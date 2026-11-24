@@ -42,12 +42,13 @@
 import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
+import { codeReviewOfferAtStart, codeReviewOfferDue } from "./inbox-code-review-offer";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { type InboxSidebarLayout } from "@plannotator/core/inbox-sidebar";
-import { inboxSidebarState, saveInboxSidebar } from "./inbox-sidebar-save";
+import { inboxSidebarOff, inboxSidebarState, saveInboxSidebar } from "./inbox-sidebar-save";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
   INBOX_APP_ID,
@@ -307,6 +308,7 @@ import { createIconSetFetcher, iconSetsPointer, INBOX_ICON_SETS_DIR } from "./in
 import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
 import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
+import { artifactPinsWire } from "./inbox-artifacts-merged";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { changedFileOf } from "./inbox-pull-diff-files";
@@ -356,6 +358,8 @@ import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitFo
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
+import { createInboxGridSeen, gridSeenOf } from "./inbox-grid-seen";
+import { gridRowDecorator, gridRowStripped } from "./inbox-grid-row";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullRiskAuto, type PullRiskAuto } from "./inbox-pull-risk-auto";
@@ -394,6 +398,7 @@ import { agentSearchDoorAnswer, agentThreadsDoorAnswer } from "./inbox-far-find"
 import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
+import { nextSharedReactionsRev, settleSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
 import { mergePullBoards } from "./inbox-machine-pulls";
 import { doorRefusesBare, replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
@@ -1323,6 +1328,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullHiddenListeners = new Set<() => void>();
   /** The person's Priority changed (inbox-priority.ts): the windows' streams say `event: priority`. */
   const priorityListeners = new Set<() => void>();
+  /** Grid's looks changed (inbox-grid-seen.ts): the windows' streams say `event: grid-seen`. */
+  const gridSeenListeners = new Set<() => void>();
   /** The pinned artifacts changed (inbox-artifact-pins.ts): the windows' streams say `event: artifact-pins`. */
   const artifactPinListeners = new Set<() => void>();
   /** A thread's tags changed (inbox-thread-tags.ts): the windows' streams say `event: tags`. */
@@ -1476,6 +1483,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
   const pullLooked = createInboxPullLooked(dataDir);
+  // Grid's looks at this Inbox's threads (inbox-grid-seen.ts): inbox/grid-seen.json, written only when a window with Grid on sends one.
+  const gridSeen = createInboxGridSeen(dataDir, (thread) => store.message(thread) !== null);
   // PRs the person hid from Reviews, the PR board and the Inbox list (inbox-pull-hidden.ts): nothing is done on the forge.
   const pullHidden = createInboxPullHidden(dataDir);
   const pullHiddenChanged = () => {
@@ -2059,7 +2068,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * and the agents' counts alike, until something newer than its newest hide happens in it; never a pinned or a
    * snoozed one (`listHiding`). Each row carries `hide_pulls`, its open PRs not hidden. Nothing is written to the thread.
    */
-  const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include", hidePulls = false) => {
+  // `grid`: the read asked for Grid's fields (`grid=1`, sent only while Grid is on there); without it, the list as before Grid.
+  const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include", hidePulls = false, grid = false) => {
     // One pass over the store feeds both the folders' counts and the sections.
     // `pinned_at`, `snoozed` and `priority` (additive) on the window's and the phone's rows only: never on anything an agent reads.
     const pinnedAt = new Map(store.pins().map((pin) => [pin.thread_id, pin.pinned_at]));
@@ -2100,9 +2110,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     const withPulls = (row: InboxListRow): InboxListRow => {
       const pulls = pullsByThread.get(row.thread_id);
-      const summary = pulls ? inboxThreadPullsSummary(pulls.sort((a, b) => a.added_at.localeCompare(b.added_at) || a.id.localeCompare(b.id))) : undefined;
+      const summary = pulls ? inboxThreadPullsSummary(pulls.sort((a, b) => a.added_at.localeCompare(b.added_at) || a.id.localeCompare(b.id)), grid ? threadPullStates.live : undefined) : undefined;
       return summary ? { ...row, pulls: summary } : row;
     };
+    // Grid (approval "inbox-agent-grid", inbox-grid-row.ts): the thread's last look on Grid and its checklist's progress.
+    const withGrid = grid ? gridRowDecorator(gridSeen, stepsOn() ? store.allSteps() : null) : (row: InboxListRow) => row;
     // `tags` (additive, approval "inbox-thread-tags"): the live tags a thread is in, on the window's and the phone's rows only.
     const tagsOf = store.allThreadTags();
     const withTags = (row: InboxListRow): InboxListRow => {
@@ -2111,7 +2123,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
     const allOwn = store
       .listRows()
-      .map((row) => withActed(withHidePulls(withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now)))))));
+      .map((row) => withGrid(withActed(withHidePulls(withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now))))))));
     const own = hiddenPulls ? allOwn.filter((row) => !hiddenPulls.out(row)) : allOwn;
     hiddenPulls?.keep();
     if (pullsByThread.size > 0) {
@@ -2141,7 +2153,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return tags.length > 0 ? { ...rest, tags } : rest;
     };
     const rows: InboxListRow[] = merged
-      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => withActed(inboxRowAsOf(withoutStepsWaiting(withFarTags(row)), now)))]
+      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => withActed(inboxRowAsOf(withoutStepsWaiting(withFarTags(grid ? row : gridRowStripped(row))), now)))]
       : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
@@ -2158,6 +2170,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       serverSession,
       version,
       cursor: store.cursor(),
+      /** This Inbox's clock as it answered (additive, a Grid read only): a linked machine reads how far apart the two run (`clock_ms`). */
+      ...(grid ? { now: now.toISOString() } : {}),
       update: updates.current(),
       /** This Inbox started on a newer version than the last one: the sidebar's "What's new in X" link. */
       updated: updates.updated(),
@@ -2970,10 +2984,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * answer and `event: reactions` carries it, so a window takes a list only
    * when it is newer than the last it took.
    */
-  const reactionsState = (): { reactions: InboxReaction[]; rev: number } => {
+  const reactionsState = (): SharedReactions => {
     const config = loadConfig();
     const rev = config.inboxReactionsRev;
-    return { reactions: parseInboxSavedReactions(config.inboxReactions) ?? [], rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+    return {
+      reactions: parseInboxSavedReactions(config.inboxReactions) ?? [],
+      rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0,
+      ...(config.inboxReactionsSynced === true ? { synced: true } : {}),
+    };
   };
   const reactionsWire = (state: { reactions: InboxReaction[]; rev: number }) => ({ reactions: state.reactions, reactions_rev: state.rev });
 
@@ -2982,14 +3000,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (body.reactions !== undefined) {
       const input = body.reactions;
       const list = parseInboxSavedReactions(input);
-      if (!list || !Array.isArray(input) || list.length !== input.length || input.length > INBOX_SAVED_REACTIONS_MAX) {
-        throw new InboxError("validation_error", `reactions: up to ${INBOX_SAVED_REACTIONS_MAX} of { emoji: one emoji, label?: string }, each emoji once.`, { field: "reactions" });
+      // A skill that is not a skill name is refused here (strict on write), not dropped as on read.
+      const skillDropped = (entry: unknown, i: number) =>
+        !!entry && typeof entry === "object" && (entry as { skill?: unknown }).skill !== undefined && list?.[i]?.skill !== (entry as { skill?: unknown }).skill;
+      if (!list || !Array.isArray(input) || list.length !== input.length || input.length > INBOX_SAVED_REACTIONS_MAX || input.some(skillDropped)) {
+        throw new InboxError("validation_error", `reactions: up to ${INBOX_SAVED_REACTIONS_MAX} of { emoji: one emoji, label?: string, skill?: a skill name }, each emoji once.`, { field: "reactions" });
       }
       return list;
     }
     const change = parseInboxReactionChange(body.reaction_change);
     if (!change) {
-      throw new InboxError("validation_error", "reaction_change: { op: add | remove, emoji } or { op: name, emoji, label } or { op: change, emoji, to }, each one emoji other than 👍.", { field: "reaction_change" });
+      throw new InboxError("validation_error", "reaction_change: { op: add | remove, emoji } or { op: name, emoji, label } or { op: change, emoji, to } or { op: skill, emoji, skill: a skill name or '' }, each one emoji other than 👍.", { field: "reaction_change" });
     }
     const list = applyInboxReactionChange(reactionsState().reactions, change);
     if (!list) throw new InboxError("validation_error", `reaction_change: your tray already has ${INBOX_SAVED_REACTIONS_MAX} emoji. Remove one to save another.`, { field: "reaction_change" });
@@ -3002,14 +3023,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (validateOnly) return before;
     // Nothing to change (a name for an emoji another window took out): no write, no event.
     if (JSON.stringify(before.reactions) === JSON.stringify(list)) return before;
-    const rev = before.rev + 1;
-    saveConfig({ inboxReactions: list, inboxReactionsRev: rev });
+    // One set on every linked machine (inbox-reactions-shared.ts): past the newest revision any of them holds.
+    return writeReactions(list, nextSharedReactionsRev(before.rev, machines?.reactionsCopies() ?? []));
+  };
+  const writeReactions = (list: InboxReaction[], rev: number, synced = false): { reactions: InboxReaction[]; rev: number } => {
+    saveConfig({ inboxReactions: list, inboxReactionsRev: rev, ...(synced ? { inboxReactionsSynced: true } : {}) });
     const saved = reactionsState();
     if (saved.rev !== rev || JSON.stringify(saved.reactions) !== JSON.stringify(list)) {
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     }
     for (const listener of reactionsListeners) listener(list, rev);
     return saved;
+  };
+  /**
+   * A linked machine's saved emoji, read in its list: taken when newer, or merged with this set the first time
+   * (inbox-reactions-shared.ts `settleSharedReactions`); every window here hears a change.
+   */
+  const adoptReactions = (far: SharedReactions): void => {
+    const held = reactionsState();
+    const next = settleSharedReactions(held, far);
+    if (next) writeReactions(next.reactions, next.rev, true);
+    else if (!held.synced) saveConfig({ inboxReactionsSynced: true });
   };
 
   /**
@@ -3064,8 +3098,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const sidebarState = inboxSidebarState;
 
   const saveSidebar = (input: unknown, validateOnly = false): { sidebar: InboxSidebarLayout; rev: number } => {
-    // An item of a capability that is off (Plans) is never written (inbox-sidebar-save.ts).
-    const { sidebar, rev } = saveInboxSidebar(input, { off: capabilities.filter((capability) => !capability.on()).map((capability) => capability.key), validateOnly });
+    // An item of a capability that is off (Plans, Grid) is never written (inbox-sidebar-save.ts).
+    const { sidebar, rev } = saveInboxSidebar(input, { off: inboxSidebarOff(capabilities, gridOn()), validateOnly });
     if (validateOnly) return { sidebar, rev };
     for (const listener of sidebarListeners) listener(sidebar, rev);
     return { sidebar, rev };
@@ -3363,6 +3397,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * request, so a switch applies at once.
    */
   const decisionModeOn = () => resolveExperimental(loadConfig(), "decision-mode");
+  /** Grid (approval "inbox-agent-grid"), off by default: its sidebar row is never saved while it is off. */
+  const gridOn = () => resolveExperimental(loadConfig(), "grid");
   /**
    * The Board (approval "inbox-board", 2026-10-26): on only when the person
    * turned it on (config.json `inboxBoard`), and only in a build that has the
@@ -3621,13 +3657,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const config = loadConfig();
     return INBOX_PROMPT_HOSTS.every((host) => inboxReminderRulesText(config, host) === null);
   };
+  // Who Code review's offer is for, decided at the first release start that shows it, as the tab icon's is
+  // (inbox-code-review-offer.ts): someone who used an earlier Inbox is marked due; a fresh install never sees it.
+  if (CODE_REVIEW_OFFER_SHOWN && normalizeStableVersion(version) !== null) {
+    const mark = codeReviewOfferAtStart(loadConfig().inboxReveals?.code_review, loadConfig().inboxCodeReview !== undefined, usedBefore, new Date().toISOString());
+    if (mark) saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, code_review: mark } });
+  }
   /**
-   * Code review's day-0 offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
-   * shared/inbox/reveals.ts): only while config.json `inboxCodeReview` is unset (nobody decided; `false` is the
-   * person's own off), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN` (false for now: the
-   * owner chose the switch without the offer, 2026-11-17), so it is never open and never claimed.
+   * Code review's one-time offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
+   * shared/inbox/reveals.ts): only for someone who used an earlier Inbox (marked due at a release start, above), only
+   * while config.json `inboxCodeReview` is unset (nobody decided; `false` is the person's own off; `true` is theirs
+   * too), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN` (held from 2026-11-17, shown again from
+   * the release after 2026-11-23, approval "inbox-code-review-offer": "for people who already use the Inbox").
    */
-  const codeReviewUndecided = () => CODE_REVIEW_OFFER_SHOWN && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined;
+  const codeReviewUndecided = () =>
+    CODE_REVIEW_OFFER_SHOWN && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && codeReviewOfferDue(loadConfig().inboxReveals?.code_review);
   /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
@@ -3989,28 +4033,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   const experimentalState = () => ({
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
+    // Grid (approval "inbox-agent-grid"): the window's page of work in flight, drawn from what the window already reads.
+    grid: { on: gridOn(), env: parseExperimentalEnv("grid") ?? null },
   });
 
-  /** Save `experimental: { decision_mode }`. `validateOnly`: check and write nothing. */
+  /** Save `experimental: { decision_mode?, grid? }` (one switch or both). `validateOnly`: check and write nothing. */
   const saveExperimental = (input: unknown, validateOnly = false) => {
-    if (
-      !input ||
-      typeof input !== "object" ||
-      Array.isArray(input) ||
-      typeof (input as { decision_mode?: unknown }).decision_mode !== "boolean" ||
-      Object.keys(input).some((key) => key !== "decision_mode")
-    ) {
-      throw new InboxError("validation_error", "experimental: { decision_mode: boolean }.", { field: "experimental" });
+    const switches = { decision_mode: ["decision-mode", "decisionMode", "decision mode"], grid: ["grid", "grid", "Grid"] } as const;
+    const named = input && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
+    if (named.length === 0 || named.some(([key, value]) => !Object.hasOwn(switches, key) || typeof value !== "boolean")) {
+      throw new InboxError("validation_error", "experimental: { decision_mode?: boolean, grid?: boolean }.", { field: "experimental" });
     }
-    const on = (input as { decision_mode: boolean }).decision_mode;
-    // The env var decides (like PLANNOTATOR_INBOX_TAILSCALE): saving to config.json would change nothing.
-    const env = parseExperimentalEnv("decision-mode");
-    if (env !== undefined) {
-      throw new InboxError("experimental_env_decides", `PLANNOTATOR_EXPERIMENTAL is set in this Inbox's environment, so decision mode stays ${env ? "on" : "off"}.`, { field: "experimental" });
+    const change: { decisionMode?: boolean; grid?: boolean } = {};
+    for (const [key, on] of named as [keyof typeof switches, boolean][]) {
+      const [feature, configKey, words] = switches[key];
+      // The env var decides (like PLANNOTATOR_INBOX_TAILSCALE): saving to config.json would change nothing.
+      const env = parseExperimentalEnv(feature);
+      if (env !== undefined) {
+        throw new InboxError("experimental_env_decides", `PLANNOTATOR_EXPERIMENTAL is set in this Inbox's environment, so ${words} stays ${env ? "on" : "off"}.`, { field: "experimental" });
+      }
+      change[configKey] = on;
     }
     if (validateOnly) return experimentalState();
-    saveConfig({ experimental: { decisionMode: on } });
-    if (loadConfig().experimental?.decisionMode !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    const gridWas = gridOn();
+    saveConfig({ experimental: change });
+    const saved = loadConfig().experimental as Record<string, unknown> | undefined;
+    if (Object.entries(change).some(([key, on]) => saved?.[key] !== on)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    // Grid turned on or off: the linked machines are asked again with or without Grid's fields and looks.
+    if (gridOn() !== gridWas) machines?.gridChanged();
     return experimentalState();
   };
 
@@ -4285,13 +4335,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // is read again. Windows, and a linked machine that asks (`priority=1`, as `pins=1`).
         const onPriority = () => send(`event: priority\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("priority") === "1") priorityListeners.add(onPriority);
+        // Grid's looks changed (inbox-grid-seen.ts): the list reads `grid_seen` again. Windows, and a linked machine that asks.
+        // A window hears it only while Grid is on here; a linked machine asks only while Grid is on there.
+        const gridSeenAsked = url.searchParams.get("grid-seen") === "1";
+        const onGridSeen = () => (gridSeenAsked || gridOn() ? send(`event: grid-seen\ndata: {}\n\n`) : undefined);
+        if (windowId || gridSeenAsked) gridSeenListeners.add(onGridSeen);
         // A thread's tags changed (any window's, a linked machine's, a rename's marks, or a deletion): the list reads
         // `tags` again. Windows, and a linked machine that asks (`tags=1`, as `pins=1`).
         const onThreadTags = () => send(`event: tags\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("tags") === "1") threadTagListeners.add(onThreadTags);
-        // The pinned artifacts changed (any window's, a phone's, or a deletion): the window reads them again. Windows only.
+        // The pinned artifacts changed (any window's, a linked machine's, or a deletion): the window reads them again.
+        // Windows, and a linked machine that asks (`artifact-pins=1`, as `pins=1`: a pin writes no record).
         const onArtifactPins = () => send(`event: artifact-pins\ndata: {}\n\n`);
-        if (windowId) artifactPinListeners.add(onArtifactPins);
+        if (windowId || url.searchParams.get("artifact-pins") === "1") artifactPinListeners.add(onArtifactPins);
         // Show a thread (`plannotator inbox --open <thread>`): every tab hears it, only the window it names moves. This computer's windows only.
         const onShow = (threadId: string | null, target: string, page?: string) => send(`event: show\ndata: ${JSON.stringify(page ? { page, window: target } : { thread_id: threadId, window: target })}\n\n`);
         if (windowId && via === "local") showListeners.add(onShow);
@@ -4324,9 +4380,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // once. Windows, and a linked machine that asks (`agent-faces=1`: a face writes no record, inbox-peer-link.ts).
         const onAgentFaces = (wire: InboxAgentFacesWire) => send(`event: agent-faces\ndata: ${JSON.stringify(wire)}\n\n`);
         if (windowId || url.searchParams.get("agent-faces") === "1") agentFaceListeners.add(onAgentFaces);
-        // The tray's saved emoji changed (any window's, a phone's too): every window takes the list at once. Windows only.
+        // The tray's saved emoji changed (any window's, a phone's, a linked machine's): every window takes the list at once.
+        // Windows, and a linked machine that asks (`reactions=1`: it reads this list and takes the newer set).
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
-        if (windowId) reactionsListeners.add(onReactions);
+        if (windowId || url.searchParams.get("reactions") === "1") reactionsListeners.add(onReactions);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
         const onCapabilities = (changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam") => {
           const floats = floatDraftsOn();
@@ -4371,6 +4428,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           pinListeners.delete(onPins);
           pullHiddenListeners.delete(onPullsHidden);
           priorityListeners.delete(onPriority);
+          gridSeenListeners.delete(onGridSeen);
           threadTagListeners.delete(onThreadTags);
           artifactPinListeners.delete(onArtifactPins);
           showListeners.delete(onShow);
@@ -4910,8 +4968,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A Codex thread the Inbox launched: its host puts the item in as a turn over the app-server it runs (the launch
     // engine is made below; the wake's first look runs after this function's synchronous part, when it exists).
     // Until it exists, a launched thread's item waits (never `codex queue`), and any other goes the queue's way.
-    deliver: (session, text) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text) : Promise.resolve(launchedCodex(session) ? ("hold" as const) : ("queue" as const))),
+    deliver: (session, text, intoTurn) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text, intoTurn === true) : Promise.resolve(launchedCodex(session) ? ("hold" as const) : ("queue" as const))),
     launched: (session) => launchedCodex(session),
+    turnRunning: (session) => (launchReady ? launch.turnRunning(INBOX_CODEX_HOST, session) : null),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
     // A Codex thread T3 Code runs: its items go into the T3 thread with T3's own `t3` command (inbox-t3-local.ts).
@@ -5480,7 +5539,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const threadTags = createInboxThreadTags({ store, serverSession, readBody: (req) => readBody(req), json });
   const projectTagsRoute = createInboxProjectTagsRoute({ tags: projectTags, serverSession, readBody: (req) => readBody(req), json });
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
-  const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
+  // Across linked machines with `?machines=1` (inbox-artifacts-merged.ts); `machines` is made further down.
+  const farArtifacts = { pinLists: () => machines.artifactPins.pinLists(), walls: (searchOf: (machine: string) => string) => machines.artifactPins.walls(searchOf) };
+  const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json, machines: farArtifacts });
   // Icon sets for agents' icons ("Sets": built in, or fetched into the data folder on one click; inbox-icon-sets.ts).
   const builtInIconSets = createBuiltInIconSets();
   const iconSetFetcher = createIconSetFetcher({ dir: join(inboxDir(dataDir), INBOX_ICON_SETS_DIR), pointer: iconSetsPointer(), builtIn: builtInIconSets.ids });
@@ -6170,7 +6231,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const merged = url.searchParams.get("machines") === "1";
         const snoozedMode = snoozedModeOf(url);
         // A linked machine's read lists every thread: its own window hides by its own records (inbox-pull-hidden.ts).
-        const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode, fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM));
+        // Grid's fields only for a read that asks (`grid=1`): a window while Grid is on, a linked machine while it is on there.
+        const gridRead = url.searchParams.get("grid") === "1" && (fromDeviceDoor.get(req)?.platform === MACHINE_PLATFORM || gridOn());
+        const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode, fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM, gridRead));
         const liveNow = new Set(live.allLive().map((s) => s.session));
         const remembered = (all: Record<string, string>) => {
           const out: Record<string, string> = {};
@@ -6188,13 +6251,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const listed = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
         // Where this computer's agents live and what their panes say, as Rex says now, in every window; Show in Rex by where the window is.
         const agents = withRexPlaces(listed, phone ? null : thisComputersWindow(req, via) ? "here" : "away");
-        // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts).
-        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state() } : {}) };
+        // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts), the
+        // artifacts pinned here (mark `artifact-pins`): that machine's windows show them on this Inbox's threads, and the
+        // saved reaction emoji (inbox-reactions-shared.ts).
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
         if (since === null) return json(model);
-        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
+        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}${gridRead ? "|grid" : ""}`, model, since || null));
       }
       // Show in Rex (inbox-rex.ts): Rex's app goes to the pane a live session said it lives in, on the person's click,
       // for any session the list places in Rex (`rexHints`). From this computer's own window: this computer's app (on a
@@ -7759,6 +7824,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json(read);
       }
 
+      // Grid's look (inbox-grid-seen.ts): the lines a window showed the person, kept with this Inbox's threads. A
+      // linked machine's window sends its look at this Inbox's threads here (rule 8's `set`), a phone through the door.
+      if (path === "/api/inbox/grid/seen") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const looks = gridSeenOf(body, Date.now()).filter((look) => store.message(look.thread));
+        const before = JSON.stringify(looks.map((look) => gridSeen.get(look.thread) ?? null));
+        const held = looks.length > 0 ? gridSeen.mark(looks) : {};
+        if (JSON.stringify(looks.map((look) => held[look.thread] ?? null)) !== before) for (const listener of gridSeenListeners) listener();
+        return json({ seen: held });
+      }
+
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);
       if (seenMatch) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -8223,6 +8301,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 ...(body.quote !== undefined ? { quote: body.quote } : {}),
                 // New thread from this message: no #tag read from the words, and no "still open" line under them.
                 ...(body.author_only === true ? { author_only: true } : {}),
+                // A skill emoji pressed in the reaction tray: kept on the reply; the words are the window's `/<skill>` reply.
+                ...(body.skill_reaction !== undefined ? { skill_reaction: body.skill_reaction } : {}),
               });
             } catch (error) {
               removeInboxAttachmentFiles(store.dir, attachments);
@@ -8582,11 +8662,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       holds: (kind, id) =>
         kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : kind === "cards" ? store.card(id) !== null : store.message(id) !== null,
       ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
+      gridOn,
       showArchivedSaid: (value) => {
         try {
           showArchived.adopt(value);
         } catch {
           // config.json could not be written: this machine keeps its own switch until the next read.
+        }
+      },
+      reactionsSaid: (value) => {
+        try {
+          adoptReactions(value);
+        } catch {
+          // config.json could not be written: this machine keeps its own emoji until the next read.
         }
       },
       sentFrom: sentFromOf,

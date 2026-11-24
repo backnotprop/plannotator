@@ -23,8 +23,8 @@ export const filterSearchShown = (sizes: readonly number[]): boolean => sizes.so
 /** The marks matching ignores: Latin/Greek/Cyrillic diacritics, Arabic harakat, Hebrew points, variation selectors. */
 const IGNORED_MARKS = /[\u0300-\u036F\u0483-\u0489\u0591-\u05C7\u064B-\u065F\u0670\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE00-\uFE0F\uFE20-\uFE2F]/gu;
 
-/** Text as matching sees it: lower case, the ignored marks gone, ı as i, ς as σ. */
-const fold = (text: string) =>
+/** Text as matching sees it: lower case, the ignored marks gone, ı as i, ς as σ. The list's title filter reads it too. */
+export const fold = (text: string) =>
   text.normalize('NFD').toLowerCase().normalize('NFD').replace(IGNORED_MARKS, '').replace(/ı/g, 'i').replace(/ς/g, 'σ');
 
 /** The Japanese voicing marks (dakuten, handakuten): each makes another letter of the one before it (か, が). */

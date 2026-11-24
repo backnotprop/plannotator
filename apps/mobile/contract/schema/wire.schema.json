@@ -1411,6 +1411,9 @@
             }
           ]
         },
+        "standalone": {
+          "type": "boolean"
+        },
         "made_read": {
           "type": "boolean"
         },
@@ -3887,6 +3890,53 @@
         "pulls": {
           "$ref": "#/$defs/InboxThreadPullsSummary"
         },
+        "grid_seen": {
+          "type": "object",
+          "properties": {
+            "through": {
+              "type": "number"
+            },
+            "at": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "through",
+            "at"
+          ],
+          "additionalProperties": true
+        },
+        "steps_progress": {
+          "type": "object",
+          "properties": {
+            "done": {
+              "type": "number"
+            },
+            "total": {
+              "type": "integer"
+            },
+            "doing": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "done",
+            "total",
+            "doing",
+            "at"
+          ],
+          "additionalProperties": true
+        },
         "hide_pulls": {
           "type": "array",
           "items": {
@@ -5030,6 +5080,9 @@
               "type": "null"
             }
           ]
+        },
+        "skill_reaction": {
+          "$ref": "#/$defs/InboxSkillReaction"
         }
       },
       "required": [
@@ -5787,6 +5840,9 @@
           "type": "string"
         },
         "label": {
+          "type": "string"
+        },
+        "skill": {
           "type": "string"
         }
       },
@@ -6992,6 +7048,23 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
+    "InboxSkillReaction": {
+      "type": "object",
+      "properties": {
+        "emoji": {
+          "type": "string"
+        },
+        "skill": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "emoji",
+        "skill"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
     "InboxSupersededBy": {
       "type": "object",
       "properties": {
@@ -7370,11 +7443,83 @@
             "state"
           ],
           "additionalProperties": true
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxThreadPullsSummaryItem"
+          }
         }
       },
       "required": [
         "count",
         "headline"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-thread-pulls.ts"
+    },
+    "InboxThreadPullsSummaryItem": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/InboxThreadPullState"
+        },
+        "added_at": {
+          "type": "string"
+        },
+        "read_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checks": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "failing",
+                "passing",
+                "running"
+              ],
+              "x-open": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "approved",
+                "changes_requested",
+                "review_required"
+              ],
+              "x-open": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "state",
+        "added_at",
+        "read_at",
+        "checks",
+        "review"
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-thread-pulls.ts"
@@ -7872,6 +8017,9 @@
               "type": "null"
             }
           ]
+        },
+        "clock_ms": {
+          "type": "integer"
         }
       },
       "required": [

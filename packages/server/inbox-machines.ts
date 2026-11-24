@@ -51,7 +51,9 @@ import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from 
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 import type { FarArchived } from "./inbox-archived-merged";
+import { ARTIFACT_PINS_MARK, readFarWall } from "./inbox-artifacts-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
+import type { SharedReactions } from "./inbox-reactions-shared";
 import { FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE } from "./inbox-far-tags";
 
 /** A far tag's door routes (inbox-far-tags.ts): this Inbox sends them itself; the forward never does. */
@@ -139,6 +141,10 @@ export interface InboxMachinesContext {
   ownVersions?: () => { current: string; latest: string | null };
   /** A linked machine's list was read: this Inbox takes its "Show archived" switch when that one is newer. */
   showArchivedSaid?: (value: InboxShowArchived) => void;
+  /** A linked machine's list was read: this Inbox takes its saved reaction emoji when that set is newer. */
+  reactionsSaid?: (value: SharedReactions) => void;
+  /** Grid is on here (experimental): only then are linked machines asked for Grid's fields and looks, and `clock_ms` shown. */
+  gridOn?: () => boolean;
   /** Where the person wrote a write this Inbox forwards, told from the request (inbox-sent-from.ts). */
   sentFrom?: (req: Request, via: "local" | "tailnet") => InboxSentFrom | null;
   /** Tests: the links' clocks. */
@@ -299,6 +305,8 @@ export interface MachineView {
    * (422) reads "<name> needs an update to delete words". True for this Inbox; false until its health is read, and for an older Inbox.
    */
   message_deletions: boolean;
+  /** How far its clock runs ahead of this one's (ms, whole minutes), from its list's `now`; absent within two minutes. Grid reads it. */
+  clock_ms?: number;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -522,6 +530,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         update: peer ? updateView(peer) : null,
         launch: peer?.launch ?? null,
         message_deletions: peer?.messageDeletions ?? false,
+        ...(context.gridOn?.() && peer?.list?.clock_ms ? { clock_ms: peer.list.clock_ms } : {}),
       } satisfies MachineView;
     }),
   ];
@@ -577,6 +586,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onRecord: (record) => emit({ event: "machine", data: record }),
       onChange: () => {
         if (peer.list?.show_archived) context.showArchivedSaid?.(peer.list.show_archived);
+        if (peer.list?.reactions) context.reactionsSaid?.(peer.list.reactions);
         machinesChanged();
       },
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
@@ -584,6 +594,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onCards: () => emit({ event: "cards", data: {} }),
       onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
+      gridOn: context.gridOn,
     });
     peers.set(link.id, peer);
     peer.start();
@@ -1315,8 +1326,18 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const search = `?limit=${Math.min(count, FAR_ARCHIVED_LIMIT_MAX)}${project ? `&project=${encodeURIComponent(project)}` : ""}`;
     return Promise.all([...peers.values()].filter((peer) => !owner || peer.id === owner).map((peer) => peer.archivedPage(search)));
   };
+  /** The linked machines whose list takes artifact pins (inbox-artifacts-merged.ts): an older one is never asked. */
+  const artifactPeers = () => [...peers.values()].filter((peer) => peer.list?.marks.includes(ARTIFACT_PINS_MARK));
+  const artifactPins = {
+    /** Each one's pins as its list last said (an asleep machine's from memory). */
+    pinLists: () => artifactPeers().map((peer) => ({ machine: peer.id, pins: peer.list!.artifact_pins })),
+    /** Each one's Wall page for its own part of the ask, read now while it is online. */
+    walls: (searchOf: (machine: string) => string) => Promise.all(artifactPeers().map((peer) => readFarWall(peer, searchOf(peer.id)))),
+  };
   /** Each linked machine's "Show archived" switch as its list last said: a save here goes past the newest. */
   const showArchivedCopies = (): InboxShowArchived[] => [...peers.values()].flatMap((peer) => (peer.list?.show_archived ? [peer.list.show_archived] : []));
+  /** Each linked machine's saved reaction emoji as its list last said: a save here goes past the newest. */
+  const reactionsCopies = (): SharedReactions[] => [...peers.values()].flatMap((peer) => (peer.list?.reactions ? [peer.list.reactions] : []));
   /** A linked machine's card, as its Board last said: the lane marks and a link's site icon are read here for it. */
   const farCard = (id: string): InboxCardWire | null => {
     for (const peer of peers.values()) {
@@ -1357,6 +1378,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
     /** A linked machine's name, or null when it is not linked. */
     nameOf: (machine: string): string | null => links.get(machine)?.name ?? null,
     machinesView,
+    /** Grid was turned on or off here: every link asks its machine again (inbox-peer-link.ts `gridChanged`). */
+    gridChanged: () => {
+      for (const peer of peers.values()) peer.gridChanged();
+      machinesChanged();
+    },
     /** This Inbox's door changed by itself (published again once Tailscale ran): the windows hear the machines block. */
     machinesChanged,
     rows,
@@ -1369,7 +1395,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
     tagColourLists,
     cardLists,
     archivedPages,
+    /** Pinned artifacts and the Wall on linked machines (mark `artifact-pins`, inbox-artifacts-merged.ts). */
+    artifactPins,
     showArchivedCopies,
+    reactionsCopies,
     /** Each linked machine's PR board (mark `pulls`), for the merged board (inbox-machine-pulls.ts). */
     pullLists: (refresh: boolean) => {
       const snapshot = machinePulls.start(refresh);

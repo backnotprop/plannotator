@@ -40,6 +40,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { InboxStore } from '../../packages/shared/inbox/store';
+import { TITLE_FILTER_LABEL } from '../../packages/inbox/listTitleFilter';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 
@@ -359,12 +360,12 @@ test("the funnel's menu offers Recent activity beside Not seen, with its own mar
   // The three just done and the three seeded.
   await expect(recentPick(page).locator('.ib-pmi-n')).toHaveText('6');
   await expect(recentPick(page)).toHaveAttribute('aria-checked', 'false');
-  // It sits right under Not seen, before Updated.
+  // It sits right under Not seen, before Updated (Filter by typing's row is alone above them).
   const items = page.locator('[data-list-filter-menu] [role="menuitemcheckbox"], [data-list-filter-menu] [role="menuitem"]');
   const words = await items.evaluateAll((all) => all.map((item) => item.querySelector('.ib-pmi-l')?.textContent ?? ''));
-  expect(words.slice(0, 3)).toEqual(['Not seen', 'Recent activity', 'Today']);
+  expect(words.slice(0, 4)).toEqual([TITLE_FILTER_LABEL, 'Not seen', 'Recent activity', 'Today']);
   // Its mark is its own, not the clock the Updated rows under it draw.
-  const marks = await items.evaluateAll((all) => all.slice(1, 3).map((item) => item.querySelector('svg')?.innerHTML ?? ''));
+  const marks = await items.evaluateAll((all) => all.slice(2, 4).map((item) => item.querySelector('svg')?.innerHTML ?? ''));
   expect(marks[0]).not.toBe('');
   expect(marks[0]).not.toBe(marks[1]);
   await shot(page, '01-menu-open.png');
