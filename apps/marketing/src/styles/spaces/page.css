@@ -114,13 +114,16 @@ mark.g{--mk:var(--green)}
 .res b{display:block;font-weight:550;line-height:19px;white-space:nowrap}
 .res .top1{background:var(--green);color:var(--mk-ink)}
 .res .top1 b{font-weight:650}
-.sheet.mock .q{margin:10px 22px 0}
+.sheet.mock .q{margin:10px 22px 0;white-space:nowrap}
 /* The agent's name (scripts/spaces/hero-name.js): its box eases to the next name's width while the old one fades,
    so the rest of the line moves with it instead of jumping. clip-path, not overflow, keeps the text's baseline. */
 .hn{display:inline-block;white-space:nowrap;clip-path:inset(-6px -1px -6px -2px);transition:width .3s ease}
 .hn>span{transition:opacity .3s ease}
 .hn.out>span{opacity:0}
 @media (prefers-reduced-motion:reduce){.hn,.hn>span{transition:none}}
+/* The card's last line stays on one line (a wrap makes the card taller and pulls the beam off the band), except
+   on phones too narrow for "Claude Code built it. No surprises in review.", where it would run off the card. */
+@media (max-width:340px){.sheet.mock .q{white-space:normal}}
 
 @media (max-width:1180px){
   .frame{height:auto;max-height:none;min-height:0;padding:96px 24px 48px}

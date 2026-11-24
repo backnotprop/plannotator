@@ -20,12 +20,17 @@
 	var timer = 0;
 	var inView = false;
 
-	// Widths in CSS pixels, unrounded (offsetWidth rounds, which would clip a fraction of the last letter), and
-	// converted back from any zoom page.js sets on the first screen.
+	// Widths in CSS pixels, unrounded (offsetWidth rounds, which would clip a fraction of the last letter). page.js
+	// zooms the first screen below 1440 px, and browsers differ on whether getBoundingClientRect includes that zoom
+	// (Chrome 128+ and Firefox do, older Safari and Chrome do not), so the scale is measured, not read from the
+	// style: a 1000 px ruler beside the name comes back in the same units as the name, whichever kind of browser.
 	function cssWidth(el) {
-		var frame = box.closest(".frame");
-		var zoom = (frame && parseFloat(frame.style.zoom)) || 1;
-		return el.getBoundingClientRect().width / zoom;
+		var ruler = document.createElement("span");
+		ruler.style.cssText = "position:absolute;visibility:hidden;width:1000px;height:0";
+		box.appendChild(ruler);
+		var scale = ruler.getBoundingClientRect().width / 1000 || 1;
+		box.removeChild(ruler);
+		return el.getBoundingClientRect().width / scale;
 	}
 
 	function widthOf(name) {
@@ -40,7 +45,7 @@
 
 	function next() {
 		timer = 0;
-		if (!inView) return;
+		if (!inView || document.hidden) return;
 		var name = names[(index + 1) % names.length];
 		box.style.width = cssWidth(box) + "px";
 		void box.offsetWidth;
@@ -54,8 +59,15 @@
 		}, FADE);
 	}
 
+	// Cycles only while the card is in view and the tab is showing. A wait already set is kept, never doubled; a
+	// change half done when the tab hides finishes, and the next one waits for the tab to show again.
+	function go() {
+		if (inView && !document.hidden && !timer) timer = window.setTimeout(next, SHOW);
+	}
+
 	new IntersectionObserver(function (entries) {
 		inView = entries[entries.length - 1].isIntersecting;
-		if (inView && !timer) timer = window.setTimeout(next, SHOW);
+		go();
 	}).observe(box.closest(".sheet") || box);
+	document.addEventListener("visibilitychange", go);
 })();
