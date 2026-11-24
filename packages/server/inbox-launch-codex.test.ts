@@ -8,7 +8,7 @@
  * the permission card; the person's `config.toml` is never written. No Inbox server is started.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_PERMISSION_ALLOW_ONCE } from "@plannotator/core/inbox-permission";
@@ -36,8 +36,7 @@ async function until<T>(what: string, check: () => T | null | undefined | false 
 
 const CONFIG = ['sandbox_mode = "workspace-write"', "", "[mcp_servers.plannotator-inbox]", 'command = "plannotator"', 'args = ["inbox", "mcp"]', ""].join("\n");
 
-/** `steer`: the experimental `codex-steer` switch on in the sandbox's config.json (off by default). */
-function setup(options: { state?: FakeCodexLaunchState; config?: string | null; withCodex?: boolean; steer?: boolean } = {}) {
+function setup(options: { state?: FakeCodexLaunchState; config?: string | null; withCodex?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-codex-")));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -46,7 +45,7 @@ function setup(options: { state?: FakeCodexLaunchState; config?: string | null; 
   const codexHome = join(home, ".codex");
   for (const dir of [home, dataDir, folder, codexHome]) mkdirSync(dir, { recursive: true });
   if (options.config !== null) writeFileSync(join(codexHome, "config.toml"), options.config ?? CONFIG);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true }, ...(options.steer ? { experimental: { codexSteer: true } } : {}) }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
   const before = process.env.PLANNOTATOR_DATA_DIR;
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   cleanup.push(() => {
@@ -89,7 +88,7 @@ function setup(options: { state?: FakeCodexLaunchState; config?: string | null; 
     store,
     environment: createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: path } }),
     commandOf: (item) => ({ type: item.reply_to ? "reply" : "message", id: item.id, thread_id: item.thread_id, reply_to: item.reply_to ?? null, subject: item.subject ?? null, body: item.body, url: `http://127.0.0.1/#${item.thread_id}` }),
-    deliver: (session, text, intoTurn) => launch.deliver("codex", session, text, intoTurn === true),
+    deliver: (session, text) => launch.deliver("codex", session, text),
     launched: (session) => launch.launched("codex", session),
     extraClis: [],
     log: () => {},
@@ -226,87 +225,6 @@ describe("Codex through the launch engine, against the fake codex", () => {
     const resumed = await until("resumed", () => t.fake.rpc("thread/resume").find((call) => call.params.threadId === thread));
     expect(resumed.params.model).toBe("gpt-5.5");
     expect(resumed.params.config.model_reasoning_effort).toBe("high");
-  }, 30_000);
-
-  /** The launched thread's rollout as Codex writes it while its first turn runs, and a way to add to it. */
-  const rolloutOf = (t: ReturnType<typeof setup>, thread: string) => {
-    const dir = join(t.codexHome, "sessions", "2026", "11", "24");
-    mkdirSync(dir, { recursive: true });
-    const file = join(dir, `rollout-2026-11-24T10-00-00-${thread}.jsonl`);
-    const add = (...entries: unknown[]) => appendFileSync(file, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
-    add({ type: "session_meta", payload: { id: thread, source: "vscode", originator: "codex_vscode", cwd: t.folder } }, { type: "event_msg", payload: { type: "task_started", turn_id: "turn-1" } });
-    return { file, add, shows: (text: string) => add({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text }] } }) };
-  };
-
-  test("steering off (the default): a reply while a turn runs is a second turn/start, Delivered at once, never steered", async () => {
-    const t = setup();
-    const root = await t.send("A SLOW job.");
-    await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");
-    const starts = t.fake.rpc("turn/start").length;
-    const reply = t.store.sendReply(root.id, { words: "After this turn.", idempotency_key: "reply-off" }).reply!;
-    await until("delivered", () => t.store.message(reply.id)!.delivery);
-    expect(t.store.message(reply.id)!.delivery!.into_turn).toBeUndefined();
-    expect(t.fake.rpc("turn/start").filter((call) => JSON.stringify(call.params.input).includes("After this turn."))).toHaveLength(1);
-    expect(t.fake.rpc("turn/start").length).toBe(starts + 1);
-    expect(t.fake.rpc("turn/steer")).toHaveLength(0);
-  }, 20_000);
-
-  test("switch on, but no rollout of the thread found before the steer: the old turn/start path, plain Delivered, never the steer words", async () => {
-    const t = setup({ steer: true });
-    const root = await t.send("A SLOW job.");
-    await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");
-    const reply = t.store.sendReply(root.id, { words: "No rollout to see it in.", idempotency_key: "reply-no-rollout" }).reply!;
-    const delivered = await until("delivered", () => t.store.message(reply.id)!.delivery);
-    expect(delivered.into_turn).toBeUndefined();
-    expect(t.fake.rpc("turn/steer")).toHaveLength(0);
-    expect(t.fake.rpc("turn/start").filter((call) => JSON.stringify(call.params.input).includes("No rollout to see it in."))).toHaveLength(1);
-  }, 20_000);
-
-  test("a reply while a turn runs goes into that turn with turn/steer, not a second turn/start; Delivered once the rollout shows it", async () => {
-    const t = setup({ steer: true });
-    const root = await t.send("A SLOW job.");
-    const thread = await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
-    await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");
-    const rollout = rolloutOf(t, thread);
-    const starts = t.fake.rpc("turn/start").length;
-    const reply = t.store.sendReply(root.id, { words: "Into this turn.", idempotency_key: "reply-steer" }).reply!;
-    const steered = await until("steered", () => t.fake.rpc("turn/steer").find((call) => JSON.stringify(call.params.input).includes("Into this turn.")));
-    // Steered, not yet read: Esc (Stop) now would drop it, so it is handed, not Delivered.
-    await t.wake.sweep();
-    expect(t.store.message(reply.id)!.delivery).toBeUndefined();
-    expect(t.store.handover.handedTo(thread)).toContain(reply.id);
-    rollout.shows((steered.params.input as { text: string }[])[0]!.text);
-    await t.wake.sweep();
-    const delivered = await until("delivered", () => t.store.message(reply.id)!.delivery);
-    expect(delivered.into_turn).toBe(true);
-    expect(t.fake.rpc("turn/steer").filter((call) => JSON.stringify(call.params.input).includes("Into this turn."))).toHaveLength(1);
-    expect(t.fake.rpc("turn/start")).toHaveLength(starts);
-  }, 20_000);
-
-  test("steered, then the turn is stopped before the model read it: never Delivered, and it goes in when the session runs again, once", async () => {
-    const t = setup({ steer: true });
-    const root = await t.send("A SLOW job.");
-    const thread = await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
-    await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");
-    const rollout = rolloutOf(t, thread);
-    const reply = t.store.sendReply(root.id, { words: "Lost to the stop?", idempotency_key: "reply-dropped" }).reply!;
-    await until("steered", () => t.fake.rpc("turn/steer").some((call) => JSON.stringify(call.params.input).includes("Lost to the stop?")));
-    await t.stopRoute(t.store.message(root.id)!.launch!.id);
-    rollout.add({ type: "event_msg", payload: { type: "turn_aborted", turn_id: "turn-1", reason: "interrupted" } });
-    const old = new Date(Date.now() - 60_000);
-    utimesSync(rollout.file, old, old);
-    await t.wake.sweep();
-    await t.wake.sweep();
-    expect(t.store.message(reply.id)!.delivery).toBeUndefined();
-    // The person writes again: the session resumes, and the dropped reply goes in with it.
-    t.store.sendReply(root.id, { words: "Go on.", idempotency_key: "reply-after" });
-    const again = await until("a second app-server", () => t.fake.starts()[1]);
-    await until("the dropped reply went in on it", () =>
-      [...t.fake.rpc("turn/start"), ...t.fake.rpc("turn/steer")].some((call) => call.pid === again.pid && JSON.stringify(call.params.input).includes("Lost to the stop?")),
-    );
-    await t.wake.sweep();
-    const sent = [...t.fake.rpc("turn/start"), ...t.fake.rpc("turn/steer")].filter((call) => call.pid === again.pid && JSON.stringify(call.params.input).includes("Lost to the stop?"));
-    expect(sent).toHaveLength(1);
   }, 30_000);
 
   test("Codex that refuses a second turn gets the reply steered into the running one", async () => {

@@ -146,11 +146,6 @@
       "parts": [],
       "source": "packages/core/inbox-delivery-line.ts TURN_ENDED_TEXT"
     },
-    "delivery.into_running_turn": {
-      "text": "went into its running turn",
-      "parts": [],
-      "source": "packages/core/inbox-delivery-line.ts INTO_RUNNING_TURN_TEXT"
-    },
     "delivery.auto_after": {
       "text": "went into its turn by itself after {minutes} min",
       "parts": [
