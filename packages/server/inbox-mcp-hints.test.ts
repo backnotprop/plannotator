@@ -11,8 +11,10 @@
  *
  * A real store in a temp dir and send_message's own handler; no Inbox
  * server, no network: the lookup after a send reads a stand-in forge.
+ * PLANNOTATOR_DATA_DIR points at a temp folder while each test runs, so
+ * nothing reaches the real data folder.
  */
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,7 +26,16 @@ import { createInboxPullLookups } from "./inbox-pull-lookups";
 import { attachPullText, pullsNamedInBody, pullsToLookUp, QUESTION_OPTIONS_HINT, questionWithBareOptions, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 
 const roots: string[] = [];
+let savedDataDir: string | undefined;
+beforeEach(() => {
+  savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  const dataDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-hints-data-")));
+  roots.push(dataDir);
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
+});
 afterEach(() => {
+  if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+  else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
