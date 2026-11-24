@@ -23,6 +23,8 @@ interface PopoutDialogProps {
   open: boolean;
   onClose: () => void;
   title: string;
+  /** A related host window (e.g. an Ask chat) that can be used while this popout stays open. */
+  relatedSurface?: string;
   container?: HTMLElement | null;
   className?: string;
   children: React.ReactNode;
@@ -34,6 +36,7 @@ export const PopoutDialog: React.FC<PopoutDialogProps> = ({
   open,
   onClose,
   title,
+  relatedSurface,
   container,
   className,
   children,
@@ -66,7 +69,7 @@ export const PopoutDialog: React.FC<PopoutDialogProps> = ({
         ];
         if (
           candidates.some(
-            (el) => el instanceof Element && ANNOTATION_SELECTORS.some((sel) => el.closest(sel)),
+            (el) => el instanceof Element && (ANNOTATION_SELECTORS.some((sel) => el.closest(sel)) || (relatedSurface && el.closest(relatedSurface))),
           )
         ) {
           eventDetails.cancel();
@@ -75,7 +78,7 @@ export const PopoutDialog: React.FC<PopoutDialogProps> = ({
       }
       onClose();
     },
-    [onClose],
+    [onClose, relatedSurface],
   );
 
   return (

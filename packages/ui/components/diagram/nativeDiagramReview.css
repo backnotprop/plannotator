@@ -121,3 +121,9 @@
   .ndr .ndr-close { width: 40px; height: 40px; top: 1px; right: 1px; }
   .ndr-editor textarea { font-size: 16px; }
 }
+
+.ndr-expanded { display: flex; flex: 1; min-height: 0; container-type: inline-size; }
+.ndr-expanded-file { display: flex; min-height: 0; width: clamp(310px, 42%, 760px); border-left: 1px solid var(--border); background: var(--background); }
+@container (max-width: 640px) {
+  .ndr-expanded-file { position: absolute; inset: 0; z-index: 12; width: 100%; }
+}

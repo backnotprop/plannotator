@@ -96,6 +96,7 @@ export function drawMessageBody(d: MessageBodyData) {
           d.comments
             ? {
                 annotations: d.comments,
+                onDelete: acts.current.deleteMessageComment,
                 onSave: (annotation) => acts.current.saveMessageComment(id, annotation),
                 onUnanchored: (report) => acts.current.noteUnanchored(report),
                 onPainted: () => acts.current.repaintHits(id),

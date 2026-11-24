@@ -80,6 +80,7 @@ function standIn(view: Extract<ReferencedFileView, { found: true }>, messageId: 
 export function ReferencedFilePane({
   threadId,
   fileRef,
+  inspect = false,
   phone,
   full,
   onOpen,
@@ -88,6 +89,8 @@ export function ReferencedFilePane({
 }: {
   threadId: string;
   fileRef: OpenFileRef;
+  /** Inspect the reference beside its diagram, including files already attached to the message. */
+  inspect?: boolean;
   agent?: string;
   phone: boolean;
   /** The window has room for the file only (a phone, a narrow window): it covers the thread. */
@@ -116,7 +119,7 @@ export function ReferencedFilePane({
       .then((answer) => {
         if (!live) return;
         // The message carries this file already: it opens as that attachment, comments and all.
-        if (answer.found && answer.attachment_id) void attachedRef.current(answer.attachment_id, null);
+        if (!inspect && answer.found && answer.attachment_id) void attachedRef.current(answer.attachment_id, null);
         else setView(answer);
       })
       .catch(() => live && setFailed(true));
@@ -125,7 +128,7 @@ export function ReferencedFilePane({
     };
     // `key` names the message and the path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, key]);
+  }, [threadId, key, inspect]);
 
   const sectionRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -173,7 +176,7 @@ export function ReferencedFilePane({
   const name = view?.name ?? fileRef.path.split('/').pop() ?? fileRef.path;
   const found = view?.found ? view : null;
   // A PR's version is shown: a comment attaches this computer's file, so it is taken only where that is the same text.
-  const writes = source.writes && !(found?.pull && !found.local_matches);
+  const writes = !inspect && source.writes && !(found?.pull && !found.local_matches);
   // Drawn as an attachment of that kind is (inboxViewKind): a log or data file as code, with its lines and their
   // numbers, so a comment made here anchors the same way once it is attached.
   const kind = found ? inboxViewKind(found.kind, found.name) : null;
@@ -203,6 +206,7 @@ export function ReferencedFilePane({
       data-referenced-file={fileRef.path}
     >
       <div className="ib-vhead">
+        {inspect && <button type="button" className="ib-vlink" onClick={onClose}>Back to diagram</button>}
         {full && (
           <Tip content="Back to the thread">
             <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Back to the thread" data-ref-back="">
@@ -218,7 +222,7 @@ export function ReferencedFilePane({
         </span>
         <span className="ib-sp" />
         {htmlComments && <HtmlSurfaceControls armed={armed} onToggleArmed={() => setArmed((v) => !v)} />}
-        {!full && (
+        {!full && !inspect && (
           <Tip content="Close">
             <button type="button" className="ib-iconbtn" onClick={onClose} aria-label={`Close ${name}`}>
               <Icon name="x" />

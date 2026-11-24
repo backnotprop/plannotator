@@ -1,5 +1,7 @@
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
+import { ExpandedDiagramEdition } from './InlineDiagrams';
+import { diagramFileReader } from './DiagramFileReader';
 import { useFileQuestions } from '../ask/useFileQuestions';
 import {
   formatInboxVideoTime,
@@ -138,6 +140,7 @@ const paneEscapes = new WeakSet<Event>();
 export interface AttachmentPaneProps {
   attachment: InboxAttachmentState;
   onOpenLatestDiagram?: () => void;
+  latestDiagram?: InboxAttachmentState | null;
   onOpenDiagramFile?: (ref: NativeDiagramFileReference) => void;
   /**
    * The file's pin (approval "inbox-artifact-stars"): its thread and its artifact key (the shown image's id for an
@@ -1436,7 +1439,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     // Once per ask (its seq), and again when the text it waits for is drawn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questionFocus?.seq, questionFocusKey, view, scrollViewport]);
-  const { sideFrom, sideButton, diagramQuestion } = useFileQuestions(attachment, props.version, view, isHtml ? [] : blocks, annotations, props.onSide);
+  const { sideFrom, sideButton, diagramQuestion, diagramThreadId } = useFileQuestions(attachment, props.version, view, isHtml ? [] : blocks, annotations, props.onSide);
   // A Markdown file with 2 or more headings has Contents (contents.ts). On a desktop, Side by side and Full screen
   // alike: ui's contents rail in the page's right gutter. Where the rail yields (its own rule: a gutter under 68 px,
   // a pane under 480 px), when it is hidden, and on a phone: a Contents button over the file (ContentsPanel.tsx).
@@ -1705,12 +1708,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
 
   const remove = async (id: string) => {
-    viewerRef.current?.removeHighlight(id);
     try {
       await source.removeAnnotation(id);
+      viewerRef.current?.removeHighlight(id);
       props.onRemoved(id);
+      return true;
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not removed.');
+      return false;
     }
   };
 
@@ -2679,7 +2684,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               wheelHint={wheelHint}
               suggestion={suggestion?.comment}
               onSelect={setSelectedId}
-              onRemove={remove}
+              onRemove={async id => { await remove(id); }}
               onNotice={props.onToast}
             />
           )}
@@ -2708,7 +2713,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               phone={phone}
               poster={source.posterUrl?.(attachment) ?? undefined}
               suggestion={suggestion ?? undefined}
-              onRemove={remove}
+              onRemove={async id => { await remove(id); }}
               onNotice={props.onToast}
             />
           )}
@@ -2799,9 +2804,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 markdown={view.text}
                 imageBaseDir={imageBaseDir}
                 resolveLocalLink={kind === 'markdown' ? resolveFileLink : undefined}
-                onOpenDiagramFile={props.onOpenDiagramFile}
+                onOpenDiagramFile={props.onOpenDiagramFile} renderExpandedDiagramFile={diagramFileReader(diagramThreadId, attachment.message_id)}
+                expandedDiagramEdition={props.latestDiagram && <ExpandedDiagramEdition attachment={props.latestDiagram}
+                  records={props.records} onSaved={props.onSaved} onRemoved={props.onRemoved} readOnly={!!props.readOnly}
+                  onOpenFile={props.onOpenDiagramFile} onSide={props.onSide} />}
                 onAskDiagramAI={diagramQuestion}
-                onEditAnnotation={edit}
+                onEditAnnotation={edit} onDeleteAnnotation={props.readOnly ? undefined : remove}
                 questionDecisionLines={false}
                 {...fileQuestionProps}
                 annotations={annotations}

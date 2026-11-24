@@ -8,9 +8,9 @@ import { diagramFileAsk, fileSideSource } from './sideSource';
 
 export function useFileQuestions(attachment: InboxAttachmentState, version: 'current' | 'sent', view: AttachmentView | null,
   blocks: readonly Block[], annotations: readonly Annotation[], onSide?: (words: string, source?: string) => void) {
-  const { reply } = useDiagramQuestionRoutes(attachment.message_id);
+  const { reply, threadId } = useDiagramQuestionRoutes(attachment.message_id);
   const sideButton = useSideButton();
   const sideFrom = onSide && ((selected: string, context: SelectionActionContext) =>
     onSide(selected, fileSideSource(attachment, version, { selected, blockId: context.blockId, blocks, annotations })));
-  return { sideButton, sideFrom, diagramQuestion: view ? diagramFileAsk(view, onSide, reply) : undefined };
+  return { diagramThreadId: threadId, sideButton, sideFrom, diagramQuestion: view ? diagramFileAsk(view, onSide, reply) : undefined };
 }

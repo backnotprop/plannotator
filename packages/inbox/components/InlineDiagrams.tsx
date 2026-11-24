@@ -7,6 +7,7 @@ import type { Annotation } from '@plannotator/ui/types';
 import { diagramDocumentBlocks } from '@plannotator/ui/utils/parser';
 import { annotationOf, inboxViewKind } from '../attachments';
 import { latestDiagramFor, type Artifact } from '../artifacts';
+import { diagramFileReader } from './DiagramFileReader';
 import { useInboxFileSource } from '../fileSource';
 import type { AttachmentView } from '../api';
 import { useDiagramQuestionRoutes } from '../ask/DiagramThreadScope';
@@ -16,6 +17,7 @@ interface InlineDiagramProps {
   records: readonly InboxAnnotationRecord[];
   onSaved: (record: InboxAnnotationRecord) => void;
   readOnly: boolean;
+  onRemoved?: (id: string) => void;
   onOpenFile?: (ref: NativeDiagramFileReference) => void;
   onSide?: (words: string, source?: string) => void;
 }
@@ -30,13 +32,18 @@ export function InlineDiagrams({ files, artifacts = [], onOpenLatest, ...props }
   return <>{files.filter((a) => inboxViewKind(a.kind, a.name) === 'plannotator-diagram').map((attachment) => {
     const latest = latestDiagramFor(artifacts, attachment);
     return <InlineDiagram key={`${attachment.id}:${attachment.sent_sha256}`} attachment={attachment} renderBlock={NativeDiagramBlock}
-      openLatest={latest && onOpenLatest ? () => onOpenLatest(latest) : undefined} {...props} />;
+      latest={latest} openLatest={latest && onOpenLatest ? () => onOpenLatest(latest) : undefined} {...props} />;
   })}</>;
 }
 
-function InlineDiagram({ renderBlock: NativeDiagramBlock, attachment, records, readOnly, onOpenFile, onSide, onSaved, openLatest }: InlineDiagramProps & { renderBlock: NativeDiagramRenderer; attachment: InboxAttachmentState; openLatest?: () => void }) {
+export function ExpandedDiagramEdition({ attachment, ...props }: InlineDiagramProps & { attachment: InboxAttachmentState }) {
+  const Block = useContext(NativeDiagramBlockContext);
+  return Block && <InlineDiagram renderBlock={Block} attachment={attachment} {...props} expandedOnly />;
+}
+
+function InlineDiagram({ renderBlock: NativeDiagramBlock, attachment, records, readOnly, onOpenFile, onSide, onSaved, onRemoved, latest, openLatest, expandedOnly }: InlineDiagramProps & { renderBlock: NativeDiagramRenderer; attachment: InboxAttachmentState; latest?: InboxAttachmentState | null; openLatest?: () => void; expandedOnly?: boolean }) {
   const source = useInboxFileSource();
-  const { reply } = useDiagramQuestionRoutes(attachment.message_id);
+  const { reply, threadId } = useDiagramQuestionRoutes(attachment.message_id);
   const version = 'sent';
   const [view, setView] = useState<AttachmentView | null>(null);
   const [error, setError] = useState('');
@@ -45,7 +52,7 @@ function InlineDiagram({ renderBlock: NativeDiagramBlock, attachment, records, r
     source.view(attachment, version).then((result) => { if (live) setView(result); }, () => { if (live) setError('Could not load the diagram preview.'); });
     return () => { live = false; };
   }, [source, attachment.id, version]);
-  if (!view) return error ? <p role="status">{error}</p> : null;
+  if (!view) return error || expandedOnly ? <p role="status">{error || 'Loading diagram…'}</p> : null;
   const annotations = records.filter((r) => r.path === attachment.path && r.version === view.version).map(annotationOf);
   const blocks = diagramDocumentBlocks(view.text, 'plannotator-diagram');
   const save = async (annotation: Annotation) => {
@@ -59,15 +66,19 @@ function InlineDiagram({ renderBlock: NativeDiagramBlock, attachment, records, r
       return false;
     }
   };
-  return <div data-inline-diagram-attachment={attachment.id}>
+  return <div data-inline-diagram-attachment={attachment.id} className={expandedOnly ? "flex flex-col flex-1 min-h-0" : undefined}>
     <LazyBlockBoundary fallback={notice => <>{notice}<pre className="max-h-64 overflow-auto">{view.text}</pre></>}>
       <Suspense fallback={null}>
         <NativeDiagramBlock block={blocks[0]!} annotations={annotations}
           onAddAnnotation={readOnly ? undefined : save}
+          onDeleteAnnotation={!readOnly && onRemoved ? async id => { await source.removeAnnotation(id); onRemoved(id); } : undefined}
           onEditAnnotation={readOnly ? undefined : (id, changes) => {
             const prior = annotations.find((a) => a.id === id);
             return prior ? save({ ...prior, ...changes }) : false;
           }}
+          expandedOnly={expandedOnly} renderExpandedFile={diagramFileReader(threadId, attachment.message_id)}
+          latestEdition={latest && openLatest ? <ExpandedDiagramEdition key={latest.id} attachment={latest}
+            records={records} readOnly={readOnly} onSaved={onSaved} onRemoved={onRemoved} onOpenFile={onOpenFile} onSide={onSide} /> : undefined}
           onOpenLatest={openLatest} onOpenFile={onOpenFile} onAskAI={diagramFileAsk(view, onSide, reply)} sourcePath={attachment.path}
           embedded />
       </Suspense>

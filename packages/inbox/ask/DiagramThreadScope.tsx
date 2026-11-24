@@ -7,13 +7,14 @@ import type { InboxToastModel } from '../components/Toast';
 import { diagramReplyTarget, diagramThreadReply, type DiagramThreadReply } from './diagramThreadReply';
 
 interface QuestionRoutes {
+  threadId?: string;
   side?: (selected: string, source?: string) => void;
   replyFor?: (source: string) => DiagramThreadReply | undefined;
 }
 const DiagramQuestions = createContext<QuestionRoutes>({});
 export function useDiagramQuestionRoutes(source: string) {
-  const { replyFor, side } = useContext(DiagramQuestions);
-  return { side, reply: replyFor?.(source) };
+  const { replyFor, side, threadId } = useContext(DiagramQuestions);
+  return { side, threadId, reply: replyFor?.(source) };
 }
 
 /** The owning pane supplies the thread author and transport, including its linked-machine outbox. */
@@ -32,7 +33,7 @@ export function DiagramThreadScope({ scope, thread, showToast, afterWrite, side,
     latest.current.showToast({ icon: held ? 'clock' : 'check', lead: held ? 'Question waiting in the outbox' : 'Question sent to thread' });
     void latest.current.afterWrite().catch(() => {});
   }), [threadId]);
-  const routes = useMemo<QuestionRoutes>(() => ({ side, replyFor: (source) => {
+  const routes = useMemo<QuestionRoutes>(() => ({ side, threadId, replyFor: (source) => {
     if (!thread || !threadId || isContested(source) || isContested(threadId)) return undefined;
     const target = diagramReplyTarget(thread, source);
     if (!target || isContested(target) || machineOf(target) !== machineOf(threadId) || machineOf(source) !== machineOf(threadId)) return undefined;

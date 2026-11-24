@@ -563,14 +563,17 @@ test.skipIf(!hasDom)('on a linked thread the inline drawing and old pane read th
     expect(reads).toEqual([sent(first.id), sent(next.id), sent(first.id)]);
     const oldInline = host.querySelector(`[data-inline-diagram-attachment="${first.id}"]`)!;
     // The native review block loads lazily inside Suspense.
-    for (let i = 0; i < 30 && !oldInline.querySelector('[data-diagram-expand]'); i++) await settle();
+    for (let i = 0; i < 30 && !oldInline.querySelector('[data-native-latest]'); i++) await settle();
     expect(oldInline.textContent).toContain('Open latest');
     expect(host.querySelector(`[data-inline-diagram-attachment="${next.id}"]`)?.textContent).not.toContain('Open latest');
     await act(async () => oldInline.querySelector<HTMLButtonElement>('[data-diagram-expand]')!.click());
     const expanded = document.querySelector('[data-diagram-popout]')!;
     const openLatest = (element: Element) => [...element.querySelectorAll('button')].find((button) => button.textContent === 'Open latest');
     await act(async () => openLatest(expanded)!.click());
-    expect(inlineOpens).toEqual([next.id]);
+    for (let i = 0; i < 30 && !expanded.querySelector('[aria-label="Revised checkout"] [data-native-focus]'); i++) await settle();
+    expect(inlineOpens).toEqual([]);
+    expect(expanded.textContent).toContain('Revised checkout');
+    expect(openLatest(expanded)).toBeUndefined();
     const latest = openLatest(pane());
     expect(latest).toBeDefined();
     await act(async () => latest!.click());

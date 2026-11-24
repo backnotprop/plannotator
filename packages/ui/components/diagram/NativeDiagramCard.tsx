@@ -28,12 +28,13 @@ function LinkDetail({ reference, showTitle }: { reference: Extract<DiagramRefere
   </>;
 }
 
-export function ReferenceDetails({ part, onOpenFile, pin }: {
+export function ReferenceDetails({ part, onOpenFile, pin, index, setIndex }: {
   part: DiagramPart;
   onOpenFile?: (ref: NativeDiagramFileReference) => void;
   pin: () => void;
+  index: number;
+  setIndex: (index: number) => void;
 }) {
-  const [index, setIndex] = useState(0);
   const reference = part.refs[index] ?? part.refs[0];
   if (!reference) return null;
   return <div className="ndr-references">
@@ -118,7 +119,7 @@ export function FloatingCard({ anchor, heading, children, mode, host, pinned, pi
     data-mode={mode} data-positioned-note={pinBounds ? '' : undefined} data-pinned={pinned || undefined}
     style={note ?? { left: clamp(x, roomWidth - width), top: clamp(y, roomHeight - height) }}
     onWheelCapture={e => e.stopPropagation()} onPointerEnter={onEnter} onPointerLeave={onLeave}
-    onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}
+    onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); } }}
     onPointerDown={e => {
       if (!pinned || !e.isPrimary || !(e.target instanceof Element) || !e.target.closest('.ndr-card-head') || e.target.closest('button,a')) return;
       if (roomWidth <= 640) return;
@@ -145,6 +146,30 @@ export function RefActions({ onComment, onAsk }: { onComment?: () => void; onAsk
 
 export function CloseButton({ label, onClick }: { label: string; onClick: () => void }) {
   return <Button className="ndr-close" size="icon" variant="ghost" aria-label={label} onClick={onClick}><X size={15} /></Button>;
+}
+
+export function SavedNote({ number, text, onEdit, onDelete, onDeleted, onClose }: {
+  number: number; text: string; onEdit?: () => void; onDelete?: () => SubmitResult; onDeleted: () => void; onClose: () => void;
+}) {
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+  async function remove() {
+    if (pending || !onDelete) return;
+    setPending(true);
+    try {
+      if (await onDelete() === false) setFailed(true);
+      else onDeleted();
+    } catch { setFailed(true); }
+    finally { setPending(false); }
+  }
+  return <div className="ndr-saved" aria-busy={pending}>
+    <div className="ndr-note-heading">Comment {number}
+      {onEdit && <button type="button" disabled={pending} onClick={onEdit}>Edit</button>}
+      {onDelete && <button type="button" disabled={pending} onClick={() => void remove()}>Delete</button>}
+    </div>
+    <p>{text}</p>{failed && <div className="ndr-error" role="alert">Couldn’t delete this comment. Try again.</div>}
+    <CloseButton label="Close comment" onClick={onClose} />
+  </div>;
 }
 
 export function TextEditor({ initial, label, ask, original, onSubmit, onDone, onCancel, onChange }: {
@@ -197,7 +222,7 @@ export function TextEditor({ initial, label, ask, original, onSubmit, onDone, on
 
 export function AskDrawer({ title, part, onClose, children }: { title: string; part?: DiagramPart; onClose: () => void; children: ReactNode }) {
   return <aside className="ndr-ask" data-diagram-control="" role="dialog" aria-label="Ask AI" onWheelCapture={e => e.stopPropagation()}
-    onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
+    onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); } }}>
     <header><strong>Ask AI</strong><CloseButton label="Close Ask AI" onClick={onClose} /></header>
     <div className="ndr-ask-context">{part ? <Paperclip size={15} /> : <MessageCircle size={15} />}{part?.title ?? title}</div>
     {children}
