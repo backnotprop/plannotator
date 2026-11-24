@@ -175,6 +175,7 @@ packages/inbox/multiAgentNames.test.tsx
 packages/inbox/movedTo.test.tsx
 packages/inbox/archivedQuestionCard.test.tsx
 packages/inbox/replyRecipient.test.tsx
+packages/inbox/removeAgent.test.tsx
 packages/inbox/replyFollow.test.tsx
 packages/inbox/replyFollowVoice.test.tsx
 packages/inbox/replyQuote.test.tsx

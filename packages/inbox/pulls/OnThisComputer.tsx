@@ -15,7 +15,7 @@
  * each list read, under the group's own rules (`keptShows`), and while open it shows whatever it holds.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { INBOX_UNREPORTED_BRANCH_DAYS, inboxLocalFolderQuiet, inboxLocalWorkKey, inboxLocalWorkLabel, type InboxLocalWork, type InboxLocalWorkAnswer } from '@plannotator/core/inbox-types';
+import { INBOX_UNREPORTED_BRANCH_DAYS, inboxLocalFolderQuiet, inboxLocalOneRowEach, inboxLocalWorkKey, inboxLocalWorkLabel, type InboxLocalWork, type InboxLocalWorkAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { Icon } from '../icons';
 import { AGENT_ROWS_SHOWN } from '../agentsView/AgentsList';
@@ -48,7 +48,8 @@ export const localOpenOf = (work: InboxLocalWork): LocalOpen =>
 
 /**
  * The list's rows and what the person kept from the +: a kept row not listed already shows under `keptShows`, by age
- * with the rest; one that shows only because it is open (nothing beyond main, or quiet) goes first.
+ * with the rest; one that shows only because it is open (nothing beyond main, or quiet) goes first. One row for one
+ * piece of work (`inboxLocalOneRowEach`): a kept folder and its branch's row are one.
  */
 export function withKept(items: InboxLocalWork[], kept: readonly InboxLocalWork[] | undefined, opened: ReadonlyMap<string, number>, project: string | null, openKey: string | null, now: number): InboxLocalWork[] {
   if (!kept?.length) return items;
@@ -61,8 +62,8 @@ export function withKept(items: InboxLocalWork[], kept: readonly InboxLocalWork[
     if (keptShows(row, opened.get(key)!, now, false)) rest.push(row);
     else if (key === openKey) first.push(row);
   }
-  if (rest.length === items.length) return [...first, ...items];
-  return [...first, ...rest.sort((a, b) => b.at.localeCompare(a.at))];
+  const all = rest.length === items.length ? [...first, ...items] : [...first, ...rest.sort((a, b) => b.at.localeCompare(a.at))];
+  return inboxLocalOneRowEach(all, openKey);
 }
 
 export function OnThisComputer({ project, projectNames, openKey, phone, readAgain, fold, onOpen }: OnThisComputerProps) {

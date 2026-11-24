@@ -1,0 +1,26 @@
+{
+  "title": "When a catalogue batch can go live",
+  "subtitle": "A release owner can trace the two checks, the stored evidence and the correction route.",
+  "note": {"title": "Worked example", "lines": ["Ternleaf Archive is fictional. All owners, records and states are invented."]},
+  "steps": [[1, "Record provenance"], [2, "Automate review"]],
+  "steps_label": "Rollout",
+  "gap": 104,
+  "row_gap": 44,
+  "columns": [
+    [{"id":"desk", "title":"Intake desk", "tiles":["Batch manifest","Correction inbox"], "cols":1, "footer":"Owner: Cataloguing"}],
+    [{"id":"rules", "title":"Rule checks", "tiles":["Schema","Control totals",{"label":"Source trace","status":"building"}], "cols":2, "step":1, "footer":"Owner: Data quality"},
+     {"id":"review", "title":"Review desk", "tiles":["Disputed records",{"label":"Auto review","status":"trial"}], "cols":1, "step":2, "footer":"Owner: Curation"}],
+    [{"id":"journal", "title":"Release journal", "sections":[{"card":{"title":"Batch TL-27","rows":[["Expected","240 records"],["Received","240 records"],["Decision","Approved"]]}}], "footer":"Owner: Publishing"}],
+    [{"id":"portal", "title":"Public catalogue", "tiles":["Current edition",{"label":"Change feed","status":"planned"}], "cols":1, "footer":"Owner: Discovery"}]
+  ],
+  "groups": [{"label":"Quality control","members":["rules","review"]}],
+  "links": [
+    {"from":"desk","to":"rules","label":"batch"},
+    {"from":"rules","to":"review","start":"bottom","end":"top","label":"exception"},
+    {"from":"rules","to":"journal","label":"passed"},
+    {"from":"review","to":"journal","label":"cleared"},
+    {"from":"journal","to":"portal","label":"publish"},
+    {"from":"review","to":"desk","lane":"bottom","label":"request correction"},
+    {"from":"desk","to":"portal","kind":"planned","lane":"top","label":"planned preview"}
+  ]
+}
