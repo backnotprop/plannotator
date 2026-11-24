@@ -5696,6 +5696,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const replyDrafts = createInboxReplyDrafts({
     store,
     serverSession,
+    // A page an earlier run of this data folder served keeps saving reply drafts (a compare-and-set): typing is never lost.
+    follows,
     readBody: (req) => readBody(req),
     json,
     onChange: (threadId) => {

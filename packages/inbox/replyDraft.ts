@@ -65,6 +65,7 @@ import {
   type ReplyDraftStore,
 } from '@plannotator/core/inbox-reply-draft';
 import { httpReplyDraftStore } from './replyDraftHttp';
+import { onInboxReconnected } from './sessionAdopt';
 import { clearReplyMentions, noteDraftMentions, replyMentionsSave } from './threadMentions';
 
 /** The files a reply draft keeps beside its words: each finished upload, a long paste with its place. */
@@ -117,6 +118,8 @@ export interface ReplyDraftState {
    */
   failed: boolean;
   offer?: InboxReplyDraft | null;
+  /** Words typed here whose save has not landed yet (`failedWords`): the box shows them, not the older draft. */
+  unsaved?: string | null;
 }
 
 /** Saves waiting or in flight anywhere on the page, and words left unsaved by a conflict (the restart guard reads them). */
@@ -146,6 +149,12 @@ const tooLongThreads = new Set<string>();
  */
 const refusedThreads = new Set<string>();
 /**
+ * Per thread, the words of the last save that did not land (refused, or no answer and not found when read back), kept
+ * at module level as `conflictWords` are: the box shows them again when the thread opens, and they are saved again on
+ * their own (the stream back, the page back online, the thread opened again) and with the next key.
+ */
+const failedWords = new Map<string, string>();
+/**
  * Per thread, the box's file changes that did not land (a refused or unanswered save, or saves skipped behind a
  * conflict) and wait for the next save of the box, which carries them (module-level, as `conflictWords`). Until
  * then the restart guard asks for a file added (one only the box holds: a restart would lose it). A removal not
@@ -168,7 +177,7 @@ export function takeHeldVoiceWords(threadId: string): string[] {
   return words;
 }
 export function replyDraftUnsaved(): boolean {
-  return unsaved > 0 || landing > 0 || heldVoice.size > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || carriesFiles();
+  return unsaved > 0 || landing > 0 || heldVoice.size > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || failedWords.size > 0 || carriesFiles();
 }
 
 /**
@@ -440,7 +449,11 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   };
   const setConflict = (target: string, words: string | null) => {
     if (words === null) conflicts.current.delete(target);
-    else conflicts.current.set(target, words);
+    else {
+      conflicts.current.set(target, words);
+      // The conflict keeps the box's newest words: they stand for any that failed before.
+      failedWords.delete(target);
+    }
     unsavedChanged();
   };
   /** The server holds this draft for the thread now: its base and words, as this window knows them. */
@@ -466,15 +479,18 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     if (target === current.current) setState((s) => ({ ...s, tooLong: on }));
   };
   /** The thread's words were refused for another reason or did not land (on), or a save of them landed or they went (off). */
-  const markRefused = (target: string, on: boolean) => {
-    if (on === refusedThreads.has(target)) return;
+  const markRefused = (target: string, on: boolean, words?: string) => {
+    // The words that did not land are kept for the thread (`failedWords`) until a save of them lands or they go.
+    if (on && words !== undefined) failedWords.set(target, words);
+    else if (!on) failedWords.delete(target);
+    if (on === refusedThreads.has(target)) return unsavedChanged();
     if (on) refusedThreads.add(target);
     else refusedThreads.delete(target);
     unsavedChanged();
-    if (target === current.current) setState((s) => ({ ...s, failed: on }));
+    if (target === current.current) setState((s) => ({ ...s, failed: on, unsaved: failedWords.get(target) ?? null }));
   };
   const show = (target: string, draft: InboxReplyDraft | null) => {
-    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target), failed: refusedThreads.has(target), offer: offers.get(target) ?? null });
+    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target), failed: refusedThreads.has(target), offer: offers.get(target) ?? null, unsaved: failedWords.get(target) ?? null });
   };
   /**
    * A draft read while the person's box (`ownedBox`: they typed in it since it opened) holds other words. `offer`: the
@@ -627,7 +643,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
             handOn();
             if (generation !== generationOf(target)) return;
             if (messageOf(cause).startsWith('body:')) markTooLong(target, true);
-            else markRefused(target, true);
+            else markRefused(target, true, text);
             return;
           }
           if (codeOf(cause) !== 'draft_conflict') throw cause;
@@ -701,7 +717,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
           handOn();
           // Only words or a file added are something a restart would lose: an emptied box's save (a delete) that
           // did not land loses nothing, so it leaves the mark as it was.
-          if (!claimed.current.has(target) && (text.trim() !== '' || save.ops.add.length > 0)) markRefused(target, true);
+          if (!claimed.current.has(target) && (text.trim() !== '' || save.ops.add.length > 0)) markRefused(target, true, text);
+          // Emptied on purpose: words that failed before are not brought back.
+          else if (failedWords.delete(target)) unsavedChanged();
         } else leave();
       } finally {
         unsaved -= 1;
@@ -721,6 +739,47 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     if (next) write(next.threadId, next.text, next.ops);
   }, [write]);
 
+  /**
+   * Words whose save did not land, saved again (the stream is back, the page is online, the thread opened again): the
+   * newest waiting for the pause in typing, or those that failed. Never while a save of the thread is on its way, a
+   * Send holds it, or a choice (a conflict, an offer) or their length stands.
+   */
+  const retry = useCallback(
+    (target: string) => {
+      const words = failedWords.get(target);
+      if (words === undefined || claimed.current.has(target) || conflicts.current.has(target) || offers.has(target) || tooLongThreads.has(target)) return;
+      if (queuedOf(target).length > 0) return;
+      if (pending.current?.threadId === target) flush();
+      else write(target, words);
+    },
+    [flush, write],
+  );
+  /**
+   * The thread's draft read as it opens, while words typed here wait unsaved (`failedWords`): the same words are saved
+   * already; a draft unchanged since this window's last known base takes them now; one another window or device saved
+   * since keeps both, as a conflict (Keep mine / Discard mine).
+   */
+  const failedAfterRead = (target: string, words: string, draft: InboxReplyDraft | null, knewBase: string | null | undefined) => {
+    if ((draft?.body ?? '') === words) return markRefused(target, false);
+    if ((draft?.updated_at ?? null) === (knewBase ?? null)) return retry(target);
+    setConflict(target, words);
+    markRefused(target, false);
+    show(target, draft);
+  };
+  // The Inbox answers again (the stream reconnected, the page took a restarted Inbox's session) or the device is back
+  // online: words whose save did not land are saved again, the open thread's and every other this window knows.
+  useEffect(() => {
+    const again = () => {
+      for (const target of [...failedWords.keys()]) if (target === current.current || bases.current.has(target)) retry(target);
+    };
+    window.addEventListener('online', again);
+    const stop = onInboxReconnected(again);
+    return () => {
+      window.removeEventListener('online', again);
+      stop();
+    };
+  }, [retry]);
+
   // The thread's draft, read when it opens; what waited for the last thread is saved first.
   useEffect(() => {
     let live = true;
@@ -730,12 +789,15 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         // An older Inbox answers 404 (caught below): no draft.
         const draft = await storeRef.current.read(threadId);
         if (!live) return;
+        const waiting = failedWords.get(threadId);
+        const knewBase = bases.current.has(threadId) ? baseOf(threadId) : undefined;
         const change = ownedChange(threadId, draft, true);
         if (change === null) adopt(threadId, draft);
-        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), offer: offers.get(threadId) ?? null });
+        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), offer: offers.get(threadId) ?? null, unsaved: waiting ?? null });
         if (change === 'typed') onOfferRef.current?.(threadId);
+        else if (waiting !== undefined) failedAfterRead(threadId, waiting, draft, knewBase);
       } catch {
-        if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId) });
+        if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), unsaved: failedWords.get(threadId) ?? null });
       }
     });
     return () => {
@@ -883,6 +945,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     learn(target, null);
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
+    failedWords.delete(target);
     unsavedChanged();
     setState({ loadedFor: target, draft: null, conflict: null, tooLong: false, failed: false });
     if (machineOf(target)) return;
@@ -905,7 +968,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     try {
       // File changes still waiting for a save (one got no answer) go first, so the draft the Send clears is the box's:
       // with a save waiting, it carries them; otherwise a save of the draft's words does.
-      if (carried.has(target) && pending.current?.threadId !== target) write(target, syncedWords.current.get(target) ?? '');
+      // Words whose save did not land go first too, so the draft holds what the Send carries.
+      if (failedWords.has(target)) retry(target);
+      else if (carried.has(target) && pending.current?.threadId !== target) write(target, syncedWords.current.get(target) ?? '');
       flush();
       // Every save answered, those a refused save queued again too.
       for (let seen = chain.current; ; seen = chain.current) {
@@ -922,7 +987,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     bump(target);
     if (conflicts.current.has(target) || offeredSends.current.has(target)) return null;
     return baseOf(target);
-  }, [flush, write]);
+  }, [flush, write, retry]);
 
   /** The Send failed: the thread's words may be saved again (the caller saves the box's words). */
   const release = useCallback((thread?: string) => {
@@ -948,6 +1013,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     clearReplyMentions(target);
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
+    failedWords.delete(target);
     unsavedChanged();
     if (!open) {
       if (conflicts.current.has(target) || offeredSends.current.delete(target)) setConflict(target, null);

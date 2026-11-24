@@ -22,10 +22,12 @@ const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
 const { replyDraftUnsaved } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
 const { createSignal } = (hasDom ? await import('./signal') : {}) as typeof import('./signal');
+const { inboxReconnected } = (hasDom ? await import('./sessionAdopt') : {}) as typeof import('./sessionAdopt');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-11-02T09:00:00.000Z' };
 const A: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'codex', session: 'ses_a', name: 'Codex' };
 const ONE = 'msg_01M6RF0000000000000000001';
+const TWO = 'msg_01M6RF0000000000000000002';
 
 const threadOf = (id: string, subject: string): InboxThread => ({
   thread_id: id,
@@ -292,4 +294,68 @@ test.skipIf(!hasDom)('a restored draft focused by a key (Tab): the caret lands a
   const { text } = await openRestored('Keep the totals column.');
   await act(async () => text.focus());
   expect(caretAtEnd(text)).toBe(true);
+});
+
+/** The page predates an update of the Inbox: its session is not the running Inbox's, and the save is refused. */
+const refusedForSession = () => Response.json({ error: 'This Inbox page is out of date.', code: 'session_mismatch' }, { status: 409 });
+const noNetwork = (): Response => {
+  throw new TypeError('Failed to fetch');
+};
+
+/** Words typed, then a save that does not land: returns the pane with the newer words unsaved. */
+async function typedThenFailed(fail: () => Response): Promise<HTMLElement> {
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'Older words.');
+  await until(() => drafts.get(ONE)?.body === 'Older words.', 'the first save');
+  saveAnswer = fail;
+  typeOn(el, ' Newer words.');
+  await until(() => el.querySelector('[data-draft-failed]') !== null, '"Not saved"');
+  expect(drafts.get(ONE)?.body).toBe('Older words.');
+  return el;
+}
+
+async function failedThenBack(fail: () => Response, back: () => void) {
+  const el = await typedThenFailed(fail);
+  // To another thread and back: the box holds the newer words, never the older draft.
+  act(() => draw(TWO));
+  await settle();
+  act(() => draw(ONE));
+  await until(() => box(el)?.value === 'Older words. Newer words.', 'the newer words back in the box');
+  expect(replyDraftUnsaved()).toBe(true);
+  // The Inbox answers again: the words are saved without a key typed.
+  saveAnswer = null;
+  back();
+  await until(() => drafts.get(ONE)?.body === 'Older words. Newer words.', 'the newer words saved');
+  await until(() => el.querySelector('[data-draft-failed]') === null, '"Not saved" gone');
+  expect(replyDraftUnsaved()).toBe(false);
+}
+
+test.skipIf(!hasDom)('a save refused for an out-of-date page: the words stay with the thread, and land once the stream is back', async () => {
+  await failedThenBack(refusedForSession, () => inboxReconnected());
+});
+
+test.skipIf(!hasDom)('a save with no network: the words stay with the thread, and land once the page is back online', async () => {
+  await failedThenBack(noNetwork, () => window.dispatchEvent(new Event('online')));
+});
+
+test.skipIf(!hasDom)('words that did not land are saved again when their thread is opened again', async () => {
+  await typedThenFailed(noNetwork);
+  act(() => draw(TWO));
+  await settle();
+  saveAnswer = null;
+  act(() => draw(ONE));
+  await until(() => drafts.get(ONE)?.body === 'Older words. Newer words.', 'saved on opening the thread');
+});
+
+test.skipIf(!hasDom)('words that did not land, while another device saved the draft: both are kept, the conflict shows', async () => {
+  const el = await typedThenFailed(noNetwork);
+  act(() => draw(TWO));
+  await settle();
+  saveAnswer = null;
+  saveElsewhere(ONE, 'The iPad wrote this.');
+  act(() => draw(ONE));
+  await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict');
+  expect(box(el)!.value).toBe('Older words. Newer words.');
+  expect(drafts.get(ONE)?.body).toBe('The iPad wrote this.');
 });
