@@ -20,7 +20,8 @@
  *   ⋯ menus do.
  * - With Code review on, the thread's card gives each open or draft PR that
  *   Reviews lists a line under it, "Open review thread": its review thread,
- *   or with none yet its page in Reviews (`pullReviewLinks`). The row itself
+ *   or with none yet its page in Reviews (`pullReviewLinks`); in its own review
+ *   thread, "Open in Reviews", its page there. The row itself
  *   still goes to the forge.
  *
  * Nothing here has a keyboard shortcut.
@@ -38,6 +39,7 @@ import { PullProblems, pullProblems } from './PullProblems';
 import { inboxApi } from '../api';
 import { INBOX_UNREACHABLE } from '../toastError';
 import { RefMarkIcon } from '../board/RefMark';
+import { OPEN_IN_REVIEWS } from '../pulls/refCardReviews';
 import { CountBadge, countBadgeText } from '../components/CountBadge';
 import { isPhone } from '../phone';
 import { HostMark, Icon } from '../icons';
@@ -390,7 +392,8 @@ export interface ThreadPullReview {
 }
 
 /**
- * A PR's line under its row: "Open review thread", then the review thread's agent when there is one. The row's own
+ * A PR's line under its row: "Open review thread", then the review thread's agent when there is one; "Open in Reviews"
+ * in the PR's own review thread (its page in Reviews, where its diff opens). The row's own
  * link still goes to the forge; this one stays in the Inbox.
  */
 function ReviewLine({ link, onOpen, of }: { link: PullReviewLink; onOpen: (link: PullReviewLink) => void; of?: string }) {
@@ -399,7 +402,7 @@ function ReviewLine({ link, onOpen, of }: { link: PullReviewLink; onOpen: (link:
       <span className="ib-prpop-rv-ic" aria-hidden="true">
         <Icon name="questionBubble" size={14} />
       </span>
-      <span className="ib-prpop-rv-w">Open review thread</span>
+      <span className="ib-prpop-rv-w">{link.kind === 'launchpad' && link.here ? OPEN_IN_REVIEWS : 'Open review thread'}</span>
       {link.kind === 'thread' && link.agent && (
         <span className="ib-prpop-rv-with">
           {' · with'}
