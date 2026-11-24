@@ -70,7 +70,7 @@ function innerGraph(c: Painter, g: Graph, path: string): Block {
         const ids = new Map(boxes.map(p=>[p.id,p]));
         boxes.forEach((a,i)=>{
             for (const b of boxes.slice(i+1)) if (separation(a,b)<0)
-                c.problems.push(`graph: nodes '${a.label}' and '${b.label}' overlap. Increase their grid spacing.`);
+                c.report(`graph: nodes '${a.label}' and '${b.label}' overlap. Increase their grid spacing.`);
         });
         function clip(a: Box,b: Box): Point {
             const ax = a.x+a.w/2, ay = a.y+a.h/2, dx = b.x+b.w/2-ax, dy = b.y+b.h/2-ay;
@@ -86,7 +86,7 @@ function innerGraph(c: Painter, g: Graph, path: string): Block {
                 for (let i=1;i<40;i++) {
                     const px=p[0]+(q[0]-p[0])*i/40, py=p[1]+(q[1]-p[1])*i/40;
                     if (px>node.x+1 && px<node.x+node.w-1 && py>node.y+1 && py<node.y+node.h-1) {
-                        c.problems.push(`graph: the line '${a.label}' to '${b.label}' runs through '${node.label}'`);
+                        c.report(`graph: the line '${a.label}' to '${b.label}' runs through '${node.label}'`);
                         break;
                     }
                 }
@@ -99,7 +99,7 @@ function innerGraph(c: Painter, g: Graph, path: string): Block {
         boxes.forEach(p=>{c.rect(p.x,p.y,p.w,p.h,t.tile_fill,t.ink,1,13); c.centered(p.label,p.x+p.w/2,p.y+13,t.body,"semibold");});
         labels.forEach((p,i)=>{
             for (const other of [...boxes,...labels.slice(i+1)]) if (separation(p,other)<2)
-                c.problems.push(`graph: the label '${p.label}' touches '${other.label}'`);
+                c.report(`graph: the label '${p.label}' touches '${other.label}'`);
             c.rect(p.x,p.y,p.w,p.h,t.paper,t.graph_line,.7,8);
             c.centered(p.label,p.x+p.w/2,p.y+8,t.small,"regular",t.muted);
         });

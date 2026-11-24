@@ -30,15 +30,25 @@ export function lightness(color: string) {
     });
     return 0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2];
 }
+const MAX_LAYOUT_PROBLEMS = 100;
+
 type Run = {width: number; outline: string};
 export class Painter {
     parts: string[] = [];
     sections: DiagramPart[] = [];
-    problems: string[] = [];
+    private reportedProblems: string[] = [];
     states = new Set<string>();
     minText = Infinity;
     private runs = new Map<string,Run>();
     constructor(readonly t: Theme, readonly fonts: Fonts, readonly extended: ReadonlySet<Weight>) {}
+    report(problem: string) {
+        if (this.reportedProblems.length < MAX_LAYOUT_PROBLEMS) this.reportedProblems.push(problem);
+        else if (this.reportedProblems.length === MAX_LAYOUT_PROBLEMS)
+            this.reportedProblems.push("More layout problems remain. Fix the reported problems and render again.");
+    }
+    getProblems(): string[] {
+        return this.reportedProblems;
+    }
     private run(text: string, weight: Weight) {
         const key = weight+"\\0"+text;
         const cached = this.runs.get(key);
@@ -52,7 +62,7 @@ export class Painter {
                 if (!this.extended.has(weight)) throw new ExtraFontRequired(weight);
                 id = f.map[0xfffd] ?? 0;
                 const warning = `Inter has no glyph for U+${code.toString(16).toUpperCase()} in '${text}'`;
-                if (!this.problems.includes(warning)) this.problems.push(warning);
+                if (!this.reportedProblems.includes(warning)) this.report(warning);
             }
             if (previous >= 0) width += pair(f,previous,id);
             const [advance,x,y,path] = f.glyphs[id];

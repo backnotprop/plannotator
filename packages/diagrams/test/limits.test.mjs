@@ -53,3 +53,31 @@ test("nonempty link labels share a limit across panels and mini-graphs", () => {
     graph.links.push(["a", "b", "inner"], ["a", "b", "inner"]);
     assert.throws(() => prepare(diagram), /graph\.links\[128\]\[2\]:.*128 labelled links/);
 });
+
+test("all mini-graphs share a single node and link budget", () => {
+    const diagram = graphDiagram({ a: [0, 0], b: [1, 0] });
+    const row = diagram.columns[0][0].sections[0].content.row;
+    const graph = row[0].graph;
+    graph.links = Array.from({ length: 508 }, () => ["a", "b"]);
+    const other = { nodes: { c: "C", d: "D" }, at: { c: [0, 0], d: [1, 0] }, links: [] };
+    row.push({ graph: other });
+    prepare(diagram);
+    other.links.push(["c", "d"]);
+    assert.throws(() => prepare(diagram), /row\[1\]\.graph\.links:.*512 mini-graph nodes and links/);
+    other.links.pop();
+    other.nodes.e = "E";
+    other.at.e = [2, 0];
+    assert.throws(() => prepare(diagram), /row\[1\]\.graph\.nodes:.*512 mini-graph nodes and links/);
+});
+
+test("the diagnostic list retains the first hundred messages and one overflow notice", async () => {
+    const { Painter } = await import("../dist/paint.js");
+    const painter = new Painter();
+    for (let i = 1; i <= 100; ++i) painter.report("Layout problem " + i);
+    assert.equal(painter.getProblems().length, 100);
+    painter.report("Another problem");
+    painter.report("One more problem");
+    assert.equal(painter.getProblems().length, 101);
+    assert.equal(painter.getProblems()[99], "Layout problem 100");
+    assert.match(painter.getProblems()[100], /More layout problems remain/);
+});

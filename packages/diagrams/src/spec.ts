@@ -3,6 +3,7 @@ import type {DiagramSpec,Panel,Section,Theme,Tile} from "./model.js";
 
 const MAX_ADDRESSABLE_PARTS = 512;
 const MAX_LABELLED_LINKS = 128;
+const MAX_GRAPH_ELEMENTS = 512;
 
 export type PreparedPanel = Panel & {sourcePath: string};
 
@@ -146,6 +147,12 @@ export function prepare(s:DiagramSpec) {
         if (++labelledLinks > MAX_LABELLED_LINKS)
             fail(path, `a diagram supports at most ${MAX_LABELLED_LINKS} labelled links, including mini-graph links`);
     }
+    let graphElements = 0;
+    function countGraphElements(count: number, path: string) {
+        graphElements += count;
+        if (graphElements > MAX_GRAPH_ELEMENTS)
+            fail(path, `a diagram supports at most ${MAX_GRAPH_ELEMENTS} mini-graph nodes and links combined`);
+    }
     const sectionIds=new Set<string>();
     const ids=new Set<string>(), found=new Set<string>();
     const overrides=new Map(Object.entries(s.statuses??{}));
@@ -172,6 +179,8 @@ export function prepare(s:DiagramSpec) {
             return {...v,content:sectionState(v.content,p+".content")};
         }
         if ("graph" in v) {
+            countGraphElements(Object.keys(v.graph.nodes).length, p+".graph.nodes");
+            countGraphElements(v.graph.links.length, p+".graph.links");
             v.graph.links.forEach((edge,i) => { if (edge[2]) addLabel(`${p}.graph.links[${i}][2]`); });
         }
         if("row" in v) return {row:v.row.map((x,i)=>sectionState(x,`${p}.row[${i}]`))};
