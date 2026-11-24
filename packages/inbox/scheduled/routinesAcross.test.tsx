@@ -16,7 +16,7 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import type { InboxToastModel } from '../components/Toast';
@@ -24,7 +24,7 @@ import { lastRun, scheduledRow } from './testRows';
 
 const hasDom = typeof document !== 'undefined';
 const { ScheduledPage } = (hasDom ? await import('./ScheduledPage') : {}) as typeof import('./ScheduledPage');
-const { resetScheduledForTests } = (hasDom ? await import('./store') : {}) as typeof import('./store');
+const { resetScheduledForTests, useScheduledOn } = (hasDom ? await import('./store') : {}) as typeof import('./store');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { LinkedCapabilities } = (hasDom ? await import('../components/LinkedCapabilities') : {}) as typeof import('../components/LinkedCapabilities');
 const { resetMachineRoutes, setLinkedMachines } = await import('../inboxUrl');
@@ -102,6 +102,35 @@ function page(openId: string | null, here: 'on' | 'off' = 'on') {
 }
 
 const click = (el: Element | null) => act(async () => (el as HTMLElement).click());
+
+test.skipIf(!hasDom)("Routines turned on and off in a window with no linked computer: the window keeps working and asks the server nothing, even one without the machines read", async () => {
+  const calls: string[] = [];
+  // An older Inbox: none of the new routes (every one answers 404).
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push(String(input));
+    return json({ code: 'not_found', error: 'No route.' }, 404);
+  }) as typeof fetch;
+  resetScheduledForTests(null, null);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  // As the window does: a hook of its own right after (App.tsx's next is usePlansOn's effect).
+  function Window({ on }: { on: boolean }) {
+    const offered = useScheduledOn({ scheduled_threads: { on } });
+    useEffect(() => {}, [offered]);
+    return <span data-offered={String(offered)} />;
+  }
+  const draw = (on: boolean) => act(() => root!.render(<Window on={on} />));
+  draw(false);
+  await settle();
+  draw(true);
+  await settle();
+  expect(host.querySelector('[data-offered]')!.getAttribute('data-offered')).toBe('true');
+  draw(false);
+  await settle();
+  expect(host.querySelector('[data-offered]')!.getAttribute('data-offered')).toBe('false');
+  expect(calls).toEqual([]);
+});
 
 test.skipIf(!hasDom)("a linked computer's routine is listed with its computer's name, and Run goes there, keyed; its 202 is the run", async () => {
   const server = inbox([scheduledRow('sch_here', { name: 'Morning digest', state: 'on' })], [scheduledRow('sch_far', { name: 'Nightly build', state: 'on' })]);
