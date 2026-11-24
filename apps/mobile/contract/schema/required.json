@@ -20,6 +20,16 @@
       "id",
       "name"
     ],
+    "DoorAckAnswer": [
+      "message",
+      "thread"
+    ],
+    "DoorAckBody": [
+      "idempotency_key"
+    ],
+    "DoorAckBodyReaction": [
+      "emoji"
+    ],
     "DoorAnnotationAnswer": [
       "annotation"
     ],
@@ -177,6 +187,39 @@
     "DoorSnoozeBody": [
       "idempotency_key",
       "until"
+    ],
+    "DoorTaggableAnswer": [
+      "owner",
+      "serverSession",
+      "sessions"
+    ],
+    "DoorTaggableAnswerOwner": [
+      "host",
+      "session"
+    ],
+    "DoorTaggableSession": [
+      "busy",
+      "host",
+      "idle_since",
+      "kind",
+      "last_at",
+      "name",
+      "owner",
+      "project",
+      "session",
+      "started_at",
+      "taggable",
+      "wrote_thread"
+    ],
+    "DoorTaggableSessionProject": [
+      "id",
+      "name",
+      "root"
+    ],
+    "DoorTakeBackAnswer": [
+      "compose",
+      "draft",
+      "message"
     ],
     "DoorThreadAttachmentsAnswer": [
       "attachments",
@@ -683,6 +726,12 @@
     ],
     "InboxReaction": [
       "emoji"
+    ],
+    "InboxRemoval": [
+      "after",
+      "at",
+      "host",
+      "session"
     ],
     "InboxReplyDraft": [
       "body",

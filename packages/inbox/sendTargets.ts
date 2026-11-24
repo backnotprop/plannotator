@@ -3,7 +3,7 @@
  * answers, and which reply each waiting annotation rides.
  */
 import { parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
-import { inboxActionInDraft, inboxWordsDefault, type InboxAnnotationRecord, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
+import { inboxActionInDraft, inboxRemovedFrom, inboxWordsDefault, type InboxAnnotationRecord, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 import { activeHandoff } from './tags';
 import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 
@@ -138,6 +138,8 @@ export function tookOverReply(thread: InboxThread): InboxMessageWire | null {
     const m = thread.messages[index]!;
     if (m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session) && !m.scheduled_change) return null;
     if (!m.took_over || !m.to) continue;
+    // A session the person removed from the thread since holds it no more (core inbox-removed.ts).
+    if (inboxRemovedFrom(thread.messages, m.to.session)) return null;
     // That session's latest since (the server's owner too): a stale tab's reply to another session does not take it.
     const owner = m.to.session;
     return thread.messages.slice(index + 1).filter((later) => later.to?.session === owner).at(-1) ?? m;
