@@ -2552,7 +2552,7 @@
       "why": "Native sheets",
       "source": "SCOPE O. Phone layout (under 768 px) as described in this guide; L325",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -2898,7 +2898,7 @@
       "why": "Native reply box",
       "source": "SCOPE Q. Thread view: reading, question cards, the foot, Send; L380-L381",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3244,7 +3244,8 @@
       "why": "Photos, camera, Files picker",
       "source": "SCOPE R. Attachments in a reply, comment card, full-screen composer; L388-L389, L391",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e9ac51f3e83fa1d4"
       }
     },
     {
@@ -3273,7 +3274,7 @@
       "why": "File tiles in the draft",
       "source": "SCOPE R. Attachments in a reply, comment card, full-screen composer; L390",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3299,7 +3300,7 @@
       "why": "Read-only tiles and viewers",
       "source": "SCOPE R. Attachments in a reply, comment card, full-screen composer; L391",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3563,7 +3564,8 @@
       "why": "Native text field, saves itself",
       "source": "SCOPE 1. Reply box and reply drafts; M:L4, M:L5, M:L10",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "0d970d030eb91c72"
       }
     },
     {
@@ -3575,7 +3577,8 @@
       "why": "",
       "source": "SCOPE 1. Reply box and reply drafts; M:L4, M:L5",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -3587,7 +3590,8 @@
       "why": "Keyboard down keeps the words",
       "source": "SCOPE 1. Reply box and reply drafts; M:L5",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -3601,7 +3605,7 @@
       "why": "Discard button",
       "source": "SCOPE 1. Reply box and reply drafts; M:L4, M:L5, M:L7, C:L98",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3706,7 +3710,7 @@
       "why": "Photo picker, camera, Files",
       "source": "SCOPE 1. Reply box and reply drafts; M:L4, M:L5, M:L12, S:L404",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3820,7 +3824,8 @@
       "why": "The v1 grant adds draft writes",
       "source": "SCOPE 1. Reply box and reply drafts; M:L10",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "34463cce97bec635"
       }
     },
     {
@@ -4478,7 +4483,7 @@
       "why": "Send button",
       "source": "SCOPE 7. Send; S:L404, C:L143, W:L351",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -4540,7 +4545,8 @@
       "why": "",
       "source": "SCOPE 7. Send; S:L404, C:L42",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -4650,7 +4656,8 @@
       "why": "Reply arrow or swipe",
       "source": "SCOPE 8. Reply with a quote, and mentioning a thread; C:L116",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -4674,7 +4681,8 @@
       "why": "",
       "source": "SCOPE 8. Reply with a quote, and mentioning a thread; C:L117",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -4689,7 +4697,8 @@
       "why": "",
       "source": "SCOPE 8. Reply with a quote, and mentioning a thread; C:L118",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "99b5b2b4206c7168"
       }
     },
     {
@@ -4706,7 +4715,7 @@
       "why": "",
       "source": "SCOPE 8. Reply with a quote, and mentioning a thread; M:L24, M:L25, M:L26, M:L27, M:L28, M:L30, C:L119, C:L120",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6727,7 +6736,8 @@
       "why": "Compose button",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L37",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -6756,7 +6766,7 @@
       "why": "Full-screen sheet",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L25, C:L35, C:L38, C:L41, C:L142, C:L143",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6771,7 +6781,7 @@
       "why": "Native To sheet",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L38, C:L145, C:L149",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6783,7 +6793,7 @@
       "why": "",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L28, C:L38, C:L39, C:L41",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6846,7 +6856,7 @@
       "why": "Photo picker, camera, Files",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L34, C:L35, C:L41, C:L42",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6858,7 +6868,7 @@
       "why": "",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L26, C:L29, C:L43",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6870,7 +6880,7 @@
       "why": "",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L40",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6936,7 +6946,8 @@
       "why": "Swipe to delete",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L40",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -14143,13 +14154,37 @@
     {
       "id": "foundation-102",
       "title": "Phone app: New message to an agent, live sessions, compose (sessions, messages, `messages/:id/to`), skill catalog",
-      "surface": [],
+      "surface": [
+        "field:DoorComposeAnswer.message",
+        "field:DoorComposeAnswer.project",
+        "field:DoorComposeAnswer.replayed",
+        "field:DoorComposeAnswer.thread_id",
+        "field:DoorComposeBody.body",
+        "field:DoorComposeBody.idempotency_key",
+        "field:DoorComposeBody.to",
+        "field:DoorComposeBody.uploads",
+        "field:DoorSessionsAnswer.machine",
+        "field:DoorSessionsAnswer.projects",
+        "field:DoorSessionsAnswer.serverSession",
+        "field:InboxComposeProject.project",
+        "field:InboxComposeProject.sessions",
+        "field:InboxComposeSession.busy",
+        "field:InboxComposeSession.host",
+        "field:InboxComposeSession.idle_since",
+        "field:InboxComposeSession.label",
+        "field:InboxComposeSession.last_seen_at",
+        "field:InboxComposeSession.last_thread",
+        "field:InboxComposeSession.place",
+        "field:InboxComposeSession.root",
+        "field:InboxComposeSession.session",
+        "field:InboxComposeSession.started_at"
+      ],
       "flows": [],
       "mobile": "v1",
       "why": "native compose sheet",
       "source": "SCOPE 1. Inventory; P:18",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -14167,13 +14202,16 @@
     {
       "id": "foundation-104",
       "title": "Phone app: upload files",
-      "surface": [],
+      "surface": [
+        "field:DoorUploadAnswer.upload"
+      ],
       "flows": [],
       "mobile": "v1",
       "why": "photo picker, files, camera",
       "source": "SCOPE 1. Inventory; P:18",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "dc44aa53876e12f7"
       }
     },
     {
@@ -22038,6 +22076,48 @@
       "title": "window:/api/inbox/reviews/local/diff",
       "surface": [
         "window:/api/inbox/reviews/local/diff"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-messages-id-guide-package-changes",
+      "title": "window:/api/inbox/messages/:id/guide/package-changes",
+      "surface": [
+        "window:/api/inbox/messages/:id/guide/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-pulls-package-changes",
+      "title": "window:/api/inbox/pulls/package-changes",
+      "surface": [
+        "window:/api/inbox/pulls/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-reviews-local-refs",
+      "title": "window:/api/inbox/reviews/local/refs",
+      "surface": [
+        "window:/api/inbox/reviews/local/refs"
       ],
       "flows": [],
       "mobile": "undecided",

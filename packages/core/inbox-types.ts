@@ -815,7 +815,7 @@ export interface InboxMessage {
    * Absent for a send from the thread's own project (or a project combined
    * with it), and on older records.
    */
-  from_project?: { name: string; root: string } | null;
+  from_project?: { name: string; root: string; repo?: InboxProjectRepo | null } | null;
   /**
    * On an agent's message: it was sent through a connection that wakes its
    * session with the person's reply (the Claude Code mod, Pi, OpenCode 2;
@@ -1807,6 +1807,7 @@ export interface InboxDecision {
     author: InboxAuthor;
     /** The body's prose before its first block, cut to about 280 characters; null when there is none. */
     excerpt: string | null;
+    repo?: InboxProjectRepo | null;
   };
   /**
    * Pictures and files the decision can show, as references only (bytes come

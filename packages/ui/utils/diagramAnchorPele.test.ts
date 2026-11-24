@@ -46,12 +46,17 @@ describe.if(hasDom)('Pele 1.3.0 flowchart anchors', () => {
     expect(PELE_FINDER.sourceLine('flowchart TD\n A[Reviewer] --> B[Approve?]\n B --> C[Done]', { family: 'flowchart', kind: 'node', id: 'B', label: '' })).toEqual([2, 2]);
     expect(PELE_FINDER.sourceLine('flowchart TD\n A --> B', { family: 'flowchart', kind: 'node', id: 'Missing', label: '' })).toBeNull();
 
+    // A second A -> B edge with the same label: the two cannot be told apart, so neither is offered or restored.
     const edge = svg.querySelector('.pele-edge[data-id="L_A_B_0"]')!;
     const duplicate = edge.cloneNode(true) as Element;
     duplicate.setAttribute('data-id', 'L_A_B_1');
     edge.parentElement!.appendChild(duplicate);
+    const duplicateLabel = svg.querySelector('.pele-edge-label[data-id="L_A_B_0"]')!.cloneNode(true) as Element;
+    duplicateLabel.setAttribute('data-id', 'L_A_B_1');
+    svg.appendChild(duplicateLabel);
     expect(PELE_FINDER.targetFromElement(svg, duplicate, RENDER_ID)).toBeNull();
-    expect(PELE_FINDER.findTarget(svg, { family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label: '' }, RENDER_ID)).toBeNull();
+    expect(PELE_FINDER.targetFromElement(svg, edge, RENDER_ID)).toBeNull();
+    expect(PELE_FINDER.findTarget(svg, { family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label: 'yes' }, RENDER_ID)).toBeNull();
   });
 
   test('whole-diagram comments restore on non-flowcharts; foreign parts and duplicate labels do not bind', () => {
@@ -64,6 +69,18 @@ describe.if(hasDom)('Pele 1.3.0 flowchart anchors', () => {
     duplicate.setAttribute('data-id', 'renamed');
     node.parentElement!.appendChild(duplicate);
     expect(PELE_FINDER.findTarget(svg, { family: 'flowchart', kind: 'node', id: 'gone', label: 'Approve?' }, RENDER_ID)).toBeNull();
+  });
+
+  // What regresses: a label Pele wraps over two rows is stored as
+  // "Detect installedagents", so the export names the part wrongly and the
+  // label differs from the one Mermaid gives the same part.
+  test('a label Pele wraps over rows reads as its words, a space between rows', () => {
+    const svg = parseInertSvg(
+      '<svg class="pele pele-flowchart" aria-roledescription="flowchart"><g class="pele-node pele-shape-rect" data-id="B"><rect/><text class="pele-label"><tspan x="0" y="-6.4">Detect installed</tspan><tspan x="0" y="17.6">agents</tspan></text></g></svg>',
+    )!;
+    const node = svg.querySelector('.pele-node[data-id="B"]')!;
+    expect(PELE_FINDER.targetFromElement(svg, node, RENDER_ID)).toEqual({ family: 'flowchart', kind: 'node', id: 'B', label: 'Detect installed agents' });
+    expect(PELE_FINDER.findTarget(svg, { family: 'flowchart', kind: 'node', id: 'gone', label: 'Detect installed agents' }, RENDER_ID)).toBe(node);
   });
 
   test('compatibility finder chooses from the rendered SVG and leaves Mermaid SVG handling intact', () => {
@@ -350,5 +367,84 @@ describe.if(hasDom)('Pele finders make the anchors Mermaid makes', () => {
     expect(PELE_FINDER.findTarget(svgs.pele, { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'owns' }, PELE_ID)).toBeNull();
     // The relation beside them keeps its own.
     expect(PELE_FINDER.findTarget(svgs.pele, { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'places' }, PELE_ID)?.getAttribute('data-id')).toBe('id_User_Order_1');
+  });
+
+  async function peleOf(src: string): Promise<SVGSVGElement> {
+    const result = await renderDiagram('mermaid', PELE_ID, src, { colorTheme: 'github', mode: 'dark' });
+    if (result.ok === false) throw new Error(result.message);
+    expect(result.svgNode.classList.contains('pele')).toBe(true);
+    return result.svgNode;
+  }
+
+  // What regresses: a comment on one of two flowchart edges with the same
+  // ends (`A -->|yes| B`, `A -->|no| B`) shows "Unanchored" under Pele, and a
+  // new click on either becomes a whole-diagram comment, where Mermaid tells
+  // them apart by their label.
+  test('flowchart: two edges with the same ends are told apart by their label, on a click and on a restore of a Mermaid-saved comment', async () => {
+    const pele = await peleOf('flowchart LR\n  A[Ask] -->|yes| B[Ship]\n  A -->|no| B\n  B --> C[Done]');
+    const edges = [...clickable(pele, PELE_FINDER, PELE_ID).values()].filter((t) => t.kind === 'edge' && t.from === 'A' && t.to === 'B');
+    expect(edges.map((t) => t.label).sort()).toEqual(['no', 'yes']);
+    // A click on the line or on its label names the same edge.
+    for (const label of ['yes', 'no']) {
+      const line = Array.from(pele.querySelectorAll('g.pele-edge[data-id]')).find((el) => PELE_FINDER.targetFromElement(pele, el, PELE_ID)?.label === label)!;
+      const text = pele.querySelector(`g.pele-edge-label[data-id="${line.getAttribute('data-id')}"]`)!;
+      expect(PELE_FINDER.targetFromElement(pele, text, PELE_ID)).toEqual({ family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label });
+      // Saved under Mermaid (its codec writes the edge as its ends and its label): restored onto that edge.
+      const saved: DiagramTarget = { family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label };
+      expect(PELE_FINDER.findTarget(pele, saved, PELE_ID)).toBe(line);
+    }
+    expect(PELE_FINDER.findTarget(pele, { family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label: 'maybe' }, PELE_ID)).toBeNull();
+
+    // The same ends AND the same label: neither is offered; the edge beside them keeps its own.
+    const twins = await peleOf('flowchart LR\n  A -->|yes| B\n  A -->|yes| B\n  A -->|no| B');
+    const offered = [...clickable(twins, PELE_FINDER, PELE_ID).values()].filter((t) => t.kind === 'edge');
+    expect(offered).toEqual([{ family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label: 'no' }]);
+    expect(PELE_FINDER.findTarget(twins, { family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label: 'yes' }, PELE_ID)).toBeNull();
+    expect(PELE_FINDER.findTarget(twins, { family: 'flowchart', kind: 'edge', from: 'A', to: 'B', label: 'no' }, PELE_ID)).not.toBeNull();
+  });
+
+  // What regresses: a comment on a subgraph made under one engine does not
+  // restore onto the same subgraph under the other (Mermaid's captured svg:
+  // 01-flowchart-td-subgraphs, subgraphs `Agent` and `Browser`).
+  test('flowchart: a subgraph comment restores across engines', async () => {
+    const mermaid = load('01-flowchart-td-subgraphs');
+    const pele = await peleOf(
+      'flowchart TD\n  subgraph Agent [Agent session]\n    Capture[VCS provider captures diff] --> Serve{Diff resolves?}\n  end\n' +
+        '  subgraph Browser [Browser session]\n    UI[Diff viewer] --> Ann[Annotate code]\n  end\n  Serve --> UI',
+    );
+    const clusters = (svg: Element, finder: DiagramFinder, renderId: string) =>
+      [...clickable(svg, finder, renderId).values()].filter((t) => t.kind === 'cluster').sort((a, b) => (a.id ?? '').localeCompare(b.id ?? ''));
+    const underMermaid = clusters(mermaid, MERMAID_FINDER, RENDER_ID);
+    expect(underMermaid).toEqual([
+      { family: 'flowchart', kind: 'cluster', id: 'Agent', label: 'Agent session' },
+      { family: 'flowchart', kind: 'cluster', id: 'Browser', label: 'Browser session' },
+    ]);
+    expect(clusters(pele, PELE_FINDER, PELE_ID)).toEqual(underMermaid);
+    // Pele draws a title an edge crosses above the edges, apart from its subgraph: a click there names the subgraph.
+    const title = pele.querySelector('g.pele-cluster-title[data-id="Browser"] > text.pele-cluster-label')!;
+    expect(title.closest(PELE_FINDER.targetSelector)).not.toBeNull();
+    expect(PELE_FINDER.targetFromElement(pele, title.closest(PELE_FINDER.targetSelector)!, PELE_ID)).toEqual(underMermaid[1]!);
+    for (const target of underMermaid) {
+      expect(restoredAs(pele, PELE_FINDER, target, PELE_ID)).toEqual(target);
+      expect(restoredAs(mermaid, MERMAID_FINDER, target, RENDER_ID)).toEqual(target);
+    }
+  });
+
+  // What regresses: a node whose label has a `<br>`, commented under
+  // Mermaid (which reads it "Line1Line2") and then renamed, is not found by
+  // its label under Pele (which reads it "Line1 Line2").
+  test('flowchart: a Mermaid-saved label with a line break finds its renamed node under Pele', async () => {
+    const mermaid = parseInertSvg(
+      '<svg aria-roledescription="flowchart-v2"><g class="nodes"><g id="diagram-fixture-flowchart-A-0" class="node"><foreignObject><div><span class="nodeLabel"><p>Line1<br/>Line2</p></span></div></foreignObject></g></g></svg>',
+    )!;
+    const saved = MERMAID_FINDER.targetFromElement(mermaid, mermaid.querySelector('g.node')!, RENDER_ID)!;
+    expect(saved).toEqual({ family: 'flowchart', kind: 'node', id: 'A', label: 'Line1Line2' });
+    const pele = await peleOf('flowchart LR\n  Renamed[Line1<br>Line2] --> B[Other]');
+    const node = pele.querySelector('g.pele-node[data-id="Renamed"]')!;
+    expect(PELE_FINDER.targetFromElement(pele, node, PELE_ID)?.label).toBe('Line1 Line2');
+    expect(PELE_FINDER.findTarget(pele, saved, PELE_ID)).toBe(node);
+    // Two nodes that read the same with the spaces out name neither.
+    const two = await peleOf('flowchart LR\n  X[Line1<br>Line2] --> Y[Line1 Line2]');
+    expect(PELE_FINDER.findTarget(two, saved, PELE_ID)).toBeNull();
   });
 });

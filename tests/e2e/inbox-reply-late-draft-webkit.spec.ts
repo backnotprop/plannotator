@@ -72,12 +72,18 @@ test('a draft read that answers after Reply was tapped waits behind Restore draf
   await fetch(`${url}/api/inbox/threads/${id}/draft`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: OLD, base: null }) });
   const context = await browser.newContext({ ...ipad, reducedMotion: 'reduce' });
   const page = await context.newPage();
-  await page.route(/\/api\/inbox\/threads\/[^/]+\/draft$/, (route) => {
-    if (route.request().method() === 'GET') setTimeout(() => void route.continue().catch(() => {}), 2500);
-    else void route.continue();
+  // The draft read is held until the Reply tap has landed, then let go: the read answers after the tap by the test's
+  // order, never by a delay racing the tap (a read that answered first made the button "Edit draft", and the tap
+  // waited for a Reply button that never came back).
+  let releaseDraftRead!: () => void;
+  const draftReadHeld = new Promise<void>((done) => (releaseDraftRead = done));
+  await page.route(/\/api\/inbox\/threads\/[^/]+\/draft$/, async (route) => {
+    if (route.request().method() === 'GET') await draftReadHeld;
+    await route.continue().catch(() => {});
   });
   await openAndReply(page, id);
   await expect(box(page)).toHaveValue('');
+  releaseDraftRead();
   await expect(restore(page)).toBeVisible({ timeout: 10_000 });
   await expect(box(page)).toHaveValue('');
   await page.keyboard.type('Thanks', { delay: 60 });

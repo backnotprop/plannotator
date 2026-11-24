@@ -30,6 +30,10 @@ import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
 import type { InboxShapes } from './shape/useInboxShapes';
+import { drawMermaidFencesWithMermaid } from '@plannotator/ui/test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 

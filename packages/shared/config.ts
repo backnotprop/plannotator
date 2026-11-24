@@ -1998,7 +1998,7 @@ export function resolveInboxLaunch(
  * a string and would fail `=== false` checks downstream. Accepts real booleans
  * plus "true"/"false"/"1"/"0" strings; anything else falls back to the default.
  */
-function coerceConfigBoolean(value: unknown, fallback: boolean): boolean {
+export function coerceConfigBoolean(value: unknown, fallback: boolean): boolean {
   return parseConfigBoolean(value) ?? fallback;
 }
 

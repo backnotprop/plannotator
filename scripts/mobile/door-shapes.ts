@@ -11,7 +11,7 @@
 import type { InboxDevicePublic } from '../../packages/shared/inbox/devices';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '../../packages/core/inbox-attachments';
 import type { InboxRowSnooze } from '../../packages/core/inbox-snooze';
-import type { InboxListRow, InboxMessageWire, InboxQuestion, InboxRecordKind, InboxReplyDraft } from '../../packages/core/inbox-types';
+import type { InboxComposeProject, InboxListRow, InboxMessageWire, InboxQuestion, InboxRecordKind, InboxReplyDraft, InboxUpload } from '../../packages/core/inbox-types';
 import type { QuestionAnswer } from '../../packages/core/question-block';
 import type { inboxPickBody } from '../../packages/core/inbox-answers';
 
@@ -233,4 +233,38 @@ export interface DoorMarkupAnswer {
   path: string;
   name: string;
   url?: string;
+}
+
+/** `GET sessions` (packages/server/inbox-compose.ts): every live agent session, grouped by project, for New message's To. */
+export interface DoorSessionsAnswer {
+  serverSession: string;
+  /** This Inbox's stable id (linked machines). */
+  machine?: string;
+  projects: InboxComposeProject[];
+}
+
+/** `POST messages` (packages/server/inbox-compose.ts `startThread`): a new thread to one live session. */
+export interface DoorComposeBody {
+  idempotency_key: string;
+  /** A live session (`409 session_not_live` otherwise, nothing written). */
+  to: { host?: string; session: string };
+  /** The words; may be empty when `uploads` holds a file. */
+  body: string;
+  /** `upl_` ids from `POST uploads`. */
+  uploads?: string[];
+}
+
+/** `POST messages` answers: the new thread and its first message. */
+export interface DoorComposeAnswer {
+  thread_id: string;
+  message: InboxMessageWire;
+  /** The project it was written in. A Send the Inbox replays from its own store (the key known, not the door's
+   * record of it) answers without it. */
+  project?: { id: string; name: string; root: string };
+  replayed: boolean;
+}
+
+/** `POST uploads?name=&idempotency_key=` (the file's own bytes) answers the pending upload a Send names. */
+export interface DoorUploadAnswer {
+  upload: InboxUpload;
 }

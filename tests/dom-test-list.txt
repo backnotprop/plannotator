@@ -69,6 +69,7 @@ packages/ui/utils/pele-labels.test.ts
 packages/ui/utils/pele-render.test.ts
 packages/ui/utils/pele-hostile.test.ts
 packages/ui/utils/diagramAnchorPele.test.ts
+packages/ui/utils/peleRowSpaces.test.ts
 packages/ui/components/DiagramBlock.copySource.test.tsx
 packages/ui/components/Viewer.askAISelectionLine.test.tsx
 packages/ui/components/Viewer.codeDocumentRepeatedLine.test.tsx
@@ -296,6 +297,7 @@ packages/inbox/toast.test.tsx
 packages/inbox/attachmentsHeader.test.tsx
 packages/inbox/threadArtifacts.test.tsx
 packages/inbox/threadLinksDrawn.test.tsx
+packages/inbox/writerRefRepo.test.tsx
 packages/inbox/sentQuestionLocked.test.tsx
 packages/inbox/perfMarks.test.ts
 packages/inbox/themeToggle.test.tsx
@@ -416,6 +418,8 @@ packages/review-editor/components/AllFilesCodeView.hostSemantic.test.tsx
 packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
+packages/review-editor/components/AllFilesCodeView.fileCommentAttachments.test.tsx
+packages/review-editor/components/DiffViewer.fileCommentAttachments.test.tsx
 packages/ui/utils/highlightCopy.test.ts
 packages/ui/components/Viewer.highlightCopy.test.tsx
 packages/ui/components/CodeFilePopout.highlightCopy.test.tsx
@@ -709,6 +713,7 @@ packages/inbox/guideChapterDiagram.test.tsx
 packages/inbox/guideOverviewMermaid.test.tsx
 packages/inbox/guideExpandContext.test.tsx
 packages/inbox/guideImagePreview.test.tsx
+packages/inbox/guidePackageChanges.test.tsx
 packages/inbox/guideMarkdownPreview.test.tsx
 packages/inbox/guideCollapseAllAfterSwitch.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
@@ -719,6 +724,7 @@ packages/inbox/pulls/lineThreads.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/pulls/hidePulls.test.tsx
 packages/inbox/pulls/onThisComputer.test.tsx
+packages/inbox/pulls/openLocalPicker.test.tsx
 packages/inbox/compose/reviewBoxBranch.test.tsx
 packages/inbox/hidePullsList.test.tsx
 packages/inbox/shortcuts/useSheetEscape.test.tsx
@@ -893,6 +899,7 @@ packages/inbox/createRoutineWindow.test.tsx
 packages/inbox/plans/plansSidebar.test.tsx
 packages/inbox/plans/plansPage.test.tsx
 packages/inbox/plans/spacesHome.test.tsx
+packages/inbox/plans/spaceFaceDiagram.test.tsx
 packages/inbox/plans/planShare.test.tsx
 packages/ui/components/OpenInAppButton.line.test.tsx
 packages/ui/utils/openInLine.test.ts

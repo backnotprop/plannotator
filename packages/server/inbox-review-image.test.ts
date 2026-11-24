@@ -205,6 +205,28 @@ describe("a guided review's image", () => {
     const edited = staged.replace("similarity index 100%", "similarity index 90%");
     expect((await at("assets/mark.png", "new", edited, head)).status).toBe(404);
   });
+
+  test("a pure rename of a committed file past the cap: missing on both sides, never too large (no size told)", async () => {
+    const dir = join(scratch, "renames-big");
+    mkdirSync(dir, { recursive: true });
+    const inDir = (...args: string[]) => {
+      const run = Bun.spawnSync(["git", "-c", "user.name=Ada Novak", "-c", "user.email=ada@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dir, env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1" } });
+      if (run.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${run.stderr.toString()}`);
+      return run.stdout.toString();
+    };
+    inDir("init", "-q", "-b", "main");
+    writeFileSync(join(dir, "big.bin"), Buffer.concat([PNG, Buffer.alloc(MAX_REVIEW_IMAGE_PREVIEW_BYTES + 1)]));
+    inDir("add", "-A");
+    inDir("commit", "-q", "-m", "big");
+    const head = inDir("rev-parse", "HEAD").trim();
+    // A crafted guide: the big file "renamed" to a picture's name, so no blob is named and the rename read runs.
+    const crafted = "diff --git a/big.bin b/x.png\nsimilarity index 100%\nrename from big.bin\nrename to x.png\n";
+    for (const side of ["old", "new"] as const) {
+      const answer = await guideReviewImage({ patch: crafted, messageId: MESSAGE, root: dir, revision: head, params: ask("x.png", side, MESSAGE) });
+      expect([answer.status, reasonOf(answer.body)]).toEqual([404, "missing"]);
+      expect(String(answer.body)).not.toContain(String(MAX_REVIEW_IMAGE_PREVIEW_BYTES));
+    }
+  });
 });
 
 describe("a pull request's image", () => {

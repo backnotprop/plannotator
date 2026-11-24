@@ -3,10 +3,13 @@
  * whole diff against the default branch, or a folder's uncommitted changes, read now (`GET /api/inbox/reviews/local/diff`)
  * and drawn read only by the reader every review uses (`GuideReader`, its files). Nothing goes to any agent. Its bar's
  * "Review with an agent" opens New review on that same work, for the person to send or not. No new keyboard shortcuts.
+ * A folder opened from the group's + (approval "reviews-open-any-branch-a"): its whole work, titled with the branch in
+ * it (on none, its own name), its facts its own name (or "detached at <commit>"), its commits not on main and
+ * "uncommitted"; with nothing beyond the default branch, a branch's or a folder's body says "Same as main.".
  */
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
-import { inboxLocalWorkLabel, inboxReviewPatchSize, type InboxLocalDiffAnswer } from '@plannotator/core/inbox-types';
+import { inboxLocalFolderName, inboxLocalSameAsBase, inboxLocalWorkLabel, inboxReviewPatchSize, type InboxLocalDiffAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { Icon } from '../icons';
@@ -39,23 +42,25 @@ export function LocalDiffPane({ open, projectName, phone, stacked, onClose, onRe
   useEffect(() => {
     setRead({ diff: null, error: null });
     const controller = new AbortController();
-    readLocalDiff(open.project, open.branch, controller.signal).then(
+    readLocalDiff(open.project, open.branch, controller.signal, open.folder ?? null).then(
       (diff) => setRead({ diff, error: null }),
       (cause: unknown) => {
         if (!controller.signal.aborted) setRead({ diff: null, error: cause instanceof Error ? cause.message : 'The diff could not be read.' });
       },
     );
     return () => controller.abort();
-  }, [open.project, open.branch]);
+  }, [open.project, open.branch, open.folder]);
   const diff = read.diff;
-  const label = diff ? inboxLocalWorkLabel(diff) : open.branch ?? 'Uncommitted changes';
+  const label = diff ? inboxLocalWorkLabel(diff) : open.folder ? inboxLocalFolderName(open.folder) : (open.branch ?? 'Uncommitted changes');
+  // Nothing beyond the default branch: its facts and "Same as main." in place of a diff.
+  const same = !!diff && !diff.patch && inboxLocalSameAsBase(diff);
   const snapshot = useMemo(
     () =>
       diff && diff.patch
         ? buildGuideSnapshot({
             guide: { title: inboxLocalWorkLabel(diff), intent: '', sections: [] },
             reviewed: [],
-            review: { rawPatch: diff.patch, gitRef: diff.kind === 'branch' ? `${diff.base}...${diff.branch}` : 'HEAD', source: { kind: 'local', ...(diff.branch ? { branch: diff.branch } : {}) } },
+            review: { rawPatch: diff.patch, gitRef: diff.kind === 'branch' ? `${diff.base}...${diff.branch}` : diff.kind === 'folder' ? diff.base : 'HEAD', source: { kind: 'local', ...(diff.branch ? { branch: diff.branch } : {}) } },
             exportedAt: new Date(0).toISOString(),
           })
         : null,
@@ -68,11 +73,11 @@ export function LocalDiffPane({ open, projectName, phone, stacked, onClose, onRe
   const bar = useRef<HTMLDivElement>(null);
   usePhoneHeadFit(bar, phone, [stacked, label, useInboxTextSize()].join('|'));
   return (
-    <section className="ib-pane ib-prpane ib-local-pane" aria-labelledby={titleId} data-local-diff={diff?.kind ?? (open.branch ? 'branch' : 'uncommitted')}>
+    <section className="ib-pane ib-prpane ib-local-pane" aria-labelledby={titleId} data-local-diff={diff?.kind ?? (open.folder ? 'folder' : open.branch ? 'branch' : 'uncommitted')}>
       <div ref={bar} className="ib-pr-bar ib-lp-bar">
         <PullPaneBack phone={phone} stacked={stacked} onClose={onClose} />
         <span className="ib-lp-id" data-fit-subject={NAME_FLOOR_PX}>
-          <Icon name={open.branch ? 'gitBranch' : 'laptop'} size={15} />
+          <Icon name={open.folder ? 'folder' : open.branch ? 'gitBranch' : 'laptop'} size={15} />
           <h2 id={titleId} className="ib-local-title" dir="auto" title={phone ? label : undefined} data-local-title="">
             {label}
           </h2>
@@ -103,7 +108,11 @@ export function LocalDiffPane({ open, projectName, phone, stacked, onClose, onRe
       <div className="ib-pr-meta ib-local-meta" data-local-facts="">
         {projectName && <span dir="auto">{projectName}</span>}
         {/* A branch: its commits not on the default branch (Branch reviews' words), else what its diff is against. */}
-        {diff?.kind === 'branch' && <span data-local-ahead="">{typeof diff.ahead === 'number' && diff.ahead > 0 ? `${plural(diff.ahead, 'commit')} not on ${diff.base}` : `against ${diff.base}`}</span>}
+        {diff?.kind === 'branch' && !same && <span data-local-ahead="">{typeof diff.ahead === 'number' && diff.ahead > 0 ? `${plural(diff.ahead, 'commit')} not on ${diff.base}` : `against ${diff.base}`}</span>}
+        {/* A folder: its own name beside the branch in it, or the commit it is on; its commits not on main; its changes. */}
+        {diff?.kind === 'folder' && <span dir="auto" data-local-folder="">{diff.branch ? inboxLocalFolderName(diff.folder ?? '') : `detached at ${diff.head ?? ''}`}</span>}
+        {diff?.kind === 'folder' && typeof diff.ahead === 'number' && diff.ahead > 0 && <span data-local-ahead="">{`${plural(diff.ahead, 'commit')} not on ${diff.base}`}</span>}
+        {diff?.kind === 'folder' && diff.uncommitted && <span>uncommitted</span>}
         {size && (
           <span>
             {plural(size.files, 'file')} <span className="ib-add">+{formatCount(size.additions)}</span> <span className="ib-del">−{formatCount(size.deletions)}</span>
@@ -121,7 +130,11 @@ export function LocalDiffPane({ open, projectName, phone, stacked, onClose, onRe
             Reading the diff…
           </p>
         )}
-        {diff && !snapshot && <p className="ib-pr-empty">No changes.</p>}
+        {diff && !snapshot && (
+          <p className="ib-pr-empty" data-local-same={same ? '' : undefined}>
+            {same ? `Same as ${diff.base}.` : 'No changes.'}
+          </p>
+        )}
         {snapshot && diff && (
           <ReaderPart diff={diff.patch}>
             <GuideReader bare snapshot={snapshot} reviewed={NO_TICKS} onReviewedChange={keepTicks} chapterTicks={false} mode="files" />
