@@ -8,7 +8,7 @@
  * the permission card; the person's `config.toml` is never written. No Inbox server is started.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_PERMISSION_ALLOW_ONCE } from "@plannotator/core/inbox-permission";
@@ -227,17 +227,62 @@ describe("Codex through the launch engine, against the fake codex", () => {
     expect(resumed.params.config.model_reasoning_effort).toBe("high");
   }, 30_000);
 
-  test("a reply while a turn runs goes into that turn with turn/steer, not a second turn/start, and its delivery says so", async () => {
+  /** The launched thread's rollout as Codex writes it while its first turn runs, and a way to add to it. */
+  const rolloutOf = (t: ReturnType<typeof setup>, thread: string) => {
+    const dir = join(t.codexHome, "sessions", "2026", "11", "24");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `rollout-2026-11-24T10-00-00-${thread}.jsonl`);
+    const add = (...entries: unknown[]) => appendFileSync(file, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
+    add({ type: "session_meta", payload: { id: thread, source: "vscode", originator: "codex_vscode", cwd: t.folder } }, { type: "event_msg", payload: { type: "task_started", turn_id: "turn-1" } });
+    return { file, add, shows: (text: string) => add({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text }] } }) };
+  };
+
+  test("a reply while a turn runs goes into that turn with turn/steer, not a second turn/start; Delivered once the rollout shows it", async () => {
     const t = setup();
     const root = await t.send("A SLOW job.");
+    const thread = await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
     await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");
+    const rollout = rolloutOf(t, thread);
     const starts = t.fake.rpc("turn/start").length;
     const reply = t.store.sendReply(root.id, { words: "Into this turn.", idempotency_key: "reply-steer" }).reply!;
+    const steered = await until("steered", () => t.fake.rpc("turn/steer").find((call) => JSON.stringify(call.params.input).includes("Into this turn.")));
+    // Steered, not yet read: Esc (Stop) now would drop it, so it is handed, not Delivered.
+    await t.wake.sweep();
+    expect(t.store.message(reply.id)!.delivery).toBeUndefined();
+    expect(t.store.handover.handedTo(thread)).toContain(reply.id);
+    rollout.shows((steered.params.input as { text: string }[])[0]!.text);
+    await t.wake.sweep();
     const delivered = await until("delivered", () => t.store.message(reply.id)!.delivery);
     expect(delivered.into_turn).toBe(true);
     expect(t.fake.rpc("turn/steer").filter((call) => JSON.stringify(call.params.input).includes("Into this turn."))).toHaveLength(1);
     expect(t.fake.rpc("turn/start")).toHaveLength(starts);
   }, 20_000);
+
+  test("steered, then the turn is stopped before the model read it: never Delivered, and it goes in when the session runs again, once", async () => {
+    const t = setup();
+    const root = await t.send("A SLOW job.");
+    const thread = await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
+    await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");
+    const rollout = rolloutOf(t, thread);
+    const reply = t.store.sendReply(root.id, { words: "Lost to the stop?", idempotency_key: "reply-dropped" }).reply!;
+    await until("steered", () => t.fake.rpc("turn/steer").some((call) => JSON.stringify(call.params.input).includes("Lost to the stop?")));
+    await t.stopRoute(t.store.message(root.id)!.launch!.id);
+    rollout.add({ type: "event_msg", payload: { type: "turn_aborted", turn_id: "turn-1", reason: "interrupted" } });
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(rollout.file, old, old);
+    await t.wake.sweep();
+    await t.wake.sweep();
+    expect(t.store.message(reply.id)!.delivery).toBeUndefined();
+    // The person writes again: the session resumes, and the dropped reply goes in with it.
+    t.store.sendReply(root.id, { words: "Go on.", idempotency_key: "reply-after" });
+    const again = await until("a second app-server", () => t.fake.starts()[1]);
+    await until("the dropped reply went in on it", () =>
+      [...t.fake.rpc("turn/start"), ...t.fake.rpc("turn/steer")].some((call) => call.pid === again.pid && JSON.stringify(call.params.input).includes("Lost to the stop?")),
+    );
+    await t.wake.sweep();
+    const sent = [...t.fake.rpc("turn/start"), ...t.fake.rpc("turn/steer")].filter((call) => call.pid === again.pid && JSON.stringify(call.params.input).includes("Lost to the stop?"));
+    expect(sent).toHaveLength(1);
+  }, 30_000);
 
   test("Codex that refuses a second turn gets the reply steered into the running one", async () => {
     const t = setup({ state: { refuseSecondTurn: true } });

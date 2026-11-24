@@ -8,14 +8,20 @@
  * inbox-launch-codex.ts):
  *
  *  1. The control socket (a terminal Codex on the shared background server, 0.157+): `turn/steer` into the running
- *     turn, found with `thread/read` (inbox-codex-control.ts). Tried first, since it lands at once; anything it cannot
- *     reach or Codex refuses falls to the hook or to `codex queue`.
+ *     turn, found with `thread/read` (inbox-codex-control.ts). OFF (`INBOX_CODEX_STEER_SOCKET`): its `initialize`
+ *     changes the shared server for every client (the originator and user-agent suffix, a gateway login it may
+ *     start), and nothing here checks the socket's owner yet. Kept, with its tests, for when that is settled.
  *  2. The hook (the Codex app, and any Codex that runs hooks). While the thread's rollout says a turn runs
- *     (`codexRolloutTurn`) and Plannotator's `PostToolUse` hook is in the person's Codex `hooks.json`, the reply is
- *     held in the hook mailbox (packages/shared/inbox/codex-hook-mailbox.ts) instead of being queued. The hook takes it
- *     after the turn's next tool call and Codex adds it to the turn before its next model request. When the turn ends
- *     first (no tool call came) the hold ends and `codex queue` gives it as the next turn, as before. One claim (the
- *     wake's mkdir) decides who sends it, so it never goes twice.
+ *     (`codexRolloutTurn`), Plannotator's `PostToolUse` hook is in the person's Codex `hooks.json` and this Codex has
+ *     run it since hooks.json last changed (Codex skips a hook the person has not reviewed; its gate notes each run,
+ *     `codex-hook-ran`), and the reply fits the hook's context whole (`codexHookFits`), the reply is held in the hook
+ *     mailbox (packages/shared/inbox/codex-hook-mailbox.ts) instead of being queued. The hook takes it after the
+ *     turn's next tool call and Codex adds it to the turn before its next model request. When the turn ends first (no
+ *     tool call came) the hold ends and `codex queue` gives it as the next turn, as before. One claim (the wake's
+ *     mkdir) decides who sends it, so it never goes twice.
+ *
+ * Either way a steer is only handed on: the wake says Delivered once the thread's rollout shows the text, and sends it
+ * as the next turn when the turn ended without it (inbox-codex-sight.ts).
  *
  * `INBOX_CODEX_BUSY_REPLY` is the one switch for what a reply to a busy Codex does.
  */
@@ -24,6 +30,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { isCodexHookCommand } from "@plannotator/shared/codex-hook-command";
+import { codexHookRanAt } from "@plannotator/shared/inbox/codex-hook-mailbox";
 import { CodexControlError, codexControlSocketPath, openCodexControl, type CodexControl } from "./inbox-codex-control";
 
 /**
@@ -37,11 +44,18 @@ import { CodexControlError, codexControlSocketPath, openCodexControl, type Codex
  */
 export const INBOX_CODEX_BUSY_REPLY: "steer" | "next_turn" = "steer";
 
+/** Whether route 1 (the control socket) is tried. Off: see the module comment. */
+export const INBOX_CODEX_STEER_SOCKET = false;
+
 /** A held reply gives up on the hook after this long, even while the rollout still says the turn runs (a Codex that quit mid-turn). */
 export const CODEX_HOOK_HOLD_MAX_MS = 30 * 60_000;
-/** How often the wake looks at what it holds (the hook took it, the turn ended). */
+/** How often the wake looks at what it holds or handed on (the hook took it, the turn ended, the rollout shows it). */
 export const CODEX_HOOK_LOOK_MS = 2_000;
-/** A claim the hook made and has not yet marked (`hooked.json`) after this long is uncertain: its process died between the two. */
+/**
+ * A claim the hook made and has not marked (`hooked.json`) after this long: its process died between the two, before
+ * it wrote anything to Codex (the mark comes first), and Codex has given up on it (its time limit is 10 s). It goes as
+ * the next turn.
+ */
 export const CODEX_HOOK_CLAIM_GRACE_MS = 30_000;
 /** A rollout last written longer ago than this is not believed to be in a turn. */
 const ROLLOUT_STALE_MS = 20 * 60_000;
@@ -247,63 +261,92 @@ export async function steerOverCodexSocket(options: {
 // ── What the wake asks ──
 
 export interface CodexSteerRoute {
-  /** Route 1: into the running turn over the control socket, when this Codex has one and the thread is on it. */
+  /** Route 1: into the running turn over the control socket, when it is on, this Codex has one and the thread is on it. */
   socket(thread: string, text: string): Promise<CodexSocketSteer>;
-  /** Whether a reply for `thread` should wait for the hook now: a turn runs, and the hook is installed. */
+  /** Whether a reply for `thread` should wait for the hook now: a turn runs, and the hook is installed and has run. */
   holdsForHook(thread: string): Promise<boolean>;
+  /**
+   * The hook is in hooks.json and this Codex has not run it since hooks.json last changed: it waits for the person's
+   * review in Codex (Codex skips it until then), so a reply goes as the next turn.
+   */
+  hookAwaitsReview(): boolean;
+  /**
+   * The thread's rollout file, or null when it is not found (or reading is not allowed). `fresh`: looked for even when
+   * it was not found a moment ago (before a steer: a thread's first turn writes its rollout).
+   */
+  rollout(thread: string, fresh?: boolean): Promise<string | null>;
 }
 
 /**
  * The routes for a Codex home. `allowed` is the test sandbox's guard (`agentHomeAllowed`): when false, nothing is read
- * and no socket is touched, so every reply goes the way it went before.
+ * and no socket is touched, so every reply goes the way it went before. `inboxDir`: where the hook's gate notes its
+ * runs (`codex-hook-ran`).
  */
 export function createCodexSteerRoute(options: {
   codexHomeDir: () => string;
+  inboxDir: () => string;
   allowed: () => boolean;
   likelyFolders: (thread: string) => string[];
   now?: () => number;
   policy?: "steer" | "next_turn";
+  /** Route 1 on (default INBOX_CODEX_STEER_SOCKET). */
+  socket?: boolean;
   requestMs?: number;
 }): CodexSteerRoute {
   const now = options.now ?? Date.now;
   const policy = options.policy ?? INBOX_CODEX_BUSY_REPLY;
+  const socketOn = options.socket ?? INBOX_CODEX_STEER_SOCKET;
   const rolloutPaths = new Map<string, string>();
   const rolloutMisses = new Map<string, number>();
-  let hooks: { at: number; installed: boolean } | null = null;
-  const hookInstalled = () => {
-    if (hooks && now() - hooks.at < HOOKS_TTL_MS) return hooks.installed;
+  let hooks: { at: number; installed: boolean; changedAt: number } | null = null;
+  const hooksFile = () => {
+    if (hooks && now() - hooks.at < HOOKS_TTL_MS) return hooks;
     let text: string | null = null;
+    let changedAt = 0;
     try {
-      text = readFileSync(join(options.codexHomeDir(), "hooks.json"), "utf8");
+      const file = join(options.codexHomeDir(), "hooks.json");
+      changedAt = statSync(file).mtimeMs;
+      text = readFileSync(file, "utf8");
     } catch {
       text = null;
     }
-    hooks = { at: now(), installed: codexHooksHavePostToolUse(text) };
-    return hooks.installed;
+    hooks = { at: now(), installed: codexHooksHavePostToolUse(text), changedAt };
+    return hooks;
+  };
+  /** Codex ran the hook since hooks.json last changed (the gate's note; read each time: it is one stat). */
+  const hookRan = () => {
+    const ran = codexHookRanAt(options.inboxDir());
+    return ran !== null && ran >= hooksFile().changedAt;
+  };
+  const rollout = async (thread: string, fresh = false): Promise<string | null> => {
+    if (!options.allowed()) return null;
+    const known = rolloutPaths.get(thread);
+    if (known && existsSync(known)) return known;
+    // A thread whose rollout was not found is not looked for again for a minute (the walk reads every day folder).
+    const missed = rolloutMisses.get(thread);
+    if (!fresh && missed !== undefined && now() - missed < 60_000) return null;
+    const path = await codexRolloutPath(options.codexHomeDir(), thread, options.likelyFolders(thread));
+    if (!path) {
+      rolloutMisses.set(thread, now());
+      return null;
+    }
+    rolloutMisses.delete(thread);
+    rolloutPaths.set(thread, path);
+    return path;
   };
   return {
     async socket(thread, text) {
-      if (policy !== "steer" || !options.allowed()) return { kind: "no", why: "off", idle: false };
+      if (!socketOn || policy !== "steer" || !options.allowed()) return { kind: "no", why: "off", idle: false };
       const socketPath = codexControlSocketPath(options.codexHomeDir());
       if (!existsSync(socketPath)) return { kind: "no", why: "Codex's control socket is not there", idle: false };
       return steerOverCodexSocket({ socketPath, thread, text, ...(options.requestMs ? { requestMs: options.requestMs } : {}) });
     },
     async holdsForHook(thread) {
-      if (policy !== "steer" || !options.allowed() || !hookInstalled()) return false;
-      let path = rolloutPaths.get(thread) ?? null;
-      if (!path || !existsSync(path)) {
-        // A thread whose rollout was not found is not looked for again for a minute (the walk reads every day folder).
-        const missed = rolloutMisses.get(thread);
-        if (missed !== undefined && now() - missed < 60_000) return false;
-        path = await codexRolloutPath(options.codexHomeDir(), thread, options.likelyFolders(thread));
-        if (!path) {
-          rolloutMisses.set(thread, now());
-          return false;
-        }
-        rolloutMisses.delete(thread);
-        rolloutPaths.set(thread, path);
-      }
-      return (await codexRolloutTurn(path, now())) === "running";
+      if (policy !== "steer" || !options.allowed() || !hooksFile().installed || !hookRan()) return false;
+      const path = await rollout(thread);
+      return path !== null && (await codexRolloutTurn(path, now())) === "running";
     },
+    hookAwaitsReview: () => policy === "steer" && options.allowed() && hooksFile().installed && !hookRan(),
+    rollout,
   };
 }

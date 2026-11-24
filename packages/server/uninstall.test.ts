@@ -19,6 +19,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, parse } from "node:path";
 import { quoteHookWord, t3HookCommand } from "@plannotator/shared/t3-hook-command";
+import { CODEX_HOOK_INSTALLED_FILE, codexHookCommand } from "@plannotator/shared/codex-hook-command";
+import { remainingHookReferences } from "./uninstall-hooks";
 import {
   formatPurgeWarning,
   runPlannotatorUninstall,
@@ -1160,6 +1162,34 @@ describe("default uninstall", () => {
       expect(readJson(settingsPath)).toEqual({ theme: "custom" });
     },
   );
+
+  test("removes the Codex PostToolUse hook with the Stop hook, keeps the person's own, and drops the installer's note", async () => {
+    const fixture = createFixture();
+    const binary = join(fixture.homeDir, ".local", "bin", "plannotator");
+    writeText(binary);
+    const hooksPath = join(fixture.homeDir, ".codex", "hooks.json");
+    const theirs = { hooks: [{ type: "command", command: "/usr/local/bin/lint-after", timeout: 5 }] };
+    writeJson(hooksPath, {
+      hooks: {
+        Stop: [{ hooks: [{ type: "command", command: binary, timeout: 345600 }] }],
+        PostToolUse: [theirs, { hooks: [{ type: "command", command: codexHookCommand(binary, hooksPath), timeout: 10 }] }, { hooks: [{ type: "command", command: codexHookCommand(join(fixture.root, "moved", "plannotator"), hooksPath), timeout: 10 }] }],
+      },
+    });
+    const note = join(fixture.dataDir, CODEX_HOOK_INSTALLED_FILE);
+    writeText(note, "");
+
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.ok).toBe(true);
+    expect(readJson(hooksPath)).toEqual({ hooks: { PostToolUse: [theirs] } });
+    expect(existsSync(note)).toBe(false);
+  });
+
+  test("a Codex hook gate the uninstall does not manage is named as a leftover, not missed inside /bin/sh -c", async () => {
+    const binary = join(tmpdir(), "nowhere", "plannotator");
+    const gate = codexHookCommand(binary, join(tmpdir(), "nowhere", ".codex", "hooks.json"))!;
+    expect(remainingHookReferences({ hooks: { PreToolUse: [{ hooks: [{ type: "command", command: gate }] }] } }, [binary], "linux", true)).toEqual(["hooks.PreToolUse[0].hooks[0].command"]);
+    expect(remainingHookReferences({ hooks: { PostToolUse: [{ hooks: [{ type: "command", command: gate }] }] } }, [binary], "linux", true, [{ event: "PostToolUse", suffix: "codex-hook" }])).toEqual([]);
+  });
 
   test("removes a relocated Codex hook adopted by the installer", async () => {
     const fixture = createFixture();
@@ -2689,7 +2719,7 @@ describe("hooks that still run Plannotator keep the CLI", () => {
 
     const dry = await runPlannotatorUninstall({ purge: false, dryRun: true }, environment);
     expect(dry.ok).toBe(true);
-    expect(dry.planned).toContain(`managed Codex Stop hook in ${file}`);
+    expect(dry.planned).toContain(`managed Codex hooks in ${file}`);
 
     const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, environment);
     expect(result.ok).toBe(true);

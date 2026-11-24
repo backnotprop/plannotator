@@ -29,6 +29,7 @@ import {
 } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { T3_SETTINGS_BACKUP_SUFFIX } from "@plannotator/shared/t3-hook-command";
+import { CODEX_HOOK_INSTALLED_FILE } from "@plannotator/shared/codex-hook-command";
 import { isManagedHook, remainingHookReferences, type ManagedHookSpec } from "./uninstall-hooks";
 import { remainingInboxReferences } from "./uninstall-inbox-references";
 import {
@@ -979,7 +980,11 @@ function removeHostConfigEntries(
 
   cleanupHooksJson(
     join(paths.codexDir, "hooks.json"),
-    [{ event: "Stop", suffix: "" }],
+    [
+      { event: "Stop", suffix: "" },
+      // The PostToolUse hook (a reply into a running turn): left behind, it would run a binary that is gone.
+      { event: "PostToolUse", suffix: "codex-hook" },
+    ],
     paths.binaryPaths,
     environment.platform,
     {
@@ -987,11 +992,14 @@ function removeHostConfigEntries(
       removeFileWhenEmpty: true,
       owner: "Codex",
     },
-    "managed Codex Stop hook",
-    `Make ${join(paths.codexDir, "hooks.json")} a readable, writable strict JSON object. Remove only Plannotator command hooks from hooks.Stop entries, then save the file; delete it only if no other settings remain.`,
+    "managed Codex hooks",
+    `Make ${join(paths.codexDir, "hooks.json")} a readable, writable strict JSON object. Remove only Plannotator command hooks from hooks.Stop entries and Plannotator's /bin/sh -c '…codex-hook…' command from hooks.PostToolUse entries, then save the file; delete it only if no other settings remain.`,
     request,
     state,
   );
+  // The installer's note that it added that hook (so an update never adds back one the person removed): with the hook
+  // gone, a later install adds it again.
+  removePath(join(state.dataDir, CODEX_HOOK_INSTALLED_FILE), request, state);
   cleanupCodexConfig(
     join(paths.codexDir, "config.toml"),
     request,

@@ -80,8 +80,9 @@ import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN, INBOX_DECISION_ASK
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentHomeAllowed, codexHome, type AgentEnvironment } from "./inbox-agents";
 import type { LaunchDelivery } from "./inbox-launch-host";
-import { codexHookedAt, holdForCodexHook, releaseCodexHookHold } from "@plannotator/shared/inbox/codex-hook-mailbox";
+import { clearCodexHookHolds, codexHooked, codexHookFits, codexSightOf, holdForCodexHook, releaseCodexHookHold, type CodexSight } from "@plannotator/shared/inbox/codex-hook-mailbox";
 import { CODEX_HOOK_CLAIM_GRACE_MS, CODEX_HOOK_HOLD_MAX_MS, CODEX_HOOK_LOOK_MS, createCodexSteerRoute, type CodexSteerRoute } from "./inbox-codex-steer";
+import { codexSightFor, codexSightStartOf, lookForCodexSight, type CodexSightCursor } from "./inbox-codex-sight";
 import { codexSteerAllowed } from "./inbox-codex-steer-guard";
 import { createT3Claims, INBOX_T3_READ_BACK_AFTER_MS, type T3Local, type T3Route, tryThroughT3 } from "./inbox-t3-local";
 
@@ -370,6 +371,21 @@ export function codexQueueMessage(command: InboxReplyCommand): string {
   return codexWakeText({ ...command, body: `${cut}${note}` });
 }
 
+/** A claim's `steered.json` (a steer Codex accepted, not yet seen): where to look, null for nowhere, undefined for none. */
+function readSteered(claim: string): CodexSight | null | undefined {
+  let text: string;
+  try {
+    text = readFileSync(join(claim, "steered.json"), "utf8");
+  } catch {
+    return undefined;
+  }
+  try {
+    return codexSightOf((JSON.parse(text) as { sight?: unknown }).sight);
+  } catch {
+    return null;
+  }
+}
+
 export function createInboxCodexWake(options: {
   store: InboxStore;
   environment: AgentEnvironment;
@@ -402,16 +418,26 @@ export function createInboxCodexWake(options: {
   const stopping = new AbortController();
   const steer =
     options.steer ??
-    createCodexSteerRoute({ codexHomeDir: () => codexHome(environment), allowed: () => codexSteerAllowed(environment), likelyFolders: codexRolloutDayFolders, now });
+    createCodexSteerRoute({ codexHomeDir: () => codexHome(environment), inboxDir: () => store.dir, allowed: () => codexSteerAllowed(environment), likelyFolders: codexRolloutDayFolders, now });
   /**
    * Replies held for the Codex hook while their thread is in a turn (inbox-codex-steer.ts), by claim key: since when,
    * and when a claim the hook made was first seen without its `hooked.json`. Not claimed meanwhile (the hook claims).
    */
   const held = new Map<string, { since: number; claimSeen: number | null }>();
+  /**
+   * Replies handed into a running turn (the hook took it, a steer Codex accepted) and not yet seen in the thread's
+   * rollout, by claim key (inbox-codex-sight.ts). Claimed; the line says handed, never Delivered, until the rollout
+   * shows the text. `sight` null: no rollout was found to look in.
+   */
+  const sighting = new Map<string, { sight: CodexSight | null; cursor: CodexSightCursor | null }>();
+  /** Replies a turn ended without (sighting said dropped, or the hook died taking it): they go as the next turn now. */
+  const nextTurnOnly = new Set<string>();
+  /** The hook waits for the person's review in Codex: said once in the log. */
+  let reviewSaid = false;
   let lookTimer: ReturnType<typeof setTimeout> | null = null;
-  /** While anything is held: look again soon (the hook took it, or the turn ended). */
+  /** While anything is held or handed on: look again soon (the hook took it, the turn ended, the rollout shows it). */
   const scheduleLook = () => {
-    if (lookTimer || held.size === 0 || stopping.signal.aborted) return;
+    if (lookTimer || (held.size === 0 && sighting.size === 0) || stopping.signal.aborted) return;
     lookTimer = setTimeout(() => {
       lookTimer = null;
       void sweep();
@@ -516,9 +542,15 @@ export function createInboxCodexWake(options: {
       const itemId = name.slice(0, dot);
       const session = name.slice(dot + 1);
       if (!isCodexThreadId(session)) continue;
-      // The hook's claim: it went into a turn. The first sweep records it (`hookStep`).
-      if (existsSync(join(dir, name, "hooked.json"))) continue;
       claimed.add(name);
+      // Handed into a running turn before a restart (the hook's `hooked.json`, a steer's `steered.json`): looked for
+      // in the rollout again from where it was handed on.
+      const hooked = codexHooked(store.dir, itemId, session);
+      const handed = hooked ? hooked.sight : readSteered(join(dir, name));
+      if (handed !== undefined) {
+        sighting.set(name, { sight: handed, cursor: null });
+        continue;
+      }
       try {
         const record = JSON.parse(readFileSync(join(dir, name, "queued.json"), "utf8")) as { at?: unknown; timed_out?: unknown; uncertain?: unknown };
         if (typeof record.at === "number" && record.timed_out !== true && record.uncertain !== true) (queued.get(session) ?? queued.set(session, new Map()).get(session)!).set(itemId, record.at);
@@ -531,14 +563,18 @@ export function createInboxCodexWake(options: {
   } catch {
     // No claims yet.
   }
+  // Nothing is held yet: a held file left by an Inbox that stopped is cleared (the first sweep holds again what still
+  // waits), so it never enters an unrelated turn, nor makes the hook's gate start the binary.
+  clearCodexHookHolds(store.dir, new Set());
   const dropClaim = (itemId: string, session: string) => {
     store.handover.giveBack(itemId, session);
     claimed.delete(`${itemId}.${session}`);
     uncertain.delete(`${itemId}.${session}`);
+    sighting.delete(`${itemId}.${session}`);
     queued.get(session)?.delete(itemId);
     rmSync(claimDir(itemId, session), { recursive: true, force: true });
   };
-  /** `steered`: it went into the running turn (the socket's `turn/steer`, the hook, a launched thread's steer). */
+  /** `steered`: the rollout shows it went into the running turn (the hook, a steer). */
   const delivered = (itemId: string, session: string, steered = false) => {
     try {
       store.recordDelivery(itemId, { host: INBOX_CODEX_HOST, session, ...(steered ? { steered: true } : {}) });
@@ -546,34 +582,90 @@ export function createInboxCodexWake(options: {
       // Gone, or no longer this session's.
     }
     held.delete(`${itemId}.${session}`);
+    nextTurnOnly.delete(`${itemId}.${session}`);
     releaseCodexHookHold(store.dir, session, itemId);
     dropClaim(itemId, session);
   };
 
+  /** Where the thread's rollout stands now (before a hand-off), or null when no rollout of it is found. */
+  const sightStart = async (session: string, fresh = false) => {
+    const rollout = await steer.rollout(session, fresh).catch(() => null);
+    return rollout ? codexSightStartOf(rollout) : null;
+  };
+  /**
+   * Handed into the running turn and not yet seen there (a steer Codex accepted): kept claimed, `steered.json` says
+   * where to look after a restart. With no rollout to look in, it reads Delivered at once, as before.
+   */
+  const handedOn = (id: string, session: string, sight: CodexSight | null) => {
+    const key = `${id}.${session}`;
+    if (!sight) {
+      log(`the rollout of Codex thread ${session} was not found, so ${id} is marked delivered without being seen there.`);
+      delivered(id, session, true);
+      return;
+    }
+    writeFileSync(join(claimDir(id, session), "steered.json"), `${JSON.stringify({ at: now(), sight })}\n`);
+    sighting.set(key, { sight, cursor: null });
+    scheduleLook();
+  };
+  /**
+   * One look at a reply handed into a running turn: Delivered once the rollout shows it, sent as the next turn when that
+   * turn ended without it (Esc, a cancelled tool call, a Codex that started again), else still handed on.
+   */
+  const sightStep = async (key: string): Promise<void> => {
+    const one = sighting.get(key);
+    if (!one) return;
+    const id = itemOfKey(key);
+    const session = sessionOfKey(key);
+    if (!one.sight) {
+      delivered(id, session, true);
+      return;
+    }
+    const answer = await lookForCodexSight(one.sight, one.cursor, now());
+    if (answer.kind === "seen") {
+      delivered(id, session, answer.intoTurn);
+      return;
+    }
+    if (answer.kind === "waiting") {
+      one.cursor = answer.cursor;
+      return;
+    }
+    // Codex dropped it: the claim goes, and the next sweep sends it as the next turn (never held or steered again).
+    log(`Codex thread ${session}'s turn ended before it took ${id}; it goes as the next turn.`);
+    dropClaim(id, session);
+    nextTurnOnly.add(key);
+    again = true;
+  };
+
   /**
    * An item the hook may hold or have taken, before anything claims it: `done` when there is nothing more to do now
-   * (the hook took it and it is recorded, it is still held, or the hook's claim is being finished), `go` to send it the
-   * usual way (`hold: false` once a hold ended, so the same turn's end does not hold it again).
+   * (the hook took it and it is looked for in the rollout, it is still held, or the hook's claim is being finished),
+   * `go` to send it the usual way (`hold: false` once a hold ended, so the same turn's end does not hold it again).
    */
   const hookStep = async (id: string, session: string): Promise<{ next: "done" } | { next: "go"; hold: boolean }> => {
     const key = `${id}.${session}`;
-    if (codexHookedAt(store.dir, id, session) !== null) {
-      delivered(id, session, true);
+    const hooked = codexHooked(store.dir, id, session);
+    if (hooked !== null) {
+      // The hook handed it to the turn: Delivered once the rollout shows it (`sightStep`).
+      held.delete(key);
+      releaseCodexHookHold(store.dir, session, id);
+      claimed.add(key);
+      sighting.set(key, { sight: hooked.sight, cursor: null });
+      await sightStep(key);
       return { next: "done" };
     }
     const hold = held.get(key);
-    if (!hold) return { next: "go", hold: true };
+    if (!hold) return { next: "go", hold: !nextTurnOnly.has(key) };
     if (existsSync(claimDir(id, session))) {
-      // The hook claimed it and is writing `hooked.json`; a claim left without one is a hook that died between the two.
+      // The hook claimed it and is writing `hooked.json`. A claim left without one is a hook that died between the two,
+      // before it wrote anything to Codex: once Codex has given up on it, the reply goes as the next turn.
       hold.claimSeen ??= now();
       if (now() - hold.claimSeen < CODEX_HOOK_CLAIM_GRACE_MS) return { next: "done" };
       held.delete(key);
       releaseCodexHookHold(store.dir, session, id);
-      claimed.add(key);
-      uncertain.add(key);
-      writeFileSync(join(claimDir(id, session), "queued.json"), `${JSON.stringify({ at: hold.since, uncertain: true })}\n`);
-      log(`the Codex hook claimed ${id} for ${session} and did not finish; it is not sent again: the agent sees it when it reads the thread.`);
-      return { next: "done" };
+      rmSync(claimDir(id, session), { recursive: true, force: true });
+      nextTurnOnly.add(key);
+      log(`the Codex hook claimed ${id} for ${session} and did not finish; it goes as the next turn.`);
+      return { next: "go", hold: false };
     }
     if (now() - hold.since < CODEX_HOOK_HOLD_MAX_MS && (await steer.holdsForHook(session))) return { next: "done" };
     // The turn ended with no tool call after the reply: it goes as the next turn.
@@ -629,17 +721,28 @@ export function createInboxCodexWake(options: {
       return;
     }
     claimed.add(key);
-    const text = codexQueueMessage(options.commandOf(item, session));
+    const command = options.commandOf(item, session);
+    const text = codexQueueMessage(command);
     const at = now();
     // An idle thread starts its turn while `codex queue` still runs; that turn's tool call is kept until the call exits 0.
     const flight = { at, session, itemId: id, taken: false };
     inFlight.set(key, flight);
+    // A launched session: where its rollout stands before its host may steer the text in (looked for there after).
+    const launchedHere = options.launched?.(session) === true;
+    const before = launchedHere ? await sightStart(session, true) : null;
     // A launched session: its host puts it in as a turn now (delivered), or leaves it to `codex queue`.
     const own = options.deliver ? await options.deliver(session, text).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) })) : "queue";
-    if (own === "delivered" || own === "steered") {
+    if (own === "delivered") {
       inFlight.delete(key);
       retryAt.delete(key);
-      delivered(id, session, own === "steered");
+      delivered(id, session);
+      return;
+    }
+    if (own === "steered") {
+      // Into the running turn: Esc before the model reads it would drop it, so it is Delivered once the rollout shows it.
+      inFlight.delete(key);
+      retryAt.delete(key);
+      handedOn(id, session, before ? codexSightFor(before, text, command.id) : null);
       return;
     }
     if (own === "hold") {
@@ -673,14 +776,17 @@ export function createInboxCodexWake(options: {
       dropClaim(id, session);
       return;
     }
-    // Into the running turn, when one runs (inbox-codex-steer.ts): the control socket's `turn/steer` at once, else
-    // held for the Codex hook (after the turn's next tool call). Anything else goes as the next turn, as before.
-    const socket = await steer.socket(session, text).catch((error: unknown) => ({ kind: "no" as const, why: String(error), idle: false }));
+    // Into the running turn, when one runs (inbox-codex-steer.ts): the control socket's `turn/steer` at once (off by
+    // default), else held for the Codex hook (after the turn's next tool call). Anything else goes as the next turn, as
+    // before; so does a reply a turn already ended without (`nextTurnOnly`).
+    const intoTurn = mayHold && !nextTurnOnly.has(key);
+    const socketBefore = intoTurn ? await sightStart(session) : null;
+    const socket = intoTurn ? await steer.socket(session, text).catch((error: unknown) => ({ kind: "no" as const, why: String(error), idle: false })) : { kind: "no" as const, why: "next turn", idle: false };
     if (socket.kind === "steered") {
       inFlight.delete(key);
       retryAt.delete(key);
       unproven.delete(session);
-      delivered(id, session, true);
+      handedOn(id, session, socketBefore ? codexSightFor(socketBefore, text, command.id) : null);
       return;
     }
     if (socket.kind === "uncertain") {
@@ -693,15 +799,21 @@ export function createInboxCodexWake(options: {
       writeFileSync(join(claimDir(id, session), "queued.json"), `${JSON.stringify({ at, timed_out: true })}\n`);
       return;
     }
-    if (mayHold && !socket.idle && (await steer.holdsForHook(session).catch(() => false)) && claimed.has(key)) {
+    // Held only for a hook this Codex has run (Codex skips one the person has not reviewed), a text the hook's context
+    // carries whole, and a rollout to see it arrive in.
+    if (intoTurn && !socket.idle && socketBefore && codexHookFits(text) && (await steer.holdsForHook(session).catch(() => false)) && claimed.has(key)) {
       // Unclaimed again for the hook to claim; still handed to Codex (its line: it takes this at its next step).
       inFlight.delete(key);
       claimed.delete(key);
       rmSync(claimDir(id, session), { recursive: true, force: true });
-      holdForCodexHook(store.dir, session, id, text, now());
+      holdForCodexHook(store.dir, session, id, text, now(), codexSightFor(socketBefore, text, command.id));
       held.set(key, { since: now(), claimSeen: null });
       scheduleLook();
       return;
+    }
+    if (intoTurn && !reviewSaid && steer.hookAwaitsReview()) {
+      reviewSaid = true;
+      log("Plannotator's Codex hook has not run yet: Codex runs it once you review it (Settings → Hooks, or /hooks). Until then a reply to a busy Codex goes as its next turn.");
     }
     releaseCodexHookHold(store.dir, session, id);
     // `--name=value`: a value that starts with "-" would be read as a flag.
@@ -896,8 +1008,19 @@ export function createInboxCodexWake(options: {
       if (!isCodexThreadId(session)) continue;
       for (const item of items) {
         if (!wakesItem(item, session) || options.skip?.(item, session)) continue;
-        const key = `${store.deliveryIdOf(item, session)}.${session}`;
+        const id = store.deliveryIdOf(item, session);
+        const key = `${id}.${session}`;
         pendingKeys.add(key);
+        // A claim the hook finished after this Inbox started (its `hooked.json` came after the start's scan).
+        if (claimed.has(key) && !sighting.has(key) && uncertain.has(key) && !existsSync(join(claimDir(id, session), "queued.json"))) {
+          const hooked = codexHooked(store.dir, id, session);
+          if (hooked) {
+            uncertain.delete(key);
+            sighting.set(key, { sight: hooked.sight, cursor: null });
+          }
+        }
+        // Handed into a running turn and not yet seen there (after a restart too): still handed to Codex.
+        if (sighting.has(key) && id === item.id) store.handover.hand(item, session, "codex");
         if (dead.has(session) || claimed.has(key)) continue;
         work.push({ item, session });
       }
@@ -909,11 +1032,19 @@ export function createInboxCodexWake(options: {
       dropClaim(key.slice(0, dot), key.slice(dot + 1));
     }
     for (const key of [...retryAt.keys()]) if (!pendingKeys.has(key)) retryAt.delete(key);
-    // A held reply that no longer waits (taken back, read, deleted): the hook must not take it.
+    // A held reply that no longer waits (taken back, read, deleted): the hook must not take it. A held file this Inbox
+    // does not hold (left by an earlier run, or by a reply gone meanwhile) is cleared too.
     for (const key of [...held.keys()]) {
       if (pendingKeys.has(key)) continue;
       held.delete(key);
       releaseCodexHookHold(store.dir, sessionOfKey(key), itemOfKey(key));
+    }
+    clearCodexHookHolds(store.dir, new Set([...held.keys()].map((key) => `${itemOfKey(key)}.${sessionOfKey(key).toLowerCase()}`)));
+    for (const key of [...nextTurnOnly]) if (!pendingKeys.has(key)) nextTurnOnly.delete(key);
+    // What was handed into a running turn: Delivered once the rollout shows it, the next turn if the turn ended without it.
+    for (const key of [...sighting.keys()]) {
+      if (stopping.signal.aborted) return;
+      if (pendingKeys.has(key)) await sightStep(key);
     }
     for (const key of [...t3Saved]) if (!pendingKeys.has(key)) t3Saved.delete(key);
     for (const key of t3Claims.keys()) if (!pendingKeys.has(key)) t3Claims.drop(itemOfKey(key), sessionOfKey(key));

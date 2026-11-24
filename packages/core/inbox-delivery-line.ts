@@ -409,8 +409,19 @@ export const INBOX_STOPPED_REPLY_TEXT = 'Stopped: goes in when you type in that 
 /** An item the Inbox marked to go in by itself that waited for the turn to end (its own Ask question held it). */
 export const TURN_ENDED_TEXT = 'went in when its turn ended';
 
-/** A reply the Codex wake steered into the thread's running turn (`turn/steer`): "Delivered to Codex, 5:12 PM · went into its running turn". */
+/**
+ * A reply the Codex wake handed into the thread's running turn (the hook, a steer), once the thread's rollout showed it
+ * there: "Delivered to Codex, 5:12 PM · went into its running turn".
+ */
 export const INTO_RUNNING_TURN_TEXT = 'went into its running turn';
+
+/**
+ * PROPOSED, NOT SHOWN YET (with the owner for approval): the words a reply to a busy Codex would add when it had to go
+ * as the next turn because Plannotator's Codex hook waits for the person's review in Codex (Codex skips a hook until
+ * then; `CodexSteerRoute.hookAwaitsReview`): "Queued for Codex; it gets this as its next turn. · review Plannotator's
+ * hook in Codex to send into its turn". Nothing reads it until it is approved and wired to the delivery.
+ */
+export const CODEX_HOOK_REVIEW_TEXT = "review Plannotator's hook in Codex to send into its turn";
 
 /** "went into its turn by itself after 5 min". */
 export function autoAfterText(minutes: number): string {
