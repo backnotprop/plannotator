@@ -45,6 +45,7 @@ export interface RemovalMessage {
   ack_of?: string | null;
   tidy?: unknown;
   scheduled_run?: { run?: number } | null;
+  scheduled_change?: unknown;
 }
 
 /** One of the Inbox's own notes (core `isInboxNote`'s rule, read here without importing the types module). */
@@ -110,16 +111,42 @@ export function inboxRemovedFrom(messages: readonly RemovalMessage[], session: s
 }
 
 /**
- * Whether a session still holds the thread after `session` left it: one that wrote in it, the session a thread the
- * person started is addressed to, or a session a reply was addressed to (a hand-off, a takeover). The last agent that
- * could take the person's reply is never removed, so a reply always has an agent to go to.
+ * The session a message can give the thread to (`InboxStore.threadOwner`'s candidates, one rule with
+ * `inboxCanRemove`): an agent's own words (never a permission prompt, never a routine's change line), or the session a
+ * message of the person's is addressed to (a thread the person started, a hand-off, a takeover). Null for any other.
+ */
+export function inboxHolderOf(message: RemovalMessage): string | null {
+  if (message.author.kind === "agent") {
+    const session = message.author.session ?? null;
+    return session && !isInboxPermissionSession(session) && !message.scheduled_change ? session : null;
+  }
+  const to = message.to?.session ?? null;
+  return to && !isInboxPermissionSession(to) ? to : null;
+}
+
+/**
+ * Whether a session still holds the thread after `session` left it (`inboxHolderOf`): the last agent that could take
+ * the person's reply is never removed, so a reply always has an agent to go to and the thread an owner.
  */
 export function inboxCanRemove(messages: readonly RemovalMessage[], session: string): boolean {
   const out = inboxRemovedNow(messages);
   if (out.has(session)) return false;
-  for (const message of messages) {
-    const other = message.author.kind === "agent" ? (message.author.session ?? null) : (message.to?.session ?? null);
-    if (other && other !== session && !out.has(other) && !isInboxPermissionSession(other)) return true;
-  }
-  return false;
+  return messages.some((message) => {
+    const other = inboxHolderOf(message);
+    return other !== null && other !== session && !out.has(other);
+  });
+}
+
+/**
+ * Whether `messageId`, a post by `session`, is its first in the thread since its standing removal: only that post's
+ * result carries the line that says it was removed (once per removal). False while it is not removed.
+ */
+export function inboxFirstPostSinceRemoval(messages: readonly RemovalMessage[], session: string, messageId: string): boolean {
+  const removal = inboxRemovedNow(messages).get(session);
+  if (!removal) return false;
+  const index = messages.findIndex((m) => m.id === removal.after);
+  const from = index >= 0 ? index + 1 : messages.findIndex((m) => (m.created_at ?? "") > removal.at);
+  if (from < 0) return false;
+  const first = messages.slice(from).find((m) => m.author.kind === "agent" && m.author.session === session);
+  return first?.id === messageId;
 }

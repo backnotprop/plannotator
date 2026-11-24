@@ -113,6 +113,8 @@ import {
   inboxWordsDefault,
   inboxRemovedNow,
   inboxCanRemove,
+  inboxFirstPostSinceRemoval,
+  inboxHolderOf,
   type InboxRemoval,
   inboxDeliveryState,
   type InboxDeliveryConnection,
@@ -3760,12 +3762,26 @@ export class InboxStore {
    * today's rule (the latest agent writer, or a session that took over
    * from an ended one since, else the session a thread the person started is
    * addressed to). Null when there is none.
+   *
+   * `isLive`: a thread whose newest writer the person removed passes to the latest live agent still in it, else the
+   * latest (the window's `followedSession`, the same rule).
    */
-  threadOwner(threadId: string): { host: string | null; session: string } | null {
+  threadOwner(threadId: string, isLive?: (session: string) => boolean): { host: string | null; session: string } | null {
     const messages = this.threadMessages(threadId);
     // An agent the person removed never owns the thread (inbox-removed.ts): it passes to the latest agent still in it.
     const removed = inboxRemovedNow(messages);
     const kept = (session: string) => !removed.has(session);
+    if (isLive && removed.size > 0) {
+      const writers = messages.flatMap((m) => {
+        const session = m.author.kind === "agent" ? inboxHolderOf(m) : null;
+        return session && m.author.kind === "agent" ? [{ host: m.author.host ?? null, session }] : [];
+      });
+      const newest = writers.at(-1)?.session;
+      if (newest && removed.has(newest) && !messages.some((m) => handoffActive(m) || m.took_over)) {
+        const live = [...writers].reverse().find((w) => kept(w.session) && isLive(w.session));
+        if (live) return live;
+      }
+    }
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]!;
       if (handoffActive(message)) {
@@ -3778,7 +3794,11 @@ export class InboxStore {
       const message = messages[index]!;
       // A permission prompt (launch, `perm:…`) is not its session's words, as in the window's `wordsMessage`.
       // An agent's routine change line (`scheduled_change`) is a note, not its words: it takes no thread.
-      if (message.author.kind === "agent" && message.author.session && kept(message.author.session) && !isInboxPermissionSession(message.author.session) && !message.scheduled_change) return { host: message.author.host ?? null, session: message.author.session };
+      // One rule with `inboxCanRemove` (`inboxHolderOf`).
+      if (message.author.kind === "agent") {
+        const holder = inboxHolderOf(message);
+        if (holder && kept(holder)) return { host: message.author.host ?? null, session: holder };
+      }
       if (message.took_over && message.to && kept(message.to.session)) return { host: message.to.host, session: message.to.session };
     }
     const root = messages[0];
@@ -3792,6 +3812,12 @@ export class InboxStore {
   /** The sessions out of a thread now (approval "inbox-remove-agent-from-thread"), each with the removal that stands. */
   removedFrom(threadId: string): ReadonlyMap<string, InboxRemoval> {
     return inboxRemovedNow(this.threadMessages(threadId));
+  }
+
+  /** Whether `messageId` is `session`'s first post in the thread since the removal that stands (the line goes once). */
+  firstPostSinceRemoval(threadId: string, session: string, messageId: string): boolean {
+    if ((this.messages.get(threadId)?.removed?.length ?? 0) === 0) return false;
+    return inboxFirstPostSinceRemoval(this.threadMessages(threadId), session, messageId);
   }
 
   /**
@@ -7150,7 +7176,8 @@ export class InboxStore {
     if (handoffHeld(message) || message.taken_back_at) return false;
     // The Inbox's own notes (a Mark read's set-aside note, a 👍's) written after the person removed the session from
     // the thread wait while it stays out: only the person writing to it brings it back (inbox-removed.ts).
-    if (isInboxNote(message)) {
+    // Only a thread someone was removed from is read again (its root's `removed`); every other note skips it.
+    if (isInboxNote(message) && (this.messages.get(message.thread_id)?.removed?.length ?? 0) > 0) {
       const removal = this.removedFrom(message.thread_id).get(session);
       if (removal && message.created_at >= removal.at) return false;
     }

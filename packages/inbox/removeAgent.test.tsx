@@ -14,7 +14,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxMessageWire, InboxProject, InboxRemoval, InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableSession } from './api';
 import type { InboxToastModel } from './components/Toast';
+import type { RecipientRow } from './replyRecipients';
 import { replyRecipientList } from './thread/recipientList';
+import { followedSession } from './thread/replyAim';
 import { threadParticipants } from './tags';
 
 const hasDom = typeof document !== 'undefined';
@@ -81,8 +83,9 @@ beforeEach(() => {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       posted.push({ path, body });
       if (path.endsWith('/remove-agent')) {
-        current = threadOf([PI_OUT]);
-        return Response.json({ thread_id: M1, removal: PI_OUT });
+        const removal: InboxRemoval = body.session === 'ses_pi' ? PI_OUT : { ...PI_OUT, host: 'claude-code', session: String(body.session) };
+        current = threadOf([removal]);
+        return Response.json({ thread_id: M1, removal });
       }
       if (path.endsWith('/remove-agent/undo')) {
         current = threadOf();
@@ -200,6 +203,30 @@ test.skipIf(!hasDom)('a computer: each agent row has Remove between its name and
   expect(el.querySelector('[data-thread-move="removed"]')).toBeNull();
 });
 
+test.skipIf(!hasDom)('Undo puts the person\'s pick back: they picked Claude Code, removed it (the reply went to Pi), and Undo picks Claude Code again', async () => {
+  const el = await render();
+  await openBox(el);
+  act(() => chip(el)!.click());
+  await settle();
+  // Pi wrote last, so the reply follows Pi; the person picks Claude Code.
+  expect(chip(el)!.getAttribute('data-recipient-chosen')).toBe('ses_pi');
+  act(() => (el.querySelector('[data-recipient-row="ses_claude"] .ib-rpick-name') as HTMLButtonElement).click());
+  await settle();
+  expect(chip(el)!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
+  if (!el.querySelector('[data-recipient-list]')) act(() => chip(el)!.click());
+  await settle();
+  await act(async () => (el.querySelector('[data-recipient-row="ses_claude"] [data-recipient-remove]') as HTMLButtonElement).click());
+  await settle();
+  await settle();
+  expect(removes()).toEqual([{ path: `/api/inbox/threads/${M1}/remove-agent`, body: { session: 'ses_claude' } }]);
+  expect(chip(el)).toBeNull();
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).getAttribute('aria-label')).toBe('Reply to Pi');
+  await act(async () => toasts[0]!.onUndo!());
+  await settle();
+  await settle();
+  expect(chip(el)!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
+});
+
 test.skipIf(!hasDom)('a phone: a row slides left over Remove; past a third it removes, a short swipe or a rightward one does nothing', async () => {
   const el = await render(true);
   await openBox(el);
@@ -249,4 +276,19 @@ test('the list: Remove only on the thread\'s own agents, never with one agent le
   // A tag of Pi's after the removal brings it back.
   const back: InboxThread = { ...out, messages: [...out.messages, message('msg_01M4H7DDDDDDDDDDDDDDDDDDDD', { kind: 'person' }, 52, { reply_to: M1, tags: [{ host: 'pi', session: 'ses_pi', wakes: true }] })] };
   expect(threadParticipants(back).map((p) => p.session)).toEqual(['ses_claude', 'ses_pi']);
+});
+
+test('the reply follows the latest live agent once the newest writer is removed, else the latest', () => {
+  const CODEX = { kind: 'agent' as const, host: 'codex', session: 'ses_codex', name: null };
+  const M3 = 'msg_01M4H7CCCCCCCCCCCCCCCCCCCC';
+  const piOut: InboxRemoval = { ...PI_OUT, after: M3 };
+  const thread: InboxThread = { ...threadOf([piOut]), messages: [message(M1, CLAUDE, 41, { removed: [piOut] }), message(M3, CODEX, 43), message(M2, PI, 45)] };
+  const row = (session: string, host: string, state: RecipientRow['state']): RecipientRow => ({ session, host, label: host, short: host, state });
+  // Codex wrote after Claude Code but has ended: the reply goes to Claude Code, which is live.
+  expect(followedSession(thread, [row('ses_claude', 'claude-code', 'live'), row('ses_codex', 'codex', 'ended')], null)).toBe('ses_claude');
+  // Neither live: the latest still in the thread.
+  expect(followedSession(thread, [row('ses_claude', 'claude-code', 'ended'), row('ses_codex', 'codex', 'ended')], null)).toBe('ses_codex');
+  // Nobody removed: today's rule, the newest writer even when it ended.
+  const plain: InboxThread = { ...threadOf(), messages: [message(M1, CLAUDE, 41), message(M3, CODEX, 43)] };
+  expect(followedSession(plain, [row('ses_claude', 'claude-code', 'live'), row('ses_codex', 'codex', 'ended')], null)).toBe('ses_codex');
 });

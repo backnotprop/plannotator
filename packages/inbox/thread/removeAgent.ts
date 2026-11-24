@@ -28,13 +28,16 @@ export interface RemoveAgentHost {
 }
 
 export function removeAgentAction(host: RemoveAgentHost) {
-  const undo = async (session: string) => {
+  /** Undo: the agent back, then the person's pick as it was before the press (`pick`, when the press changed it). */
+  const undo = async (session: string, pick: readonly string[] | null) => {
     try {
       await postUndoRemoveAgent(host.threadId, session);
     } catch (cause) {
       if (!(cause instanceof InboxHeldError)) host.onToast?.({ icon: 'warn', lead: cause instanceof Error ? cause.message : String(cause), wrap: true });
+      return void (await host.changed());
     }
     await host.changed();
+    if (pick) host.aim(pick);
   };
   return async (row: RecipientRow) => {
     const name = recipientNames(host.rows, host.labels, host.folderOf).get(row.session)?.name ?? row.label;
@@ -48,18 +51,25 @@ export function removeAgentAction(host: RemoveAgentHost) {
       host.onToast?.({ icon: 'warn', lead: cause instanceof InboxApiError || cause instanceof Error ? cause.message : String(cause), wrap: true });
       return;
     }
-    // The person's choice without it: the rest, else the first other agent that can take the reply alone.
-    if (host.picked?.includes(row.session)) {
-      const rest = host.picked.filter((id) => id !== row.session);
-      const next = rest.length > 0 ? rest : host.rows.filter((r) => r.session !== row.session && r.alone !== false && !r.start).map((r) => r.session).slice(0, 1);
-      if (next.length > 0) host.aim(next);
+    // The person's choice without it: the rest, else the first other agent that can take the reply alone (a live one
+    // first). Undo puts the choice back as it was.
+    const before = host.picked ? [...host.picked] : null;
+    let changedPick = false;
+    if (before?.includes(row.session)) {
+      const rest = before.filter((id) => id !== row.session);
+      const others = host.rows.filter((r) => r.session !== row.session && r.alone !== false && !r.start);
+      const next = rest.length > 0 ? rest : [...others.filter((r) => r.state === 'live'), ...others].map((r) => r.session).slice(0, 1);
+      if (next.length > 0) {
+        host.aim(next);
+        changedPick = true;
+      }
     }
     host.onToast?.({
       icon: 'check',
       lead: `Removed ${name}`,
       phoneLead: 'Removed',
       speech: `Removed ${name} from this thread. Undo brings it back for a few seconds.`,
-      onUndo: () => void undo(row.session),
+      onUndo: () => void undo(row.session, changedPick ? before : null),
     });
     await host.changed();
     // Its Remove had focus and is gone (or the whole list, with one agent left): back to the words.

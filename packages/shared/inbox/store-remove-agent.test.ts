@@ -12,7 +12,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
-import { inboxWordsDefault, type InboxAuthor, type InboxMessage } from "@plannotator/core/inbox-types";
+import { inboxCanRemove, inboxHolderOf, inboxWordsDefault, type InboxAuthor, type InboxMessage } from "@plannotator/core/inbox-types";
+import { reaskThreadAll } from "./reask-all";
 import { InboxStore } from "./store";
 
 const roots: string[] = [];
@@ -176,6 +177,56 @@ describe("Remove an agent from a thread", () => {
     expect(JSON.stringify(messagesOf(store, thread)[0]!.removed ?? null)).toBe(before);
     expect(participants(store, thread)).toEqual([API.session, HOOKS.session]);
     expect(receivers(store, defaultReply(store, thread, "r"))).toEqual([HOOKS.session!]);
+  });
+
+  test("a reply queued for it before the removal is still delivered, and Send now still sends it", () => {
+    const { store, thread, hooks } = world();
+    const queued = store.sendReply(hooks.id, { idempotency_key: "q", words: "Check the dedupe table." }).reply;
+    store.removeFromThread(thread, HOOKS.session!);
+    // Send now after the removal: allowed, and it is still that agent's to take.
+    expect(store.requestDeliverNow(queued.id).deliver_now_at).toBeTruthy();
+    expect(receivers(store, queued)).toEqual([HOOKS.session!]);
+    store.recordDelivery(queued.id, { host: HOOKS.host!, session: HOOKS.session! });
+    expect(store.message(queued.id)!.delivery).toBeTruthy();
+    expect(receivers(store, queued)).toEqual([]);
+    // Delivering what was sent before does not bring it back.
+    expect(store.removedFrom(thread).has(HOOKS.session!)).toBe(true);
+  });
+
+  test("Re-ask all leaves a removed agent's open questions alone: it is not asked and stays removed", () => {
+    const { store, thread, hooks } = world({ hooksAsks: true });
+    store.removeFromThread(thread, HOOKS.session!);
+    const result = reaskThreadAll(store, thread, "k1", () => true);
+    expect(result.asked).toEqual([]);
+    expect(messagesOf(store, thread).filter((m) => m.author.kind === "person" && m.reply_to === hooks.id)).toEqual([]);
+    expect(store.removedFrom(thread).has(HOOKS.session!)).toBe(true);
+    // Not removed, the same press asks it.
+    const other = world({ hooksAsks: true });
+    expect(reaskThreadAll(other.store, other.thread, "k1", () => true).asked.map((a) => a.session)).toEqual([HOOKS.session]);
+  });
+
+  test("Remove and the owner count the same agents: one whose only post is a routine's change line holds nothing", () => {
+    const root = { id: "m1", thread_id: "m1", reply_to: null, author: { kind: "agent", session: API.session } };
+    const change = { id: "m2", thread_id: "m1", reply_to: "m1", author: { kind: "agent", session: "ses_routine" }, scheduled_change: { kind: "paused" } };
+    expect(inboxCanRemove([root, change], API.session!)).toBe(false);
+    expect(inboxHolderOf(change)).toBeNull();
+    const words = { ...change, id: "m3", scheduled_change: undefined };
+    expect(inboxCanRemove([root, change, words], API.session!)).toBe(true);
+  });
+
+  test("the owner passes to the latest live agent still in the thread, else the latest", () => {
+    const { store, thread, asked, hooks } = world();
+    const PI: Extract<InboxAuthor, { kind: "agent" }> = { kind: "agent", host: "pi", session: "ses_pi", name: null };
+    store.sendReply(asked.id, { idempotency_key: "pi", words: "@Pi too.", tags: [{ host: "pi", session: PI.session!, label: "Pi", wakes: true }] });
+    const project = messagesOf(store, thread)[0]!.project_id;
+    store.sendMessage({ project_id: project, author: PI, reply_to: asked.id, body: "Queue looks fine.", wakes: true });
+    store.sendMessage({ project_id: project, author: HOOKS, reply_to: hooks.id, body: "Retries replayed.", wakes: true });
+    store.removeFromThread(thread, HOOKS.session!);
+    // Pi wrote after billing-api, but has ended: billing-api, live, owns it.
+    expect(store.threadOwner(thread, (s) => s === API.session)?.session).toBe(API.session);
+    // Neither live (or no liveness known): the latest still in it.
+    expect(store.threadOwner(thread, () => false)?.session).toBe(PI.session);
+    expect(store.threadOwner(thread)?.session).toBe(PI.session);
   });
 
   test("the mark survives a restart", () => {

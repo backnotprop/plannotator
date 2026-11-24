@@ -76,6 +76,10 @@ describe("a removed agent's post", () => {
     expect(after.structured.thread_id).toBe(threadId);
     expect(after.text.split("\n").filter((line) => line === INBOX_REMOVED_FROM_THREAD_TEXT)).toHaveLength(1);
     expect(store.removedFrom(threadId).has("ses_webhooks")).toBe(true);
+    // Once per removal: its next post there carries nothing, and it is still out.
+    const second = await send("ses_webhooks", "codex", { reply_to: root.id, body: "Dedupe table checked too." });
+    expect(second.text).not.toContain(INBOX_REMOVED_FROM_THREAD_TEXT);
+    expect(store.removedFrom(threadId).has("ses_webhooks")).toBe(true);
 
     const owner = await send("ses_billing_api", "claude-code", { reply_to: root.id, body: "Fixed on my side." });
     expect(owner.text).not.toContain(INBOX_REMOVED_FROM_THREAD_TEXT);
@@ -86,5 +90,10 @@ describe("a removed agent's post", () => {
     store.sendReply(root.id, { idempotency_key: "back", words: "@Codex hold the replays.", tags: [{ host: "codex", session: "ses_webhooks", label: "Codex", wakes: true }] });
     const back = await send("ses_webhooks", "codex", { reply_to: root.id, body: "Holding them." });
     expect(back.text).not.toContain(INBOX_REMOVED_FROM_THREAD_TEXT);
+
+    // Removed again: a new removal, so its first post after it carries the line once more.
+    store.removeFromThread(threadId, "ses_webhooks");
+    const again = await send("ses_webhooks", "codex", { reply_to: root.id, body: "Replays held." });
+    expect(again.text.split("\n").filter((line) => line === INBOX_REMOVED_FROM_THREAD_TEXT)).toHaveLength(1);
   });
 });

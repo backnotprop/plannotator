@@ -1107,11 +1107,14 @@ export async function sendAgentMessage(
  */
 export const INBOX_REMOVED_FROM_THREAD_TEXT = "You were removed from this thread. Your message is posted, but the person's replies come to you only if they write to you again.";
 
-/** That line, on a line of its own, when the sender's session is out of the thread it posted into; "" otherwise. */
+/**
+ * That line, on a line of its own, on the sender's first post into a thread it is out of since the person removed it
+ * (once per removal: its later posts there carry nothing); "" otherwise.
+ */
 export function removedFromThreadText(store: InboxStore, structured: Record<string, unknown>, session: string | undefined): string {
   const who = session?.trim();
   if (!who || structured.new_thread === true) return "";
-  return store.removedFrom(String(structured.thread_id)).has(who) ? `\n${INBOX_REMOVED_FROM_THREAD_TEXT}` : "";
+  return store.firstPostSinceRemoval(String(structured.thread_id), who, String(structured.message_id)) ? `\n${INBOX_REMOVED_FROM_THREAD_TEXT}` : "";
 }
 
 /**
