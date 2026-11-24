@@ -10,7 +10,7 @@ import { PILL_BAND_PX, atEnd } from '../seenOnSight';
 import type { AskingSession } from '../components/ReplyRoute';
 import type { ReviewOutcome } from '../components/ReviewCard';
 import type { SentAnswerGroup } from '../sentReply';
-import { routeSendAnnotations, sendTargetsOf } from '../sendTargets';
+import { answersItself, routeSendAnnotations, sendTargetsOf } from '../sendTargets';
 
 export const noop = () => {};
 export const NO_ANNOTATIONS: never[] = [];
@@ -67,11 +67,15 @@ export const reducedMotion = () => typeof matchMedia === 'function' && matchMedi
  * back. `mark` (the tab visible and nothing over the thread) adds what is on
  * screen now to `passed`; scrolled to the end, everything is on screen.
  */
-export function newBelow(body: HTMLElement, passed: Set<string>, mark: boolean): HTMLElement[] {
+export function newBelow(body: HTMLElement, passed: Set<string>, mark: boolean, watch: PillWatch | null = null): HTMLElement[] {
+  // The pane says which messages can count (`watch`): with none left that the person has not passed, nothing is
+  // read (most scrolls); else only those articles, never the whole thread.
+  const lookUp = watch ? watchedArticles(body, passed, watch) : null;
+  if (lookUp && lookUp.arrivals.length === 0 && lookUp.atOpen.length === 0) return [];
   const bottom = body.getBoundingClientRect().bottom - PILL_BAND_PX;
   const end = mark && body.scrollHeight > 0 && atEnd(body);
-  const below = (selector: string) =>
-    [...body.querySelectorAll<HTMLElement>(selector)].filter((a) => {
+  const below = (selector: string, watched?: HTMLElement[]) =>
+    (watched ?? [...body.querySelectorAll<HTMLElement>(selector)]).filter((a) => {
       const id = a.getAttribute('data-message-article') ?? '';
       if (passed.has(id)) return false;
       if (end || a.getBoundingClientRect().top <= bottom) {
@@ -80,9 +84,40 @@ export function newBelow(body: HTMLElement, passed: Set<string>, mark: boolean):
       }
       return true;
     });
-  const arrivals = below('[data-message-article][data-arrival]:not([data-sighted])');
-  const atOpen = below('[data-message-article][data-new]:not([data-arrival]):not([data-sighted])');
+  const arrivals = below('[data-message-article][data-arrival]:not([data-sighted])', lookUp?.arrivals);
+  const atOpen = below('[data-message-article][data-new]:not([data-arrival]):not([data-sighted])', lookUp?.atOpen);
   return arrivals.length > 0 ? arrivals : atOpen;
+}
+
+/**
+ * What the pill can count, as the pane last drew it (thread/pillWatch.ts): the arrivals (`data-arrival`), the messages
+ * new at the open (`data-new`), and each message's drawn article.
+ */
+export interface PillWatch {
+  arrivals: ReadonlySet<string>;
+  atOpen: ReadonlySet<string>;
+  article: (id: string) => HTMLElement | null;
+}
+
+/**
+ * The articles the two selectors of `newBelow` would find, by id: drawn in this body, not passed, carrying the same
+ * marks (the marks decide, as the selectors did), in the page's order.
+ */
+function watchedArticles(body: HTMLElement, passed: Set<string>, watch: PillWatch): { arrivals: HTMLElement[]; atOpen: HTMLElement[] } {
+  const drawn = (ids: ReadonlySet<string>, fits: (a: HTMLElement) => boolean): HTMLElement[] => {
+    const found: HTMLElement[] = [];
+    for (const id of ids) {
+      if (passed.has(id)) continue;
+      const a = watch.article(id);
+      if (a && fits(a) && body.contains(a)) found.push(a);
+    }
+    return found.length > 1 ? found.sort((x, y) => (x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)) : found;
+  };
+  const unsighted = (a: HTMLElement) => a.hasAttribute('data-message-article') && !a.hasAttribute('data-sighted');
+  return {
+    arrivals: drawn(watch.arrivals, (a) => unsighted(a) && a.hasAttribute('data-arrival')),
+    atOpen: drawn(watch.atOpen, (a) => unsighted(a) && a.hasAttribute('data-new') && !a.hasAttribute('data-arrival')),
+  };
 }
 
 /** A wire message's question states, for the shared asking rule. */
@@ -115,7 +150,7 @@ export function askingSessionOf(thread: InboxThread, options: { skip: ReadonlySe
   // inbox-delivery), plus the questions the person chose to skip, when any.
   const message = options.carries
     ? sendTargetsOf(thread, options.skip).at(-1)!.message
-    : (lastSkipOrPick(thread, options.skip) ?? inboxAskingMessage(thread.messages, questionStatesOf, false));
+    : (lastSkipOrPick(thread, options.skip) ?? inboxAskingMessage(thread.messages, questionStatesOf, false, answersItself));
   if (!message) return null;
   if (message.author.kind !== 'agent' || !message.author.session) return null;
   return { message, session: message.author.session, host: message.author.host ?? '', name: agentName(message.author) };

@@ -80,8 +80,9 @@ export const ReviewLoadError: React.FC<ReviewLoadErrorProps> = ({ failure, retry
 
   if (outcome) {
     return (
-      <div className="pn-app-viewport flex items-center justify-center bg-background px-6" data-review-load-error="done">
-        <div role="status" className="max-w-md text-center space-y-2">
+      <div className="pn-app-viewport flex items-center justify-center bg-background" data-review-load-error="done">
+        {/* The side margin sits inside: .pn-app-viewport's own padding is the safe area's, so a px-* on it is lost. */}
+        <div role="status" className="max-w-md px-6 text-center space-y-2">
           <h1 ref={headingRef} tabIndex={-1} className="text-sm font-medium text-foreground outline-none">
             {outcome === 'feedback' ? 'Feedback sent' : 'Review closed'}
           </h1>
@@ -92,67 +93,70 @@ export const ReviewLoadError: React.FC<ReviewLoadErrorProps> = ({ failure, retry
   }
 
   return (
-    <div className="pn-app-viewport flex items-center justify-center bg-background px-6" data-review-load-error="">
-      <div className="w-full max-w-md space-y-4">
-        <div className="space-y-1.5">
-          <h1 className="text-sm font-medium text-foreground">
-            This review could not load
-          </h1>
-          <div role="alert" className="space-y-1">
-            <p className="text-sm text-muted-foreground" data-review-load-error-message="">{failure.summary}</p>
-            {failure.detail && (
-              <p className="text-xs text-muted-foreground/80 font-mono break-words" data-review-load-error-detail="">
-                {failure.detail}
-              </p>
-            )}
-          </div>
-        </div>
-        <button
-          ref={retryRef}
-          type="button"
-          data-pn-touch-target
-          onClick={onRetry}
-          disabled={retrying || busy}
-          className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-        >
-          {retrying ? 'Retrying…' : 'Retry'}
-        </button>
-        {failure.canDecide && (
-          <div className="space-y-2 border-t border-border pt-4">
-            <label htmlFor="review-load-error-note" className="block text-xs text-muted-foreground">
-              Or answer the agent without the diff:
-            </label>
-            <textarea
-              id="review-load-error-note"
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              rows={3}
-              className="w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
-              placeholder="Feedback for the agent"
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                data-pn-touch-target
-                onClick={() => void run('feedback')}
-                disabled={busy || !note.trim()}
-                className="rounded-md bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 disabled:opacity-60"
-              >
-                Send Feedback
-              </button>
-              <button
-                type="button"
-                data-pn-touch-target
-                onClick={() => void run('exited')}
-                disabled={busy}
-                className="rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60"
-              >
-                Close review
-              </button>
+    <div className="pn-app-viewport flex items-center justify-center bg-background" data-review-load-error="">
+      {/* The side margin sits inside: .pn-app-viewport's own padding is the safe area's, so a px-* on it is lost. */}
+      <div className="flex w-full justify-center px-6" data-review-load-error-page="">
+        <div className="w-full max-w-md space-y-4">
+          <div className="space-y-1.5">
+            <h1 className="text-sm font-medium text-foreground">
+              This review could not load
+            </h1>
+            <div role="alert" className="space-y-1">
+              <p className="text-sm text-muted-foreground" data-review-load-error-message="">{failure.summary}</p>
+              {failure.detail && (
+                <p className="text-xs text-muted-foreground/80 font-mono break-words" data-review-load-error-detail="">
+                  {failure.detail}
+                </p>
+              )}
             </div>
-            {actionError && <p role="alert" className="text-xs text-destructive">{actionError}</p>}
           </div>
-        )}
+          <button
+            ref={retryRef}
+            type="button"
+            data-pn-touch-target
+            onClick={onRetry}
+            disabled={retrying || busy}
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60 pointer-coarse:min-h-11 pointer-coarse:px-4"
+          >
+            {retrying ? 'Retrying…' : 'Retry'}
+          </button>
+          {failure.canDecide && (
+            <div className="space-y-2 border-t border-border pt-4">
+              <label htmlFor="review-load-error-note" className="block text-xs text-muted-foreground">
+                Or answer the agent without the diff:
+              </label>
+              <textarea
+                id="review-load-error-note"
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                rows={3}
+                className="w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                placeholder="Feedback for the agent"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  data-pn-touch-target
+                  onClick={() => void run('feedback')}
+                  disabled={busy || !note.trim()}
+                  className="rounded-md bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 disabled:opacity-60 pointer-coarse:min-h-11"
+                >
+                  Send Feedback
+                </button>
+                <button
+                  type="button"
+                  data-pn-touch-target
+                  onClick={() => void run('exited')}
+                  disabled={busy}
+                  className="rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60 pointer-coarse:min-h-11"
+                >
+                  Close review
+                </button>
+              </div>
+              {actionError && <p role="alert" className="text-xs text-destructive">{actionError}</p>}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

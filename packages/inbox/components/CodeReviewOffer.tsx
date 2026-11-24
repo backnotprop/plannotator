@@ -5,8 +5,9 @@ import { Modal } from './Updates';
 
 /**
  * Code review's one-time offer (approval "code-review-offer-card", 2026-11-06; the owner picked "Card"): a dialog over
- * the list with the brand kit's static storm on top, the title, what code review brings, and two buttons. Its words are
- * the owner's (the approval's 15:25Z addendum, take 1, with the risk and System parts by the owner's call).
+ * the list with the brand kit's static storm on top, the title, what code review brings, and two buttons. Its four
+ * lines and their icons are the owner's (approval "inbox-code-review-offer", 2026-11-23: icon row "D · Mix" and the
+ * curator line chosen from three; the old line naming Shape and System is gone).
  * "Turn on code review" turns Code review on, as Settings → Capabilities does; "Not now", Escape and a click outside
  * leave it off. Every way out is final (the claim already spent it); Settings is the way on later. No keyboard
  * shortcut. Its slot in the line: `CODE_REVIEW_OFFER` (packages/shared/inbox/reveals.ts); its moment:
@@ -25,14 +26,16 @@ export function CodeReviewOffer({ phone, onClose, onTurnOn }: { phone: boolean; 
             <span>Filter PRs by your own risk rules</span>
           </li>
           <li>
-            <MapIcon />
-            <span>A review curator walks you through each change</span>
+            <CuratorIcon />
+            <span>A review curator works with you on everything you ship</span>
           </li>
           <li>
-            <BoardIcon />
-            <span>
-              See each change as a <b className="ib-cro-name">Shape</b>, and where it lands in your <b className="ib-cro-name">System</b>
-            </span>
+            <MapIcon />
+            <span>A guided review walks you through each change</span>
+          </li>
+          <li>
+            <PicturesIcon />
+            <span>Big pictures of what changed and why</span>
           </li>
         </ul>
         <div className="ib-cro-acts">
@@ -97,16 +100,33 @@ function CodeReviewOfferArt({ phone }: { phone: boolean }) {
   );
 }
 
-/** A flag on a pole: risk rules. */
+/*
+ * The four icons (approval "inbox-code-review-offer", row "D · Mix"): drawn by `.ib-cro-feats svg` (18 px, stroke
+ * 1.5, no fill); a child's own `stroke-width` or `opacity` overrides it for that child only.
+ */
+
+/** Three risk bars at Medium, as the product draws risk: two solid, the third faint. Drawn for this row. */
 function RiskIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M5 21V4m0 0.5c3.5-1.8 6 1.8 9.5 0s4.5-0.6 4.5-0.6v9.6s-1-1.2-4.5 0.6-6-1.8-9.5 0" />
+      <path strokeWidth="2.25" d="M6 19.5v-4.5M12 19.5v-9" />
+      <path strokeWidth="2.25" opacity=".38" d="M18 19.5V5.25" />
     </svg>
   );
 }
 
-/** A folded map: the walk through the change. */
+/** A stack of work with the front item checked: the review curator. Drawn for this row. */
+function CuratorIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7.5 3.75h9M5.25 7.125h13.5" />
+      <rect x="3" y="10.5" width="18" height="9.75" rx="1.5" />
+      <path d="m9 15.375 2.25 2.25 3.75-4.5" />
+    </svg>
+  );
+}
+
+/** A folded map: the guided review (Heroicons outline `map`, MIT; the same path as inbox-thread/icons.tsx). */
 function MapIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -115,14 +135,13 @@ function MapIcon() {
   );
 }
 
-/** A board of boxes and lines: the change drawn. */
-function BoardIcon() {
+/** Two linked boxes: the big pictures (lucide `workflow`, ISC, drawn at the row's 1.5 stroke). */
+function PicturesIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="3" y="4.5" width="7.5" height="6" rx="1.2" />
-      <rect x="13.5" y="4.5" width="7.5" height="9" rx="1.2" />
-      <rect x="3" y="14" width="7.5" height="5.5" rx="1.2" />
-      <path d="M10.5 7.5h3M7 10.5V14" />
+      <rect width="8" height="8" x="3" y="3" rx="2" />
+      <path d="M7 11v4a2 2 0 0 0 2 2h4" />
+      <rect width="8" height="8" x="13" y="13" rx="2" />
     </svg>
   );
 }

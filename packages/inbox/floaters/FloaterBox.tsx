@@ -28,6 +28,7 @@ import { VoiceMicButton, VoiceStatusLine } from '../components/VoiceMic';
 import { Icon } from '../icons';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
 import { tookOverReply, wordsMessage } from '../sendTargets';
+import { useFloatingReplyWords } from '../threadMentions';
 import { inboxThreadShortcuts } from '../shortcuts';
 import { useShortcutAria } from '../shortcuts/hint';
 import { INBOX_REPLY_SKILL_AUDIENCE, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
@@ -44,7 +45,7 @@ const ENDED_READ_MS = 5_000;
 
 /** Picks, comments and action items waiting in the thread: only the thread's Send carries them. */
 export function carriedCount(row: InboxReplyDraftRow): number {
-  return (row.unsent?.picks ?? 0) + (row.unsent?.comments ?? 0) + (row.unsent?.done ?? 0) + (row.unsent?.cant ?? 0);
+  return (row.unsent?.picks ?? 0) + (row.unsent?.comments ?? 0) + (row.unsent?.done ?? 0) + (row.unsent?.cant ?? 0) + (row.unsent?.skipped ?? 0);
 }
 
 /**
@@ -234,6 +235,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   /** The key of a Send that failed, kept for its retry only while the words and files are the same ones. */
   const sendKey = useRef<{ key: string; content: string } | null>(null);
   const hasSomething = text.trim() !== '' || files.draftFiles().length > 0;
+  // Its words not sent yet (none while a Send is on its way): the row menu's Mention in reply goes to this draft.
+  useFloatingReplyWords(threadId, text.trim() !== '' && !sending);
   const send = async () => {
     if (sending || voice.busy) return;
     if (!here) {

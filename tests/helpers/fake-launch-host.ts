@@ -1,7 +1,8 @@
 /**
  * The launch engine's test fake (`LaunchHost`, packages/server/inbox-launch-host.ts): an in-memory agent whose sessions
  * a test connects, works and idles by hand. `start` makes a session that is not connected; the test works and idles it
- * (`poll`), and asks its permission questions (`ask`). `faults` says what goes wrong. Registered through
+ * (`poll`), and asks its permission questions (`ask`). `rexCommand` (Start in Rex) names a session it makes the same
+ * way, run by nothing: the test connects it by hand, as a Rex tab's agent would. `faults` says what goes wrong. Registered through
  * `createInboxLaunch`'s `hosts` option, or `startInboxServer`'s `launchHosts`.
  */
 import type { InboxLaunchAgent, InboxMessage } from "@plannotator/core/inbox-types";
@@ -39,6 +40,12 @@ export function fakeLaunchHost() {
       const ref = `f${sessions.size + 1}`;
       sessions.set(`session-${ref}`, { ref, live: null, state: "running" });
       return { ok: true, session: `session-${ref}`, ref };
+    },
+    async rexCommand(launch, input) {
+      calls.push(`rexCommand ${input.resume ? (input.fresh ? "fresh" : "resume") : "new"}`);
+      const session = input.resume && launch.session ? launch.session : `session-r${sessions.size + 1}`;
+      if (!sessions.has(session)) sessions.set(session, { ref: session, live: null, state: "running" });
+      return { ok: true, session, ref: session, command: `cd '${launch.folder}' && exec fake-agent --session ${session}` };
     },
     sessions: async () => (ref) => {
       const session = byRef(ref);
@@ -81,15 +88,25 @@ export function fakeLaunchHost() {
       };
     },
   };
-  /** The session polls: live, busy or idle; each poll shows new life. */
+  /** The session polls: live, busy or idle; each poll shows new life. An idle spell begins at the first idle poll after a busy one. */
   const poll = (session: string, busy: boolean, at: number) => {
     const s = sessions.get(session)!;
-    s.live = { busy, busySince: busy ? (s.live?.busySince ?? at) : null, polls: (s.live?.polls ?? 0) + 1 };
+    const idleSince = busy ? null : s.live?.busy === false ? (s.live.idleSince ?? at) : at;
+    s.live = { busy, busySince: busy ? (s.live?.busySince ?? at) : null, polls: (s.live?.polls ?? 0) + 1, idleSince };
+  };
+  /** The session takes an item as a turn (its connection's `delivered`), without saying busy. */
+  const took = (session: string) => {
+    const s = sessions.get(session)!;
+    if (s.live) s.live = { ...s.live, taken: (s.live.taken ?? 0) + 1 };
   };
   /** The session asks to run a command: the question lands in the launch's thread. */
   const ask = (root: InboxMessage, session: string) => {
     const event = { session_id: session, tool_name: "Bash", tool_input: { command: "ls" }, cwd: root.launch!.folder, permission_suggestions: [], permission_mode: null };
     return questions!.ask(root, event, "req-1", questions!.questionFor(root, event, {}))!;
   };
-  return { host, calls, poll, ask, faults };
+  /** The session's process ended by itself (its Rex tab was closed): it stops polling. */
+  const ended = (session: string) => {
+    sessions.get(session)!.live = null;
+  };
+  return { host, calls, poll, took, ask, faults, ended };
 }

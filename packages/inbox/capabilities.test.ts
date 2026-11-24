@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import { dispatchInboxFrame, type InboxEventHandlers, type SettingsModel } from './api';
 import { namesCapability, withCapabilities } from './capabilities';
 
-type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'bro' | 'float_drafts' | 'code_review' | 'shape' | 'system'>;
+type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'bro' | 'float_drafts' | 'code_review' | 'system'>;
 
 /** What App's onCapabilities does with a frame: apply what it names, else read the settings again. */
 function hear(data: string, settings: Held): { settings: Held; reread: boolean } {
@@ -52,6 +52,18 @@ describe('event: capabilities', () => {
     expect(hear(JSON.stringify({ board: { on: false }, steps: { on: true }, float_drafts: { on: false } }), on.settings).settings.float_drafts).toEqual({ on: false });
     // The server leaves it out of a frame while it is off and was not the change: the window keeps what it has.
     expect(hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), on.settings).settings.float_drafts).toEqual({ on: true });
+  });
+
+  test('thread panes turned on, then off, in Settings (this window or another): the window follows; a frame without them leaves them', () => {
+    // The server names `split_view` only in the frame of its own change (inbox.ts onCapabilities).
+    const on = hear(JSON.stringify({ board: { on: false }, steps: { on: true }, split_view: { on: true } }), { ...OFF, split_view: { on: false } } as Held);
+    expect(on.reread).toBe(false);
+    expect((on.settings as { split_view?: unknown }).split_view).toEqual({ on: true });
+    const off = hear(JSON.stringify({ board: { on: false }, steps: { on: true }, split_view: { on: false } }), on.settings);
+    expect((off.settings as { split_view?: unknown }).split_view).toEqual({ on: false });
+    expect((hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), on.settings).settings as { split_view?: unknown }).split_view).toEqual({ on: true });
+    // A frame naming only it is applied, not a reason to read the settings again.
+    expect(hear(JSON.stringify({ split_view: { on: true } }), OFF).reread).toBe(false);
   });
 
   test('a frame without the Board leaves it; a malformed Board value is not applied', () => {

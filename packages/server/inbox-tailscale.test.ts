@@ -128,7 +128,14 @@ describe("Inbox over your tailnet", () => {
     expect(ts.serve.get(inbox.port)).toBe(`http://127.0.0.1:${listener}`);
     expect(listener).not.toBe(inbox.port);
     expect(ts.calls.some((args) => args.includes("funnel"))).toBe(false);
-    expect(registryOf(dataDir).tailscale).toEqual({ url: `https://${MAGIC}:${inbox.port}/`, error: null, https_port: inbox.port, proxy_port: listener });
+    // `made`: the proxy ports this Inbox pointed its mapping on this port at (its own leftovers, inbox-tailscale.ts).
+    expect(registryOf(dataDir).tailscale).toEqual({
+      url: `https://${MAGIC}:${inbox.port}/`,
+      error: null,
+      https_port: inbox.port,
+      proxy_port: listener,
+      made: { https_port: inbox.port, proxy_ports: [listener] },
+    });
 
     // The owner, through serve: the window and its data.
     expect((await throughServe(inbox, "/")).status).toBe(200);
@@ -421,7 +428,8 @@ describe("Inbox over your tailnet", () => {
     inbox.stop();
     servers.splice(servers.indexOf(inbox), 1);
     expect(ts.serve.size).toBe(0);
-    expect(registryOf(dataDir).tailscale).toBeUndefined();
+    // No mapping is named any more, but the ports it made stay known until the switch goes off (#3591).
+    expect(registryOf(dataDir).tailscale).toEqual({ url: null, error: null, made: { https_port: port, proxy_ports: expect.any(Array) } });
     const next = await start(dataDir, ts.run);
     expect(next.port).toBe(port);
     expect(ts.serve.get(port)).toBe(`http://127.0.0.1:${next.tailscale.listenerPort()}`);

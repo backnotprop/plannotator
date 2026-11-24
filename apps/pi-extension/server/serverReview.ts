@@ -164,6 +164,8 @@ import { type AgentJobInfo, REVIEW_OUTPUT_FAILED, getAgentJobAnnotationContext, 
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
 	handleReviewDraftRequest,
+	handleCustomThemesScript,
+	customThemesPage,
 	handleFavicon,
 	handleImageRequest,
 	handleStarAskRequest,
@@ -2201,7 +2203,7 @@ export async function startReviewServer(options: {
 		env: process.env,
 	});
 
-	const app = openPackedApp(options.htmlContent);
+	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
@@ -3628,6 +3630,12 @@ export async function startReviewServer(options: {
 			res.writeHead(result.status, result.headers);
 			res.end(result.body ?? undefined);
 		} else if (url.pathname === REPO_FILES_ENDPOINT && req.method === "GET") {
+			const requestAbort = url.searchParams.has("include") || url.searchParams.has("exclude") ? new AbortController() : null;
+			if (requestAbort) {
+				res.once("close", () => {
+					if (!res.writableEnded) requestAbort.abort();
+				});
+			}
 			const result = await handleRepoFilesRequest({
 				params: url.searchParams,
 				unavailable: repoFilesUnavailable(),
@@ -3638,8 +3646,9 @@ export async function startReviewServer(options: {
 						? findRepoOnDiskChanges(reviewRuntime, listing.root, diffFileStates(currentPatch), snapshotCapturedAt)
 						: Promise.resolve(null),
 				lazyThreshold: options.repoFilesLazyThreshold,
+				signal: requestAbort?.signal,
 			});
-			json(res, result.body, result.status);
+			if (!requestAbort?.signal.aborted) json(res, result.body, result.status);
 		} else if (url.pathname === REPO_FILES_SEARCH_ENDPOINT && req.method === "GET") {
 			const result = await handleRepoFilesSearchRequest({
 				params: url.searchParams,
@@ -4096,6 +4105,9 @@ export async function startReviewServer(options: {
 			await handleReviewDraftRequest(req, res, keys, reviewDrafts);
 		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
 			handleFavicon(res, url.pathname);
+		} else if (url.pathname === "/plannotator-themes.js" && req.method === "GET") {
+			// The person's own themes, for the page's first frame (packages/shared/theme-files.ts).
+			handleCustomThemesScript(res, url.searchParams);
 		} else if (isDiagramEngineRequest(url.pathname)) {
 			// Code review's diagram engine, fetched by the page only for a
 			// preview or guide overview that holds a diagram fence.
@@ -4267,7 +4279,7 @@ export async function startReviewServer(options: {
 	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteSession()) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
 	serverUrl = buildAdvertisedUrl(port);
 	agentApiUrl = `http://127.0.0.1:${port}`;
 	const exitHandler = () => agentJobs.killAll();

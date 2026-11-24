@@ -182,6 +182,17 @@ describe.skipIf(!hasDom)('decision mode: refs link into the thread repo', () => 
     expect(links.some((h) => h?.includes('github.com'))).toBe(false);
   });
 
+  test("a question from another project's folder links bare refs into the writer's repo; one not looked up yet links none", () => {
+    const d = withRepo({ display: 'acme/billing', host: 'github.com' });
+    render({ ...d, message: { ...d.message, repo: { display: 'backnotprop/plannotator', host: 'github.com' } } });
+    expect(hrefs()).toContain('https://github.com/backnotprop/plannotator/issues/3');
+    expect(hrefs().some((h) => h?.includes('acme/billing'))).toBe(false);
+    act(() => root?.unmount());
+    host?.remove();
+    render({ ...d, message: { ...d.message, repo: null } });
+    expect(hrefs().filter((h) => h?.includes('/issues/3'))).toEqual([]);
+  });
+
   test('without the thread repo, refs stay plain text', () => {
     render(withRepo(null));
     expect(hrefs().filter((h) => h?.includes('/issues/'))).toEqual([]);
@@ -190,6 +201,24 @@ describe.skipIf(!hasDom)('decision mode: refs link into the thread repo', () => 
 });
 
 describe.skipIf(!hasDom)('decision mode: the contract lines', () => {
+  test('a scenario table shows in the context as a plain table, as before the section existed (approval question-scenario-table)', () => {
+    const table = ['| Scenario | Nowhere | Local only |', '| --- | --- | --- |', '| You edit offline on a plane | Lost — nothing says so | Kept — in History |'].join('\n');
+    render(decision(question({
+      context: `Two copies disagree.\n\n${table}`,
+      choices: [
+        { label: 'Nowhere', description: null, recommended: false, settled: false },
+        { label: 'Local only', description: null, recommended: true, settled: false },
+      ],
+      scenarios: {
+        columns: [{ choice: 'Nowhere', header: 'Nowhere' }, { choice: 'Local only', header: 'Local only' }],
+        rows: [{ situation: 'You edit offline on a plane', cells: [{ verdict: 'Lost', detail: 'nothing says so' }, { verdict: 'Kept', detail: 'in History' }] }],
+      },
+    })));
+    expect($$('table')).toHaveLength(1);
+    expect($('table')!.textContent).toContain('You edit offline on a plane');
+    expect($('[data-question-part="scenarios"]')).toBeNull();
+  });
+
   test('Stakes under the prompt, Why under the answers, the tiles as the thread card draws them', () => {
     render(decision(DRAWERS, DRAWER_PICTURES));
     const stakes = $('[data-decision-stakes]')!;

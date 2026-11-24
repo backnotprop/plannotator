@@ -8,9 +8,10 @@
  *
  * On the wire (GET and POST /api/inbox/settings `diff_options`) each field
  * has a snake_case name; config.json keeps code review's names. Whole file
- * (`expandUnchanged`) and Hide whitespace are not here: they need the local
- * repository, and the Inbox does not show them. Fonts are set in code
- * review's Settings only.
+ * (`expand_unchanged`, config.json `expandUnchanged`) is here: the Inbox's
+ * diffs read whole files too, so it shows the switch. Hide whitespace is not:
+ * it needs the local repository, and the Inbox does not show it. Fonts are
+ * set in code review's Settings only.
  *
  * `diff_style` stays as an alias of `diff_options.diff_style` (pages and
  * scripts from before).
@@ -26,6 +27,8 @@ export interface InboxDiffOptions {
   background: boolean | null;
   background_intensity: "subtle" | "normal" | "strong" | null;
   tab_size: number | null;
+  semantic: boolean | null;
+  expand_unchanged: boolean | null;
 }
 
 type WireKey = keyof InboxDiffOptions;
@@ -50,6 +53,8 @@ export const INBOX_DIFF_OPTION_FIELDS: Record<WireKey, Field> = {
   background: { config: "showDiffBackground", read: bool, rule: "true or false" },
   background_intensity: { config: "lineBgIntensity", read: oneOf("subtle", "normal", "strong"), rule: "subtle, normal or strong" },
   tab_size: { config: "tabSize", read: (value) => (Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 8 ? value : undefined), rule: "a whole number from 1 to 8" },
+  semantic: { config: "semantic", read: bool, rule: "true or false" },
+  expand_unchanged: { config: "expandUnchanged", read: bool, rule: "true or false" },
 };
 
 const WIRE_KEYS = Object.keys(INBOX_DIFF_OPTION_FIELDS) as WireKey[];

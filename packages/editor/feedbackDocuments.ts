@@ -49,8 +49,9 @@ export const blocksForDocument = (filepath: string, text: string): Block[] =>
 
 /**
  * Merge local annotations with SSE-delivered external ones, dropping
- * draft-restored copies of externals that SSE re-delivered (same source,
- * type and quote). The SSE version wins.
+ * draft-restored copies of externals that SSE re-delivered. A live update
+ * wins by ID. When IDs differ across sessions, the source, type, quote and
+ * comment text must match before dropping the restored copy.
  */
 export function mergeExternalAnnotations(local: Annotation[], external: Annotation[]): Annotation[] {
   if (external.length === 0) return local;
@@ -58,8 +59,12 @@ export function mergeExternalAnnotations(local: Annotation[], external: Annotati
     if (!a.source) return true;
     return !external.some((ext) =>
       ext.source === a.source &&
-      ext.type === a.type &&
-      ext.originalText === a.originalText
+      (ext.id === a.id || (
+        ext.type === a.type &&
+        ext.originalText === a.originalText &&
+        ext.text === a.text &&
+        ext.inReplyTo === a.inReplyTo
+      ))
     );
   });
   return [...kept, ...external];

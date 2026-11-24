@@ -41,6 +41,8 @@ import { open, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { isDotenvFileName } from "@plannotator/core/annotatable";
+import { inboxOwnSecretRefusal } from "./own-secrets";
+import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
 import { MAX_REVIEW_IMAGE_PREVIEW_BYTES, MAX_REVIEW_IMAGE_PREVIEW_PIXELS, isReviewImagePath } from "../diff-paths";
 import { isLfsPointer, readImageDimensions, sniffImageContentType } from "../review-image";
 
@@ -77,7 +79,9 @@ const NOT_LOCAL_SRC_RE = /^(https?:|\/\/|\\\\|data:|blob:)/i;
  * Every image source the body names, as the window sends it: the markdown
  * `![alt](src)` target as written and each `<img src>` value decoded. Remote
  * (`http(s):`, protocol-relative `//host/…`), `data:` and `blob:` sources are
- * left out: the window never asks the server for them.
+ * left out: the window never asks the server for them. Nor does it for a
+ * picture written inside code (a fence or an inline code span, which it draws
+ * as the text it is), so those are left out too.
  */
 export function inboxMessageImageRefs(body: string): Set<string> {
   const refs = new Set<string>();
@@ -86,8 +90,9 @@ export function inboxMessageImageRefs(body: string): Set<string> {
     if (NOT_LOCAL_SRC_RE.test(src)) return;
     refs.add(src);
   };
-  for (const match of body.matchAll(MARKDOWN_IMAGE_RE)) add(match[1]);
-  for (const match of body.matchAll(HTML_IMG_SRC_RE)) add(decodeAttribute(match[1] ?? match[2] ?? match[3] ?? ""));
+  const text = blankCode(body);
+  for (const match of text.matchAll(MARKDOWN_IMAGE_RE)) add(match[1]);
+  for (const match of text.matchAll(HTML_IMG_SRC_RE)) add(decodeAttribute(match[1] ?? match[2] ?? match[3] ?? ""));
   return refs;
 }
 
@@ -117,9 +122,16 @@ export function blankCode(body: string): string {
  * a run of N backticks opens a span that the next run of exactly N closes
  * (CommonMark); a run with no such closer stays literal. Each run length has
  * one cursor over the runs of that length, and cursors only move forward, so
- * a body of many unmatched backticks is still linear.
+ * a body of many unmatched backticks is still linear. A span never crosses a
+ * blank line: the window draws inline code paragraph by paragraph, so a stray
+ * backtick in one paragraph is literal even when another has one too.
  */
 export function blankInlineCode(text: string): string {
+  const parts = text.split(/(\r?\n[ \t\r]*\n)/);
+  return parts.length === 1 ? blankInlineCodeInBlock(text) : parts.map((part, i) => (i % 2 === 0 ? blankInlineCodeInBlock(part) : part)).join("");
+}
+
+function blankInlineCodeInBlock(text: string): string {
   const runs: { start: number; end: number }[] = [];
   for (let i = 0; i < text.length; ) {
     if (text.charCodeAt(i) !== 96) {
@@ -167,13 +179,48 @@ export function blankInlineCode(text: string): string {
 }
 
 /**
+ * The body with each image source outside code that `rename` names (by the
+ * source as `inboxMessageImageRefsInOrder` gives it) written as its new value:
+ * a markdown target percent-encoded, an `<img src>` quoted. Everything else is
+ * left exactly as it was.
+ */
+export function renameInboxMessageImageSources(body: string, rename: ReadonlyMap<string, string>): string {
+  if (rename.size === 0) return body;
+  const text = blankCode(body);
+  const edits: { start: number; end: number; value: string }[] = [];
+  for (const match of text.matchAll(new RegExp(MARKDOWN_IMAGE_RE.source, "dg"))) {
+    const [start, end] = match.indices![1]!;
+    const next = rename.get(body.slice(start, end));
+    if (next !== undefined) edits.push({ start, end, value: encodeURIComponent(next).replace(/[()]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`) });
+  }
+  for (const match of text.matchAll(new RegExp(HTML_IMG_SRC_RE.source, "dgi"))) {
+    const group = [1, 2, 3].find((n) => match.indices![n]);
+    if (group === undefined) continue;
+    const [start, end] = match.indices![group]!;
+    const next = rename.get(decodeAttribute(body.slice(start, end)));
+    if (next === undefined) continue;
+    const quoted = `"${next.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`;
+    // A quoted value keeps its quotes: the edit covers them too.
+    edits.push(group === 3 ? { start, end, value: quoted } : { start: start - 1, end: end + 1, value: quoted });
+  }
+  edits.sort((a, b) => b.start - a.start);
+  let out = body;
+  for (const edit of edits) out = out.slice(0, edit.start) + edit.value + out.slice(edit.end);
+  return out;
+}
+
+/**
  * The images the body shows, each once, in the order the text shows them:
  * the sources `inboxMessageImageRefs` finds, minus any inside a code block or
  * an inline code span (drawn as code, never as an image). What the store
  * captures (inline-images.ts), in the order the window steps through them.
  */
 export function inboxMessageImageRefsInOrder(body: string): string[] {
-  return imageSourcesInOrder(body).filter((src) => !NOT_LOCAL_SRC_RE.test(src));
+  return imageSourcesInOrder(body).filter((src) => !NOT_LOCAL_SRC_RE.test(src) && inboxInlineMediaKind(src) === null);
+}
+
+export function inboxMessageMediaRefsInOrder(body: string): string[] {
+  return imageSourcesInOrder(body).filter((src) => !NOT_LOCAL_SRC_RE.test(src) && inboxInlineMediaKind(src) !== null);
 }
 
 /**
@@ -320,6 +367,8 @@ function exemptsHidden(anchor: string, protectedHomes: readonly string[]): boole
  */
 function hiddenPath(path: string, anchors: readonly string[], homes: readonly string[]): boolean {
   if (isDotenvFileName(basename(path))) return true;
+  // The Inbox's own keys (own-secrets.ts), wherever its data folder is, for every agent.
+  if (inboxOwnSecretRefusal(path) !== null) return true;
   const dot = inboxHomeDotFolder(path, homes);
   // An anchor exempts it only from inside that hidden folder (a project in `~/.claude/worktrees/`), never from above it.
   return dot !== null && !anchors.some((folder) => isInside(path, folder) && isInside(folder, dot));
@@ -364,7 +413,7 @@ function spellings(folder: string): string[] {
  * refusal, or the file to read (its realpath, and the absolute path it was
  * named by). Never throws.
  */
-function locateInboxMessageImage(input: InboxMessageImageInput): Refusal | { ok: true; real: string; named: string } {
+export function locateInboxMessageImage(input: InboxMessageImageInput, accept: "image" | "media" = "image"): Refusal | { ok: true; real: string; named: string } {
   const src = input.path;
   if (typeof src !== "string" || src === "") return refuse(400, "validation_error", "path: required.") as Refusal;
   if (src.length > INBOX_MESSAGE_IMAGE_PATH_MAX || /[\u0000-\u001f\u007f]/.test(src)) {
@@ -384,7 +433,7 @@ function locateInboxMessageImage(input: InboxMessageImageInput): Refusal | { ok:
   const anchors = area.filter((folder) => exemptsHidden(folder, protectedHomes));
   const inArea = (path: string) => input.anywhere === true || area.some((folder) => isInside(path, folder));
 
-  const candidates = pathCandidates(src).filter((candidate) => isReviewImagePath(candidate));
+  const candidates = pathCandidates(src).filter((candidate) => (accept === "media" ? inboxInlineMediaKind(candidate) !== null : isReviewImagePath(candidate)));
   if (candidates.length === 0) return refuse(415, "not_an_image", "Only png, jpg, gif, webp, svg, avif, bmp and ico images are shown.") as Refusal;
 
   for (const candidate of candidates) {
@@ -521,7 +570,7 @@ function headRefusal(head: Buffer): Refusal | null {
 }
 
 /** The path must still lead to the file a descriptor read, so a parent folder swapped for a symlink in between is caught. */
-function stillSameFile(real: string, stat: { dev: number; ino: number }): boolean {
+export function stillSameFile(real: string, stat: { dev: number; ino: number }): boolean {
   try {
     if (realpathSync(real) !== real) return false;
     const again = statSync(real);

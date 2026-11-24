@@ -4,7 +4,8 @@
  * Grouped is the default.
  *
  * Remembered per browser, as the thread panel and the sidebar's closed sections are: a cookie through `storage`,
- * "list" while List is on and removed for Grouped, so an untouched browser carries none. Never on the server.
+ * "list" while List is on, "agents" while Agents is, and removed for Grouped, so an untouched browser carries none.
+ * Never on the server.
  *
  * List never hides a thread the grouped view shows: every section's rows are in it, Quiet and Sent included (Quiet is
  * no longer folded). Snoozed rows keep the grouped view's rule (their folded Snoozed band, under the list), and
@@ -23,21 +24,26 @@ import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannota
 import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
 import { storage } from '@plannotator/ui/utils/storage';
 
-export type ListView = 'grouped' | 'list';
+export type ListView = 'grouped' | 'list' | 'agents';
 
 export const LIST_VIEW_COOKIE = 'plannotator-inbox-list-view';
 
-/** The ⋮ menu's words: the group's label and its two choices, in their order. */
+/**
+ * The ⋮ menu's words: the group's label and its choices, in their order. Agents (the owner, 2026-11-19, design A
+ * "Agents that open"; agentsView/): the list as the person's agents, each with its threads under it.
+ */
 export const LIST_VIEW_LABEL = 'View';
 export const LIST_VIEW_OPTIONS: ReadonlyArray<{ value: ListView; label: string }> = [
   { value: 'grouped', label: 'Smart groups' },
   { value: 'list', label: 'Simple list' },
+  { value: 'agents', label: 'Agents' },
 ];
 
-/** The remembered choice; anything but "list" (or no cookie) is Grouped. */
+/** The remembered choice; anything but "list" or "agents" (or no cookie) is Grouped. */
 export function readListView(): ListView {
   try {
-    return storage.getItem(LIST_VIEW_COOKIE) === 'list' ? 'list' : 'grouped';
+    const kept = storage.getItem(LIST_VIEW_COOKIE);
+    return kept === 'list' || kept === 'agents' ? kept : 'grouped';
   } catch {
     return 'grouped';
   }
@@ -51,7 +57,7 @@ const read = (): ListView => (current ??= readListView());
 /** Remember the choice for every list on the page; Grouped removes the cookie. */
 export function writeListView(view: ListView): void {
   try {
-    if (view === 'list') storage.setItem(LIST_VIEW_COOKIE, 'list');
+    if (view !== 'grouped') storage.setItem(LIST_VIEW_COOKIE, view);
     else storage.removeItem(LIST_VIEW_COOKIE);
   } catch {
     // A page with no cookies: the choice holds until it reloads.
@@ -92,12 +98,19 @@ export function resetListViewForTests(): void {
 export interface ListSort {
   epoch: number;
   keep: string | null;
+  /**
+   * The time a row is placed by; absent: its `last_at`. Recent activity's (listFilterRecent.ts): when the person last
+   * acted there. Set, InboxList draws List's one list whatever the view.
+   */
+  by?: (row: InboxListRow) => string;
 }
 
 /** Each row's place in List: the time it is sorted by, and the group it had when it took it. */
 export interface ListPlaces {
   epoch: number;
   keys: ReadonlyMap<string, { key: string; group: InboxListGroupId }>;
+  /** The `ListSort.by` they were placed by: another one sorts the list whole. */
+  by?: ListSort['by'];
 }
 
 export interface FlatRow {
@@ -112,7 +125,7 @@ export interface FlatRow {
  * (`sort`) or it changed group. Returns the rows and the places to keep for the next call. Pure.
  */
 export function flatRows(sections: readonly InboxListSection[], places: ListPlaces | null, sort: ListSort): { rows: FlatRow[]; places: ListPlaces } {
-  const sorted = places === null || places.epoch !== sort.epoch;
+  const sorted = places === null || places.epoch !== sort.epoch || places.by !== sort.by;
   const keys = new Map<string, { key: string; group: InboxListGroupId }>();
   const rows: Array<FlatRow & { key: string }> = [];
   for (const section of sections) {
@@ -120,11 +133,11 @@ export function flatRows(sections: readonly InboxListSection[], places: ListPlac
     for (const row of section.threads) {
       const old = places?.keys.get(row.thread_id);
       const holds = old !== undefined && old.group === section.id && (!sorted || row.thread_id === sort.keep);
-      const key = holds ? old.key : row.last_at;
+      const key = holds ? old.key : sort.by ? sort.by(row) : row.last_at;
       keys.set(row.thread_id, { key, group: section.id });
       rows.push({ row, drawn: section.id, key });
     }
   }
   rows.sort((left, right) => right.key.localeCompare(left.key) || left.row.thread_id.localeCompare(right.row.thread_id));
-  return { rows: rows.map(({ row, drawn }) => ({ row, drawn })), places: { epoch: sort.epoch, keys } };
+  return { rows: rows.map(({ row, drawn }) => ({ row, drawn })), places: { epoch: sort.epoch, keys, by: sort.by } };
 }

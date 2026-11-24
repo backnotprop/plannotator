@@ -22,6 +22,7 @@ import {
   type InboxPullsAnswer,
 } from '@plannotator/core/inbox-types';
 import { repoLabels } from '../pulls/labels';
+import { pullInProject } from '../pulls/model';
 import { person, wordsText, type Words } from '../pulls/words';
 
 /**
@@ -146,7 +147,8 @@ export function matchesQuery(pull: Pick<InboxPull, 'title' | 'author' | 'repo' |
   const hay = `${pull.title}\n${pull.author ?? ''}\n${pull.repo}`.toLowerCase();
   const label = inboxPullLabel(pull).toLowerCase();
   return words.every((word) => {
-    if (/^[#!]?\d+$/.test(word)) return String(pull.number) === word.replace(/^[#!]/, '') || label === word;
+    if (/^[#!]\d+$/.test(word)) return label === word;
+    if (/^\d+$/.test(word)) return String(pull.number) === word;
     return hay.includes(word);
   });
 }
@@ -181,6 +183,16 @@ export interface SheetModel {
 }
 
 const isMergedWithin = (pull: InboxPull, now: number, ms: number) => pull.state === 'merged' && !!pull.merged_at && now - Date.parse(pull.merged_at) <= ms;
+
+/**
+ * The board as Reviews' project filter shows it: only that project's PRs, by Reviews' own rule (`pullInProject`), so
+ * its sections, its Merged view and its head line count only those.
+ * No project: the answer as it is.
+ */
+export function boardInProject<T extends Pick<InboxPullsAnswer, 'pulls' | 'projects'> & { links?: InboxPullsAnswer['links'] }>(answer: T, project: string | null): T {
+  if (!project) return answer;
+  return { ...answer, pulls: answer.pulls.filter((pull) => pullInProject(pull, project, answer.projects, answer.links?.[pull.key]?.project_id)) };
+}
 
 /** The Open view: a section per repository with an open PR, the repositories with the most on you first. */
 export function sheetModel(answer: Pick<InboxPullsAnswer, 'pulls' | 'projects'>, now: number, risk: RiskLevels = {}): SheetModel {
@@ -317,4 +329,13 @@ export function closedLinks(hosts: readonly { host: string; cli: 'gh' | 'glab' }
 /** The stack's layers in the stack view's order: the top of the stack first, the base branch below the last. */
 export function topFirst(stack: Pick<InboxPullStack, 'layers'>): InboxPull[] {
   return [...stack.layers].reverse();
+}
+
+/**
+ * The filtered project's name for the board ("Nothing open in checkout-web"): from the list's threads (`names`), else
+ * from the Inbox's projects, so a project whose every thread is hidden (or never had one) is still named.
+ */
+export function boardProjectName(project: string | null, names: ReadonlyMap<string, string>, projects: readonly { id: string; name: string }[]): string | null {
+  if (!project) return null;
+  return names.get(project) ?? projects.find((p) => p.id === project)?.name ?? null;
 }

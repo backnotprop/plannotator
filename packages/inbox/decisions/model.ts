@@ -8,7 +8,7 @@
  */
 import type { InboxDecision, InboxListRow, InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { readInboxQuestionKind, inboxAgentName } from '@plannotator/core/inbox-types';
-import { capQuestionPrompt, type QuestionAnswer } from '@plannotator/core/question-block';
+import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { INBOX_STOPPED_REPLY_TEXT } from '@plannotator/core/inbox-delivery-line';
 import { sendTargetsOf, type SendTarget } from '../sendTargets';
 import { plainLabel } from '../folding';
@@ -411,40 +411,8 @@ export function sessionChips(state: QueueState): SessionChip[] {
 
 // ─────────────────────────────── Answers ───────────────────────────────
 
-/** The answer kind a question takes (an action item takes none: it is marked, not answered). */
-function answerKind(question: InboxQuestion): QuestionAnswer['kind'] {
-  const kind = readInboxQuestionKind(question.kind);
-  return kind === 'multi' || kind === 'text' ? kind : 'single';
-}
-
-/** An answer to build on: the saved one, else empty. */
-export function baseAnswer(question: InboxQuestion): QuestionAnswer {
-  return question.answer ?? { v: 1, key: question.key, kind: answerKind(question), prompt: capQuestionPrompt(question.prompt), selected: [] };
-}
-
-export function choiceAnswer(question: InboxQuestion, selected: readonly string[], note: string): QuestionAnswer {
-  const base = baseAnswer(question);
-  const { other: _o, text: _t, skipped: _s, by_reply: _b, note: _n, ...rest } = base;
-  return { ...rest, selected: [...selected], ...(note.trim() ? { note: note.trim() } : {}) };
-}
-
-export function otherAnswer(question: InboxQuestion, other: string, note: string): QuestionAnswer {
-  const base = baseAnswer(question);
-  const { text: _t, skipped: _s, by_reply: _b, note: _n, ...rest } = base;
-  return { ...rest, selected: [], other: other.trim(), ...(note.trim() ? { note: note.trim() } : {}) };
-}
-
-export function textAnswer(question: InboxQuestion, text: string, note: string): QuestionAnswer {
-  const base = baseAnswer(question);
-  const { other: _o, skipped: _s, by_reply: _b, note: _n, ...rest } = base;
-  return { ...rest, selected: [], text: text.trim(), ...(note.trim() ? { note: note.trim() } : {}) };
-}
-
-export function skipAnswer(question: InboxQuestion, note: string): QuestionAnswer {
-  const base = baseAnswer(question);
-  const { other: _o, text: _t, by_reply: _b, note: _n, ...rest } = base;
-  return { ...rest, selected: [], skipped: true, ...(note.trim() ? { note: note.trim() } : {}) };
-}
+/** The answers a tap or typed words make, shared with every client (core inbox-answers). */
+export { baseAnswer, choiceAnswer, otherAnswer, skipAnswer, textAnswer } from '@plannotator/core/inbox-answers';
 
 /** The answer in the person's words, for the stamp, the live region and the review: "Retry with the same key", "Skipped". */
 export function answerWords(answer: QuestionAnswer | null): string {

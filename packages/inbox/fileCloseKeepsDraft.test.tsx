@@ -22,6 +22,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAnnotationRecord, InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { attachmentSequence, type AttachmentStep } from './stepping';
 import { clearFileDrafts, fileDraftKey, peekFileDrafts } from './fileCommentDrafts';
+import { drawMermaidFencesWithMermaid } from '@plannotator/ui/test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');

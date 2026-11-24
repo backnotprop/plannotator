@@ -37,6 +37,7 @@ export interface InboxPull {
   author: string | null;
   /** The person (the CLI's signed-in account) wrote it. */
   mine: boolean;
+  author_member?: true;
   /** Review was requested from the person (or one of their teams). */
   requested: boolean;
   /** The person is one of its assignees (GitHub `assignee:@me`, GitLab `assignedMergeRequests`); absent from an older Inbox. */
@@ -118,8 +119,18 @@ export interface InboxPullLink {
    * `session`: the session that sent it (absent from an older Inbox).
    */
   guide: { message_id: string; title: string; steps: number; review: boolean; session?: string | null } | null;
-  /** `owner` only: what the hand-off asked for first (a guided review, or the person's own curation); absent for an older choice. */
-  ask?: "guide" | "custom";
+  picture_it_asked_at?: string;
+  picture_it_page?: { message_id: string; title: string; at: string; seen?: true };
+  /**
+   * `owner` only: what the hand-off asked for first (a guided review, or the person's own curation), or `thread`: nothing
+   * (a PR page's Start a thread; the thread is the PR's page from then on). Absent for an older choice.
+   */
+  ask?: InboxPullAsk;
+  /**
+   * `owner` only: the thread was started from the PR's page (Start a thread), so it is the PR's page; kept when that
+   * thread later asks for a guided review (`ask` then `guide`). Absent otherwise.
+   */
+  page?: true;
 }
 
 /** One host the Inbox asked, and as whom. */
@@ -176,6 +187,39 @@ export interface InboxPullsAnswer {
   machines?: Record<string, { read_at: string | null; pending: boolean; name?: string; looked?: true }>;
   /** The merged board only: the linked machines' risk judgments of the PRs they list, by pull key. */
   far_risk?: Record<string, InboxPullRiskJudgment>;
+  /**
+   * The PRs the person hid on this machine (server's inbox-pull-hidden.ts), newest first: left out of `pulls`, kept
+   * here so Reviews can list them with Show again. Absent from an older Inbox.
+   */
+  hidden?: InboxPullHidden[];
+  /** The repositories hidden (every PR in them left out): Hidden lists them too. Absent from an older Inbox. */
+  hidden_repos?: InboxRepoHidden[];
+}
+
+/** A PR the person hid from their lists: nothing is done on the forge. `at`: when, ISO. */
+export interface InboxPullHidden {
+  key: string;
+  title: string;
+  url: string;
+  at: string;
+  /** The Inbox thread it belongs to (its review, hand-off or the thread's own PR list), when one does: Hidden opens it. */
+  thread_id?: string;
+  /** Its head repository (`owner/repo`) when it came from a fork, as the list knew it at hide time: the project rule's fork case. */
+  head_repo?: string;
+}
+
+/** A repository the person hid from their lists (every PR in it, new ones too): nothing is done on the forge. */
+export interface InboxRepoHidden {
+  /** `inboxPullRepoKey`: `host/owner/repo`, lowercased. */
+  key: string;
+  /** Its name as the board showed it. */
+  label: string;
+  at: string;
+}
+
+/** A PR key's repository key (`host/owner/repo#12` → `host/owner/repo`; GitLab's `…#12:pull` too). */
+export function inboxPullRepoOfKey(key: string): string {
+  return key.replace(/#\d+(?::[a-z]+)?$/, "").toLowerCase();
 }
 
 /** `GET /api/inbox/pulls/diff`: the patch of one layer, or of the stack up to that layer. */
@@ -291,6 +335,12 @@ export const INBOX_PULLS_SEARCH_MAX = 50;
 /** Merged PRs are asked back this many days (to put a stack's merged layers under it). */
 export const INBOX_PULLS_MERGED_DAYS = 14;
 
+/**
+ * A reopen (the board's Close, then Undo) is taken only for a PR this Inbox closed this recently. The server refuses
+ * one past it; the board's Undo line goes when it ends.
+ */
+export const INBOX_PULL_REOPEN_WINDOW_MS = 5 * 60_000;
+
 /** `#412` on GitHub, `!61` on GitLab. */
 export function inboxPullLabel(pull: Pick<InboxPull, "platform" | "number">): string {
   return `${pull.platform === "gitlab" ? "!" : "#"}${pull.number}`;
@@ -364,6 +414,7 @@ export interface InboxPullStack {
 const LONG_LIVED = /^(main|master|trunk|develop|dev|staging|production|release([/-].*)?)$/;
 /** A repository's usual trunk names, when the forge did not say its default branch. */
 const TRUNK = /^(main|master)$/;
+const MERGED_STACK_LOOKBACK = 5;
 
 /** A long-lived branch (`main`, `develop`, `release/…`): what a stack's bottom layer lands on. */
 export function inboxPullLongLived(branch: string): boolean {
@@ -394,7 +445,7 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
   // The PR a branch's layers sit on, when two open PRs come from one branch (a backport: a second PR from the same
   // branch, into a release branch): the one into the repository's trunk (its default branch when the forge said,
   // else main or master), then into another long-lived branch, then the lowest number, whatever the order.
-  const rank = (pull: InboxPull) => (pull.base === pull.default_branch || TRUNK.test(pull.base) ? 0 : LONG_LIVED.test(pull.base) ? 1 : 2);
+  const rank = (pull: InboxPull) => ((pull.default_branch ? pull.base === pull.default_branch : TRUNK.test(pull.base)) ? 0 : LONG_LIVED.test(pull.base) ? 1 : 2);
   for (const pull of open) {
     if (!ownHead(pull)) continue;
     const at = `${repoKey(pull)}\u0000${pull.head}`;
@@ -405,9 +456,10 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
   const parentOf = (pull: InboxPull): { parent: InboxPull; via: InboxPull[] } | null => {
     const via: InboxPull[] = [];
     let base = pull.base;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i <= MERGED_STACK_LOOKBACK; i++) {
       const parent = headOf.get(`${repoKey(pull)}\u0000${base}`);
       if (parent) return parent.key !== pull.key ? { parent, via } : null;
+      if (i === MERGED_STACK_LOOKBACK) return null;
       const between = merged.find((m) => ownHead(m) && repoKey(m) === repoKey(pull) && m.head === base && !LONG_LIVED.test(m.head) && !via.includes(m));
       if (!between) return null;
       via.unshift(between);
@@ -451,7 +503,7 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
     }
     const under: InboxPull[] = [];
     let base = root.base;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < MERGED_STACK_LOOKBACK; i++) {
       const below = merged.find(
         (pull) =>
           ownHead(pull) &&
@@ -648,4 +700,28 @@ export function inboxPullUrlsIn(text: string): string[] {
     if (!found.includes(match[0])) found.push(match[0]);
   }
   return found;
+}
+
+/** How a PR hand-off's details begin (the window's `pullHandoffMessage` opening): what tells them apart from the words. */
+export type InboxPullAsk = "guide" | "custom" | "thread" | "picture_it";
+export const INBOX_PULL_ASKS: readonly InboxPullAsk[] = ["guide", "custom", "thread", "picture_it"];
+export const isInboxPullAsk = (value: unknown): value is InboxPullAsk => INBOX_PULL_ASKS.includes(value as InboxPullAsk);
+
+export const PULL_DETAILS_START = "You're being asked to help me review and understand a ";
+/** Only a Start a thread's details have this step (`pullHandoffMessage`'s `thread` kind). */
+export const PULL_THREAD_STEP = "We discuss it in this thread.";
+
+/**
+ * A person's message split into their words and the PR's details that went with them (a PR page's Start a thread),
+ * or null for any other message. The details are the LAST block that starts with the hand-off's opening after a blank
+ * line and holds the thread's step, so words that quote it stay words, and a hand-off with nothing before it (New
+ * review's) is not split. The window folds the details; the server finds the PR a started thread is about by them.
+ */
+export function splitPullThreadDetails(body: string): { words: string; details: string } | null {
+  const at = body.lastIndexOf(`\n\n${PULL_DETAILS_START}`);
+  if (at <= 0) return null;
+  const words = body.slice(0, at).trimEnd();
+  const details = body.slice(at + 2).trimEnd();
+  if (!words.trim() || !details.includes(`\nWhat to do\n${PULL_THREAD_STEP}`)) return null;
+  return { words, details };
 }

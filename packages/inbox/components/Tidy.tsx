@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { Popover } from '@base-ui/react/popover';
-import type { InboxTidyCombine, InboxTidyRun } from '@plannotator/core/inbox-types';
+import { isInboxId, type InboxTidyCombine, type InboxTidyRun } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
@@ -18,6 +18,7 @@ import { THREAD_PANEL_LABEL } from '../threadPanel';
 import { LIST_VIEW_LABEL, LIST_VIEW_OPTIONS, type ListView } from '../listView';
 import { STARRED_ABOVE_LABEL } from '../starredPills';
 import { SHOW_TAG_COLOURS_LABEL } from '../tagColours';
+import { AGENT_STATUS_LABEL, setAgentStatus, useAgentStatusOn } from '../agents/agentStatus';
 
 /**
  * Tidy (owner-approved design, 2026-10-28, simplified the same day: "quiet,
@@ -192,7 +193,16 @@ export function MenuCheckbox({
 }
 
 /**
- * The list's view (listView.ts): Grouped or List, one choice of two (`menuitemradio`, its state announced), drawn as
+ * "Show agent status" (agents/agentStatus.ts, owner 2026-11-18): the same switch as Settings → General → Appearance's
+ * row, so the two always agree. Off by default.
+ */
+export function AgentStatusMenuItem() {
+  const on = useAgentStatusOn();
+  return <MenuCheckbox label={AGENT_STATUS_LABEL} checked={on} onChange={(next) => void setAgentStatus(next)} data-agent-status-option="" />;
+}
+
+/**
+ * The list's view (listView.ts): Grouped, List or Agents, one choice (`menuitemradio`, its state announced), drawn as
  * the checkboxes are with a round box, under its label (the radio group is the labelled group). A pick changes the
  * list at once and leaves the menu open, as a tick does.
  */
@@ -229,6 +239,7 @@ export function TidyMenu({
   view,
   starredAbove,
   onSelect,
+  markAllRead,
   showArchived,
   tagColours,
 }: {
@@ -253,6 +264,11 @@ export function TidyMenu({
   starredAbove?: { on: boolean; onChange: (on: boolean) => void };
   /** "Select threads", after Tidy: the list starts picking rows (rowPicks.ts). Absent (the Board, the tour): no item. */
   onSelect?: () => void;
+  /**
+   * "Mark all as read", after Select threads (markAllRead.ts): every row the list shows that takes Mark read, as the
+   * project menu's item. Greyed while none does. Absent (the Board, the tour): no item.
+   */
+  markAllRead?: { disabled: boolean; onClick: () => void };
   /** "Show archived" (approval "inbox-archived-group"), after it: the Archived group under the list. Absent: no item. */
   showArchived?: { on: boolean; onChange: (on: boolean) => void };
   /**
@@ -325,6 +341,12 @@ export function TidyMenu({
                   Select threads
                 </Menu.Item>
               )}
+              {markAllRead && (
+                <Menu.Item className="ib-pmi" label="Mark all as read" disabled={markAllRead.disabled} data-list-mark-all-read="" onClick={markAllRead.onClick}>
+                  <Icon name="checkCircle" size={15} />
+                  Mark all as read
+                </Menu.Item>
+              )}
               <Menu.Item className="ib-pmi" label="Refresh" data-tidy-refresh="" onClick={onRefresh} aria-keyshortcuts={refreshKeys}>
                 <Icon name="refresh" size={15} />
                 Refresh
@@ -336,6 +358,13 @@ export function TidyMenu({
                   <MenuViewChoice view={view.value} onChange={view.onChange} />
                   {starredAbove && <MenuCheckbox label={STARRED_ABOVE_LABEL} checked={starredAbove.on} onChange={starredAbove.onChange} data-starred-above-option="" />}
                   {showArchived && <MenuCheckbox label="Show archived" checked={showArchived.on} onChange={showArchived.onChange} data-show-archived-option="" />}
+                </>
+              )}
+              {/* About the sidebar's agents, not the list's rows: its own item after the View group (owner, 2026-11-18). */}
+              {view && (
+                <>
+                  <Menu.Separator className="ib-pm-sep" />
+                  <AgentStatusMenuItem />
                 </>
               )}
               {look && onLook && (
@@ -393,13 +422,17 @@ export function TidyMenu({
   );
 }
 
-/** A Tidy note in its thread: one quiet line, "Tidy sent to Claude Code · 8:54 AM". */
-export function TidyNote({ agent, time, fullWhen }: { agent: string; time: string; fullWhen: string }) {
+/**
+ * A Tidy note in its thread: one quiet line, "Tidy sent to Claude Code · 8:54 AM". A Combine's wake is the same note
+ * (its run a `cmb_` id): "Combine sent to Claude Code · 8:54 AM" (approval "inbox-combine-across-computers": a Combine
+ * is not a Tidy).
+ */
+export function TidyNote({ run, agent, time, fullWhen }: { run?: string; agent: string; time: string; fullWhen: string }) {
   return (
     <p className="ib-tidy-mark" data-tidy-note="">
       <Icon name="todo" size={14} />
       <span>
-        Tidy sent to {agent}
+        {run && isInboxId('cmb', run) ? 'Combine' : 'Tidy'} sent to {agent}
         {' · '}
         <Tip content={fullWhen}>
           <span data-full-when="">{time}</span>
@@ -408,3 +441,8 @@ export function TidyNote({ agent, time, fullWhen }: { agent: string; time: strin
     </p>
   );
 }
+
+/** What a Combine left where it was, in the same quiet note style (CombineLeftNote.tsx). */
+export { CombineLeftNote } from './CombineLeftNote';
+/** Ship's note to the shipping agent, in the same quiet note style (pulls/ShipNote.tsx). */
+export { ShipNote } from '../pulls/ShipNote';

@@ -23,9 +23,9 @@ This starts the Inbox and opens it in your browser. If it is already running, th
 | Command | What it does |
 |---------|--------------|
 | `plannotator inbox` | Start the Inbox and open it in the browser, or open the one already running |
-| `plannotator inbox --background` | Start it detached without opening a browser, print its URL and exit. Agents run this form |
+| `plannotator inbox --background` | Start it detached without opening a browser, print its URL and exit. Agents run this form; it starts nothing until you have turned the Inbox on (`plannotator inbox`, `--no-open` or `--open`) |
 | `plannotator inbox --no-open` | Run it in this terminal without opening a browser |
-| `plannotator inbox --open` | Open it in the browser and print its URL, starting it in the background first if it is not running. It returns at once. Over SSH it opens no browser on the remote machine and says how to reach the Inbox |
+| `plannotator inbox --open` | Open it in the browser and print its URL, starting it in the background first if it is not running. It returns at once. The first time, it also turns the Inbox on and connects the agents it finds, within half a minute. Over SSH it opens no browser on the remote machine and says how to reach the Inbox |
 | `plannotator inbox --open <thread>` | Show that thread in the Inbox window you already have open, as if you clicked its row (Back returns). Takes a thread id, a message id or a `#thread=` link. With no window open, it opens one at the thread. For a status-bar widget or a script |
 | `plannotator inbox --tailscale` | Also publish it [over your tailnet](#over-your-tailnet) until it stops. Works with the forms above. If the Inbox is already running, it is asked to publish |
 | `plannotator inbox mcp` | The stdio MCP server for agents. It starts a stopped Inbox without opening a browser tab |
@@ -152,7 +152,7 @@ Settings lists each agent found on this computer with up to three switches: **Re
 - **Action items.** When an agent is stuck on something only you can do outside the chat (approve a deploy, sign in, touch a security key, merge a pull request it cannot merge), its message carries a **Action item** card: what to do, why, where (an **Open** button for a link, or a command with **Copy**), and, when the agent will notice it happen, what it is watching. An action item counts like a question: it puts the thread under **Stopped on you** (or **Holding up work**, or **Waiting on you**), it notifies and rings like one, and the row reads "1 action item" (or "1 question, 1 action item"). Press **Done** when you did it (**Add note** first to say more), or **Can't do it…** and say why: it goes to the agent right away, with a few seconds to **Undo** (the toast, `Z`, or the card's own Undo), as 👍 Looks good does. The agent gets it in your reply under "Action items you asked for" ("Done, 3:12 PM." with your note, or "Can't do it: " and your reason). When the agent sees it happen by itself (the deploy it was watching is Ready), it can close the card itself: the card then reads "<agent> saw it done", and nothing is sent. **Mark read** sets an open action item aside like a question.
 - **Guided reviews.** An agent can send a guided review of a code change. It opens full window, as the agent's walkthrough of sections, files and the diff (or **All files**, every changed file in one column), and you can tick sections as reviewed. **Split | Unified**, in the small tab on top of each section, draws the diffs side by side or in one column; it is the same setting as code review's, so a choice in either holds in the other. On a phone the diffs are always in one column. Comment on the diff as in code review (click a line number, drag across lines, or select code): your comments ride your next Send under "Feedback on the guided review", with each file, line and the lines you commented on. **Write the reply**, at the top right, takes you back to the thread with the reply box open.
 - **Notifications.** The open page raises a browser notification for every new thread an agent starts, and for every new question unless it is in the thread you have open on screen, even while the Inbox tab is in front. Plain messages in a thread you already have do not notify. Until you allow or decline them, a line above the list asks. **Settings** shows whether they are on for this address, sends a test notification, and says whether any open Inbox tab can notify you.
-- **Sound.** When an agent asks you something and no Inbox tab is in front, the page plays a soft doorbell, once per burst of questions (more questions within 30 seconds stay quiet). Plain messages never ring, and several Inbox tabs ring once. It works whether notifications are on or not, and while it is on, a notification about a question that rings it arrives without a system sound, so you never hear two. Browsers play sound only after one click in the tab; the first click anywhere turns it on. Turn it off, change the volume or hear it in **Settings**, under Notifications. After the update that brings it, the Inbox says so once.
+- **Sound.** When no Inbox tab is in front, the page plays a soft doorbell. Every new thread an agent starts rings it, and so does every question, even one that comes right after other replies; only another question in the last 30 seconds keeps a question quiet, and only another new thread or question in the last 30 seconds keeps a new thread quiet. In **Settings**, **Play a sound** can also ring it for a plain reply in a thread you already have (**every agent message**, the default; a reply stays quiet when other news came in the last 30 seconds) or not (**questions and new threads**). Your own messages never ring, nor do snoozed threads, and several Inbox tabs ring once. It works whether notifications are on or not, and a notification for something the doorbell rang for arrives without a system sound, so you never hear two; when the doorbell could not ring, the notification keeps its own sound. A browser may hold sound back until you click or press a key in the tab, and Settings says so while it does; the first click anywhere turns it on. After a reload, a browser that already let the page play sound may allow it at once. Turn it off, change the volume or hear it in **Settings**, under Notifications. After the update that brings it, the Inbox says so once.
 - **Settings.** Appearance (light, dark or match the system; the text size; and the colors, a palette for the light half and one for the dark half, the same choices and the same setting as plan review's Theme tab), the inbox tool switch per host, notifications and the sound, the MCP command for other agents, and how much space each project and thread takes on disk, with **Delete from Inbox** on each thread and project (your code is never touched).
 
 How to write questions is described in [Questions in Plans and Documents](/docs/guides/questions/). The Inbox reads the same `:::question` blocks.
@@ -209,13 +209,13 @@ Before any agent has written, the Inbox window shows one next step for this comp
 
 ### Claude Code
 
-With the Plannotator plugin and [the Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) (Claude Code 2.1.287 or newer), Claude Code gets a `plannotator_inbox` tool. The tool is on by default for Claude Code, also before you ever ran the Inbox: the first time Claude uses it, it starts the Inbox in the background. The tool is added when Claude Code starts, not when you start a new conversation in a running one, so restart Claude Code after you change the setting. When you send a reply, it arrives in that session as a new turn after Claude finishes what it is doing; **Send now** puts it into the turn Claude is in instead. The thread then shows "Delivered to Claude Code".
+With the Plannotator plugin and [the Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) (Claude Code 2.1.287 or newer), Claude Code gets a `plannotator_inbox` tool. The tool is on by default for Claude Code once you have turned the Inbox on (run `plannotator inbox` once); after that, when Claude uses it with the Inbox stopped, it starts the Inbox in the background. The tool is added when Claude Code starts, not when you start a new conversation in a running one, so restart Claude Code after you change the setting. When you send a reply, it arrives in that session as a new turn after Claude finishes what it is doing; **Send now** puts it into the turn Claude is in instead. The thread then shows "Delivered to Claude Code".
 
 In `claude -p` and other SDK runs the mod adds the tool too (Plannotator 0.28.65 or newer), but nothing wakes the run: the agent reads your reply later with `read_thread`. The chat panel of Claude Code's VS Code extension and Claude threads in T3 Code get the tool and the wake. On an older Plannotator, use the MCP server in `claude -p` (see [Other agents](#other-agents)).
 
 ### Pi
 
-Install the [Pi extension](/docs/getting-started/installation/#pi), then run `plannotator inbox`: it turns the inbox tool on for Pi when it finds the extension. The tool is off by default on Pi, because Pi sends every tool's full definition with each request: the inbox tool adds about 14 KB to every request, roughly 3,729 tokens depending on the model (about 15 KB, roughly 4,226 tokens, with the Board on). To turn it on yourself:
+Install the [Pi extension](/docs/getting-started/installation/#pi), then run `plannotator inbox`: it turns the inbox tool on for Pi when it finds the extension. The tool is off by default on Pi, because Pi sends every tool's full definition with each request: the inbox tool adds about 15 KB to every request, roughly 3,906 tokens depending on the model (about 16 KB, roughly 4,492 tokens, with the Board on). To turn it on yourself:
 
 ```bash
 export PLANNOTATOR_INBOX_TOOL=1
@@ -225,7 +225,7 @@ Start a new Pi session (or `/reload`). A reply arrives as a follow-up message on
 
 ### OpenCode
 
-Add the [OpenCode plugin](/docs/getting-started/installation/#opencode), then run `plannotator inbox`: it turns the inbox tool on for OpenCode when it finds the plugin in your global opencode config. The tool is off by default on OpenCode, for the same reason as Pi (about 14 KB per request, roughly 3,729 tokens). To turn it on yourself:
+Add the [OpenCode plugin](/docs/getting-started/installation/#opencode), then run `plannotator inbox`: it turns the inbox tool on for OpenCode when it finds the plugin in your global opencode config. The tool is off by default on OpenCode, for the same reason as Pi (about 15 KB per request, roughly 3,906 tokens). To turn it on yourself:
 
 ```bash
 export PLANNOTATOR_INBOX_TOOL=1
@@ -269,7 +269,7 @@ The `plannotator_inbox` tool is one tool. Its actions are the Inbox's MCP tools 
 - the Inbox is installed (you ran `plannotator inbox` once), and
 - the inbox tool setting is on for that host.
 
-Claude Code needs only the setting: before the Inbox was ever installed, the tool's first call starts it.
+Claude Code needs the setting and the Inbox turned on (`plannotator inbox` once); after that, a call with the Inbox stopped starts it.
 
 | Host | Default |
 |------|---------|
@@ -365,7 +365,7 @@ The stdio command fills in the project (its working folder) and a session id for
 | Tool | What it does |
 |------|--------------|
 | `send_message` | Send you a message. It can carry `:::question` blocks and `attachments` (any file it can read, absolute or relative to the project; `.env` refused). `thread` names a thread to join, and `reply_to` answers one of your replies. In a thread you started that has no name you typed, the agent's first reply names it with `thread` (a name another open thread of the project already has is refused, and the agent picks another). `supersedes` (or a `Replaces: <message id>/<key>` line in a new question block) retires earlier questions of the thread, so you can no longer answer them. `done` closes the agent's own action items it saw happen (the card reads "<agent> saw it done"; nothing is sent) |
-| `read_thread` | Read one thread as a short transcript: the questions still waiting on you, the newest 6 messages in full (`limit` sets how many), your earlier messages in full (up to 12 KB of them), and every other earlier message as one line with its questions' answers. A message over 16 KB is cut, except your newest one, which is always whole. Your answers are given whole. The agent can ask for any message in full (`expand`), read further back (`before`), or read only what is new since its last read (`after`). Your 👍 Looks good shows on its message. Without a thread, it lists the threads this session wrote in, one short row each (subject, name, where it sits in your list, open questions, last writer and time, your last message, and whether it has a reply from you it has not read) |
+| `read_thread` | Read one thread as a short transcript: the questions still waiting on you, the newest 6 messages in full (`limit` sets how many) and your newest one, and the 30 most recent earlier messages as one line each with its questions' answers (older ones as a count it can read further back from). A message over 16 KB is cut, except your newest one. Your newest message is shown exactly as you sent it; in older ones a skills block's instructions are one line until the agent expands that message, and a Re-ask note whose questions were all handled says so. Your answers are given whole. The agent can ask for any message in full (`expand`), read further back (`before`), or read only what is new since its last read (`after`). Your 👍 Looks good shows on its message. Without a thread, it lists the threads this session wrote in, one short row each (subject, name, where it sits in your list, open questions, last writer and time, your last message, and whether it has a reply from you it has not read) |
 | `search` | Find messages by their words, in the agent's project or in every project: its own, other agents' and yours. Read-only: it uses the same search as your **⌘K**, never adds to your recent searches, and marks nothing read. Each result is one line: the thread, the message, who wrote it, when, and the words around the match |
 | `resolve_message` | Resolve (archive) or reopen a thread |
 | `snooze_thread` | Only when you ask: snooze a thread until a time, or end its snooze |
@@ -421,14 +421,23 @@ Then run:
 plannotator inbox cloudflare-access setup --email you@example.com
 ```
 
-It asks for the token (or reads `CLOUDFLARE_API_TOKEN`). It creates a sign-in by one-time code sent to that e-mail, a tunnel, an Access application that lets in only that e-mail, and, last, two DNS records: one name for the Inbox and a sibling name (the same name with `-s` added) for sessions. It then checks from outside that a visit without your sign-in, a forged token, a forged cookie and a wrong name all stay out. Only then does it turn on and print the address with a QR code. Use `--zone` when the token sees several domains, and `--hostname` to choose the name (one level under your domain, for example `plannotator.example.com`).
+It asks for the token (or reads `CLOUDFLARE_API_TOKEN`). It creates a sign-in by one-time code sent to that e-mail, a tunnel, an Access application that lets in only that e-mail, and finally DNS records for the Inbox and for sessions. It then checks from outside that a visit without your sign-in, a forged token, a forged cookie and a wrong name all stay out. Only then does it turn on and print the address with a QR code.
+
+Use `--zone` when the token sees several domains. To choose both names, pass `--hostname` for the Inbox and `--session-hostname` for sessions. Both names must be distinct and one level under the selected zone.
+
+```bash
+plannotator inbox cloudflare-access setup --email you@example.com --zone example.com \
+  --hostname inbox.example.com --session-hostname reviews.example.com
+```
+
+On first setup the sessions name defaults to the Inbox name with `-s` added to its first label, such as `inbox-s.example.com`. Re-running setup keeps the configured sessions name. To change it in a managed setup, run `plannotator inbox cloudflare-access teardown` before setting up the new name.
 
 - **Only you can open it.** Cloudflare asks for your e-mail and a one-time code, and the Inbox checks Cloudflare's signed token on every request itself: the e-mail must be the one you typed. A mistake in the Access policy alone is not enough to let anyone in.
 - **It is on the internet.** Unlike the tailnet, the address is public, behind that sign-in. Treat a signed-in phone like your computer: what you send becomes a turn in an agent session here. The sign-in lasts 24 hours.
-- **Sessions:** add `--cloudflare-access` to `plannotator review`, `annotate` or `last`, and the session opens under `/s/…` at the sibling name, with the same sign-in (you sign in once). The Inbox and sessions are kept on separate names, so a page in a review cannot act as the Inbox. Open sessions share the sibling name with each other. If the Inbox is not running, it starts in the background.
+- **Sessions:** add `--cloudflare-access` to `plannotator review`, `annotate` or `last`, and the session opens under `/s/…` at the sessions hostname, with the same sign-in. The Inbox and sessions are kept on separate names, so a page in a review cannot act as the Inbox. Open sessions share a hostname. If the Inbox is not running, it starts in the background.
 - **When this computer sleeps** or the Inbox is stopped, the address shows Cloudflare's own error page. `cloudflared` runs as part of the Inbox and stops with it.
 
-You can do all of this from **Settings → Remote devices → Cloudflare** too: type your e-mail, paste the token, pick the domain, and watch each step tick. The same place shows both addresses with a QR code, whether the tunnel is connected, **Turn off** (keeps the setup) and **Remove**. It cannot be changed from a device signed in through Cloudflare. `plannotator inbox cloudflare-access status` shows the same state in a terminal. `plannotator inbox cloudflare-access teardown` turns it off and deletes the DNS records, the Access application and the tunnel, in that order (it asks for a token again). `PLANNOTATOR_INBOX_CF_ACCESS=0` keeps it off for one run.
+For standard setup, open **Settings → Remote devices → Cloudflare**, type your e-mail, paste the token and pick the domain. Use the CLI example above to choose the sessions hostname. Settings also shows both addresses with a QR code, whether the tunnel is connected, **Turn off** (keeps the setup) and **Remove**. It cannot be changed from a device signed in through Cloudflare. `plannotator inbox cloudflare-access status` shows the same state in a terminal. `plannotator inbox cloudflare-access teardown` turns it off and deletes the DNS records, the Access application and the tunnel, in that order (it asks for a token again). `PLANNOTATOR_INBOX_CF_ACCESS=0` keeps it off for one run.
 
 ### Use a tunnel and Access application you already have
 
@@ -452,7 +461,7 @@ If you already run a Cloudflare Tunnel to the Inbox with an Access application i
    `port` is the local port your tunnel's ingress points at (`http://127.0.0.1:<port>`), and the ingress must set the Host header to `host`.
 4. Restart the Inbox (`plannotator inbox restart`).
 
-This opens the Inbox only. Sessions need the second address that setup creates; until then `--cloudflare-access` says so.
+To open sessions too, add `"sessionHost": "reviews.example.com"` to `inboxCloudflareAccess`. Point both names at the tunnel, give each its own ingress rule with its own Host header, and cover both names with the Access application whose AUD appears in the config. Omit `sessionHost` if you only publish the Inbox.
 
 ## Inside another app on this computer
 
@@ -489,6 +498,7 @@ Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/
 | `seq.json` | The highest event number ever written, kept across deletions |
 | `agents.json` | The agents `plannotator inbox` found or connected, so it never adds one back that you turned off |
 | `drafts/` | Messages you started and did not send, one file each. They never reach an agent, a phone or search |
+| `pull-closes.jsonl` | One line each time a pull request was closed or reopened from the Pull requests page: which pull request, when, and whether it worked. No titles or names. Owner-only |
 | `reply-drafts/` | The words typed in a thread's reply box and not sent, one file per thread. They never reach an agent or search; a phone can read them |
 | `uploads/` | Files you attached to a message you started or pasted into a reply: those not sent yet (forgotten after a day unless a draft keeps them), and read-only copies of those you sent, which the agent opens |
 | `board.json` | When you last looked at the Board, so the cards written since show bold |

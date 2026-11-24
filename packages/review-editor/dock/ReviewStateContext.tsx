@@ -49,6 +49,8 @@ export interface CallTreeRequest {
 export interface ReviewState {
   // Files & diff
   files: DiffFile[];
+  filteredDiffFiles?: DiffFile[];
+  onClearFileFilter?: () => void;
   rawPatch: string;
   focusedFileIndex: number;
   focusedFilePath: string | null;
@@ -150,8 +152,9 @@ export interface ReviewState {
   /** Sink for a comment authored through the edit session's Selection Action
    * ("Make annotation"): line-scoped comment on pristine new-side lines. */
   onAddEditorCommentForFile: (filePath: string, comment: EditSelectionComment) => void;
-  onAddFileComment: (text: string) => void;
-  onAddFileCommentForFile: (filePath: string, text: string) => void;
+  /** A file's comment box: its words and what was attached (pictures, files). */
+  onAddFileComment: (text: string, images?: ImageAttachment[]) => void;
+  onAddFileCommentForFile: (filePath: string, text: string, images?: ImageAttachment[]) => void;
   /** Explorer (step 2): a changed file's view, Changes or Whole file. Absent: no switch. */
   fileViewOf?: (filePath: string) => ChangedFileView;
   onFileViewChange?: (filePath: string, view: ChangedFileView) => void;
@@ -349,11 +352,12 @@ export interface ReviewState {
 
   // Code navigation
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
-  /** Token hover cards. Undefined whenever the gate or the setting is off. */
+  /** Token hover cards. Undefined whenever the gate or the setting is off.
+   *  Returns false for a token that is not a symbol (no hover affordance). */
   onTokenHoverEnter?: (
     props: import('@pierre/diffs').DiffTokenEventBaseProps,
     filePath: string,
-  ) => void;
+  ) => boolean;
   onTokenHoverLeave?: () => void;
   codeNavResult: import('@plannotator/shared/code-nav').CodeNavResponse | null;
   codeNavIsLoading: boolean;

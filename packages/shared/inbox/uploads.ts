@@ -23,7 +23,7 @@
  */
 
 import { reviewAnchorBlock, reviewBatchBlock, reviewFollowUpLine, type InboxReviewAnchor } from "@plannotator/core/review-threads";
-import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
+import { INBOX_ROWS_ASK_BLOCK, inboxSentFromLine } from "@plannotator/core/inbox-types";
 import { randomBytes } from "node:crypto";
 import {
   chmodSync,
@@ -111,8 +111,8 @@ export function inboxViewingLine(message: { viewing?: InboxReplyViewing | null }
 }
 
 /**
- * The words an agent reads for a person's message: its body, then `inboxViewingLine`,
- * then `inboxAttachedLines`, then, on a message sent with compose's Board chip on,
+ * The words an agent reads for a person's message: its body, then `inboxViewingLine`, then
+ * `inboxSentFromLine` (written away from this computer), then `inboxAttachedLines`, then, on a message sent with compose's Board chip on,
  * the Board request (`inboxBoardRequestBlock`), or on an Ask from Decision data its
  * instructions (`INBOX_DECISION_ASK_BLOCK`). The stored body never holds them.
  */
@@ -124,6 +124,7 @@ export function inboxBodyForAgent(message: {
   decision_ask?: true;
   rows_ask?: true;
   viewing?: InboxReplyViewing | null;
+  sent_from?: unknown;
   id?: string;
   review_anchor?: InboxReviewAnchor | null;
 }, batch: readonly { id: string; body: string; review_anchor?: InboxReviewAnchor | null }[] = [], within: InboxReviewAnchor | null = null): string {
@@ -134,7 +135,7 @@ export function inboxBodyForAgent(message: {
         ? reviewAnchorBlock({ id: message.id, review_anchor: message.review_anchor })
         : reviewFollowUpLine({ id: message.id }, within)
     : "";
-  const after = [review, inboxViewingLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
+  const after = [review, inboxViewingLine(message), inboxSentFromLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
   // A reply of pasted files alone may have no words.
   let words = !after ? message.body : message.body.trim() ? `${message.body}\n\n${after}` : after;
   if (message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
@@ -300,7 +301,7 @@ export async function receiveInboxUpload(
     const path = inboxBlobPath(inboxDirPath, scan.sha256);
     if (existsSync(path)) unlinkSync(temp);
     else renameSync(temp, path);
-    const decided = decideInboxAttachmentKind(name as string, scan.head, scan.text, scan.size);
+    const decided = decideInboxAttachmentKind(name as string, scan.head, scan.text, scan.size, scan.video);
     const upload: InboxUpload = {
       upload_id: inboxId("upl"),
       name: name as string,
@@ -310,6 +311,7 @@ export async function receiveInboxUpload(
       created_at: options.at,
       ...(decided.media_type ? { media_type: decided.media_type } : {}),
       ...(decided.width !== undefined && decided.height !== undefined ? { width: decided.width, height: decided.height } : {}),
+      ...(decided.duration_ms !== undefined ? { duration_ms: decided.duration_ms } : {}),
       ...(options.shownSha256 ? { shown_sha256: options.shownSha256 } : {}),
     };
     recordPendingUpload(inboxDirPath, upload);

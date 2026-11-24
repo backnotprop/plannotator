@@ -428,6 +428,37 @@ describe("Claude Code as a launch host", () => {
     expect(w.calls().find((call) => call.startsWith("respawn"))).toContain("FROM_LOGIN=yes");
   });
 
+  test("Start in Rex: interactive claude in the folder as a session id picked now, with the launch's settings file and flags; nothing runs, and no message on the line", async () => {
+    const w = world();
+    const made = await w.host.rexCommand!({ ...w.launch, session_ref: null, own_mode: true }, { name: "Tidy the changelog", login: w.login, resume: false });
+    if (!made.ok) throw new Error(made.text);
+    expect(made.session).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(made.ref).toBe(made.session);
+    const settings = join(w.dataDir, "inbox", "launch", "lch_1", "settings.json");
+    // Named for its thread, as a background start is (`--bg --name`): the list's row and Claude's own title read it.
+    expect(made.command).toBe(`cd '${w.root}' && exec claude '--session-id' '${made.session}' '--name' 'Tidy the changelog' '--settings' '${settings}'`);
+    // A name that would read as a flag, or none: never a flag, never empty.
+    const dashed = await w.host.rexCommand!({ ...w.launch, session_ref: null, own_mode: true }, { name: "--print it's", login: w.login, resume: false });
+    expect(dashed.ok && dashed.command).toContain(String.raw`'--name' 'print it'\''s' '--settings'`);
+    const unnamed = await w.host.rexCommand!({ ...w.launch, session_ref: null, own_mode: true }, { name: "  ", login: w.login, resume: false });
+    expect(unnamed.ok && unnamed.command).toContain("'--name' 'Inbox'");
+    // The same settings file as a background start (its permission hook brings prompts to the Inbox too).
+    expect(JSON.parse(readFileSync(settings, "utf8")).env.PATH).toBe(w.login.PATH);
+    // Nothing was run: Rex runs it.
+    expect(existsSync(join(w.root, "calls.log")) ? w.calls().filter((call) => call.startsWith("--")) : []).toEqual([]);
+    // A reply to it once it ended: the same session again.
+    const again = await w.host.rexCommand!({ ...w.launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: w.login, resume: true });
+    expect(again.ok && again.command).toContain(`'--resume' '${made.session}'`);
+    // Started again, it keeps the name it has (the person may have renamed it).
+    expect(again.ok && again.command).not.toContain("--name");
+    expect(again.ok && again.command).toContain("'--permission-mode' 'auto'");
+    // One that never took a turn (stopped at a prompt in its tab): nothing to resume, so a first start on its own id, named.
+    const fresh = await w.host.rexCommand!({ ...w.launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: w.login, resume: true, fresh: true });
+    expect(fresh.ok && fresh.session).toBe(made.session);
+    expect(fresh.ok && fresh.command).toContain(`'--session-id' '${made.session}' '--name' 'Tidy'`);
+    expect(fresh.ok && fresh.command).not.toContain("--resume");
+  });
+
   test("a login env that can't reach `claude` (a shell read that failed) still starts it, from Claude's install folders", async () => {
     const w = world({ installFolderOnly: true, login: { FROM_LOGIN: "yes" } });
     expect(await w.host.start(w.launch, { name: "Inbox", login: w.login })).toMatchObject({ ok: true });

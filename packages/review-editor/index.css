@@ -21,6 +21,7 @@
 
 @import "../ui/theme.css";
 @import "./comments.css";
+@import "./semantic-colors.css";
 @import "./components/callTree/callTree.css";
 @import "./live/live.css";
 
@@ -32,12 +33,6 @@
    search bar vertically aligned across all three columns. */
 :root {
   --panel-header-h: 32px;
-  --semantic-moved: #69b1ff;
-  --semantic-edited: #bf91f3;
-  --semantic-reformatted: #a0a0a0;
-  --diffs-moved-color: var(--semantic-moved);
-  --diffs-edited-color: var(--semantic-edited);
-  --diffs-reformatted-color: var(--semantic-reformatted);
 
   /* Code-review-only readable-text bump. `text-xs` is the app's small/body
      tier; Tailwind's default leaves it at 12px, which reads cramped here.
@@ -348,12 +343,6 @@ diffs-container {
   justify-self: end;
   white-space: nowrap;
   font-size: 0.75rem;
-}
-
-.light {
-  --semantic-moved: #009fff;
-  --semantic-edited: #9954d8;
-  --semantic-reformatted: gray;
 }
 
 .semantic-diff-summary {
@@ -2497,12 +2486,12 @@ diffs-container {
   color: var(--muted-foreground);
 }
 
-.review-sidebar [data-review-panel-list] {
-  padding-bottom: 4px;
-}
-
 .review-sidebar [data-review-sticky-tools] {
   padding-bottom: 0;
+}
+
+.review-sidebar [data-review-file-filter] [data-review-sticky-tools] {
+  padding-block: 12px;
 }
 
 .review-sidebar [data-panel-controls-row] {

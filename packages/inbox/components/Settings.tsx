@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { KeyboardSettings } from './KeyboardSettings';
-import { INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
+import { INBOX_SYSTEM_SWITCH_SHOWN, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
 import { SoundRow, Switch } from './SoundRow';
+import { LinkedCapabilities } from './LinkedCapabilities';
 import { type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
@@ -12,6 +13,8 @@ import { ConnectPicker } from './ConnectPicker';
 import { AccountsRefresh, AccountsSection } from './Accounts';
 import { LinearKeySettings } from './LinearKeySettings';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
+import { AgentStatusRow } from '../agents/AgentStatusSwitch';
+import { ContentsDotsRow } from '../parts/ContentsDotsRow';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
 import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox-types';
@@ -29,6 +32,8 @@ import { PaletteRow } from './Palettes';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
 import { chooseFavicon, useInboxFavicon } from '../faviconChoice';
+import { useSplitViewSwitch } from '../data/actions/settings';
+import { splitViewSetting } from '../panes/beside';
 import { FAVICON_STYLE_CHOICES, faviconDataUrl } from '@plannotator/core/favicon';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 import { VoiceSettings } from './VoiceSettings';
@@ -40,6 +45,7 @@ import type { SystemProjectRow } from '@plannotator/core/inbox-system';
 import { openSystemSetup } from '../system/opener';
 import { systemStateWords } from '../system/projects';
 import { ScheduledSettingsRow } from '../scheduled/SettingsRow';
+import { usePhone } from '../phone';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -83,8 +89,8 @@ export interface SettingsPageProps {
   context: ConnectContext | null;
   error: string | null;
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
-  /** Settings → Capabilities → Experimental: decision mode's switch. Absent (or an Inbox that reports no experimental features): no Experimental group. */
-  onToggleExperimental?: (next: boolean) => void;
+  /** Settings → Capabilities → Experimental: decision mode's switch, and Grid's (`feature`). Absent (or an Inbox that reports no experimental features): no Experimental group. */
+  onToggleExperimental?: (next: boolean, feature?: 'decision_mode' | 'grid') => void;
   /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184). Absent: no row. */
   onToggleCookieHost?: (next: boolean) => void;
   /** `#settings/experimental` (an old link): Capabilities scrolls to its Experimental group and focuses its heading. */
@@ -93,8 +99,6 @@ export interface SettingsPageProps {
   onToggleBoard?: (next: boolean) => void;
   /** Settings → Capabilities → Code review (approval "inbox-code-review-direction"). Absent (or an Inbox without it): no row. */
   onToggleCodeReview?: (next: boolean) => void;
-  /** Settings → Capabilities → Shape (approval "shape-inbox-placement"). Absent (or an Inbox without it): no row. */
-  onToggleShape?: (next: boolean) => void;
   /** Settings → Capabilities → System (approval "system-inbox"), under Code review and shown only while it is on; in 0.29 also only while System is on (SYSTEM_SETTINGS_ROW_VISIBLE). Absent: no row. */
   onToggleSystem?: (next: boolean) => void;
   /** System's projects with their drawing's state, listed under its switch while it is on; null until read. */
@@ -109,7 +113,7 @@ export interface SettingsPageProps {
   onToggleBro?: (next: boolean) => void;
   /** Settings → Capabilities → Experimental → "Float reply drafts" (approval "inbox-reply-floaters", off by default). Absent (or an Inbox without it): no row. */
   onToggleFloatDrafts?: (next: boolean) => void;
-  /** Settings → General → When an agent asks you → the Mark read warning (the owner's ask, 2026-11-10). Absent (or an Inbox without it): no row. */
+  /** Settings → General → When an agent sends you something → the Mark read warning (the owner's ask, 2026-11-10). Absent (or an Inbox without it): no row. */
   onToggleMarkReadWarning?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
@@ -141,7 +145,7 @@ export interface SettingsPageProps {
    * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none.
    */
   updateRow?: ReactNode;
-  /** The question sound's row, under the notifications switch (sound.ts). */
+  /** The sound's row, under the notifications switch (sound.ts). */
   sound?: InboxSound;
   /** Settings → Archived: the archived threads (components/Archived.tsx). */
   archived?: ReactNode;
@@ -221,6 +225,31 @@ const THEME_CHOICES = [
 ] as const;
 
 /**
+ * Thread panes (config.json `inboxSplitView`, off by default; docs/agent-guides/inbox-window.md "Free layout"): several
+ * threads side by side beside the list. Saved here, every window turns them on or off at once (useSplitViewSwitch).
+ */
+function SplitViewRow({ saved }: { saved: boolean }) {
+  const { on, failed, toggle } = useSplitViewSwitch(saved);
+  return (
+    <div className="ib-prow" data-settings-split-view={on ? 'on' : 'off'}>
+      <span className="ib-txt">
+        <span className="ib-l" id="ib-split-view-label">
+          Threads side by side
+        </span>
+        <span className="ib-desc" aria-live="polite">
+          {failed
+            ? 'Not saved. Try again.'
+            : 'Open several threads at once: right-click a thread and choose Open to the side, or drag it next to the open one.'}
+        </span>
+      </span>
+      <span className="ib-ctl">
+        <Switch on={on} labelledBy="ib-split-view-label" onClick={toggle} />
+      </span>
+    </div>
+  );
+}
+
+/**
  * General (design of record `.product/approved/inbox-settings-tabs/`):
  * Appearance (light, dark, or match this computer; the text size; and the
  * palette for each half, Plannotator's one theme preference, so plan review
@@ -255,6 +284,9 @@ function GeneralSection({
   const textSize = useInboxTextSize();
   // Null from an Inbox that predates the setting: no row.
   const favicon = useInboxFavicon();
+  // Null from a settings model without it: no row. Never on a phone, which always shows one thread.
+  const splitView = splitViewSetting(settings);
+  const phone = usePhone();
   const notificationsOn = settings.notifications.enabled && permission === 'granted';
   const status = notifyStatusKind(settings.notifications.enabled, permission);
   const browser = browserName();
@@ -357,6 +389,11 @@ function GeneralSection({
               </button>
             </span>
           </div>
+          {splitView && !phone && <SplitViewRow saved={splitView.on} />}
+          {/* Agent status (agents/agentStatus.ts, owner 2026-11-18): every agent's mark; the ⋮ menu has the same switch. */}
+          <AgentStatusRow />
+          {/* Annotation minimap (data/contentsDots.ts, owner 2026-11-21): the contents rail's comments as dots; the rail itself stays. A phone has no rail. */}
+          {!phone && <ContentsDotsRow />}
           <PaletteRow />
           {favicon && (
             <div className="ib-prow" data-settings-favicon={favicon}>
@@ -389,7 +426,7 @@ function GeneralSection({
       </section>
       <KeyboardSettings />
       <section className="ib-sgroup" data-settings-notifications="" aria-labelledby="ib-g-attention">
-        <h2 id="ib-g-attention">When an agent asks you</h2>
+        <h2 id="ib-g-attention">When an agent sends you something</h2>
         <div className="ib-card">
           <div className="ib-prow">
             <span className="ib-txt">
@@ -487,10 +524,11 @@ function GeneralSection({
 /**
  * Whether Settings → Capabilities offers the System switch to everyone (approval "system-inbox", addendum 2026-11-08:
  * in 0.29 System stays off and hidden; it turns on only by config.json `inboxSystem: true`, for testing). False: the
- * row shows only while System is already on, so a tester who turned it on in config.json can turn it off here. Set it
+ * row shows only while System is already on, so a tester who turned it on in config.json can turn it off here. It is
+ * core's `INBOX_SYSTEM_SWITCH_SHOWN`, which also decides whether agents get System (`plannotator inbox capability`): set that
  * to true when System is announced.
  */
-export const SYSTEM_SETTINGS_ROW_VISIBLE = false;
+export const SYSTEM_SETTINGS_ROW_VISIBLE: boolean = INBOX_SYSTEM_SWITCH_SHOWN;
 
 /**
  * Capabilities (the owner, 2026-10-27): the switches that turn a whole
@@ -510,8 +548,6 @@ function CapabilitiesSection({
   onToggleScheduled,
   codeReview,
   onToggleCodeReview,
-  shape,
-  onToggleShape,
   system,
   onToggleSystem,
   systemProjects,
@@ -536,9 +572,6 @@ function CapabilitiesSection({
   /** Code review in the Inbox (approval "inbox-code-review-direction"), null on an Inbox without it. */
   codeReview: { on: boolean } | null;
   onToggleCodeReview?: (next: boolean) => void;
-  /** Shape (approval "shape-inbox-placement"), null on an Inbox without it. */
-  shape: { on: boolean } | null;
-  onToggleShape?: (next: boolean) => void;
   /** System (approval "system-inbox"): null unless Code review is on. */
   system: { on: boolean } | null;
   onToggleSystem?: (next: boolean) => void;
@@ -553,7 +586,7 @@ function CapabilitiesSection({
   floatDrafts: { on: boolean } | null;
   onToggleFloatDrafts?: (next: boolean) => void;
   experimental: InboxExperimentalSettings | null;
-  onToggleExperimental?: (next: boolean) => void;
+  onToggleExperimental?: (next: boolean, feature?: 'decision_mode' | 'grid') => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
   experimentalHeading: RefObject<HTMLHeadingElement | null>;
 }) {
@@ -561,7 +594,6 @@ function CapabilitiesSection({
   const stepsRow = steps && onToggleSteps;
   const scheduledRow = scheduled && onToggleScheduled;
   const codeReviewRow = codeReview && onToggleCodeReview;
-  const shapeRow = shape && onToggleShape;
   // System's row (see SYSTEM_SETTINGS_ROW_VISIBLE): while hidden, it shows only once System is on, and then stays for
   // as long as Capabilities is open, so turning System off here does not pull the row out from under the click.
   const [systemRowSeen, setSystemRowSeen] = useState(false);
@@ -576,7 +608,7 @@ function CapabilitiesSection({
   const decisionRow = experimental && onToggleExperimental;
   return (
     <>
-      {(boardRow || stepsRow || scheduledRow || codeReviewRow || shapeRow) && (
+      {(boardRow || stepsRow || scheduledRow || codeReviewRow) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
             {boardRow && (
@@ -670,21 +702,6 @@ function CapabilitiesSection({
                 )}
               </div>
             )}
-            {shapeRow && (
-              <div className="ib-prow" data-settings-shape="">
-                <span className="ib-txt">
-                  <span className="ib-l" id="ib-shape-label">
-                    Shape
-                  </span>
-                  <span className="ib-desc">
-                    Boards your agents draw and keep current: a picture of the work you can point at to change or ask. Type /shape in a reply to ask for one; it opens from the thread's header. Off, agents are not offered boards and none shows; every board is kept.
-                  </span>
-                </span>
-                <span className="ib-ctl">
-                  <Switch on={shape.on} labelledBy="ib-shape-label" onClick={() => onToggleShape(!shape.on)} />
-                </span>
-              </div>
-            )}
           </div>
         </section>
       )}
@@ -714,6 +731,20 @@ function CapabilitiesSection({
                     disabled={experimental.decision_mode.env !== null}
                     onClick={() => onToggleExperimental(!experimental.decision_mode.on)}
                   />
+                </span>
+              </div>
+            )}
+            {decisionRow && experimental.grid && (
+              // Grid (approval "inbox-agent-grid"): its page in the sidebar while on; nothing of it while off.
+              <div className="ib-prow" data-settings-grid="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-grid-label">Grid</span>
+                  <span className="ib-desc">
+                    {experimental.grid.env !== null ? `PLANNOTATOR_EXPERIMENTAL turns it ${experimental.grid.env ? 'on' : 'off'}.` : 'A page in the sidebar with all your agents’ work: what needs you, what is moving, what landed and what was dropped.'}
+                  </span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={experimental.grid.on} labelledBy="ib-grid-label" disabled={experimental.grid.env !== null} onClick={() => onToggleExperimental(!experimental.grid!.on, 'grid')} />
                 </span>
               </div>
             )}
@@ -1058,7 +1089,6 @@ export function SettingsPage(props: SettingsPageProps) {
   const steps = settings?.steps && props.onToggleSteps ? settings.steps : null;
   const scheduled = settings?.scheduled_threads && props.onToggleScheduled ? settings.scheduled_threads : null;
   const codeReview = settings?.code_review && props.onToggleCodeReview ? settings.code_review : null;
-  const shape = settings?.shape && props.onToggleShape ? settings.shape : null;
   const system = settings?.system && props.onToggleSystem ? settings.system : null;
   const chapterDiagrams = settings?.chapter_diagrams && props.onToggleChapterDiagrams ? settings.chapter_diagrams : null;
   const bro = settings?.bro && props.onToggleBro ? settings.bro : null;
@@ -1069,7 +1099,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || scheduled !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || scheduled !== null || codeReview !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -1142,7 +1172,7 @@ export function SettingsPage(props: SettingsPageProps) {
         return !voice?.on ? 'Off' : voice.engine === 'api' ? 'API key' : 'Codex login';
       case 'capabilities': {
         // What is on, by name: "Off", "Board", "Decision mode", or "2 on".
-        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, codeReview?.on ? 'Code review' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
+        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, codeReview?.on ? 'Code review' : null, experimental?.decision_mode.on ? 'Decision mode' : null, experimental?.grid?.on ? 'Grid' : null].filter((name): name is string => name !== null);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} on`;
       }
     }
@@ -1267,7 +1297,8 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'capabilities':
         body =
-          (board && props.onToggleBoard) || steps || scheduled || codeReview || shape || bro || experimental ? (
+          (board && props.onToggleBoard) || steps || scheduled || codeReview || bro || experimental ? (
+            <>
             <CapabilitiesSection
               board={board}
               onToggleBoard={props.onToggleBoard}
@@ -1277,8 +1308,6 @@ export function SettingsPage(props: SettingsPageProps) {
               onToggleScheduled={props.onToggleScheduled}
               codeReview={codeReview}
               onToggleCodeReview={props.onToggleCodeReview}
-              shape={shape}
-              onToggleShape={props.onToggleShape}
               system={system}
               onToggleSystem={props.onToggleSystem}
               systemProjects={props.systemProjects}
@@ -1292,6 +1321,9 @@ export function SettingsPage(props: SettingsPageProps) {
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}
             />
+            {/* Each linked computer's switches, under this computer's (LinkedCapabilities.tsx). */}
+            <LinkedCapabilities machines={machines} />
+            </>
           ) : (
             <div className="ib-card ib-sempty" data-settings-capabilities-none="">
               <Icon name="puzzle" />
