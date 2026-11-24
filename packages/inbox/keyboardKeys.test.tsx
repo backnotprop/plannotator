@@ -377,7 +377,6 @@ test('Shift+R runs the refresh of the page on screen, route by route; none where
     ['Drafts', { page: 'drafts' }, null],
     ['Settings', { page: 'settings' }, null],
     ['What’s new', { page: 'whats-new' }, null],
-    ['Shapes', { page: 'shapes' }, null],
     ['the tour', { page: 'tour', tourOn: true }, null],
   ];
   for (const [where, over, kind] of rows) expect([where, refreshKind({ ...base, ...over })]).toEqual([where, kind]);

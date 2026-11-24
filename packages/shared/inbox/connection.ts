@@ -1451,7 +1451,7 @@ export interface InboxReplyCommand {
   /**
    * With `tagged`, on a reply that tags a session the person ADDED to the
    * thread ("Add instead", approval "inbox-tag-handoff"): it works alongside
-   * the owner and gets the person's later replies there too. The wake takes
+   * the owner and gets a later reply there when it is addressed to it. The wake takes
    * INBOX_ADDED_INSTRUCTION and `inboxAddedLine`. An older connection words
    * it as a tag, which stays true for this one reply. Absent otherwise.
    */
@@ -1605,7 +1605,7 @@ export function inboxAlsoTaggedLine(names: readonly string[]): string {
  * thread another session owns ("Add instead", approval "inbox-tag-handoff").
  */
 export const INBOX_ADDED_INSTRUCTION =
-  "The person added you to a Plannotator Inbox thread that another session owns: you work on it alongside that session, and their later replies in it come to you too. Their reply follows as they wrote it; parts of it may be meant for the other session."
+  "The person added you to a Plannotator Inbox thread that another session owns: you work on it alongside that session. Their reply follows as they wrote it; parts of it may be meant for the other session. Their later replies in it come to you only when they are addressed to you."
 
 /** The line under INBOX_ADDED_INSTRUCTION: whose thread it is, read it first, answer in it. */
 export function inboxAddedLine(owner: string, id: string): string {

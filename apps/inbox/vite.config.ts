@@ -11,10 +11,9 @@ import { webTreeSitterServedWasm } from '../../build/web-tree-sitter-served-wasm
 import { excalidrawLocal } from '../../build/excalidraw-local';
 
 /**
- * What the window, the phone's surface (vite.surface.config.ts) and the Shape
- * page (vite.shape.config.ts) build with alike. Each adds how its page is put
- * together: the window packs its code split scripts behind the page (below),
- * the surface and the Shape page inline everything.
+ * What the window and the phone's surface (vite.surface.config.ts) build with
+ * alike. Each adds how its page is put together: the window packs its code
+ * split scripts behind the page (below), the surface inlines everything.
  */
 export const sharedConfig = defineConfig({
   server: {

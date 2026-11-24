@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { InboxDraft, InboxListGroupId, InboxListRow, InboxQuestion, InboxReaction, InboxRun, InboxSentRecipient, InboxThread } from '@plannotator/core/inbox-types';
 import type { MachineView, OutboxView, ThreadModel } from '../api';
+import type { CanvasReplyPart } from '../canvas/replyPart';
 import type { MachinesModel } from '../machines';
 import type { FrameMove } from '../fullScreenOrigin';
 import type { InboxToastModel } from '../components/Toast';
@@ -10,7 +11,6 @@ import type { ActionMark } from '../components/ActionChecklist';
 import type { OpenQuestionsDecide } from '../components/OpenQuestions';
 import type { StepsSubscribe } from '../steps/useThreadSteps';
 import type { Signal } from '../signal';
-import type { ShapeReplyPart } from '../shape/addToReply';
 import type { ThreadPullReview } from '../threadPulls/ThreadPulls';
 import type { OpenFileRef } from '../components/ReferencedFilePane';
 
@@ -73,19 +73,18 @@ export interface ThreadPaneProps {
   onUnsnooze?: () => void;
   replyRequest?: string | null;
   onReplyOpened?: () => void;
-  shapeButton?: ReactNode;
-  /** The thread's open board (ThreadShapeLayer): it takes the messages' and the reply's place under the header. */
-  board?: ReactNode;
   onSide?: (selected: string, source?: string) => void;
   onSideWords?: (words: string, taken?: () => void) => void;
   replyWords?: string | null;
   onReplyWordsTaken?: () => void;
-  replyPart?: ShapeReplyPart | null;
+  /** What the thread's canvas puts in the reply box (canvas/replyPart.ts), and that the box took it. */
+  replyPart?: CanvasReplyPart | null;
   onReplyPartTaken?: () => void;
   /** How the canvas's own Send ended: it went, or it stays in the box for the person (a refused file, a choice at Send). */
   onReplyPartOutcome?: (outcome: 'sent' | 'held') => void;
-  /** The reply box's Sketch button (canvas/CanvasParts.tsx). */
+  /** The Sketch buttons (canvas/CanvasParts.tsx): the reply box's, and the thread header's. */
   sketchButton?: ReactNode;
+  sketchHeader?: ReactNode;
   backLabel?: string;
   cardChip?: ReactNode;
   threadSteps?: { on: boolean; subscribe: StepsSubscribe; boardCard?: { title: string; onOpen: () => void } | null } | null;
@@ -101,7 +100,6 @@ export interface ThreadPaneProps {
   remote?: boolean | null;
   onBackToList?: (fileName: string | null) => void;
   onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;
-  onToastGone?: (onUndo: () => void) => void;
   linkOf?: (messageId?: string) => string;
   onInboxLink?: (href: string) => (() => void) | null;
   landing?: { messageId: string; terms: readonly string[]; questionKey: string | null; focus?: 'prompt' } | null;

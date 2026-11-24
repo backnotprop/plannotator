@@ -16,16 +16,16 @@ const rows = async (response: Response) => ((await response.json()) as { skills:
 const none = () => [];
 
 test("the / list offers /create-routine only while Routines are on, as a built-in the window pastes", async () => {
-  expect((await rows(inboxSkillCatalog(true, none, true, false))).map((s) => s.name)).not.toContain(CREATE_ROUTINE_SKILL.name);
-  const on = await rows(inboxSkillCatalog(false, none, false, true));
+  expect((await rows(inboxSkillCatalog(true, none, false))).map((s) => s.name)).not.toContain(CREATE_ROUTINE_SKILL.name);
+  const on = await rows(inboxSkillCatalog(false, none, true));
   expect(on.filter((s) => s.name !== "picture-it")).toEqual([{ name: "create-routine", root: INBOX_BUILTIN_SKILL_ROOT, description: CREATE_ROUTINE_SKILL.description, humanOnly: true }]);
-  // Beside the other built-ins, after them: the review skills, then /shape, then /create-routine.
-  const all = (await rows(inboxSkillCatalog(true, none, true, true))).map((s) => s.name);
-  expect(all.slice(-2)).toEqual(["shape", "create-routine"]);
+  // Beside the other built-ins, after them: the review skills, then /create-routine.
+  const all = (await rows(inboxSkillCatalog(true, none, true))).map((s) => s.name);
+  expect(all.slice(-2)).toEqual(["review-recheck", "create-routine"]);
 });
 
 test("a skill of the person's own named create-routine wins over the built-in", async () => {
-  const mine = await rows(inboxSkillCatalog(false, () => [{ name: "create-routine", root: "/x", description: "mine" }] as never, false, true));
+  const mine = await rows(inboxSkillCatalog(false, () => [{ name: "create-routine", root: "/x", description: "mine" }] as never, true));
   expect(mine.filter((s) => s.name === "create-routine")).toHaveLength(1);
   expect(mine.find((s) => s.name === "create-routine")).toMatchObject({ root: "/x", description: "mine" });
 });

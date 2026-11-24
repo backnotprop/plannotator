@@ -60,7 +60,7 @@ function mount(node: React.ReactNode) {
 const thread = { thread_id: 'msg_A1', subject: 'Plan', messages: [] } as unknown as InboxThread;
 
 function Pens({ canvas }: { canvas: { on: boolean } | undefined }) {
-  const slot = { settings: { canvas } as SettingsModel, setShapeReply: () => {} } as unknown as ThreadSlotHost;
+  const slot = { settings: { canvas } as SettingsModel, setCanvasReply: () => {} } as unknown as ThreadSlotHost;
   const pens = useThreadCanvas(thread, slot, false);
   return (
     <>

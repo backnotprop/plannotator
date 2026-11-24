@@ -1,6 +1,6 @@
 /**
  * The window's parts loaded on first use (#2593): the guided/code review
- * reader, the Shape board, the search palette and the post dialog.
+ * reader, the search palette and the post dialog.
  *
  * Each is a chunk the Inbox serves (build/pack-inbox.ts). Through a bare
  * React.lazy, the first open suspends while its chunk arrives, and React holds
@@ -26,7 +26,7 @@ type Loaded<P> = { default: ComponentType<P> };
  * `preload` that brings it in. A failed load reaches the caller's
  * LazyBlockBoundary and is forgotten by `preload`. React.lazy keeps its
  * rejection for good, so a host that offers the part again after a failure
- * (the next ⌘K, the next Post, the next Shape board) calls `retry()` first: the next mount then asks
+ * (the next ⌘K, the next Post) calls `retry()` first: the next mount then asks
  * for the chunk again. Without it the part stays failed until Reload.
  */
 export function lazyPart<P extends object>(load: () => Promise<Loaded<P>>) {
@@ -66,7 +66,7 @@ function Failed({ run }: { run: () => void }) {
 }
 
 /**
- * A part drawn in a pane (the review reader, the Shape board): one whose chunk cannot arrive says so in the
+ * A part drawn in a pane (the review reader): one whose chunk cannot arrive says so in the
  * pane with ui's notice and Reload, and the window stays as it is. `loading`: what shows while it arrives.
  * `onFailed`: runs once the notice shows (the host's part `retry()`, so its next open asks again).
  */
@@ -141,7 +141,6 @@ export function ReviewKeysHere(props: { diff: string; viewed: boolean }) {
   }, [ready]);
   return ready ? <ReviewKeysPart.Part {...props} /> : null;
 }
-export const ShapeBoardPart = lazyPart(() => import('#shape-board'));
 /**
  * A thread's canvas (Excalidraw, packages/inbox/canvas): several MB, so never warmed with PARTS; it arrives when a
  * person opens a canvas, or when the Inbox asks this window to draw one for an agent (`canvasWork`).
@@ -159,7 +158,7 @@ export const CanvasLayerPart = lazyPart(() => canvasParts().then((mod) => ({ def
 export const SearchPalettePart = lazyPart(() => import('#search-palette'));
 export const PlatformPostPart = lazyPart(() => import('#platform-post'));
 
-const PARTS = [GuideReaderPart, ShapeBoardPart, SearchPalettePart, PlatformPostPart];
+const PARTS = [GuideReaderPart, SearchPalettePart, PlatformPostPart];
 
 /** Once the window is idle after its first paint: fetch the parts, one per idle slot. Draws nothing. */
 export function WarmWindowParts() {

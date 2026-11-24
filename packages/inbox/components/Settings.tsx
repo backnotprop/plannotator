@@ -99,8 +99,6 @@ export interface SettingsPageProps {
   onToggleBoard?: (next: boolean) => void;
   /** Settings → Capabilities → Code review (approval "inbox-code-review-direction"). Absent (or an Inbox without it): no row. */
   onToggleCodeReview?: (next: boolean) => void;
-  /** Settings → Capabilities → Shape (approval "shape-inbox-placement"). Absent (or an Inbox without it): no row. */
-  onToggleShape?: (next: boolean) => void;
   /** Settings → Capabilities → System (approval "system-inbox"), under Code review and shown only while it is on; in 0.29 also only while System is on (SYSTEM_SETTINGS_ROW_VISIBLE). Absent: no row. */
   onToggleSystem?: (next: boolean) => void;
   /** System's projects with their drawing's state, listed under its switch while it is on; null until read. */
@@ -550,8 +548,6 @@ function CapabilitiesSection({
   onToggleScheduled,
   codeReview,
   onToggleCodeReview,
-  shape,
-  onToggleShape,
   system,
   onToggleSystem,
   systemProjects,
@@ -577,9 +573,6 @@ function CapabilitiesSection({
   /** Code review in the Inbox (approval "inbox-code-review-direction"), null on an Inbox without it. */
   codeReview: { on: boolean } | null;
   onToggleCodeReview?: (next: boolean) => void;
-  /** Shape (approval "shape-inbox-placement"), null on an Inbox without it. */
-  shape: { on: boolean } | null;
-  onToggleShape?: (next: boolean) => void;
   /** System (approval "system-inbox"): null unless Code review is on. */
   system: { on: boolean } | null;
   onToggleSystem?: (next: boolean) => void;
@@ -603,7 +596,6 @@ function CapabilitiesSection({
   const stepsRow = steps && onToggleSteps;
   const scheduledRow = scheduled && onToggleScheduled;
   const codeReviewRow = codeReview && onToggleCodeReview;
-  const shapeRow = shape && onToggleShape;
   // System's row (see SYSTEM_SETTINGS_ROW_VISIBLE): while hidden, it shows only once System is on, and then stays for
   // as long as Capabilities is open, so turning System off here does not pull the row out from under the click.
   const [systemRowSeen, setSystemRowSeen] = useState(false);
@@ -618,7 +610,7 @@ function CapabilitiesSection({
   const decisionRow = experimental && onToggleExperimental;
   return (
     <>
-      {(boardRow || stepsRow || scheduledRow || codeReviewRow || shapeRow || canvasRow) && (
+      {(boardRow || stepsRow || scheduledRow || codeReviewRow || canvasRow) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
             {boardRow && (
@@ -710,21 +702,6 @@ function CapabilitiesSection({
                     ))}
                   </ul>
                 )}
-              </div>
-            )}
-            {shapeRow && (
-              <div className="ib-prow" data-settings-shape="">
-                <span className="ib-txt">
-                  <span className="ib-l" id="ib-shape-label">
-                    Shape
-                  </span>
-                  <span className="ib-desc">
-                    Boards your agents draw and keep current: a picture of the work you can point at to change or ask. Type /shape in a reply to ask for one; it opens from the thread's header. Off, agents are not offered boards and none shows; every board is kept.
-                  </span>
-                </span>
-                <span className="ib-ctl">
-                  <Switch on={shape.on} labelledBy="ib-shape-label" onClick={() => onToggleShape(!shape.on)} />
-                </span>
               </div>
             )}
             {canvasRow}
@@ -1101,7 +1078,6 @@ export function SettingsPage(props: SettingsPageProps) {
   const steps = settings?.steps && props.onToggleSteps ? settings.steps : null;
   const scheduled = settings?.scheduled_threads && props.onToggleScheduled ? settings.scheduled_threads : null;
   const codeReview = settings?.code_review && props.onToggleCodeReview ? settings.code_review : null;
-  const shape = settings?.shape && props.onToggleShape ? settings.shape : null;
   const system = settings?.system && props.onToggleSystem ? settings.system : null;
   const chapterDiagrams = settings?.chapter_diagrams && props.onToggleChapterDiagrams ? settings.chapter_diagrams : null;
   const bro = settings?.bro && props.onToggleBro ? settings.bro : null;
@@ -1112,7 +1088,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || scheduled !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null || !!settings?.canvas) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || scheduled !== null || codeReview !== null || bro !== null || floatDrafts !== null || experimental !== null || !!settings?.canvas) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -1310,7 +1286,7 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'capabilities':
         body =
-          (board && props.onToggleBoard) || steps || scheduled || codeReview || shape || bro || experimental || (settings?.canvas && props.onToggleCanvas) ? (
+          (board && props.onToggleBoard) || steps || scheduled || codeReview || bro || experimental || (settings?.canvas && props.onToggleCanvas) ? (
             <CapabilitiesSection
               board={board}
               onToggleBoard={props.onToggleBoard}
@@ -1320,8 +1296,6 @@ export function SettingsPage(props: SettingsPageProps) {
               onToggleScheduled={props.onToggleScheduled}
               codeReview={codeReview}
               onToggleCodeReview={props.onToggleCodeReview}
-              shape={shape}
-              onToggleShape={props.onToggleShape}
               system={system}
               onToggleSystem={props.onToggleSystem}
               systemProjects={props.systemProjects}

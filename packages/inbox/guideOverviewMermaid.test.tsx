@@ -28,14 +28,11 @@ import { join, resolve } from 'node:path';
 import { FIXTURE_V2_OVERVIEW } from '@plannotator/core/guide-format-fixtures';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
-import type { InboxShapes } from './shape/useInboxShapes';
 import { drawMermaidFencesWithMermaid } from '@plannotator/ui/test-setup/mermaidEngine';
 
 // A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
 drawMermaidFencesWithMermaid();
 
-const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 // The window's tsconfig points `#guide-reader` at the reader's type shape (reader-module.d.ts), which Bun
 // would load as the module; the real reader is package.json's `imports` entry (as guideDiffStyle.test.tsx).
@@ -161,7 +158,7 @@ async function mount(element: React.ReactElement) {
 const box = () => document.querySelector('[data-guide-overview-diagram="mermaid"]');
 
 test.skipIf(!hasDom)('the guide pane draws a Mermaid overview diagram instead of showing its source', async () => {
-  await mount(<ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
+  await mount(<ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} />);
   expect(box() !== null).toBe(true);
   expect(rendered).toContain(DRAWN);
   expect(box()!.querySelector('svg[data-drawn-overview]') !== null).toBe(true);
@@ -172,7 +169,7 @@ test.skipIf(!hasDom)('the guide pane draws a Mermaid overview diagram instead of
 
 test.skipIf(!hasDom)('a Mermaid source that does not render stays readable as its plain fence, without the error panel', async () => {
   snapshot = overviewOf(BROKEN);
-  await mount(<ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
+  await mount(<ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} />);
   expect(rendered).toContain(BROKEN);
   expect(box()!.querySelector('pre')?.textContent).toBe(BROKEN);
   expect(box()!.textContent).not.toContain('Error');
@@ -202,7 +199,7 @@ test.skipIf(!hasDom)("the diagram sits under the overview's words, no wider than
   sheet.textContent = guideRules();
   document.head.append(sheet);
   try {
-    await mount(<ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
+    await mount(<ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} />);
     const title = document.querySelector<HTMLElement>('[data-guide-heading] .gv-title');
     const overview = document.querySelector<HTMLElement>('[data-guide-overview]');
     const diagram = box() as HTMLElement | null;

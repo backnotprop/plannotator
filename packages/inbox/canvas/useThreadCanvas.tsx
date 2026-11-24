@@ -60,7 +60,7 @@ export function useThreadCanvas(thread: InboxThread | null, host: ThreadSlotHost
     const id = canvasOpen;
     setCanvasOpen(null);
     // Words typed (or changed) in the bar and not sent go to the reply box.
-    if (id && canvasWords.current !== canvasDraft) host.setShapeReply({ words: canvasWords.current, file: null, replace: true, quiet: true, threadId: id });
+    if (id && canvasWords.current !== canvasDraft) host.setCanvasReply({ words: canvasWords.current, threadId: id });
   };
   const toggleCanvas = () => (canvasOn ? closeCanvas() : openCanvas());
   const canvasAgent = thread ? ([...thread.messages].reverse().find((m) => m.author.kind === 'agent')?.author ?? null) : null;
@@ -85,7 +85,7 @@ export function useThreadCanvas(thread: InboxThread | null, host: ThreadSlotHost
             // Sent: the bar is empty again, and so is what goes back to the reply box.
             canvasWords.current = '';
             setCanvasDraft('');
-            host.setShapeReply({ words: reply.words, file: null, files: reply.files, sketch: reply.sketch, send: true, replace: true, threadId: canvasFor });
+            host.setCanvasReply({ words: reply.words, files: reply.files, sketch: reply.sketch, send: true, threadId: canvasFor });
           }}
           onClose={closeCanvas}
         />

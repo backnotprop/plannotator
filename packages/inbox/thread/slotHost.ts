@@ -2,6 +2,7 @@ import type { ReactNode, RefObject } from 'react';
 import type { InboxListRow, InboxListSection, InboxReaction, InboxThread, InboxTourChange } from '@plannotator/core/inbox-types';
 import type { CardsModel, OutboxView, SettingsModel, ThreadModel } from '../api';
 import type { Route } from '../app/route';
+import type { CanvasReplyFor } from '../canvas/replyPart';
 import type { SearchLanding } from '../components/SearchHost';
 import type { InboxToastModel } from '../components/Toast';
 import type { ComposeRequest } from '../compose/ComposeDialog';
@@ -9,8 +10,6 @@ import type { MachinesModel } from '../machines';
 import type { useInboxNotifications } from '../notify';
 import type { PanesOnScreen } from '../panes/onScreen';
 import type { PaneReads } from '../panes/paneReads';
-import type { useInboxShapes } from '../shape/useInboxShapes';
-import type { ShapeReplyPart } from '../shape/addToReply';
 import type { KeyedSignal } from '../signal';
 import type { Stack } from '../stack';
 import type { createStepsBus } from '../steps/useThreadSteps';
@@ -52,7 +51,6 @@ export interface ThreadSlotHost {
   pullsShown: boolean;
   stepsBus: ReturnType<typeof createStepsBus>;
   boardEnabled: boolean | null;
-  boardsOn: boolean;
   cards: CardsModel | null;
   backToCard: () => void;
   openThreadRow: InboxListRow | null;
@@ -79,17 +77,12 @@ export interface ThreadSlotHost {
   setReplyFor: (threadId: string | null) => void;
   draftSignals: KeyedSignal;
   filesSignals: KeyedSignal;
-  shapes: ReturnType<typeof useInboxShapes>;
-  /**
-   * The board open in this thread (`#thread=…&shape=…`), drawn in the thread's own pane under its header, or null.
-   * `sidebarToggle`: the board's own sidebar toggle, where the list's (and its toggle) is not beside the thread.
-   */
-  board: ((inThread: boolean, sidebarToggle: boolean) => ReactNode) | null;
   ask: { side: ThreadPaneProps['onSide']; sideWords: ThreadPaneProps['onSideWords'] };
   askReply: { threadId: string; words: string } | null;
   setAskReply: (next: null) => void;
-  shapeReply: (ShapeReplyPart & { threadId: string }) | null;
-  setShapeReply: (next: (ShapeReplyPart & { threadId: string }) | null) => void;
+  /** What the thread's canvas puts in a thread's reply box (canvas/useThreadCanvas.tsx), until that pane takes it. */
+  canvasReply: CanvasReplyFor | null;
+  setCanvasReply: (next: CanvasReplyFor | null) => void;
   patchQuestions: ThreadPaneProps['onQuestions'];
   /** A run of pick saves on `threadId` (this pane's) changed or ended (App's `onPickSaves`). */
   onPickSaves: (ids: ReadonlySet<string>, paneClosed: boolean | undefined, threadId: string | null) => void;
@@ -109,8 +102,6 @@ export interface ThreadSlotHost {
   setThreadFull: (on: boolean) => void;
   leaveFull: () => void;
   showToast: (toast: Omit<InboxToastModel, 'id'>) => void;
-  toastNow: RefObject<InboxToastModel | null>;
-  dismissToast: () => void;
   inboxLink: (href: string) => (() => void) | null;
   /** Fold a docked sidebar on screen when the list and `columns` thread columns (the open ones by default) fit only without it. */
   holdSidebarIfTight: (columns?: number) => void;
