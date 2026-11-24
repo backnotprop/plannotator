@@ -358,4 +358,51 @@ test.skipIf(!hasDom)('words that did not land, while another device saved the dr
   await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict');
   expect(box(el)!.value).toBe('Older words. Newer words.');
   expect(drafts.get(ONE)?.body).toBe('The iPad wrote this.');
+  // Keep mine saves them over it (and leaves nothing waiting for the next test).
+  act(() => [...el.querySelectorAll<HTMLButtonElement>('[data-draft-conflict] button')].find((b) => b.textContent === 'Keep mine')!.click());
+  await until(() => drafts.get(ONE)?.body === 'Older words. Newer words.', 'Keep mine saved');
+});
+
+/** The page hidden (a phone's app switch, the tab switcher, a locked screen) or shown again, as `visibilitychange` says. */
+function pageVisibility(state: 'hidden' | 'visible') {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  act(() => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+}
+
+test.skipIf(!hasDom)('the page hidden inside the pause in typing: the words are sent at once, and read back when it shows again', async () => {
+  const el = await open();
+  await reply(el);
+  try {
+    const at = Date.now();
+    typeOn(el, 'Typed on the phone, then another app.');
+    pageVisibility('hidden');
+    // Well inside the pause in typing (500 ms): sent as the page hid, not after it.
+    await until(() => drafts.get(ONE)?.body === 'Typed on the phone, then another app.', 'the save as the page hid', 200);
+    expect(Date.now() - at < 400).toBe(true);
+    pageVisibility('visible');
+    await settle(4);
+    expect(el.querySelector('[data-draft-failed]') === null).toBe(true);
+    expect(replyDraftUnsaved()).toBe(false);
+    // Typing on saves over it: never a conflict with this window's own words.
+    typeOn(el, ' Back.');
+    await until(() => drafts.get(ONE)?.body === 'Typed on the phone, then another app. Back.', 'saved on top', 1500);
+    expect(el.querySelector('[data-draft-conflict]') === null).toBe(true);
+  } finally {
+    pageVisibility('visible');
+  }
+});
+
+test.skipIf(!hasDom)('the page hidden while its save did not land: the words are sent again as it hides', async () => {
+  const el = await typedThenFailed(noNetwork);
+  try {
+    saveAnswer = null;
+    pageVisibility('hidden');
+    await until(() => drafts.get(ONE)?.body === 'Older words. Newer words.', 'the save as the page hid', 300);
+    pageVisibility('visible');
+    await until(() => el.querySelector('[data-draft-failed]') === null, '"Not saved" gone');
+  } finally {
+    pageVisibility('visible');
+  }
 });

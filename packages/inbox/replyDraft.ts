@@ -810,11 +810,13 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   // A reload or a closed tab while a save waits: sent as the page goes (keepalive).
   useEffect(() => {
     const onHide = () => {
-      const next = pending.current;
-      if (!next) return;
+      // What waits for the pause in typing, else words of the open thread whose save did not land.
+      const open = current.current;
+      const failed = failedWords.get(open);
+      const next = pending.current ?? (failed !== undefined && queuedOf(open).length === 0 ? { threadId: open, text: failed, files: NO_FILES, ops: NO_FILE_OPS } : null);
+      if (!next || keptAlive.current || claimed.current.has(next.threadId) || conflicts.current.has(next.threadId) || offers.has(next.threadId)) return;
       pending.current = null;
       if (timer.current) clearTimeout(timer.current);
-      if (claimed.current.has(next.threadId) || conflicts.current.has(next.threadId) || offers.has(next.threadId)) return;
       const ops = composeReplyDraftFileOps(carried.get(next.threadId) ?? NO_FILE_OPS, next.ops);
       // `base` may be a step behind a save still on its way; `base_body` names the words that save carries.
       void storeRef.current
@@ -825,15 +827,23 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       // Kept until the page comes back and reads it back (or the page goes, and the next one reads the draft).
       carry(next.threadId, next.ops);
     };
-    // Back from the back/forward cache: the keepalive's answer was never read, and the `drafts` frames
-    // sent meanwhile are not replayed. Read back what it saved.
-    const onShow = (event: PageTransitionEvent) => {
+    // Back (the tab shown again, or from the back/forward cache): the keepalive's answer was never read, and the
+    // `drafts` frames sent meanwhile may not be replayed. Read back what it saved; words it did not land are saved again.
+    const readBack = () => {
       const kept = keptAlive.current;
       keptAlive.current = null;
-      if (!event.persisted || !kept) return;
+      if (!kept) return;
       chain.current = chain.current.then(async () => {
         const latest = await readDraft(kept.threadId);
-        if (kept.generation !== generationOf(kept.threadId) || !holds(latest, kept.text, kept.ops)) return;
+        if (kept.generation !== generationOf(kept.threadId) || claimed.current.has(kept.threadId)) return;
+        if (!holds(latest, kept.text, kept.ops)) {
+          // Not read (no answer yet): kept as not saved, and saved again once the Inbox answers.
+          if (latest === undefined) {
+            if (kept.text.trim() !== '') markRefused(kept.threadId, true, kept.text);
+          }
+          else if (!conflicts.current.has(kept.threadId)) write(kept.threadId, kept.text);
+          return;
+        }
         takeCarried(kept.threadId);
         markRefused(kept.threadId, false);
         learn(kept.threadId, latest!);
@@ -841,11 +851,20 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         boxTakes(kept.threadId, latest!);
       });
     };
+    const onShow = (event: PageTransitionEvent) => {
+      if (event.persisted) readBack();
+      else keptAlive.current = null;
+    };
+    // A phone hides the page (another app, the tab switcher, the screen locked) without `pagehide`, and may end it there:
+    // what waits is sent as the page hides, as it is when the page goes.
+    const onVisibility = () => (document.visibilityState === 'hidden' ? onHide() : readBack());
     window.addEventListener('pagehide', onHide);
     window.addEventListener('pageshow', onShow);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('pagehide', onHide);
       window.removeEventListener('pageshow', onShow);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 
