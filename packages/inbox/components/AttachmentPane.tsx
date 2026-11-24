@@ -1534,7 +1534,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     for (const id of listedIds.current) if (!ids.has(id)) viewerRef.current?.removeHighlight(id);
     listedIds.current = ids;
   }, [annotations]);
-
   const save = useCallback(
     (annotation: Annotation): Promise<boolean> => {
       // The file is closing (or Escape set a comment aside): the composer's words become its draft, not a comment.
@@ -1557,6 +1556,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           props.onSaved(record);
           return true;
         } catch (cause) {
+          if (annotation.diagramAnchor?.family === 'plannotator-diagram') throw cause; // Report inside its open editor.
           setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
           return false;
         }

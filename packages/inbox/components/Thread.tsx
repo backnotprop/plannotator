@@ -1266,8 +1266,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       saveRecord(result.annotation);
       return true;
     } catch (cause) {
-      // A Delete on another machine's message, refused (422) by an Inbox too old to take one (it does not say
-      // `message_deletions`): say so, with that machine's Update, not its store's words (approval "inbox-toolbar-delete").
+      if (annotation.diagramAnchor?.family === 'plannotator-diagram') throw cause; // Its editor keeps the words and explains the refusal.
+      // Offer Update when a linked Inbox predates message deletions (approval "inbox-toolbar-delete").
       const home = machineOf(messageId) ?? machineOf(thread.thread_id);
       if (home !== null && annotation.type === AnnotationType.DELETION && cause instanceof InboxApiError && cause.status === 422 && machine?.message_deletions !== true) {
         const line = `${machine?.name ?? 'That machine'} needs an update to delete words`;

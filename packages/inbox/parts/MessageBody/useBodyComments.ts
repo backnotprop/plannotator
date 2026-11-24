@@ -37,6 +37,7 @@ export function useBodyComments({ comments, message, blocks, onPick, pictures = 
   commentsRef.current = comments;
   const painted = useRef<Set<string>>(new Set());
   const addComment = useCallback(async (annotation: Annotation) => {
+    if (annotation.diagramAnchor?.family === 'plannotator-diagram') return commentsRef.current?.onSave(annotation) ?? false;
     painted.current.add(annotation.id);
     const saved = await commentsRef.current?.onSave(annotation).catch(() => false);
     if (!saved) {

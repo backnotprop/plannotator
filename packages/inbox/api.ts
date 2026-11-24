@@ -109,7 +109,7 @@ import type {
 } from '@plannotator/core/inbox-types';
 
 import { newUuid } from './uuid';
-import { trackCommentWrite } from './commentSaves';
+import { annotationBody, trackCommentWrite } from './commentSaves';
 
 /**
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
@@ -932,7 +932,7 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
         rememberMachine(idsIn(entry.answer), machine);
         return entry.answer as T;
       }
-      // Taken back with Cancel: a Send retried with its key never sends it after all.
+      if (body.diagram_annotation && entry.state === 'refused' && entry.status === 422) return readJson<T>(Response.json(entry.answer, { status: 422 }));
       if (entry.state === 'cancelled') throw new InboxApiError(409, 'outbox_cancelled', `Cancelled. It was never sent to ${held.machine?.name ?? 'the other machine'}.`);
       const why = entry.answer && typeof entry.answer === 'object' ? (entry.answer as { error?: unknown }).error : null;
       throw new InboxApiError(409, 'not_delivered', typeof why === 'string' && why ? why : `Not delivered to ${held.machine?.name ?? 'the other machine'}.`);
@@ -1523,7 +1523,7 @@ export const inboxApi = {
     trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id, annotation }),
   /** A comment on the text of an agent's message (the words selected), new or edited; removed through `removeAnnotation`. */
   saveMessageAnnotation: (messageId: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id, annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), annotationBody(annotation)), { on: messageId, id: (annotation as { id?: unknown }).id, annotation }),
   // A question choice's running-app prototype, through the live proxy (packages/server/inbox-live.ts). `probe`: the
   // app is asked first, so a stopped one answers 422 live_not_answering instead of the proxy framing its error.
   liveSite: (threadId: string, siteId: string, probe = false) =>
@@ -1606,7 +1606,7 @@ export const inboxApi = {
   linkedPage: (attachmentId: string, path: string) =>
     get<LinkedPageView>(attachmentUrl(attachmentId, `/linked-page?path=${encodeURIComponent(path)}`)),
   saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }), { on: attachmentId, id: (annotation as { id?: unknown }).id, annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, ...annotationBody(annotation) }), { on: attachmentId, id: (annotation as { id?: unknown }).id, annotation }),
   removeAnnotation: (id: string) =>
     trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}), { on: id, id, remove: true }),
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */

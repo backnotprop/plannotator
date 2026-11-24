@@ -51,21 +51,44 @@ test('diagram discovery, inline and expanded comments, owner-scoped source and a
     await editor.fill('Who handles retries?');
     const writes: string[] = [];
     await page.route('**/api/inbox/annotations', async route => {
-      const { annotation } = route.request().postDataJSON();
-      writes.push(annotation.id);
-      if (writes.length > 1) return route.continue();
-      // A peer from before native diagram anchors returns a successful write with the anchor stripped.
-      const { diagramAnchor, ...stripped } = annotation;
-      await route.fulfill({ json: { annotation: { id: annotation.id, annotation: stripped } } });
+      const { diagram_annotation: pin, ...legacyBody } = route.request().postDataJSON();
+      expect(pin.diagramAnchor.family).toBe('plannotator-diagram');
+      expect(legacyBody).not.toHaveProperty('annotation');
+      writes.push(pin.id);
+      if (writes.length === 1) {
+        // Run the former decoder against the real store: it cannot see the new envelope and must refuse before writing.
+        const response = await route.fetch({ postData: legacyBody });
+        expect(response.status()).toBe(422);
+        return route.fulfill({ response });
+      }
+      if (writes.length === 2) return route.abort('failed'); // An ordinary connection failure can be retried.
+      return route.continue();
     });
-    await inline.getByRole('button', { name: 'Add comment' }).click();
-    await expect(inline.getByText('The diagram comment could not be saved.')).toBeVisible();
+    const add = inline.getByRole('button', { name: 'Add comment' });
+    await add.click();
+    await expect(inline.getByRole('alert')).toHaveText('The other computer needs a newer Plannotator to pin this comment.');
     await expect(editor).toHaveValue('Who handles retries?');
+    await expect(add).toBeDisabled();
+    await editor.press('Control+Enter');
+    expect(writes).toHaveLength(1);
+    await page.reload();
+    const expandAuthor = page.getByRole('button', { name: /^Diagram author, .*1 attachment/ });
+    if (!(await queue.count())) await expandAuthor.click();
+    await expect(inline.getByRole('button', { name: 'Comment 1 on Queue' })).toHaveCount(0);
+    await queue.focus();
+    await queue.press('Enter');
+    await inline.getByRole('button', { name: 'Comment', exact: true }).click();
+    await editor.fill('Who handles retries?');
+    await add.click();
+    await expect(inline.getByRole('alert')).toHaveText('Couldn’t save the comment. Try again.');
+    await expect(editor).toHaveValue('Who handles retries?');
+    await expect(add).toBeEnabled();
     await editor.fill('Show who handles retries.');
-    await inline.getByRole('button', { name: 'Add comment' }).click();
+    await add.click();
     await expect(inline.getByRole('button', { name: 'Comment 1 on Queue' })).toBeVisible();
     await expect(inline.getByRole('button', { name: 'Comment 1 on Queue' })).toBeFocused();
-    expect(writes).toEqual([writes[0], writes[0]]);
+    expect(writes).toHaveLength(3);
+    expect(writes[2]).toBe(writes[1]);
     await inline.getByRole('button', { name: 'Expand diagram' }).click();
     const popout = page.locator('[data-diagram-popout]');
     await expect(popout.getByRole('button', { name: 'Comment 1 on Queue' })).toBeVisible();
@@ -88,7 +111,6 @@ test('diagram discovery, inline and expanded comments, owner-scoped source and a
     }
     await popout.getByRole('button', { name: 'Close', exact: true }).first().click();
     await page.reload();
-    const expandAuthor = page.getByRole('button', { name: /^Diagram author, .*1 attachment/ });
     await expandAuthor.click();
     await expect(inline.getByRole('button', { name: 'Comment 1 on Queue' })).toBeVisible();
     if (process.env.PLANNOTATOR_E2E_PROOF_DIR) await page.screenshot({ path: join(process.env.PLANNOTATOR_E2E_PROOF_DIR, 'inbox-inline-diagram.png') });
@@ -133,6 +155,54 @@ test('diagram discovery, inline and expanded comments, owner-scoped source and a
     expect(note?.body).toContain('Diagram panel Queue (queue)');
   } finally {
     await later?.close().catch(() => {});
+    await agent?.close().catch(() => {});
+    await removeInboxScratch(root);
+  }
+});
+
+test('an older receiver leaves a message-fence draft in its editor and nothing to send', async ({ page }) => {
+  const root = inboxScratch('plannotator-old-message-pin-');
+  const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? '.local/plannotator');
+  const env = { PATH: [dirname(binary), process.env.PATH].join(':'), HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'),
+    PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
+  let agent: SimAgent | undefined;
+  try {
+    const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
+    expect(started.status, started.stderr).toBe(0);
+    const url = started.stdout.trim();
+    const project = scratchProject(join(root, 'src'), 'orders');
+    agent = await SimAgent.connect({ binary, env, name: 'Diagram author', host: 'codex' });
+    const drawing = { id: 'orders', title: 'Orders', columns: [{ id: 'cart', title: 'Cart' }] };
+    const sent = await agent.send({ project_path: project, subject: 'Orders', body: ['```plannotator-diagram', JSON.stringify(drawing), '```'].join('\n') });
+    await page.goto(`${url}#thread=${sent.thread_id}`);
+    const part = page.getByRole('button', { name: 'panel Cart' });
+    await part.focus();
+    await part.press('Enter');
+    await page.getByRole('button', { name: 'Comment', exact: true }).click();
+    const draft = page.getByRole('textbox', { name: 'Comment on Cart' });
+    await draft.fill('Show where tax is calculated.');
+    await page.route(`**/messages/${sent.message_id}/annotations`, async route => {
+      const { diagram_annotation: pin, ...oldBody } = route.request().postDataJSON();
+      expect(pin.diagramAnchor.id).toBe('cart');
+      expect(oldBody).not.toHaveProperty('annotation');
+      const refusal = await route.fetch({ postData: oldBody });
+      expect(refusal.status()).toBe(422);
+      return route.fulfill({ response: refusal });
+    });
+    await page.getByRole('button', { name: 'Add comment' }).click();
+    await expect(page.getByRole('alert')).toHaveText('The other computer needs a newer Plannotator to pin this comment.');
+    await expect(draft).toHaveValue('Show where tax is calculated.');
+    await expect(page.getByRole('button', { name: 'Add comment' })).toBeDisabled();
+    await page.reload();
+    await expect(part).toBeAttached();
+    await expect(page.getByRole('button', { name: 'Comment 1 on Cart' })).toHaveCount(0);
+    const pane = page.locator('section.ib-pane');
+    await pane.getByRole('button', { name: 'Reply', exact: true }).last().click();
+    await pane.locator('.ib-rbox textarea').fill('Thanks for the drawing.');
+    await pane.getByRole('button', { name: 'Send', exact: true }).click();
+    const received = await agent.nextReply(sent.thread_id as string, 10);
+    expect(received.body).toBe('Thanks for the drawing.');
+  } finally {
     await agent?.close().catch(() => {});
     await removeInboxScratch(root);
   }

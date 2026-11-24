@@ -49,15 +49,8 @@ function InlineDiagram({ renderBlock: NativeDiagramBlock, attachment, records, r
   const annotations = records.filter((r) => r.path === attachment.path && r.version === view.version).map(annotationOf);
   const blocks = diagramDocumentBlocks(view.text, 'plannotator-diagram');
   const save = async (annotation: Annotation) => {
-    try {
-      const record = await source.saveAnnotation(attachment, view.version, annotation);
-      onSaved(record);
-      setError('');
-      return true;
-    } catch {
-      setError('The diagram comment could not be saved.');
-      return false;
-    }
+    onSaved(await source.saveAnnotation(attachment, view.version, annotation));
+    return true;
   };
   return <div data-inline-diagram-attachment={attachment.id}>
     <LazyBlockBoundary fallback={notice => <>{notice}<pre className="max-h-64 overflow-auto">{view.text}</pre></>}>
@@ -72,6 +65,5 @@ function InlineDiagram({ renderBlock: NativeDiagramBlock, attachment, records, r
           embedded />
       </Suspense>
     </LazyBlockBoundary>
-    {error && <p role="alert">{error}</p>}
   </div>;
 }
