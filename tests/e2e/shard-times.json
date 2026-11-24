@@ -51,6 +51,7 @@
   "inbox-choice-pill.spec.ts": 2,
   "inbox-cloud-how.spec.ts": 3,
   "inbox-cloud-wake.spec.ts": 3,
+  "inbox-code-review-offer.spec.ts": 70,
   "inbox-code-review.spec.ts": 65,
   "inbox-combine-machines.spec.ts": 150,
   "inbox-comment-box-attach.spec.ts": 60,

@@ -92,6 +92,8 @@ interface State {
   held: boolean;
   toast: boolean;
   thread: string | null;
+  /** Code review turned on elsewhere (Settings, another window): the settings say so. */
+  onElsewhere?: boolean;
 }
 
 /** Day 0: the line has it next, the first-run screen with the tour's entry screen up. */
@@ -114,7 +116,7 @@ function Harness({ state }: { state: State }) {
     place: state.thread ?? '',
     heldBack: () => state.held,
     toast: state.toast,
-    on: codeReviewOn,
+    on: codeReviewOn || state.onElsewhere === true,
   });
   agentNoteMayGo = offer.settled;
   return (
@@ -243,6 +245,28 @@ describe.skipIf(!hasDom)("Code review's offer on day 0", () => {
     expect(claims()).toHaveLength(0);
     expect(dialog()).toBeNull();
     expect(agentNoteMayGo).toBe(true);
+  });
+
+  test('Code review already on (Settings, another window) before its moment: never opens, no claim, and the agent note need not wait', async () => {
+    const set = mount({ ...DAY0, onElsewhere: true });
+    set({ tourScreen: false });
+    await wait(TIMES.settledMs * 4);
+    expect(claims()).toHaveLength(0);
+    expect(dialog()).toBeNull();
+    expect(agentNoteMayGo).toBe(true);
+  });
+
+  test('its lines name nothing that is gone (Shape, System), and each icon is hidden from a screen reader', async () => {
+    await opened();
+    const lines = [...dialog()!.querySelectorAll('#ib-cro-feats li')];
+    expect(lines.length).toBeGreaterThan(0);
+    expect(dialog()!.textContent).not.toMatch(/\bshape\b|\bsystem\b/i);
+    for (const line of lines) {
+      const icons = [...line.querySelectorAll('svg')];
+      expect(icons).toHaveLength(1);
+      expect(icons[0]!.getAttribute('aria-hidden')).toBe('true');
+      expect(line.textContent!.trim()).not.toBe('');
+    }
   });
 
   test('another one-time dialog on this load (an update, the sound): blocked, no claim', async () => {
