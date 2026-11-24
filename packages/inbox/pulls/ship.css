@@ -74,7 +74,7 @@
   .ib-shp :is(.ib-shp-rev, .ib-shp-in, .ib-shp-pool, .ib-shp-pool > span),
   .ib-shp[data-shp-launch] :is(.ib-shp-rev, .ib-shp-in),
   .ib-prrow[data-ship] :is(.ib-shp-sail, .ib-shp-rock, .ib-rvr-agent) { animation: none; }
-  .ib-shp-glide { display: none; }
+  .ib-shp-glide { display: none; animation: none; transition: none; }
   .ib-shp-sand { transition: none; }
 }
 

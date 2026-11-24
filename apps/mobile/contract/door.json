@@ -169,6 +169,22 @@
       "relay": true
     },
     {
+      "name": "POST grid/seen",
+      "method": "POST",
+      "path": "grid/seen",
+      "params": [],
+      "call": "postGridSeen",
+      "window": "/api/inbox/grid/seen",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST threads/:id/read",
       "method": "POST",
       "path": "threads/{thread}/read",

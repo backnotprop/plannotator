@@ -2384,7 +2384,7 @@
     },
     {
       "id": "window-178",
-      "title": "Capabilities section: switches for the Board, the Checklist, Code review (with Chapter diagrams), Shape; \"Experimental\" group: Decision mode, Bro mode, Float reply drafts; Routines switch",
+      "title": "Capabilities section: switches for the Board, the Checklist, Code review (with Chapter diagrams), Shape; \"Experimental\" group: Decision mode, Grid, Bro mode, Float reply drafts; Routines switch",
       "surface": [],
       "flows": [],
       "mobile": "later",
@@ -16752,7 +16752,7 @@
     },
     {
       "id": "other-settings-10",
-      "title": "Capabilities (`capabilities`): Board; Checklist; Routines; Code review; Chapter diagrams; System (hidden unless turned on in config); Shape. **Experimental**: Decision mode, Bro mode, Float reply drafts",
+      "title": "Capabilities (`capabilities`): Board; Checklist; Routines; Code review; Chapter diagrams; System (hidden unless turned on in config); Shape. **Experimental**: Decision mode, Grid, Bro mode, Float reply drafts",
       "surface": [
         "settings:capabilities"
       ],
@@ -22327,26 +22327,308 @@
       }
     },
     {
-      "id": "ship-mode",
-      "title": "Ship (Reviews): a row's Ship and its agent picker, ship mode on the row, the ship log and Stop; the Inbox's notes to the shipping agent",
+      "id": "undecided-door-post-grid-seen",
+      "title": "door:POST grid/seen",
       "surface": [
-        "door:GET ships",
-        "door:GET ships/log",
-        "door:POST ships",
-        "door:POST ships/stop",
-        "window:/api/inbox/ships",
-        "window:/api/inbox/ships/log",
-        "window:/api/inbox/ships/stop",
-        "frame:ships",
-        "enum:InboxMessageWire.ship_note.kind.stop",
-        "enum:InboxMessageWire.ship_note.kind.watch",
-        "field:InboxMessageWire.ship_note"
+        "door:POST grid/seen"
       ],
       "flows": [],
-      "mobile": "later",
-      "why": "L-size: Ship is a Reviews row's, and the native app gets Reviews with its pull request screens; its door routes are machineOnly, as the pull routes are. A ship note is the person's own message: the thread shows it as one.",
-      "reason": "L-size",
-      "source": "approval inbox-ship-mode (2026-11-24)",
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-grid-seen",
+      "title": "window:/api/inbox/grid/seen",
+      "surface": [
+        "window:/api/inbox/grid/seen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-frame-grid-seen",
+      "title": "frame:grid-seen",
+      "surface": [
+        "frame:grid-seen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-checks-failing",
+      "title": "enum:InboxThreadPullsSummaryItem.checks.failing",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.checks.failing"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-checks-passing",
+      "title": "enum:InboxThreadPullsSummaryItem.checks.passing",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.checks.passing"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-checks-running",
+      "title": "enum:InboxThreadPullsSummaryItem.checks.running",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.checks.running"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-review-approved",
+      "title": "enum:InboxThreadPullsSummaryItem.review.approved",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.review.approved"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-review-changes-requested",
+      "title": "enum:InboxThreadPullsSummaryItem.review.changes_requested",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.review.changes_requested"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-review-review-required",
+      "title": "enum:InboxThreadPullsSummaryItem.review.review_required",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.review.review_required"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-grid-seen",
+      "title": "field:InboxListRow.grid_seen",
+      "surface": [
+        "field:InboxListRow.grid_seen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-steps-progress",
+      "title": "field:InboxListRow.steps_progress",
+      "surface": [
+        "field:InboxListRow.steps_progress"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummary-items",
+      "title": "field:InboxThreadPullsSummary.items",
+      "surface": [
+        "field:InboxThreadPullsSummary.items"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-added-at",
+      "title": "field:InboxThreadPullsSummaryItem.added_at",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.added_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-checks",
+      "title": "field:InboxThreadPullsSummaryItem.checks",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.checks"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-key",
+      "title": "field:InboxThreadPullsSummaryItem.key",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.key"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-read-at",
+      "title": "field:InboxThreadPullsSummaryItem.read_at",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.read_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-review",
+      "title": "field:InboxThreadPullsSummaryItem.review",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.review"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-state",
+      "title": "field:InboxThreadPullsSummaryItem.state",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.state"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-machineview-clock-ms",
+      "title": "field:MachineView.clock_ms",
+      "surface": [
+        "field:MachineView.clock_ms"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-ships",
+      "title": "door:GET ships",
+      "surface": [
+        "door:GET ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-ships-log",
+      "title": "door:GET ships/log",
+      "surface": [
+        "door:GET ships/log"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-ships",
+      "title": "door:POST ships",
+      "surface": [
+        "door:POST ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22367,10 +22649,122 @@
       }
     },
     {
+      "id": "undecided-door-post-ships-stop",
+      "title": "door:POST ships/stop",
+      "surface": [
+        "door:POST ships/stop"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-ships",
+      "title": "window:/api/inbox/ships",
+      "surface": [
+        "window:/api/inbox/ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-ships-log",
+      "title": "window:/api/inbox/ships/log",
+      "surface": [
+        "window:/api/inbox/ships/log"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-window-api-inbox-ships-newer",
       "title": "window:/api/inbox/ships/newer",
       "surface": [
         "window:/api/inbox/ships/newer"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-ships-stop",
+      "title": "window:/api/inbox/ships/stop",
+      "surface": [
+        "window:/api/inbox/ships/stop"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-frame-ships",
+      "title": "frame:ships",
+      "surface": [
+        "frame:ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-ship-note-kind-stop",
+      "title": "enum:InboxMessageWire.ship_note.kind.stop",
+      "surface": [
+        "enum:InboxMessageWire.ship_note.kind.stop"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-ship-note-kind-watch",
+      "title": "enum:InboxMessageWire.ship_note.kind.watch",
+      "surface": [
+        "enum:InboxMessageWire.ship_note.kind.watch"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-ship-note",
+      "title": "field:InboxMessageWire.ship_note",
+      "surface": [
+        "field:InboxMessageWire.ship_note"
       ],
       "flows": [],
       "mobile": "undecided",

@@ -2044,6 +2044,19 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   pulls?: InboxThreadPullsSummary;
   /**
+   * Grid (approval "inbox-agent-grid"): the person's last look at this thread's line on Grid, kept on the thread's
+   * own machine (server inbox-grid-seen.ts), so a look on a phone or a linked computer counts everywhere. `through`:
+   * the line's last landing or drop (ms, that machine's clock) the look showed; `at`: when the look was (ms). Absent
+   * until a line of it was shown, and from an older Inbox.
+   */
+  grid_seen?: { through: number; at: number };
+  /**
+   * The thread's checklist as Grid reads it (approval "inbox-agent-grid": "checklist steps may show"): the latest
+   * list's steps done and counted (a dropped step not counted), the step in progress, and when a step last changed.
+   * Only while that machine's Checklist switch is on; a linked machine's rows carry their own. Absent otherwise.
+   */
+  steps_progress?: { done: number; total: number; doing: string | null; at: string };
+  /**
    * The thread's open PRs that are not hidden (keys; the server's inbox-pull-hidden.ts): the row menu's and the picks'
    * "Hide pull request". Only on this Inbox's own rows of the list the window and the phone read; absent when none.
    * A thread whose open PRs are all hidden is left out of that list (it stays in search and in Reviews' Hidden).
