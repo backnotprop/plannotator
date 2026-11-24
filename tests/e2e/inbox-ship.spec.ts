@@ -23,7 +23,7 @@
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/ship.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -297,6 +297,19 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(proofDir, name) });
 }
 
+/** A stuck row's line: "Stuck:" drawn whole, a few characters of its reason drawn, and the title the wider of the two. */
+async function stuckRoom(row: Locator) {
+  return row.evaluate((el) => {
+    const width = (selector: string) => el.querySelector(selector)!.getBoundingClientRect().width;
+    const head = el.querySelector<HTMLElement>('.ib-shp-head')!;
+    return {
+      head: head.getBoundingClientRect().width > 20 && head.scrollWidth <= Math.ceil(head.getBoundingClientRect().width),
+      why: width('.ib-shp-why') >= 24,
+      titleLarger: width('.ib-rvr-t') >= width('[data-ship-words]'),
+    };
+  });
+}
+
 /** The window reads its ships again (as it does on focus). */
 async function reread(page: Page) {
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
@@ -346,11 +359,19 @@ test('desktop: Ship from the row menu with the review agent, ship mode, stuck, t
     await reread(page);
     await expect(receipt).toHaveAttribute('data-ship', 'stuck');
     await expect(receipt.locator('[data-ship-words]')).toContainText('Stuck: e2e-checkout failing');
-    // The title keeps the room it has on a row that does not ship; the stuck words give way, whole in their tooltip.
-    expect((await receipt.locator('.ib-rvr-t').boundingBox())!.width).toBeGreaterThanOrEqual(titleBefore.width - 0.5);
+    // Short of room: "Stuck:" whole, the start of the reason, the title the larger share; the whole words in a tooltip.
     await expect(receipt.locator('[data-ship-words]')).toHaveAttribute('title', /Stuck: e2e-checkout failing/);
-    expect(await receipt.locator('.ib-rvr-t').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(await stuckRoom(receipt)).toEqual({ head: true, why: true, titleLarger: true });
     await shot(page, '04-stuck.png');
+    // A long title takes no more than its share: the reason still shows its start.
+    await receipt.locator('.ib-rvr-t').evaluate((el) => {
+      el.textContent = 'Send a receipt after checkout with the order lines, the tax and the shipping address in it';
+    });
+    expect(await stuckRoom(receipt)).toEqual({ head: true, why: true, titleLarger: true });
+    await shot(page, '04b-stuck-long-title.png');
+    await receipt.locator('.ib-rvr-t').evaluate((el, text) => {
+      el.textContent = text;
+    }, RECEIPT.title);
 
     // 5. The ship log, from the row's menu; Stop.
     ships = [shipOf({})];
@@ -405,7 +426,15 @@ test('phone: rows in ship mode', async ({ browser }) => {
       });
       expect(edges).toEqual({ left: 0, right: 0, ageInside: true });
     }
+    const retry = page.locator('[data-reviews-row="thr_retry"]');
+    expect(await stuckRoom(retry)).toEqual({ head: true, why: true, titleLarger: true });
     await shot(page, '07-phone.png');
+    // A long title on the phone: still "Stuck:" and the start of why.
+    await retry.locator('.ib-rvr-t').evaluate((el) => {
+      el.textContent = 'Retry failed charges twice before the card is marked declined and the person is told';
+    });
+    expect(await stuckRoom(retry)).toEqual({ head: true, why: true, titleLarger: true });
+    await shot(page, '07b-phone-stuck-long-title.png');
   } finally {
     await context.close();
   }

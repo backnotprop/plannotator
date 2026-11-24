@@ -85,16 +85,25 @@ export function ShipWater({ ship }: { ship: Pick<InboxShipView, 'started_at'> })
 }
 
 /**
- * "Stuck: <reason>" or "Merged <time>"; a shipping row says it to a screen reader only. Stuck words give the title the
- * row's room and cut with "…" (pulls/ship.css): the whole words are in the row's name, their tooltip and the ship log.
+ * "Stuck: <reason>" or "Merged <time>"; a shipping row says it to a screen reader only. Stuck: "Stuck:" is never cut
+ * and the reason keeps a floor, cut with "…" past it (pulls/ship.css); the whole words are in the row's name, their
+ * tooltip and the ship log.
  */
 export function ShipWords({ ship, now }: { ship: Pick<InboxShipView, 'state' | 'reason' | 'merged_at'>; now: number }) {
   const words = shipRowWords(ship, new Date(now));
   if (!words) return <span className="ib-sr">, shipping</span>;
+  const cut = ship.state === 'stuck' ? words.indexOf(': ') : -1;
   return (
     <span className="ib-shp-word" data-ship-words="" title={ship.state === 'stuck' ? words : undefined}>
       <span className="ib-sr">, </span>
-      {words}
+      {cut < 0 ? (
+        words
+      ) : (
+        <>
+          <span className="ib-shp-head">{words.slice(0, cut + 2)}</span>
+          <span className="ib-shp-why">{words.slice(cut + 2)}</span>
+        </>
+      )}
     </span>
   );
 }

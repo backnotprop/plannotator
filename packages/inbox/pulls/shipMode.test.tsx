@@ -204,6 +204,10 @@ test.skipIf(!hasDom)('stuck says why on the row and keeps the sail; merged keeps
   draw(new Map([[RECEIPT.key, ship(RECEIPT.key, { state: 'stuck', reason: 'e2e-checkout failing' })]]));
   expect(row('thr_receipt').getAttribute('data-ship')).toBe('stuck');
   expect(row('thr_receipt').querySelector('[data-ship-words]')!.textContent).toContain('Stuck: e2e-checkout failing');
+  // "Stuck: " drawn apart from the reason, which alone may be cut; the whole words are the tooltip.
+  expect(row('thr_receipt').querySelector('.ib-shp-head')!.textContent).toBe('Stuck: ');
+  expect(row('thr_receipt').querySelector('.ib-shp-why')!.textContent).toBe('e2e-checkout failing');
+  expect(row('thr_receipt').querySelector('[data-ship-words]')!.getAttribute('title')).toBe('Stuck: e2e-checkout failing');
   expect(row('thr_receipt').querySelector('.ib-shp-sail')).not.toBeNull();
   draw(new Map([[RECEIPT.key, ship(RECEIPT.key, { state: 'merged', merged_at: ago(5 * 60_000), ended_at: ago(5 * 60_000) })]]));
   expect(row('thr_receipt').getAttribute('data-ship')).toBe('merged');

@@ -58,12 +58,14 @@
 .ib-prrow[data-ship="stuck"] :is(.ib-shp-pool, .ib-shp-pool > span, .ib-shp-glide, .ib-shp-sail, .ib-shp-rock) { animation-play-state: paused; }
 .ib-prrow[data-ship="stuck"] .ib-shp-sail { color: var(--ib-sand-ink); }
 .ib-shp-word { flex: none; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; }
-/* Stuck words sit between the title and the row's end and take only the room the title leaves: the title keeps what
-   it has on a row that does not ship, and the words give way first, cut with "…". Their own 8px before the end stands
-   in for the line's gap, so a row with no room left gives the title all of it. A long unbroken title (split in its
-   middle) has no width of its own to keep, so it takes the room and the words show only in full elsewhere. */
-.ib-prrow[data-ship="stuck"] .ib-shp-word { flex: 1 1 0%; min-width: 0; margin-right: -10px; padding-right: 8px; overflow: hidden; text-overflow: ellipsis; text-align: right; color: var(--ib-sand-ink); }
-.ib-prrow[data-ship="stuck"]:has(.ib-rvr-t[data-reviews-title-split]) .ib-shp-word { flex-grow: 0; }
+/* Stuck words sit between the title and the row's end. "Stuck:" is never cut; the reason after it keeps a floor (the
+   words' box never under min(8em, 26%) of the line) and is cut with "…" past it. Short of room, the words give way
+   faster than the title (flex-shrink 4) and never take more than 45% of the line, so the title keeps the larger
+   share down to its own floor. A long unbroken title (split in its middle) takes what the words leave. */
+.ib-prrow[data-ship="stuck"] .ib-shp-word { display: inline-flex; justify-content: flex-end; flex: 0 4 auto; min-width: min(8em, 26%); max-width: 45%; margin-left: auto; overflow: hidden; color: var(--ib-sand-ink); }
+.ib-shp-head { flex: none; white-space: pre; }
+.ib-shp-why { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-prrow[data-ship="stuck"] .ib-rvr-t { min-width: min(6em, 25%); }
 .ib-prrow[data-ship="stuck"] .ib-rvr-end { margin-left: 0; }
 /* Merged: the words take the end of the row, where the agent and the age were. */
 .ib-prrow[data-ship="merged"] .ib-rvr-end { position: relative; }
