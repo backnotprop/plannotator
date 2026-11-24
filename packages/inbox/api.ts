@@ -16,7 +16,7 @@ import type { SystemModel } from '@plannotator/system';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
-import { createListReader, type ListReadAnswer } from './listRead';
+import { createListReader, listGridAsked, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberArtifactMachines, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
@@ -485,7 +485,7 @@ export function inboxAskOn(settings: Pick<SettingsModel, 'via'> | null | undefin
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
 export interface InboxExperimentalSettings {
-  decision_mode: { on: boolean; env: boolean | null };
+  decision_mode: { on: boolean; env: boolean | null }; /** Grid (approval "inbox-agent-grid"); absent from an older Inbox. */ grid?: { on: boolean; env: boolean | null };
 }
 
 /** One live agent session of a thread's project (New message, record 5.x). */
@@ -1222,7 +1222,7 @@ export function saveRecentSearch(input: { q: string } | { clear: true }): Promis
 
 /** The window's list reads (listRead.ts): `since` names the list it holds; empty asks for the whole list. */
 const listReader = createListReader<ListModel>((since) =>
-  get<ListReadAnswer<ListModel>>(inboxUrl(`/threads?archived=exclude&snoozed=exclude&machines=1&since=${encodeURIComponent(since)}`)),
+  get<ListReadAnswer<ListModel>>(inboxUrl(`/threads?archived=exclude&snoozed=exclude&machines=1${listGridAsked() ? '&grid=1' : ''}&since=${encodeURIComponent(since)}`)),
 );
 
 /** Tests only: the next list read is a whole one. */
@@ -1303,7 +1303,7 @@ export const inboxApi = {
   startTidy: (input: { sessions: readonly string[]; idempotency_key: string; project: string | null; surface: 'list' | 'board'; thread_ids?: readonly string[]; words?: string }, machine?: string | null) =>
     post<{ run: InboxTidyRun | null; asked: string[] }>(inboxUrl('/tidy', undefined, machine), { ...input, sessions: [...input.sessions], ...(input.thread_ids ? { thread_ids: [...input.thread_ids] } : {}) }),
   saveCookieHost: (on: boolean) => post<{ cookie_host: InboxCookieHost }>(inboxUrl('/settings'), { cookie_host: on }),
-  saveExperimental: (change: { decision_mode: boolean }) =>
+  saveExperimental: (change: { decision_mode?: boolean; grid?: boolean }) =>
     post<{ experimental: InboxExperimentalSettings }>(inboxUrl('/settings'), { experimental: change }),
   /** The Board on or off (Settings → Capabilities): agents get the card action from their next session. */
   saveBoard: (on: boolean) => post<{ board: { on: boolean } }>(inboxUrl('/settings'), { board: { on } }),

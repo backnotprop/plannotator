@@ -29,6 +29,8 @@ const hasDom = typeof document !== 'undefined';
 const { ListFilterButton } = (hasDom ? await import('./components/ListFilter') : {}) as typeof import('./components/ListFilter');
 const { ThreadTagsContext } = await import('./threadTags');
 const { NO_LIST_FILTER, resetListFilterForTests } = await import('./listFilter');
+// Filter by typing's row: first in the menu, a row "Search filters" narrows like the others.
+const { TITLE_FILTER_LABEL } = await import('./listTitleFilter');
 const { resetScheduledForTests } = await import('./scheduled/store');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
@@ -207,7 +209,7 @@ describe.skipIf(!hasDom)('the filter menu with short lists', () => {
     expect(menu()!.hasAttribute('data-list-filter-searchable')).toBe(false);
     expect(menu()!.getAttribute('role')).toBe('menu');
     expect(groups()).toEqual(['Updated', 'Project']);
-    expect(rowWords()).toEqual(['Not seen', 'Recent activity', 'Today', 'Last 3 days', 'Last 7 days', 'Last 30 days', 'Custom range…', 'api', 'web']);
+    expect(rowWords()).toEqual([TITLE_FILTER_LABEL, 'Not seen', 'Recent activity', 'Today', 'Last 3 days', 'Last 7 days', 'Last 30 days', 'Custom range…', 'api', 'web']);
   });
 
   test('Escape closes it and puts focus back on the funnel; aria-expanded follows the menu', async () => {
@@ -248,7 +250,7 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     expect(funnel().getAttribute('aria-expanded')).toBe('true');
     expect(field()).not.toBeNull();
     expect(document.activeElement).toBe(field());
-    expect(rowWords()).toEqual(['Not seen', 'Recent activity', 'Today', 'Last 3 days', 'Last 7 days', 'Last 30 days', 'Custom range…', ...LONG]);
+    expect(rowWords()).toEqual([TITLE_FILTER_LABEL, 'Not seen', 'Recent activity', 'Today', 'Last 3 days', 'Last 7 days', 'Last 30 days', 'Custom range…', ...LONG]);
     expect(status()).toBe('');
   });
 
@@ -327,7 +329,7 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     await key('Escape');
     expect(menu()).not.toBeNull();
     expect(field()!.value).toBe('');
-    expect(rowWords()).toHaveLength(7 + LONG.length);
+    expect(rowWords()).toHaveLength(8 + LONG.length);
     await key('Escape');
     expect(menu()).toBeNull();
     expect(funnel().getAttribute('aria-expanded')).toBe('false');
@@ -340,7 +342,7 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     await type('bil');
     await press($('[data-list-filter-search-clear]')!);
     expect(field()!.value).toBe('');
-    expect(rowWords()).toHaveLength(7 + LONG.length);
+    expect(rowWords()).toHaveLength(8 + LONG.length);
     expect($('[data-list-filter-search-clear]')).toBeNull();
   });
 
@@ -379,11 +381,11 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     render(LONG);
     await keyOpen();
     expect(document.activeElement).toBe(field());
-    expect(highlighted()).toBe('Not seen');
+    expect(highlighted()).toBe(TITLE_FILTER_LABEL);
     await key('End');
     expect(highlighted()).toBe('worker');
     await key('Home');
-    expect(highlighted()).toBe('Not seen');
+    expect(highlighted()).toBe(TITLE_FILTER_LABEL);
     expect(document.activeElement).toBe(field());
   });
 
@@ -441,6 +443,8 @@ describe.skipIf(!hasDom)('nothing matches after something did', () => {
   test('Not seen ticked, a keyboard open, then a query with no match: Enter leaves Not seen ticked', async () => {
     render(LONG, { ...NO_LIST_FILTER, notSeen: true });
     await keyOpen();
+    // The first row is Filter by typing's; one down is Not seen.
+    await key('ArrowDown');
     expect(highlighted()).toBe('Not seen');
     await type('z');
     await type('zz');

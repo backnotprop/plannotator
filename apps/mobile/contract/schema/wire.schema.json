@@ -3881,6 +3881,53 @@
         "pulls": {
           "$ref": "#/$defs/InboxThreadPullsSummary"
         },
+        "grid_seen": {
+          "type": "object",
+          "properties": {
+            "through": {
+              "type": "number"
+            },
+            "at": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "through",
+            "at"
+          ],
+          "additionalProperties": true
+        },
+        "steps_progress": {
+          "type": "object",
+          "properties": {
+            "done": {
+              "type": "number"
+            },
+            "total": {
+              "type": "integer"
+            },
+            "doing": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "done",
+            "total",
+            "doing",
+            "at"
+          ],
+          "additionalProperties": true
+        },
         "hide_pulls": {
           "type": "array",
           "items": {
@@ -7384,11 +7431,83 @@
             "state"
           ],
           "additionalProperties": true
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxThreadPullsSummaryItem"
+          }
         }
       },
       "required": [
         "count",
         "headline"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-thread-pulls.ts"
+    },
+    "InboxThreadPullsSummaryItem": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/InboxThreadPullState"
+        },
+        "added_at": {
+          "type": "string"
+        },
+        "read_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checks": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "failing",
+                "passing",
+                "running"
+              ],
+              "x-open": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "approved",
+                "changes_requested",
+                "review_required"
+              ],
+              "x-open": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "state",
+        "added_at",
+        "read_at",
+        "checks",
+        "review"
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-thread-pulls.ts"
@@ -7886,6 +8005,9 @@
               "type": "null"
             }
           ]
+        },
+        "clock_ms": {
+          "type": "integer"
         }
       },
       "required": [

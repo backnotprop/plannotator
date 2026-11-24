@@ -552,6 +552,10 @@
       "at",
       "label"
     ],
+    "InboxListRowGridSeen": [
+      "at",
+      "through"
+    ],
     "InboxListRowLastAgent": [
       "host"
     ],
@@ -562,6 +566,12 @@
     "InboxListRowSent": [
       "at",
       "checked_at"
+    ],
+    "InboxListRowStepsProgress": [
+      "at",
+      "doing",
+      "done",
+      "total"
     ],
     "InboxListSection": [
       "id",
@@ -928,6 +938,14 @@
     ],
     "InboxThreadPullsSummaryHeadline": [
       "key",
+      "state"
+    ],
+    "InboxThreadPullsSummaryItem": [
+      "added_at",
+      "checks",
+      "key",
+      "read_at",
+      "review",
       "state"
     ],
     "InboxTidyMark": [
