@@ -5043,7 +5043,7 @@
     },
     {
       "id": "messages-110",
-      "title": "Add: \"You added <agent> to this thread\" above the reply; later replies go to it too",
+      "title": "Add: \"You added <agent> to this thread\" above the reply; a later reply reaches it only when the reply box names it",
       "surface": [],
       "flows": [],
       "mobile": "v1",
