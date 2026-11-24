@@ -44,6 +44,7 @@ import { inboxFarReaderName, inboxMachineRecordName } from "./inbox-sent-from-re
 import { createMachineAgentFind } from "./inbox-machine-agent-find";
 import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
+import type { OutboxFile } from "./inbox-outbox-files";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
@@ -54,9 +55,7 @@ import type { FarArchived } from "./inbox-archived-merged";
 import { ARTIFACT_PINS_MARK, readFarWall } from "./inbox-artifacts-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
 import { createFarRoutines } from "./inbox-scheduled-machines";
-import { inboxCapabilitySwitchesOf, type InboxCapabilitySwitches } from "@plannotator/core/inbox-types";
-import { createFarCapabilities } from "./inbox-capabilities-machines";
-import { CAPABILITY_NOTE_FIELD, CAPABILITY_NOTE_MARK } from "./inbox-capability-note";
+import { CAPABILITY_SET_MARK, type CapabilitySet } from "./inbox-capability-set";
 import type { SharedReactions } from "./inbox-reactions-shared";
 import { FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE } from "./inbox-far-tags";
 
@@ -147,6 +146,8 @@ export interface InboxMachinesContext {
   showArchivedSaid?: (value: InboxShowArchived) => void;
   /** A linked machine's list was read: this Inbox takes its saved reaction emoji when that set is newer. */
   reactionsSaid?: (value: SharedReactions) => void;
+  /** A linked computer's list was read, one that keeps the one set (mark `capability-set`): this Inbox takes each newer flip. */
+  capabilitySetSaid?: (value: CapabilitySet) => void;
   /** Grid is on here (experimental): only then are linked machines asked for Grid's fields and looks, and `clock_ms` shown. */
   gridOn?: () => boolean;
   /** Where the person wrote a write this Inbox forwards, told from the request (inbox-sent-from.ts). */
@@ -323,21 +324,6 @@ export interface MachineSnoozeAnswer {
   ended: boolean;
 }
 
-/** A linked computer's capability switches, read or turned for an agent: `switches` null while the turn is held there. */
-export interface MachineCapabilitiesAnswer {
-  machine: string;
-  name: string;
-  switches: InboxCapabilitySwitches | null;
-  /** The words for a turn that waits for it ("Waiting for Studio: …"). */
-  held: string | null;
-  /** A read: when it is away, when it last gave its switches (ISO); null when they were read now. */
-  awaySince?: string | null;
-  /** A read: the switches turned here that wait for it (shown as turned in `switches`). */
-  pending?: string[];
-  /** A held turn: resolves once that computer has settled it, with its refusal's words when it did not take it. */
-  settled?: Promise<{ taken: boolean; why: string | null }>;
-}
-
 /** What a held write says, by its machine's state: the same words as the window's `heldWords` (packages/inbox/api.ts). A revoked machine is forgotten as it is revoked, so it never holds one here. */
 export function machineHeldWords(name: string, state: string | null): string {
   return state !== null && state !== "online" && state !== "connecting" ? `Waiting for ${name}: this applies when ${name} is back.` : `Sending to ${name}: this applies once ${name} confirms.`;
@@ -493,12 +479,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const machineBranches = createMachineBranches({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
   const launchReads = createMachineLaunchReads();
-  /** The person's writes waiting for a linked computer, laid on its routines and switches as they are shown. */
+  /** The person's writes waiting for a linked computer, laid on its routines as they are shown. */
   const heldOn = (machine: string) => outbox.list(machine, "pending").filter((entry) => !entry.auto);
   /** Each linked computer's routines (mark `routines`), for the Routines page's merged read (inbox-scheduled-machines.ts). */
   const farRoutines = createFarRoutines(() => peers.values(), heldOn);
-  /** Each linked computer's Capabilities switches, as it last gave them (inbox-capabilities-machines.ts). */
-  const farCapabilities = createFarCapabilities(heldOn);
   // An agent here reads a linked machine's thread, and saves its files here (inbox-machine-agent-read.ts).
   const agentRead = createMachineAgentRead({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
   // ...and finds them: its search and read_thread's list ask every linked machine too (inbox-machine-agent-find.ts).
@@ -618,6 +602,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onChange: () => {
         if (peer.list?.show_archived) context.showArchivedSaid?.(peer.list.show_archived);
         if (peer.list?.reactions) context.reactionsSaid?.(peer.list.reactions);
+        // An older Plannotator there says no mark: its switches stay its own, and none of its are taken here.
+        if (peer.list?.capability_set && peer.list.marks.includes(CAPABILITY_SET_MARK)) context.capabilitySetSaid?.(peer.list.capability_set);
         machinesChanged();
       },
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
@@ -645,7 +631,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
     machinePulls.forget(id);
     machineBranches.forget(id);
     launchReads.forget(id);
-    farCapabilities.forget(id);
     const link = links.remove(id);
     if (link?.device_id) context.door.revokeDevice(link.device_id, { oweRefusal: closeDoor === "after_refusal" });
     outbox.dropMachine(id, link?.name ?? null);
@@ -922,8 +907,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const sessionsRead = route === MACHINE_SESSIONS_ROUTE ? launchReads.begin() : null;
       // An attached page's own tab is made here from its door's `view` (inbox-machine-page.ts): no page route there.
       const page = MACHINE_PAGE_ROUTE.exec(route);
-      // Its switches: read now, or the last it gave while it is away, with the person's held turns on them.
-      if (route === "capabilities" && !head) return farCapabilities.read(peer, offline);
       try {
         const answer = await peer.request(page ? `attachments/${page[1]}/view` : route, search, { method: "GET", headers, signal: req.signal });
         if (sessionsRead !== null && answer.ok) void launchReads.keep(machine, sessionsRead, answer.clone(), () => peers.has(machine));
@@ -1106,58 +1089,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (!response.ok) throw new InboxError(typeof body.code === "string" ? body.code : "machine_refused", typeof body.error === "string" ? body.error : `${name} refused it.`);
     return { machine, name, snoozed: body.snoozed ?? null, held: null, ended: until === null && !!row.snoozed && inboxSnoozeRunning(row.snoozed.until) };
   };
-
-  // ── An agent's capability switch on a linked computer (`plannotator inbox capability`, inbox-capability-agent.ts) ──
-
-  /**
-   * That computer's switches (`change` null: read while it is online), or one of them turned there: the window's own
-   * write, through the forward and the outbox, so a computer that is away gets it when it is back. Null: no linked
-   * computer has that name or id. A computer too old to take it is refused here, with nothing held or noticed.
-   */
-  const capabilitiesOn = async (computer: string, change: { key: string; on: boolean } | null, by: { name: string; host: string | null } | null = null): Promise<MachineCapabilitiesAnswer | null> => {
-    const wanted = computer.trim().toLowerCase();
-    const peer = [...peers.values()].find((candidate) => candidate.id === computer.trim() || (links.get(candidate.id)?.name ?? "").toLowerCase() === wanted);
-    if (!peer) return null;
-    const machine = peer.id;
-    const name = links.get(machine)?.name ?? computer.trim();
-    if (peer.list && !peer.list.marks.includes("capabilities")) throw new InboxError("machine_needs_update", `Update Plannotator on ${name}: its capabilities cannot be turned from another computer yet. Nothing changed.`);
-    const route = "capabilities";
-    const url = new URL(`http://inbox.local/api/inbox/m/${machine}/${route}`);
-    // Who turned it, for that computer's own line, only to one whose door takes it (an older one refuses the field).
-    const note = by && peer.list?.marks.includes(CAPABILITY_NOTE_MARK) ? { [CAPABILITY_NOTE_FIELD]: { agent: by.name, host: by.host } } : {};
-    const asked = change
-      ? new Request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idempotency_key: `agent-${crypto.randomUUID()}`, [change.key]: { on: change.on }, ...note }) })
-      : new Request(url, { method: "GET" });
-    const response = await forward(asked, url, machine, route, "local");
-    const body = (await response.json().catch(() => ({}))) as { capabilities?: unknown; away?: unknown; read_at?: unknown; held?: unknown; code?: unknown; error?: unknown; machine?: { state?: string } | null; outbox?: OutboxView };
-    if (response.status === 202) {
-      const state = body.outbox?.state;
-      if ((state === "queued" || state === "sending") && body.outbox) return { machine, name, switches: null, held: machineHeldWords(name, body.machine?.state ?? null), settled: heldSettled(body.outbox.key) };
-      const why = (body.outbox?.answer as { error?: unknown } | null | undefined)?.error;
-      throw new InboxError("not_delivered", typeof why === "string" && why ? why : `Not delivered to ${name}.`);
-    }
-    if (!response.ok) throw new InboxError(typeof body.code === "string" ? body.code : "machine_refused", typeof body.error === "string" ? body.error : `${name} refused it.`);
-    if (change) return { machine, name, switches: inboxCapabilitySwitchesOf(body), held: null };
-    // A read while it is away is the last it gave (inbox-capabilities-machines.ts): said so, with the turns that wait for it.
-    const pending = Array.isArray(body.held) ? body.held.filter((key): key is string => typeof key === "string") : [];
-    return { machine, name, switches: inboxCapabilitySwitchesOf(body.capabilities), held: null, awaySince: body.away === true && typeof body.read_at === "string" ? body.read_at : null, pending };
-  };
-
-  /** A held write's end, however long it waits: taken, or not (refused, given up, dropped, cancelled) with its words. */
-  const heldSettled = (key: string): Promise<{ taken: boolean; why: string | null }> =>
-    new Promise((resolve) => {
-      const done = (entry: OutboxEntry) => {
-        const why = (entry.answer as { error?: unknown } | null)?.error;
-        resolve({ taken: entry.state === "delivered", why: typeof why === "string" && why ? why : null });
-      };
-      const now = outbox.get(key);
-      if (now && now.state !== "queued" && now.state !== "sending") return done(now);
-      const off = outbox.onChange(({ entry }) => {
-        if (entry.key !== key || entry.state === "queued" || entry.state === "sending") return;
-        off();
-        done(entry);
-      });
-    });
 
   // ── A linked machine's accounts (Settings → Accounts, the Usage peek) ──
 
@@ -1498,9 +1429,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
     branchLists: () => machineBranches.start((machine) => links.get(machine)?.name ?? null),
     farCard,
     snoozeThread,
-    capabilitiesOn,
-    /** The linked computers' names, as this Inbox shows them. */
-    linkedNames: (): string[] => links.list().map((link) => link.name),
     /**
      * A write this Inbox makes itself on a linked machine's thread (a Combine's archive there, and its Undo;
      * inbox-combine-far.ts): held in the outbox as the window's writes are, so one queue and one key per write, sent
@@ -1508,7 +1436,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
      * that machine is not linked. `own`: the write it undoes (`follows`), when it stops being worth sending (`send_by`), and
      * whether its refusal is a notice the window shows (`notify`).
      */
-    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string; notify?: boolean } = {}): Promise<OutboxEntry | null> | null => {
+    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string; notify?: boolean; files?: readonly OutboxFile[] } = {}): Promise<OutboxEntry | null> | null => {
       const peer = peers.get(machine);
       if (!peer) return null;
       // Marked as this Inbox's own (`auto`): the window never lists it as the person's waiting write.

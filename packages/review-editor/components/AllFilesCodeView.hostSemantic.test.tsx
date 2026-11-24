@@ -483,7 +483,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       dispose: () => {},
     };
     const { read } = hostReader();
-    await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read, powerUp: { active: true, rejected: [], provider: 'jev', retry: 0 } }, 40);
+    await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read, powerUp: { active: true, rejected: [], provider: 'jev', settingsRevision: 0, retry: 0 } }, 40);
     await pressArrow();
     const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
     await act(async () => {
@@ -901,7 +901,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect(page.swapped('a.ts')).toBe(true);
   });
 
-  const powerUp = { active: true, rejected: [], provider: 'jev', retry: 0 } as never;
+  const powerUp = { active: true, rejected: [], provider: 'jev', settingsRevision: 0, retry: 0 } as never;
 
   test.skipIf(!hasDom)('a second opinion landing after the switch was turned on by hand is offered, not drawn under the reader', async () => {
     configStore.set('diffSemantic', false);
@@ -939,7 +939,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     await page.land();
     expect(page.drawnKey('a.ts')).not.toContain(':c1');
     page.move('a.ts', 3000);
-    await page.rerender({ powerUp: { active: true, rejected: ['c1'], provider: 'jev', retry: 0 } as never });
+    await page.rerender({ powerUp: { active: true, rejected: ['c1'], provider: 'jev', settingsRevision: 0, retry: 0 } as never });
     await page.land();
     expect(page.drawnKey('a.ts')).toContain(':c2');
     expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-label')).toBe('Semantic changes for a.ts: 2 moved');

@@ -167,6 +167,17 @@ function refuse(status: number, code: string, error: string, details: Record<str
 }
 
 /**
+ * A raw command (a file to `uploads` or `markups`) carries its key in the query, which rides on whole: the door's
+ * refusal when it has none, before a byte of the file is taken. Null: it has one. Exported so a stand-in door in a
+ * test refuses exactly what this door refuses (inbox-far-reply-files.test.ts).
+ */
+export function rawCommandKeyRefusal(search: URLSearchParams): Response | null {
+  const key = search.get("idempotency_key");
+  if (key !== null && key.trim()) return null;
+  return refuse(422, "validation_error", "idempotency_key: required on a phone's command (in the query for a file).", { field: "idempotency_key" });
+}
+
+/**
  * A path the door does not open to this caller: `404 device_route_not_found`. Clients act on the code (a linked
  * machine reads it as "needs an update"), never the words. A linked machine's own Inbox gets words for a computer;
  * a phone, and a caller not known yet, "Not a phone route."
@@ -1126,10 +1137,9 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const metered = req.body ? meteredBody(req.body, raw.max, () => new InboxError(raw.code, `${raw.what} is too large.`)) : null;
       /** Every raw answer: what is left of the file read and dropped (bounded), else the connection closes. */
       const finish = async (response: Response) => ((await metered?.settle()) === false ? withClose(response) : response);
-      const key = url.searchParams.get("idempotency_key");
-      if (key === null || !key.trim()) {
-        return finish(refuse(422, "validation_error", "idempotency_key: required on a phone's command (in the query for a file).", { field: "idempotency_key" }));
-      }
+      const missing = rawCommandKeyRefusal(url.searchParams);
+      if (missing) return finish(missing);
+      const key = url.searchParams.get("idempotency_key")!;
       return claim(req, device, doorPath, key, finish, async () => {
         const response = await toWindow(req, device, windowPath, url.search, metered?.stream ?? null, req.signal, true);
         const answer = await response.text();

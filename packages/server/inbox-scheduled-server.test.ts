@@ -122,7 +122,7 @@ describe("plannotator inbox capability (inbox-capability-agent.ts)", () => {
     expect(await w.tools()).not.toContain("capability");
     const turn = async () => (await (await fetch(`${w.base}/api/inbox/capability`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ by: { session: "ses_maya", host: "claude-code", name: "Claude Code" }, project_path: w.folder, capability: "routines", on: true, thread_id: w.thread }) })).json()) as { text: string };
     const shellNow = "Agents get the routine action in their next session (a session's tools are listed once, at its start); from a shell it works now: `plannotator routine --help`.";
-    expect((await turn()).text).toBe(`Turned on Routines on this computer. The person sees it in thread ${w.thread}. ${shellNow}`);
+    expect((await turn()).text).toBe(`Turned on Routines. The person sees it in thread ${w.thread}. ${shellNow}`);
     expect((await (await fetch(`${w.base}/api/inbox/settings`)).json()).scheduled_threads.on).toBe(true);
     expect(await w.tools()).toContain("routine");
     const said = () => w.server.store.threadMessageIds(w.thread).map((m) => w.server.store.message(m)!).filter((m) => m.body === "Turned on Routines.");
