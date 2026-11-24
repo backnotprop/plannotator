@@ -15,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { InboxAttachment } from "@plannotator/core/inbox-types";
+import { childEnv } from "@plannotator/shared/child-env";
 import { planAgentBodyPictures } from "@plannotator/shared/inbox/agent-pictures";
 import { inboxBlobPath, recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -91,7 +92,7 @@ function branchHere(value: unknown, folder: string | undefined): unknown {
   if (!value || typeof value !== "object" || !folder) return value;
   const branch = { ...(value as Record<string, unknown>) };
   const git = (...args: string[]) => {
-    const run = spawnSync("git", ["-C", folder, ...args], { encoding: "utf8", timeout: 5_000 });
+    const run = spawnSync("git", ["-C", folder, ...args], { encoding: "utf8", timeout: 5_000, env: childEnv(), windowsHide: true });
     return run.status === 0 ? run.stdout.trim() : "";
   };
   if (typeof branch.head !== "string" && typeof branch.name === "string") {
