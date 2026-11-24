@@ -15,14 +15,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import type { InboxAttachment } from "@plannotator/core/inbox-types";
+import { INBOX_UPLOAD_MAX_BYTES, type InboxAttachment } from "@plannotator/core/inbox-types";
 import { childEnv } from "@plannotator/shared/child-env";
 import { planAgentBodyPictures } from "@plannotator/shared/inbox/agent-pictures";
 import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { sameInboxSend, type InboxSendCall } from "@plannotator/shared/inbox/send-same";
 import type { OutboxEntry } from "./inbox-outbox";
-import { checkOutboxFiles, holdOutboxFiles, type OutboxFile } from "./inbox-outbox-files";
+import { checkOutboxFiles, holdOutboxFiles, outboxFileTooLarge, type OutboxFile } from "./inbox-outbox-files";
 import type { PeerLink } from "./inbox-peer-link";
 import { FAR_AGENT_REPLY_ROUTE, TAG_ACROSS_MARK } from "./inbox-far-tags";
 import { farReplyRefusal } from "./inbox-mcp-far-read";
@@ -63,6 +63,10 @@ interface FarReplyMachines {
   readThread: (ask: { thread_id?: string; message_id?: string; limit?: number }) => Promise<{ machine: string; answer: { thread_id: string } } | null>;
 }
 
+/** An answer's files read by this Inbox's attachment rules, each cut off at the size that computer takes (one that grew since it was checked). */
+export const readFarFiles = (storeDir: string, paths: string[], base: string | undefined) =>
+  recordInboxAttachments(storeDir, paths, { base: base ?? "/", at: new Date().toISOString(), maxBytes: { bytes: INBOX_UPLOAD_MAX_BYTES, refusal: outboxFileTooLarge } });
+
 /** The deps over this Inbox's linked machines: where a far id is (a wake's, a listed thread's, else asked), and its files kept here. */
 export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: string) => { machine: string; thread_id: string } | null }, storeDir: string): FarReplyDeps {
   const peer = (machine: string) => machines.peerLinks().find((p) => p.id === machine) ?? null;
@@ -85,7 +89,7 @@ export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: 
     holdWrite: machines.holdWrite,
     heldWrite: machines.heldWrite,
     dismissHeld: machines.dismissHeld,
-    readFiles: (paths, base) => recordInboxAttachments(storeDir, paths, { base: base ?? "/", at: new Date().toISOString() }),
+    readFiles: (paths, base) => readFarFiles(storeDir, paths, base),
     holdFiles: (files) => holdOutboxFiles(storeDir, files, new Date().toISOString()),
   };
 }
@@ -131,6 +135,8 @@ export async function farAgentReply(
   nextStep: () => Promise<string>,
   workingFolder: string | undefined,
 ): Promise<{ text: string; structured: Record<string, unknown> } | null> {
+  // The agent's whole wait with files, the far read and the copy here included, is FAR_FILES_WAIT_MS.
+  const started = Date.now();
   const replyTo = input.reply_to?.trim();
   const session = input.agent_session?.trim();
   if (!replyTo || !session) return null;
@@ -173,7 +179,7 @@ export async function farAgentReply(
     FAR_AGENT_REPLY_ROUTE,
     before?.body ?? { idempotency_key: heldKey, session, ...(input.agent_host ? { host: input.agent_host } : {}), ...(input.agent_name ? { name: input.agent_name } : {}), args },
     place.thread_id,
-    withFiles ? FAR_FILES_WAIT_MS : FAR_REPLY_WAIT_MS,
+    withFiles ? Math.max(0, FAR_FILES_WAIT_MS - (Date.now() - started)) : FAR_REPLY_WAIT_MS,
     // Refused after the agent was told it waits: the person sees it under that thread.
     { notify: true, files: keptFiles },
   );

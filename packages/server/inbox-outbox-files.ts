@@ -13,31 +13,19 @@
  * `keepUploads`): while it waits, and while it is a notice nobody dismissed. After that the upload sweep (hourly)
  * forgets it once it is a day old, and removes its blob when nothing else uses it.
  *
- * Sent: the sender loop sends each file to that computer's `uploads` route just before the write and puts their ids
- * there in `args.attachments` (`sendWithFiles`). Each id is saved on the entry as it comes (`sent_files`), so a retry
- * (a crash, a line that went down between a file and the write) sends no file again, and the write carries the same
- * ids under the same key: the other computer's door and store answer it once. Each file goes under its own key at
- * that door (`outboxFileKey`), so one that landed before its id was saved is answered with that id, not taken again.
- * A file ends only when no byte moves (OUTBOX_FILE_IDLE_MS), and one that stalls or fails is a server error for its
- * entry: the person's writes behind it go, and after the outbox's tries it is a notice.
+ * Sent: the files go up in their own lane (inbox-outbox-file-lane.ts), outside the write queue, so nothing the person
+ * does waits on a file. Each id is saved on the entry as it comes (`sent_files`); once all are there the write takes
+ * its place in the queue and carries those ids in `args.attachments` (`sendWithFiles`), under its own key: the other
+ * computer's door and store answer it once.
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { inboxAttachmentNameRefusal, INBOX_UPLOAD_MAX_BYTES, type InboxAttachment } from "@plannotator/core/inbox-types";
-import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import { JsonLines } from "@plannotator/shared/inbox/devices";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
-import { inboxUploadFromAttachment, inboxUploadNameRefusal, readInboxUpload } from "@plannotator/shared/inbox/uploads";
+import { inboxUploadFromAttachment, inboxUploadNameRefusal } from "@plannotator/shared/inbox/uploads";
 import { classifyAnswer, INBOX_OUTBOX_DIR, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
-
-/**
- * How long one file's upload may go with no byte moving (and, once its bytes are all sent, with no answer). A slow
- * file that keeps moving takes as long as it takes; one that stops is a failed try (`sendWithFiles`).
- */
-export const OUTBOX_FILE_IDLE_MS = 30_000;
-/** A file goes in pieces of at most this, so each piece taken by the line counts as progress. */
-const FILE_PIECE_BYTES = 64 * 1024;
 
 /** One held file: this Inbox's pending upload and the name it goes under. */
 export interface OutboxFile {
@@ -45,12 +33,15 @@ export interface OutboxFile {
   name: string;
 }
 
-const tooLarge = () => new InboxError("upload_too_large", `Not attached: a file is at most ${INBOX_UPLOAD_MAX_BYTES / (1024 * 1024)} MB.`, { max_bytes: INBOX_UPLOAD_MAX_BYTES });
+/** A file past the size the other computer's `uploads` route takes, in its words. */
+export const outboxFileTooLarge = () =>
+  new InboxError("upload_too_large", `Not attached: a file is at most ${INBOX_UPLOAD_MAX_BYTES / (1024 * 1024)} MB.`, { max_bytes: INBOX_UPLOAD_MAX_BYTES });
 
 /**
  * Before any file is read or copied: each one past the size the other computer's `uploads` route takes, or under a
  * name it refuses, refuses the send, so a refused file leaves nothing in this Inbox's blobs or pending uploads. A path
  * that cannot be read is left to the attachment rules, which refuse it in their own words. `name` null: the file's own.
+ * A file that grows after this is cut off by the copy itself (`maxBytes` of the attachment rules).
  */
 export function checkOutboxFiles(files: readonly { path: string; name: string | null }[], base: string): void {
   for (const file of files) {
@@ -62,7 +53,7 @@ export function checkOutboxFiles(files: readonly { path: string; name: string | 
     } catch {
       // The attachment rules say why.
     }
-    if (size !== null && size > INBOX_UPLOAD_MAX_BYTES) throw tooLarge();
+    if (size !== null && size > INBOX_UPLOAD_MAX_BYTES) throw outboxFileTooLarge();
     // A file's own dotenv name is the attachment rules' to refuse, in their words, before they copy anything.
     if (size === null || (file.name === null && inboxAttachmentNameRefusal(named))) continue;
     const refusal = inboxUploadNameRefusal(file.name ?? basename(named));
@@ -76,7 +67,7 @@ export function checkOutboxFiles(files: readonly { path: string; name: string | 
  */
 export async function holdOutboxFiles(storeDir: string, files: readonly { attachment: InboxAttachment; name: string }[], at: string): Promise<OutboxFile[]> {
   for (const { attachment, name } of files) {
-    if (attachment.size > INBOX_UPLOAD_MAX_BYTES) throw tooLarge();
+    if (attachment.size > INBOX_UPLOAD_MAX_BYTES) throw outboxFileTooLarge();
     const refusal = inboxUploadNameRefusal(name);
     if (refusal) throw new InboxError("upload_refused", refusal, { field: "name" });
   }
@@ -137,114 +128,20 @@ export function refusedForFiles(answer: OutboxAnswer): boolean {
 
 /**
  * One file's key at that computer's door (its `uploads` route takes a file only under one): the same for every try,
- * so a file that landed before this Inbox could save its id is answered with that id, never taken twice; a new one only
- * once that computer forgot the ids (`files_try`).
+ * so a file that landed before this Inbox could save its id is answered with that id, never taken twice; a new one
+ * (`files_try`) after a stall, so a retry never waits behind a stuck upload there under the old key, and once that
+ * computer forgot the ids.
  */
 export const outboxFileKey = (entry: OutboxEntry, attempt: number, index: number) => `${entry.key}:files${attempt}:${index}`;
 
-export interface SendFilesDeps {
-  storeDir: string;
-  /** The other computer's name, for a refusal that has no words of its own. */
-  machineName: string;
-  /** One file to that computer's `uploads` route under its key, `size` bytes streamed from `body`. Throws when it cannot be reached or `signal` aborts. */
-  upload: (file: { name: string; key: string; body: ReadableStream<Uint8Array>; size: number; signal: AbortSignal }) => Promise<Response>;
-  /** How long a file may go with no byte moving (OUTBOX_FILE_IDLE_MS). */
-  idleMs: number;
-  /** The ids there so far and which try of the files they are, saved on the entry before the next request leaves. */
-  note: (sent: string[], attempt: number) => void;
-  post: (body: Record<string, unknown>) => Promise<OutboxAnswer>;
-}
-
-type UploadAnswer = { upload?: { upload_id?: unknown }; code?: unknown; error?: unknown };
-
-/** One file's upload, ended when no byte moves for `idleMs`: its status and answer, or null when it stalled or failed. */
-async function uploadFile(deps: SendFilesDeps, name: string, key: string, path: string): Promise<{ response: Response; answer: UploadAnswer } | null> {
-  const file = Bun.file(path);
-  const stop = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const moved = () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => stop.abort(), deps.idleMs);
-  };
-  const reader = file.stream().getReader();
-  let rest = new Uint8Array(0);
-  // Pulled only as the line takes the bytes (nothing read ahead), in pieces, so each pull is progress.
-  const body = new ReadableStream<Uint8Array>(
-    {
-      async pull(controller) {
-        if (rest.length === 0) {
-          const next = await reader.read();
-          if (next.done) return controller.close();
-          rest = next.value;
-        }
-        const piece = rest.subarray(0, FILE_PIECE_BYTES);
-        rest = rest.subarray(piece.length);
-        moved();
-        controller.enqueue(piece);
-      },
-      cancel: (reason) => reader.cancel(reason).catch(() => {}),
-    },
-    { highWaterMark: 0 },
-  );
-  moved();
-  try {
-    const response = await deps.upload({ name, key, body, size: file.size, signal: stop.signal });
-    const text = await response.text();
-    if (stop.signal.aborted) return null;
-    let answer: UploadAnswer = {};
-    try {
-      answer = (JSON.parse(text) ?? {}) as UploadAnswer;
-    } catch {
-      // Not JSON: no id, so its status says what it was.
-    }
-    return { response, answer };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-    // The file's handle closed, however the request ended.
-    void reader.cancel().catch(() => {});
-  }
-}
-
 /**
- * One try of an entry: its files first, those not sent yet, then the write. A file's upload that is not a 2xx is the
- * entry's answer: a 4xx its refusal; a 5xx, or one that stalled (no byte moving for `idleMs`) or failed, a server
- * error marked `unsent` (nothing of the write reached that computer), so this Inbox's own write yields to the person's
- * and, after OUTBOX_MAX_SERVER_ERRORS tries, ends refused (a notice), never parked as maybe delivered. Ids the write is
- * refused for (`refusedForFiles`: that computer forgot them) are sent again once, under new keys.
+ * The write queue's try of an entry: its body, and for a held answer its files' ids there (all up by now: the queue
+ * passes it by until they are). Refused for those ids (that computer forgot them), its files go again once
+ * (`forgot` true): the entry waits for them again and is not settled by this answer.
  */
-export async function sendWithFiles(entry: OutboxEntry, deps: SendFilesDeps): Promise<OutboxAnswer> {
-  const files = entry.files ?? [];
-  if (files.length === 0) return deps.post(entry.body);
-  let attempt = entry.files_try ?? 0;
-  let sent = (entry.sent_files ?? []).slice(0, files.length);
-  let again = true;
-  for (;;) {
-    for (const [index, file] of files.entries()) {
-      if (index < sent.length) continue;
-      const held = readInboxUpload(deps.storeDir, file.upload);
-      const path = held ? inboxBlobPath(deps.storeDir, held.sha256) : null;
-      if (!held || !path || !existsSync(path)) return { status: 422, body: { code: "upload_not_found", error: `${file.name} is no longer here.` } };
-      const failed = { code: "upload_failed", error: `${file.name} could not be sent to ${deps.machineName}.` };
-      const done = await uploadFile(deps, held.name, outboxFileKey(entry, attempt, index), path);
-      if (!done) return { status: 500, body: failed, unsent: true };
-      const { response, answer } = done;
-      const id = answer.upload?.upload_id;
-      if (!response.ok || typeof id !== "string") {
-        if (response.status === 401) return { status: 401, body: answer };
-        const words = { code: typeof answer.code === "string" ? answer.code : failed.code, error: typeof answer.error === "string" ? answer.error : failed.error };
-        // A 2xx without an id is that computer's refusal of the file, never a retry that could go on for ever.
-        return { status: response.ok ? 422 : response.status, body: words, ...(response.status >= 500 ? { unsent: true as const } : {}) };
-      }
-      sent = [...sent, id];
-      deps.note(sent, attempt);
-    }
-    const answer = await deps.post(withAttachments(entry.body, sent));
-    if (!again || !refusedForFiles(answer)) return answer;
-    again = false;
-    attempt += 1;
-    sent = [];
-    deps.note(sent, attempt);
-  }
+export async function sendWithFiles(entry: OutboxEntry, deps: { post: (body: Record<string, unknown>) => Promise<OutboxAnswer>; forgot: () => boolean }): Promise<OutboxAnswer> {
+  if (!entry.files || entry.files.length === 0) return deps.post(entry.body);
+  const answer = await deps.post(withAttachments(entry.body, entry.sent_files ?? []));
+  if (refusedForFiles(answer)) deps.forgot();
+  return answer;
 }

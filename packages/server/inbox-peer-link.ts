@@ -26,7 +26,8 @@ import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
 import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
-import { OUTBOX_FILE_IDLE_MS, sendWithFiles } from "./inbox-outbox-files";
+import { sendWithFiles } from "./inbox-outbox-files";
+import { OUTBOX_FILE_IDLE_MS, OutboxFileLane, type OutboxFileUpload } from "./inbox-outbox-file-lane";
 import { INBOX_SENT_FROM_HEADER } from "@plannotator/core/inbox-types";
 import type { InboxPeerTransport } from "./inbox-transport";
 import { farArchivedPage, type FarArchived } from "./inbox-archived-merged";
@@ -256,10 +257,22 @@ export class PeerLink {
   private deliveriesLabels = false;
   private flushDelay = 0;
   private readonly t: PeerLinkTimings;
+  /** Held answers' files, in their own lane (inbox-outbox-file-lane.ts): nothing in the write queue waits on one. */
+  private readonly files: OutboxFileLane;
+  private filesTimer: ReturnType<typeof setTimeout> | null = null;
+  private filesDelay = 0;
 
   constructor(private readonly options: PeerLinkOptions) {
     this.id = options.link.id;
     this.t = { ...PEER_LINK_TIMINGS, ...options.timings };
+    this.files = new OutboxFileLane({
+      outbox: options.outbox,
+      machine: options.link.id,
+      machineName: () => this.options.link.name,
+      upload: (file) => this.uploadFile(file),
+      idleMs: this.t.fileIdleMs,
+      onChange: () => this.flush(),
+    });
   }
 
   private get token() {
@@ -290,6 +303,8 @@ export class PeerLink {
     this.wake?.();
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = null;
+    if (this.filesTimer) clearTimeout(this.filesTimer);
+    this.filesTimer = null;
     if (this.deliveriesTimer) clearTimeout(this.deliveriesTimer);
     this.deliveriesTimer = null;
   }
@@ -667,23 +682,21 @@ export class PeerLink {
     return response;
   }
 
-  /** One outbox try: the entry's route and body under its own key (rule 1), a held answer's files sent first. */
+  /** One outbox try: the entry's route and body under its own key (rule 1), a held answer's with its files' ids there. */
   private send = (entry: OutboxEntry): Promise<OutboxAnswer> =>
-    sendWithFiles(entry, {
-      storeDir: this.options.outbox.storeDir,
-      machineName: this.options.link.name,
-      // Its key in the query, as that computer's door takes a file (and as a window's upload there sends one).
-      upload: (file) =>
-        this.options.transport.request("uploads", `?${new URLSearchParams({ name: file.name, idempotency_key: file.key })}`, {
-          method: "POST",
-          headers: this.auth({ "Content-Type": "application/octet-stream", "Content-Length": String(file.size) }),
-          body: file.body,
-          signal: file.signal,
-        }),
-      idleMs: this.t.fileIdleMs,
-      note: (sent, attempt) => this.options.outbox.noteSentFiles(entry.key, sent, attempt),
-      post: (body) => this.post(entry, body),
+    sendWithFiles(entry, { post: (body) => this.post(entry, body), forgot: () => this.options.outbox.filesForgotten(entry.key) });
+
+  /** A held answer's file to that machine's `uploads` route, its key in the query as that door takes a file (and as a window's upload there sends one). */
+  // Streamed: `fetch` pulls the body as the socket takes it (inbox-outbox-file-wire.test.ts), so the lane's idle limit
+  // measures the line. Its Content-Length declared, so that door refuses one too large before a byte is read.
+  private uploadFile: OutboxFileUpload = (file) =>
+    this.options.transport.request("uploads", `?${new URLSearchParams({ name: file.name, idempotency_key: file.key })}`, {
+      method: "POST",
+      headers: this.auth({ "Content-Type": "application/octet-stream", "Content-Length": String(file.size) }),
+      body: file.body,
+      signal: file.signal,
     });
+
 
   private post = async (entry: OutboxEntry, sendBody: Record<string, unknown>): Promise<OutboxAnswer> => {
     try {
@@ -710,6 +723,21 @@ export class PeerLink {
   /** Send what waits for this machine (rule 15). A 5xx is tried again after a pause; anything else waits for the next hello. */
   flush(): void {
     if (!this.running || this.state !== "online") return;
+    // Files go in their own lane; a file that failed (the line) or stalled is tried again after a pause of its own.
+    void this.files.run().then((result) => {
+      if (result === "revoked") return this.stream?.abort();
+      if (result === "empty") {
+        this.filesDelay = 0;
+        return;
+      }
+      this.filesDelay = Math.min(Math.max(this.filesDelay * 2, 1000), this.t.backoffMaxMs);
+      if (!this.filesTimer) {
+        this.filesTimer = setTimeout(() => {
+          this.filesTimer = null;
+          this.flush();
+        }, this.filesDelay);
+      }
+    });
     void this.options.outbox.drain(this.id, this.send).then((result) => {
       if (result === "server_error") {
         this.flushDelay = Math.min(Math.max(this.flushDelay * 2, 1000), this.t.backoffMaxMs);

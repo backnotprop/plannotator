@@ -40,10 +40,11 @@
  * outbox: it streams through while the machine is online. An agent's answer
  * in another computer's thread waits with its files: its entry names this
  * Inbox's own pending uploads (`files`), whose bytes stay in the store's blob
- * folder, kept while the entry waits or its notice stands, and the sender
- * loop sends them just before the write, each id there saved on the entry as
- * it comes (`sent_files`), so a retry sends no file twice and the write goes
- * once under its key (inbox-outbox-files.ts).
+ * folder, kept while the entry waits or its notice stands. They go up in
+ * their own lane (inbox-outbox-file-lane.ts), each id there saved on the
+ * entry as it comes (`sent_files`); the write queue passes the entry by until
+ * they are all there (`outboxWaitsForFiles`), then sends the write once under
+ * its key (inbox-outbox-files.ts).
  */
 
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -143,8 +144,13 @@ export interface OutboxEntry {
   files?: OutboxFile[];
   /** Their ids on that machine so far, saved as each one lands, so a retry sends no file twice. */
   sent_files?: string[];
-  /** Which try of the files those are (their keys there): one more each time that machine forgot the ids. */
+  /**
+   * Which try of the files those are (their keys there): one more each time a file stalled (a stuck upload there
+   * keeps its key busy) and when that machine forgot the ids.
+   */
   files_try?: number;
+  /** Its files went again once already, after that machine forgot their ids. */
+  files_again?: true;
 }
 
 /** Whether a settled entry may have been applied there: delivered (and not skipped there by its guard), given up after 5xx, or taken back after it left. */
@@ -153,12 +159,18 @@ export function outboxMayHaveApplied(entry: OutboxEntry): boolean {
   return entry.state === "parked" || ((entry.state === "dropped" || entry.state === "cancelled") && entry.left);
 }
 
-/**
- * What one try got back: the owner's status and JSON body, or `null` when the machine could not be reached.
- * `unsent`: a server error before any of the write left (a held answer's file did not get there,
- * inbox-outbox-files.ts), so the entry that keeps meeting it ends refused, never "may have been delivered".
- */
-export type OutboxAnswer = { status: number; body: unknown; unsent?: true } | null;
+/** What one try got back: the owner's status and JSON body, or `null` when the machine could not be reached. */
+export type OutboxAnswer = { status: number; body: unknown } | null;
+
+/** A held answer still sending its files (inbox-outbox-file-lane.ts): the write queue passes it by until they are all there. */
+export function outboxWaitsForFiles(entry: OutboxEntry): boolean {
+  return pending(entry) && !!entry.files && entry.files.length > 0 && (entry.sent_files?.length ?? 0) < entry.files.length;
+}
+
+/** An agent's answers in one thread of that machine keep their order among themselves: their session and thread. */
+function answerLane(entry: OutboxEntry): string | null {
+  return entry.route === "agent-reply" && typeof entry.body.session === "string" ? `${entry.body.session}\u0000${entry.thread ?? ""}` : null;
+}
 
 export type AnswerClass = "delivered" | "refused" | "revoked" | "retry";
 
@@ -390,7 +402,7 @@ export function doorRefusesBare(door: { window: boolean } | null | undefined, ro
 }
 
 /** Statuses a proxy in front of the owner answers when the owner itself never got the request (`tailscale serve` with the Inbox down). */
-const GATEWAY_STATUSES = new Set([502, 503, 504]);
+export const GATEWAY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
 
 const MACHINE_FILE = /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -481,6 +493,35 @@ export class InboxOutbox {
   noteSentFiles(key: string, sent: readonly string[], attempt = 0): void {
     const entry = this.entries.get(key);
     if (entry && pending(entry)) this.save({ ...entry, sent_files: [...sent], ...(attempt > 0 ? { files_try: attempt } : {}) });
+  }
+
+  /**
+   * A held answer's file that stalled or met a server error there: counted as a 5xx is. Nothing of the answer reached
+   * that machine, so after OUTBOX_MAX_SERVER_ERRORS it ends refused (its notice says why), never "may have been delivered".
+   */
+  filesFailed(key: string, answer: { status: number; body: unknown }): void {
+    const entry = this.entries.get(key);
+    if (!entry || !pending(entry)) return;
+    const errors = entry.errors + 1;
+    if (errors >= OUTBOX_MAX_SERVER_ERRORS) this.settle({ ...entry, errors }, answer, "refused");
+    else this.save({ ...entry, errors });
+  }
+
+  /** A held answer's file that machine refused (or that is no longer here): the answer is refused, a notice. */
+  filesRefused(key: string, answer: { status: number; body: unknown }): void {
+    const entry = this.entries.get(key);
+    if (entry && pending(entry)) this.settle(entry, answer, "refused");
+  }
+
+  /**
+   * That machine forgot a held answer's file ids (its upload sweep took them while it was away a day): its files go
+   * again, once, under new keys. False when they went again already (the refusal then stands).
+   */
+  filesForgotten(key: string): boolean {
+    const entry = this.entries.get(key);
+    if (!entry || !pending(entry) || entry.files_again) return false;
+    this.save({ ...entry, sent_files: [], files_try: (entry.files_try ?? 0) + 1, files_again: true });
+    return true;
   }
 
   /** A machine's entries in queue order (all of them, or only those not settled). */
@@ -659,7 +700,17 @@ export class InboxOutbox {
     // try, and the person's writes behind them go now.
     let ownFailed = false;
     for (;;) {
-      const head = this.list(machine, "pending").find((e) => !(ownFailed && e.auto));
+      // A held answer whose files are still going up (their own lane, inbox-outbox-file-lane.ts) is not this queue's
+      // yet, and nor is a later answer of the same agent in the same thread: it stays behind the one before it.
+      const waiting = new Set<string>();
+      const head = this.list(machine, "pending").find((e) => {
+        const lane = answerLane(e);
+        if (outboxWaitsForFiles(e) || (lane !== null && waiting.has(lane))) {
+          if (lane !== null) waiting.add(lane);
+          return false;
+        }
+        return !(ownFailed && e.auto);
+      });
       if (!head) return ownFailed ? "server_error" : "empty";
       // This Inbox's own: one past its day is never sent again; one behind a write that surely did not land goes with it.
       const before = head.follows ? this.entries.get(head.follows) : undefined;
@@ -681,6 +732,8 @@ export class InboxOutbox {
       const current = this.entries.get(leaving.key);
       // Dropped while in flight (Unlink): its notice already says it may have landed.
       if (!current || !pending(current)) continue;
+      // That machine forgot its files' ids: it waits for them again (`filesForgotten`), never settled by that refusal.
+      if (outboxWaitsForFiles(current)) continue;
       const verdict = classifyAnswer(answer);
       if (verdict === "delivered" || verdict === "refused") {
         this.settle(current, answer!, verdict);
@@ -694,11 +747,6 @@ export class InboxOutbox {
       if (answer === null || GATEWAY_STATUSES.has(answer.status)) return "unreachable";
       // A 5xx: counted, and parked once it keeps happening, so the queue moves on.
       const errors = current.errors + 1;
-      // Nothing of it ever reached that machine (a held answer's file that would not go): refused, a notice that says why.
-      if (errors >= OUTBOX_MAX_SERVER_ERRORS && answer.unsent) {
-        this.settle({ ...current, errors }, answer, "refused");
-        continue;
-      }
       if (errors >= OUTBOX_MAX_SERVER_ERRORS) {
         const at = this.now().toISOString();
         this.save({ ...current, errors, state: "parked", status: answer.status, answer: answer.body, settled_at: at, notice: { kind: "may_have_been_delivered", at } });
