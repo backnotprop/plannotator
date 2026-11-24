@@ -18,7 +18,7 @@ import type { InboxDraftFile, InboxMessageWire, InboxReplyDraftRow, InboxThread 
 import type { ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { ChatFrame, type ChatWindowStore } from '@plannotator/ui/components/chat';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import { inboxApi } from '../api';
+import { heldWords, inboxApi, type MachineView } from '../api';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
 import { InboxComposerField } from '../components/ComposerField';
 import { conflictText, DraftHead, DraftStamp } from '../components/DraftLabel';
@@ -26,6 +26,7 @@ import { ReplyRow } from '../components/ReplyRow';
 import { Tip } from '../components/Tip';
 import { VoiceMicButton, VoiceStatusLine } from '../components/VoiceMic';
 import { Icon } from '../icons';
+import { linkedMachineFacts, machineOf } from '../inboxUrl';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
 import { tookOverReply, wordsMessage } from '../sendTargets';
 import { useFloatingReplyWords } from '../threadMentions';
@@ -69,7 +70,8 @@ export interface FloaterBoxProps {
   /** × : it stops floating and stays in Drafts. */
   onPutAway: () => void;
   onOpenThread: () => void;
-  onSent: (agent: string) => void;
+  /** `held`: the words of a reply held for a linked machine that is away ("Waiting for …"), else null. */
+  onSent: (agent: string, held: string | null) => void;
   /** Discarded; the words and files, for Undo. */
   onDiscarded: (words: string, files: readonly ReplyDraftFileRef[]) => void;
   /** Sent or discarded in another window. */
@@ -93,6 +95,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   });
   const files = useComposeFiles(NO_UPLOADS, {
     onPasted: (names) => setSaid(attachedAnnouncement(names)),
+    // A linked machine's thread: its files go to that machine, beside its draft.
+    machine: machineOf(threadId),
     text: {
       get value() {
         return textRef.current;
@@ -281,7 +285,7 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
       // A retry of the same reply keeps its key (a lost answer is not sent twice); changed words are a new reply.
       const content = `${words}\u0000${uploads.join(',')}`;
       if (sendKey.current?.content !== content) sendKey.current = { key: crypto.randomUUID(), content };
-      await inboxApi.reply(target.id, {
+      const answer = await inboxApi.reply(target.id, {
         idempotency_key: sendKey.current.key,
         words,
         questions: [],
@@ -296,7 +300,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
       });
       sendKey.current = null;
       draft.sent();
-      onSent(target.author.kind === 'agent' ? (target.author.name ?? agentLabel) : agentLabel);
+      const away = answer.held ? linkedMachineFacts(machineOf(threadId) ?? '') : null;
+      onSent(target.author.kind === 'agent' ? (target.author.name ?? agentLabel) : agentLabel, answer.held ? heldWords(away && { name: away.name, state: away.state as MachineView['state'] }) : null);
     } catch (cause) {
       if (claimed) draft.release();
       if (textRef.current.trim() !== '') draft.save(textRef.current, files.draftFiles(textRef.current));

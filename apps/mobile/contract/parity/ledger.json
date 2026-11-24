@@ -22120,6 +22120,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-post-threads-id-draft",
+      "title": "door:POST threads/:id/draft",
+      "surface": [
+        "door:POST threads/:id/draft"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-draft-delete",
+      "title": "door:POST threads/:id/draft/delete",
+      "surface": [
+        "door:POST threads/:id/draft/delete"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

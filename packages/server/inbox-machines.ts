@@ -46,6 +46,7 @@ import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
+import { createMachineDrafts, MACHINE_DRAFT_ROUTE } from "./inbox-machine-drafts";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
@@ -146,7 +147,7 @@ export interface InboxMachinesContext {
 export type MachineLinkTimings = Partial<PeerLinkTimings> & { updatedShownMs?: number; restartBackMs?: number; accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: PeerRereadEvent | "cards"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: PeerRereadEvent | "cards"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } } | { event: "drafts"; data: { thread_id: string } };
 
 /** How the window draws a machine's version (approval "inbox-machine-update"). */
 export interface MachineUpdateView {
@@ -453,6 +454,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const outbox = InboxOutbox.open(context.dataDir, context.now);
   const peers = new Map<string, PeerLink>();
   const machinePulls = createMachinePulls({ peers: () => peers.values() });
+  // A linked machine's thread's reply draft (mark `reply-drafts`): kept there, held here while it is away. Every window
+  // hears a change as it hears this Inbox's own (`event: drafts`).
+  const drafts = createMachineDrafts({ outbox, peer: (id) => peers.get(id), onChange: (_machine, threadId) => emit({ event: "drafts", data: { thread_id: threadId } }) });
   // Branch reviews: each linked machine's reported branches, read when Reviews is (inbox-machine-branches.ts).
   const machineBranches = createMachineBranches({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
@@ -578,6 +582,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onReread: (event) => emit({ event, data: {} }),
       onCards: () => emit({ event: "cards", data: {} }),
+      // A reply draft there changed (its window, a phone, a Send, this Inbox's own write): read again on the next read.
+      onDrafts: (threadId) => {
+        drafts.farChanged(link.id, threadId);
+        emit({ event: "drafts", data: { thread_id: threadId } });
+      },
       onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
     });
@@ -859,6 +868,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (fileRead) return json(fileRead.body, fileRead.status);
     // HEAD as a local page and its folder answer it: the far GET's headers, no body.
     const head = req.method === "HEAD" && (MACHINE_PAGE_ROUTE.test(route) || MACHINE_ASSET_ROUTE.test(route) || MACHINE_MARKDOWN_IMAGE_ROUTE.test(route));
+    // A thread's reply draft (inbox-machine-drafts.ts): one waiting to land there, or (away) the last one heard, is answered here.
+    const draftRoute = MACHINE_DRAFT_ROUTE.exec(route);
+    if (draftRoute && !draftRoute[2] && req.method === "GET") {
+      const here = drafts.read(peer, draftRoute[1]!);
+      if (here) return json(here);
+    }
     if (req.method === "GET" || head) {
       const search = url.search;
       const headers = pick(req.headers, PASS_REQUEST);
@@ -877,6 +892,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       try {
         const answer = await peer.request(page ? `attachments/${page[1]}/view` : route, search, { method: "GET", headers, signal: req.signal });
         if (sessionsRead !== null && answer.ok) void launchReads.keep(machine, sessionsRead, answer.clone(), () => peers.has(machine));
+        if (draftRoute && !draftRoute[2]) drafts.noteRead(machine, draftRoute[1]!, answer.clone());
         if (page) {
           const made = await machinePageAnswer(answer, machine, search, (far) => passAnswer(far));
           if (!head) return made;
@@ -917,7 +933,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
         }
         query.delete("serverSession");
         const search = query.size > 0 ? `?${query}` : "";
-        return passAnswer(await peer.request(route, search, { method: "POST", headers, body: req.body, signal: req.signal, timeoutMs: UPLOAD_MS }));
+        const far = await peer.request(route, search, { method: "POST", headers, body: req.body, signal: req.signal, timeoutMs: UPLOAD_MS });
+        // A reply draft held while that machine is away shows this file's tile by it.
+        if (route === "uploads" && far.ok) drafts.noteUpload(far.clone());
+        return passAnswer(far);
       } catch {
         return offline();
       }
@@ -930,6 +949,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // An agent's or a script's bare call is still the owner's for every other write, as before.
     const window = isWindowRequest(req, body, context.serverSession);
     if (!window && startsAgentThere(route, body)) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+    // A reply draft's save or Discard: straight there while it can take it, else held here (inbox-machine-drafts.ts).
+    if (draftRoute) {
+      delete body.serverSession;
+      const answer = await drafts.write(peer, draftRoute[1]!, !!draftRoute[2], body, req.signal);
+      return "far" in answer ? passAnswer(answer.far) : json(answer.body, answer.status);
+    }
     // Sent now or not at all, from a press in this window (rule 8, `now`): a file a message names, attached there as the
     // person comments on it (the window needs the attachment now); a Combine, or a Tidy with the person's words, which
     // held for days would act on threads nobody is looking at. A Tidy without words stays held like any append.
@@ -990,6 +1015,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // Where the person was, when not at this window, said on so that machine's agent reads where they wrote it.
     const place = inboxForwardedPlace(context.sentFrom?.(req, via) ?? null);
     const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window, place);
+    // A reply that carries a draft still waiting to land there: the draft shown here settles with it.
+    if (fresh && REPLY_ROUTE.test(route) && THREAD_HINT.test(named)) drafts.afterReply(peer, named, body);
     if (peer.state === "online") peer.flush();
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;
@@ -1265,7 +1292,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
 
   // ── The merged view (only with machines=1) ──
 
-  const rows = (): (InboxListRow & { machine: string })[] => [...peers.values()].flatMap((peer) => peer.list?.rows ?? []);
+  // A draft waiting to land on its machine draws the row's Draft mark here (inbox-machine-drafts.ts).
+  const rows = (): (InboxListRow & { machine: string })[] => drafts.overlay([...peers.values()].flatMap((peer) => peer.list?.rows ?? []));
   const projects = (): Record<string, unknown>[] => [...peers.values()].flatMap((peer) => peer.list?.projects ?? []);
   /** Each linked machine's agents, as its list last said (kept in memory while it is away, like its rows); none from an older Inbox. */
   const agents = (): InboxAgentsGroup[] => [...peers.values()].flatMap((peer) => (peer.list?.agents ? [peer.list.agents] : []));
@@ -1355,6 +1383,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     /** This Inbox's door changed by itself (published again once Tailscale ran): the windows hear the machines block. */
     machinesChanged,
     rows,
+    /** The Drafts page's rows of linked machines' threads holding unsent work (mark `reply-drafts`), each with its first words. */
+    replyDraftRows: () => drafts.rowsFor([...peers.values()], rows()),
     projects,
     agents,
     sessionNames,

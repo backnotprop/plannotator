@@ -9,7 +9,7 @@
  */
 import type { DraftFileUploader, ReplyDraftSaveInput, ReplyDraftStore } from '@plannotator/core/inbox-reply-draft';
 import { inboxApi, pageServerSession, replyDraftSaveBody, reuseAttachment, uploadFile } from './api';
-import { inboxUrl } from './inboxUrl';
+import { inboxUrl, machineOf } from './inboxUrl';
 
 /**
  * A browser takes at most 64 KiB of keepalive bodies in flight (more is refused at once), so the save sent as the
@@ -39,12 +39,14 @@ export const httpReplyDraftStore: ReplyDraftStore = {
   read: async (threadId) => (await inboxApi.replyDraft(threadId)).draft ?? null,
   save: async (threadId, input, options) => {
     if (!options.keepalive) return inboxApi.saveReplyDraft(threadId, input.body, input.base, input.baseBody, input.files, input.recipients, input.quote, input.mentions);
-    // As the page goes: its answer is never read (the window reads the draft back when it comes back).
+    // As the page goes: its answer is never read (the window reads the draft back when it comes back). A linked
+    // machine's thread goes through the forward, keyed and named as every write there is.
     const session = pageServerSession();
-    void fetch(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft`), {
+    const machine = machineOf(threadId);
+    void fetch(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft`, undefined, machine), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      ...keepaliveBody({ ...saveBody(input), ...(session ? { serverSession: session } : {}) }),
+      headers: { 'Content-Type': 'application/json', ...(machine ? { 'X-Plannotator-Thread': threadId } : {}) },
+      ...keepaliveBody({ ...saveBody(input), ...(session ? { serverSession: session } : {}), ...(machine ? { idempotency_key: crypto.randomUUID() } : {}) }),
     }).catch(() => {});
     return { draft: null };
   },

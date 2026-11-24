@@ -43,7 +43,7 @@ import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { JsonLines } from "@plannotator/shared/inbox/devices";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
-import type { InboxMessage } from "@plannotator/core/inbox-types";
+import type { InboxMessage, InboxReplyDraft } from "@plannotator/core/inbox-types";
 import { inboxTidyWords, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
 
 export const INBOX_OUTBOX_DIR = "outbox";
@@ -123,6 +123,11 @@ export interface OutboxEntry {
    * is on its way right now). So nothing of it lands after its maker said it did not.
    */
   send_by?: string;
+  /**
+   * A reply draft write held for the thread's machine (inbox-machine-drafts.ts; always `auto`): `view`, the draft the
+   * window here shows while it waits (null: none, after a delete), never sent on. Settled, it is not kept past a start.
+   */
+  draft?: { view: InboxReplyDraft | null };
 }
 
 /** Whether a settled entry may have been applied there: delivered (and not skipped there by its guard), given up after 5xx, or taken back after it left. */
@@ -256,6 +261,11 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST messages/:id/run": "now",
   "POST messages/:id/secret": "now",
   "POST threads/:id/delete": "set",
+  // A reply draft of the machine's thread (mark `reply-drafts`): a compare-and-set on the words, so a second copy is
+  // the same draft (its own words, `base_body`) or refused; a delete twice deletes once. Held only while the machine
+  // cannot take it now (inbox-machine-drafts.ts), as this Inbox's own write: never "waiting", never a notice.
+  "POST threads/:id/draft": "set",
+  "POST threads/:id/draft/delete": "set",
   "POST annotations": "set",
   "POST annotations/:id/remove": "set",
   "POST messages/:id/guide/reviewed": "set",
@@ -440,7 +450,7 @@ export class InboxOutbox {
     window = false,
     sentFrom: InboxSentFromPlace | null = null,
     auto = false,
-    own: { follows?: string; send_by?: string } = {},
+    own: { follows?: string; send_by?: string; draft?: { view: InboxReplyDraft | null } } = {},
   ): { entry: OutboxEntry; fresh: boolean } {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
@@ -478,6 +488,7 @@ export class InboxOutbox {
       ...(auto ? { auto: true as const } : {}),
       ...(auto && own.follows ? { follows: own.follows } : {}),
       ...(auto && own.send_by ? { send_by: own.send_by } : {}),
+      ...(auto && own.draft ? { draft: own.draft } : {}),
     });
     return { entry, fresh: true };
   }
@@ -642,6 +653,8 @@ export class InboxOutbox {
     const now = this.now().getTime();
     const keep = (entry: OutboxEntry) => {
       if (pending(entry)) return true;
+      // A reply draft's settled write: nobody asks for it by its key again (each save has its own), and it held words.
+      if (entry.draft) return false;
       const settled = entry.settled_at ? Date.parse(entry.settled_at) : now;
       // Not sent because the link went: its words are the only copy, so it stays until the person dismisses it.
       if (entry.state === "dropped" && !entry.dismissed) return true;

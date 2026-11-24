@@ -112,6 +112,8 @@
       "POST rex/show",
       "POST tag-colours",
       "POST threads/:id/delete",
+      "POST threads/:id/draft",
+      "POST threads/:id/draft/delete",
       "POST threads/:id/mark-unread",
       "POST threads/:id/message",
       "POST threads/:id/pin",

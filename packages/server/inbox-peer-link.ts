@@ -139,6 +139,8 @@ export interface PeerLinkOptions {
   onReread?: (event: PeerRereadEvent) => void;
   /** Its Board was read again (`cards`): the windows read the merged Board. */
   onCards?: () => void;
+  /** A thread's reply draft changed there (`drafts`, mark `reply-drafts`) and its list was read again for the Draft mark. */
+  onDrafts?: (threadId: string) => void;
   /**
    * That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows
    * read theirs. `sessions`: a session ended or came back there; `agents`: its Agents section moved; `labels`: a
@@ -369,8 +371,8 @@ export class PeerLink {
     }, this.t.silenceMs);
     let response: Response;
     try {
-      // The reread events and `deliveries=1`: none writes a record, so the stream tells this machine when to read the list again.
-      const asks = [...PEER_REREAD_EVENTS, "deliveries"].map((event) => `${event}=1`).join("&");
+      // The reread events, `deliveries=1` and `drafts=1`: none writes a record, so the stream tells this machine when to read the list again.
+      const asks = [...PEER_REREAD_EVENTS, "deliveries", "drafts"].map((event) => `${event}=1`).join("&");
       response = await this.options.transport.events(headers, this.cursor === null ? `?${asks}` : `?cursor=${this.cursor}&${asks}`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;
@@ -435,6 +437,11 @@ export class PeerLink {
             // The list's cursor does not move, so the windows are told apart from a list that changes it.
             const event = parsed.event;
             void this.refreshList().then(() => this.options.onReread?.(event));
+          } else if (parsed.event === "drafts") {
+            // A thread's reply draft there: its row's Draft mark is in the list. A compose draft there is its own.
+            const change = JSON.parse(parsed.data) as Json;
+            const threadId = typeof change.thread_id === "string" ? change.thread_id : null;
+            if (threadId) void this.refreshList().then(() => this.options.onDrafts?.(threadId));
           } else if (parsed.event === "deliveries") {
             const change = JSON.parse(parsed.data) as Json;
             this.deliveriesMoved(change.sessions === true, change.agents === true, change.labels === true);

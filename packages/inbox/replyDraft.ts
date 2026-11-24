@@ -49,7 +49,8 @@
  * Storage is the host's (`store`, @plannotator/core/inbox-reply-draft's
  * `ReplyDraftStore`); this Inbox's is HTTP (replyDraftHttp.ts).
  */
-import { machineOf } from './inboxUrl';
+import { keepsReplyDraft } from './machineDrafts';
+export { keepsReplyDraft };
 import { clearLateVoiceMiss, noteLateVoiceMiss } from './lateVoice';
 import { spaced } from './voiceField';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -156,9 +157,9 @@ let landing = 0;
 /** Per thread: raised by each Discard here. A file still landing from before one joins no draft (it was thrown away). */
 const discards = new Map<string, number>();
 const discardsOf = (threadId: string) => discards.get(threadId) ?? 0;
-/** Another machine's thread keeps no draft here: dictated words for its closed box wait in this page for the box. */
+/** A linked machine's thread that keeps no draft (an older Plannotator there): dictated words for its closed box wait in this page for the box. */
 const heldVoice = new Map<string, string[]>();
-/** The dictated words waiting for this thread's box (`landWordsInReplyDraft` on another machine's thread), taken once. */
+/** The dictated words waiting for this thread's box (`landWordsInReplyDraft` on a thread whose draft is not kept), taken once. */
 export function takeHeldVoiceWords(threadId: string): string[] {
   const words = heldVoice.get(threadId) ?? [];
   heldVoice.delete(threadId);
@@ -241,7 +242,7 @@ export function replyDraftDiscarded(threadId: string): void {
  * stay for the thread to offer again (lateVoice.ts).
  */
 export function landWordsInReplyDraft(threadId: string, words: string, store: ReplyDraftStore = httpReplyDraftStore): Promise<void> {
-  if (machineOf(threadId)) {
+  if (!keepsReplyDraft(threadId)) {
     heldVoice.set(threadId, [...(heldVoice.get(threadId) ?? []), words]);
     unsavedChanged();
     return Promise.resolve();
@@ -761,9 +762,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   const save = useCallback(
     (text: string, files: ReplyDraftFiles = NO_FILES) => {
       const target = current.current;
-      // Another machine's thread (linked machines): its drafts live on that machine, whose door takes none, so
-      // the words stay in this box only.
-      if (claimed.current.has(target) || machineOf(target)) return;
+      // A linked machine's thread is saved there through the forward, as here (machineDrafts.ts). One whose older
+      // Plannotator keeps no draft from here: the words stay in this box only.
+      if (claimed.current.has(target) || !keepsReplyDraft(target)) return;
       // Longer than a draft holds: never sent (the Inbox would refuse it), said above the box instead. The file
       // changes wait for the next save (the box keeps its last held files).
       if (text.length > INBOX_DRAFT_BODY_MAX) {
@@ -848,7 +849,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     refusedThreads.delete(target);
     unsavedChanged();
     setState({ loadedFor: target, draft: null, conflict: null, tooLong: false, failed: false });
-    if (machineOf(target)) return;
+    if (!keepsReplyDraft(target)) return;
     chain.current = chain.current.then(() => storeRef.current.discard(target).then(() => undefined, () => undefined));
   }, []);
 
@@ -1034,12 +1035,13 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
    * (`draftFiles`) are saved now, with this window's file changes still waiting (`carried`), and every save is
    * answered. A save the Inbox refused earlier (it restarted under the page) is made again. True when the Inbox holds
    * exactly these words and files; false while they are not saved (a conflict to resolve, too long, refused, no answer,
-   * a file change still waiting, a Send on its way). Another machine's thread keeps no draft: true, as a reload always did.
+   * a file change still waiting, a Send on its way). A linked machine's thread whose draft is not kept (an older
+   * Plannotator there): true, as a reload always did.
    */
   const settle = useCallback(
     async (text: string | null, files: ReplyDraftFiles = NO_FILES): Promise<boolean> => {
       const target = current.current;
-      if (machineOf(target)) return true;
+      if (!keepsReplyDraft(target)) return true;
       if (text !== null && (carried.has(target) || replyContentKey(text, files) !== (synced.current.get(target) ?? ''))) save(text, files);
       else if (text === null && carried.has(target)) write(target, syncedWords.current.get(target) ?? '');
       flush();

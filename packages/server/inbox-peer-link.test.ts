@@ -417,6 +417,27 @@ describe("the list (rule 5)", () => {
     expect(pinsAtTold).toEqual(["msg_a"]);
   });
 
+  test("a reply draft there moves no record: the stream asks for `drafts`, and a thread's frame reads the list (its Draft mark) before the windows hear it; a compose draft there is not this Inbox's", async () => {
+    const told: string[] = [];
+    let readsAtTold = 0;
+    const d = door({
+      cursor: 3,
+      frames: ['event: drafts\ndata: {"compose":true}\n\n', 'event: drafts\ndata: {"thread_id":"msg_a"}\n\n'],
+      threads: () => Response.json({ cursor: 3, sections: [{ threads: [{ thread_id: "msg_a" }] }], marks: ["reply-drafts"] }),
+    });
+    const { peer } = link(d.url, {
+      onDrafts: (threadId) => {
+        told.push(threadId);
+        readsAtTold = d.stats.threads;
+      },
+    });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("drafts")).toBe("1");
+    expect(told).toEqual(["msg_a"]);
+    expect(readsAtTold).toBeGreaterThan(1);
+  });
+
   test("its archived threads are read only when asked; asleep, it answers with the last page for that ask, away; an older door, nothing", async () => {
     let awake = true;
     const d = door({ cursor: 3, archived: () => (awake ? Response.json({ total: 1, threads: [{ thread_id: "msg_old", resolved_at: "2026-11-14T10:00:00Z" }], projects: [] }) : new Response("", { status: 503 })) });
