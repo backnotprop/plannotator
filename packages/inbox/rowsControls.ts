@@ -120,7 +120,7 @@ export const ROWS_MAIN_CONTROLS: readonly RowsControl[] = [
   showSwitch('pulls', 'hidePulls', 'Pull requests', 'Their state at the end of the row'),
 ];
 
-/** Under "More choices": nine choices over the other twelve options. */
+/** Under "More choices": ten choices over the other thirteen options. */
 export const ROWS_MORE_CONTROLS: readonly RowsControl[] = [
   showSwitch('machineNames', 'hideMachineNames', 'Machine names on projects', 'Same-name projects keep the machine name so you can tell them apart'),
   seg({
