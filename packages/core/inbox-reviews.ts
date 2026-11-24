@@ -559,6 +559,7 @@ export function inboxReviewLandingChanges(input: {
  *   work). A later review is listed, as a review with no open PR and links to
  *   the PRs (`landed`), until the person approves it. `landed`: the records
  *   (`inboxReviewLandingChanges`), which outlive the list's read of merged PRs.
+ *   A thread whose ship merged stays while its Merged words show (`shipMerged`).
  * - Archived: a resolved thread is left out while its latest review is no
  *   newer than the archive, unless it still owns an open PR. A review sent
  *   after the archive brings it back, as the Inbox brings the thread back.
@@ -580,6 +581,11 @@ export function inboxReviewRows(input: {
   ended?: (threadId: string) => boolean;
   /** The person's last review posted on a PR from here, by pull key: their answer to any review before it. */
   posted?: ReadonlyMap<string, InboxReviewPosted>;
+  /**
+   * The threads whose ship merged and still shows "Merged <time>" (core `shipLook`): each keeps its row while it does,
+   * its PRs landed and its agent ended or not, in the group it had (inbox-ship.md, How a ship ends).
+   */
+  shipMerged?: ReadonlySet<string>;
 }): InboxReviewRow[] {
   const byThread = new Map(input.threads.map((thread) => [thread.thread_id, thread]));
   const all = new Map<string, InboxPull>();
@@ -616,14 +622,17 @@ export function inboxReviewRows(input: {
     const landed = open.length === 0 ? landingsOf(threadId, pulls, review) : [];
     // Only when every PR it owns is accounted for: one with no record may be open, just off this list.
     const allDone = landed.length > 0 && ownedKeys(threadId, review).every((key) => landed.some((landing) => landing.key === key));
-    if (allDone && (!review || landed.some((landing) => landing.through_review === review.latest_review_id) || (review.verdict?.verdict === "approved" && reviewIsOfLanding(review, landed)))) return;
+    // A ship that just merged keeps its row for its Merged words.
+    const shipMerged = allDone && !!input.shipMerged?.has(threadId);
+    if (allDone && !shipMerged && (!review ||landed.some((landing) => landing.through_review === review.latest_review_id) || (review.verdict?.verdict === "approved" && reviewIsOfLanding(review, landed)))) return;
     if (review?.resolved_at && review.reviewed_at <= review.resolved_at && open.length === 0) return;
     const stacks = stacksOf(open);
     for (const stack of stacks) attached.add(stack.id);
     // A reported branch with no review yet waits on the person: they start the review (the owner, 2026-11-16).
     const reported = !review && input.started?.get(threadId)?.kind === "branch";
     // A thread started from the PR's page asked for no review: nobody is curating, so the PR stays where its own state puts it.
-    const talk = !review && own?.link.via === "owner" && own.link.ask === "thread" && stacks[0] ? inboxReviewPullMove(stacks[0], input.posted) : null;
+    // Its ship merged, its stack gone with the merge: not reviewed, where its own PR's row was while open.
+    const talk = !review && own?.link.via === "owner" && own.link.ask === "thread" ? (stacks[0] ? inboxReviewPullMove(stacks[0], input.posted) : shipMerged ? { move: "not_reviewed" as const, reason: "not_reviewed" as const } : null) : null;
     rows.push({
       id: threadId,
       reviewed: true,
@@ -642,7 +651,7 @@ export function inboxReviewRows(input: {
   for (const thread of input.threads) push(thread.thread_id, thread, owned.get(thread.thread_id));
   // Curating only while someone can: with the agent ended the PR is back to not reviewed (its stack row, the stack view's Start a new review thread).
   // A thread archived before its review drops out earlier, as the PR's owner (the server's `pullOwnersNow`).
-  for (const [threadId, own] of owned) if (!byThread.has(threadId) && (own.link.agent?.ended !== true || input.started?.get(threadId)?.kind === "branch")) push(threadId, null, own);
+  for (const [threadId, own] of owned) if (!byThread.has(threadId) && (own.link.agent?.ended !== true || input.started?.get(threadId)?.kind === "branch" || input.shipMerged?.has(threadId))) push(threadId, null, own);
   // A reported branch keeps its row with its agent ended: the person starts the review, with any agent.
   for (const [threadId, start] of input.started ?? []) if (!byThread.has(threadId) && !owned.has(threadId) && (start.kind === "branch" || !input.ended?.(threadId))) push(threadId, null, undefined);
   for (const stack of input.stacks) {

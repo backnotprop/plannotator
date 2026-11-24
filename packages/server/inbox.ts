@@ -367,7 +367,7 @@ import { gridRowDecorator, gridRowStripped } from "./inbox-grid-row";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createShipReader } from "./inbox-ship-read";
 import { shipBinds, shipLaunchFailed, shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
-import { inboxNoticeOf, type InboxShip } from "@plannotator/core/inbox-pull-handoff";
+import { inboxNoticeOf, shipLook, type InboxShip } from "@plannotator/core/inbox-pull-handoff";
 import { createInboxShipRoutes } from "./inbox-ship-routes";
 import { createInboxShipStore } from "./inbox-ship-store";
 import { createInboxShipWatch, shipEndedWaiting } from "./inbox-ship-watch";
@@ -6828,7 +6828,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const allOwners = new Map([...branchOwners, ...pullOwners.all()]);
         const rows = reviewRowsShown(
-          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true }),
+          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true, shipMerged: new Set(ships.all().filter((ship) => shipLook(ship) === "merged").map((ship) => ship.thread_id)) }),
           hiddenKeys,
           (key) => links[key]?.thread_id ?? allOwners.get(key)?.thread_id ?? null,
         );

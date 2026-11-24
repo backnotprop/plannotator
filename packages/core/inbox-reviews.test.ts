@@ -372,6 +372,22 @@ describe("landed PRs", () => {
     expect(inboxReviewRows({ threads: [thread], stacks: [], links: {}, pulls: [], landed: [landing()] })).toEqual([]);
   });
 
+  test("a thread whose ship merged keeps its row while Merged shows, in its group, with its agent ended; then it leaves", () => {
+    // A review thread's PR, shipped and merged.
+    const thread = review({ thread_id: "t", source: { kind: "pr", pr: { url: landing().url } } });
+    const reviewed = (shipMerged?: ReadonlySet<string>) => inboxReviewRows({ threads: [thread], stacks: [], links: {}, pulls: [merged()], landed: [landing()], shipMerged });
+    expect(reviewed(new Set(["t"])).map((r) => [r.id, r.landed.map((l) => l.key)])).toEqual([["t", [landing().key]]]);
+    expect(reviewed(new Set(["other"]))).toEqual([]);
+    expect(reviewed()).toEqual([]);
+    // A PR with no review, shipped from its row in a thread tied to it ("Open, not reviewed"); its agent ended after the merge.
+    const pull = merged();
+    const tied: InboxPullLink = { ...link("s", "owner"), ask: "thread", agent: { host: "claude-code", session: "ses", name: "Claude Code", ended: true } };
+    const owners = new Map([[pull.key, { thread_id: "s" }]]);
+    const handed = (shipMerged?: ReadonlySet<string>) => inboxReviewRows({ threads: [], stacks: [], links: { [pull.key]: tied }, pulls: [pull], landed: [landing({ thread_id: "s", through_review: null })], owners, shipMerged });
+    expect(handed(new Set(["s"])).map((r) => [r.id, r.reviewed, r.move, r.reason, r.pull_keys, r.landed.map((l) => l.key)])).toEqual([["s", true, "not_reviewed", "not_reviewed", [], [pull.key]]]);
+    expect(handed()).toEqual([]);
+  });
+
   test("a closed PR leaves too, and a later review comes back with a link to the PR", () => {
     const closed = landing({ state: "closed" });
     const round2 = review({ thread_id: "t", round: 2, latest_review_id: "t_r2" });

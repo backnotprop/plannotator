@@ -72,7 +72,8 @@ export function reviewRowTitle(row: InboxReviewRow, pullTitle: (stack: InboxPull
   const stack = row.stacks[0];
   if (stack) return pullTitle(stack);
   if (row.review) return inboxReviewTitleLine(row.review.title);
-  return row.started?.name ?? row.link?.thread_id ?? '';
+  // A shipped PR's thread, its PR merged: the PR's title, as its row had while open.
+  return row.started?.name ?? reviewRowLanding(row)?.title ?? row.link?.thread_id ?? '';
 }
 
 /** A row's third line: what it is, whose agent, and why it is where it is. */

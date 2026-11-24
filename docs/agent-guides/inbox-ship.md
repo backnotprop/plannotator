@@ -56,7 +56,7 @@ Approval "inbox-ship-mode" (`.product/approved/inbox-ship-mode/`, look "Glint").
   - the shipping session ended with a ship note waiting for 10 minutes (`INBOX_SHIP_ENDED_MS`, `shipEndedWaiting`, `shipSessionEnded`);
   - the PR could not be read 3 times in a row (`INBOX_SHIP_READ_MISSES`: `gh` or `glab` missing, signed out, refused): "Stuck: can't read the pull request", with why in the log and on stderr, until a read works.
 - **How a ship ends.**
-  - Merged, by anyone: the record goes merged, with no wake. The row shows "Merged <time>" for 6 hours (`INBOX_SHIP_MERGED_SHOWN_MS`), then returns to normal.
+  - Merged, by anyone: the record goes merged, with no wake. The row shows "Merged <time>" for 6 hours (`INBOX_SHIP_MERGED_SHOWN_MS`), then returns to normal. Meanwhile the ship's thread keeps its Reviews row though its PR landed, in the group it had, its agent ended or not (core `inboxReviewRows` `shipMerged`; the row finds its ship by its landing's key); after that a landed thread leaves Reviews as any does.
   - Closed: the ship stops, and the agent gets the closed line.
   - Stop: the ship stops at once in the record, and the agent gets the stop line on its next turn.
 - **The merge.** The merge is the agent's own `gh pr merge`. The Inbox never approves or merges.

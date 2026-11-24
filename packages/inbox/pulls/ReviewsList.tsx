@@ -299,10 +299,13 @@ export interface ShipHandlers {
 const NO_PROJECTS: Readonly<Record<string, string[]>> = {};
 const noProjects = () => NO_PROJECTS;
 
-/** The ship a row draws: its one PR's; a folded stack's, any layer's (an unfolded one's layers draw their own). */
+/**
+ * The ship a row draws: its one PR's; a folded stack's, any layer's (an unfolded one's layers draw their own); a
+ * landed PR's (its Merged words).
+ */
 function rowShip(row: InboxReviewRow, ships: ReadonlyMap<string, InboxShipView> | undefined, unfolded: boolean): InboxShipView | null {
   if (!ships || ships.size === 0 || unfolded) return null;
-  for (const key of row.pull_keys) {
+  for (const key of [...row.pull_keys, ...row.landed.map((landing) => landing.key)]) {
     const ship = ships.get(key);
     if (ship) return ship;
   }
