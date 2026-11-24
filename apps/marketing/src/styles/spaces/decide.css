@@ -26,11 +26,22 @@
   --dsn-well           muted 40% into card             var(--muted)
   --dsn-mark           oklch(70% 0.2 60 / 0.15)        oklch(70% 0.18 60 / 0.3)
   --dsn-ease           cubic-bezier(0.22, 1, 0.36, 1)  same
+  --dsn-q              #414853                         #aeb5bf   (a decision's question)
+  --dsn-who            #63656f                         #939aa4   (who decided, and the time)
+  --dsn-day            #9a9dab                         #646c7a   (the day names)
+  --dsn-rail           #cdcfdd                         #343c4a   (the rail)
   --tone               set inline on each face to one of the presence tokens
 
   Read from the page, not set here:
   --sans               "Spaces Inter", -apple-system, "Helvetica Neue", Arial, sans-serif
                        (page.css; the same variable Inter file the app ships)
+  --mono               "Geist Mono Variable", ui-monospace, ... (page.css)
+
+  The right panel is the list of decisions made, newest on top, on a rail
+  whose dots are the deciders' faces from the bar. The rail is solid within
+  a day (.dsn-in) and dotted across a gap of days (.dsn-apart, longer for a
+  longer gap). On the phone the first four rows sit in a second block under
+  the question.
 
   The containers .cap.wide (shown above 1180 px) and .cap.pn (shown at
   1180 px and below) come from the page's existing front door rules; the
@@ -55,6 +66,10 @@
 	--dsn-well: color-mix(in oklch, var(--muted) 40%, var(--card));
 	--dsn-mark: oklch(70% 0.2 60 / 0.15);
 	--dsn-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	--dsn-q: #414853;
+	--dsn-who: #63656f;
+	--dsn-day: #9a9dab;
+	--dsn-rail: #cdcfdd;
 	position: relative;
 	width: 828px;
 	height: 600px;
@@ -85,6 +100,10 @@ html:not(.light) .pg .dsn {
 	--presence-6: oklch(0.74 0.11 210);
 	--dsn-well: var(--muted);
 	--dsn-mark: oklch(70% 0.18 60 / 0.3);
+	--dsn-q: #aeb5bf;
+	--dsn-who: #939aa4;
+	--dsn-day: #646c7a;
+	--dsn-rail: #343c4a;
 }
 
 .pg .dsn p,
@@ -109,15 +128,8 @@ html:not(.light) .pg .dsn {
 	margin-right: auto;
 }
 
-.pg .dsn-dim,
-.pg .dsn-time,
-.pg .dsn-n {
+.pg .dsn-dim {
 	color: var(--muted-foreground);
-}
-
-.pg .dsn-n {
-	margin-left: 4px;
-	font-weight: 450;
 }
 
 .pg .dsn-pile {
@@ -187,30 +199,6 @@ html:not(.light) .pg .dsn {
 
 .pg .dsn-bar > .dsn-face {
 	margin-left: 4px;
-}
-
-.pg .dsn-agent {
-	flex: none;
-	display: inline-grid;
-	place-items: center;
-	width: 20px;
-	height: 20px;
-	border-radius: 4px;
-	background: var(--muted);
-	color: var(--foreground);
-}
-
-.pg .dsn-agent i {
-	width: 12px;
-	height: 12px;
-	background: currentColor;
-	mask-mode: alpha;
-	mask-position: center;
-	mask-repeat: no-repeat;
-	mask-size: contain;
-	-webkit-mask-position: center;
-	-webkit-mask-repeat: no-repeat;
-	-webkit-mask-size: contain;
 }
 
 .pg .dsn-split {
@@ -301,11 +289,6 @@ html:not(.light) .pg .dsn {
 
 .pg .dsn > .dsn-card {
 	position: absolute;
-}
-
-.pg .dsn-phone > .dsn-card {
-	position: static;
-	height: auto;
 }
 
 .pg .dsn-card {
@@ -444,65 +427,95 @@ html:not(.light) .pg .dsn {
 	color: var(--muted-foreground);
 }
 
-.pg .dsn-head h5 {
-	font-size: 13.5px;
-	font-weight: 620;
+.pg .dsn-head h5,
+.pg .dsn-list h5 {
+	font-size: 14.5px;
+	font-weight: 600;
+	line-height: 18px;
 	color: var(--foreground);
 }
 
-.pg .dsn-root,
-.pg .dsn-reply {
-	display: grid;
-	grid-template-columns: 20px minmax(0, 1fr);
-	gap: 9px;
+/* The list of decisions: a still. Only the question card moves. */
+.pg .dsn-log {
+	--dsn-line: linear-gradient(var(--dsn-rail), var(--dsn-rail)) 10px 0 / 1.5px 100% no-repeat;
+	margin-top: 8px;
 }
 
-.pg .dsn-reply {
-	padding: 10px 0 0 29px;
-	opacity: 0;
-	transform: translateY(6px);
-	transition: opacity 0.35s ease, transform 0.45s var(--dsn-ease);
-}
-
-.pg .dsn-reply[data-on] {
-	opacity: 1;
-	transform: none;
-}
-
-.pg .dsn-body {
-	display: grid;
-	gap: 3px;
-	min-width: 0;
-}
-
-.pg .dsn-who {
-	display: flex;
-	align-items: center;
-	gap: 7px;
-	height: 20px;
+.pg .dsn-dec {
+	position: relative;
+	display: block;
+	box-sizing: border-box;
+	height: 54px;
+	padding-left: 34px;
+	background: var(--dsn-line);
 	white-space: nowrap;
 }
 
-.pg .dsn-who b {
+.pg .dsn-dec.dsn-end {
+	background-size: 1.5px 12px;
+}
+
+.pg .dsn-dec > span {
+	display: block;
+}
+
+.pg .dsn-dec .dsn-face {
+	display: grid;
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 22px;
+	height: 22px;
+	font-size: 9px;
+	font-weight: 600;
+	box-shadow: 0 0 0 2px var(--card);
+}
+
+.pg .dsn-dq {
+	font-size: 13px;
+	line-height: 18px;
+	color: var(--dsn-q);
+}
+
+.pg .dsn-da {
+	font-size: 14px;
+	line-height: 21px;
 	font-weight: 600;
 }
 
-.pg .dsn-time {
-	font-size: 12px;
+.pg .dsn-dw {
+	font-size: 12.5px;
+	line-height: 16px;
+	color: var(--dsn-who);
 }
 
-.pg .dsn-guest {
-	padding: 1px 6px;
-	border-radius: 5px;
-	background: var(--muted);
+.pg .dsn-dw time {
+	margin-left: 8px;
+	font-family: var(--mono);
 	font-size: 11px;
-	font-weight: 520;
-	color: var(--muted-foreground);
 }
 
-.pg .dsn-quote {
-	font-size: 12px;
-	color: var(--muted-foreground);
+.pg .dsn-in {
+	height: 10px;
+	background: var(--dsn-line);
+}
+
+.pg .dsn-apart {
+	background: repeating-linear-gradient(var(--dsn-rail) 0 2px, transparent 2px 6px) 10px 0 / 1.5px 100% no-repeat;
+}
+
+.pg .dsn-day {
+	height: 18px;
+	padding-left: 34px;
+	background: var(--dsn-line);
+	font-family: var(--mono);
+	font-size: 10.5px;
+	line-height: 14px;
+	color: var(--dsn-day);
+}
+
+.pg .dsn-day.dsn-first {
+	background: none;
 }
 
 .pg .cap.pn.dsn-pn {
@@ -514,16 +527,34 @@ html:not(.light) .pg .dsn {
 }
 
 .pg .dsn-phone {
-	container-type: inline-size;
 	width: auto;
 	height: auto;
 	display: block;
+	background: none;
+}
+
+.pg .dsn-blk {
+	container-type: inline-size;
 	padding: 16px 16px 12px;
 	border-radius: 0 10px 10px;
 	background: var(--card);
 }
 
-.pg .dsn-phone > p {
+.pg .dsn-blk.dsn-list {
+	margin-top: 8px;
+	padding: 16px 16px 21px;
+	border-radius: 10px;
+}
+
+.pg .dsn-list h5 {
+	margin-bottom: 14px;
+}
+
+.pg .dsn-list .dsn-log {
+	margin-top: 0;
+}
+
+.pg .dsn-blk > p {
 	margin: 0 0 14px;
 	font-size: 14px;
 	line-height: 1.68;
@@ -548,6 +579,40 @@ html:not(.light) .pg .dsn {
 	}
 }
 
+/* The pencil note under the frame's bottom right corner, its arrow up at
+   the list, in the style of the row "Sticking to the plan" (page.css .ask).
+   On the phone it sits under the list with no arrow, at the inset of the
+   text in the blocks above. */
+.pg .dsn-ask {
+	align-items: flex-start;
+}
+
+.pg .dsn-ask .note {
+	font-size: 38px;
+	margin-top: 22px;
+}
+
+@media (min-width: 1181px) {
+	.pg .dsn-ask {
+		position: absolute;
+		top: 606px;
+		right: 96px;
+	}
+	.pg .dsn-ask .ar-u {
+		display: block;
+	}
+}
+
+@media (max-width: 1180px) {
+	.pg .dsn-ask {
+		margin: 22px 0 0 calc(max(16px, 50% - 260px) + 16px);
+	}
+	.pg .dsn-ask .note {
+		font-size: 32px;
+		margin-top: 0;
+	}
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.pg .dsn * {
 		transition: none !important;
@@ -567,9 +632,5 @@ html:not(.light) .pg .dsn {
 	}
 	.pg .dsn-q + .dsn-opt .dsn-radio {
 		box-shadow: inset 0 0 0 4.5px var(--primary);
-	}
-	.pg .dsn-reply {
-		opacity: 1;
-		transform: none;
 	}
 }

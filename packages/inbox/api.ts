@@ -1482,14 +1482,14 @@ export const inboxApi = {
        */
       quote?: { of: string; words?: string; time?: string };
       /** The answer carries the thread as a read of it would (`thread_read`): the Send's last reply asks, and reads nothing after. */
-      with_thread?: boolean;
+      with_thread?: boolean; /** New thread from this message: no #tag read, no still-open line, no length noted. */ author_only?: boolean;
     },
   ) =>
     // To another machine: the newest seq the person saw there rides along (rule 11), and a reply its Inbox has not
     // confirmed yet is held (`held`): the Send went into this Inbox's outbox, not into the thread.
     post<ReplyResult>(messageUrl(messageId, `/reply`), { ...input, ...seenThrough(messageId) }).then(
       (result) => {
-        noteReplySent(input.words);
+        if (input.author_only !== true) noteReplySent(input.words);
         // Only this Inbox's own thread, read as `thread` reads one; a linked machine's thread is read after, as before.
         const read = result.thread_read && !machineOf(messageId) && result.thread_read.thread?.thread_id ? threadModelOf(result.thread_read.thread.thread_id, result.thread_read) : undefined;
         const { thread_read: _read, ...rest } = result;
