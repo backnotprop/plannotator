@@ -43,7 +43,7 @@ import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache, type LaunchChoiceLists } from
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { createCodexPermissions, CODEX_APPROVALS } from "./inbox-launch-codex-permission";
 import { createInboxCodexAccount } from "./inbox-codex-account";
-import { CODEX_TURN_MOVED, codexBusyReply } from "./inbox-codex-steer";
+import { CODEX_TURN_MOVED } from "./inbox-codex-steer";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, launchTurnErrorNote, writeLaunchNote, type LaunchAvailability, type LaunchDelivery, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
 
@@ -765,7 +765,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
      * (`delivered`, a new turn). A turn Codex will not steer (a review, a compaction) is tried again later. A restart
      * under way is waited for. No answer in time: it may have gone, and is never sent again (`uncertain`).
      */
-    async deliver(launch: InboxLaunchRecord, text: string, signal: AbortSignal): Promise<LaunchDelivery> {
+    async deliver(launch: InboxLaunchRecord, text: string, signal: AbortSignal, how?: { intoTurn?: boolean }): Promise<LaunchDelivery> {
       const thread = launch.session_ref;
       if (!thread) return { failed: "the thread has not started" };
       const under = spawning.get(thread);
@@ -774,9 +774,10 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
       if (!p?.ready) return { failed: "Codex is not running" };
       if (signal.aborted) return { failed: "stopped" };
       const input = [{ type: "text", text, text_elements: [] }];
-      // The experimental `codex-steer` switch off (the default): exactly as before it (a new turn; into the running
-      // one only when Codex refuses a second turn), delivered at once.
-      if (codexBusyReply() !== "steer") {
+      // Not asked into the turn (the experimental `codex-steer` switch off, the default, or no rollout of the thread
+      // found to see it arrive in): exactly as before it (a new turn; into the running one only when Codex refuses a
+      // second turn), delivered at once.
+      if (how?.intoTurn !== true) {
         try {
           const started = await request(p, "turn/start", { threadId: thread, input });
           const id = started.turn?.id;

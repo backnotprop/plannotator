@@ -1550,7 +1550,7 @@ elif [ "$codex_available" -eq 1 ]; then
     case "$codex_steer_on:$PLANNOTATOR_BIN$CODEX_HOOKS" in
         0:*) ;;
         *[\'\"\$\`\\]*) ;;
-        *) CODEX_POST_TOOL_HOOK="/bin/sh -c 'B=\"${PLANNOTATOR_BIN}\"; H=\"${CODEX_HOOKS}\"; [ -x \"\$B\" ] || exit 0; [ -n \"\${PLANNOTATOR_DATA_DIR:-}\" ] && exec \"\$B\" codex-hook; for d in \"\$HOME/.plannotator/inbox\" \"\${XDG_DATA_HOME:-/nonexistent}/plannotator/inbox\"; do [ -d \"\$d\" ] || continue; m=\"\$d/codex-hook-ran\"; [ -e \"\$m\" ] && [ ! \"\$H\" -nt \"\$m\" ] || true 2>/dev/null >\"\$m\"; for f in \"\$d\"/codex-hook/*.json; do [ -e \"\$f\" ] || break; p=\$(dd bs=512 count=1 2>/dev/null); t=\${p#*session_id???}; t=\${t%%[!0-9a-f-]*}; export PLANNOTATOR_CODEX_HOOK_HEAD=\"\$p\"; [ \${#t} -eq 36 ] || exec \"\$B\" codex-hook; for g in \"\$d/codex-hook/\$t\".*.json; do [ -e \"\$g\" ] && exec \"\$B\" codex-hook; done; exit 0; done; done; exit 0'" ;;
+        *) CODEX_POST_TOOL_HOOK="/bin/sh -c 'B=\"${PLANNOTATOR_BIN}\"; H=\"${CODEX_HOOKS}\"; [ -x \"\$B\" ] || exit 0; for d in \"\${PLANNOTATOR_DATA_DIR:-/nonexistent}/inbox\" \"\$HOME/.plannotator/inbox\" \"\${XDG_DATA_HOME:-/nonexistent}/plannotator/inbox\"; do [ -d \"\$d\" ] || continue; m=\"\$d/codex-hook-ran\"; [ -e \"\$m\" ] && [ ! \"\$H\" -nt \"\$m\" ] || true 2>/dev/null >\"\$m\"; for f in \"\$d\"/codex-hook/*.json; do [ -e \"\$f\" ] || break; p=\$(dd bs=512 count=1 2>/dev/null); t=\${p#*session_id???}; t=\${t%%[!0-9a-f-]*}; export PLANNOTATOR_CODEX_HOOK_HEAD=\"\$p\"; [ \${#t} -eq 36 ] || exec \"\$B\" codex-hook; for g in \"\$d/codex-hook/\$t\".*.json; do [ -e \"\$g\" ] && exec \"\$B\" codex-hook; done; exit 0; done; done; exit 0'" ;;
     esac
     CODEX_POST_TOOL_HOOK_JSON=$(printf '%s' "$CODEX_POST_TOOL_HOOK" | sed 's/\\/\\\\/g; s/"/\\"/g')
     # Written once this installer added the PostToolUse hook: from then on, a hook the person removed from hooks.json
@@ -1790,25 +1790,35 @@ NODE
         else
             echo ""
             echo "Codex hooks file already exists at ${CODEX_HOOKS}, but it could not be merged automatically."
-            echo "Leaving Codex hook support unchanged. Add or update these hooks manually:"
-            echo ""
-            echo "  Stop:        command: ${PLANNOTATOR_BIN}"
-            echo "               timeout: 345600"
             if [ -n "$CODEX_POST_TOOL_HOOK" ]; then
+                echo "Leaving Codex hook support unchanged. Add or update these hooks manually:"
+                echo ""
+                echo "  Stop:        command: ${PLANNOTATOR_BIN}"
+                echo "               timeout: 345600"
                 echo "  PostToolUse: command: ${CODEX_POST_TOOL_HOOK}"
                 echo "               timeout: 10"
+            else
+                echo "Leaving Codex hook support unchanged. Add or update this Stop hook manually:"
+                echo ""
+                echo "  command: ${PLANNOTATOR_BIN}"
+                echo "  timeout: 345600"
             fi
         fi
     else
         echo ""
         echo "Codex hooks file already exists at ${CODEX_HOOKS}, but node was not found to merge it safely."
-        echo "Leaving Codex hook support unchanged. Add or update these hooks manually:"
-        echo ""
-        echo "  Stop:        command: ${PLANNOTATOR_BIN}"
-        echo "               timeout: 345600"
         if [ -n "$CODEX_POST_TOOL_HOOK" ]; then
+            echo "Leaving Codex hook support unchanged. Add or update these hooks manually:"
+            echo ""
+            echo "  Stop:        command: ${PLANNOTATOR_BIN}"
+            echo "               timeout: 345600"
             echo "  PostToolUse: command: ${CODEX_POST_TOOL_HOOK}"
             echo "               timeout: 10"
+        else
+            echo "Leaving Codex hook support unchanged. Add or update this Stop hook manually:"
+            echo ""
+            echo "  command: ${PLANNOTATOR_BIN}"
+            echo "  timeout: 345600"
         fi
     fi
 

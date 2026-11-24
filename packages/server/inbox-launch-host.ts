@@ -352,9 +352,10 @@ export interface LaunchHost {
    * Only a host whose sessions the Inbox wakes itself (Codex: inbox-codex-wake.ts, no plugin poll): the wake text of
    * a person's item for a launched session goes in as that session's turn. Without it, the wake's own way. `signal`:
    * the person pressed Stop or Delete meanwhile (the engine waits for this call before it stops the session): start
-   * no turn after it.
+   * no turn after it. `intoTurn`: it may go into the running turn (`steered`); only when the Codex wake's experimental
+   * `codex-steer` switch is on and it found the thread's rollout to see it arrive in. Absent: as before the switch.
    */
-  deliver?(launch: InboxLaunchRecord, text: string, signal: AbortSignal): Promise<LaunchDelivery>;
+  deliver?(launch: InboxLaunchRecord, text: string, signal: AbortSignal, options?: { intoTurn?: boolean }): Promise<LaunchDelivery>;
   /**
    * Only a host whose session writes its failed turns down where the Inbox can read them (Claude Code's transcript)
    * and says nothing to the Inbox itself: the error the session's last turn ended in, or null (it ended well, a new

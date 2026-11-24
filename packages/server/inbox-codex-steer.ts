@@ -4,14 +4,8 @@
  * (inbox-codex-wake.ts) asks this module before `codex queue`, and `codex queue` stays the fallback for everything
  * this cannot do, so a reply never goes worse than it did before.
  *
- * Two routes, for a thread the Inbox did not launch (a launched thread steers on its own app-server,
- * inbox-launch-codex.ts):
- *
- *  1. The control socket (a terminal Codex on the shared background server, 0.157+): `turn/steer` into the running
- *     turn, found with `thread/read` (inbox-codex-control.ts). OFF (`INBOX_CODEX_STEER_SOCKET`): its `initialize`
- *     changes the shared server for every client (the originator and user-agent suffix, a gateway login it may
- *     start), and nothing here checks the socket's owner yet. Kept, with its tests, for when that is settled.
- *  2. The hook (the Codex app, and any Codex that runs hooks). While the thread's rollout says a turn runs
+ * One route for a thread the Inbox did not launch (a launched thread steers on its own app-server,
+ * inbox-launch-codex.ts): the hook (the Codex app, and any Codex that runs hooks). While the thread's rollout says a turn runs
  *     (`codexRolloutTurn`), Plannotator's `PostToolUse` hook is in the person's Codex `hooks.json` and this Codex has
  *     run it since hooks.json last changed (Codex skips a hook the person has not reviewed; its gate notes each run,
  *     `codex-hook-ran`), and the reply fits the hook's context whole (`codexHookFits`), the reply is held in the hook
@@ -20,13 +14,14 @@
  *     tool call came) the hold ends and `codex queue` gives it as the next turn, as before. One claim (the wake's
  *     mkdir) decides who sends it, so it never goes twice.
  *
- * Either way a steer is only handed on: the wake says Delivered once the thread's rollout shows the text, and sends it
- * as the next turn when the turn ended without it (inbox-codex-sight.ts).
+ * A steer is only handed on: the wake says Delivered once the thread's rollout shows the text, and sends it as the
+ * next turn when the turn ended without it (inbox-codex-sight.ts).
  *
- * EXPERIMENTAL, OFF by default (the owner, 2026-11-24: "Q's working fine for the most part"): `codexBusyReply()`
- * reads the `codex-steer` experimental switch (PLANNOTATOR_EXPERIMENTAL, else config.json `experimental.codexSteer`).
- * Off, delivery is exactly as before this module: no rollout is read, nothing is held, a launched thread's host takes
- * the text as it did, and the installer writes no PostToolUse hook.
+ * EXPERIMENTAL, OFF by default (the owner, 2026-11-24: "Q's working fine for the most part"): `codexSteerOn()`
+ * reads the `codex-steer` experimental switch (PLANNOTATOR_EXPERIMENTAL, else config.json `experimental.codexSteer`)
+ * once, when the wake and the launch host are made (an Inbox restart applies a change). Off, delivery is exactly as
+ * before this module: no file of it is read or written, a launched thread's host takes the text as it did, and the
+ * installer writes no PostToolUse hook.
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -35,24 +30,18 @@ import { join } from "node:path";
 import { isCodexHookCommand } from "@plannotator/shared/codex-hook-command";
 import { loadConfig, resolveExperimental } from "@plannotator/shared/config";
 import { codexHookRanAt } from "@plannotator/shared/inbox/codex-hook-mailbox";
-import { CodexControlError, codexControlSocketPath, openCodexControl, type CodexControl } from "./inbox-codex-control";
 
 /**
- * What a reply to a Codex thread that is in a turn does, read on every use so a change applies at once:
- *
- *  - `"next_turn"` (the default): it waits for the turn to end and goes as the next turn (`codex queue`), as always.
- *  - `"steer"` (the `codex-steer` experimental switch on): it goes into the running turn (the hook after the next
- *    tool call, or `turn/steer`), else as the next turn.
+ * Whether a reply to a Codex thread that is in a turn may go into that turn (the `codex-steer` experimental switch;
+ * off: it waits for the turn to end and goes as the next turn, `codex queue`, as always). Read once by each caller at
+ * its creation, quietly (an invalid config.json says nothing here; it is off).
  *
  * Option b (wait, with Send now to steer on demand, as Claude Code) needs the Codex connection to report `busy` and
  * `send_now` and the wake to act on `deliver_now_at`; option c needs a control to queue one reply. Neither exists yet.
  */
-export function codexBusyReply(env: NodeJS.ProcessEnv = process.env): "steer" | "next_turn" {
-  return resolveExperimental(loadConfig(), "codex-steer", env) ? "steer" : "next_turn";
+export function codexSteerOn(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveExperimental(loadConfig({ quiet: true }), "codex-steer", env);
 }
-
-/** Whether route 1 (the control socket) is tried. Off: see the module comment. */
-export const INBOX_CODEX_STEER_SOCKET = false;
 
 /** A held reply gives up on the hook after this long, even while the rollout still says the turn runs (a Codex that quit mid-turn). */
 export const CODEX_HOOK_HOLD_MAX_MS = 30 * 60_000;
@@ -166,110 +155,14 @@ export function codexHooksHavePostToolUse(text: string | null): boolean {
 }
 
 
-// ── The socket: steer the running turn ──
-
-export type CodexSocketSteer =
-  /** `turn/steer` took it: it is in the running turn. */
-  | { kind: "steered"; turnId: string }
-  /** Sent and no answer: it may be in the turn. Never sent again. */
-  | { kind: "uncertain"; why: string }
-  /** Not taken (no socket, the thread not on that server, no running turn, Codex refused it): another route sends it. */
-  | { kind: "no"; why: string; idle: boolean };
-
-/**
- * A thread's `status` from `thread/read` (`ThreadStatus`, app-server-protocol v2 thread.rs: `{ "type": "active",
- * "activeFlags": [...] }`, `"idle"`, `"notLoaded"`, `"systemError"`): `active`, `idle`, or null for anything else.
- */
-export function codexThreadStatusOf(result: unknown): "active" | "idle" | null {
-  const status = (result as { thread?: { status?: unknown } } | null)?.thread?.status;
-  const type = typeof status === "string" ? status : (status as { type?: unknown } | null | undefined)?.type;
-  return type === "active" ? "active" : type === "idle" ? "idle" : null;
-}
-
-/** The running turn's id in a list of turns (`Turn.status` `inProgress`), the newest first; null when none runs. */
-export function codexRunningTurnOf(turns: unknown): string | null {
-  if (!Array.isArray(turns)) return null;
-  const running = turns.find((turn: { id?: unknown; status?: unknown } | null) => turn?.status === "inProgress" && typeof turn.id === "string" && turn.id);
-  return running ? (running.id as string) : null;
-}
-
 /**
  * Codex refused a steer because the turn it named is not the running one (it ended, or another began): "no active
  * turn to steer", "expected active turn id `X` but found `Y`" (codex-rs/app-server turn_processor.rs).
  */
 export const CODEX_TURN_MOVED = /no active turn|expected active turn id/i;
-const TURN_MOVED = CODEX_TURN_MOVED;
-
-/**
- * One reply into the running turn of `thread` on Codex's shared background server. Reads the thread (never loading
- * it: a thread that server does not hold is left alone), steers the running turn, and when that turn ended between
- * the read and the steer, reads once more and steers the next one. Anything else is "no" (or "uncertain" once a steer
- * was written and no answer came).
- */
-export async function steerOverCodexSocket(options: {
-  socketPath: string;
-  thread: string;
-  text: string;
-  /** One request's answer (ms). */
-  requestMs?: number;
-  connect?: (path: string, ms: number) => Promise<CodexControl | null>;
-}): Promise<CodexSocketSteer> {
-  const ms = options.requestMs ?? 10_000;
-  const control = await (options.connect ?? openCodexControl)(options.socketPath, ms).catch(() => null);
-  if (!control) return { kind: "no", why: "Codex's control socket is not there", idle: false };
-  const input = [{ type: "text", text: options.text, text_elements: [] }];
-  const thread = options.thread.toLowerCase();
-  /** The running turn's id; "idle"; null when Codex does not say. Reads only: never loads the thread. */
-  const activeTurn = async (): Promise<string | "idle" | null> => {
-    const status = codexThreadStatusOf(await control.request("thread/read", { threadId: options.thread }, ms));
-    if (status !== "active") return status;
-    // The newest turn first (`thread/turns/list`); when that does not show it, the whole thread once.
-    const listed = await control.request("thread/turns/list", { threadId: options.thread, limit: 1 }, ms).catch(() => null);
-    const fromList = codexRunningTurnOf(listed?.data);
-    if (fromList) return fromList;
-    const whole = await control.request("thread/read", { threadId: options.thread, includeTurns: true }, ms);
-    return codexRunningTurnOf([...((whole.thread?.turns as unknown[] | undefined) ?? [])].reverse());
-  };
-  try {
-    await control.request("initialize", { clientInfo: { name: "plannotator", title: "Plannotator", version: "1.0.0" } }, ms);
-    control.notify("initialized");
-    // Only a thread this server holds (the TUI's): never one of the Codex app's, whose server is its own.
-    let loaded = false;
-    let cursor: string | null = null;
-    for (let page = 0; page < 10 && !loaded; page++) {
-      const list = await control.request("thread/loaded/list", cursor ? { cursor } : {}, ms);
-      const ids: unknown[] = Array.isArray(list.data) ? list.data : [];
-      loaded = ids.some((id) => typeof id === "string" && id.toLowerCase() === thread);
-      cursor = typeof list.nextCursor === "string" && list.nextCursor ? list.nextCursor : null;
-      if (!cursor) break;
-    }
-    if (!loaded) return { kind: "no", why: "the thread is not on Codex's background server", idle: false };
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const active = await activeTurn();
-      if (active === null) return { kind: "no", why: "Codex did not say which turn runs", idle: false };
-      if (active === "idle") return { kind: "no", why: "no turn runs", idle: true };
-      try {
-        const steered = await control.request("turn/steer", { threadId: options.thread, expectedTurnId: active, input }, ms);
-        return { kind: "steered", turnId: typeof steered.turnId === "string" ? steered.turnId : active };
-      } catch (error) {
-        if (error instanceof CodexControlError && error.maybeSent) return { kind: "uncertain", why: error.message };
-        if (!(error instanceof CodexControlError) || !TURN_MOVED.test(error.message)) return { kind: "no", why: error instanceof Error ? error.message : String(error), idle: false };
-      }
-    }
-    return { kind: "no", why: "the turn kept changing", idle: false };
-  } catch (error) {
-    // Only reads failed: nothing of the reply was sent.
-    return { kind: "no", why: error instanceof Error ? error.message : String(error), idle: false };
-  } finally {
-    control.close();
-  }
-}
-
 // ── What the wake asks ──
 
 export interface CodexSteerRoute {
-  /** Route 1: into the running turn over the control socket, when it is on, this Codex has one and the thread is on it. */
-  socket(thread: string, text: string): Promise<CodexSocketSteer>;
   /** Whether a reply for `thread` should wait for the hook now: a turn runs, and the hook is installed and has run. */
   holdsForHook(thread: string): Promise<boolean>;
   /**
@@ -282,14 +175,13 @@ export interface CodexSteerRoute {
    * it was not found a moment ago (before a steer: a thread's first turn writes its rollout).
    */
   rollout(thread: string, fresh?: boolean): Promise<string | null>;
-  /** The experimental switch is on (`codexBusyReply` is "steer"): off, the wake delivers exactly as before. */
-  steering(): boolean;
+  /** The experimental switch, read once when the route was made: off, the wake delivers exactly as before. */
+  readonly steering: boolean;
 }
 
 /**
- * The routes for a Codex home. `allowed` is the test sandbox's guard (`agentHomeAllowed`): when false, nothing is read
- * and no socket is touched, so every reply goes the way it went before. `inboxDir`: where the hook's gate notes its
- * runs (`codex-hook-ran`).
+ * The route for a Codex home. `allowed` is the test sandbox's guard (`agentHomeAllowed`): when false, nothing is read,
+ * so every reply goes the way it went before. `inboxDir`: where the hook's gate notes its runs (`codex-hook-ran`).
  */
 export function createCodexSteerRoute(options: {
   codexHomeDir: () => string;
@@ -297,16 +189,11 @@ export function createCodexSteerRoute(options: {
   allowed: () => boolean;
   likelyFolders: (thread: string) => string[];
   now?: () => number;
-  /** Default `codexBusyReply` (the experimental switch, read on every use). */
-  policy?: "steer" | "next_turn" | (() => "steer" | "next_turn");
-  /** Route 1 on (default INBOX_CODEX_STEER_SOCKET). */
-  socket?: boolean;
-  requestMs?: number;
+  /** The switch; default `codexSteerOn()`, read once here. */
+  steering?: boolean;
 }): CodexSteerRoute {
   const now = options.now ?? Date.now;
-  const chosen = options.policy ?? (() => codexBusyReply());
-  const policyOf = typeof chosen === "function" ? chosen : () => chosen;
-  const socketOn = options.socket ?? INBOX_CODEX_STEER_SOCKET;
+  const steering = options.steering ?? codexSteerOn();
   const rolloutPaths = new Map<string, string>();
   const rolloutMisses = new Map<string, number>();
   let hooks: { at: number; installed: boolean; changedAt: number } | null = null;
@@ -330,7 +217,7 @@ export function createCodexSteerRoute(options: {
     return ran !== null && ran >= hooksFile().changedAt;
   };
   const rollout = async (thread: string, fresh = false): Promise<string | null> => {
-    if (!options.allowed()) return null;
+    if (!steering || !options.allowed()) return null;
     const known = rolloutPaths.get(thread);
     if (known && existsSync(known)) return known;
     // A thread whose rollout was not found is not looked for again for a minute (the walk reads every day folder).
@@ -346,19 +233,13 @@ export function createCodexSteerRoute(options: {
     return path;
   };
   return {
-    async socket(thread, text) {
-      if (!socketOn || policyOf() !== "steer" || !options.allowed()) return { kind: "no", why: "off", idle: false };
-      const socketPath = codexControlSocketPath(options.codexHomeDir());
-      if (!existsSync(socketPath)) return { kind: "no", why: "Codex's control socket is not there", idle: false };
-      return steerOverCodexSocket({ socketPath, thread, text, ...(options.requestMs ? { requestMs: options.requestMs } : {}) });
-    },
     async holdsForHook(thread) {
-      if (policyOf() !== "steer" || !options.allowed() || !hooksFile().installed || !hookRan()) return false;
+      if (!steering || !options.allowed() || !hooksFile().installed || !hookRan()) return false;
       const path = await rollout(thread);
       return path !== null && (await codexRolloutTurn(path, now())) === "running";
     },
-    hookAwaitsReview: () => policyOf() === "steer" && options.allowed() && hooksFile().installed && !hookRan(),
+    hookAwaitsReview: () => steering && options.allowed() && hooksFile().installed && !hookRan(),
     rollout,
-    steering: () => policyOf() === "steer",
+    steering,
   };
 }

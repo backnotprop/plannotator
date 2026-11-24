@@ -89,7 +89,7 @@ function setup(options: { state?: FakeCodexLaunchState; config?: string | null; 
     store,
     environment: createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: path } }),
     commandOf: (item) => ({ type: item.reply_to ? "reply" : "message", id: item.id, thread_id: item.thread_id, reply_to: item.reply_to ?? null, subject: item.subject ?? null, body: item.body, url: `http://127.0.0.1/#${item.thread_id}` }),
-    deliver: (session, text) => launch.deliver("codex", session, text),
+    deliver: (session, text, intoTurn) => launch.deliver("codex", session, text, intoTurn === true),
     launched: (session) => launch.launched("codex", session),
     extraClis: [],
     log: () => {},
@@ -249,6 +249,17 @@ describe("Codex through the launch engine, against the fake codex", () => {
     expect(t.fake.rpc("turn/start").filter((call) => JSON.stringify(call.params.input).includes("After this turn."))).toHaveLength(1);
     expect(t.fake.rpc("turn/start").length).toBe(starts + 1);
     expect(t.fake.rpc("turn/steer")).toHaveLength(0);
+  }, 20_000);
+
+  test("switch on, but no rollout of the thread found before the steer: the old turn/start path, plain Delivered, never the steer words", async () => {
+    const t = setup({ steer: true });
+    const root = await t.send("A SLOW job.");
+    await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");
+    const reply = t.store.sendReply(root.id, { words: "No rollout to see it in.", idempotency_key: "reply-no-rollout" }).reply!;
+    const delivered = await until("delivered", () => t.store.message(reply.id)!.delivery);
+    expect(delivered.into_turn).toBeUndefined();
+    expect(t.fake.rpc("turn/steer")).toHaveLength(0);
+    expect(t.fake.rpc("turn/start").filter((call) => JSON.stringify(call.params.input).includes("No rollout to see it in."))).toHaveLength(1);
   }, 20_000);
 
   test("a reply while a turn runs goes into that turn with turn/steer, not a second turn/start; Delivered once the rollout shows it", async () => {

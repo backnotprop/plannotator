@@ -112,8 +112,9 @@ export interface InboxDeliveryInput {
   /**
    * Delivered after an automatic mark: whether it went into a running turn
    * (`delivery.into_turn`). False: it waited for the turn to end (the
-   * session's own Ask question held it). Absent: not known. True with no
-   * mark: the wake steered it into the running turn (a Codex `turn/steer`).
+   * session's own Ask question held it). Absent: not known. True on an item
+   * never marked by the Inbox (`nowBy` not "auto"): the Codex wake steered it
+   * into the running turn and saw it there.
    */
   intoTurn?: boolean | null;
   /** Who set `deliver_now_at`, kept after a failed attempt cleared it (`deliver_now_by`). */
@@ -152,8 +153,9 @@ export function inboxDeliveryState(input: InboxDeliveryInput): InboxDeliveryDeci
   const marked = input.nowBy === "auto" && !!input.nowAt && !!input.waitingSince;
   const auto = marked && input.intoTurn !== false ? { autoAfterMin: wholeMinutes(input.waitingSince!, input.nowAt!) } : {};
   if (input.delivered) {
-    // Unmarked and into the running turn: the wake steered it in itself (a Codex `turn/steer`).
-    const steered = !marked && input.intoTurn === true ? { intoRunningTurn: true } : {};
+    // Into the running turn and never marked to go by itself (`nowBy` is not "auto", even after a failed attempt
+    // cleared `nowAt`): only the Codex wake's own steer writes that (the store's `intoTurnOf`).
+    const steered = input.nowBy !== "auto" && input.intoTurn === true ? { intoRunningTurn: true } : {};
     return { state: "delivered", reason: "delivered", ...no, ...auto, ...(marked && input.intoTurn === false ? { turnEnded: true } : {}), ...steered };
   }
   if (input.stuck) return { state: "undelivered", reason: "stuck", ...no };

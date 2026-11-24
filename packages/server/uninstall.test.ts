@@ -2719,7 +2719,7 @@ describe("hooks that still run Plannotator keep the CLI", () => {
 
     const dry = await runPlannotatorUninstall({ purge: false, dryRun: true }, environment);
     expect(dry.ok).toBe(true);
-    expect(dry.planned).toContain(`managed Codex hooks in ${file}`);
+    expect(dry.planned).toContain(`managed Codex Stop hook in ${file}`);
 
     const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, environment);
     expect(result.ok).toBe(true);

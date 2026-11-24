@@ -1,8 +1,7 @@
 /**
  * The Codex hook's mailbox: replies the Inbox holds for a Codex thread that is in a turn, for Plannotator's Codex
- * `PostToolUse` hook (`plannotator codex-hook`) to put into that turn after its next tool call. The route for a Codex
- * the Inbox cannot reach over Codex's control socket (the Codex app, any Codex that runs hooks): see
- * packages/server/inbox-codex-steer.ts.
+ * `PostToolUse` hook (`plannotator codex-hook`) to put into that turn after its next tool call (the Codex app, any
+ * Codex that runs hooks; only with the experimental `codex-steer` switch on): see packages/server/inbox-codex-steer.ts.
  *
  * Files only, under the Inbox's folder (`<data dir>/inbox/`), so the hook needs no request to the Inbox:
  *
@@ -28,6 +27,8 @@ export const CODEX_HOOK_DIR = "codex-hook";
 export const CODEX_QUEUE_DIR = "codex-queue";
 /** Written in a claim the hook made: it handed the text to the running turn. */
 export const CODEX_HOOKED_FILE = "hooked.json";
+/** The hook's mark in a claim it made (empty), written before `hooked.json`. */
+export const CODEX_HOOK_CLAIM_MARK = "hook-claim";
 
 /**
  * The most the hook hands Codex at once, in bytes. Codex shortens an `additionalContext` past about 2,500 tokens to a
@@ -160,6 +161,16 @@ export function codexHookHeld(inboxDir: string, thread: string): CodexHookHeld[]
   return held.sort((a, b) => a.at - b.at || a.itemId.localeCompare(b.itemId));
 }
 
+/** Whether the claim of `itemId` for `thread` is the hook's (its mark, written right after its mkdir). */
+export function codexHookClaimed(inboxDir: string, itemId: string, thread: string): boolean {
+  try {
+    statSync(join(codexHookClaimDir(inboxDir, itemId, thread), CODEX_HOOK_CLAIM_MARK));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** What the hook wrote when it took the item (`hooked.json` in its claim), or null. */
 export function codexHooked(inboxDir: string, itemId: string, thread: string): CodexHooked | null {
   try {
@@ -188,6 +199,8 @@ export function takeForCodexHook(inboxDir: string, thread: string, now: number):
       // Claimed already: `codex queue` (or another hook run) has it.
       continue;
     }
+    // The hook's own mark, at once: the Inbox treats a claim as the hook's only with it (never another Inbox's).
+    writeFileSync(join(claim, CODEX_HOOK_CLAIM_MARK), "", { mode: 0o600 });
     // Said before the text goes out: the Inbox then looks for it in the rollout (never Delivered before it is there).
     const fd = openSync(join(claim, CODEX_HOOKED_FILE), "w", 0o600);
     try {

@@ -9,12 +9,11 @@
  *    changed after it): the Inbox holds a reply for the hook only once Codex has run it, since Codex skips a hook the
  *    person has not reviewed (packages/server/inbox-codex-steer.ts).
  *  - Nothing held in the Codex hook mailbox (packages/shared/inbox/codex-hook-mailbox.ts) of the data dirs the Inbox
- *    may use (`~/.plannotator`, `$XDG_DATA_HOME/plannotator`): exit 0. A tool call costs one `sh`, a few stats and a
- *    glob.
+ *    may use (PLANNOTATOR_DATA_DIR when Codex's env sets it, `~/.plannotator`, `$XDG_DATA_HOME/plannotator`): exit 0,
+ *    the binary never starts. A tool call costs one `sh`, a few stats and a glob.
  *  - Something held: it reads the payload's first bytes for `session_id` (Codex writes it first) and starts the binary
  *    only when a reply is held for that thread; the bytes it read go to the binary in PLANNOTATOR_CODEX_HOOK_HEAD.
  *    When it cannot read the id, the binary decides.
- *  - PLANNOTATOR_DATA_DIR set (another data dir): the binary decides, every time.
  *
  * The hook writes nothing when it takes nothing, which Codex reads as no effect. Codex ignores a hook that leaves its
  * stdin unread (a broken pipe there is not a failure, codex-rs/hooks/src/engine/command_runner.rs).
@@ -64,8 +63,7 @@ export function codexHookCommand(executable: string, hooksFile: string): string 
     `B="${executable}"`,
     `H="${hooksFile}"`,
     `[ -x "$B" ] || exit 0`,
-    `[ -n "\${PLANNOTATOR_DATA_DIR:-}" ] && ${GATE_RUN}`,
-    `for d in "$HOME/.plannotator/inbox" "\${XDG_DATA_HOME:-/nonexistent}/plannotator/inbox"; do [ -d "$d" ] || continue`,
+    `for d in "\${PLANNOTATOR_DATA_DIR:-/nonexistent}/inbox" "$HOME/.plannotator/inbox" "\${XDG_DATA_HOME:-/nonexistent}/plannotator/inbox"; do [ -d "$d" ] || continue`,
     `m="$d/${CODEX_HOOK_RAN_FILE}"`,
     `[ -e "$m" ] && [ ! "$H" -nt "$m" ] || true 2>/dev/null >"$m"`,
     `for f in "$d"/codex-hook/*.json; do [ -e "$f" ] || break`,

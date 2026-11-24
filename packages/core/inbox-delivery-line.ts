@@ -415,14 +415,6 @@ export const TURN_ENDED_TEXT = 'went in when its turn ended';
  */
 export const INTO_RUNNING_TURN_TEXT = 'went into its running turn';
 
-/**
- * PROPOSED, NOT SHOWN YET (with the owner for approval): the words a reply to a busy Codex would add when it had to go
- * as the next turn because Plannotator's Codex hook waits for the person's review in Codex (Codex skips a hook until
- * then; `CodexSteerRoute.hookAwaitsReview`): "Queued for Codex; it gets this as its next turn. · review Plannotator's
- * hook in Codex to send into its turn". Nothing reads it until it is approved and wired to the delivery.
- */
-export const CODEX_HOOK_REVIEW_TEXT = "review Plannotator's hook in Codex to send into its turn";
-
 /** "went into its turn by itself after 5 min". */
 export function autoAfterText(minutes: number): string {
   return `went into its turn by itself after ${minutes} min`;

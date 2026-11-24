@@ -14,7 +14,18 @@
  *  - the turn's end (`task_complete`, `turn_aborted`, …) or another turn's start (a Codex started again after a crash):
  *    the turn it was handed to is over. Then the model's next step (its reasoning, a tool call, a reply) with no text
  *    before it: dropped. Nothing after the end for SIGHT_QUIET_MS: dropped too (the thread went idle without it).
+ *  - nothing written to the rollout for CODEX_SIGHT_GIVE_UP_MS (20 minutes, the hold's rule: a Codex that crashed
+ *    mid-turn and was not resumed): dropped, so it goes once as the next turn.
  *  - anything else: still waiting (a long tool call, the model still answering).
+ *
+ * What Codex writes, from its source (openai/codex at baf9b39, 2026-11-24): a PostToolUse hook's `additionalContext`
+ * is recorded by `record_additional_contexts` (core/src/tools/registry.rs, after `run_post_tool_use_hooks`, cancelled
+ * with the tool call) as `HookAdditionalContext` (core/src/context/hook_additional_context.rs: role "developer", one
+ * `input_text` with the text whole, no markers), through `record_conversation_items` → `record_prepared_items` →
+ * `persist_rollout_items(RolloutItem::ResponseItem)` (core/src/session/mod.rs): a rollout line
+ * `{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":…}]}}`.
+ * A `turn/steer` input is recorded as the user's message (`record_user_prompt_and_emit_turn_item`, hook_runtime.rs
+ * `record_pending_input`). `showsText` matches both.
  */
 
 import { open, stat } from "node:fs/promises";
@@ -22,6 +33,8 @@ import type { CodexSight, CodexSightStart } from "@plannotator/shared/inbox/code
 
 /** After the turn ended without the text, this long with nothing more in the rollout: it was dropped. */
 export const CODEX_SIGHT_QUIET_MS = 10_000;
+/** Nothing written to the rollout for this long while handed on: Codex is gone (the hold's ROLLOUT_STALE_MS). */
+export const CODEX_SIGHT_GIVE_UP_MS = 20 * 60_000;
 /** How much of the rollout before the hand-off is read for the running turn's id. */
 const TURN_TAIL_BYTES = 512 * 1024;
 /** The most read in one look (the rest on the next one). */
@@ -165,6 +178,8 @@ export async function lookForCodexSight(start: CodexSight, cursor: CodexSightCur
       }
     }
     if (answer.kind === "waiting" && answer.cursor.ended && answer.cursor.pos >= info.size && now - info.mtimeMs >= CODEX_SIGHT_QUIET_MS) return { kind: "dropped" };
+    // A Codex that crashed mid-turn: its rollout stopped; after the hold's give-up time, the next turn, once.
+    if (answer.kind === "waiting" && answer.cursor.pos >= info.size && now - info.mtimeMs >= CODEX_SIGHT_GIVE_UP_MS) return { kind: "dropped" };
     return answer;
   } catch {
     return { kind: "waiting", cursor: from };

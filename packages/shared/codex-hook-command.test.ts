@@ -123,12 +123,18 @@ describe("the Codex PostToolUse hook command", () => {
     expect(statSync(note).mtimeMs).toBeGreaterThan(later.getTime() - 1);
   });
 
-  test("the XDG data dir, and a data dir named in the env (the binary finds it)", () => {
+  test("the XDG data dir, and a data dir named in Codex's env: the binary only for a reply held there", () => {
     const xdg = scratch();
     const xdgInbox = join(xdg.root, "xdg", "plannotator", "inbox");
     hold(xdgInbox, THREAD);
     expect(runGate("/bin/sh", codexHookCommand(xdg.bin)!, { HOME: xdg.home, XDG_DATA_HOME: join(xdg.root, "xdg") }, payload(THREAD)).stdout).toStartWith("RAN codex-hook|");
-    expect(runGate("/bin/sh", codexHookCommand(xdg.bin)!, { HOME: xdg.home, PLANNOTATOR_DATA_DIR: "/elsewhere" }, payload(THREAD)).stdout).toStartWith("RAN codex-hook|");
+    // PLANNOTATOR_DATA_DIR set and nothing held there: the binary never starts, on any tool call.
+    const named = join(xdg.root, "named");
+    mkdirSync(join(named, "inbox"), { recursive: true });
+    const idle = runGate("/bin/sh", codexHookCommand(xdg.bin)!, { HOME: xdg.home, PLANNOTATOR_DATA_DIR: named }, payload(THREAD));
+    expect([idle.status, idle.stdout, idle.stderr]).toEqual([0, "", ""]);
+    hold(join(named, "inbox"), THREAD);
+    expect(runGate("/bin/sh", codexHookCommand(xdg.bin)!, { HOME: xdg.home, PLANNOTATOR_DATA_DIR: named }, payload(THREAD)).stdout).toStartWith("RAN codex-hook|");
   });
 
   test("a path the gate's quotes cannot carry gets no command", () => {
@@ -282,5 +288,9 @@ describe("the installer's Codex hooks", () => {
     expect(readFileSync(file, "utf8")).toBe("{}");
     expect(run.stdout).toContain(`Stop:        command: ${bin}`);
     expect(run.stdout).toContain(`PostToolUse: command: ${codexHookCommand(bin, file)}`);
+    // The switch off: the words as before the switch, the Stop hook only.
+    const off = install(root, bin, { node: false, steer: null });
+    expect(off.run.stdout).toContain(`Add or update this Stop hook manually:\n\n  command: ${bin}\n  timeout: 345600\n`);
+    expect(off.run.stdout).not.toContain("PostToolUse");
   });
 });

@@ -1,8 +1,7 @@
 /**
- * Whether the Codex wake may read a Codex home's rollouts and hooks file and connect to its control socket
- * (inbox-codex-steer.ts). Always, except under the test sandbox (PLANNOTATOR_TEST_SANDBOX): there both the home and the
- * Codex home must be scratch folders under the temp folder, so a test can never reach the person's real ~/.codex or a
- * real Codex's socket, even with a CODEX_HOME left pointing at it.
+ * Whether the Codex wake may read a Codex home's rollouts and hooks file (inbox-codex-steer.ts). Always, except under
+ * the test sandbox (PLANNOTATOR_TEST_SANDBOX): there both the home and the Codex home must be scratch folders under the
+ * temp folder, so a test can never reach the person's real ~/.codex, even with a CODEX_HOME left pointing at it.
  */
 
 import { realpathSync } from "node:fs";

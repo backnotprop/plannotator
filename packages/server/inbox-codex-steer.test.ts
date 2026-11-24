@@ -1,27 +1,27 @@
 /**
  * Steering a reply into a running Codex turn (inbox-codex-steer.ts, through the Codex wake): through Plannotator's
- * `PostToolUse` hook (the Codex app, any Codex that runs hooks), and over Codex's control socket (off by default, kept
- * with these tests), with `codex queue` the fallback for everything else. A steer is only handed on: Delivered once the
- * thread's rollout shows the text (inbox-codex-sight.ts), the next turn when the turn ended without it, never twice.
+ * `PostToolUse` hook (the Codex app, any Codex that runs hooks), with `codex queue` the fallback for everything else.
+ * A steer is only handed on: Delivered once the thread's rollout shows the text (inbox-codex-sight.ts), the next turn
+ * when the turn ended without it, never twice. All of it only behind the experimental `codex-steer` switch.
  *
- * Against fakes only: a fake `codex` on a scratch PATH that logs its argv (tests/helpers/fake-agents.ts), a fake
- * control socket in a scratch Codex home (tests/helpers/fake-codex-control.ts), a scratch rollout and hooks.json, and a
- * store in a temp folder. No Inbox server, no real Codex, no real socket.
+ * Against fakes only: a fake `codex` on a scratch PATH that logs its argv (tests/helpers/fake-agents.ts), a scratch
+ * rollout and hooks.json, and a store in a temp folder. No Inbox server, no real Codex.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
-import { deliveryLine } from "@plannotator/core/inbox-delivery-line";
+import { deliveryLine, INTO_RUNNING_TURN_TEXT } from "@plannotator/core/inbox-delivery-line";
 import { CODEX_HOOK_RAN_FILE, codexHookCommand } from "@plannotator/shared/codex-hook-command";
 import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
-import { CODEX_HOOK_DIR, codexHookClaimDir, takeForCodexHook } from "@plannotator/shared/inbox/codex-hook-mailbox";
+import { CODEX_HOOK_CLAIM_MARK, CODEX_HOOK_DIR, codexHookClaimDir, takeForCodexHook } from "@plannotator/shared/inbox/codex-hook-mailbox";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { runCodexHook } from "../../apps/hook/server/codex-hook";
 import { createFakeAgents } from "../../tests/helpers/fake-agents";
-import { startFakeCodexControl, type FakeCodexControl, type FakeCodexControlState } from "../../tests/helpers/fake-codex-control";
 import { createAgentEnvironmentFor } from "./inbox-agents";
-import { CODEX_HOOK_CLAIM_GRACE_MS, codexBusyReply, createCodexSteerRoute, INBOX_CODEX_STEER_SOCKET } from "./inbox-codex-steer";
+import { CODEX_HOOK_CLAIM_GRACE_MS, codexSteerOn, createCodexSteerRoute } from "./inbox-codex-steer";
 import { codexQueueMessage, createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { InboxOutbox } from "./inbox-outbox";
 import { MACHINE_PLATFORM } from "./inbox-devices";
@@ -49,10 +49,10 @@ async function until<T>(what: string, check: () => T | Promise<T>, ms = 5_000): 
 const commandOf = (item: InboxMessage): InboxReplyCommand => ({ type: "reply", id: item.id, thread_id: item.thread_id, reply_to: item.reply_to ?? null, subject: null, body: item.body, url: "http://127.0.0.1/#thread" });
 
 /**
- * `switch`: the experimental `codex-steer` switch as config.json says it (absent: the policy is "steer", as the switch
- * on). The data dir is the world's own (PLANNOTATOR_DATA_DIR, restored after).
+ * `switch`: the experimental `codex-steer` switch as config.json says it (absent: on, given to the route). The data dir
+ * is the world's own (PLANNOTATOR_DATA_DIR, restored after).
  */
-function world(options: { socket?: FakeCodexControlState; rollout?: "running" | "idle" | null; hook?: boolean; reviewed?: boolean; requestMs?: number; switch?: "on" | "off" | "unset" } = {}) {
+function world(options: { rollout?: "running" | "idle" | null; hook?: boolean; reviewed?: boolean; switch?: "on" | "off" | "unset" } = {}) {
   const agents = createFakeAgents("plannotator-codex-steer-");
   cleanup.push(() => agents.remove());
   agents.install("codex");
@@ -107,23 +107,23 @@ function world(options: { socket?: FakeCodexControlState; rollout?: "running" | 
     utimesSync(file, later, later);
   };
   if (options.hook && options.reviewed !== false) reviewed();
-  let control: FakeCodexControl | null = null;
-  if (options.socket) {
-    control = startFakeCodexControl(codexHome, options.socket);
-    cleanup.push(() => control!.stop());
-  }
+  /** Nothing written for 21 minutes (a Codex that crashed mid-turn). */
+  const stale = () => {
+    const old = new Date(Date.now() - 21 * 60_000);
+    utimesSync(rollout, old, old);
+  };
   const wakes: InboxCodexWake[] = [];
   cleanup.push(() => {
     for (const wake of wakes) wake.stop();
   });
   const clock = { shift: 0 };
   const now = () => Date.now() + clock.shift;
-  const start = (how: { socket?: boolean } = {}) => {
-    // The route under this scratch Codex home; the socket route is on only where a test turns it on.
-    const socket = how.socket ?? !!options.socket;
-    const policy = options.switch ? {} : { policy: "steer" as const };
-    const steer = createCodexSteerRoute({ codexHomeDir: () => codexHome, inboxDir: () => store.dir, allowed: () => true, likelyFolders: () => [], now, socket, ...policy, ...(options.requestMs ? { requestMs: options.requestMs } : {}) });
-    const wake = createInboxCodexWake({ store, environment, commandOf, extraClis: [], log: () => {}, steer, now });
+  const logs: string[] = [];
+  const start = () => {
+    // The route under this scratch Codex home; the switch from config.json when the test names it, else on.
+    const steering = options.switch ? {} : { steering: true };
+    const steer = createCodexSteerRoute({ codexHomeDir: () => codexHome, inboxDir: () => store.dir, allowed: () => true, likelyFolders: () => [], now, ...steering });
+    const wake = createInboxCodexWake({ store, environment, commandOf, extraClis: [], log: (line) => logs.push(line), steer, now });
     wakes.push(wake);
     return wake;
   };
@@ -136,26 +136,64 @@ function world(options: { socket?: FakeCodexControlState; rollout?: "running" | 
     runCodexHook(JSON.stringify({ session_id: THREAD, turn_id: "t1", transcript_path: rollout, cwd: "/work/ledger", hook_event_name: "PostToolUse", model: "gpt-5.5", permission_mode: "default", tool_name: "Bash", tool_input: { command: "ls" }, tool_response: "a\nb", tool_use_id: "call_1", ...extra }), store.dir, Date.now());
   const contextOf = (out: string) => (JSON.parse(out) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } }).hookSpecificOutput;
   const handed = (id: string) => store.handover.handedTo(THREAD).includes(id);
-  return { store, project, rollout, subRollout, hooksFile, clock, control: () => control!, turn, append, shows, aborted, modelStep, quiet, reviewed, start, ask, reply, queues, held, hookRun, contextOf, handed };
+  return { store, project, codexHome, rollout, subRollout, hooksFile, clock, logs, turn, append, shows, aborted, modelStep, quiet, stale, reviewed, start, ask, reply, queues, held, hookRun, contextOf, handed };
+}
+
+/** Every path the fs calls name while `run` runs (sync and promise forms), for "nothing of the steering is touched". */
+async function pathsTouched(run: () => Promise<void>): Promise<string[]> {
+  const seen: string[] = [];
+  const spies = [
+    ...(["readFileSync", "readdirSync", "existsSync", "statSync", "writeFileSync", "rmSync", "mkdirSync", "openSync", "renameSync", "utimesSync"] as const).map((name) => spyOn(fs, name)),
+    ...(["open", "stat", "readdir", "readFile", "writeFile"] as const).map((name) => spyOn(fsp, name)),
+  ];
+  try {
+    await run();
+  } finally {
+    for (const spy of spies) {
+      for (const call of spy.mock.calls) if (typeof call[0] === "string") seen.push(call[0]);
+      spy.mockRestore();
+    }
+  }
+  return seen;
 }
 
 describe("the experimental codex-steer switch: off by default, and off is the queue as before", () => {
   for (const state of ["unset", "off"] as const) {
-    test(`switch ${state}: a busy Codex with the hook reviewed and a socket gets codex queue, nothing held, nothing steered`, async () => {
-      const w = world({ switch: state, rollout: "running", hook: true, socket: { loaded: [THREAD], running: { [THREAD]: "t7" } } });
-      const wake = w.start({ socket: true });
+    test(`switch ${state}: a busy Codex with the hook reviewed gets codex queue; nothing of the steering is read or written, nothing new is logged`, async () => {
+      const w = world({ switch: state, rollout: "running", hook: true });
+      // Left by an earlier run with the switch on: a held file. Off, it is left exactly as it is (never read, never cleared).
+      const leftHeld = join(w.store.dir, CODEX_HOOK_DIR, `${THREAD}.m-left.json`);
+      mkdirSync(join(w.store.dir, CODEX_HOOK_DIR), { recursive: true });
+      writeFileSync(leftHeld, "{}");
+      const wake = w.start();
       const reply = w.reply(w.ask(), "Just queue it.");
-      await wake.sweep();
-      await until("queued", () => w.queues().length === 1);
-      expect(w.held()).toHaveLength(0);
-      expect(w.control().calls).toHaveLength(0);
-      // The hook, if Codex runs it anyway, finds nothing to take.
-      expect(w.hookRun()).toBe("");
-      await wake.sweep();
+      const touched = await pathsTouched(async () => {
+        await wake.sweep();
+        await until("queued", () => w.queues().length === 1);
+        await wake.sweep();
+      });
       expect(w.queues()).toHaveLength(1);
+      expect(existsSync(leftHeld)).toBe(true);
+      // (The wake reads a thread's rollout as before this, for T3 Code's threads; nothing of the steering's own.)
+      const steering = touched.filter((path) => /codex-hook|hooked\.json|steered\.json|hook-claim|hooks\.json|config\.json/.test(path));
+      expect(steering).toEqual([]);
+      expect(w.logs).toEqual([]);
       expect(w.store.message(reply.id)!.delivery?.into_turn).toBeUndefined();
     });
   }
+
+  test("off: a claim this Inbox did not make is left alone, as before (never re-sent after any wait)", async () => {
+    const w = world({ switch: "off", rollout: "running", hook: true });
+    const wake = w.start();
+    const reply = w.reply(w.ask(), "Another Inbox has it.");
+    mkdirSync(codexHookClaimDir(w.store.dir, reply.id, THREAD), { recursive: true });
+    await wake.sweep();
+    w.clock.shift = CODEX_HOOK_CLAIM_GRACE_MS + 60_000;
+    await wake.sweep();
+    await wake.sweep();
+    expect(w.queues()).toHaveLength(0);
+    expect(existsSync(codexHookClaimDir(w.store.dir, reply.id, THREAD))).toBe(true);
+  });
 
   test("switch on in config.json: held for the hook; PLANNOTATOR_EXPERIMENTAL decides over config.json", async () => {
     const w = world({ switch: "on", rollout: "running", hook: true });
@@ -164,11 +202,11 @@ describe("the experimental codex-steer switch: off by default, and off is the qu
     await wake.sweep();
     await until("held", () => w.held().length === 1);
     expect(w.queues()).toHaveLength(0);
-    expect(codexBusyReply({})).toBe("steer");
-    expect(codexBusyReply({ PLANNOTATOR_EXPERIMENTAL: "-codex-steer" })).toBe("next_turn");
+    expect(codexSteerOn({})).toBe(true);
+    expect(codexSteerOn({ PLANNOTATOR_EXPERIMENTAL: "-codex-steer" })).toBe(false);
     writeFileSync(join(process.env.PLANNOTATOR_DATA_DIR!, "config.json"), "{}");
-    expect(codexBusyReply({})).toBe("next_turn");
-    expect(codexBusyReply({ PLANNOTATOR_EXPERIMENTAL: "x, Codex-Steer" })).toBe("steer");
+    expect(codexSteerOn({})).toBe(false);
+    expect(codexSteerOn({ PLANNOTATOR_EXPERIMENTAL: "x, Codex-Steer" })).toBe(true);
   });
 });
 
@@ -410,13 +448,14 @@ describe("the Codex hook: a reply goes into the running turn after its next tool
     expect(w.held()).toHaveLength(0);
   });
 
-  test("a hook that died mid-claim (no hooked.json): once Codex gave up on it, the next turn, once", async () => {
+  test("a hook that died mid-claim (its mark, no hooked.json): once Codex gave up on it, the next turn, once", async () => {
     const w = world({ rollout: "running", hook: true });
     const wake = w.start();
     const reply = w.reply(w.ask(), "Half taken.");
     await wake.sweep();
     await until("held", () => w.held().length === 1);
     mkdirSync(codexHookClaimDir(w.store.dir, reply.id, THREAD), { recursive: true });
+    writeFileSync(join(codexHookClaimDir(w.store.dir, reply.id, THREAD), CODEX_HOOK_CLAIM_MARK), "");
     await wake.sweep();
     expect(w.queues()).toHaveLength(0);
     w.clock.shift = CODEX_HOOK_CLAIM_GRACE_MS + 1_000;
@@ -503,153 +542,55 @@ describe("the Codex hook: a reply goes into the running turn after its next tool
   });
 });
 
-describe("over the control socket (off by default)", () => {
-  test("off by default: a Codex with a socket and a running turn gets the hook or the queue, never a steer", async () => {
-    expect(INBOX_CODEX_STEER_SOCKET).toBe(false);
-    const w = world({ socket: { loaded: [THREAD], running: { [THREAD]: "t7" } }, rollout: "running" });
-    const wake = w.start({ socket: false });
-    w.reply(w.ask(), "Default route.");
-    await wake.sweep();
-    await until("queued", () => w.queues().length === 1);
-    expect(w.control().steers()).toHaveLength(0);
+describe("the line: into its running turn only for a real steer", () => {
+  test("a Claude Code item marked to go by itself, its attempt failed (deliver_now_at cleared), then delivered into the turn: no steer words", () => {
+    const base = { name: "Claude Code", deliveredAt: "2026-11-24T17:12:00.000Z", time: () => "5:12 PM", wakes: true, sendingNow: false, connection: undefined };
+    const plain = deliveryLine(base).text;
+    // deliver_now_by "auto" kept, deliver_now_at cleared by the failed attempt, into_turn true from the connection.
+    expect(deliveryLine({ ...base, nowBy: "auto", nowAt: null, waitingSince: "2026-11-24T17:00:00.000Z", intoTurn: true }).text).toBe(plain);
+    // The Codex wake's own steer (no mark, into_turn true): the words.
+    expect(deliveryLine({ ...base, name: "Codex", intoTurn: true }).text).toContain(INTO_RUNNING_TURN_TEXT);
   });
+});
 
-  test("turn/steer into the running turn: handed until the rollout shows it, then delivered into the turn", async () => {
-    const w = world({ socket: { loaded: [THREAD], running: { [THREAD]: "t7" } }, rollout: "running" });
+describe("the switch on: what Codex crashes and other Inboxes leave behind", () => {
+  test("taken by the hook, then Codex crashed before recording it (no rollout writes for 20 minutes): the next turn, once", async () => {
+    const w = world({ rollout: "running", hook: true });
     const wake = w.start();
-    const asked = w.ask();
-    const reply = w.reply(asked, "Use the staging bucket.");
+    const reply = w.reply(w.ask(), "Before the crash.");
     await wake.sweep();
-    await until("steered", () => w.control().steers().length === 1);
-    expect(w.control().steers().map((s) => s.expectedTurnId)).toEqual(["t7"]);
-    const text = w.control().steers()[0]!.text;
-    expect(text).toBe(codexQueueMessage(commandOf(w.store.message(reply.id)!)));
-    expect(w.store.message(reply.id)!.delivery).toBeUndefined();
+    await until("held", () => w.held().length === 1);
+    expect(w.contextOf(w.hookRun()).additionalContext).toContain("Before the crash.");
+    await wake.sweep();
     expect(w.handed(reply.id)).toBe(true);
-    w.shows(text, "user");
-    await wake.sweep();
-    expect((await until("delivered", () => w.store.message(reply.id)!.delivery)).into_turn).toBe(true);
     expect(w.queues()).toHaveLength(0);
-  });
-
-  test("steered, then Esc before the model read it: the next turn by codex queue, once, never steered again", async () => {
-    const w = world({ socket: { loaded: [THREAD], running: { [THREAD]: "t7" } }, rollout: "running" });
-    const wake = w.start();
-    const reply = w.reply(w.ask(), "Dropped by Esc.");
-    await wake.sweep();
-    await until("steered", () => w.control().steers().length === 1);
-    w.aborted();
-    w.quiet();
+    w.stale();
     await wake.sweep();
     await until("queued", () => w.queues().length === 1);
     await wake.sweep();
-    expect(w.queues()).toHaveLength(1);
-    expect(w.control().steers()).toHaveLength(1);
-    expect(w.store.message(reply.id)!.delivery).toBeUndefined();
-  });
-
-  test("steered, read, then Esc: delivered once, never queued", async () => {
-    const w = world({ socket: { loaded: [THREAD], running: { [THREAD]: "t7" } }, rollout: "running" });
-    const wake = w.start();
-    const reply = w.reply(w.ask(), "Read before Esc.");
-    await wake.sweep();
-    await until("steered", () => w.control().steers().length === 1);
-    w.shows(w.control().steers()[0]!.text, "user");
-    w.aborted();
-    await wake.sweep();
-    await until("delivered", () => w.store.message(reply.id)!.delivery);
-    await wake.sweep();
-    expect(w.queues()).toHaveLength(0);
-  });
-
-  test("steered, and the turn ended quietly without it: the next turn once the rollout stays quiet", async () => {
-    const w = world({ socket: { loaded: [THREAD], running: { [THREAD]: "t7" } }, rollout: "running" });
-    const wake = w.start();
-    w.reply(w.ask(), "Left at the end.");
-    await wake.sweep();
-    await until("steered", () => w.control().steers().length === 1);
-    w.append({ type: "event_msg", payload: { type: "task_complete", turn_id: "t1" } });
-    await wake.sweep();
-    expect(w.queues()).toHaveLength(0);
-    w.quiet();
-    await wake.sweep();
-    await until("queued", () => w.queues().length === 1);
-  });
-
-  test("an idle thread starts its turn as before: codex queue, no steer", async () => {
-    const w = world({ socket: { loaded: [THREAD], running: {} }, rollout: "idle" });
-    const wake = w.start();
-    w.reply(w.ask(), "Go ahead.");
-    await wake.sweep();
-    await until("queued", () => w.queues().length === 1);
-    expect(w.control().steers()).toHaveLength(0);
-  });
-
-  test("the turn ended between the look and the steer: queued once, as the next turn", async () => {
-    const w = world({ socket: { loaded: [THREAD], running: { [THREAD]: "t1" }, moved: { t1: "ended" } }, rollout: "running" });
-    const wake = w.start();
-    const reply = w.reply(w.ask(), "One more thing.");
-    await wake.sweep();
-    await until("queued", () => w.queues().length === 1);
     await wake.sweep();
     expect(w.queues()).toHaveLength(1);
     expect(w.store.message(reply.id)!.delivery).toBeUndefined();
   });
 
-  test("another turn began between the look and the steer: steered into that one, once", async () => {
-    const w = world({ socket: { loaded: [THREAD], running: { [THREAD]: "t1" }, moved: { t1: { next: "t2" } } }, rollout: "running" });
+  test("a claim without the hook's mark (another Inbox on this data dir) is left alone, while held or not: never re-sent", async () => {
+    const w = world({ rollout: "running", hook: true });
     const wake = w.start();
-    const reply = w.reply(w.ask(), "And the docs.");
+    // Held, and then another Inbox claims it.
+    const heldOne = w.reply(w.ask(), "Held here, claimed there.");
     await wake.sweep();
-    await until("steered", () => w.control().steers().length === 2);
-    expect(w.control().steers().map((s) => s.expectedTurnId)).toEqual(["t1", "t2"]);
-    w.shows(w.control().steers()[1]!.text, "user");
+    await until("held", () => w.held().length === 1);
+    mkdirSync(codexHookClaimDir(w.store.dir, heldOne.id, THREAD), { recursive: true });
+    // Never held here: claimed there first.
+    const other = w.reply(w.ask(), "Claimed there first.");
+    mkdirSync(codexHookClaimDir(w.store.dir, other.id, THREAD), { recursive: true });
     await wake.sweep();
-    await until("delivered", () => w.store.message(reply.id)!.delivery);
+    w.clock.shift = CODEX_HOOK_CLAIM_GRACE_MS + 60_000;
+    await wake.sweep();
+    await wake.sweep();
     expect(w.queues()).toHaveLength(0);
-  });
-
-  test("an older server without thread/turns/list: the whole thread is read for the running turn", async () => {
-    const w = world({ socket: { loaded: [THREAD], running: { [THREAD]: "t9" }, noTurnsList: true }, rollout: "running" });
-    const wake = w.start();
-    w.reply(w.ask(), "Check CI.");
-    await wake.sweep();
-    await until("steered", () => w.control().steers().length === 1);
-    expect(w.control().steers().map((s) => s.expectedTurnId)).toEqual(["t9"]);
-  });
-
-  test("Codex refuses the steer (a review turn): queued as the next turn", async () => {
-    const w = world({ socket: { loaded: [THREAD], running: { [THREAD]: "t3" }, refuseSteer: "cannot steer a review turn" }, rollout: "running" });
-    const wake = w.start();
-    w.reply(w.ask(), "After the review.");
-    await wake.sweep();
-    await until("queued", () => w.queues().length === 1);
-  });
-
-  test("no socket (an older Codex, --no-daemon), or the thread not on it (the Codex app): codex queue as before", async () => {
-    const none = world();
-    const wake = none.start({ socket: true });
-    none.reply(none.ask(), "Hello.");
-    await wake.sweep();
-    await until("queued", () => none.queues().length === 1);
-
-    const elsewhere = world({ socket: { loaded: [], running: {} } });
-    const other = elsewhere.start();
-    elsewhere.reply(elsewhere.ask(), "Hello there.");
-    await other.sweep();
-    await until("queued", () => elsewhere.queues().length === 1);
-    expect(elsewhere.control().steers()).toHaveLength(0);
-  });
-
-  test("a steer that never answers is never sent again, and never queued", async () => {
-    const w = world({ socket: { loaded: [THREAD], running: { [THREAD]: "t1" }, silentSteer: true }, requestMs: 300 });
-    const wake = w.start();
-    const reply = w.reply(w.ask(), "Are you there?");
-    await wake.sweep();
-    await until("uncertain", () => wake.uncertain(THREAD, reply.id));
-    await wake.sweep();
-    expect(w.control().steers()).toHaveLength(1);
-    expect(w.queues()).toHaveLength(0);
-    expect(w.store.message(reply.id)!.delivery).toBeUndefined();
+    expect(w.held()).toHaveLength(0);
+    expect(existsSync(codexHookClaimDir(w.store.dir, heldOne.id, THREAD))).toBe(true);
+    expect(existsSync(codexHookClaimDir(w.store.dir, other.id, THREAD))).toBe(true);
   });
 });
