@@ -715,6 +715,20 @@ export const MACHINE_PLATFORM = "machine";
 export const AGENT_PLATFORM = "agent";
 /** Machine offers kept, open or redeemed (a CLI offer and a link-back can be open at once). */
 const MACHINE_OFFERS_KEPT = 8;
+/**
+ * An introduction's link code (inbox-link-through.ts) lives this long by this computer's clock: the computer it is for
+ * redeems it the moment the broker hands it over, so this is its freshness, whatever the other clocks say.
+ */
+export const INTRODUCTION_OFFER_MS = 2 * 60_000;
+/**
+ * A device an introduction's code made is provisional this long: revoked unless the link-back of the computer it was
+ * made for saved its link first. The ordinary link's own steps take at most a minute (its health read, 15 s, then its
+ * link-back, 30 s, inside which this computer pairs back and reads health, 15 s each), so twice that leaves room for a
+ * slow line and none for a pass nobody uses.
+ */
+export const INTRODUCED_DEVICE_MS = 2 * 60_000;
+/** The door routes a provisional device reaches: the ordinary link's health read, the link-back that completes it, and its own unlink. */
+const INTRODUCED_ROUTES = new Set(["GET health", "POST link-back", "POST unlink"]);
 
 /**
  * The computer's name as a phone and a linked machine show it: PLANNOTATOR_MACHINE_NAME when set (a headless box
@@ -894,8 +908,13 @@ export function createInboxDevices(context: InboxDevicesContext) {
   /** The last offer made, kept after it closes so the window can say what reached the door while it showed. */
   let lastOffer: Offer | null = null;
   const phonesOn = context.phones !== false;
-  /** Machine offers (inbox-machines.ts), newest last, with the device each was redeemed for. */
-  const machineOffers: (Offer & { deviceId: string | null })[] = [];
+  /**
+   * Machine offers (inbox-machines.ts), newest last, with the device each was redeemed for. An introduction's offer
+   * carries the computer it is for and the one that introduced it (`for`, `by`), and no six digits (`code` empty).
+   */
+  const machineOffers: (Offer & { deviceId: string | null; for?: string; by?: string })[] = [];
+  // A provisional device outlives no restart: the link-back that would complete it ended with the last run.
+  for (const device of devices.list()) if (device.introduced) devices.revoke(device.id, now().toISOString());
   let name: string | null = null;
   const tailnet: TailnetState = { on: false, address: null, error: null };
 
@@ -953,16 +972,45 @@ export function createInboxDevices(context: InboxDevicesContext) {
       attempts: [],
       deviceId: null,
     };
+    keepMachineOffer(made);
+    return { secret: made.secret, code: made.code, expires_at: new Date(made.expiresAt).toISOString() };
+  };
+  const keepMachineOffer = (made: (typeof machineOffers)[number]) => {
     machineOffers.push(made);
     if (machineOffers.length > MACHINE_OFFERS_KEPT) machineOffers.splice(0, machineOffers.length - MACHINE_OFFERS_KEPT);
-    return { secret: made.secret, code: made.code, expires_at: new Date(made.expiresAt).toISOString() };
+  };
+  /**
+   * An introduction's offer (inbox-link-through.ts): its secret only, no six digits, for one computer (`forId`), from
+   * the computer that introduced it (`by`). The device it makes is provisional (`INTRODUCED_DEVICE_MS`).
+   */
+  const openIntroductionOffer = (forId: string, by: string) => {
+    const made = {
+      secret: randomBytes(32).toString("base64url"),
+      code: "",
+      expiresAt: now().getTime() + INTRODUCTION_OFFER_MS,
+      wrong: 0,
+      redeemed: false,
+      attempts: [],
+      deviceId: null,
+      for: forId,
+      by,
+    };
+    keepMachineOffer(made);
+    return { secret: made.secret, expires_at: new Date(made.expiresAt).toISOString() };
   };
   const openMachineOffers = () => machineOffers.filter((o) => !o.redeemed && o.wrong < PAIRING_CODE_TRIES && o.expiresAt > now().getTime());
   const offerDevice = (secret: string) => machineOffers.find((o) => sameSecret(o.secret, secret))?.deviceId ?? null;
 
+  /** A provisional device still unsettled when its time is up is revoked. */
+  const expireIntroduced = (id: string) => {
+    const device = devices.get(id);
+    if (device?.introduced && device.revoked_at === null) revoke(device);
+  };
+
   /** A machine redeems a machine offer: the same limits as a phone's (10 minutes, 5 wrong codes), its own slots. */
   const redeemMachine = (name: string, secret: string | null, code: string | null): Response => {
-    const open = openMachineOffers();
+    // Six digits never reach an introduction's offer: it has none.
+    const open = openMachineOffers().filter((o) => secret !== null || o.code !== "");
     const match = open.find((o) => (secret ? sameSecret(secret, o.secret) : code === o.code));
     if (!match) {
       if (!secret) for (const o of open) o.wrong += 1;
@@ -974,10 +1022,15 @@ export function createInboxDevices(context: InboxDevicesContext) {
     match.redeemed = true;
     const token = `tok_${randomBytes(32).toString("base64url")}`;
     const at = now().toISOString();
-    const device = devices.add({ id: inboxId("dev"), name, platform: MACHINE_PLATFORM, token, secret: match.secret, at });
+    const introduced = match.for && match.by ? { for: match.for, by: match.by, until: new Date(now().getTime() + INTRODUCED_DEVICE_MS).toISOString() } : undefined;
+    const device = devices.add({ id: inboxId("dev"), name, platform: MACHINE_PLATFORM, token, secret: match.secret, at, ...(introduced ? { introduced } : {}) });
     // A machine is never a phone: no relay carriage, no pushes.
     devices.setCarriage(device.id, false, at);
     match.deviceId = device.id;
+    if (introduced) {
+      const timer = setTimeout(() => expireIntroduced(device.id), INTRODUCED_DEVICE_MS + 50);
+      (timer as { unref?: () => void }).unref?.();
+    }
     return json({ device: publicDevice(devices.get(device.id) ?? device), token, computer: computer() }, 201);
   };
 
@@ -1299,6 +1352,14 @@ export function createInboxDevices(context: InboxDevicesContext) {
       // A machine reads this Inbox's own threads only (PLAN rule 3): never the merged view, so links both ways cannot echo.
       if (url.searchParams.has("machines")) return refuse(403, "machines_view_refused", "A linked machine reads this Inbox's own threads only.");
       const name = `${req.method} ${route}`;
+      // An introduction's device is provisional: past its time it is revoked; until then it reaches only what completes its link.
+      if (device.introduced) {
+        if (Date.parse(device.introduced.until) <= now().getTime()) {
+          revoke(device);
+          return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
+        }
+        if (!INTRODUCED_ROUTES.has(name)) return refuse(403, "introduction_pending", "This link is not complete yet.");
+      }
       const own = DOOR_OWN_ROUTES.find((row) => row.grant === "machine" && `${row.method} ${row.route}` === name);
       if (own && (!("needs" in own) || hasOwn(own.needs))) return await machineOwn[name as MachineOwnName](req, url, device);
     }
@@ -2046,7 +2107,23 @@ export function createInboxDevices(context: InboxDevicesContext) {
   /** Linked machines (inbox-machines.ts): the door's side of linking. */
   const machineDoor = {
     openMachineOffer,
+    openIntroductionOffer,
     offerDevice,
+    /** The computer a provisional device's link-back must come from, and who introduced it; null for any other device. */
+    introduction: (deviceId: string): { for: string; by: string } | null => {
+      const device = devices.get(deviceId);
+      if (!device?.introduced || device.revoked_at !== null) return null;
+      return { for: device.introduced.for, by: device.introduced.by };
+    },
+    /** The link a provisional device was made for is saved: it is an ordinary device from now on. */
+    settleIntroduction: (deviceId: string) => {
+      devices.settleIntroduced(deviceId, now().toISOString());
+    },
+    /** `by` is no longer linked: every offer it had opened here closes, and every device still provisional from one goes. */
+    dropIntroductions: (by: string) => {
+      for (const o of machineOffers) if (o.by === by) o.redeemed = true;
+      for (const device of devices.list()) if (device.introduced?.by === by) revoke(device);
+    },
     /** `oweRefusal`: a machine unlinked while it could not be told; the door stays up until its token is refused once. */
     revokeDevice: (id: string, options: { oweRefusal?: boolean } = {}) => {
       const device = devices.get(id);

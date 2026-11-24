@@ -142,31 +142,45 @@ export function linkThroughPairs(peers: readonly LinkThroughPeerFacts[], jobs: r
   return pairs;
 }
 
+/** One of this Inbox's asks to a link (`via`) to link it with `with`: still held (`why` null), or refused there, in its words. */
+export interface LinkThroughAsk {
+  via: string;
+  with: string;
+  why: string | null;
+}
+
 /**
  * On one of the two: every computer a link names that is not this one, not linked here, and takes the mark (as that
- * link last read it), once each (through an online link first). `asked`: this Inbox's asks still held for a link.
+ * link last read it), once each (through an online link first). `asked`: this Inbox's newest ask per computer.
  */
-export function linkThroughRows(selfId: string, peers: readonly LinkThroughPeerFacts[], asked: readonly { via: string; with: string }[]): LinkThroughRowView[] {
+export function linkThroughRows(selfId: string, peers: readonly LinkThroughPeerFacts[], asked: readonly LinkThroughAsk[]): LinkThroughRowView[] {
   const linked = new Set(peers.map((peer) => peer.id));
   const ordered = [...peers.filter(takes)].sort((p, q) => Number(isAway(p.state)) - Number(isAway(q.state)));
   const rows: LinkThroughRowView[] = [];
   for (const via of ordered) {
     for (const far of via.wire!.links) {
       if (far.id === selfId || linked.has(far.id) || !far.through || rows.some((row) => row.id === far.id)) continue;
-      const held = asked.some((ask) => ask.via === via.id && ask.with === far.id);
+      const ask = asked.find((candidate) => candidate.via === via.id && candidate.with === far.id) ?? null;
       const job = via.wire!.pending.find((candidate) => samePair(candidate, selfId, far.id)) ?? null;
       let status: LinkThroughStatus = "idle";
       let waitingFor: string | null = null;
-      if (held) {
+      let why: string | null = null;
+      if (ask && ask.why === null) {
         status = isAway(via.state) ? "waiting" : "linking";
         waitingFor = isAway(via.state) ? via.name : null;
-      } else if (job?.state === "failed") status = "failed";
-      else if (job) {
+      } else if (job?.state === "failed") {
+        status = "failed";
+        why = job.why;
+      } else if (job) {
         const away = far.away ? far.name : isAway(via.state) ? via.name : null;
         status = job.state === "waiting" && away ? "waiting" : "linking";
         waitingFor = status === "waiting" ? away : null;
+      } else if (ask) {
+        // The link refused the ask itself: its words, and Link again.
+        status = "failed";
+        why = ask.why;
       }
-      rows.push({ id: far.id, name: far.name, via: { id: via.id, name: via.name }, status, waiting_for: waitingFor, why: status === "failed" ? job!.why : null });
+      rows.push({ id: far.id, name: far.name, via: { id: via.id, name: via.name }, status, waiting_for: waitingFor, why });
     }
   }
   return rows;

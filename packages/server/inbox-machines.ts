@@ -59,7 +59,7 @@ import { createFarCapabilities } from "./inbox-capabilities-machines";
 import { CAPABILITY_NOTE_FIELD, CAPABILITY_NOTE_MARK } from "./inbox-capability-note";
 import type { SharedReactions } from "./inbox-reactions-shared";
 import { FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE } from "./inbox-far-tags";
-import { createLinkThrough, LINK_THROUGH_ASK_ROUTE, LINK_THROUGH_INTRODUCE_ROUTE, LINK_THROUGH_OFFER_ROUTE, LINK_THROUGH_ROUTES, LINK_THROUGH_WINDOW_ONLY } from "./inbox-link-through";
+import { createLinkThrough, LINK_THROUGH_ASK_ROUTE, LINK_THROUGH_INTRODUCE_ROUTE, LINK_THROUGH_OFFER_ROUTE, LINK_THROUGH_ROUTES, LINK_THROUGH_WINDOW_ONLY, linkThroughAsks } from "./inbox-link-through";
 import type { LinkThroughView } from "@plannotator/core/inbox-link-through";
 
 /** A far tag's door routes (inbox-far-tags.ts): this Inbox sends them itself; the forward never does. */
@@ -92,6 +92,14 @@ const FORGE_WRITE_MS = 60_000;
 export interface InboxMachineDoor {
   /** Open a one-time machine offer: its secret and six digits. */
   openMachineOffer: () => { secret: string; code: string; expires_at: string };
+  /** Open an introduction's offer (inbox-link-through.ts): a secret only, for one computer, from the one introducing it. */
+  openIntroductionOffer: (forId: string, by: string) => { secret: string; expires_at: string };
+  /** A provisional device's binding: the computer whose link-back completes it, and who introduced it; null otherwise. */
+  introduction: (deviceId: string) => { for: string; by: string } | null;
+  /** The link a provisional device was made for is saved: it is an ordinary device from now on. */
+  settleIntroduction: (deviceId: string) => void;
+  /** A computer is no longer linked: the offers it had opened here close, and the devices still provisional from them go. */
+  dropIntroductions: (by: string) => void;
   /** The device a machine offer was redeemed for, once it was. */
   offerDevice: (secret: string) => string | null;
   /** Close a machine offer that will not be used; the device it made, if one was. */
@@ -533,14 +541,14 @@ export function createInboxMachines(context: InboxMachinesContext) {
       if (peer.state === "online") peer.flush();
       else peer.poke();
     },
-    held: () =>
-      links.list().flatMap((record) =>
-        outbox.list(record.id, "pending").flatMap((entry) => (entry.route === LINK_THROUGH_ASK_ROUTE && typeof entry.body.with === "string" ? [{ via: record.id, with: entry.body.with }] : [])),
-      ),
+    held: () => links.list().flatMap((record) => linkThroughAsks(outbox.list(record.id), record)),
     link: (input) => link(input),
-    offer: () => offer({}),
+    introOffer: (forId, by) => {
+      const opened = context.door.openIntroductionOffer(forId, by);
+      links.keepSelf();
+      return { link: buildLinkOffer({ id: links.selfId, name: context.computerName(), tailnet: context.door.tailnetAddress(), secret: opened.secret, code: null }) };
+    },
     ownAddress: () => context.door.tailnetAddress(),
-    offerDevice: (secret) => context.door.offerDevice(secret),
     refresh: async (ids) => {
       await Promise.all(ids.map((id) => peers.get(id)?.refreshList()));
     },
@@ -642,6 +650,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   };
 
   outbox.onChange(({ entry }) => {
+    // A link-through ask is drawn on its own row (how it stands, a refusal's words): the rows hear it, not the outbox.
+    if (entry.auto && entry.route === LINK_THROUGH_ASK_ROUTE) return machinesChanged();
     // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it,
     // except the notice of one the person is told about when it does not land (`notify`).
     if (entry.auto && !(entry.notify && entry.notice !== null)) return;
@@ -698,6 +708,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
     farCapabilities.forget(id);
     const link = links.remove(id);
     if (link?.device_id) context.door.revokeDevice(link.device_id, { oweRefusal: closeDoor === "after_refusal" });
+    // What it introduced and is not complete yet goes with it: its open codes here, the devices they made, the introductions it sent.
+    context.door.dropIntroductions(id);
+    linkThrough.forgetBroker(id);
     outbox.dropMachine(id, link?.name ?? null);
     // The last link gone: with Phones off the tailnet door has nothing left to serve (but a refusal owed).
     if (closeDoor === "after_answer") closeDoorAfterAnswer();
@@ -905,16 +918,23 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (!parsed?.secret || !parsed.tailnet || !parsed.id) return json({ error: "link: a plannotator://link code with an address.", code: "validation_error" }, 422);
     const url = checkTailnetAddress(parsed.tailnet);
     if (!url) return json({ error: "link: its address is not usable.", code: "validation_error" }, 422);
-    // A link code made for an introduction (inbox-link-through.ts) is completed only by the computer it was made for.
-    const wrong = linkThrough.linkBackRefusal(deviceId, parsed.id);
-    if (wrong) {
+    // A device an introduction's code made (inbox-link-through.ts) is completed only by the computer it was made for,
+    // however many link-backs came before; it stays bound until its link is saved.
+    const introduced = context.door.introduction(deviceId);
+    if (introduced && introduced.for !== parsed.id) {
       context.door.revokeDevice(deviceId);
-      return json({ error: wrong, code: "introduction_mismatch" }, 403);
+      return json({ error: "This link code was made for another computer.", code: "introduction_mismatch" }, 403);
     }
     try {
       const target = await redeem({ kind: "tailnet", url }, parsed);
+      // Dropped meanwhile (its time ran out, or the computer that introduced it was unlinked): nothing is saved.
+      if (introduced && (target.id !== introduced.for || !context.door.introduction(deviceId))) {
+        await tellUnlink(target.transport, target.token);
+        return json({ error: "This introduction is no longer open. Click Link again.", code: "introduction_dropped" }, 409);
+      }
       const record: InboxLinkRecord = { id: target.id, name: target.name, token: target.token, transport: { kind: "tailnet", url }, device_id: deviceId, linked_at: new Date().toISOString() };
       save(record);
+      if (introduced) context.door.settleIntroduction(deviceId);
       return json({ machine: { id: links.selfId, name: context.computerName() } }, 201);
     } catch (error) {
       if (error instanceof InboxError) return json({ error: error.message, code: error.code }, 409);

@@ -12016,6 +12016,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
   case initiativeNotFound
   case initiativePersonOnly
   case internalError
+  case introductionPending
   case invalidDone
   case invalidSupersedes
   case lanUnavailable
@@ -12094,7 +12095,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [WireErrorCode] = [.ackAfterReply, .ackNotAllowed, .ackSent, .ackStale, .actionAlreadySent, .actionClosed, .agentHasIt, .agentNotAcceptedHere, .agentUnavailable, .alreadyCombined, .alreadyDelivered, .alreadyOwner, .annotationClosed, .annotationNotAllowed, .annotationNotFound, .appNotAvailable, .artifactNotFound, .artifactPinsNewer, .askBusy, .askDamaged, .askFull, .askNoBridge, .askNoLivePath, .askNoOwner, .askUnreadable, .attachmentChangedType, .attachmentMissing, .attachmentNotAudio, .attachmentNotFound, .attachmentNotHtml, .attachmentNotImage, .attachmentNotText, .attachmentNotVideo, .attachmentTooLarge, .batchIdReused, .cannotTakeBack, .cardBacklogPersonOnly, .cardDroppedByPerson, .cardNoProject, .cardNotFound, .cardOtherProject, .cardPersonOnly, .codeNotAcceptedHere, .codeReviewOff, .configNotSaved, .cookieHostEnvDecides, .cookieHostUrlHostInUse, .crossOrigin, .deviceNotFound, .deviceRevoked, .deviceRouteNotFound, .deviceTokenInvalid, .deviceTokenMissing, .draftConflict, .experimentalEnvDecides, .folderMissing, .folderUnavailable, .guideNotFound, .handoffSettled, .idempotencyKeyReused, .initiativeExists, .initiativeNotFound, .initiativePersonOnly, .internalError, .invalidDone, .invalidSupersedes, .lanUnavailable, .lastAgent, .launchInRex, .launchNotFound, .launchOff, .linkFailed, .linkToSelf, .linkedPageMissing, .linkedPageNotHtml, .linkedPageOutside, .linkedPageRefused, .linkedPageTooLarge, .liveNotAnswering, .liveSiteNotFound, .liveUnavailable, .localOnly, .machineMismatch, .machineNeedsUpdate, .machineNotAcceptedHere, .machineNotLinked, .machineUnreachable, .machinesViewRefused, .markupTooLarge, .messageNotFound, .modeNeedsLive, .noWayBack, .notAddressed, .notInThread, .nothingToReask, .nothingToTidy, .offerExpired, .openNotAllowed, .openUnavailable, .originNotAllowed, .ownerOnly, .pairingCodeWrong, .pinsNewer, .priorityNewer, .projectNotFound, .projectUnresolved, .questionAlreadySent, .questionNotFound, .questionOpen, .questionRevisionConflict, .questionSetAside, .questionSuperseded, .relayUploadUnavailable, .scratchUnavailable, .sendNowUnavailable, .sessionNotLive, .sessionStillLive, .snoozePast, .snoozesNewer, .systemOff, .tagHostMismatch, .tagNeedsUpdate, .tagsNewer, .tailnetUnavailable, .tailscaleEnvDecides, .tailscaleUnavailable, .takenBack, .threadMovedOn, .threadNameTaken, .threadNotFound, .threadResolved, .trustFailed, .trustWarningChanged, .uploadNoSpace, .uploadNotFound, .uploadRefused, .uploadTooLarge, .validationError, .windowOnly]
+  public static let known: [WireErrorCode] = [.ackAfterReply, .ackNotAllowed, .ackSent, .ackStale, .actionAlreadySent, .actionClosed, .agentHasIt, .agentNotAcceptedHere, .agentUnavailable, .alreadyCombined, .alreadyDelivered, .alreadyOwner, .annotationClosed, .annotationNotAllowed, .annotationNotFound, .appNotAvailable, .artifactNotFound, .artifactPinsNewer, .askBusy, .askDamaged, .askFull, .askNoBridge, .askNoLivePath, .askNoOwner, .askUnreadable, .attachmentChangedType, .attachmentMissing, .attachmentNotAudio, .attachmentNotFound, .attachmentNotHtml, .attachmentNotImage, .attachmentNotText, .attachmentNotVideo, .attachmentTooLarge, .batchIdReused, .cannotTakeBack, .cardBacklogPersonOnly, .cardDroppedByPerson, .cardNoProject, .cardNotFound, .cardOtherProject, .cardPersonOnly, .codeNotAcceptedHere, .codeReviewOff, .configNotSaved, .cookieHostEnvDecides, .cookieHostUrlHostInUse, .crossOrigin, .deviceNotFound, .deviceRevoked, .deviceRouteNotFound, .deviceTokenInvalid, .deviceTokenMissing, .draftConflict, .experimentalEnvDecides, .folderMissing, .folderUnavailable, .guideNotFound, .handoffSettled, .idempotencyKeyReused, .initiativeExists, .initiativeNotFound, .initiativePersonOnly, .internalError, .introductionPending, .invalidDone, .invalidSupersedes, .lanUnavailable, .lastAgent, .launchInRex, .launchNotFound, .launchOff, .linkFailed, .linkToSelf, .linkedPageMissing, .linkedPageNotHtml, .linkedPageOutside, .linkedPageRefused, .linkedPageTooLarge, .liveNotAnswering, .liveSiteNotFound, .liveUnavailable, .localOnly, .machineMismatch, .machineNeedsUpdate, .machineNotAcceptedHere, .machineNotLinked, .machineUnreachable, .machinesViewRefused, .markupTooLarge, .messageNotFound, .modeNeedsLive, .noWayBack, .notAddressed, .notInThread, .nothingToReask, .nothingToTidy, .offerExpired, .openNotAllowed, .openUnavailable, .originNotAllowed, .ownerOnly, .pairingCodeWrong, .pinsNewer, .priorityNewer, .projectNotFound, .projectUnresolved, .questionAlreadySent, .questionNotFound, .questionOpen, .questionRevisionConflict, .questionSetAside, .questionSuperseded, .relayUploadUnavailable, .scratchUnavailable, .sendNowUnavailable, .sessionNotLive, .sessionStillLive, .snoozePast, .snoozesNewer, .systemOff, .tagHostMismatch, .tagNeedsUpdate, .tagsNewer, .tailnetUnavailable, .tailscaleEnvDecides, .tailscaleUnavailable, .takenBack, .threadMovedOn, .threadNameTaken, .threadNotFound, .threadResolved, .trustFailed, .trustWarningChanged, .uploadNoSpace, .uploadNotFound, .uploadRefused, .uploadTooLarge, .validationError, .windowOnly]
 
   public init(rawValue: String) {
     switch rawValue {
@@ -12162,6 +12163,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
     case "initiative_not_found": self = .initiativeNotFound
     case "initiative_person_only": self = .initiativePersonOnly
     case "internal_error": self = .internalError
+    case "introduction_pending": self = .introductionPending
     case "invalid_done": self = .invalidDone
     case "invalid_supersedes": self = .invalidSupersedes
     case "lan_unavailable": self = .lanUnavailable
@@ -12307,6 +12309,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
     case .initiativeNotFound: return "initiative_not_found"
     case .initiativePersonOnly: return "initiative_person_only"
     case .internalError: return "internal_error"
+    case .introductionPending: return "introduction_pending"
     case .invalidDone: return "invalid_done"
     case .invalidSupersedes: return "invalid_supersedes"
     case .lanUnavailable: return "lan_unavailable"
@@ -12457,6 +12460,7 @@ extension WireErrorCode {
     "initiative_not_found": 404,
     "initiative_person_only": 403,
     "internal_error": 500,
+    "introduction_pending": 403,
     "invalid_done": 422,
     "invalid_supersedes": 422,
     "lan_unavailable": 409,

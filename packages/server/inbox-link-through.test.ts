@@ -6,7 +6,10 @@
  * it made it for, then both sides naming each other as linked. What regresses: the gap not seen, or seen when there
  * is none; an older computer offered; a click that links nothing; an away computer that never links once back; a
  * link code written to the broker's disk; an introduction taken from a computer that is not linked, without a
- * window's press, a second time, or late; a link code completed by a computer it was not made for.
+ * window's press, or a second time; two computers whose clocks disagree refused as late; the introductions seen
+ * growing without bound or written per entry; a code made with six digits or not bound to the computer it is for; an
+ * address from the broker taken outside a test sandbox; a refused ask that leaves its row idle. The door's side of the
+ * binding (a provisional device) is in inbox-link-through-pass.test.ts.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
@@ -15,7 +18,8 @@ import { join } from "node:path";
 import { LINK_THROUGH_MARK, linkThroughPairs, linkThroughRows, readLinkThroughWire, type LinkThroughPeerFacts, type LinkThroughWire } from "@plannotator/core/inbox-link-through";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { buildLinkOffer, parseLinkOffer } from "./inbox-links";
-import { createLinkThrough, LINK_THROUGH_ASK_ROUTE, LINK_THROUGH_INTRODUCE_ROUTE, LINK_THROUGH_OFFER_ROUTE, type InboxLinkThrough } from "./inbox-link-through";
+import { createLinkThrough, LINK_THROUGH_ASK_ROUTE, LINK_THROUGH_INTRODUCE_ROUTE, LINK_THROUGH_OFFER_ROUTE, linkThroughAsks, type InboxLinkThrough } from "./inbox-link-through";
+import type { OutboxEntry } from "./inbox-outbox";
 
 const ibx = (last: string) => `ibx_${"0".repeat(25)}${last}`;
 const STUDIO = ibx("S");
@@ -33,13 +37,24 @@ interface Node {
   /** This node's copy of each link's `link_through`, as its list was last read. */
   read: Map<string, LinkThroughWire | null>;
   held: { via: string; body: Record<string, unknown> }[];
-  /** Link codes it made: their secret, and the device the computer that redeemed one has here. */
-  offers: Map<string, { device: string | null }>;
+  /** Link codes it made: their secret, the computer each is for and who introduced it, and whether it was redeemed. */
+  offers: Map<string, { device: string | null; for: string; by: string }>;
+  /** What it was asked to link with (the ordinary link's input). */
+  linked: { link: string; address?: string; back?: string }[];
   module: InboxLinkThrough;
 }
 
+interface WorldOptions {
+  /** Each computer's clock (default: this one's). */
+  clocks?: Record<string, () => number>;
+  /** Each computer's environment (default: the test sandbox). */
+  envs?: Record<string, Record<string, string | undefined>>;
+  /** Computers whose door is not on the tailnet (two Inboxes on one computer in a test). */
+  unpublished?: string[];
+}
+
 /** Three computers and the links between them. */
-function world(names: Record<string, string> = { [STUDIO]: "Studio", [LAPTOP]: "Laptop", [MINI]: "Mini" }) {
+function world(names: Record<string, string> = { [STUDIO]: "Studio", [LAPTOP]: "Laptop", [MINI]: "Mini" }, options: WorldOptions = {}) {
   const nodes = new Map<string, Node>();
   const sent: { from: string; to: string; route: string; body: Record<string, unknown> }[] = [];
   const node = (id: string) => nodes.get(id)!;
@@ -59,6 +74,7 @@ function world(names: Record<string, string> = { [STUDIO]: "Studio", [LAPTOP]: "
       read: new Map(),
       held: [],
       offers: new Map(),
+      linked: [],
       module: null as unknown as InboxLinkThrough,
     };
     nodes.set(id, self);
@@ -80,30 +96,32 @@ function world(names: Record<string, string> = { [STUDIO]: "Studio", [LAPTOP]: "
         return door(id, to, route, body, true);
       },
       hold: (via, body) => self.held.push({ via, body }),
-      held: () => self.held.map((entry) => ({ via: entry.via, with: String(entry.body.with) })),
+      held: () => self.held.map((entry) => ({ via: entry.via, with: String(entry.body.with), why: null })),
       link: async (input) => {
+        self.linked.push(input);
         const code = parseLinkOffer(input.link);
         const maker = code?.id ? nodes.get(code.id) : undefined;
         const offer = code?.secret ? maker?.offers.get(code.secret) : undefined;
         if (!maker || !offer || offer.device) throw new InboxError("offer_expired", "This link code is no longer open.");
         offer.device = `dev_${id}`;
-        // The code's maker takes the link-back only from the computer the code was made for.
-        const wrong = maker.module.linkBackRefusal(`dev_${id}`, id);
-        if (wrong) throw new InboxError("introduction_mismatch", wrong);
+        // The code's maker's door takes the link-back only from the computer the code was made for (inbox-devices.ts;
+        // the real door is in inbox-link-through-pass.test.ts).
+        if (offer.for !== id) throw new InboxError("introduction_mismatch", "This link code was made for another computer.");
         self.links.add(maker.id);
         maker.links.add(id);
         changed();
         return { machine: { id: maker.id } };
       },
-      offer: () => {
+      introOffer: (forId, by) => {
         const secret = `secret${Math.random().toString(16).slice(2)}`;
-        self.offers.set(secret, { device: null });
-        return { link: buildLinkOffer({ id, name, tailnet: `${name.toLowerCase()}.tail1234.ts.net:8443`, secret, code: "123456" }), expires_at: new Date(Date.now() + 600_000).toISOString() };
+        self.offers.set(secret, { device: null, for: forId, by });
+        return { link: buildLinkOffer({ id, name, tailnet: `${name.toLowerCase()}.tail1234.ts.net:8443`, secret, code: null }) };
       },
-      ownAddress: () => `${name.toLowerCase()}.tail1234.ts.net:8443`,
-      offerDevice: (secret) => self.offers.get(secret)?.device ?? null,
+      ownAddress: () => (options.unpublished?.includes(id) ? null : `${name.toLowerCase()}.tail1234.ts.net:8443`),
       refresh: async (ids) => refresh(id, ids),
       changed: () => changed(),
+      now: options.clocks?.[id],
+      env: options.envs?.[id] ?? { PLANNOTATOR_TEST_SANDBOX: "1" },
     });
   }
 
@@ -335,7 +353,7 @@ describe("what a linked computer can cause", () => {
     expect(w.node(MINI).offers.size).toBe(0);
   });
 
-  test("an introduction is taken once: a replay, and a late one, are refused", async () => {
+  test("an introduction is taken once: a replay is refused", async () => {
     const w = await chain();
     w.node(STUDIO).module.linkHere(LAPTOP, MINI);
     await w.settle();
@@ -348,30 +366,107 @@ describe("what a linked computer can cause", () => {
     await w.settle();
     expect(await w.node(LAPTOP).module.introduce(STUDIO, true, introduced.body)).toMatchObject({ status: 409, body: { code: "introduction_used" } });
     expect(await w.node(MINI).module.offerFor(STUDIO, true, offered.body)).toMatchObject({ status: 409, body: { code: "introduction_used" } });
-    const late = new Date(Date.now() - 20 * 60_000).toISOString();
-    expect(await w.node(LAPTOP).module.introduce(STUDIO, true, { ...introduced.body, intro: `lt_${"9".repeat(32)}`, at: late })).toMatchObject({ status: 409, body: { code: "introduction_stale" } });
     expect(w.node(LAPTOP).links.has(MINI)).toBe(false);
   });
 
-  test("a replay is refused after a restart too (the introductions seen are kept)", async () => {
+  test("computers whose clocks disagree by more than any window still link", async () => {
+    const hour = 60 * 60_000;
+    const w = world(undefined, { clocks: { [LAPTOP]: () => Date.now() + 3 * hour, [MINI]: () => Date.now() - 5 * hour } });
+    w.link(STUDIO, LAPTOP);
+    w.link(STUDIO, MINI);
+    await w.settle();
+    w.node(STUDIO).module.linkHere(LAPTOP, MINI);
+    await w.settle();
+    expect(w.node(STUDIO).module.view().pairs).toEqual([]);
+    expect(w.node(LAPTOP).links.has(MINI)).toBe(true);
+  });
+
+  test("the introductions seen are kept per broker, a bounded number, and never written to disk", async () => {
     const w = await chain();
+    const laptop = w.node(LAPTOP).module;
+    const intro = (i: number) => `lt_${i.toString(16).padStart(32, "0")}`;
+    // Many introductions from Studio, each for a code that is not Mini's own (refused after it is seen).
+    for (let i = 1; i <= 200; i++) {
+      const code = buildLinkOffer({ id: MINI, name: "Mini", tailnet: "mini.tail1234.ts.net:8443", secret: `s${i}`, code: null });
+      await laptop.introduce(STUDIO, true, { intro: intro(i), link: code, with: { id: MINI } });
+    }
+    // The newest are still refused as used; the oldest have left the list.
+    expect(await laptop.introduce(STUDIO, true, { intro: intro(200), link: "x", with: { id: MINI } })).toMatchObject({ status: 409, body: { code: "introduction_used" } });
+    expect((await laptop.introduce(STUDIO, true, { intro: intro(1), link: "x", with: { id: MINI } })).body.code).not.toBe("introduction_used");
+    // Nothing of them on Laptop's disk (it brokers nothing, so it keeps no file).
+    expect(existsSync(join(w.node(LAPTOP).dataDir, "inbox", "link-through.json"))).toBe(false);
+  });
+
+  test("a code Mini makes is bound to the computer it is for and the broker that asked, and carries no six digits", async () => {
+    const w = await chain();
+    const offered = await w.node(MINI).module.offerFor(STUDIO, true, { intro: `lt_${"7".repeat(32)}`, for: { id: LAPTOP } });
+    expect(offered.status).toBe(200);
+    const code = parseLinkOffer(offered.body.link as string)!;
+    expect(code.code).toBeNull();
+    expect(w.node(MINI).offers.get(code.secret!)).toMatchObject({ for: LAPTOP, by: STUDIO });
+  });
+
+  test("outside a test sandbox, the taker never takes an address or a way back from the broker", async () => {
+    const tailnetless = buildLinkOffer({ id: MINI, name: "Mini", tailnet: null, secret: "s", code: null });
+    const body = { link: tailnetless, with: { id: MINI }, address: "http://127.0.0.1:9", back: "http://127.0.0.1:8" };
+    const production = world(undefined, { envs: { [LAPTOP]: {} }, unpublished: [LAPTOP] });
+    production.link(STUDIO, LAPTOP);
+    production.link(STUDIO, MINI);
+    await production.settle();
+    await production.node(LAPTOP).module.introduce(STUDIO, true, { ...body, intro: `lt_${"1".repeat(32)}` });
+    expect(production.node(LAPTOP).linked).toEqual([{ link: tailnetless }]);
+    // Inside one, two Inboxes on one computer reach each other by what the broker says.
+    const sandbox = world(undefined, { unpublished: [LAPTOP] });
+    sandbox.link(STUDIO, LAPTOP);
+    sandbox.link(STUDIO, MINI);
+    await sandbox.settle();
+    await sandbox.node(LAPTOP).module.introduce(STUDIO, true, { ...body, intro: `lt_${"2".repeat(32)}` });
+    expect(sandbox.node(LAPTOP).linked).toEqual([{ link: tailnetless, address: body.address, back: body.back }]);
+  });
+
+  test("outside a test sandbox, the broker sends no addresses", async () => {
+    const w = world(undefined, { envs: { [STUDIO]: {} } });
+    w.link(STUDIO, LAPTOP);
+    w.link(STUDIO, MINI);
+    await w.settle();
     w.node(STUDIO).module.linkHere(LAPTOP, MINI);
     await w.settle();
     const introduced = w.sent.find((s) => s.route === LINK_THROUGH_INTRODUCE_ROUTE)!;
-    const seen = JSON.parse(readFileSync(join(w.node(LAPTOP).dataDir, "inbox", "link-through.json"), "utf8")).seen;
-    expect(Object.keys(seen)).toContain(introduced.body.intro);
+    expect(introduced.body.address).toBeUndefined();
+    expect(introduced.body.back).toBeUndefined();
+    expect(w.node(LAPTOP).links.has(MINI)).toBe(true);
   });
+});
 
-  test("a link code made for Laptop is not completed by another computer", async () => {
-    const w = await chain();
-    const at = new Date().toISOString();
-    const offered = await w.node(MINI).module.offerFor(STUDIO, true, { intro: `lt_${"7".repeat(32)}`, at, for: { id: LAPTOP } });
-    expect(offered.status).toBe(200);
-    const secret = parseLinkOffer(offered.body.link as string)!.secret!;
-    // Studio redeems it itself, and links back as itself.
-    w.node(MINI).offers.get(secret)!.device = "dev_studio_again";
-    expect(w.node(MINI).module.linkBackRefusal("dev_studio_again", STUDIO)).toBe("This link code was made for another computer.");
-    // A code from Show link code is not checked.
-    expect(w.node(MINI).module.linkBackRefusal("dev_someone", OTHER)).toBeNull();
+describe("the computer that asked, when its ask is refused", () => {
+  const entry = (n: number, state: OutboxEntry["state"], answer: unknown = null): OutboxEntry => ({
+    v: 1,
+    key: `link-through:${MINI}:${n}`,
+    machine: STUDIO,
+    route: LINK_THROUGH_ASK_ROUTE,
+    body: { with: MINI },
+    n,
+    queued_at: "2026-11-24T00:00:00Z",
+    state,
+    left: state !== "queued",
+    errors: 0,
+    status: state === "refused" ? 404 : state === "delivered" ? 200 : null,
+    answer,
+    settled_at: null,
+    notice: null,
+    dismissed: false,
+    auto: true,
+  });
+  const studio = { id: STUDIO, name: "Studio" };
+
+  test("its row says the refusal's words, and a newer ask (Link again) says it is linking", () => {
+    const refused = linkThroughAsks([entry(1, "refused", { error: "That computer is not linked here.", code: "machine_not_linked" })], studio);
+    expect(refused).toEqual([{ via: STUDIO, with: MINI, why: "That computer is not linked here." }]);
+    expect(linkThroughRows(LAPTOP, [facts(STUDIO, "Studio", [LAPTOP, MINI])], refused)[0]).toMatchObject({ status: "failed", why: "That computer is not linked here." });
+    const again = linkThroughAsks([entry(1, "refused", { error: "No." }), entry(2, "queued")], studio);
+    expect(linkThroughRows(LAPTOP, [facts(STUDIO, "Studio", [LAPTOP, MINI])], again)[0]).toMatchObject({ status: "linking", why: null });
+    // Taken there (the broker's own job tells the rest), and words the broker did not give.
+    expect(linkThroughAsks([entry(1, "delivered")], studio)).toEqual([]);
+    expect(linkThroughAsks([entry(1, "refused", "not json")], studio)[0]!.why).toBe("Studio answered 404.");
   });
 });

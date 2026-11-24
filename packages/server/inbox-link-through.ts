@@ -7,24 +7,28 @@
  *    (`link-through-ask`, held in that computer's outbox while Studio is away). Once both are online it asks one for
  *    a link code (`link-through-offer`) and hands it to the other (`link-through-introduce`). The code is held in
  *    memory for that one request: nothing of it is written here, and the tokens the two then mint never pass here.
- *  - the code's maker (Mini) opens an ordinary machine offer, as Show link code does, and remembers which computer it
- *    is for: the link-back that completes it must come from that computer (`linkBackRefusal`).
+ *  - the code's maker (Mini) opens an introduction's offer on its door: a secret only (no six digits), bound to the
+ *    computer it is for and the one that introduced it, alive two minutes by Mini's own clock. The device it makes is
+ *    provisional: it reaches only health, link-back and unlink, only a link-back from that computer completes it, and
+ *    it is revoked unless that link is saved within two minutes (inbox-devices.ts, `INTRODUCED_DEVICE_MS`).
  *  - the taker (Laptop) runs the ordinary link with that code (`link` in inbox-machines.ts): it redeems it at Mini's
  *    door, checks Mini's health answers with Mini's id, and links back with a code of its own. The result is the link
  *    a person makes by hand.
  *
  * Every one of the three is refused without the mark of a press in a window there (`X-Plannotator-Window`), and an
- * introduction (`intro`) is taken once, and only while it is fresh. Jobs and the introductions seen are kept in
- * `inbox/link-through.json` (0600, temp file then rename).
+ * introduction (`intro`) is taken once. Its freshness is the code's life on Mini's clock, so the computers' clocks
+ * need not agree. Jobs are kept in `inbox/link-through.json` (0600, temp file then rename); the introductions seen,
+ * in memory, a bounded number per broker.
  */
 
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { LINK_THROUGH_MARK, linkThroughPairs, linkThroughRows, linkThroughText, type LinkThroughPeerFacts, type LinkThroughView, type LinkThroughWire, type LinkThroughWireJob } from "@plannotator/core/inbox-link-through";
+import { LINK_THROUGH_MARK, linkThroughPairs, linkThroughRows, linkThroughText, type LinkThroughAsk, type LinkThroughPeerFacts, type LinkThroughView, type LinkThroughWire, type LinkThroughWireJob } from "@plannotator/core/inbox-link-through";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { parseLinkOffer } from "./inbox-links";
+import type { OutboxEntry } from "./inbox-outbox";
 
 /** Laptop → Studio: link me with that computer of yours. */
 export const LINK_THROUGH_ASK_ROUTE = "link-through-ask";
@@ -35,9 +39,12 @@ export const LINK_THROUGH_INTRODUCE_ROUTE = "link-through-introduce";
 /** This Inbox's own writes: the forward never carries them. */
 export const LINK_THROUGH_ROUTES: ReadonlySet<string> = new Set([LINK_THROUGH_ASK_ROUTE, LINK_THROUGH_OFFER_ROUTE, LINK_THROUGH_INTRODUCE_ROUTE]);
 
-/** An introduction is taken only this long either side of its making, by the taker's clock (a link code lives 10 minutes). */
-export const LINK_THROUGH_FRESH_MS = 15 * 60_000;
-/** Introductions seen are kept this long, so a replay is refused across a restart. */
+/**
+ * Introductions seen, per broker: at most this many, each for at most a day. An introduction replayed after it left
+ * the list (or after a restart) meets a dead code: the one it carries was redeemed or ran out on its maker's clock, and
+ * a code request opens only another two-minute code for the same computer, answered to the broker alone.
+ */
+const SEEN_PER_BROKER = 32;
 const SEEN_KEPT_MS = 24 * 60 * 60_000;
 const OFFER_MS = 15_000;
 /** The taker's link: its pairing, its health read and its way back, each up to 15 s or 30 s. */
@@ -63,7 +70,6 @@ interface Job extends LinkThroughWireJob {
 interface ThroughFile {
   v: 1;
   jobs: Job[];
-  seen: Record<string, number>;
 }
 
 /** One of this Inbox's links, as the module needs it. */
@@ -87,21 +93,43 @@ export interface LinkThroughContext {
   request: (machine: string, route: string, body: Record<string, unknown>, timeoutMs: number) => Promise<Response>;
   /** Hold an ask in the outbox for `via` (the window's mark, this Inbox's own write), sent now when it is online. */
   hold: (via: string, body: Record<string, unknown>) => void;
-  /** This Inbox's asks still held, by computer. */
-  held: () => { via: string; with: string }[];
+  /** This Inbox's newest ask per computer and broker: still held (`why` null), or refused there (its words). */
+  held: () => LinkThroughAsk[];
   /** The ordinary link (inbox-machines.ts `link`): redeem a code, link back. */
   link: (input: { link: string; address?: string; back?: string }) => Promise<unknown>;
-  /** Open an ordinary machine offer here (Show link code's), and its link code. */
-  offer: () => { link: string; expires_at: string };
+  /** Open an introduction's offer on this door, for `forId`, introduced by `by`, and its link code (a secret only). */
+  introOffer: (forId: string, by: string) => { link: string };
   /** This Inbox's door on the tailnet, or null. */
   ownAddress: () => string | null;
-  /** The device a machine offer was redeemed for, once it was. */
-  offerDevice: (secret: string) => string | null;
   /** Read these links' lists again (after a link: their `link_through` moved). */
   refresh: (ids: string[]) => Promise<void>;
   /** The rows changed: the windows and the links hear it. */
   changed: () => void;
   now?: () => number;
+  /** Where the test sandbox flag is read (`PLANNOTATOR_TEST_SANDBOX`). Default `process.env`. */
+  env?: Record<string, string | undefined>;
+}
+
+/**
+ * This Inbox's link-through asks for one linked computer (`via`), from its outbox entries: per computer asked for,
+ * the newest one, while it is held, or with the words it was refused with there.
+ */
+export function linkThroughAsks(entries: readonly OutboxEntry[], via: { id: string; name: string }): LinkThroughAsk[] {
+  const newest = new Map<string, OutboxEntry>();
+  for (const entry of entries) {
+    if (entry.route !== LINK_THROUGH_ASK_ROUTE || typeof entry.body.with !== "string") continue;
+    const kept = newest.get(entry.body.with);
+    if (!kept || entry.n > kept.n) newest.set(entry.body.with, entry);
+  }
+  const asks: LinkThroughAsk[] = [];
+  for (const [withId, entry] of newest) {
+    if (entry.state === "queued" || entry.state === "sending") asks.push({ via: via.id, with: withId, why: null });
+    else if (entry.state === "refused") {
+      const words = linkThroughText((entry.answer as { error?: unknown } | null)?.error, 300);
+      asks.push({ via: via.id, with: withId, why: words || `${via.name} answered ${entry.status ?? "with a refusal"}.` });
+    }
+  }
+  return asks;
 }
 
 const newIntro = () => `lt_${randomBytes(16).toString("hex")}`;
@@ -110,11 +138,11 @@ const pairOf = (job: { a: string; c: string }, x: string, y: string) => (job.a =
 export function createLinkThrough(context: LinkThroughContext) {
   const now = context.now ?? Date.now;
   const path = join(inboxDir(context.dataDir), FILE);
-  let file: ThroughFile = { v: 1, jobs: [], seen: {} };
+  let file: ThroughFile = { v: 1, jobs: [] };
   if (existsSync(path)) {
     try {
       const read = JSON.parse(readFileSync(path, "utf8")) as Partial<ThroughFile>;
-      file = { v: 1, jobs: Array.isArray(read.jobs) ? read.jobs.filter(isJob) : [], seen: read.seen && typeof read.seen === "object" ? { ...read.seen } : {} };
+      file = { v: 1, jobs: Array.isArray(read.jobs) ? read.jobs.filter(isJob) : [] };
     } catch {
       const aside = `${path}.unreadable-${now()}`;
       renameSync(path, aside);
@@ -123,15 +151,14 @@ export function createLinkThrough(context: LinkThroughContext) {
   }
   // A job mid-way when this Inbox stopped tries again.
   for (const job of file.jobs) if (job.state === "linking") job.state = "waiting";
-  /** Link codes this Inbox made for an introduction: the computer each is for, until it expires. In memory only. */
-  const offersFor = new Map<string, { for: string; until: number }>();
+  /** The introductions each broker sent that were taken here, oldest first. In memory only (SEEN_PER_BROKER). */
+  const seenBy = new Map<string, Map<string, number>>();
+  const sandbox = !!(context.env ?? process.env).PLANNOTATOR_TEST_SANDBOX;
   let running = false;
   let again = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   const save = () => {
-    const cut = now() - SEEN_KEPT_MS;
-    for (const [intro, at] of Object.entries(file.seen)) if (typeof at !== "number" || at < cut) delete file.seen[intro];
     const dir = inboxDir(context.dataDir);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const temp = `${path}.${process.pid}.tmp`;
@@ -260,10 +287,9 @@ export function createLinkThrough(context: LinkThroughContext) {
   /** One introduction: a link code from `c`, handed to `a`. The code lives in this function only. */
   const attempt = async (job: Job, a: LinkThroughPeer, c: LinkThroughPeer): Promise<Outcome> => {
     const intro = newIntro();
-    const at = new Date(now()).toISOString();
     let offered: { status: number; body: Record<string, unknown> };
     try {
-      offered = await answerOf(await context.request(c.id, LINK_THROUGH_OFFER_ROUTE, { intro, at, for: { id: a.id, name: a.name } }, OFFER_MS));
+      offered = await answerOf(await context.request(c.id, LINK_THROUGH_OFFER_ROUTE, { intro, for: { id: a.id, name: a.name } }, OFFER_MS));
     } catch {
       return { kind: "again", why: `${c.name} did not answer.` };
     }
@@ -274,7 +300,8 @@ export function createLinkThrough(context: LinkThroughContext) {
     let taken: { status: number; body: Record<string, unknown> };
     try {
       taken = await answerOf(
-        await context.request(a.id, LINK_THROUGH_INTRODUCE_ROUTE, { intro, at, link: code, with: { id: c.id, name: c.name }, address: c.url, back: a.url }, INTRODUCE_MS),
+        // Where this Inbox reaches each, for two Inboxes on one computer in a test only: the taker takes it nowhere else.
+        await context.request(a.id, LINK_THROUGH_INTRODUCE_ROUTE, { intro, link: code, with: { id: c.id, name: c.name }, ...(sandbox ? { address: c.url, back: a.url } : {}) }, INTRODUCE_MS),
       );
     } catch {
       return { kind: "again", why: `${a.name} did not answer.` };
@@ -285,20 +312,24 @@ export function createLinkThrough(context: LinkThroughContext) {
 
   // ── The door routes (a linked computer's token; `from` is the computer it belongs to) ──
 
-  /** An introduction's id and time: taken once, and only while fresh. Null when it may be taken. */
-  const introRefusal = (body: Record<string, unknown>): LinkThroughAnswer | null => {
+  /**
+   * An introduction's id: taken once from its broker. Null when it may be taken. No time is compared: the code it
+   * opens or carries lives two minutes on its maker's clock, so two computers whose clocks disagree still link.
+   */
+  const introRefusal = (from: string, body: Record<string, unknown>): LinkThroughAnswer | null => {
     const intro = typeof body.intro === "string" ? body.intro : "";
     if (!INTRO_ID.test(intro)) return { status: 422, body: { error: "intro: an introduction's id.", code: "validation_error" } };
-    if (file.seen[intro] !== undefined) return { status: 409, body: { error: "This introduction was already used.", code: "introduction_used" } };
-    const at = typeof body.at === "string" ? Date.parse(body.at) : NaN;
-    if (!Number.isFinite(at) || Math.abs(now() - at) > LINK_THROUGH_FRESH_MS) {
-      return { status: 409, body: { error: "This introduction is too old. Click Link again.", code: "introduction_stale" } };
-    }
+    if (seenBy.get(from)?.has(intro)) return { status: 409, body: { error: "This introduction was already used.", code: "introduction_used" } };
     return null;
   };
-  const seen = (body: Record<string, unknown>) => {
-    file.seen[String(body.intro)] = now();
-    save();
+  const seen = (from: string, body: Record<string, unknown>) => {
+    const kept = seenBy.get(from) ?? new Map<string, number>();
+    const cut = now() - SEEN_KEPT_MS;
+    for (const [intro, at] of kept) if (at < cut) kept.delete(intro);
+    kept.set(String(body.intro), now());
+    // The oldest first out (a Map keeps the order they were taken).
+    while (kept.size > SEEN_PER_BROKER) kept.delete(kept.keys().next().value!);
+    seenBy.set(from, kept);
   };
   /** The broker names `other` as one of its links, as its list says (read once more when it does not). */
   const brokerNames = async (broker: string, other: string): Promise<boolean> => {
@@ -330,41 +361,37 @@ export function createLinkThrough(context: LinkThroughContext) {
   const offerFor = async (from: string | null, window: boolean, body: Record<string, unknown>): Promise<LinkThroughAnswer> => {
     if (!from) return { status: 404, body: { error: "Not found", code: "not_found" } };
     if (!window) return { status: 403, body: { ...LINK_THROUGH_WINDOW_ONLY } };
-    const stale = introRefusal(body);
-    if (stale) return stale;
+    const used = introRefusal(from, body);
+    if (used) return used;
     const forId = otherId(body.for);
     if (!forId || forId === context.selfId() || forId === from) return { status: 422, body: { error: "for: another computer.", code: "validation_error" } };
-    if (peer(forId)) {
-      seen(body);
-      return { status: 409, body: { error: "Already linked.", code: "already_linked" } };
-    }
+    // Taken before anything is awaited, so two copies arriving together cannot both pass.
+    seen(from, body);
+    if (peer(forId)) return { status: 409, body: { error: "Already linked.", code: "already_linked" } };
     if (!(await brokerNames(from, forId))) return { status: 409, body: { error: "That computer is not linked to the one introducing it.", code: "not_linked_there" } };
-    seen(body);
-    const opened = context.offer();
-    const secret = parseLinkOffer(opened.link)?.secret;
-    if (secret) offersFor.set(secret, { for: forId, until: Date.parse(opened.expires_at) || now() + LINK_THROUGH_FRESH_MS });
-    return { status: 200, body: { link: opened.link } };
+    // Bound on the door's own offer, for `forId` alone, and dropped if `from` is unlinked before it completes.
+    return { status: 200, body: { link: context.introOffer(forId, from).link } };
   };
 
   /** Studio hands this Inbox (Laptop) `with`'s link code: link, as a person pasting it would. */
   const introduce = async (from: string | null, window: boolean, body: Record<string, unknown>): Promise<LinkThroughAnswer> => {
     if (!from) return { status: 404, body: { error: "Not found", code: "not_found" } };
     if (!window) return { status: 403, body: { ...LINK_THROUGH_WINDOW_ONLY } };
-    const stale = introRefusal(body);
-    if (stale) return stale;
+    const used = introRefusal(from, body);
+    if (used) return used;
     const withId = otherId(body.with);
     const parsed = typeof body.link === "string" ? parseLinkOffer(body.link) : null;
     if (!withId || withId === context.selfId() || withId === from || !parsed?.secret || parsed.id !== withId) {
       return { status: 422, body: { error: "link: that computer's own link code.", code: "validation_error" } };
     }
-    if (peer(withId)) {
-      seen(body);
-      return { status: 200, body: { linked: true } };
-    }
+    // Taken before anything is awaited, so two copies arriving together cannot both pass.
+    seen(from, body);
+    if (peer(withId)) return { status: 200, body: { linked: true } };
     if (!(await brokerNames(from, withId))) return { status: 409, body: { error: "That computer is not linked to the one introducing it.", code: "not_linked_there" } };
-    seen(body);
-    const address = parsed.tailnet ? undefined : typeof body.address === "string" ? body.address : undefined;
-    const back = context.ownAddress() ? undefined : typeof body.back === "string" ? body.back : undefined;
+    // An address from the broker is taken only inside a test sandbox (two Inboxes on one computer), as loopback is
+    // (inbox-transport-tailnet.ts): anywhere else the code's own tailnet address, and this Inbox's own way back.
+    const address = !sandbox || parsed.tailnet ? undefined : typeof body.address === "string" ? body.address : undefined;
+    const back = !sandbox || context.ownAddress() ? undefined : typeof body.back === "string" ? body.back : undefined;
     try {
       await context.link({ link: body.link as string, ...(address ? { address } : {}), ...(back ? { back } : {}) });
     } catch (error) {
@@ -372,23 +399,6 @@ export function createLinkThrough(context: LinkThroughContext) {
       throw error;
     }
     return { status: 201, body: { linked: true } };
-  };
-
-  /**
-   * Mini's check of a link-back on a device a link code made for an introduction: it must come from the computer the
-   * code was for. Null: take it (a code from Show link code, or the right computer).
-   */
-  const linkBackRefusal = (deviceId: string, offeredId: string | null): string | null => {
-    for (const [secret, entry] of offersFor) {
-      if (entry.until < now() - 60_000) {
-        offersFor.delete(secret);
-        continue;
-      }
-      if (context.offerDevice(secret) !== deviceId) continue;
-      offersFor.delete(secret);
-      return offeredId === entry.for ? null : "This link code was made for another computer.";
-    }
-    return null;
   };
 
   // ── The window's routes ──
@@ -414,7 +424,7 @@ export function createLinkThrough(context: LinkThroughContext) {
     if (!p) return { status: 404, body: { error: "That computer is not linked.", code: "machine_not_linked" } };
     if (withId === context.selfId() || peer(withId)) return { status: 200, body: { linked: true } };
     if (!takes(p) || !p.wire!.links.some((l) => l.id === withId)) return { status: 404, body: { error: `That computer is not linked to ${p.name}.`, code: "not_linked_there" } };
-    if (!context.held().some((ask) => ask.via === via && ask.with === withId)) context.hold(via, { with: withId, idempotency_key: `link-through:${withId}:${newIntro()}` });
+    if (!context.held().some((ask) => ask.via === via && ask.with === withId && ask.why === null)) context.hold(via, { with: withId, idempotency_key: `link-through:${withId}:${newIntro()}` });
     context.changed();
     return { status: 200, body: { asked: true } };
   };
@@ -426,9 +436,12 @@ export function createLinkThrough(context: LinkThroughContext) {
     asked,
     offerFor,
     introduce,
-    linkBackRefusal,
     linkHere,
     askVia,
+    /** `broker` is no longer linked: the introductions it sent are forgotten with it. */
+    forgetBroker: (broker: string) => {
+      seenBy.delete(broker);
+    },
     stop: () => {
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = null;
