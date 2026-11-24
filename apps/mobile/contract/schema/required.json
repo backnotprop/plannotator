@@ -902,6 +902,16 @@
       "key",
       "message_id"
     ],
+    "InboxSwarmMemberWire": [
+      "host",
+      "joined",
+      "name",
+      "session"
+    ],
+    "InboxSwarmMemberWireDoing": [
+      "at",
+      "text"
+    ],
     "InboxTag": [
       "host",
       "session",
@@ -951,6 +961,11 @@
       "read_at",
       "review",
       "state"
+    ],
+    "InboxThreadSwarm": [
+      "ghost_id",
+      "members",
+      "on"
     ],
     "InboxTidyMark": [
       "id",

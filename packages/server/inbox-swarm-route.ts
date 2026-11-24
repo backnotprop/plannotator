@@ -213,7 +213,8 @@ export async function swarmWindowRoute(req: Request, url: URL, ctx: SwarmRouteCo
     };
     if (req.method === "GET") return Response.json(read());
     if (req.method !== "POST") return Response.json({ error: "Use GET or POST." }, { status: 405 });
-    const body = await readBody(req);
+    // The door's writes carry an idempotency key in the body; these are answered now, never held, so it is not kept.
+    const { idempotency_key: _key, ...body } = await readBody(req);
     const keys = Object.keys(body);
     if (keys.length !== 1 || !["say", "on", "seen"].includes(keys[0]!)) throw new InboxError("validation_error", "One of say, on or seen.");
     if (body.say !== undefined) {

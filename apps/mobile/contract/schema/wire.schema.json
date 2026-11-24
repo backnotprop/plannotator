@@ -4497,6 +4497,9 @@
             }
           ]
         },
+        "ghost_of": {
+          "type": "string"
+        },
         "reopened": {
           "type": "array",
           "items": {
@@ -5884,6 +5887,7 @@
         "question",
         "scheduled",
         "steps",
+        "swarm",
         "thread_pull"
       ],
       "x-open": true,
@@ -7110,6 +7114,97 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
+    "InboxSwarmMemberWire": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "type": "string"
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "machine_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "for": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "joined": {
+          "type": "boolean"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "idle",
+                "waiting",
+                "working"
+              ],
+              "x-open": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "doing": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text",
+                "at"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "session",
+        "host",
+        "name",
+        "joined"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-swarm-types.ts"
+    },
     "InboxTag": {
       "type": "object",
       "properties": {
@@ -7389,6 +7484,9 @@
             }
           ]
         },
+        "swarm": {
+          "$ref": "#/$defs/InboxThreadSwarm"
+        },
         "archive_seq": {
           "anyOf": [
             {
@@ -7544,6 +7642,40 @@
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-thread-pulls.ts"
+    },
+    "InboxThreadSwarm": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "ghost_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxSwarmMemberWire"
+          }
+        },
+        "ghost_unread": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "on",
+        "ghost_id",
+        "members"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-swarm-types.ts"
     },
     "InboxTidyMark": {
       "type": "object",
