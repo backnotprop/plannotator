@@ -88,6 +88,6 @@ describe('event: capabilities', () => {
     expect((on.settings as { experimental?: unknown }).experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: true, env: null } });
     expect((hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), on.settings).settings as { experimental?: unknown }).experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: true, env: null } });
     // A malformed one is not applied.
-    expect((hear(JSON.stringify({ board: { on: false }, experimental: { grid: { on: true } } }), before).settings as { experimental?: unknown }).experimental).toEqual(before.experimental);
+    expect((hear(JSON.stringify({ board: { on: false }, experimental: { grid: { on: true } } }), before).settings as { experimental?: unknown }).experimental).toEqual((before as { experimental?: unknown }).experimental);
   });
 });
