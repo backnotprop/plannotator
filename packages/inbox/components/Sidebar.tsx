@@ -45,7 +45,9 @@ import { PlansNav } from '../plans/PlansNav';
 import { useStickyHeadings } from './stickyHeadings';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans' | 'grid';
+  /** Grid (approval "inbox-agent-grid"): the row under Inbox, only while Settings → Capabilities → Experimental → Grid is on. */
+  onGrid?: () => void;
   /** Plans: the row second under Inbox, only while Plans is on (config.json `inboxPlans`); no row, menu item or Customize entry while off. */
   onPlans?: () => void;
   /**
@@ -419,6 +421,7 @@ export function Sidebar(props: SidebarProps) {
   const drawn = drawnSidebarItems({
     board: Boolean(props.onBoard),
     plans: Boolean(props.onPlans),
+    grid: Boolean(props.onGrid),
     scheduled: Boolean(props.onScheduled),
     reviews: Boolean(props.onPulls),
     // The Usage row decides itself whether it shows (components/Usage.tsx); the menu offers it only where `cswap` is.
@@ -542,6 +545,13 @@ export function Sidebar(props: SidebarProps) {
         >
           <Icon name="board" />
           Board
+        </button>
+        );
+      case 'grid':
+        return (
+        <button type="button" className={`ib-nav${props.page === 'grid' ? ' ib-on' : ''}`} onClick={pick(() => props.onGrid?.())} aria-current={props.page === 'grid' ? 'page' : undefined} data-grid-nav="">
+          <Icon name="grid" />
+          Grid
         </button>
         );
       case 'plans':
