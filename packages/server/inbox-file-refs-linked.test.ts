@@ -6,6 +6,9 @@
  * agent's or a script's bare call through the forward reads and attaches nothing.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { diagramFileAsk } from "../inbox/ask/sideSource";
+import type { AttachmentView } from "../inbox/api";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -119,8 +122,18 @@ describe("a file a message names, on a linked machine's thread, two real Inboxes
         const attachment = listing.attachments[0];
         expect(attachment.kind).toBe("plannotator-diagram");
         const remote = `/api/inbox/m/${there.id}`;
-        const view = await windowGet(here, `${remote}/attachments/${attachment.id}/view?version=sent`);
-        expect(await view.json()).toMatchObject({ text: source, version: attachment.sent_sha256 });
+        const revised = JSON.stringify({ title: `Revised on ${there.name}`, columns: [{ id: "queue", title: "Checkout queue" }] });
+        writeFileSync(join(there.w.project, "delivery.diagram.json"), revised);
+        for (const [version, content] of [["sent", source], ["current", revised]] as const) {
+          const response = await windowGet(here, `${remote}/attachments/${attachment.id}/view?version=${version}`);
+          const view = await response.json() as AttachmentView;
+          const sha = createHash("sha256").update(content).digest("hex");
+          expect(view).toMatchObject({ text: content, version: version === "sent" ? attachment.sent_sha256 : "current" });
+          let context = "";
+          diagramFileAsk(view, (_question, source) => { context = source ?? ""; })!("Where are retries handled?", { kind: "selection", detail: "panel queue" });
+          expect(context).toContain(`SHA-256: ${sha}`);
+          expect(context).toContain(`Attachment: ${attachment.id}`);
+        }
         const anchor = { v: 1, family: "plannotator-diagram", kind: "node", id: "queue", label: "Queue", sourceLine: null, point: { kind: "panel", x: 0.34, y: 0.7 } };
         const save = await windowPost(here, `${remote}/annotations`, { idempotency_key: crypto.randomUUID(), attachment_id: attachment.id, version: attachment.sent_sha256,
           annotation: { id: crypto.randomUUID(), type: "COMMENT", text: "Show the retry path", originalText: "Queue", blockId: "block-0", startOffset: 0, endOffset: 0, createdA: Date.now(), diagramAnchor: anchor },

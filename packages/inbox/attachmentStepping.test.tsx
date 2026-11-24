@@ -537,6 +537,7 @@ test.skipIf(!hasDom)('on a linked thread the inline drawing and old pane read th
   const steps = stepsOf(rows);
   rememberMachine([M1, M2, first.id, next.id], machine);
   const reads: string[] = [];
+  const inlineOpens: string[] = [];
   globalThis.fetch = (async (input) => {
     const path = String(input);
     if (path.includes('/view')) {
@@ -553,20 +554,29 @@ test.skipIf(!hasDom)('on a linked thread the inline drawing and old pane read th
   root = createRoot(host);
   try {
     await act(async () => root!.render(<>
-      <InlineDiagrams files={[first]} records={[]} readOnly onSaved={() => {}} />
+      <InlineDiagrams files={[first, next]} artifacts={rows} onOpenLatest={(a) => { inlineOpens.push(a.id); }} records={[]} readOnly onSaved={() => {}} />
       <Pane start={first} harness={{ steps: [], closed: 0, saved: [] }} steps={steps} editions={rows} />
     </>));
     await settle();
     const sent = (id: string) => `/api/inbox/m/${machine}/attachments/${id}/view?version=sent`;
-    expect(reads).toEqual([sent(first.id), sent(first.id)]);
-    expect(host.querySelector(`[data-inline-diagram-attachment="${first.id}"]`)).not.toBeNull();
-    const latest = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Open latest');
+    expect(reads).toEqual([sent(first.id), sent(next.id), sent(first.id)]);
+    const oldInline = host.querySelector(`[data-inline-diagram-attachment="${first.id}"]`)!;
+    // The native review block loads lazily inside Suspense.
+    for (let i = 0; i < 30 && !oldInline.querySelector('[data-diagram-expand]'); i++) await settle();
+    expect(oldInline.textContent).toContain('Open latest');
+    expect(host.querySelector(`[data-inline-diagram-attachment="${next.id}"]`)?.textContent).not.toContain('Open latest');
+    await act(async () => oldInline.querySelector<HTMLButtonElement>('[data-diagram-expand]')!.click());
+    const expanded = document.querySelector('[data-diagram-popout]')!;
+    const openLatest = (element: Element) => [...element.querySelectorAll('button')].find((button) => button.textContent === 'Open latest');
+    await act(async () => openLatest(expanded)!.click());
+    expect(inlineOpens).toEqual([next.id]);
+    const latest = openLatest(pane());
     expect(latest).toBeDefined();
     await act(async () => latest!.click());
     await settle();
     expect(reads.at(-1)).toBe(sent(next.id));
-    expect(host.textContent).not.toContain('Open latest');
-    expect(host.textContent).not.toContain('Showing the sent version');
+    expect(pane().textContent).not.toContain('Open latest');
+    expect(pane().textContent).not.toContain('Showing the sent version');
   } finally {
     resetMachineRoutes();
   }
