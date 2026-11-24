@@ -3452,6 +3452,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const gridOn = () => resolveExperimental(loadConfig(), "grid");
   /** Swarm (docs/agent-guides/inbox-swarm.md), off by default, with no Settings row: PLANNOTATOR_EXPERIMENTAL=swarm or config `experimental.swarm`. */
   const swarmOn = () => resolveExperimental(loadConfig(), "swarm");
+  // Off, no ghost thread's words wait for any agent (store.ts `isSwarmMember`): no wake hands them.
+  store.setSwarmSwitch(swarmOn);
   /**
    * The Board (approval "inbox-board", 2026-10-26): on only when the person
    * turned it on (config.json `inboxBoard`), and only in a build that has the
@@ -5112,6 +5114,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   store.setCloudPolling(cloudPollsItself);
   const cloudGate = createInboxCloudGate({ dataDir, relayUrl: () => readRelayFile(dataDir)?.url ?? defaultRelayUrl() });
   const agentSignalsFor = (line: InboxLine): string[] => {
+    // Words in a ghost thread (Swarm, an agent's or the person's): only the members they wait for, never their author.
+    if (line.kind === "message" && store.ghostParentOf(line.record.thread_id)) {
+      const waits = line.at === line.record.created_at ? store.ghostWaitsFor(line.record) : [];
+      return cloudAgents.list().flatMap((agent) => (agent.device_id && waits.includes(agent.session) ? [agent.device_id] : []));
+    }
     if (line.kind !== "message" || line.record.author.kind !== "person" || line.at !== line.record.created_at) return [];
     const threadId = line.record.thread_id;
     return cloudAgents

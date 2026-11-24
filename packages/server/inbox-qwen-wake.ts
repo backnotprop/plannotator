@@ -821,7 +821,8 @@ export function createInboxQwenWake(options: {
   const unsubscribe = store.subscribe((line) => {
     if (line.kind !== "message") return;
     const message = line.record as InboxMessage;
-    if (message.author.kind === "agent") {
+    // An agent's words in a ghost thread (Swarm) are looked at as a person's tags are.
+    if (message.author.kind === "agent" && !store.isGhostSay(message)) {
       if (message.wakes !== true || message.author.host !== INBOX_QWEN_HOST || !isQwenSessionId(message.author.session)) return;
       knownSessions().add(message.author.session);
     } else {

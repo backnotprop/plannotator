@@ -13,6 +13,7 @@ import { inboxSentFromLine, type InboxMessage } from "@plannotator/core/inbox-ty
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents, type InboxCloudWakeAgent } from "./inbox-cloud-agents";
 import { postCloudWebhook } from "./inbox-cloud-post";
+import { swarmNoticeOf } from "./inbox-swarm-wake";
 
 const RETRY_FIRST_MS = 30_000;
 const RETRY_MAX_MS = 10 * 60_000;
@@ -101,9 +102,12 @@ export function createInboxCloudWake(options: {
   };
 
   // Where the person wrote it, when away from this computer (inbox-sent-from.ts): the one line under their words.
+  // Words in a ghost thread (Swarm): its notice line first, as every other connection hands them.
   const wakeItem = (item: InboxMessage): InboxCloudWakeItem => {
     const from = inboxSentFromLine(item);
-    return { id: item.id, at: item.created_at, body: from ? `${item.body}\n\n${from}` : item.body, files: item.attachments?.length ?? 0 };
+    const notice = swarmNoticeOf(store, item);
+    const body = from ? `${item.body}\n\n${from}` : item.body;
+    return { id: item.id, at: item.created_at, body: notice ? `${notice}\n\n${body}` : body, files: item.attachments?.length ?? 0 };
   };
 
   const wakeThread = async (agent: InboxCloudWakeAgent, threadId: string, listed: InboxMessage[]): Promise<number | null> => {
@@ -184,12 +188,14 @@ export function createInboxCloudWake(options: {
     for (const [session, all] of pending) {
       const agent = agents.agent(session);
       if (!agent || !hasCloudWake(agent)) continue;
-      if (startPass) for (const item of all) if (item.cloud_wake?.state === "sending") setWake(item, session, { ...item.cloud_wake, state: "uncertain" });
-      for (const item of all) if (POSTED.has(item.cloud_wake?.state ?? "")) store.handover.hand(item, session, "cloud");
+      // A ghost thread's words (Swarm) are for several agents, each woken once: another agent's wake state is not this one's.
+      const mine = (item: InboxMessage) => !store.ghostParentOf(item.thread_id) || store.message(item.id)?.cloud_wake?.name === agent.name;
+      if (startPass) for (const item of all) if (item.cloud_wake?.state === "sending" && mine(item)) setWake(item, session, { ...item.cloud_wake, state: "uncertain" });
+      for (const item of all) if (POSTED.has(item.cloud_wake?.state ?? "") && mine(item)) store.handover.hand(item, session, "cloud");
       // The note that a session's questions moved never starts a run: it is for a session that comes on its own. Nor do
       // Ship's stop and closed lines (`ship_note` `stop`): a run started only to be told to stop would act on the PR.
       // Ship's update note (`watch`) wakes a shipping cloud agent as any reply would.
-      const open = all.filter((item) => !item.moved_note && item.ship_note?.kind !== "stop" && !inboxCloudWakeSettled(store.message(item.id)?.cloud_wake));
+      const open = all.filter((item) => !item.moved_note && item.ship_note?.kind !== "stop" && !(inboxCloudWakeSettled(store.message(item.id)?.cloud_wake) && mine(item)));
       const byThread = new Map<string, InboxMessage[]>();
       for (const item of open) (byThread.get(item.thread_id) ?? byThread.set(item.thread_id, []).get(item.thread_id)!).push(item);
       for (const [threadId, items] of byThread) {
@@ -243,7 +249,8 @@ export function createInboxCloudWake(options: {
   const unsubscribe = store.subscribe((line) => {
     if (line.kind !== "message") return;
     const message = line.record as InboxMessage;
-    if (message.author.kind !== "person") return;
+    // An agent's words in a ghost thread (Swarm) wake the members they tag, as a person's do.
+    if (message.author.kind !== "person" && !store.isGhostSay(message)) return;
     if (queued) return;
     queued = true;
     setTimeout(() => {

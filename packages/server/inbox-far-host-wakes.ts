@@ -30,7 +30,8 @@ export function farWakeItem(wake: FarWake): InboxMessage {
     reply_to: wake.command.reply_to,
     author: { kind: "person" },
     subject: wake.command.subject,
-    body: wake.command.body,
+    // A notice (a swarm's ghost thread) keeps its own first line for a wake that words the item's body (the cloud's).
+    body: wake.command.moved && wake.command.notice ? `${wake.command.notice}\n\n${wake.command.body}` : wake.command.body,
     created_at: wake.received_at,
     resolved_at: null,
     idempotency_key: null,

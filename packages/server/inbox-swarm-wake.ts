@@ -16,11 +16,18 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { SWARM_WORDS } from "@plannotator/shared/inbox/swarm";
 import { inboxMessageStartsSwarm } from "@plannotator/shared/inbox/swarm-start";
 
+/** The notice line words in a ghost thread are handed with (`SWARM_WORDS.wake`, or the person's); null outside one. */
+export function swarmNoticeOf(store: InboxStore, message: InboxMessage): string | null {
+  if (!store.ghostParentOf(message.thread_id)) return null;
+  const notice = message.author.kind === "agent" ? SWARM_WORDS.wake(message.author.name ?? "An agent") : SWARM_WORDS.wakePerson;
+  return notice.length <= 300 ? notice : SWARM_WORDS.wakePerson;
+}
+
 export function swarmWakeOf(store: InboxStore, reply: InboxMessage, command: InboxReplyCommand, on: boolean): InboxReplyCommand {
   if (!on) return command;
   const parent = store.ghostParentOf(reply.thread_id);
   if (parent) {
-    const notice = reply.author.kind === "agent" ? SWARM_WORDS.wake(reply.author.name ?? "An agent") : SWARM_WORDS.wakePerson;
+    const notice = swarmNoticeOf(store, reply)!;
     const subject = store.threadSubject(parent);
     return {
       type: "reply",
@@ -31,7 +38,7 @@ export function swarmWakeOf(store: InboxStore, reply: InboxMessage, command: Inb
       body: reply.body,
       url: command.url,
       moved: true,
-      notice: notice.length <= 300 ? notice : SWARM_WORDS.wakePerson,
+      notice,
       ...(command.now ? { now: true } : {}),
     };
   }

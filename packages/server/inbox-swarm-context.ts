@@ -8,6 +8,7 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { SwarmLiveState } from "@plannotator/shared/inbox/swarm";
 import type { InboxMachines } from "./inbox-machines";
 import { FAR_SWARM_ROUTE, type SwarmRouteContext } from "./inbox-swarm-route";
+import { createSwarmFarJoins, holdSwarmSay } from "./inbox-swarm-far";
 
 /** How long a linked computer has to answer a swarm command. */
 const FAR_SWARM_WAIT_MS = 8_000;
@@ -22,6 +23,7 @@ export function inboxSwarmContext(deps: {
   ownSession: (session: string) => boolean;
 }): SwarmRouteContext {
   const { store } = deps;
+  const joins = createSwarmFarJoins(store.dir);
   const live: SwarmLiveState = (member, threadId) => {
     const row = store.listRow(threadId);
     if (row?.waiting_on_person) {
@@ -53,6 +55,16 @@ export function inboxSwarmContext(deps: {
         return found ? { machine: found.machine, thread_id: found.answer.thread_id } : null;
       },
       nameOf: (machine) => deps.machines()?.nameOf(machine) ?? null,
+      joins,
+      // As a far reply (inbox-mcp-far-reply.ts): this Inbox's own held write, its refusal a notice under that thread.
+      holdSay: (machine, thread, body) =>
+        holdSwarmSay(
+          (m, b, t) => deps.machines()?.holdWrite(m, FAR_SWARM_ROUTE, b, t, FAR_SWARM_WAIT_MS, { notify: true }) ?? null,
+          (key) => deps.machines()?.dismissHeld(key),
+          machine,
+          thread,
+          body,
+        ),
       ask: async (machine, body) => {
         const peer = deps.machines()?.peerLinks().find((p) => p.id === machine);
         const name = deps.machines()?.nameOf(machine) ?? "The other computer";

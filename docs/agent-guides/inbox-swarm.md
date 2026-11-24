@@ -19,7 +19,26 @@ Piece 1 (this): several agents in New message, the swarm record, the ghost threa
 
 ### Delivery inside a ghost thread
 
-The only place an agent's words reach other agents. `store.isGhostSay(message)`: an agent message in a ghost thread with tags. `pendingReplies`, `pendingRepliesFor`, `pendingFor`, `recordDelivery` and `farSessions` accept it, for a tagged session that is a member of a swarm that is on, and only for a connection that words tags. Every other thread is exactly as before. A ghost message is handed as a notice (`moved` with its own `notice` line, `SWARM_WORDS.wake`), so it never reads as the person's reply. A far member's tag carries its `machine`; the far tags' `onPersonMessage` sends its wake there.
+The only place an agent's words reach other agents. `store.isGhostSay(message)`: an agent message in a ghost thread with tags. `pendingReplies`, `pendingRepliesFor`, `pendingFor`, `recordDelivery`, `recordCloudWake`, `wakingSessionsOfHost` and `farSessions` accept it, for a tagged session that is a member of a swarm that is on, and only for a connection that words tags. The person's words from the ghost pane follow the same rule: a member only, while on. With the experimental switch off (`store.setSwarmSwitch`, set by inbox.ts) no ghost words wait for anyone. `store.ghostWaitsFor(message)` names the sessions they still wait for (never the author). Every other thread is exactly as before. A ghost message is handed as a notice (`moved` with its own `notice` line, `SWARM_WORDS.wake`, `swarmNoticeOf`), so it never reads as the person's reply. A far member's tag carries its `machine`; the far tags' `onPersonMessage` sends its wake there.
+
+Delivery receipts stay in the ghost thread: a member's delivery is written on the ghost message's tag, never on the main thread, and the ghost thread is no row, so no unread, no "Delivered to …" line and no notification comes of it (`swarm-wakes.test.ts`).
+
+### Who is woken how
+
+Each member is woken by the channel its host's ordinary reply uses, once per message, by the command `replyCommand` makes (the notice):
+
+| Host | How a ghost message reaches it | Proof |
+|---|---|---|
+| Claude Code (the mod), T3 Code's Claude with the mod, Pi, OpenCode 2, DeepSeek Harness, Cline, OpenClaw, Hermes | The bridge poll (`live.pendingOf` → `pendingReplies`); a held poll answers at once (inbox.ts, the poll's subscriber) | store: `swarm-wakes.test.ts` |
+| Codex | The Codex wake: `codex queue`, or a launched thread's app-server; its subscriber looks at a ghost message's tags as at a person's | store test; the wake read only |
+| Qwen Code | The Qwen wake's cross-session frame, same subscriber change | store test; read only |
+| T3 Code (no mod) | The T3 wake, same subscriber change | store test; read only |
+| Antigravity | The Antigravity wake's `agentapi send-message`, same subscriber change | `inbox-swarm-host-wakes.test.ts` |
+| Paired cloud agent with a wake address | The cloud wake's webhook, the notice line first in the item's words; each member's own wake state (`cloud_wake.name`), so a second cloud member is woken too | `inbox-swarm-host-wakes.test.ts` |
+| Paired cloud agent that checks by itself | Its relay signal (`agentSignalsFor`): only the members the words wait for | read only |
+| A launched session that rests | Started again (`maybeRespawn`), as the person's reply starts it (inbox-launch.ts, its subscriber) | read only |
+| A member on a linked computer | `POST far-wake` through the outbox (the far tags); that computer keeps `moved` and `notice` (`farWakeCommand`), so its own poll, Codex, Qwen, T3, Antigravity or cloud wake hands it as a notice | `inbox-swarm-far.test.ts` |
+| No wake today (an MCP-only client, OpenCode 1, Claude Code with the mod off, Muse Code, Gemini CLI, Cursor) | Nothing wakes it: its next `swarm join` prints the ghost thread's latest words (`swarm status` lists the members only; the ghost thread is in no list or read) | — |
 
 ### `plannotator inbox swarm`
 
@@ -27,4 +46,4 @@ The only place an agent's words reach other agents. `store.isGhostSay(message)`:
 
 ### Linked computers
 
-The swarm lives on the thread's computer. A linked computer's agent runs the command on its own computer; that Inbox finds the thread's computer (`placeOf`: a wake it holds, a listed row, else a read) and asks its door's `POST swarm` (a machine's token only; `farSwarmAnswer` refuses a session of the thread's computer's own). Answered now, never held: an away computer is refused with `machine_offline`. After a far join the asking Inbox remembers the swarm in memory so `say` needs no `--thread`; after its restart the agent passes `--thread`. The window's `threads/:id/swarm` is on the door's allowlist, so the phone and a linked computer's window reach it.
+The swarm lives on the thread's computer. A linked computer's agent runs the command on its own computer; that Inbox finds the thread's computer (`placeOf`: a wake it holds, a listed row, else a read) and asks its door's `POST swarm` (a machine's token only; `farSwarmAnswer` refuses a session of the thread's computer's own). `say` to an away computer is held in the outbox as this Inbox's own write, as a far reply is (`packages/server/inbox-swarm-far.ts`, `holdSwarmSay`): the agent reads `FAR_REPLY_WORDS.held` ("Waiting for …"), and it goes once when that computer is back; its key (`swarm-say:<uuid>`) is written on the ghost message there, so a resend after a lost answer writes nothing more (`writeGhostMessage`). `join`, `status`, `doing` and `leave` are answered now; an away computer refuses them with `machine_offline`. A far join is kept in `swarm-far-joins.json` in the Inbox's data (0600; `createSwarmFarJoins`), so `say`, `doing` and `leave` need no `--thread` after a restart; `leave` forgets it. The window's `threads/:id/swarm` is on the door's allowlist, so the phone and a linked computer's window reach it.
