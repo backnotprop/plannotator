@@ -52,6 +52,7 @@ import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 import type { FarArchived } from "./inbox-archived-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
+import { createFarRoutines } from "./inbox-scheduled-machines";
 
 /** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
 const FAR_ARCHIVED_LIMIT_MAX = 200;
@@ -393,13 +394,15 @@ export function forwardedFileReadRefusal(route: string, req: Request): { status:
 const LAUNCH_ROUTE = /^launch\/[^/]+\/(stop|retry|trust|delete)$/;
 /** New message, and a reply sent to a new session in place of one that ended: both carry `to.launch`. */
 const LAUNCHES_WITH_TO = /^messages(\/[^/]+\/reply)?$/;
+/** A routine's write there (make, edit, turn, run, stop, delete, bring back): that computer takes it only from a window. */
+const ROUTINE_WRITE = /^scheduled(\/sch_[^/]+(\/(on|off|run|stop|delete|restore))?)?$/;
 
 /**
  * Remote launch: a write that starts, stops or trusts an agent on another machine, which is code run there. Only a
  * press in a window of this Inbox sends one; an agent's or a script's bare call through the forward never does.
  */
 export function startsAgentThere(route: string, body: Record<string, unknown>): boolean {
-  if (LAUNCH_ROUTE.test(route)) return true;
+  if (LAUNCH_ROUTE.test(route) || ROUTINE_WRITE.test(route)) return true;
   const to = body.to;
   return LAUNCHES_WITH_TO.test(route) && !!to && typeof to === "object" && "launch" in to;
 }
@@ -1310,6 +1313,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const search = `?limit=${Math.min(count, FAR_ARCHIVED_LIMIT_MAX)}${project ? `&project=${encodeURIComponent(project)}` : ""}`;
     return Promise.all([...peers.values()].filter((peer) => !owner || peer.id === owner).map((peer) => peer.archivedPage(search)));
   };
+  /** Each linked computer's routines (mark `routines`), for the Routines page's merged read (inbox-scheduled-machines.ts). */
+  const farRoutines = createFarRoutines(() => peers.values());
   /** Each linked machine's "Show archived" switch as its list last said: a save here goes past the newest. */
   const showArchivedCopies = (): InboxShowArchived[] => [...peers.values()].flatMap((peer) => (peer.list?.show_archived ? [peer.list.show_archived] : []));
   /** A linked machine's card, as its Board last said: the lane marks and a link's site icon are read here for it. */
@@ -1364,6 +1369,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     tagColourLists,
     cardLists,
     archivedPages,
+    farRoutines,
     showArchivedCopies,
     /** Each linked machine's PR board (mark `pulls`), for the merged board (inbox-machine-pulls.ts). */
     pullLists: (refresh: boolean) => {

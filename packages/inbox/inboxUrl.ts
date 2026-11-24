@@ -55,6 +55,19 @@ export function setLinkedMachines(machines: readonly MachineFactsWire[] | null |
     if (m.self) selfName = m.name;
     else if (MACHINE_ID.test(m.id)) linkedFacts.set(m.id, { name: m.name, marks: m.marks ?? [], both_ways: m.both_ways === true, listed: m.list_cursor !== null && m.list_cursor !== undefined, state: m.state ?? '' });
   }
+  for (const listener of linkedListeners) listener();
+}
+
+const linkedListeners = new Set<() => void>();
+/** Told each time the merged list names the linked machines again (the Routines store reads theirs once one takes it). */
+export function onLinkedMachines(listener: () => void): () => void {
+  linkedListeners.add(listener);
+  return () => linkedListeners.delete(listener);
+}
+
+/** The linked machines whose list says `mark`, by id. */
+export function linkedMachinesWith(mark: string): string[] {
+  return [...linkedFacts].flatMap(([id, facts]) => (facts.marks.includes(mark) ? [id] : []));
 }
 
 /** This machine's name as the merged list last said it, or null. */

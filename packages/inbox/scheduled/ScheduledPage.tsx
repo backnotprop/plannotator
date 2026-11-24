@@ -2,25 +2,25 @@
  * The sidebar's Routines page (CONTRACT.md section 2): the table, and with one open, the narrow list beside
  * its editor. On a phone, or where the window stacks a list and a thread, the editor stands alone with a Back.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import type { SettingsModel } from '../api';
 import type { Route } from '../app/route';
 import { writeRoute } from '../app/writeRoute';
 import type { InboxToastModel } from '../components/Toast';
-import { errorText } from '../toastError';
-import { selfMachineId } from '../inboxUrl';
+import { errorText, errorToast } from '../toastError';
+import { linkedMachineFacts, machineOf, selfMachineId } from '../inboxUrl';
 import { lastLaunchAgent } from '../compose/model';
 import { SidebarTrigger } from '../shell/sidebar';
 import { InboxApiError } from '../apiError';
-import { scheduledApi } from './client';
-import { useLaunchBlock } from './EditorParts';
+import { onRoutineHeld, scheduledApi } from './client';
 import { useEditorKey } from './editorKey';
 import { ScheduledEditor } from './ScheduledEditor';
 import type { RoutineTab } from './RoutineTabs';
+import { THIS_COMPUTER, type RoutineHome } from './RunsOn';
 import { ScheduledTable, type RowActs } from './ScheduledTable';
-import { putScheduled, readScheduled, useScheduledPage } from './store';
+import { farRoutinesOn, putScheduled, readScheduled, useScheduledPage } from './store';
 
 export { useScheduledOn } from './store';
 
@@ -71,20 +71,33 @@ export function ScheduledRoute(props: { route: Route; settings: Pick<SettingsMod
   );
 }
 
-const local = (row: InboxListRow) => !row.machine || row.machine === selfMachineId();
+/** The list row's computer: null for this one. */
+const computerOf = (row: InboxListRow) => (!row.machine || row.machine === selfMachineId() ? null : row.machine);
 
-/** The folder New message last started an agent in on this computer, if any. */
-function lastProject(rows: readonly InboxListRow[]): string | null {
+/** The folder New message last started an agent in on that computer (null: this one), if any. */
+function lastProject(rows: readonly InboxListRow[], machine: string | null): string | null {
   let last: InboxListRow | null = null;
-  for (const row of rows) if ('run' in row && local(row) && (!last || row.created_at > last.created_at)) last = row;
+  for (const row of rows) if ('run' in row && computerOf(row) === machine && (!last || row.created_at > last.created_at)) last = row;
   return last?.project.id ?? null;
 }
 
+/** A linked computer by its name as the merged list says it. */
+const homeOf = (machine: string | null): RoutineHome => (machine ? { id: machine, name: linkedMachineFacts(machine)?.name ?? 'another computer' } : { id: null, name: THIS_COMPUTER });
+
 export function ScheduledPage(props: ScheduledPageProps) {
   const snap = useScheduledPage();
-  const block = useLaunchBlock();
   const { openId } = props;
   const rows = snap.rows ?? [];
+  // A write held for a linked computer that is away: the window's waiting toast ("Waiting for Studio: …").
+  const toast = props.onToast;
+  useEffect(() => {
+    onRoutineHeld(toast ? (cause) => toast(errorToast(cause, '')) : null);
+    return () => onRoutineHeld(null);
+  }, [toast]);
+  // Where a new one can be made: this computer while Routines are on here, then each linked one with them on there.
+  const homes: RoutineHome[] = [...(props.switch === 'on' ? [homeOf(null)] : []), ...snap.computers.filter((c) => c.on).map((c) => homeOf(c.id))];
+  const openRow = rows.find((row) => row.id === openId) ?? null;
+  const openHome = openId === 'new' ? (homes[0] ?? homeOf(null)) : homeOf(openRow?.machine ?? machineOf(openId));
   const [actError, setActError] = useState<string | null>(null);
   const settle = (call: Promise<{ scheduled: InboxScheduledRow }>) => {
     setActError(null);
@@ -100,7 +113,8 @@ export function ScheduledPage(props: ScheduledPageProps) {
   /** Delete, then the window's toast with Undo, which brings it back as it was. A failure throws, for its caller to say. */
   const remove = async (row: InboxScheduledRow): Promise<void> => {
     try {
-      await scheduledApi.remove(row.id);
+      // Held for a computer that is away: it is deleted there when it is back, and the waiting toast said so.
+      if (!(await scheduledApi.remove(row.id)).deleted) return;
     } catch (cause) {
       void readScheduled();
       throw new Error(`${row.name} was not deleted. ${errorText(cause, 'Try again.')}`);
@@ -115,6 +129,7 @@ export function ScheduledPage(props: ScheduledPageProps) {
     props.onToast?.({ icon: 'check', lead: 'Routine deleted', phoneLead: 'Deleted', detail: row.name, onUndo: () => void undo() });
   };
   const acts: RowActs = {
+    computer: (row) => (row.machine ? homeOf(row.machine).name : null),
     open: (row) => props.onOpen(row.id),
     run: (row) => void settle(scheduledApi.run(row.id)),
     stop: (row) => void settle(scheduledApi.stop(row.id)),
@@ -124,17 +139,19 @@ export function ScheduledPage(props: ScheduledPageProps) {
       remove(row).catch((cause: Error) => setActError(cause.message));
     },
   };
-  const on = props.switch === 'on';
+  // Routines on here, or on a linked computer: the page lists and makes them either way.
+  const on = props.switch === 'on' || farRoutinesOn(snap);
   const alone = props.phone || props.stacked;
   const editorKey = useEditorKey(openId);
   const editor = openId && (
     <ScheduledEditor
       key={editorKey.key}
       id={openId}
-      row={rows.find((row) => row.id === openId) ?? null}
+      row={openRow}
       version={snap.version}
-      block={block}
-      defaults={{ agent: lastLaunchAgent(props.rows), projectId: lastProject(props.rows) }}
+      home={openHome}
+      homes={homes}
+      defaultsFor={(machine) => ({ agent: lastLaunchAgent(props.rows.filter((row) => computerOf(row) === machine)), projectId: lastProject(props.rows, machine) })}
       phone={props.phone}
       narrow={alone}
       onClose={() => props.onOpen(null)}
@@ -163,20 +180,26 @@ export function ScheduledPage(props: ScheduledPageProps) {
           )}
         </div>
         <div className="ib-lbody st-lbody" aria-busy={props.switch === 'loading' || undefined}>
-          {props.switch === 'loading' ? null : props.switch === 'unsupported' ? (
-            <p className="st-note" data-scheduled-off-note="">
-              Routines aren't available on Windows.
-            </p>
-          ) : !on ? (
-            <p className="st-note" data-scheduled-off-note="">
-              Routines are off on this computer.{' '}
-              <button type="button" className="st-link" onClick={() => props.onSettings('capabilities')}>
-                Turn them on in Settings
-              </button>
-            </p>
-          ) : (
+          {props.switch === 'loading' ? null : (
             <>
-              {!snap.launchOn && (
+              {/* This computer's own: said above a linked computer's routines too, which list and run as ever. */}
+              {props.switch === 'unsupported' ? (
+                <p className="st-note" data-scheduled-off-note="">
+                  Routines aren't available on Windows.
+                </p>
+              ) : props.switch === 'off' ? (
+                <p className="st-note" data-scheduled-off-note="">
+                  Routines are off on this computer.{' '}
+                  <button type="button" className="st-link" onClick={() => props.onSettings('capabilities')}>
+                    Turn them on in Settings
+                  </button>
+                </p>
+              ) : null}
+            </>
+          )}
+          {props.switch !== 'loading' && on && (
+            <>
+              {props.switch === 'on' && !snap.launchOn && (
                 <p className="st-note" data-scheduled-launch-off="">
                   Starting agents is off, so nothing runs.{' '}
                   <button type="button" className="st-link" onClick={() => props.onSettings('agents')}>

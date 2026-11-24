@@ -287,6 +287,21 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // Show in Rex for an agent on another machine (inbox-rex-far.ts): a press that moves Rex's app now; held for later it
   // would move it when nobody asked.
   "POST rex/show": "now",
+  // A routine on a linked computer (mark `routines`), from a press in a window here. A create carries its
+  // `idempotency_key`, which that computer keeps on the routine (one key, one routine); an edit, a turn, a stop, a delete
+  // and a restore put a state; a Run is answered once per key by that computer's door. A preview is the editor's
+  // words for a schedule, wanted now or not at all.
+  "POST scheduled": "append",
+  "POST scheduled/preview": "now",
+  "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})": "set",
+  "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/on": "set",
+  "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/off": "set",
+  "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/run": "append",
+  "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/stop": "set",
+  "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/delete": "set",
+  "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/restore": "set",
+  // A capability switch on a linked computer (mark `capabilities`): on or off, a state.
+  "POST capabilities": "set",
   "POST link-back": "set",
   "POST unlink": "set",
   // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.

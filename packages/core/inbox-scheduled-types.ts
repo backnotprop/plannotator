@@ -137,6 +137,8 @@ export interface InboxScheduledRow extends InboxScheduledThread {
   thread_name: string | null;
   /** The newest change line an agent wrote in its own thread: which change, by whom, when (the list row reads it while it is the latest). */
   last_change: { op: InboxScheduledChange["op"]; by: string; at: string } | null;
+  /** In the window's merged read (`?machines=1`): the linked computer it lives and runs on (`ibx_…`); absent for this one's. */
+  machine?: string;
 }
 
 /** `POST /api/inbox/scheduled/preview`: a schedule being edited, before it is saved. */

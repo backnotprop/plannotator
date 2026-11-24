@@ -46,6 +46,7 @@
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
+import { INBOX_CAPABILITY_SWITCH_KEYS } from "@plannotator/core/inbox-capability-switches";
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { hostname } from "node:os";
@@ -176,7 +177,7 @@ function routeNotFound(device: Pick<InboxDevice, "platform"> | null = null): Res
 /**
  * The allowlist (contract section 2): door route to the window's route. A
  * door path outside it is `404 device_route_not_found`; the window, `/mcp`,
- * the bridge, control, settings, restart, the raw text route
+ * the bridge, control, settings (but Capabilities' switches, for a linked machine), restart, the raw text route
  * (`attachments/<id>`; text reaches the phone through `view`), project
  * deletion, drafts, recent searches, "Open in",
  * pairing and the device list are never on it. An attachment's bytes reach
@@ -203,6 +204,8 @@ interface DoorRoute {
   fromMachine?: string;
   /** Only a linked machine's token reaches it (a phone gets the unknown-route 404): starting and stopping agents from another machine. */
   machineOnly?: true;
+  /** The only body fields it takes (with `idempotency_key`); any other is refused (`422`) before the window route runs. */
+  only?: readonly string[];
 }
 
 const ALLOWLIST: readonly DoorRoute[] = [
@@ -366,6 +369,20 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^launch\/folders$/, window: () => "/api/inbox/launch/folders", machineOnly: true },
   // Clone from a git URL: where a URL would be cloned on that machine, and whether its git can read it.
   { method: "GET", route: /^launch\/(clone|clone-check)$/, window: (m) => `/api/inbox/launch/${m[1]}`, machineOnly: true },
+  // Routines (mark `routines`): a linked computer's window lists, opens, previews, makes, edits, turns on or off, runs,
+  // stops, deletes and brings back this Inbox's routines here, which run here as ever. The window's own routes, so the
+  // same checks: a write only with the window's mark (`scheduledRoute`'s `farWindow`), Routines off answers
+  // `routines_off`. Phones have no Routines.
+  { method: "GET", route: /^scheduled$/, window: () => "/api/inbox/scheduled", machineOnly: true },
+  { method: "GET", route: /^scheduled\/(sch_[A-Za-z0-9_-]{1,80})$/, window: (m) => `/api/inbox/scheduled/${m[1]}`, machineOnly: true },
+  { method: "POST", route: /^scheduled$/, window: () => "/api/inbox/scheduled", machineOnly: true },
+  { method: "POST", route: /^scheduled\/preview$/, window: () => "/api/inbox/scheduled/preview", machineOnly: true },
+  { method: "POST", route: /^scheduled\/(sch_[A-Za-z0-9_-]{1,80})$/, window: (m) => `/api/inbox/scheduled/${m[1]}`, machineOnly: true },
+  { method: "POST", route: /^scheduled\/(sch_[A-Za-z0-9_-]{1,80})\/(on|off|run|stop|delete|restore)$/, window: (m) => `/api/inbox/scheduled/${m[1]}/${m[2]}`, machineOnly: true },
+  // Settings → Capabilities' switches (mark `capabilities`, core inbox-capability-switches.ts): a linked computer's
+  // window reads them, and turns one on or off through the settings route with those keys alone. No other setting.
+  { method: "GET", route: /^capabilities$/, window: () => "/api/inbox/capabilities", machineOnly: true },
+  { method: "POST", route: /^capabilities$/, window: () => "/api/inbox/settings", machineOnly: true, only: INBOX_CAPABILITY_SWITCH_KEYS },
 ];
 
 /**
@@ -397,6 +414,12 @@ type DoorOwnRoute = (typeof DOOR_OWN_ROUTES)[number];
 /** A linked machine's own routes by name (`POST link-back`). */
 type OwnName<R> = R extends { method: infer M extends string; route: infer P extends string } ? `${M} ${P}` : never;
 type MachineOwnName = OwnName<Extract<DoorOwnRoute, { grant: "machine" }>>;
+
+/** Of an answer, only the named fields (a route with `only`). */
+function onlyFields(answer: unknown, only: readonly string[]): Record<string, unknown> {
+  if (!answer || typeof answer !== "object" || Array.isArray(answer)) return {};
+  return Object.fromEntries(Object.entries(answer).filter(([field]) => only.includes(field)));
+}
 
 /** Door routes the sealed relay path never carries (`asDevice`): `pair`, and the event stream. Raw bodies neither. */
 const NOT_BY_RELAY = new Set(["pair", "events"]);
@@ -1086,10 +1109,15 @@ export function createInboxDevices(context: InboxDevicesContext) {
     for (const refused of entry.refuse ?? []) {
       if (fields[refused.field] !== undefined) throw new InboxError("validation_error", refused.message, { field: refused.field });
     }
+    const outside = entry.only ? Object.keys(fields).find((field) => field !== "idempotency_key" && !entry.only!.includes(field)) : undefined;
+    if (outside !== undefined) throw new InboxError("validation_error", `${outside}: not taken here; only ${entry.only!.join(", ")}.`, { field: outside });
     return claim(req, device, doorPath, key, async (response) => response, async () => {
       const response = await toWindow(req, device, windowPath, device.platform === MACHINE_PLATFORM ? (entry.fromMachine ?? "") : "", text, req.signal);
-      const answer = await response.text();
-      return { response: new Response(answer, { status: response.status, headers: response.headers }), answer, status: response.status, record: true };
+      // A route that takes only some fields answers only those: the settings route's answer says every setting.
+      const answer = entry.only && response.ok ? JSON.stringify(onlyFields(await response.json().catch(() => ({})), entry.only)) : await response.text();
+      const headers = new Headers(response.headers);
+      headers.delete("content-length");
+      return { response: new Response(answer, { status: response.status, headers }), answer, status: response.status, record: true };
     });
   };
 

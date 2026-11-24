@@ -3605,9 +3605,11 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * `agent-search`: they search and list this Inbox's threads too (`agent-search`, `agent-threads`; inbox-far-find.ts).
  * `combine-across` (approval "inbox-combine-across-computers"): a Combine here takes picked threads of a linked
  * machine too (read there, archived there through the outbox), so a linked machine's window offers this Inbox's
- * agents for picks on both.
+ * agents for picks on both. `routines`: its routines are listed, made, changed and run from a linked machine's
+ * window through its door (`scheduled…`; inbox-scheduled-machines.ts in the server). `capabilities`: its Settings →
+ * Capabilities switches are read and turned from there (`capabilities`; core inbox-capability-switches.ts).
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "routines", "capabilities"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
