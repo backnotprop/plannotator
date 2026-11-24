@@ -256,6 +256,8 @@ test.skipIf(!hasDom)('@ opens the agents grouped by agent, the owner first and t
   await press(box, 'Escape');
   expect(picker()).toBeNull();
   expect(replyBox(el)).not.toBeNull();
+  // Typed words are the thread's draft: emptied, so the next test opens the thread with none.
+  await type(box, '');
 }, 30_000);
 
 test.skipIf(!hasDom)('an MCP agent gets the other heads-up; Send carries the tags; the sent reply shows one line per agent, each with its own Send now', async () => {
