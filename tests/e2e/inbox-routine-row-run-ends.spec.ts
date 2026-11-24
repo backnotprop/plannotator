@@ -80,9 +80,10 @@ test.beforeAll(async () => {
   const bin = join(root, 'bin');
   const dataDir = join(root, 'data');
   for (const dir of [home, bin, dataDir]) mkdirSync(dir, { recursive: true });
-  // Plannotator's Claude Code plugin is on in this HOME: launch needs its mod (it is what connects the session).
-  mkdirSync(join(home, '.claude'), { recursive: true });
-  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
+  // Plannotator's Claude Code plugin is on in the sandbox's own agent home, and the fake `claude` is on its launch PATH
+  // (PLANNOTATOR_TEST_LAUNCH_PATH below), as in inbox-icon-animate.spec.ts: a sandboxed Inbox finds no other agent CLI.
+  mkdirSync(join(dataDir, 'agents-home', '.claude'), { recursive: true });
+  writeFileSync(join(dataDir, 'agents-home', '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
   const fake = installFakeClaude({ bin, state: join(root, 'fake-claude'), config: { hold: true, workMs: 300 } });
   markTourDecided(dataDir);
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxLaunch: { enabled: true, fullPermissions: false }, inboxScheduledThreads: true }));
@@ -92,6 +93,7 @@ test.beforeAll(async () => {
     HOME: home,
     SHELL: fake.shell,
     PLANNOTATOR_TEST_SANDBOX: root,
+    PLANNOTATOR_TEST_LAUNCH_PATH: `${bin}:/usr/bin:/bin`,
     NO_ANON_PING: '1',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
