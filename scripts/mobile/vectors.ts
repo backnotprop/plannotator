@@ -12,7 +12,8 @@
  * app headers read by the door's version rules), snooze (the snooze times,
  * words and the list's clock over snoozed rows, in each zone), rows (the list's
  * groups and what each row offers), acts (the words said after a row action,
- * scripts/mobile/vectors-actions.ts). The stream
+ * scripts/mobile/vectors-actions.ts), quote (a quoting reply's lead, written and
+ * taken away, and where ↩ quotes; scripts/mobile/vectors-quote.ts). The stream
  * suite reads with the window's own parser, so it has its own generator,
  * scripts/mobile/vectors-stream.ts.
  */
@@ -38,6 +39,7 @@ import { ROOT, cli, jsonText, readRepoText, type Output } from './lib';
 import { ACTS_FIXTURE, ACTS_ROWS, actVectors } from './vectors-actions';
 import { FEEDBACK_FIXTURE, feedbackVectors } from './vectors-feedback';
 import { DOCUMENTS_FIXTURE, FILES_FIXTURE, documentVectors, fileVectors } from './vectors-files';
+import { QUOTE_FIXTURE, quoteVectors } from './vectors-quote';
 import { buildWords } from './words';
 
 export const FIXTURES = {
@@ -51,6 +53,7 @@ export const FIXTURES = {
   files: 'apps/mobile/contract/fixtures/files.json',
   documents: 'apps/mobile/contract/fixtures/documents.json',
   feedback: 'apps/mobile/contract/fixtures/feedback.json',
+  quote: 'apps/mobile/contract/fixtures/quote.json',
   relay: 'packages/core/fixtures/inbox-relay-vectors.json',
 } as const;
 
@@ -67,6 +70,7 @@ export const VECTORS = {
   files: 'apps/mobile/contract/vectors/files.json',
   documents: 'apps/mobile/contract/vectors/documents.json',
   feedback: 'apps/mobile/contract/vectors/feedback.json',
+  quote: 'apps/mobile/contract/vectors/quote.json',
 } as const;
 
 const TIME_SCRIPT = 'scripts/mobile/vectors-time.ts';
@@ -360,6 +364,10 @@ export async function generateVectors(): Promise<Output[]> {
     {
       path: VECTORS.feedback,
       text: jsonText(feedbackVectors(about('The text a Send carries for comments on attached files (attachmentFeedback), and the comments the window makes on code lines and on a picture (codeCommentAnnotation, imageCommentAnnotation, codeHash).', FEEDBACK_FIXTURE))),
+    },
+    {
+      path: VECTORS.quote,
+      text: jsonText(quoteVectors(about('The lead the Inbox writes in front of a quoting reply\'s words (inboxReplyQuoteLead), each body with it and what the window draws of it (withoutInboxReplyQuoteLead), and in each thread which messages ↩ quotes whole (arrowQuotesWhole).', QUOTE_FIXTURE))),
     },
   ];
 }

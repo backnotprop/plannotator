@@ -38,7 +38,7 @@ import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { openedLinesQuote } from '../attachments';
 import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
 import { useSemDiffClient } from './useSemDiffClient';
-import type { GuideFileNote, GuideLineNote, GuideReaderProps } from './types';
+import type { GuideFileNote, GuideLineMark, GuideLineNote, GuideReaderProps, OnGuideLineMark } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
 import { GuideCodeSpanContext } from '@plannotator/guide-viewer/renderInlineMarkdown';
@@ -58,6 +58,10 @@ import { usePhone } from '../phone';
 import { useCommentPictures } from '../commentPictures';
 import { ReviewImagesContext } from '../reviewImages';
 import { ImageDiffPreview } from '@plannotator/review-editor/components/ImageDiffPreview';
+import { PackageChangesCard } from '@plannotator/review-editor/components/PackageChangesCard';
+import { adoptPackageChangesConfig, usePackageChangesSetting } from '@plannotator/ui/hooks/usePackageChangesSetting';
+import { fileKind } from '@plannotator/core/file-kind';
+import { useGuideHost } from '@plannotator/guide-viewer';
 import { differencesSupported, ImageViewMenu } from '@plannotator/review-editor/components/image-diff/ImageViewMenu';
 import type { GuideReaderImages } from './types';
 import { RenderedFilesProvider, useRenderedFiles } from './renderedFiles';
@@ -68,6 +72,7 @@ type SelectedLineRange = NonNullable<AllFilesCodeViewProps['pendingSelection']>;
 
 const NO_ANNOTATIONS: never[] = [];
 const NO_LINE_NOTES: readonly GuideLineNote[] = [];
+const NO_LINE_MARKS: readonly GuideLineMark[] = [];
 const NO_FILE_NOTES: readonly GuideFileNote[] = [];
 const noop = () => {};
 
@@ -98,7 +103,7 @@ export interface GuideDiffComments {
   ) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
-  /** Choices before the comment box (Comment · Ask · Show me). Absent: the comment box opens at once. */
+  /** Choices before the comment box (Comment · Ask). Absent: the comment box opens at once. */
   selectionActions?: DiffSelectionActions;
 }
 
@@ -116,6 +121,8 @@ export const GuideDiff: FC<
      */
     renderImagePreview?: AllFilesCodeViewProps['renderImagePreview'];
     renderImageViewControl?: AllFilesCodeViewProps['renderImageViewControl'];
+    /** Code review's package changes card under a package.json or lockfile (`usePackageChangeCards`). Absent: none. */
+    renderPackageChanges?: AllFilesCodeViewProps['renderPackageChanges'];
     /** Code review's rendered Markdown files and SVG Image / Source (`useRenderedFiles`), forwarded likewise. Absent: the source diff. */
     markdownPreview?: AllFilesCodeViewProps['markdownPreview'];
     comments?: GuideDiffComments;
@@ -132,13 +139,17 @@ export const GuideDiff: FC<
     fileOpenIn?: (filePath: string) => ReactNode;
     /** What the host draws under this file's lines (the PR page's threads). Absent: none. */
     lineNotes?: readonly GuideLineNote[];
+    /** This file's marks at the right edge of lines (the PR page's risk bars). Absent: none. */
+    lineMarks?: readonly GuideLineMark[];
+    /** Hears this file's marks. */
+    onLineMark?: OnGuideLineMark;
     /** What the host draws about this whole file, under its header (the PR page's threads on the file). Absent: none. */
     wholeFileNotes?: readonly GuideFileNote[];
     /** Context notes on this file's lines (review-editor's seam). Absent: none, as before. */
     contextNotes?: AllFilesCodeViewProps['contextNotes'];
     renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
   }
-> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, wholeFileNotes, contextNotes, renderContextNote, ...props }) => {
+> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, lineMarks, onLineMark, wholeFileNotes, contextNotes, renderContextNote, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -149,9 +160,18 @@ export const GuideDiff: FC<
   const expandUnchanged = useConfigValue('diffExpandUnchanged');
   const fontFamily = useConfigValue('diffFontFamily');
   const fontSize = useConfigValue('diffFontSize');
+  // Code review's reason for a folded generated file (its "Generated file collapsed" strip and the header's badge): the
+  // files the guide folds as generated (GuideFileCard, the host's set or the built-in names, as code review's PR mode).
+  // The fold itself stays the guide's (`mountCollapsed`): none of them seeds folded again here.
+  const { generatedFiles: hostGenerated } = useGuideHost();
+  const generated = useMemo(() => {
+    const paths = props.files.filter((file) => fileKind(file.path, hostGenerated) === 'generated').map((file) => file.path);
+    return paths.length > 0 ? { generatedFiles: new Set(paths), expandedGeneratedFiles: new Set(paths) } : null;
+  }, [props.files, hostGenerated]);
   return (
     <AllFilesCodeView
       {...props}
+      {...(generated ?? {})}
       readOnly={!comments}
       commentOnly={!!comments}
       fileOpenIn={fileOpenIn}
@@ -168,6 +188,8 @@ export const GuideDiff: FC<
       fontSize={fontSize || undefined}
       annotations={comments?.annotations ?? NO_ANNOTATIONS}
       {...(lineNotes ? { hostLineNotes: lineNotes } : {})}
+      {...(lineMarks ? { hostLineMarks: lineMarks } : {})}
+      {...(onLineMark ? { onHostLineMark: onLineMark } : {})}
       {...(wholeFileNotes ? { hostFileNotes: wholeFileNotes } : {})}
       selectedAnnotationId={comments?.selectedAnnotationId ?? null}
       scrollTargetAnnotation={comments?.scrollTargetAnnotation ?? null}
@@ -254,6 +276,54 @@ function useImagePreviews(images: GuideReaderImages | undefined): ImagePreviewPr
 }
 
 /**
+ * The review app's card under one file. The card reports its height after every render, and the guide's re-measure
+ * draws the file's header again, which renders the card again: only a new height goes on to the host, or the two
+ * would draw each other for ever.
+ */
+function PackageCard({ filePath, snapshotId, fetchImpl, compact, onHeightChange }: { filePath: string; snapshotId: string; fetchImpl: typeof fetch; compact: boolean; onHeightChange: () => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const reportedHeight = useRef<number | null>(null);
+  const reported = useCallback(() => {
+    // Before the box is attached (the card's first layout effect runs first) the height is unknown: always news.
+    const height = box.current?.offsetHeight;
+    if (height !== undefined && height === reportedHeight.current) return;
+    if (height !== undefined) reportedHeight.current = height;
+    onHeightChange();
+  }, [onHeightChange]);
+  return (
+    <div ref={box}>
+      <PackageChangesCard filePath={filePath} reviewSnapshotId={snapshotId} onHeightChange={reported} compactTouchLayout={compact} fetchImpl={fetchImpl} />
+    </div>
+  );
+}
+
+/** The Inbox's card switch: on (config.json `packageChanges.card` off answers no cards), and no npm lookup or its button. */
+const INBOX_PACKAGE_CHANGES = { packageChanges: { card: true, lookup: false, lookupEnv: false } };
+
+/**
+ * Code review's package changes card under a changed package.json or lockfile (review parity B5): the review app's own
+ * `PackageChangesCard`, wired as its All files wires it (review-editor ReviewAllFilesDiffPanel.tsx; a lockfile's card
+ * shows while the file is folded), its read sent to the host's route (`images.fetchImpl`, packages/inbox/reviewImages.ts).
+ * The Inbox never asks npm: the setting it adopts has the lookup off and no way to turn it on, so the card shows no
+ * consent button.
+ */
+function usePackageChangeCards(images: GuideReaderImages | undefined): AllFilesCodeViewProps['renderPackageChanges'] {
+  const compact = usePhone();
+  const snapshotId = images?.snapshotId;
+  const fetchImpl = images?.fetchImpl;
+  const setting = usePackageChangesSetting();
+  useEffect(() => {
+    if (snapshotId && !setting) adoptPackageChangesConfig(INBOX_PACKAGE_CHANGES);
+  }, [snapshotId, setting]);
+  return useMemo<AllFilesCodeViewProps['renderPackageChanges']>(() => {
+    if (!snapshotId || !fetchImpl) return undefined;
+    return ({ file, onHeightChange }) => (
+      <PackageCard key={`${snapshotId}:${file.path}`} filePath={file.path} snapshotId={snapshotId} fetchImpl={fetchImpl} compact={compact} onHeightChange={onHeightChange} />
+    );
+  }, [snapshotId, fetchImpl, compact]);
+}
+
+/**
  * Highlighting runs off the page's thread, or a long file freezes it. The pool's three workers start with the first
  * reader on screen and end with the last, so a page with no diff does not hold them.
  */
@@ -290,6 +360,8 @@ function Reader({
   hostDiffControls = false,
   collapseAll,
   lineNotes,
+  lineMarks,
+  onLineMark,
   wholeFileNotes,
   contextNotes,
   renderContextNote,
@@ -302,6 +374,7 @@ function Reader({
   // Code review's image previews, where the host's reader part names where its images are read (ReaderPart `images`).
   const readerImages = useContext(ReviewImagesContext);
   const imagePreviews = useImagePreviews(readerImages);
+  const renderPackageChanges = usePackageChangeCards(readerImages);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
       title: snapshot.guide.title,
@@ -508,6 +581,27 @@ function Reader({
     return next;
   }, [notesByFile]);
 
+  // The same for marks at lines' right edges: each file's own, the same array while they stay the same (a new array
+  // is new CSS for the file's diff, drawn again).
+  const marksByFile = useMemo(() => {
+    const map = new Map<string, GuideLineMark[]>();
+    for (const mark of lineMarks ?? []) {
+      const list = map.get(mark.filePath);
+      if (list) list.push(mark);
+      else map.set(mark.filePath, [mark]);
+    }
+    return map;
+  }, [lineMarks]);
+  const keptMarks = useRef(new Map<string, readonly GuideLineMark[]>());
+  const fileMarks = useCallback((path: string): readonly GuideLineMark[] => {
+    const next = marksByFile.get(path) ?? NO_LINE_MARKS;
+    const kept = keptMarks.current.get(path);
+    const same = kept && kept.length === next.length && kept.every((mark, i) => mark.id === next[i]!.id && mark.side === next[i]!.side && mark.line === next[i]!.line && mark.label === next[i]!.label && mark.paint === next[i]!.paint && mark.popup === next[i]!.popup);
+    if (same) return kept;
+    keptMarks.current.set(path, next);
+    return next;
+  }, [marksByFile]);
+
   // The same for notes on whole files: each file's own, the same array while they stay the same.
   const wholeByFile = useMemo(() => {
     const map = new Map<string, GuideFileNote[]>();
@@ -541,11 +635,15 @@ function Reader({
       flushFiles?: boolean;
       headerKeepsFolder?: boolean;
       lineNotes?: readonly GuideLineNote[];
+      lineMarks?: readonly GuideLineMark[];
+      onLineMark?: OnGuideLineMark;
       wholeFileNotes?: readonly GuideFileNote[];
       contextNotes?: AllFilesCodeViewProps['contextNotes'];
       renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
     } => ({
       ...(lineNotes ? { lineNotes: fileNotes(file.path) } : {}),
+      ...(lineMarks ? { lineMarks: fileMarks(file.path) } : {}),
+      ...(onLineMark ? { onLineMark } : {}),
       ...(wholeFileNotes ? { wholeFileNotes: wholeNotesFor(file.path) } : {}),
       // The PR page: files flush, and a narrow header (a phone's) keeps the folder, so two files of one name read apart.
       ...(bare && { flushFiles: true, headerKeepsFolder: true }),
@@ -574,7 +672,7 @@ function Reader({
           }
         : {}),
     }),
-    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, fileOpenIn, lineNotes, fileNotes, wholeFileNotes, wholeNotesFor],
+    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, fileOpenIn, lineNotes, fileNotes, lineMarks, fileMarks, onLineMark, wholeFileNotes, wholeNotesFor],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -618,10 +716,15 @@ function Reader({
     compact: phone,
     openFile: openLinkedFile,
   });
-  // Each file's renderer props, with the image previews and rendered files where the host has them.
+  // Each file's renderer props, with code review's extras where the host has them (image previews, rendered files and
+  // package cards), passed one way: spread over the host's props.
+  const reviewExtras = useMemo(
+    () => ({ ...imagePreviews, ...(markdownPreview ? { markdownPreview } : {}), ...(renderPackageChanges ? { renderPackageChanges } : {}) }),
+    [imagePreviews, markdownPreview, renderPackageChanges],
+  );
   const rendererProps = useCallback(
-    (context: GuideDiffRendererContext) => ({ ...getDiffRendererProps(context), ...imagePreviews, ...(markdownPreview ? { markdownPreview } : {}) }),
-    [getDiffRendererProps, imagePreviews, markdownPreview],
+    (context: GuideDiffRendererContext) => ({ ...getDiffRendererProps(context), ...reviewExtras }),
+    [getDiffRendererProps, reviewExtras],
   );
   const host = useMemo(
     () => ({

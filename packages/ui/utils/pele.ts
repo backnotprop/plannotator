@@ -1,16 +1,16 @@
 /**
  * The Pele runtime slot (https://pele.run, MIT, pinned 1.3.0): a second
- * engine for Mermaid-syntax fences. Mermaid stays the engine for every fence
- * unless `diagram-engine.ts` says otherwise.
+ * engine for Mermaid-syntax fences. `diagram-engine.ts` decides which engine
+ * draws a fence (shipped: Pele where it can, Mermaid the rest).
  *
  * Pele's library is in a build only when `PELE_IN_BUILD` (below) is true,
- * which is when `DIAGRAM_ENGINE_MODE` is not `'mermaid'`. While it is
- * `'mermaid'` (shipped) the `import('pele/lazy')` sits in a branch every
- * bundler sees is dead, so no build output carries any of Pele, the
- * single-file builds that inline every dynamic import included
- * (`tests/entry-assets.test.ts` reads the artifacts; the review diagram
- * engine's `guardBundle` refuses it). Tests reach the library through
- * `__setPeleRuntimeLoaderForTests(peleRuntimeFrom)` (`test-setup/pele.ts`).
+ * which is when `DIAGRAM_ENGINE_MODE` is not `'mermaid'` (it is not, as
+ * shipped). Under `'mermaid'` the `import('pele/lazy')` sits in a branch every
+ * bundler sees is dead, so no build output carries Pele's library, the
+ * single-file builds that inline every dynamic import included (the review
+ * diagram engine's `guardBundle` then refuses it). Tests reach the library
+ * through `__setPeleRuntimeLoaderForTests(peleRuntimeFrom)`
+ * (`test-setup/pele.ts`).
  *
  * Loaded through `pele/lazy`: the core (parser front, layout, svg writer)
  * arrives on the first Pele render, and each diagram type's code arrives on
@@ -23,9 +23,15 @@ import type * as PeleLazy from 'pele/lazy';
 import { DIAGRAM_ENGINE_MODE } from './diagram-engine';
 import { MERMAID_LABEL_WRAP_WIDTH } from './mermaid';
 
-export const PELE_SOURCE_LIMIT = 100_000;
+/**
+ * What one source may cost: Mermaid's own defaults (`maxTextSize` 50,000,
+ * `maxEdges` 500), so Pele lays out on the main thread nothing Mermaid would
+ * refuse. A source over either is a Pele failure, so under
+ * `'pele-where-safe'` it goes to Mermaid, which refuses it as before.
+ */
+export const PELE_SOURCE_LIMIT = 50_000;
 export const PELE_OUTPUT_LIMIT = 1_000_000;
-export const PELE_MAX_EDGES = 5_000;
+export const PELE_MAX_EDGES = 500;
 
 export interface PeleRuntime {
   /** Whether Pele has a renderer for the source's diagram type (loads that type's chunk when it has). */
@@ -47,9 +53,8 @@ export function peleRuntimeFrom(pele: typeof PeleLazy): PeleRuntime {
 }
 
 /**
- * Whether Pele's library is part of the build: false while
- * `DIAGRAM_ENGINE_MODE` is `'mermaid'`. Flipping the mode is the one change
- * that brings it back, as lazy chunks (`PELE.md`, "Turning Pele on").
+ * Whether Pele's library is part of the build: true unless
+ * `DIAGRAM_ENGINE_MODE` is `'mermaid'`. It arrives as lazy chunks (`PELE.md`).
  */
 export const PELE_IN_BUILD: boolean = DIAGRAM_ENGINE_MODE !== 'mermaid';
 

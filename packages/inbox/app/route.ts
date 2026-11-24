@@ -2,6 +2,7 @@
 
 import { tourStepOf } from '../tour/model';
 import { systemRouteOf } from '../system/route';
+import { localRouteOf, type LocalOpen } from '../pulls/localRoute';
 import { withoutClickSignal } from '../history';
 import { parseFileView } from '../fileView';
 import { parseSettingsHash, type SettingsSection } from '../settingsRoute';
@@ -9,11 +10,11 @@ import type { SheetView } from '../prs/SheetPage';
 import { sheetLayoutOf, type SheetLayout } from '../prs/tableModel';
 import { pullFilterOf, type PullFilter } from '../pulls/model';
 import { boardInitiativeOf, boardViewOf, type BoardView } from '../board/model';
-import { shapeReviewAtOf, type ReviewAt } from '../shape/review';
+import { reviewAtOf, type ReviewAt } from './reviewAt';
 import { viewScopeOf, type PullViewScope } from '../pulls/viewScope';
 
 export interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
   /**
    * Plans (`#plans`, only while config.json `inboxPlans` is on; approval "inbox-plans"): the plan open (`#plans=pln_…`),
    * the version read (`&v=3`; absent: the newest), the two versions compared (`&from=3&to=5`), and `#plans&new` for
@@ -74,11 +75,8 @@ export interface Route {
   system?: string | null;
   sheet?: string | null;
   full?: boolean;
-  /**
-   * Shape (approval "shape-inbox-placement"): the board open in its thread's pane (`#thread=…&shape=shp_…`), or
-   * over the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
-   */
-  shape?: string | null;
+  /** Reviews' "On this computer" (pulls/localRoute.ts): the row whose diff is open beside the list (`&local=prj_…&branch=…`). */
+  local?: LocalOpen | null;
   /** The Board's list (`#board`, `#board=done`, `#board=cancelled`; `#board=shipped` before the rename opens Done, `#board=icebox` from before v2 Cancelled). */
   board?: BoardView;
   /** The opened Board card (`#board&card=crd_…`), or on a thread the card it was opened from (its "‹ Board" way back). */
@@ -128,9 +126,8 @@ export interface Route {
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
   /**
-   * Where that review opens (a Shape board's place in code, such as a drawn part's `data-code`): `&code=path:line`,
-   * `&step=N` or `&files` (a context note's lines on the removed side add `&side=old`). Dropped from the address once
-   * the review is there.
+   * Where that review opens: `&code=path:line`, `&step=N` or `&files` (a context note's lines on the removed side
+   * add `&side=old`). Dropped from the address once the review is there.
    */
   guideAt?: ReviewAt | null;
   /**
@@ -183,7 +180,6 @@ export function routeOf(fullHash: string): Route {
     return { page: 'scheduled', project: null, thread: null, scheduled, ...(scheduled && params.has('runs') ? { routineRuns: true } : {}) };
   }
   if (params.has('plans')) return plansRouteOf(params);
-  if (params.has('shapes')) return { page: 'shapes', project: null, thread: null, shape: params.get('shape') };
   if (params.has('prs')) {
     const stack = params.get('stack') || null;
     const layer = stack ? params.get('layer') || null : null;
@@ -217,6 +213,7 @@ export function routeOf(fullHash: string): Route {
       backLayer: !layer ? params.get('back') || null : null,
       new: params.has('new'),
       ...systemRouteOf(params),
+      ...localRouteOf(params),
     };
   }
   if (params.has('board'))
@@ -241,8 +238,7 @@ export function routeOf(fullHash: string): Route {
     ref: thread && !fileId && params.get('ref') && params.get('in') ? { path: params.get('ref')!, messageId: params.get('in')!, ...(Number(params.get('line')) > 0 ? { line: Number(params.get('line')) } : {}), ...(Number(params.get('to')) > 0 ? { lineEnd: Number(params.get('to')) } : {}) } : null,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
-    guideAt: thread && params.get('guide') ? shapeReviewAtOf(params) : null,
-    shape: thread ? params.get('shape') : null,
+    guideAt: thread && params.get('guide') ? reviewAtOf(params) : null,
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
     links: thread ? params.has('artifacts') && params.has('links') : false,

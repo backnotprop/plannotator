@@ -7,6 +7,8 @@
     "DoorAnnotationAnswer": "scripts/mobile/door-shapes.ts",
     "DoorAnnotationBody": "scripts/mobile/door-shapes.ts",
     "DoorAnnotationRemoveBody": "scripts/mobile/door-shapes.ts",
+    "DoorComposeAnswer": "scripts/mobile/door-shapes.ts",
+    "DoorComposeBody": "scripts/mobile/door-shapes.ts",
     "DoorError": "scripts/mobile/door-shapes.ts",
     "DoorHelloFrame": "scripts/mobile/door-shapes.ts",
     "DoorKeyBody": "scripts/mobile/door-shapes.ts",
@@ -25,10 +27,12 @@
     "DoorResolveBody": "scripts/mobile/door-shapes.ts",
     "DoorRevokeAnswer": "scripts/mobile/door-shapes.ts",
     "DoorSeenBody": "scripts/mobile/door-shapes.ts",
+    "DoorSessionsAnswer": "scripts/mobile/door-shapes.ts",
     "DoorSnoozeAnswer": "scripts/mobile/door-shapes.ts",
     "DoorSnoozeBody": "scripts/mobile/door-shapes.ts",
     "DoorThreadAttachmentsAnswer": "scripts/mobile/door-shapes.ts",
     "DoorThreadDraftAnswer": "scripts/mobile/door-shapes.ts",
+    "DoorUploadAnswer": "scripts/mobile/door-shapes.ts",
     "InboxDelivery": "packages/core/inbox-types.ts",
     "InboxDevicePublic": "packages/shared/inbox/devices.ts",
     "InboxDoorHealth": "packages/core/inbox-door-version.ts",
@@ -187,6 +191,86 @@
       },
       "required": [
         "idempotency_key"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorComposeAnswer": {
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "message": {
+          "$ref": "#/$defs/InboxMessageWire"
+        },
+        "project": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "root"
+          ],
+          "additionalProperties": true
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "thread_id",
+        "message",
+        "replayed"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorComposeBody": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "to": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "session"
+          ],
+          "additionalProperties": true
+        },
+        "body": {
+          "type": "string"
+        },
+        "uploads": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "to",
+        "body"
       ],
       "additionalProperties": true,
       "x-source": "scripts/mobile/door-shapes.ts"
@@ -876,6 +960,29 @@
       "additionalProperties": true,
       "x-source": "scripts/mobile/door-shapes.ts"
     },
+    "DoorSessionsAnswer": {
+      "type": "object",
+      "properties": {
+        "serverSession": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxComposeProject"
+          }
+        }
+      },
+      "required": [
+        "serverSession",
+        "projects"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
     "DoorSnoozeAnswer": {
       "type": "object",
       "properties": {
@@ -975,6 +1082,19 @@
       "required": [
         "serverSession",
         "draft"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorUploadAnswer": {
+      "type": "object",
+      "properties": {
+        "upload": {
+          "$ref": "#/$defs/InboxUpload"
+        }
+      },
+      "required": [
+        "upload"
       ],
       "additionalProperties": true,
       "x-source": "scripts/mobile/door-shapes.ts"
@@ -2145,6 +2265,141 @@
           }
         }
       },
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxComposeProject": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "root"
+          ],
+          "additionalProperties": true
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxComposeSession"
+          }
+        }
+      },
+      "required": [
+        "project",
+        "sessions"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxComposeSession": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "last_seen_at": {
+          "type": "string"
+        },
+        "busy": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "idle_since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_thread": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "subject": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "subject",
+                "at"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "place": {
+          "$ref": "#/$defs/InboxAgentPlace"
+        }
+      },
+      "required": [
+        "session",
+        "host",
+        "started_at",
+        "last_seen_at",
+        "busy",
+        "idle_since",
+        "last_thread"
+      ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
@@ -4149,6 +4404,16 @@
                 },
                 "root": {
                   "type": "string"
+                },
+                "repo": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/InboxProjectRepo"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [

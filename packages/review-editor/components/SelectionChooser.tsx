@@ -14,14 +14,12 @@ export interface DiffSelection {
 
 /**
  * A host's choices for selected lines, before the comment box (the Inbox's
- * code review: Comment · Ask · Show me). Absent: a selection opens the comment
+ * code review: Comment · Ask). Absent: a selection opens the comment
  * box at once, as always.
  */
 export interface DiffSelectionActions {
   /** Ask about the lines in words. Absent: no Ask. */
   onAsk?: (selection: DiffSelection) => void;
-  /** Ask for a picture of the lines (offered on the new side only: added or unchanged lines). Absent: no Show me. */
-  onShowMe?: (selection: DiffSelection) => void;
 }
 
 const sameLines = (a: ReadLines, b: ReadLines) =>
@@ -45,7 +43,6 @@ export function SelectionChooser({
   actions,
   onComment,
   onAsk,
-  onShowMe,
 }: {
   toolbarRef: React.RefObject<HTMLDivElement | null>;
   position: { top: number; left: number };
@@ -53,7 +50,6 @@ export function SelectionChooser({
   actions: DiffSelectionActions;
   onComment: () => void;
   onAsk: () => void;
-  onShowMe: () => void;
 }) {
   const bounds = useVisibleViewportBounds(hasPrimaryCoarsePointer() ? 16 : 0);
   const [lines, setLines] = React.useState<ReadLines | null>(null);
@@ -112,11 +108,6 @@ export function SelectionChooser({
       {actions.onAsk && (
         <button type="button" className="review-selpop-btn" onClick={onAsk} data-selection-action="ask">
           Ask
-        </button>
-      )}
-      {actions.onShowMe && (
-        <button type="button" className="review-selpop-btn review-selpop-show" onClick={onShowMe} data-selection-action="show-me">
-          Show me
         </button>
       )}
     </div>

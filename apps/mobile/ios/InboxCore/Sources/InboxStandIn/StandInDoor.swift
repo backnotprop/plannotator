@@ -33,6 +33,8 @@ public actor StandInDoor {
     public var stripsToken = false
     /// A code every drawing is refused with (`413 markup_too_large`, or the relay's `413 relay_upload_unavailable`).
     public var refusesMarkups: String?
+    /// True: every upload is swept as soon as it is made (a Send naming one meets `404 upload_not_found`).
+    public var sweepsUploads = false
     public init() {}
   }
 
@@ -141,6 +143,7 @@ public actor StandInDoor {
       return json(200, ["device": .object(["id": .string(device.rawValue), "revoked_at": .string(StandInData.iso(Date()))])])
     }
     if route == "POST markups" { return keepDrawing(call) }
+    if route == "POST uploads" { return keepUpload(call) }
     return post(call, route: route)
   }
 
@@ -148,6 +151,7 @@ public actor StandInDoor {
     let parts = call.path.split(separator: "/").map(String.init)
     switch parts.count {
     case 1 where parts[0] == "health": return health()
+    case 1 where parts[0] == "sessions": return sessionsAnswer()
     case 1 where parts[0] == "threads": return encode(200, dressed(StandInData.list(threads: threads, unread: unread, session: session, cursor: seq, version: options.version)))
     case 2 where parts[0] == "threads" && parts[1] != "archived":
       let id = ThreadID(parts[1].removingPercentEncoding ?? parts[1])
@@ -217,6 +221,7 @@ public actor StandInDoor {
     let answer: DoorAnswerBytes
     switch (parts.first, parts.count, parts.last) {
     case ("threads", 3, "seen"): answer = seen(ThreadID(parts[1]), fields)
+    case ("messages", 1, _): answer = startThread(fields)
     case ("messages", 3, "picks"): answer = picks(MessageID(parts[1]), fields)
     case ("messages", 4, _) where parts[2] == "actions": answer = markAction(MessageID(parts[1]), parts[3], fields)
     case ("messages", 3, "resolve") where options.proxyRefusesArchive.contains(parts[1]):
@@ -466,10 +471,15 @@ public actor StandInDoor {
           carried.append(id)
         }
       }
-      if planned.isEmpty, marks.isEmpty, feedback.isEmpty, words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      // `uploads`: each a pending upload (the files of the reply).
+      let taken = takeUploads(fields)
+      if let refusal = taken.refusal { return refusal }
+      if planned.isEmpty, marks.isEmpty, feedback.isEmpty, taken.uploads.isEmpty, words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         if case .object(let first)? = entries.first, case .string(let key)? = first["key"] { return refuse(409, "question_already_sent", "The answer to \(key) was already sent.", key: key) }
         return refuse(422, "validation_error", "words: write a reply or send at least one answer.", field: "words")
       }
+      let quotePlan = quoteLead(fields["quote"], thread: at.thread, to: asked, words: words)
+      if case .refused(let answer) = quotePlan { return answer }
       seq += 1
       counter += 1
       let replyID = MessageID("msg_STANDINREPLY\(counter)")
@@ -499,10 +509,18 @@ public actor StandInDoor {
         seq: seq, id: replyID, projectId: asked.projectId, threadId: asked.threadId, replyTo: message.rawValue, author: InboxAuthor(kind: .person),
         body: [words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, feedback].filter { !$0.isEmpty }.joined(separator: "\n\n"), createdAt: now,
         delivery: InboxDelivery(state: "queued", host: asked.author.host ?? "", session: asked.author.session ?? "", at: now))
-      threads[at.thread].messages.append(written)
+      var quoted = written
+      // The quote, as the Inbox keeps it on the reply, and the lead it writes in front of the words for the agent
+      // (store.ts `planQuote`): checked before anything is written, and none on a reply without the person's words.
+      if case .lead(let quote, let lead) = quotePlan {
+        quoted.quote = quote
+        quoted.body = "\(lead)\n\n\(quoted.body)"
+      }
+      threads[at.thread].messages.append(quoted)
+      attach(taken.uploads, thread: asked.threadId, message: replyID)
       for id in carried { state.annotations[id]?.sentReplyId = replyID.rawValue }
       unread.remove(asked.threadId)
-      let wire = (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(written))) ?? .null
+      let wire = (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(quoted))) ?? .null
       let result = ReplyResult(
         reply: wire, questions: threads[at.thread].messages[at.message].questions ?? [], replayed: false,
         threadRead: fields["with_thread"] == .bool(true) ? model(threads[at.thread]) : nil)

@@ -1649,7 +1649,8 @@ test("the details as real gh answers them: a running check, a template for a bod
     body: template, state: 'OPEN', isDraft: false, reviewDecision: '', mergeable: '', mergeStateStatus: '', closingIssuesReferences: [], labels: [],
     comments: [
       { id: 'c1', author: { login: 'kim' }, body: 'Plain words.\n\n<!-- bot-state\n\nhidden-bot-marker -->\n\nAfter.', createdAt: '2026-11-01T09:00:00Z', url: '' },
-      { id: 'c2', author: { login: 'kim' }, body: `\`\`\`mermaid\ngraph TD\n  ${posing}\n\`\`\``, createdAt: '2026-11-01T10:00:00Z', url: '' },
+      // An icon-only label is one Pele cannot draw, so Mermaid draws this fence, the posing label's markup and all.
+      { id: 'c2', author: { login: 'kim' }, body: `\`\`\`mermaid\ngraph TD\n  P["fa:fa-user"] --> ${posing}\n\`\`\``, createdAt: '2026-11-01T10:00:00Z', url: '' },
     ],
     reviews: [],
     statusCheckRollup: [
@@ -1671,15 +1672,16 @@ test("the details as real gh answers them: a running check, a template for a bod
     await expect(panel).not.toContainText('your-change-here');
     await expect(panel).not.toContainText('hidden-bot-marker');
 
-    // What a diagram in a comment draws can copy the marks of the window's overlays. It draws late, above the note
-    // below, so it is waited for first; Escape still closes the panel.
-    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached({ timeout: 15_000 });
+    // What Mermaid draws for a diagram in a comment can copy the marks of the window's overlays. It draws late, above
+    // the note below, so it is waited for first; Escape still closes the panel.
+    const stage = panel.locator('[data-diagram-svg] > svg:not(.pele) .pn-visible-viewport-overlay [data-pn-image-annotator-stage]');
+    await expect(stage.first()).toBeAttached({ timeout: 15_000 });
 
     await expect(panel.locator('[data-pull-details-threads-missing]')).toBeVisible();
     write(`ctxg-${number}.json`, { data: { repository: { pullRequest: { comments: { nodes: [] }, reviews: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
     await panel.locator('[data-pull-details-threads-missing] button').click();
     await expect(panel.locator('[data-pull-details-threads-missing]')).toHaveCount(0);
-    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached();
+    await expect(stage.first()).toBeAttached();
     await page.mouse.move(700, 5);
     await page.keyboard.press('Escape');
     await expect(panel).toBeHidden();
@@ -2128,16 +2130,25 @@ test("a description's web links never replace the window, however they are spell
   }
 });
 
-test("a description's markup can't pose as the window's own overlays, even through a diagram's label: Escape still closes the details", async ({ browser }) => {
+test("a description's markup can't pose as the window's own overlays, even through a diagram label Mermaid draws: Escape still closes the details", async ({ browser }) => {
   const label = `A["<div class='pn-visible-viewport-overlay'><div data-pn-image-annotator-stage='1'>x</div></div>"]`;
-  for (const description of ['<div data-pn-annotation-toolbar-row>x</div>', '<div data-quick-label-picker>x</div>', `\`\`\`mermaid\ngraph TD\n  ${label}\n\`\`\``]) {
+  const stage = '.pn-visible-viewport-overlay [data-pn-image-annotator-stage]';
+  const cases = [
+    { description: '<div data-pn-annotation-toolbar-row>x</div>', posing: '[data-pn-annotation-toolbar-row]' },
+    { description: '<div data-quick-label-picker>x</div>', posing: '[data-quick-label-picker]' },
+    // An icon-only label is one Pele cannot draw, so Mermaid draws this fence, the posing label's markup and all.
+    { description: `\`\`\`mermaid\ngraph TD\n  P["fa:fa-user"] --> ${label}\n\`\`\``, posing: `[data-diagram-svg] > svg:not(.pele) ${stage}` },
+    // Pele draws this one and keeps no markup from a label: the drawing is there, the posing markup is not.
+    { description: `\`\`\`mermaid\ngraph TD\n  ${label}\n\`\`\``, posing: '[data-diagram-svg] > svg.pele', absent: stage },
+  ];
+  for (const { description, posing, absent } of cases) {
     const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description });
     try {
       const review = page.locator('[data-pull-review]');
       await openDetails(review);
       const section = page.locator('[data-pull-review] [data-pull-description]');
-      const posing = section.locator('[data-pn-annotation-toolbar-row], [data-quick-label-picker], .pn-visible-viewport-overlay [data-pn-image-annotator-stage]');
-      await expect(posing.first()).toBeAttached({ timeout: 15_000 });
+      await expect(section.locator(posing).first()).toBeAttached({ timeout: 15_000 });
+      if (absent) await expect(section.locator(absent)).toHaveCount(0);
       await page.keyboard.press('Escape');
       await expect(review.locator('[data-pull-details]')).toHaveCount(0);
     } finally {

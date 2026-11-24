@@ -11,11 +11,6 @@
 /* The guided review: the guide chain and the read-only diff renderer it draws with (packages/inbox/guide). */
 @source "../../packages/guide-viewer/**/*.tsx";
 @source "../../packages/review-editor/components/**/*.tsx";
-/* Shape (the living board, packages/ui/components/shape) and its Inbox parts (packages/inbox/shape). */
-@source "../../packages/ui/components/shape/**/*.tsx";
-@source "../../packages/inbox/shape/**/*.tsx";
-/* Show me in the code review: the box, the picture over the diff and the Overview's picture (packages/inbox/review-drawing). */
-@source "../../packages/inbox/review-drawing/**/*.tsx";
 /* System: the project setup dialog (packages/inbox/system). */
 @source "../../packages/inbox/system/**/*.tsx";
 /* Floating reply drafts (packages/inbox/floaters/). */
@@ -41,8 +36,6 @@
 @import "../../packages/ui/theme.css";
 /* The shared page frame (top bar, rail, page card, versions panel, phone sheets): after the theme, as its README asks. */
 @import "../../packages/ui/components/frame/frame.css";
-/* The board's own sheet (shp- classes). */
-@import "../../packages/ui/components/shape/shape.css";
 /* A document's contents rail (its own sheet: not in theme.css). */
 @import "../../packages/ui/contents-rail.css";
 /* The comment card and visible comment drafts (configurePlannotatorUI commentCard / visibleCommentDrafts, App.tsx). */
@@ -62,6 +55,8 @@
 @import "../../packages/inbox/prs/prs.css";
 /* A PR's thread: its line, the empty thread before its first message, "Sent with" (packages/inbox/pulls/). */
 @import "../../packages/inbox/pulls/pullThread.css";
+/* Reviews' "On this computer" +: its heading's control and picker (packages/inbox/pulls/OpenLocalPicker.tsx). */
+@import "../../packages/inbox/pulls/openLocal.css";
 /* Plans (packages/inbox/plans/). */
 @import "../../packages/inbox/plans/plans.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */

@@ -66,6 +66,8 @@ export * from "./inbox-pull-risk";
 export * from "./inbox-reviews";
 // Branch reviews (inbox-branch-reports.ts): an agent reports its branch ready for review.
 export * from "./inbox-branch-reports";
+// Reviews' "On this computer" (inbox-local-work.ts): local work in no pull request, and its diff.
+export * from "./inbox-local-work";
 // A thread's PRs (approval "inbox-pr-binding"), the same way.
 export * from "./inbox-thread-pulls";
 // Every word an agent reads about the list's rows ("tell your agent", Settings → Rows): one file, the owner's words.
@@ -76,7 +78,7 @@ export const INBOX_RECORD_VERSION = 1 as const;
 
 // ─────────────────────────────── Ids ───────────────────────────────
 
-// The id clock lives in ./ulid (Shape uses it too, without the Inbox types).
+// The id clock lives in ./ulid.
 export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 
@@ -813,7 +815,7 @@ export interface InboxMessage {
    * Absent for a send from the thread's own project (or a project combined
    * with it), and on older records.
    */
-  from_project?: { name: string; root: string } | null;
+  from_project?: { name: string; root: string; repo?: InboxProjectRepo | null } | null;
   /**
    * On an agent's message: it was sent through a connection that wakes its
    * session with the person's reply (the Claude Code mod, Pi, OpenCode 2;
@@ -1013,8 +1015,9 @@ export interface InboxTag {
   read_at?: string | null;
   /**
    * "Add instead" (approval "inbox-tag-handoff", A2): the person added this
-   * session to the thread. It works alongside the owner, and every later
-   * reply of the person's in the thread goes to it too (the store tags it
+   * session to the thread. It works alongside the owner and stays a member
+   * (the reply box offers it); a later reply reaches it only when the box
+   * names it (through 0.29.3 the store tagged every later reply to it
    * again). Absent: an Ask, today's tag (this one message only).
    */
   joined?: boolean;
@@ -1805,6 +1808,7 @@ export interface InboxDecision {
     author: InboxAuthor;
     /** The body's prose before its first block, cut to about 280 characters; null when there is none. */
     excerpt: string | null;
+    repo?: InboxProjectRepo | null;
   };
   /**
    * Pictures and files the decision can show, as references only (bytes come

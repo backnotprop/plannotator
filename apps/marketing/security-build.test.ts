@@ -4,7 +4,7 @@ import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { ossMenu, readOssStars } from './src/lib/oss-stars';
-import { PLAN_CARDS } from './src/lib/spaces-pricing';
+import { PLAN_CARDS, YEARLY_PERCENT_OFF } from './src/lib/spaces-pricing';
 
 const marketingRoot = fileURLToPath(new URL('.', import.meta.url));
 const hostileWaitlistUrl =
@@ -211,6 +211,33 @@ describe('the Spaces header on the built pages', () => {
   });
 });
 
+describe('the Decide together row as built', () => {
+  async function decideFigure() {
+    const html = await readFile(join(outputRoot, 'workspaces/index.html'), 'utf8');
+    const section = /<section class="sec blk dev row" data-job="decide">([\s\S]*?)<\/section>/.exec(html)?.[1] ?? '';
+    const figure = /<figure\b([^>]*)>([\s\S]*?)<\/figure>/.exec(section);
+    expect(figure, 'the decide row has a figure').not.toBeNull();
+    return { attrs: figure![1], inner: figure![2] };
+  }
+
+  test('a screen reader gets one labelled image; the drawn scenes are hidden and nothing in them takes focus', async () => {
+    const { attrs, inner } = await decideFigure();
+    expect(attrs).toContain('role="img"');
+    expect(/aria-label="([^"]+)"/.exec(attrs)?.[1]).toContain('Keep both');
+    const scenes = [...inner.matchAll(/<div class="dsn( dsn-phone)?"([^>]*)>/g)];
+    expect(scenes).toHaveLength(2);
+    for (const [, , sceneAttrs] of scenes) expect(sceneAttrs).toContain('aria-hidden="true"');
+    expect(inner).not.toMatch(/<(?:a|button|input|select|textarea)\b|\btabindex=|\bcontenteditable\b/);
+  });
+
+  test('the agent marks point at a file the site ships', async () => {
+    const { inner } = await decideFigure();
+    const urls = new Set([...inner.matchAll(/mask-image: url\(&quot;([^&]+)&quot;\)/g)].map(([, url]) => url));
+    expect([...urls]).toEqual(['/assets/agents/claude.svg']);
+    expect(await listFiles(outputRoot)).toContain('assets/agents/claude.svg');
+  });
+});
+
 describe('the Spaces pricing page as built', () => {
   test('every card carries both prices for the switch and shows the monthly one first', async () => {
     const html = await readFile(join(outputRoot, 'workspaces/pricing/index.html'), 'utf8');
@@ -227,18 +254,20 @@ describe('the Spaces pricing page as built', () => {
     }
   });
 
-  test('Monthly is the checked choice, and without scripts the switch is not shown', async () => {
+  test('Monthly is the checked choice, Yearly carries its saving, and without scripts the switch is not shown', async () => {
     const html = await readFile(join(outputRoot, 'workspaces/pricing/index.html'), 'utf8');
     const group = /<div class="pp-sw" role="radiogroup"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? '';
-    const radios = [...group.matchAll(/<button\b([^>]*)>([^<]*)<\/button>/g)].map(([, attrs, label]) => ({
-      label,
+    const radios = [...group.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].map(([, attrs, inner]) => ({
+      text: inner.replace(/<[^>]*>/g, ''),
+      name: /aria-label="([^"]*)"/.exec(attrs)?.[1] ?? null,
       checked: /aria-checked="true"/.test(attrs),
     }));
     expect(radios).toEqual([
-      { label: 'Monthly', checked: true },
-      { label: 'Yearly', checked: false },
+      { text: 'Monthly', name: null, checked: true },
+      { text: `Yearly ${YEARLY_PERCENT_OFF}`, name: `Yearly, ${YEARLY_PERCENT_OFF}`, checked: false },
     ]);
+    expect(html).not.toContain('class="pp-saving"');
     const noscript = [...html.matchAll(/<noscript>([\s\S]*?)<\/noscript>/g)].map(([, inner]) => inner).join('');
-    expect(noscript).toMatch(/\.pp-sw\{display:none\}/);
+    expect(noscript).toMatch(/\.pp-pick\{display:none\}/);
   });
 });

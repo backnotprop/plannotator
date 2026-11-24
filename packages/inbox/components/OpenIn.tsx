@@ -306,7 +306,7 @@ function SplitButton({
 const knownFiles = new Map<string, { path: string; kind: string } | null>();
 
 /**
- * "Open in" for a file something references, by its project-relative path (Shape's references and Code view, a review's
+ * "Open in" for a file something references, by its project-relative path (a message's code spans, a review's
  * diff headers). The split button, without "Open". Nothing at all when the file is not on this computer, through the
  * tailnet (the apps route refuses it) or on a phone, as for an attachment there is no app to launch. `line` goes along
  * when the app's launcher takes one. `label`: the word "Open" on the button (the code window's header). `note`: added to the button's hover words.

@@ -1,6 +1,6 @@
 /**
  * Code navigation's node runtime for Pi (the Bun one is packages/server/code-nav.ts):
- * the review server's /api/code-nav/* and Shape's code routes (serverShape.ts).
+ * the review server's /api/code-nav/*.
  */
 import { spawn } from "node:child_process";
 import { resolve as resolvePath } from "node:path";

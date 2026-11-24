@@ -41,7 +41,9 @@ const RETRY_EPOCHS: Record<DiagramKind, ReturnType<typeof createRuntimeRetryEpoc
   graphviz: createRuntimeRetryEpoch(),
 };
 
-const LABELS: Record<DiagramKind, string> = { mermaid: 'Mermaid', graphviz: 'Graphviz' };
+/** The pop-out's title and the heading of the panel shown when a diagram cannot be drawn (a Mermaid fence may be drawn by Pele, so it names no engine). */
+const POPOUT_TITLES: Record<DiagramKind, string> = { mermaid: 'Diagram', graphviz: 'Graphviz diagram' };
+const ERROR_TITLES: Record<DiagramKind, string> = { mermaid: 'Diagram error', graphviz: 'Graphviz Error' };
 
 /** The full-size popout is only ever reached by pressing Expand, so it loads
  * then and not with the document. Its fallback is null: the overlay simply
@@ -152,7 +154,6 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   reopenComment,
   onComposerAnchor,
 }) => {
-  const label = LABELS[kind];
   const onComposerAnchorRef = useRef(onComposerAnchor);
   onComposerAnchorRef.current = onComposerAnchor;
   const inlineComposerAnchor = useCallback((anchor: DiagramAnchor | null) => onComposerAnchorRef.current?.(block.id, 'inline', anchor), [block.id]);
@@ -367,7 +368,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               <svg className="w-4 h-4 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
-              <span className="text-xs text-destructive font-medium">{label} Error</span>
+              <span className="text-xs text-destructive font-medium">{ERROR_TITLES[kind]}</span>
               {state.error.runtimeUnavailable && (
                 <button
                   type="button"
@@ -392,7 +393,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
       // so this shows only before the first diagram lands.
       return <DiagramPending block={block} kind={kind} />;
     },
-    [block, kind, label, sourceOnError],
+    [block, kind, sourceOnError],
   );
 
   const viewerProps = {
@@ -491,7 +492,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               {...viewerProps}
               open
               onClose={() => setIsExpanded(false)}
-              title={`${label} diagram`}
+              title={POPOUT_TITLES[kind]}
               renderId={`${kind}-${block.id}-popout`}
               onAskAI={handlePopoutAskAI}
               onComposerAnchor={popoutComposerAnchor}
