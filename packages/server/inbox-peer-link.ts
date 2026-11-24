@@ -33,6 +33,7 @@ import type { InboxPeerTransport } from "./inbox-transport";
 import { farArchivedPage, type FarArchived } from "./inbox-archived-merged";
 import { readShowArchived, type InboxShowArchived } from "./inbox-show-archived";
 import { readSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
+import { readCapabilitySet, type CapabilitySet } from "./inbox-capability-set";
 import { readFarArtifactPins } from "./inbox-artifacts-merged";
 import type { InboxArtifactPin } from "@plannotator/core/inbox-artifact-pins";
 
@@ -79,7 +80,7 @@ export interface PeerRecord {
  * thread's tag): this Inbox asks for each (`<event>=1` on its stream), reads that machine's list again when one comes,
  * and tells its own windows the same event (approval "inbox-linked-marks"). A new mark adds its event here.
  */
-export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags", "show-archived", "grid-seen", "artifact-pins", "reactions"] as const;
+export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags", "show-archived", "grid-seen", "artifact-pins", "reactions", "capability-set"] as const;
 export type PeerRereadEvent = (typeof PEER_REREAD_EVENTS)[number];
 const isRereadEvent = (event: string): event is PeerRereadEvent => (PEER_REREAD_EVENTS as readonly string[]).includes(event);
 
@@ -105,6 +106,8 @@ export interface PeerList {
   show_archived: InboxShowArchived | null;
   /** Its saved reaction emoji and their revision (inbox-reactions-shared.ts); null from an Inbox before it. */
   reactions: SharedReactions | null;
+  /** Its Capabilities switches with the person's last flip of each (inbox-capability-set.ts); null from an Inbox before it. */
+  capability_set: CapabilitySet | null;
   /** The artifacts pinned there (its list's `artifact_pins`, mark `artifact-pins`), in its own order; none from an older Inbox. */
   artifact_pins: InboxArtifactPin[];
   /**
@@ -570,6 +573,7 @@ export class PeerLink {
       session_titles: inboxPeerSessionNames(list.session_titles),
       show_archived: list.show_archived === undefined ? null : readShowArchived(list.show_archived),
       reactions: readSharedReactions(list.reactions),
+      capability_set: readCapabilitySet(list.capability_set),
       artifact_pins: readFarArtifactPins(list.artifact_pins),
       clock_ms: peerClockMs(list.now, Date.now()),
     };

@@ -1,14 +1,17 @@
 /**
  * `plannotator inbox capability` (apps/hook/server/inbox-capability-command.ts) on the Inbox's side: an agent turns
  * one of Settings → Capabilities' switches on or off when the person asks it to (the owner, 2026-11-24: "Yes, an
- * agent I ask can turn any capability on or off"), on this computer or on a linked one. A command and not an action
- * of the agent tool (the owner, 2026-11-24: "don't bloat or change the tool as it was for this customer configuration
- * stuff ... Just add it to the cli help"): the route `/api/inbox/capability`, which the command calls on this
- * computer's listener, and a paired cloud agent's through the agent door's `route` (inbox-agent-routes.ts).
+ * agent I ask can turn any capability on or off"). A command and not an action of the agent tool (the owner,
+ * 2026-11-24: "don't bloat or change the tool as it was for this customer configuration stuff ... Just add it to the
+ * cli help"): the route `/api/inbox/capability`, which the command calls on this computer's listener, and a paired
+ * cloud agent's through the agent door's `route` (inbox-agent-routes.ts).
+ *
+ * A turn here is a flip like the person's own, so every linked computer takes it (inbox-capability-set.ts): there is
+ * no computer to name.
  *
  * Only the switches a person sees there (core `INBOX_CAPABILITY_AGENT_SWITCHES`: a hidden one, as System is, is not
- * offered). A turn posts one line for the person, as the agent: in the thread it names, else in a new thread in its
- * project, with no sound.
+ * offered). A turn posts one line for the person, as the agent, on this computer only: in the thread it names, else in
+ * a new thread in its project, with no sound.
  */
 
 import { INBOX_CAPABILITY_AGENT_IDS, INBOX_CAPABILITY_AGENT_SWITCHES, INBOX_CAPABILITY_SWITCHES, type InboxCapabilitySwitches, type InboxCapabilitySwitchKey } from "@plannotator/core/inbox-types";
@@ -16,7 +19,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { NO_CHANGE_LINE } from "./inbox-mcp-scheduled";
 
-/** The route the command calls: `GET` lists (`?computer=`), `POST` turns one. */
+/** The route the command calls: `GET` lists, `POST` turns one. */
 export const INBOX_CAPABILITY_ROUTE = "/api/inbox/capability";
 
 export interface InboxCapabilityTurnBy {
@@ -25,30 +28,13 @@ export interface InboxCapabilityTurnBy {
   name: string;
 }
 
-/** A linked computer's switches as the forward gave them (inbox-machines.ts `capabilitiesOn`). */
-export interface InboxCapabilityThere {
-  name: string;
-  switches: InboxCapabilitySwitches | null;
-  held: string | null;
-  /** Away: when it last gave its switches. */
-  awaySince?: string | null;
-  /** The switches turned for it that wait for it. */
-  pending?: string[];
-  /** A held turn's end: taken, or not with its words. */
-  settled?: Promise<{ taken: boolean; why: string | null }>;
-}
-
 export interface InboxCapabilityContext {
   /** The project an agent's path names. */
   resolveProject?: (path: string) => Promise<{ id: string }>;
   /** This computer's switches, each one it offers now. */
   here: () => InboxCapabilitySwitches;
-  /** Turns one here, as Settings does; answers the switches after. */
+  /** Turns one here, as Settings does (so every linked computer takes it); answers the switches after. */
   set: (key: InboxCapabilitySwitchKey, on: boolean) => Promise<InboxCapabilitySwitches>;
-  /** A linked computer's (`change` null: read). Null: no linked computer has that name. */
-  there: (computer: string, change: { key: InboxCapabilitySwitchKey; on: boolean } | null, by?: { name: string; host: string | null }) => Promise<InboxCapabilityThere | null>;
-  /** The linked computers' names, for a name that matches none. */
-  linked: () => string[];
   /**
    * The one line for the person: in that thread, else a new thread in the agent's project (`project`, asked only
    * then: a lookup may make it). The thread id, or null when it had nowhere to go.
@@ -60,7 +46,6 @@ export interface InboxCapabilityContext {
 export interface InboxCapabilityAsk {
   capability?: string;
   on?: boolean;
-  computer?: string;
   thread_id?: string;
   project_path?: string;
   /** The agent's project by id (a paired cloud agent's own, as the agent door names it), in place of `project_path`. */
@@ -68,7 +53,7 @@ export interface InboxCapabilityAsk {
   by?: { host?: string; session?: string; name?: string };
 }
 
-/** The answer: `text` for the agent, and the switches (or where the turn waits). */
+/** The answer: `text` for the agent, and the switches. */
 export interface InboxCapabilityAnswer {
   text: string;
   structured: Record<string, unknown>;
@@ -82,9 +67,6 @@ const switchOf = (id: string) => INBOX_CAPABILITY_SWITCHES.find((s) => s.agent =
  */
 const shown = (switches: InboxCapabilitySwitches): Record<string, { on: boolean }> =>
   Object.fromEntries(INBOX_CAPABILITY_AGENT_SWITCHES.flatMap((s) => (switches[s.key] ? [[s.agent, switches[s.key]!]] : [])));
-
-/** Settings keys (the turns that wait for a linked computer) by the names the command takes. */
-const agentNamesOf = (keys: readonly string[]): string[] => keys.flatMap((key) => INBOX_CAPABILITY_AGENT_SWITCHES.filter((s) => s.key === key).map((s) => s.agent));
 
 const listLine = (where: string, switches: InboxCapabilitySwitches) => {
   const parts = INBOX_CAPABILITY_AGENT_SWITCHES.flatMap((s) => (switches[s.key] ? [`${s.agent} ${switches[s.key]!.on ? "on" : "off"}`] : []));
@@ -104,17 +86,12 @@ function servesLine(key: InboxCapabilitySwitchKey): string {
   return serves ? ` Agents get the ${serves.action} action in their next session (a session's tools are listed once, at its start); from a shell it works now: \`${serves.shell}\`.` : "";
 }
 
-/** The line the person sees, as the agent: "Turned on Routines." / "Turned off Board on Studio." */
-export function capabilityLineText(name: string, on: boolean, computer: string | null, held: boolean): string {
-  return `Turned ${on ? "on" : "off"} ${name}${computer ? ` on ${computer}` : ""}.${held && computer ? ` It applies when ${computer} is back.` : ""}`;
+/** The line the person sees, as the agent: "Turned on Routines." */
+export function capabilityLineText(name: string, on: boolean): string {
+  return `Turned ${on ? "on" : "off"} ${name}.`;
 }
 
-/** The line after a held turn that computer did not take. */
-export function capabilityNotTakenText(name: string, on: boolean, computer: string, why: string | null): string {
-  return `${computer} did not turn ${on ? "on" : "off"} ${name}${why ? `: ${why.replace(/\.$/, "")}` : ""}.`;
-}
-
-const ASK_FIELDS = ["capability", "on", "computer", "thread_id", "project_path", "project_id", "by"];
+const ASK_FIELDS = ["capability", "on", "thread_id", "project_path", "project_id", "by"];
 const text = (value: unknown, field: string): string | undefined => {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw new InboxError("validation_error", `${field}: a string.`, { field });
@@ -134,7 +111,6 @@ export function capabilityAskOf(body: Record<string, unknown>): InboxCapabilityA
   return {
     ...(capability !== undefined ? { capability } : {}),
     ...(typeof body.on === "boolean" ? { on: body.on } : {}),
-    ...(text(body.computer, "computer") !== undefined ? { computer: body.computer as string } : {}),
     ...(text(body.thread_id, "thread_id") !== undefined ? { thread_id: body.thread_id as string } : {}),
     ...(text(body.project_path, "project_path") !== undefined ? { project_path: body.project_path as string } : {}),
     ...(text(body.project_id, "project_id") !== undefined ? { project_id: body.project_id as string } : {}),
@@ -145,29 +121,9 @@ export function capabilityAskOf(body: Record<string, unknown>): InboxCapabilityA
 /** List the switches, or turn one: the answer, or an InboxError with the refusal. */
 export async function capabilityAnswer(caps: InboxCapabilityContext, input: InboxCapabilityAsk): Promise<InboxCapabilityAnswer> {
   const done = (words: string, structured: Record<string, unknown>): InboxCapabilityAnswer => ({ text: words, structured });
-  const computer = input.computer?.trim() || null;
-  const nowhere = (asked: string) => {
-    const names = caps.linked();
-    return new InboxError("machine_not_found", `No linked computer is named ${asked}. ${names.length > 0 ? `Linked: ${names.join(", ")}.` : "No computer is linked."} Leave computer out for this computer.`);
-  };
-  /** A linked computer's read: as it last said while it is away, and what waits for it. */
-  const awayLine = (read: InboxCapabilityThere) => {
-    const waiting = agentNamesOf(read.pending ?? []);
-    if (!read.awaySince) return waiting.length > 0 ? ` Waiting for ${read.name}: ${waiting.join(", ")}.` : "";
-    return ` ${read.name} is away: these are as it last said, at ${read.awaySince}.${waiting.length > 0 ? ` Turned here and waiting for it: ${waiting.join(", ")}.` : ""}`;
-  };
   if (input.on === undefined) {
     if (input.capability) throw new InboxError("validation_error", "on: true or false, to turn it; leave capability out to list them.", { field: "on" });
-    if (!computer) return done(listLine("On this computer", caps.here()), { capabilities: shown(caps.here()) });
-    const read = await caps.there(computer, null);
-    if (!read) throw nowhere(computer);
-    const waiting = agentNamesOf(read.pending ?? []);
-    return done(`${listLine(`On ${read.name}`, read.switches ?? {})}${awayLine(read)}`, {
-      computer: read.name,
-      capabilities: shown(read.switches ?? {}),
-      ...(read.awaySince ? { away: true, read_at: read.awaySince } : {}),
-      ...(waiting.length ? { waiting } : {}),
-    });
+    return done(listLine("On this computer", caps.here()), { capabilities: shown(caps.here()) });
   }
   if (!input.capability) throw new InboxError("validation_error", `capability: one of ${INBOX_CAPABILITY_AGENT_IDS.join(", ")}.`, { field: "capability" });
   const { key, name } = switchOf(input.capability);
@@ -180,44 +136,23 @@ export async function capabilityAnswer(caps: InboxCapabilityContext, input: Inbo
   const projectId = input.project_id?.trim() || null;
   const project = async () => projectId ?? (projectPath && resolve ? ((await resolve(projectPath).catch(() => null))?.id ?? null) : null);
   const threadId = input.thread_id?.trim() || null;
-  const tell = (body: string, thread: string | null = threadId) => caps.tell(by, thread, project, body);
-  const told = async (where: string | null, held: boolean) => {
-    const id = await tell(capabilityLineText(name, on, where, held));
-    return { id, words: id ? ` The person sees it in thread ${id}.` : NO_CHANGE_LINE };
-  };
   const state = on ? "on" : "off";
-  if (!computer) {
-    const before = caps.here()[key];
-    if (!before) throw new InboxError("not_offered", `${name} is not offered on this computer.`);
-    if (before.on === on) return done(`${name} was already ${state} (this computer). Nothing changed.${on ? servesLine(key) : ""}`, { capabilities: shown(caps.here()) });
-    const after = await caps.set(key, on);
-    return done(`Turned ${state} ${name} on this computer.${(await told(null, false)).words}${on ? servesLine(key) : ""}`, { capabilities: shown(after) });
-  }
-  const before = await caps.there(computer, null).catch(() => undefined);
-  if (before === null) throw nowhere(computer);
-  // Only switches read now decide "already" or "not offered": while it is away, the last it said may have changed.
-  const current = before && !before.awaySince ? before.switches : null;
-  if (current && !current[key]) throw new InboxError("not_offered", `${name} is not offered on ${before!.name}.`);
-  if (current?.[key]?.on === on) return done(`${name} was already ${state} (${before!.name}). Nothing changed.`, { computer: before!.name, capabilities: shown(current) });
-  // Who turned it: that computer posts its own line for its person (inbox-capability-note.ts).
-  const turned = await caps.there(computer, { key, on }, { name: by.name, host: host || null });
-  if (!turned) throw nowhere(computer);
-  if (turned.held) {
-    const line = await told(turned.name, true);
-    // Not taken there after all (refused, given up, dropped): one more line, in the same thread.
-    void turned.settled?.then(({ taken, why }) => (taken ? null : tell(capabilityNotTakenText(name, on, turned.name, why), line.id ?? threadId))).catch(() => {});
-    return done(`Asked ${turned.name} to turn ${name} ${state}. ${turned.held}${line.words}`, { computer: turned.name, held: true });
-  }
-  return done(`Turned ${state} ${name} on ${turned.name}.${(await told(turned.name, false)).words}`, { computer: turned.name, capabilities: shown(turned.switches ?? {}) });
+  const before = caps.here()[key];
+  if (!before) throw new InboxError("not_offered", `${name} is not offered on this computer.`);
+  if (before.on === on) return done(`${name} was already ${state} (this computer). Nothing changed.${on ? servesLine(key) : ""}`, { capabilities: shown(caps.here()) });
+  const after = await caps.set(key, on);
+  // One line, here: a linked computer that takes the flip posts none.
+  const told = await caps.tell(by, threadId, project, capabilityLineText(name, on));
+  return done(`Turned ${state} ${name}.${told ? ` The person sees it in thread ${told}.` : NO_CHANGE_LINE}${on ? servesLine(key) : ""}`, { capabilities: shown(after) });
 }
 
-const STATUS: Record<string, number> = { validation_error: 422, machine_not_found: 404, not_offered: 409, machine_needs_update: 409 };
+const STATUS: Record<string, number> = { validation_error: 422, not_offered: 409 };
 
 /**
- * `/api/inbox/capability`: `GET` (`?computer=<name>`) lists, `POST` (an ask) lists or turns. The answer is
- * `{ text, ...structured }`; a refusal `{ code, error }`. Null for any other path. This computer's agents' only: a
- * request through a device door (a phone, a linked computer; `fromDeviceDoor`) is not found here, as on an Inbox
- * without the route, and another site's page is refused, read or write.
+ * `/api/inbox/capability`: `GET` lists, `POST` (an ask) lists or turns. The answer is `{ text, ...structured }`; a
+ * refusal `{ code, error }`. Null for any other path. This computer's agents' only: a request through a device door
+ * (a phone, a linked computer; `fromDeviceDoor`) is not found here, as on an Inbox without the route, and another
+ * site's page is refused, read or write.
  */
 export async function capabilityRoute(req: Request, url: URL, caps: InboxCapabilityContext, readBody: (req: Request) => Promise<Record<string, unknown>>, fromDeviceDoor = false): Promise<Response | null> {
   if (url.pathname !== INBOX_CAPABILITY_ROUTE) return null;
@@ -227,8 +162,7 @@ export async function capabilityRoute(req: Request, url: URL, caps: InboxCapabil
   }
   if (req.method !== "GET" && req.method !== "POST") return Response.json({ error: "Use GET or POST." }, { status: 405 });
   try {
-    const computer = url.searchParams.get("computer");
-    const ask = req.method === "GET" ? (computer ? { computer } : {}) : capabilityAskOf(await readBody(req));
+    const ask = req.method === "GET" ? {} : capabilityAskOf(await readBody(req));
     const answer = await capabilityAnswer(caps, ask);
     return Response.json({ text: answer.text, ...answer.structured });
   } catch (error) {

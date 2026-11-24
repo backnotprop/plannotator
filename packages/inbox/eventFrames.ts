@@ -1,5 +1,5 @@
 import type { InboxHealth, InboxNotifyReach, InboxRestartAgents, InboxWindowPermission } from '@plannotator/core/inbox-types';
-import { idsIn, localIdsIn, type InboxEvent, type MachineView, type OutboxView, type TailscaleSettings, type UpdateCheckFailing } from './api';
+import { idsIn, localIdsIn, type InboxEvent, type InboxExperimentalSettings, type MachineView, type OutboxView, type TailscaleSettings, type UpdateCheckFailing } from './api';
 import { inboxUrl, rememberLocal, rememberMachine } from './inboxUrl';
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { parseRestartAgents } from './restartAgents';
@@ -8,6 +8,7 @@ import { scheduledFrame, scheduledMachineFrame } from './scheduled/store';
 import { readRunStateFrame, runEvents } from './data/runEvents';
 import { shipEvents } from './data/shipEvents';
 import { gridHeard } from './grid/gridOn';
+import { experimentalOfFrame } from './capabilities';
 
 
 export interface MachineRecordFrame {
@@ -58,7 +59,7 @@ export interface InboxEventHandlers {
   onShowArchived?: (value: unknown) => void;
   onAgentFaces?: (data: unknown) => void;
   onReactions?: (reactions: unknown, rev: unknown) => void;
-  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean } }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean }; experimental?: InboxExperimentalSettings }) => void;
   onTailscale?: (tailscale: TailscaleSettings) => void;
   onMachine?: (frame: MachineRecordFrame) => void;
   onMachines?: (machines: MachineView[]) => void;
@@ -206,7 +207,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown } };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown }; experimental?: unknown };
+        const experimental = experimentalOfFrame(data.experimental);
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
           ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
@@ -219,6 +221,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
           ...(typeof data.scheduled_threads?.on === 'boolean' ? { scheduled_threads: { on: data.scheduled_threads.on } } : {}),
           ...(typeof data.plans?.on === 'boolean' ? { plans: { on: data.plans.on } } : {}),
+          ...(experimental ? { experimental } : {}),
         });
       } catch {
       }
