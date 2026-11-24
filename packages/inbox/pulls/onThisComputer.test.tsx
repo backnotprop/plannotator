@@ -345,3 +345,55 @@ test.skipIf(!hasDom)('git that could not be read says "The branches could not be
   expect(group()).not.toBeNull();
   expect(unread()).toBe('The branches could not be read.');
 });
+
+test.skipIf(!hasDom)("one row for one piece of work: a kept worktree folder and its branch's row, or a folder kept through Another folder… of a known project, show once", async () => {
+  const BRANCH = 'fix/guide-global-comment-keep-words';
+  const folder = '/tmp/trees/wt-keep';
+  const keptFolder = { project_id: 'prj_plannotator', kind: 'folder' as const, branch: BRANCH, base: 'main', at: ago(60_000), ahead: 3, folder, head: null, uncommitted: true };
+  // The same folder kept again through Another folder… (no project): the server names the project it belongs to.
+  const pickedAgain = { project_id: '', kind: 'folder' as const, branch: BRANCH, base: 'main', at: ago(60_000), ahead: 3, folder: '~/trees/wt-keep', head: null, uncommitted: true, in_project: 'prj_plannotator' };
+  // A project's own folder picked through Another folder… on a branch the list has: one row.
+  const spacesPicked = { project_id: '', kind: 'folder' as const, branch: 'feat/spaces-share-link', base: 'main', at: ago(30_000), ahead: 1, folder: '~/code/spaces-site', head: null, uncommitted: false, in_project: 'prj_spaces' };
+  window.localStorage.setItem(
+    'plannotator-inbox-reviews-opened',
+    JSON.stringify([
+      { key: `prj_plannotator::${folder}`, at: NOW - 60_000 },
+      { key: '::~/trees/wt-keep', at: NOW - 50_000 },
+      { key: '::~/code/spaces-site', at: NOW - 40_000 },
+    ]),
+  );
+  fetches({ '/reviews/local': { ...LOCAL, kept: [keptFolder, pickedAgain, spacesPicked] } satisfies InboxLocalWorkAnswer });
+  await mount(page());
+  await act(async () => toggle().click());
+  const keys = rows().map((row) => row.getAttribute('data-local-row'));
+  // Newest first: Another folder…'s pick for spaces-site's branch, the folder (its project's) for the branch it holds.
+  expect(keys).toEqual(['::~/code/spaces-site', `prj_plannotator::${folder}`, 'prj_plannotator:']);
+  expect(keys.filter((key) => key?.endsWith(BRANCH))).toEqual([]);
+  // Opened, the row it opened is the one shown.
+  await act(async () => root!.unmount());
+  root = null;
+  await mount(page({ local: { project: 'prj_plannotator', branch: BRANCH } }));
+  expect(rows().map((row) => row.getAttribute('data-local-row'))).toContain(`prj_plannotator:${BRANCH}`);
+  expect(rows().map((row) => row.getAttribute('data-local-row'))).not.toContain(`prj_plannotator::${folder}`);
+});
+
+test.skipIf(!hasDom)('two worktrees on no branch at one commit stay two rows; one such folder kept as a full path and as ~/… is one', async () => {
+  const detached = (folder: string, real: string, project: string, extra: Record<string, unknown> = {}) => ({ project_id: project, kind: 'folder' as const, branch: null, base: 'main', at: ago(120_000), ahead: 0, folder, head: '4e1c9a2', uncommitted: true, folder_real: real, ...extra });
+  // Two agents' worktrees, both started detached at main's tip, each with its own changes.
+  const one = detached('/tmp/agents/wt-one', '/private/tmp/agents/wt-one', 'prj_plannotator');
+  const two = detached('/tmp/agents/wt-two', '/private/tmp/agents/wt-two', 'prj_plannotator');
+  // wt-one again, through Another folder… by its ~/ spelling.
+  const oneAgain = detached('~/agents/wt-one', '/private/tmp/agents/wt-one', '', { in_project: 'prj_plannotator' });
+  window.localStorage.setItem(
+    'plannotator-inbox-reviews-opened',
+    JSON.stringify([
+      { key: 'prj_plannotator::/tmp/agents/wt-one', at: NOW - 60_000 },
+      { key: 'prj_plannotator::/tmp/agents/wt-two', at: NOW - 50_000 },
+      { key: '::~/agents/wt-one', at: NOW - 40_000 },
+    ]),
+  );
+  fetches({ '/reviews/local': { unread: 0, items: [], kept: [one, two, oneAgain] } satisfies InboxLocalWorkAnswer });
+  await mount(page());
+  await act(async () => toggle().click());
+  expect(rows().map((row) => row.getAttribute('data-local-row'))).toEqual(['prj_plannotator::/tmp/agents/wt-one', 'prj_plannotator::/tmp/agents/wt-two']);
+});

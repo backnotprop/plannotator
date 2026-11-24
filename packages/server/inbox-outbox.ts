@@ -255,6 +255,10 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST messages/:id/take-back": "set",
   "POST messages/:id/reask": "append",
   "POST messages/:id/handoff/undo": "set",
+  // Remove an agent from a thread and its Undo (approval "inbox-remove-agent-from-thread"): a mark on the thread's
+  // own machine; a second press writes nothing.
+  "POST threads/:id/remove-agent": "set",
+  "POST threads/:id/remove-agent/undo": "set",
   "POST messages/:id/actions/(a-[0-9a-f]{8}(?:-\\d{1,3})?)": "set",
   // A run starts, stops or opens a terminal now, and a secret's value is never written to the outbox: sent now from a
   // press in a window there, or not at all (inbox-run-routes.ts).

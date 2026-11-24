@@ -36,6 +36,8 @@ export interface RecipientRow {
   alone?: boolean;
   /** A start row (thread/replyStart.ts): a new session of this agent, in `project`; `asleep`, its machine is away. */
   start?: { project: string; asleep: boolean };
+  /** Its row offers Remove (thread/recipientList.ts): one of the thread's agents, not the last one there. */
+  removable?: boolean;
 }
 
 /** Whether a session can take the reply alone: it wrote here (the reply answers its message), or `to` reaches it (live). */

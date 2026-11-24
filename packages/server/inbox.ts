@@ -940,6 +940,9 @@ const ERROR_STATUS: Record<string, number> = {
   mode_needs_live: 409,
   already_owner: 409,
   handoff_settled: 409,
+  // Remove an agent from a thread (approval "inbox-remove-agent-from-thread"): one not in it, or the last one there.
+  not_in_thread: 422,
+  last_agent: 409,
   // Compose: a new thread the person starts (packages/server/inbox-compose.ts).
   already_delivered: 409,
   agent_has_it: 409,
@@ -6593,7 +6596,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (branch !== null || (projectId && !project) || !localFolderFormOk(folder)) return json({ error: "A project, and a branch or none.", code: "validation_error" }, 400);
           try {
             const answer = await localRefs.diff(project, folder);
-            if (!answer) return json({ error: "This project's folder isn't a git repository on this computer.", code: "not_git" }, 404);
+            if (!answer) return json({ error: "This folder isn't a git repository on this computer.", code: "not_git" }, 404);
             return json({ serverSession, ...answer });
           } catch (cause) {
             if (cause instanceof BranchDiffTooLarge) return json({ error: cause.message, code: "diff_too_large" }, 413);
@@ -7749,6 +7752,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json(store.markUnread(unreadMatch[1]!));
+      }
+
+      // Remove an agent from a thread, and the toast's Undo (approval "inbox-remove-agent-from-thread"): `{ session }`.
+      // It gets nothing more from the thread until the person writes to it again; nothing is sent and nobody is woken.
+      const removeAgentMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/remove-agent(\/undo)?$/.exec(path);
+      if (removeAgentMatch) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const session = typeof body.session === "string" ? body.session.trim() : "";
+        if (!session) throw new InboxError("validation_error", "session: the agent session to remove.", { field: "session" });
+        const threadId = removeAgentMatch[1]!;
+        if (removeAgentMatch[2]) return json({ thread_id: threadId, removed: store.undoRemoveFromThread(threadId, session).removed ?? [] });
+        return json({ thread_id: threadId, removal: store.removeFromThread(threadId, session).removal });
       }
 
       // 👍 Looks good (design record "inbox-acknowledge"): silent, nothing sent and no

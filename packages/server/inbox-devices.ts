@@ -272,6 +272,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^messages\/([^/]+)\/(picks|reply|resolve|to|ack|send-now|take-back|reask)$/, window: (m) => `/api/inbox/messages/${m[1]}/${m[2]}` },
   // A hand-off's Undo inside its window (approval "inbox-tag-handoff", contract 7.64): the reply goes as an Ask.
   { method: "POST", route: /^messages\/([^/]+)\/handoff\/undo$/, window: (m) => `/api/inbox/messages/${m[1]}/handoff/undo` },
+  // Remove an agent from a thread, and its Undo (approval "inbox-remove-agent-from-thread", mark `remove-agent`).
+  { method: "POST", route: /^threads\/([^/]+)\/remove-agent$/, window: (m) => `/api/inbox/threads/${m[1]}/remove-agent` },
+  { method: "POST", route: /^threads\/([^/]+)\/remove-agent\/undo$/, window: (m) => `/api/inbox/threads/${m[1]}/remove-agent/undo` },
   // An action item's Done or Can't do it, and its Undo (approval "inbox-next-actions", contract 7.63).
   { method: "POST", route: /^messages\/([^/]+)\/actions\/(a-[0-9a-f]{8}(?:-\d{1,3})?)$/, window: (m) => `/api/inbox/messages/${m[1]}/actions/${m[2]}` },
   // Run on a `:::run` block, its Stop and Open in terminal, and Save or Remove on a `:::secret` block: the person on
