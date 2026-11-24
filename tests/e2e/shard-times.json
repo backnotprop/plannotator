@@ -126,6 +126,7 @@
   "inbox-mobile.spec.ts": 77,
   "inbox-network-held.spec.ts": 37,
   "inbox-new-message.spec.ts": 40,
+  "inbox-new-thread-from-message.spec.ts": 6,
   "inbox-open-beside.spec.ts": 16,
   "inbox-open-in-refs.spec.ts": 96,
   "inbox-open-questions.spec.ts": 21,
