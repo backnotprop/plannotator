@@ -367,7 +367,7 @@ import { gridRowDecorator, gridRowStripped } from "./inbox-grid-row";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createShipReader } from "./inbox-ship-read";
 import { shipBinds, shipLaunchFailed, shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
-import { inboxNoticeOf, shipLook, type InboxShip } from "@plannotator/core/inbox-pull-handoff";
+import { inboxNoticeOf, shipsMergedShown, type InboxShip } from "@plannotator/core/inbox-pull-handoff";
 import { createInboxShipRoutes } from "./inbox-ship-routes";
 import { createInboxShipStore } from "./inbox-ship-store";
 import { createInboxShipWatch, shipEndedWaiting } from "./inbox-ship-watch";
@@ -6827,8 +6827,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (row && !inboxRowArchived(row)) started.set(threadId, { ...start, name: row.thread_name ?? row.subject });
         }
         const allOwners = new Map([...branchOwners, ...pullOwners.all()]);
+        // The PRs whose ship merged and still says so, here and on each linked machine (that machine's as last read,
+        // never waited for; a linked machine reading this list gets this machine's own).
+        const shipMerged = shipsMergedShown([...ships.all(), ...(byWindow ? machines.mergedShips() : [])]);
         const rows = reviewRowsShown(
-          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true, shipMerged: new Set(ships.all().filter((ship) => shipLook(ship) === "merged").map((ship) => ship.thread_id)) }),
+          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true, shipMerged }),
           hiddenKeys,
           (key) => links[key]?.thread_id ?? allOwners.get(key)?.thread_id ?? null,
         );

@@ -23,6 +23,7 @@
 import { describe, expect, test } from "bun:test";
 import { inboxPullMove, inboxPullStacks, type InboxPull, type InboxPullLink } from "./inbox-pulls";
 import { inboxReviewLinkOf, INBOX_REVIEW_SOURCE_FIELD_MAX, inboxReviewPatchSize, inboxReviewStartOf, inboxReviewGroups, inboxReviewIsOf, inboxReviewLandingChanges, inboxReviewLandingOf, inboxReviewMove, inboxReviewRows, inboxReviewSourceOf, type InboxReviewLanding, type InboxReviewThread } from "./inbox-reviews";
+import type { InboxShipMergedPull } from "./inbox-ship";
 
 function pr(fields: Partial<InboxPull> & { number: number }): InboxPull {
   const repo = "northwind/billing-svc";
@@ -365,6 +366,8 @@ describe("landed PRs", () => {
     through_review: "t_r1",
     ...fields,
   });
+  /** The merged ships still showing, by PR key (as core `shipsMergedShown` makes them). */
+  const shipsOf = (...keys: string[]): Map<string, InboxShipMergedPull> => new Map(keys.map((key) => [key, { key, url: `https://github.com/${key.replace(/^github\.com\//, "").replace("#", "/pull/")}`, number: Number(key.split("#")[1]), title: `PR ${key.split("#")[1]}`, at: MERGED_AT }]));
 
   test("past the list's window the record still takes the thread out of Reviews, where it would read as a local review", () => {
     const thread = review({ thread_id: "t", source: { kind: "pr", pr: { url: landing().url } } });
@@ -375,25 +378,27 @@ describe("landed PRs", () => {
   test("a thread whose ship merged keeps its row while Merged shows, in its group, with its agent ended; then it leaves", () => {
     // A review thread's PR, shipped and merged.
     const thread = review({ thread_id: "t", source: { kind: "pr", pr: { url: landing().url } } });
-    const reviewed = (shipMerged?: ReadonlySet<string>) => inboxReviewRows({ threads: [thread], stacks: [], links: {}, pulls: [merged()], landed: [landing()], shipMerged });
-    expect(reviewed(new Set(["t"])).map((r) => [r.id, r.landed.map((l) => l.key)])).toEqual([["t", [landing().key]]]);
-    expect(reviewed(new Set(["other"]))).toEqual([]);
+    // By the PR's key: the ship may be on a linked computer, in a thread there; this computer's thread on the PR keeps its row.
+    const reviewed = (shipMerged?: ReadonlyMap<string, InboxShipMergedPull>) => inboxReviewRows({ threads: [thread], stacks: [], links: {}, pulls: [merged()], landed: [landing()], shipMerged });
+    expect(reviewed(shipsOf(landing().key)).map((r) => [r.id, r.landed.map((l) => l.key)])).toEqual([["t", [landing().key]]]);
+    expect(reviewed(shipsOf("github.com/northwind/billing-svc#99"))).toEqual([]);
     expect(reviewed()).toEqual([]);
     // A PR with no review, shipped from its row in a thread tied to it ("Open, not reviewed"); its agent ended after the merge.
     const pull = merged();
     const tied: InboxPullLink = { ...link("s", "owner"), ask: "thread", agent: { host: "claude-code", session: "ses", name: "Claude Code", ended: true } };
     const owners = new Map([[pull.key, { thread_id: "s" }]]);
-    const handed = (shipMerged?: ReadonlySet<string>) => inboxReviewRows({ threads: [], stacks: [], links: { [pull.key]: tied }, pulls: [pull], landed: [landing({ thread_id: "s", through_review: null })], owners, shipMerged });
-    expect(handed(new Set(["s"])).map((r) => [r.id, r.reviewed, r.move, r.reason, r.pull_keys, r.landed.map((l) => l.key)])).toEqual([["s", true, "not_reviewed", "not_reviewed", [], [pull.key]]]);
+    const handed = (shipMerged?: ReadonlyMap<string, InboxShipMergedPull>) => inboxReviewRows({ threads: [], stacks: [], links: { [pull.key]: tied }, pulls: [pull], landed: [landing({ thread_id: "s", through_review: null })], owners, shipMerged });
+    expect(handed(shipsOf(pull.key)).map((r) => [r.id, r.reviewed, r.move, r.reason, r.pull_keys, r.landed.map((l) => l.key)])).toEqual([["s", true, "not_reviewed", "not_reviewed", [], [pull.key]]]);
     expect(handed()).toEqual([]);
   });
+
 
   test("a row kept for its ship's Merged words never moves to On you; an approval stays Ready to land", () => {
     // A teammate's PR, reviewed in a thread and answered on the forge only (Waiting on others while open), then shipped and merged.
     const theirs = pr({ number: 10, head: "feature", state: "merged", merged_at: MERGED_AT, mine: false });
     const source = { kind: "pr" as const, pr: { url: landing().url } };
     const posted = new Map([[theirs.key, { at: "2026-11-04T11:00:00.000Z", head: null }]]);
-    const kept = (thread: InboxReviewThread) => inboxReviewRows({ threads: [thread], stacks: [], links: {}, pulls: [theirs], landed: [landing()], posted, shipMerged: new Set(["t"]) });
+    const kept = (thread: InboxReviewThread) => inboxReviewRows({ threads: [thread], stacks: [], links: {}, pulls: [theirs], landed: [landing()], posted, shipMerged: shipsOf(theirs.key) });
     const rows = kept(review({ thread_id: "t", source }));
     expect(rows.map((r) => [r.id, r.move])).toEqual([["t", "waiting"]]);
     expect(inboxReviewGroups(rows).on_you).toEqual([]);
@@ -404,7 +409,7 @@ describe("landed PRs", () => {
     const top = pr({ number: 11, head: "feature-2", base: "feature" });
     const tied: InboxPullLink = { ...link("s", "owner"), ask: "thread", agent: { host: "claude-code", session: "ses", name: "Claude Code", ended: true } };
     const pulls = [merged(), top];
-    const rows = inboxReviewRows({ threads: [], stacks: inboxPullStacks(pulls), links: { [merged().key]: tied, [top.key]: tied }, pulls, landed: [landing({ thread_id: "s", through_review: null })], owners: new Map(pulls.map((p) => [p.key, { thread_id: "s" }])), shipMerged: new Set(["s"]) });
+    const rows = inboxReviewRows({ threads: [], stacks: inboxPullStacks(pulls), links: { [merged().key]: tied, [top.key]: tied }, pulls, landed: [landing({ thread_id: "s", through_review: null })], owners: new Map(pulls.map((p) => [p.key, { thread_id: "s" }])), shipMerged: shipsOf(merged().key) });
     expect(rows.map((r) => [r.id === "s", r.reviewed, r.move, r.pull_keys])).toEqual([[false, false, "not_reviewed", [top.key]]]);
   });
 

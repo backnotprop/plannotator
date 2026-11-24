@@ -47,6 +47,7 @@ import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type Ou
 import type { OutboxFile } from "./inbox-outbox-files";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
+import { createMachineShips } from "./inbox-machine-ships";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
@@ -477,6 +478,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const machinePulls = createMachinePulls({ peers: () => peers.values() });
   // Branch reviews: each linked machine's reported branches, read when Reviews is (inbox-machine-branches.ts).
   const machineBranches = createMachineBranches({ peers: () => peers.values() });
+  // Ship: each linked machine's merged ships, read when Reviews is (inbox-machine-ships.ts).
+  const machineShips = createMachineShips({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
   const launchReads = createMachineLaunchReads();
   /** The person's writes waiting for a linked computer, laid on its routines as they are shown. */
@@ -630,6 +633,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     peers.delete(id);
     machinePulls.forget(id);
     machineBranches.forget(id);
+    machineShips.forget(id);
     launchReads.forget(id);
     const link = links.remove(id);
     if (link?.device_id) context.door.revokeDevice(link.device_id, { oweRefusal: closeDoor === "after_refusal" });
@@ -1427,6 +1431,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     pullLinkedThere: (key: string) => machinePulls.linkedThere(key),
     /** Each linked machine's reported branches (mark `branches`), for Reviews (inbox-machine-branches.ts). */
     branchLists: () => machineBranches.start((machine) => links.get(machine)?.name ?? null),
+    /** Each linked machine's merged ships (mark `ships`), as last read: for Reviews' rows kept while Merged shows. */
+    mergedShips: () => machineShips.start(),
     farCard,
     snoozeThread,
     /**
