@@ -11,7 +11,8 @@
  * Routines, the create made here when the person picked another computer, a far switch not offered or not sent there;
  * an away computer's rows claiming a run going or a next run, or not said away; a Run while it is away held (or said
  * as waiting) instead of refused in plain words; a Stop without the run it was pressed for; Starting agents off there
- * unsaid; a far computer's switches gone after a reload while it is away, or a held turn not shown as waiting.
+ * unsaid; a far computer's switches gone after a reload while it is away, or a held turn not shown as waiting; a first
+ * read of a far computer's routines that failed never tried again until a reconnect.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -24,7 +25,7 @@ import { lastRun, scheduledRow } from './testRows';
 
 const hasDom = typeof document !== 'undefined';
 const { ScheduledPage } = (hasDom ? await import('./ScheduledPage') : {}) as typeof import('./ScheduledPage');
-const { resetScheduledForTests, useScheduledOn } = (hasDom ? await import('./store') : {}) as typeof import('./store');
+const { resetScheduledForTests, useScheduled, useScheduledOn } = (hasDom ? await import('./store') : {}) as typeof import('./store');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { LinkedCapabilities } = (hasDom ? await import('../components/LinkedCapabilities') : {}) as typeof import('../components/LinkedCapabilities');
 const { resetMachineRoutes, setLinkedMachines } = await import('../inboxUrl');
@@ -130,6 +131,38 @@ test.skipIf(!hasDom)("Routines turned on and off in a window with no linked comp
   await settle();
   expect(host.querySelector('[data-offered]')!.getAttribute('data-offered')).toBe('false');
   expect(calls).toEqual([]);
+});
+
+test.skipIf(!hasDom)("a first read of a linked computer's routines that failed is read again on the next list, though that list names the same computers", async () => {
+  let reads = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input) !== '/api/inbox/scheduled?machines=1') return json({ code: 'not_found', error: 'No route.' }, 404);
+    reads += 1;
+    if (reads === 1) return json({ code: 'machine_offline', error: 'Studio cannot be reached now.' }, 503);
+    return json({ scheduled: [{ ...scheduledRow('sch_far', { name: 'Nightly build', state: 'on' }), machine: STUDIO }], launch_on: true, computers: [{ id: STUDIO, on: true, launch_on: true, away: false }] });
+  }) as typeof fetch;
+  const studio = [{ id: STUDIO, name: 'Studio', marks: ['routines'], list_cursor: 1, state: 'online' }];
+  setLinkedMachines(studio);
+  // Routines off here: only Studio's are read.
+  resetScheduledForTests(null, false);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  function Rows() {
+    const s = useScheduled();
+    return <span data-rows={s.rows === null ? 'none' : s.rows.map((row) => row.id).join(',')} />;
+  }
+  act(() => root!.render(<Rows />));
+  await settle();
+  expect([reads, host.querySelector('[data-rows]')!.getAttribute('data-rows')]).toEqual([1, 'none']);
+  // The next merged list: the same facts, so nothing changed for `onLinkedMachines`.
+  setLinkedMachines(studio);
+  await settle();
+  expect([reads, host.querySelector('[data-rows]')!.getAttribute('data-rows')]).toEqual([2, 'sch_far']);
+  // Read once: a list after that reads nothing more.
+  setLinkedMachines(studio);
+  await settle();
+  expect(reads).toBe(2);
 });
 
 test.skipIf(!hasDom)("a linked computer's routine is listed with its computer's name, and Run goes there, keyed; its 202 is the run", async () => {

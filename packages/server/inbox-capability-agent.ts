@@ -13,6 +13,7 @@
 
 import { INBOX_CAPABILITY_AGENT_IDS, INBOX_CAPABILITY_AGENT_SWITCHES, INBOX_CAPABILITY_SWITCHES, type InboxCapabilitySwitches, type InboxCapabilitySwitchKey } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { NO_CHANGE_LINE } from "./inbox-mcp-scheduled";
 
 /** The route the command calls: `GET` lists (`?computer=`), `POST` turns one. */
@@ -75,9 +76,15 @@ export interface InboxCapabilityAnswer {
 
 const switchOf = (id: string) => INBOX_CAPABILITY_SWITCHES.find((s) => s.agent === id)!;
 
-/** Only the switches an agent may see: a hidden one never shows in a list or a structured answer. */
-const shown = (switches: InboxCapabilitySwitches): InboxCapabilitySwitches =>
-  Object.fromEntries(INBOX_CAPABILITY_AGENT_SWITCHES.flatMap((s) => (switches[s.key] ? [[s.key, switches[s.key]]] : [])));
+/**
+ * Only the switches an agent may see, by the names the command takes (`routines`, not the settings key): a hidden one
+ * never shows in a list or a structured answer.
+ */
+const shown = (switches: InboxCapabilitySwitches): Record<string, { on: boolean }> =>
+  Object.fromEntries(INBOX_CAPABILITY_AGENT_SWITCHES.flatMap((s) => (switches[s.key] ? [[s.agent, switches[s.key]!]] : [])));
+
+/** Settings keys (the turns that wait for a linked computer) by the names the command takes. */
+const agentNamesOf = (keys: readonly string[]): string[] => keys.flatMap((key) => INBOX_CAPABILITY_AGENT_SWITCHES.filter((s) => s.key === key).map((s) => s.agent));
 
 const listLine = (where: string, switches: InboxCapabilitySwitches) => {
   const parts = INBOX_CAPABILITY_AGENT_SWITCHES.flatMap((s) => (switches[s.key] ? [`${s.agent} ${switches[s.key]!.on ? "on" : "off"}`] : []));
@@ -145,7 +152,7 @@ export async function capabilityAnswer(caps: InboxCapabilityContext, input: Inbo
   };
   /** A linked computer's read: as it last said while it is away, and what waits for it. */
   const awayLine = (read: InboxCapabilityThere) => {
-    const waiting = (read.pending ?? []).flatMap((key) => INBOX_CAPABILITY_AGENT_SWITCHES.filter((s) => s.key === key).map((s) => s.agent));
+    const waiting = agentNamesOf(read.pending ?? []);
     if (!read.awaySince) return waiting.length > 0 ? ` Waiting for ${read.name}: ${waiting.join(", ")}.` : "";
     return ` ${read.name} is away: these are as it last said, at ${read.awaySince}.${waiting.length > 0 ? ` Turned here and waiting for it: ${waiting.join(", ")}.` : ""}`;
   };
@@ -154,11 +161,12 @@ export async function capabilityAnswer(caps: InboxCapabilityContext, input: Inbo
     if (!computer) return done(listLine("On this computer", caps.here()), { capabilities: shown(caps.here()) });
     const read = await caps.there(computer, null);
     if (!read) throw nowhere(computer);
+    const waiting = agentNamesOf(read.pending ?? []);
     return done(`${listLine(`On ${read.name}`, read.switches ?? {})}${awayLine(read)}`, {
       computer: read.name,
       capabilities: shown(read.switches ?? {}),
       ...(read.awaySince ? { away: true, read_at: read.awaySince } : {}),
-      ...(read.pending?.length ? { waiting: read.pending } : {}),
+      ...(waiting.length ? { waiting } : {}),
     });
   }
   if (!input.capability) throw new InboxError("validation_error", `capability: one of ${INBOX_CAPABILITY_AGENT_IDS.join(", ")}.`, { field: "capability" });
@@ -207,10 +215,16 @@ const STATUS: Record<string, number> = { validation_error: 422, machine_not_foun
 
 /**
  * `/api/inbox/capability`: `GET` (`?computer=<name>`) lists, `POST` (an ask) lists or turns. The answer is
- * `{ text, ...structured }`; a refusal `{ code, error }`. Null for any other path.
+ * `{ text, ...structured }`; a refusal `{ code, error }`. Null for any other path. This computer's agents' only: a
+ * request through a device door (a phone, a linked computer; `fromDeviceDoor`) is not found here, as on an Inbox
+ * without the route, and another site's page is refused, read or write.
  */
-export async function capabilityRoute(req: Request, url: URL, caps: InboxCapabilityContext, readBody: (req: Request) => Promise<Record<string, unknown>>): Promise<Response | null> {
+export async function capabilityRoute(req: Request, url: URL, caps: InboxCapabilityContext, readBody: (req: Request) => Promise<Record<string, unknown>>, fromDeviceDoor = false): Promise<Response | null> {
   if (url.pathname !== INBOX_CAPABILITY_ROUTE) return null;
+  if (fromDeviceDoor) return Response.json({ error: "Not found", code: "not_found" }, { status: 404 });
+  if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+    return Response.json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, { status: 403 });
+  }
   if (req.method !== "GET" && req.method !== "POST") return Response.json({ error: "Use GET or POST." }, { status: 405 });
   try {
     const computer = url.searchParams.get("computer");

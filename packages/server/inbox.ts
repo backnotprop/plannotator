@@ -7351,11 +7351,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ capabilities: inboxCapabilitySwitchesOf(settingsModel(via, false, null, false)) });
       }
       // An agent's `plannotator inbox capability` (inbox-capability-agent.ts): this computer's own, never a device door's.
-      if (path === "/api/inbox/capability" && !fromDeviceDoor.has(req)) {
-        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
-          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
-        }
-        const answer = await capabilityRoute(req, url, capabilityAgent, readBody);
+      if (path === "/api/inbox/capability") {
+        const answer = await capabilityRoute(req, url, capabilityAgent, readBody, fromDeviceDoor.has(req));
         if (answer) return answer;
       }
       if (path === "/api/inbox/settings") {

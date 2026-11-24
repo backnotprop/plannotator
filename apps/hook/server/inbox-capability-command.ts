@@ -62,6 +62,18 @@ export function parseCapabilityCommand(argv: readonly string[]): ParsedCapabilit
   return { ok: true, call: { capability: name, on: state === "on", ...call }, session };
 }
 
+/**
+ * An Inbox from before the route: on this computer its unknown-route answer (`404`, `not_found`, which the route
+ * itself never answers to this computer's agents), or none at all; through the agent door its `route` refusing the
+ * request with the list of those it carries, which does not name capability.
+ */
+export function inboxHasNoCapabilityRoute(answer: { status: number; json: Record<string, unknown> | null }): boolean {
+  const code = answer.json?.code;
+  if (answer.status === 404) return typeof code !== "string" || code === "not_found";
+  const words = typeof answer.json?.error === "string" ? answer.json.error : "";
+  return answer.status === 502 && code === "validation_error" && words.startsWith("method, path:") && !/\bcapability\b/.test(words);
+}
+
 export interface CapabilityCommandDeps {
   cwd: string;
   env: Record<string, string | undefined>;
@@ -130,7 +142,7 @@ export async function runInboxCapabilityCommand(argv: readonly string[], deps: C
   } catch (error) {
     return refused("inbox_no_answer", `Plannotator Inbox did not answer: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (answer.status === 404 && typeof answer.json?.code !== "string") return refused("inbox_needs_update", "This Plannotator Inbox has no capability command; update Plannotator for it.");
+  if (inboxHasNoCapabilityRoute(answer)) return refused("inbox_needs_update", "This Plannotator Inbox has no capability command; update Plannotator for it.");
   if (answer.status !== 200 || !answer.json || typeof answer.json.text !== "string") {
     return refused(typeof answer.json?.code === "string" ? answer.json.code : "inbox_error", typeof answer.json?.error === "string" ? answer.json.error : `The Inbox answered ${answer.status}. Nothing changed.`);
   }

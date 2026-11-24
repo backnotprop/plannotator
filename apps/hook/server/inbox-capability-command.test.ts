@@ -2,8 +2,8 @@
  * `plannotator inbox capability` (inbox-capability-command.ts): what it asks the Inbox, and its help. No Inbox runs:
  * a stand-in for the Inbox's route. What regresses: a turn sent the wrong way or as someone else; a typo turning
  * something on; bad usage starting the Inbox; the Inbox's answer (the line it posted, a linked computer's, an away
- * one's) not reaching stdout whole; a refusal printed as a result; the help losing the rule that a turn is the
- * person's request.
+ * one's) not reaching stdout whole; a refusal printed as a result; an Inbox too old for the command not said so; the
+ * help losing the rule that a turn is the person's request.
  */
 import { expect, test } from "bun:test";
 import { INBOX_CAPABILITY_USAGE, parseCapabilityCommand, runInboxCapabilityCommand } from "./inbox-capability-command";
@@ -46,12 +46,12 @@ function inbox(answer: (path: string, body: Record<string, unknown> | null) => {
 
 test("a turn is a POST as this shell's session, in its folder; the Inbox's answer is stdout, the line it posted included", async () => {
   const text = "Turned on Routines on this computer. The person sees it in thread msg_1.";
-  const w = inbox(() => ({ status: 200, json: { text, capabilities: { scheduled_threads: { on: true } } } }));
+  const w = inbox(() => ({ status: 200, json: { text, capabilities: { routines: { on: true } } } }));
   expect(await runInboxCapabilityCommand(["routines", "on", "--thread", "msg_1"], w.deps)).toBe(0);
   expect(w.asked).toHaveLength(1);
   expect(w.asked[0]).toMatchObject({ method: "POST", path: "/api/inbox/capability", body: { capability: "routines", on: true, thread_id: "msg_1", project_path: "/work/api" } });
   expect(w.asked[0]!.body!.by).toMatchObject({ session: "019a2b3c-1111-7222-8333-444455556666", host: "codex" });
-  expect(JSON.parse(w.out.join(""))).toEqual({ text, capabilities: { scheduled_threads: { on: true } } });
+  expect(JSON.parse(w.out.join(""))).toEqual({ text, capabilities: { routines: { on: true } } });
 });
 
 test("a list is a read, of a linked computer by its name; an away computer's answer says so", async () => {
@@ -65,6 +65,23 @@ test("a refusal is `<code>: <message>` on stderr, exit 1, nothing on stdout", as
   const w = inbox(() => ({ status: 404, json: { code: "machine_not_found", error: "No linked computer is named Mini. Linked: Studio. Leave computer out for this computer." } }));
   expect(await runInboxCapabilityCommand(["board", "on", "--computer", "Mini"], w.deps)).toBe(1);
   expect([w.out, w.err.join("")]).toEqual([[], "machine_not_found: No linked computer is named Mini. Linked: Studio. Leave computer out for this computer.\n"]);
+});
+
+test("an Inbox from before the command says to update, here (its unknown-route 404) and through the agent door (its route's refusal); a refusal of the new route does not", async () => {
+  const run = async (status: number, json: unknown, argv = ["routines", "on"]) => {
+    const w = inbox(() => ({ status, json }));
+    const code = await runInboxCapabilityCommand(argv, w.deps);
+    return [code, w.out.join(""), w.err.join("").split(":")[0]];
+  };
+  // main's unknown /api/ route on this computer (packages/server/inbox.ts), a read and a turn.
+  expect(await run(404, { error: "Not found", code: "not_found" })).toEqual([1, "", "inbox_needs_update"]);
+  expect(await run(404, { error: "Not found", code: "not_found" }, [])).toEqual([1, "", "inbox_needs_update"]);
+  // Through the agent door (inboxPairedRouteFetch's 502): the older door's `route` names the requests it carries, not this one.
+  expect(await run(502, { code: "validation_error", error: "method, path: one of the requests plannotator inbox rows, projects, icon and export-decisions make." })).toEqual([1, "", "inbox_needs_update"]);
+  // This Inbox's own refusals are said as they are.
+  expect(await run(502, { code: "validation_error", error: "method, path: one of the requests plannotator inbox rows, projects, icon, capability and export-decisions make." })).toEqual([1, "", "validation_error"]);
+  expect(await run(404, { code: "machine_not_found", error: "No linked computer is named Mini." })).toEqual([1, "", "machine_not_found"]);
+  expect(await run(502, { code: "queued", error: "The person's computer is asleep or offline." })).toEqual([1, "", "queued"]);
 });
 
 test("help and bad usage ask the Inbox nothing: help on stdout with exit 0, bad usage exit 2", async () => {

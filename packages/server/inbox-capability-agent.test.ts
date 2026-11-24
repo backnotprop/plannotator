@@ -3,7 +3,9 @@
  * runs. What regresses: a turn not taking, or taking on the wrong computer; the person's line posted twice, posted for
  * a turn that changed nothing, or not said when it had nowhere to go; a linked computer's held turn reported as done;
  * a linked computer too old for it, or a name that matches none, answered as if it worked; the route taking a field it
- * should refuse; a paired cloud agent's turn through the door not named as that agent, or naming someone else.
+ * should refuse; a paired cloud agent's turn through the door not named as that agent, or naming someone else; the
+ * answer naming a switch by a name the command does not take; the route answering another site's page or a request
+ * through a device door.
  */
 import { describe, expect, test } from "bun:test";
 import type { InboxCapabilitySwitches, InboxCapabilitySwitchKey } from "@plannotator/core/inbox-types";
@@ -178,12 +180,56 @@ describe("plannotator inbox capability, on the Inbox's side", () => {
     expect(() => capabilityAskOf({ capability: "routines", on: "yes" })).toThrow("on: true or false.");
   });
 
+  test("every name the answer prints is one the command takes back: the switches, and the turns that wait for a computer", async () => {
+    const w = world();
+    const listed = await w.call({});
+    const here = Object.keys(listed.structuredContent!.capabilities as object);
+    expect(here).toEqual(["board", "checklist", "routines", "bro_mode"]);
+    for (const name of here) expect([name, (await w.call({ capability: name, on: true })).isError ?? false]).toEqual([name, false]);
+    // A linked computer away, with turns that wait for it.
+    w.context.there = async () => ({ name: "Studio", switches: { board: { on: true }, steps: { on: false }, scheduled_threads: { on: false }, bro: { on: false } }, held: null, awaySince: "2026-11-24T14:10:00.000Z", pending: ["scheduled_threads", "steps"] });
+    const far = (await w.call({ computer: "Studio" })).structuredContent!;
+    expect(far.waiting).toEqual(["routines", "checklist"]);
+    for (const name of [...Object.keys(far.capabilities as object), ...(far.waiting as string[])]) expect(capabilityAskOf({ capability: name, on: true }).capability).toBe(name);
+  });
+
   test("a list by GET, here or on a linked computer by its name", async () => {
     const w = world({ far: "online" });
     const get = async (query: string) => (await (await capabilityRoute(new Request(`http://127.0.0.1/api/inbox/capability${query}`), new URL(`http://127.0.0.1/api/inbox/capability${query}`), w.context, async () => ({})))!.json()) as Record<string, unknown>;
     expect((await get("")).text).toBe("On this computer: board off, checklist off, routines off, bro_mode off.");
     expect(await get("?computer=Studio")).toMatchObject({ text: "On Studio: board on, routines off.", computer: "Studio" });
     expect(w.turns).toEqual([]);
+  });
+});
+
+describe("the route is this computer's agents' own", () => {
+  const ask = (init: { method?: string; headers?: Record<string, string>; body?: string }, query = "") =>
+    new Request(`http://127.0.0.1:41000/api/inbox/capability${query}`, { ...init, headers: { Host: "127.0.0.1:41000", ...init.headers } });
+  const turn = JSON.stringify({ capability: "routines", on: true, thread_id: "msg_work" });
+  const answer = async (req: Request, w: ReturnType<typeof world>, fromDeviceDoor = false) => {
+    const response = (await capabilityRoute(req, new URL(req.url), w.context, (r) => r.json(), fromDeviceDoor))!;
+    return [response.status, ((await response.json()) as { code?: string }).code];
+  };
+
+  test("another site's page is refused, a read and a write: nothing turns and nothing is told", async () => {
+    const w = world({ far: "online" });
+    for (const headers of [{ Origin: "https://elsewhere.example" }, { "Sec-Fetch-Site": "cross-site" }, { Origin: "http://127.0.0.1:41000", "Sec-Fetch-Site": "same-site" }, { Origin: "null" }]) {
+      expect(await answer(ask({ headers }, "?computer=Studio"), w)).toEqual([403, "cross_origin"]);
+      expect(await answer(ask({ method: "POST", headers: { ...headers, "Content-Type": "text/plain" }, body: turn }), w)).toEqual([403, "cross_origin"]);
+    }
+    expect([w.turns, w.lines, w.here.scheduled_threads]).toEqual([[], [], { on: false }]);
+    // The agent's own command (no browser origin), and the window's own page, are answered.
+    expect(await answer(ask({ method: "POST", body: turn }), w)).toEqual([200, undefined]);
+    expect(await answer(ask({ headers: { Origin: "http://127.0.0.1:41000" } }), w)).toEqual([200, undefined]);
+  });
+
+  test("through a device door (a phone, a linked computer) it is not found, a read or a write: nothing turns and nothing is told", async () => {
+    const w = world({ far: "online" });
+    expect(await answer(ask({}), w, true)).toEqual([404, "not_found"]);
+    expect(await answer(ask({}, "?computer=Studio"), w, true)).toEqual([404, "not_found"]);
+    expect(await answer(ask({ method: "POST", body: turn }), w, true)).toEqual([404, "not_found"]);
+    expect(await answer(ask({ method: "POST", body: JSON.stringify({ capability: "board", on: false, computer: "Studio" }) }), w, true)).toEqual([404, "not_found"]);
+    expect([w.turns, w.lines]).toEqual([[], []]);
   });
 });
 

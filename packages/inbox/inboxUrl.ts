@@ -62,6 +62,16 @@ export function setLinkedMachines(machines: readonly MachineFactsWire[] | null |
     else if (MACHINE_ID.test(m.id)) linkedFacts.set(m.id, { name: m.name, marks: m.marks ?? [], both_ways: m.both_ways === true, listed: m.list_cursor !== null && m.list_cursor !== undefined, state: m.state ?? '' });
   }
   if (factsSignature() !== was) linkedChanged();
+  for (const listener of listedListeners) listener();
+}
+
+const listedListeners = new Set<() => void>();
+/** Called each time the merged list names the linked machines, changed or not (`onLinkedMachines` hears a change only). */
+export function onLinkedMachinesListed(listener: () => void): () => void {
+  listedListeners.add(listener);
+  return () => {
+    listedListeners.delete(listener);
+  };
 }
 
 function linkedChanged() {

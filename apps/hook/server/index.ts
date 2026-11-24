@@ -485,7 +485,7 @@ const rawArgs = process.argv.slice(2);
     );
   }
 }
-// `plannotator inbox capability [<capability> on|off]`: the capability switches, sugar over `inbox call capability` (inbox-capability-command.ts).
+// `plannotator inbox capability [<capability> on|off]`: the capability switches, a thin client over the Inbox's `/api/inbox/capability` (inbox-capability-command.ts).
 {
   const args = rawArgs;
   if (args[0] === "inbox" && args[1] === "capability") {
