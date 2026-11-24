@@ -264,6 +264,9 @@ describe("the tagged agent's answer, written on the thread's computer", () => {
       placeOf: async (id: string) => (id === MSG(1) || id === MSG(0) ? ids : null),
       nameOf: () => "Studio",
       online: () => online,
+      takes: () => true,
+      heldWrite: () => null,
+      dismissHeld: () => {},
       holdWrite: (_m: string, route: string, body: Record<string, unknown>) => {
         sent.push({ route, ...body });
         return Promise.resolve({ state, answer: { text: "Sent to the Plannotator Inbox (thread X).", structured: { message_id: MSG(2), thread_id: ids.thread_id } } } as unknown as OutboxEntry);

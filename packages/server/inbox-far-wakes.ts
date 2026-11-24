@@ -14,12 +14,13 @@
  * inbox-far-read.ts) and answers with send_message's `reply_to` (inbox-mcp-far-reply.ts).
  */
 
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { InboxCloudWake } from "@plannotator/core/inbox-cloud";
 import { INBOX_SESSION_ID_PATTERN, isInboxId } from "@plannotator/core/inbox-types";
 import type { InboxReplyCommand, InboxWakeContext, InboxWakeReplyingTo } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { OUTBOX_KEEP_NOTICE_MS } from "./inbox-outbox";
 
 /** One wake a linked machine handed this Inbox for one of its sessions. */
 export interface FarWake {
@@ -43,6 +44,11 @@ export interface FarWake {
 const FAR_WAKE_BODY_MAX = 240 * 1024;
 /** How long a delivered wake is kept (so a retried push answers it, and never wakes the session twice). */
 const DELIVERED_KEPT_MS = 7 * 24 * 60 * 60_000;
+/**
+ * How long a wake no session took is kept: as long as the outbox keeps what did not land. A session that comes back
+ * later still gets the reply: the thread's computer sends its wake again with the next message there.
+ */
+const WAITING_KEPT_MS = OUTBOX_KEEP_NOTICE_MS;
 const MACHINE_ID = /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 const keyOf = (machine: string, reply: string, session: string) => `${machine} ${reply} ${session}`;
@@ -123,9 +129,11 @@ export function createInboxFarWakes(options: { dataDir: string; now?: () => Date
   const wakes = new Map<string, FarWake>();
   const listeners = new Set<(session: string) => void>();
 
+  let lines = 0;
   try {
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
+      lines += 1;
       try {
         const wake = JSON.parse(line) as FarWake;
         if (wake && wake.v === 1 && typeof wake.machine === "string" && typeof wake.reply_id === "string" && typeof wake.session === "string") wakes.set(keyOf(wake.machine, wake.reply_id, wake.session), wake);
@@ -136,8 +144,21 @@ export function createInboxFarWakes(options: { dataDir: string; now?: () => Date
   } catch {
     // No file yet: nothing was ever handed.
   }
-  const cutoff = now().getTime() - DELIVERED_KEPT_MS;
-  for (const [key, wake] of wakes) if (wake.delivered_at && Date.parse(wake.delivered_at) < cutoff) wakes.delete(key);
+  const at = now().getTime();
+  for (const [key, wake] of wakes) {
+    const old = wake.delivered_at ? at - Date.parse(wake.delivered_at) > DELIVERED_KEPT_MS : at - Date.parse(wake.received_at) > WAITING_KEPT_MS;
+    if (old) wakes.delete(key);
+  }
+  // At open: one line per wake kept, written to a temp file and renamed over the old one (never a rewrite in place).
+  if (lines > wakes.size) {
+    try {
+      const temp = `${file}.${process.pid}.tmp`;
+      writeFileSync(temp, [...wakes.values()].map((wake) => `${JSON.stringify(wake)}\n`).join(""), { mode: 0o600 });
+      renameSync(temp, file);
+    } catch {
+      // Not compacted this time: the lines still read the same.
+    }
+  }
 
   const save = (wake: FarWake) => {
     mkdirSync(dir, { recursive: true, mode: 0o700 });

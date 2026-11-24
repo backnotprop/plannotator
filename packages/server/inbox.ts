@@ -5184,6 +5184,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     commandFor: (reply, session, now) => replyCommand(reply, now, session),
     sendAs: (input) => farSendMessage(mcpContext, input),
     ownSession: (session) => live.allLive().some((entry) => entry.session === session),
+    knownHere: (session) => live.allLive().some((entry) => entry.session === session) || (store.sessionMachine(session) === null && live.mcpAgents().some((agent) => agent.session === session)),
   });
   const unsubscribeFarTags = store.subscribe((line) => {
     if (line.kind !== "message" || line.record.author.kind !== "person") return;
@@ -8250,8 +8251,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // with a connection that understands tags, or an MCP agent the Inbox knows; any other
             // is refused before anything is written. A replay answers what it wrote, as it was.
             const tagKey = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
-            const tagged =
-              body.tags === undefined || body.tags === null || (tagKey && store.replyByKey(messageId, tagKey)) ? undefined : tagModes(messageId, body.tags);
+            const tagsNew = !(body.tags === undefined || body.tags === null || (tagKey && store.replyByKey(messageId, tagKey)));
+            // A far session its computer's agents do not list (that computer restarted since `@` opened) is read there once more.
+            if (tagsNew) await farTags.prepare(body.tags);
+            const tagged = tagsNew ? tagModes(messageId, body.tags) : undefined;
             const tags = tagged?.tags;
             const handoff = tagged?.handoff;
             // Files the person pasted into the reply box: their uploads become

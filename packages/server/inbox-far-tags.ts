@@ -55,6 +55,8 @@ export interface FarTagsDeps {
   sendAs: (input: FarReplyInput) => Promise<{ text: string; structured: Record<string, unknown> }>;
   /** Whether `session` is one of this computer's own (live here, or it wrote here with no other computer). */
   ownSession: (session: string) => boolean;
+  /** Whether a tag naming no computer is for `session` here: live here, or an agent of this computer's that reads the Inbox. Absent: `ownSession`. */
+  knownHere?: (session: string) => boolean;
   now?: () => number;
 }
 
@@ -159,20 +161,61 @@ export function createInboxFarTags(deps: FarTagsDeps) {
     );
   };
 
+  const here = (session: string) => (deps.knownHere ?? deps.ownSession)(session);
+
+  /** The linked computers whose agents, as last read, list `session`. */
+  const listedBy = (session: unknown): string[] => deps.peers().filter((peer) => takes(peer) && !!agents.get(peer.id)?.rows.some((row) => row.session === session)).map((peer) => peer.id);
+
   /**
-   * The reply route's tags: the ones naming another computer (`machine`) resolved here against that computer's
+   * The computer a tag is for, when it is another one: the one it names (`machine`), or, for a tag that names none
+   * (the phone's), the one linked computer whose agents list that session, when it is not one of this computer's own.
+   */
+  const farMachineOf = (item: unknown): string | null => {
+    if (!item || typeof item !== "object") return null;
+    const { machine, session } = item as { machine?: unknown; session?: unknown };
+    if (isMachineId(machine)) return machine !== deps.selfId() ? machine : null;
+    if (machine !== undefined && machine !== null) return null;
+    if (typeof session !== "string" || here(session)) return null;
+    const by = listedBy(session);
+    return by.length === 1 ? by[0]! : null;
+  };
+
+  /**
+   * Before the reply route resolves its tags: a far session its computer's agents (as last read) do not list is read
+   * there once more, so a computer that restarted since the `@` list opened is not refused as "not live".
+   */
+  const prepare = async (value: unknown): Promise<void> => {
+    if (!Array.isArray(value)) return;
+    const self = deps.selfId();
+    const peers = deps.peers().filter((peer) => takes(peer) && peer.state === "online");
+    const again = new Set<PeerLink>();
+    for (const item of value) {
+      if (!item || typeof item !== "object") continue;
+      const { machine, session } = item as { machine?: unknown; session?: unknown };
+      if (isMachineId(machine)) {
+        const peer = machine !== self ? peers.find((p) => p.id === machine) : undefined;
+        if (peer && !agents.get(peer.id)?.rows.some((row) => row.session === session)) again.add(peer);
+      } else if ((machine === undefined || machine === null) && typeof session === "string" && !here(session) && listedBy(session).length === 0) {
+        for (const peer of peers) again.add(peer);
+      }
+    }
+    if (again.size > 0) await Promise.all([...again].map(readAgents));
+  };
+
+  /**
+   * The reply route's tags: the ones for another computer (`farMachineOf`) resolved here against that computer's
    * agents, the rest by `local` (inbox-sessions.ts `tagTargets`, its refusals unchanged), in the order typed.
    */
   const targets = (value: unknown, local: (value: unknown) => InboxTag[]): InboxTag[] => {
     if (!Array.isArray(value)) return local(value);
-    const self = deps.selfId();
-    const isFar = (item: unknown) => !!item && typeof item === "object" && isMachineId((item as { machine?: unknown }).machine) && (item as { machine: string }).machine !== self;
-    const near = local(value.filter((item) => !isFar(item)));
+    const placed = value.map((item) => ({ item, machine: farMachineOf(item) }));
+    const near = local(placed.filter((p) => !p.machine).map((p) => p.item));
     const missing: string[] = [];
     const old: string[] = [];
     const far: InboxTag[] = [];
-    for (const item of value.filter(isFar) as Record<string, unknown>[]) {
-      const machine = item.machine as string;
+    for (const { item: raw, machine } of placed) {
+      if (!machine) continue;
+      const item = raw as Record<string, unknown>;
       const session = item.session;
       const peer = deps.peers().find((p) => p.id === machine);
       const row = peer && takes(peer) ? agents.get(machine)?.rows.find((r) => r.session === session && (item.host === undefined || item.host === null || item.host === r.host)) : undefined;
@@ -302,7 +345,7 @@ export function createInboxFarTags(deps: FarTagsDeps) {
     return null;
   };
 
-  return { rows, targets, onPersonMessage, agentReply, delivered, self, lists, connectionOf };
+  return { rows, prepare, targets, onPersonMessage, agentReply, delivered, self, lists, connectionOf };
 }
 
 export type InboxFarTags = ReturnType<typeof createInboxFarTags>;

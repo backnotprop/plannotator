@@ -10,7 +10,7 @@
  * another computer sends its files), and a branch report gets its head and remote from this computer's git.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -21,7 +21,8 @@ import { inboxBlobPath, recordInboxAttachments } from "@plannotator/shared/inbox
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { OutboxEntry } from "./inbox-outbox";
 import type { PeerLink } from "./inbox-peer-link";
-import { FAR_AGENT_REPLY_ROUTE } from "./inbox-far-tags";
+import { FAR_AGENT_REPLY_ROUTE, TAG_ACROSS_MARK } from "./inbox-far-tags";
+import { farReplyRefusal } from "./inbox-mcp-far-read";
 
 /** How long send_message waits for the other computer's answer while it is online. */
 const FAR_REPLY_WAIT_MS = 6_000;
@@ -31,7 +32,13 @@ export interface FarReplyDeps {
   placeOf: (id: string) => Promise<{ machine: string; thread_id: string } | null>;
   nameOf: (machine: string) => string | null;
   online: (machine: string) => boolean;
-  holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number) => Promise<OutboxEntry | null> | null;
+  /** Whether that computer's list says it takes an agent's answer (mark `tag-across`); null while this Inbox holds no list of it. */
+  takes: (machine: string) => boolean | null;
+  holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own?: { notify?: boolean }) => Promise<OutboxEntry | null> | null;
+  /** A held write of this Inbox's own, by its key (null: never held). */
+  heldWrite: (key: string) => OutboxEntry | null;
+  /** Its notice dismissed: the agent was told already. */
+  dismissHeld: (key: string) => void;
   /** Files on this disk, read by this Inbox's attachment rules (no folder, no dotenv file, it must exist). */
   readFiles: (paths: string[], base: string | undefined) => Promise<InboxAttachment[]>;
   /** This Inbox's own copy of a file it read (its blob). */
@@ -45,6 +52,8 @@ interface FarReplyMachines {
   peerLinks: () => readonly PeerLink[];
   nameOf: (machine: string) => string | null;
   holdWrite: FarReplyDeps["holdWrite"];
+  heldWrite: FarReplyDeps["heldWrite"];
+  dismissHeld: FarReplyDeps["dismissHeld"];
   readThread: (ask: { thread_id?: string; message_id?: string; limit?: number }) => Promise<{ machine: string; answer: { thread_id: string } } | null>;
 }
 
@@ -63,7 +72,14 @@ export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: 
     },
     nameOf: machines.nameOf,
     online: (machine) => peer(machine)?.state === "online",
+    takes: (machine) => {
+      const link = peer(machine);
+      if (!link) return false;
+      return link.list ? link.list.marks.includes(TAG_ACROSS_MARK) : null;
+    },
     holdWrite: machines.holdWrite,
+    heldWrite: machines.heldWrite,
+    dismissHeld: machines.dismissHeld,
     readFiles: (paths, base) => recordInboxAttachments(storeDir, paths, { base: base ?? "/", at: new Date().toISOString() }),
     blobOf: (attachment) => inboxBlobPath(storeDir, attachment.sent_sha256),
     upload: async (machine, name, path) => {
@@ -118,27 +134,41 @@ export async function farAgentReply(
   const place = await deps.placeOf(replyTo);
   if (!place) return null;
   const name = deps.nameOf(place.machine) ?? "the other computer";
+  // An older Plannotator there takes no answer: refused as before, never held to be refused later.
+  if (deps.takes(place.machine) === false) throw new InboxError("thread_on_other_machine", farReplyRefusal(replyTo, name));
   const here = workingFolder && isAbsolute(workingFolder) ? workingFolder : input.project_path && isAbsolute(input.project_path) ? input.project_path : undefined;
   // Files and the pictures the body shows from this disk: read here, sent there, named as the body names them.
   const given = Array.isArray(input.attachments) ? (input.attachments as unknown[]).filter((item): item is string => typeof item === "string") : [];
   const pictures = here ? planAgentBodyPictures(input.body, given, here, (path) => existsSync(path) && statSync(path).isFile()) : { body: input.body, files: [] };
   const files = [...given.map((path) => ({ path, name: null as string | null })), ...pictures.files.map((file) => ({ path: file.path, name: file.name as string | null }))];
+  const key = input.idempotency_key?.trim() || `far-reply:${randomUUID()}`;
+  // The outbox is this whole computer's, and the thread's computer keeps keys per project: each key is this session's
+  // own (two sessions may both send "reply-1"), and the outbox's is this thread's too. The same session's retry is the
+  // same send; its key reused for other words is refused, as a local send refuses it.
+  const scoped = (...parts: string[]) => createHash("sha256").update(parts.join("\u0000")).digest("hex").slice(0, 40);
+  const heldKey = `far-reply:${scoped(session, place.thread_id, key)}`;
+  const before = deps.heldWrite(heldKey);
+  const was = before?.body.args && typeof before.body.args === "object" ? (before.body.args as Record<string, unknown>) : null;
+  if (before && (was?.body !== pictures.body || was?.reply_to !== replyTo)) {
+    throw new InboxError("idempotency_key_reused", "This idempotency_key was already used for a different message.");
+  }
   const uploads: string[] = [];
-  if (files.length > 0) {
+  if (!before && files.length > 0) {
     if (!deps.online(place.machine)) throw new InboxError("machine_offline", FAR_REPLY_WORDS.filesAway(name));
     const read = await deps.readFiles(files.map((file) => file.path), here);
     for (const [i, attachment] of read.entries()) uploads.push(await deps.upload(place.machine, files[i]!.name ?? attachment.name, deps.blobOf(attachment)));
   }
-  const key = input.idempotency_key?.trim() || `far-reply:${randomUUID()}`;
   const { agent_session: _session, agent_name: _name, agent_host: _host, project_path: _path, ...rest } = input;
-  const args: Record<string, unknown> = { ...rest, body: pictures.body, reply_to: replyTo, idempotency_key: key, ...(uploads.length > 0 ? { attachments: uploads } : {}) };
+  const args: Record<string, unknown> = { ...rest, body: pictures.body, reply_to: replyTo, idempotency_key: `far:${scoped(session, key)}`, ...(uploads.length > 0 ? { attachments: uploads } : {}) };
   if (args.branch !== undefined) args.branch = branchHere(args.branch, here);
   const held = deps.holdWrite(
     place.machine,
     FAR_AGENT_REPLY_ROUTE,
-    { idempotency_key: key, session, ...(input.agent_host ? { host: input.agent_host } : {}), ...(input.agent_name ? { name: input.agent_name } : {}), args },
+    before?.body ?? { idempotency_key: heldKey, session, ...(input.agent_host ? { host: input.agent_host } : {}), ...(input.agent_name ? { name: input.agent_name } : {}), args },
     place.thread_id,
     FAR_REPLY_WAIT_MS,
+    // Refused after the agent was told it waits: the person sees it under that thread.
+    { notify: true },
   );
   if (!held) return null;
   const entry = await held;
@@ -150,6 +180,8 @@ export async function farAgentReply(
     return { text: typeof answer.text === "string" ? answer.text : `${await nextStep()}`, structured: { ...structured, machine } };
   }
   if (entry && (entry.state === "refused" || entry.state === "dropped" || entry.state === "cancelled")) {
+    // The agent is told now: the window has nothing to add.
+    deps.dismissHeld(heldKey);
     const answer = (entry.answer ?? {}) as { code?: unknown; error?: unknown };
     throw new InboxError(typeof answer.code === "string" ? answer.code : "machine_refused", typeof answer.error === "string" ? answer.error : `${name} did not take the message.`);
   }

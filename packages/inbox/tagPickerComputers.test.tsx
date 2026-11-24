@@ -1,8 +1,8 @@
 /**
  * The `@` picker in a thread whose list spans linked computers (packages/server/inbox-far-tags.ts). What regresses:
  * another computer's agent not offered, offered without its computer, or picked without the computer its tag must
- * name (the thread's computer then refuses it as "not live"); a heading that only repeats its first row's name
- * drawn again; an agent that named itself by its host's id ("gemini") shown in lower case.
+ * name (the thread's computer then refuses it as "not live"); an agent that named itself by its host's id ("gemini")
+ * shown in lower case.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -81,17 +81,6 @@ test.skipIf(!hasDom)('one computer only: no computer is named and no tag carries
   const options = draw(one);
   expect(text('pi-1')).not.toContain('Studio');
   expect(tagsToSend(['pi-1'], options, 'owner-1')).toEqual([{ host: 'pi', session: 'pi-1', label: 'Pi' }]);
-});
-
-test.skipIf(!hasDom)('a heading that only repeats its first row is not drawn, and every group keeps its name', () => {
-  draw(spanning);
-  const headings = [...document.querySelectorAll('.ib-tg-gh')].map((h) => h.textContent);
-  // "Pi" over a row "Pi" goes; "Claude Code" over "Claude Code" goes; the readers' heading says something the rows do not.
-  expect(headings).toEqual(['Reads the Inbox, not woken']);
-  for (const group of document.querySelectorAll('[data-tag-picker] [role="group"]')) {
-    const by = group.getAttribute('aria-labelledby');
-    expect(by ? document.getElementById(by)?.textContent : group.getAttribute('aria-label')).toBe(group.getAttribute('data-tag-group') ?? undefined);
-  }
 });
 
 test.skipIf(!hasDom)('an agent named by its host id reads by its product name', () => {

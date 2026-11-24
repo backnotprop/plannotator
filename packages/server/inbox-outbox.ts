@@ -123,6 +123,11 @@ export interface OutboxEntry {
    * is on its way right now). So nothing of it lands after its maker said it did not.
    */
   send_by?: string;
+  /**
+   * This Inbox's own write the person is told about when it does not land (an agent's answer in another computer's
+   * thread, held while that computer was away; inbox-mcp-far-reply.ts): its refusal is a notice, as a window's write's.
+   */
+  notify?: true;
 }
 
 /** Whether a settled entry may have been applied there: delivered (and not skipped there by its guard), given up after 5xx, or taken back after it left. */
@@ -430,7 +435,7 @@ export class InboxOutbox {
 
   /** Every entry the person has not been told about yet, or not dismissed: refusals and losses (rules 3, 4). */
   notices(): OutboxEntry[] {
-    return [...this.entries.values()].filter((e) => e.notice !== null && !e.dismissed && !e.auto).sort((a, b) => (a.notice!.at < b.notice!.at ? -1 : 1));
+    return [...this.entries.values()].filter((e) => e.notice !== null && !e.dismissed && (!e.auto || e.notify)).sort((a, b) => (a.notice!.at < b.notice!.at ? -1 : 1));
   }
 
   dismiss(key: string): OutboxEntry | null {
@@ -453,7 +458,7 @@ export class InboxOutbox {
     window = false,
     sentFrom: InboxSentFromPlace | null = null,
     auto = false,
-    own: { follows?: string; send_by?: string } = {},
+    own: { follows?: string; send_by?: string; notify?: boolean } = {},
   ): { entry: OutboxEntry; fresh: boolean } {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
@@ -491,6 +496,7 @@ export class InboxOutbox {
       ...(auto ? { auto: true as const } : {}),
       ...(auto && own.follows ? { follows: own.follows } : {}),
       ...(auto && own.send_by ? { send_by: own.send_by } : {}),
+      ...(auto && own.notify ? { notify: true as const } : {}),
     });
     return { entry, fresh: true };
   }

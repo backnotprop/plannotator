@@ -562,8 +562,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
   };
 
   outbox.onChange(({ entry }) => {
-    // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it.
-    if (entry.auto) return;
+    // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it,
+    // except the notice of one the person is told about when it does not land (`notify`).
+    if (entry.auto && !(entry.notify && entry.notice !== null)) return;
     emit({ event: "outbox", data: outboxView(entry) });
     machinesChanged();
   });
@@ -1413,9 +1414,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
      * A write this Inbox makes itself on a linked machine's thread (a Combine's archive there, and its Undo;
      * inbox-combine-far.ts): held in the outbox as the window's writes are, so one queue and one key per write, sent
      * now while that machine is online and when it is back otherwise. Waits up to `waitMs` for its answer. Null when
-     * that machine is not linked. `own`: the write it undoes (`follows`), and when it stops being worth sending (`send_by`).
+     * that machine is not linked. `own`: the write it undoes (`follows`), when it stops being worth sending (`send_by`), and
+     * whether its refusal is a notice the window shows (`notify`).
      */
-    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string } = {}): Promise<OutboxEntry | null> | null => {
+    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string; notify?: boolean } = {}): Promise<OutboxEntry | null> | null => {
       const peer = peers.get(machine);
       if (!peer) return null;
       // Marked as this Inbox's own (`auto`): the window never lists it as the person's waiting write.
@@ -1428,6 +1430,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
     peerLinks: (): PeerLink[] => [...peers.values()],
     /** A held write of this Inbox's own, by its key: how it stands (null: never held). */
     heldWrite: (key: string): OutboxEntry | null => outbox.get(key),
+    /** A held write's notice, dismissed: the one who made it was told already (inbox-mcp-far-reply.ts). */
+    dismissHeld: (key: string): void => {
+      outbox.dismiss(key);
+    },
     /** Take back a held write of this Inbox's own that never left (rule 10: one that left stays), or one past its `send_by`. */
     cancelHeld: (key: string): OutboxEntry | null => outbox.cancel(key),
     /** A linked machine's rows as its list last said, or null while this Inbox holds no list of it. */
