@@ -11,7 +11,7 @@ import { guideReviewImages } from './reviewImages';
 import { searchPasses } from './search/searchMachines';
 import { searchTagIds } from './search/searchTags';
 import { tagsOnOwnRows } from './threadTags';
-import { machineServesReads } from './linkedReads';
+import { machineServesReads, ownerSwitch, threadStepsRead } from './linkedReads';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 
 const SELF = `ibx_01K${'0'.repeat(22)}S`;
@@ -55,6 +55,39 @@ test("a linked thread's steps are read on its machine; an older machine is not a
   expect(asked).toHaveLength(1);
   await inboxApi.threadSteps(LOCAL_THREAD);
   expect(asked[1]).toBe(`/api/inbox/threads/${LOCAL_THREAD}/steps`);
+});
+
+test("a linked thread's steps follow that machine's Steps switch, never this computer's", async () => {
+  linked();
+  // Off here: this computer's threads read none, a linked machine's thread is still asked.
+  expect(threadStepsRead(LOCAL_THREAD, { on: false })).toBe(false);
+  expect(threadStepsRead(NEW_THREAD, { on: false })).toBe(true);
+  expect(threadStepsRead(NEW_THREAD, undefined)).toBe(true);
+  expect(threadStepsRead(LOCAL_THREAD, { on: true })).toBe(true);
+  expect(threadStepsRead(LOCAL_THREAD, undefined)).toBeNull();
+  // Asked, that machine's answer decides: off there reads as off.
+  const asked = stub({ serverSession: 's', on: false, steps: [{ id: 'stp_1', steps: [] }] });
+  expect((await inboxApi.threadSteps(NEW_THREAD)).on).toBe(false);
+  expect(asked).toEqual([`/api/inbox/m/${NEW}/threads/${NEW_THREAD}/steps`]);
+});
+
+test('a switch on a linked machine\'s thread or message is that machine\'s; this computer\'s own is this one\'s', () => {
+  linked();
+  expect(ownerSwitch(NEW_THREAD, true, false)).toBe(false);
+  expect(ownerSwitch(NEW_THREAD, false, true)).toBe(true);
+  expect(ownerSwitch(LOCAL_THREAD, true, false)).toBe(true);
+  expect(ownerSwitch(LOCAL_THREAD, false, true)).toBe(false);
+});
+
+test("a file a linked thread names is checked on its machine (its path there); an older one is not asked", async () => {
+  linked();
+  const asked = stub({ found: true, path: '/Users/ada/shop/src/a.ts', kind: 'code' });
+  expect(await inboxApi.openInFileCheck({ thread: NEW_THREAD, message: NEW_THREAD }, 'src/a.ts')).toEqual({ found: true, path: '/Users/ada/shop/src/a.ts', kind: 'code' });
+  expect(new URL(asked[0]!, 'http://x').pathname).toBe(`/api/inbox/m/${NEW}/open-in/file`);
+  expect(await inboxApi.openInFileCheck({ thread: OLD_THREAD }, 'src/a.ts')).toEqual({ found: false });
+  expect(asked).toHaveLength(1);
+  await inboxApi.openInFileCheck({ thread: LOCAL_THREAD }, 'src/a.ts');
+  expect(new URL(asked[1]!, 'http://x').pathname).toBe('/api/inbox/open-in/file');
 });
 
 test("a code span's hover text on a linked thread is read on its machine; an older one is not asked", async () => {

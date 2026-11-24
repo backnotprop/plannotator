@@ -18,6 +18,7 @@ import type { OpenInFileCode, OpenInFileScope } from '../openInWire';
 import { Icon } from '../icons';
 import { newTabMenu, newTabUrl, onAnotherMachine, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
 import { readableVersion } from '../attachments';
+import { onLinkedMachine } from '../linkedReads';
 import { projectFileOfLink } from '../links';
 import { useInboxFileSource } from '../fileSource';
 import { usePhone, useTouchScreen } from '../phone';
@@ -309,8 +310,9 @@ const knownFiles = new Map<string, { path: string; kind: string } | null>();
 
 /**
  * "Open in" for a file something references, by its project-relative path (a message's code spans, a review's
- * diff headers). The split button, without "Open". Through the tailnet (the apps route refuses it) Copy path alone;
- * nothing at all when the file is not on this computer, or on a phone, as there is no app to launch. `line` goes along
+ * diff headers). The split button, without "Open". Through the tailnet (the apps route refuses it), and for a file on
+ * the thread's linked machine (asked there, its path there), Copy path alone; nothing at all when the file is not on
+ * the thread's computer, or on a phone, as there is no app to launch. `line` goes along
  * when the app's launcher takes one. `label`: the word "Open" on the button (the code window's header). `note`: added to the button's hover words.
  */
 export function OpenInFile({ scope, path, line, label = false, onListOpenChange, note }: { scope: OpenInFileScope; path: string; line?: number; label?: boolean; onListOpenChange?: (open: boolean) => void; note?: string }) {
@@ -357,8 +359,9 @@ function OpenInFileSplit({ scope, path, line, label, onListOpenChange, note }: {
   }, [key, answered]);
   const { busy, status, launch, copyPath } = useOpenInActions(file?.path ?? null, (id) => inboxApi.openInFile(scope, path, id, line), remember);
   if (!file) return null;
-  // No app to launch here (a window over the tailnet): Copy path alone, as for an attachment there.
-  if (!available) return <CopyPathButton id={path} status={status} copyPath={copyPath} />;
+  // No app to launch here (a window over the tailnet), or the file is on the thread's linked machine (its path there;
+  // an app here cannot open a file that is not on this disk): Copy path alone, as for an attachment there.
+  if (!available || ('thread' in scope && onLinkedMachine(scope.thread))) return <CopyPathButton id={path} status={status} copyPath={copyPath} />;
   const menu = openInMenuFor(file, answer.apps, answer.platform ?? 'linux', remembered, null, false);
   return <SplitButton id={path} kind={file.kind} missingWord="" menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} onOpenChange={onListOpenChange} note={note} />;
 }

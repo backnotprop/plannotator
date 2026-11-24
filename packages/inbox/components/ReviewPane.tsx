@@ -69,7 +69,7 @@ import type { ReviewAt } from '../app/reviewAt';
 import type { GuideSelectionActions } from '../guide/types';
 import { reviewSourceLine } from '../guide/sourceLine';
 import { InboxApiError, inboxApi } from '../api';
-import { readsServedFor } from '../linkedReads';
+import { ownerSwitch, readsServedFor } from '../linkedReads';
 import { guideReviewImages } from '../reviewImages';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
@@ -124,7 +124,7 @@ export interface ReviewPaneProps {
   onPosted?: () => void;
   /** Plain Ask on selected lines: the Inbox's Ask window opens with these words in its box. Absent: no Ask. */
   onAsk?: (words: string) => void;
-  /** Settings → Capabilities → Code review is on. */
+  /** Settings → Capabilities → Code review is on (this computer's: a linked machine's review follows its own). */
   codeReview: boolean;
   /** Settings → Capabilities → Chapter diagrams (on unless turned off). Off: a chapter's diagram draws folded under its Diagram header. */
   chapterDiagrams?: boolean;
@@ -154,8 +154,11 @@ function chapterOf(chapters: readonly { diffs: readonly { file: string }[] }[], 
   return at < 0 ? null : at;
 }
 
-export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted, onAsk, codeReview, chapterDiagrams = true, onWriteReply, at = null, onLanded }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted, onAsk, codeReview: codeReviewHere, chapterDiagrams = true, onWriteReply, at = null, onLanded }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
+  // The Inbox that holds the review decides: a linked machine's, as it answered with the snapshot (an older one says
+  // nothing: this computer's, as before), so nothing shows that its Inbox would refuse.
+  const codeReview = ownerSwitch(message.id, codeReviewHere, state.codeReviewThere ?? codeReviewHere);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, commentsRead, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // Code review's own review: the agent sent it as one (`review: true`) while Code review is on. A guide, or a review
   // while Code review is off, reads with none of it: no verdict, Viewed ticks or Post. With Code review off the server

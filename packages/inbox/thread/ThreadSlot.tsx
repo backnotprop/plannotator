@@ -10,6 +10,7 @@ import { useHeldThread } from '../data/queries/thread';
 import type { HeldThread } from '../data/apply/record';
 import { drawnSection } from '../held';
 import { machineOf } from '../inboxUrl';
+import { threadStepsRead } from '../linkedReads';
 import { machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from '../machines';
 import { MAIN_PANE, type PaneId } from '../panes/model';
 import type { PaneOnScreen } from '../panes/onScreen';
@@ -84,6 +85,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
     reportScreen();
   });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
+  const stepsRead = thread ? threadStepsRead(thread.thread_id, settings?.steps) : null;
   return (
     <PaneScopeContext.Provider value={scope}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
@@ -144,9 +146,10 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           reviewView={host.reviewView}
           onInReviews={host.pullsShown && !route.reviews ? () => go({ page: 'inbox', reviews: { project: null, view: 'all' }, project: null, thread: thread.thread_id }) : undefined}
           threadSteps={
-            settings?.steps
+            // The thread's own machine's Steps switch decides (a linked machine's thread: its answer's `on`).
+            stepsRead !== null
               ? {
-                  on: settings.steps.on,
+                  on: stepsRead,
                   subscribe: host.stepsBus.subscribe,
                   // The checklist head's Board icon (part 4): the card that links this thread, while the Board is on.
                   boardCard: (() => {

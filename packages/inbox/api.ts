@@ -1514,9 +1514,9 @@ export const inboxApi = {
   health: () => get<InboxHealth>(inboxUrl('/health')),
   /** The health, or InboxReadTimeout past `timeoutMs` (the stale page notice's checks and its Reload). */
   healthWithin: (timeoutMs: number) => getWithin<InboxHealth>(inboxUrl('/health'), timeoutMs),
-  /** The guided review a message carries: its record and the snapshot (validated by the server, parsed again here). */
+  /** A message's guided review: its record, the snapshot (parsed again here), and its Inbox's Code review switch. */
   guide: (messageId: string) =>
-    get<{ message_id: string; guide: InboxGuideRef; snapshot: unknown }>(messageUrl(messageId, `/guide`)),
+    get<{ message_id: string; guide: InboxGuideRef; code_review?: unknown; snapshot: unknown }>(messageUrl(messageId, `/guide`)),
   /** One changed file's whole text as the guide's patch names it, for its expand arrows. */
   guideFile: (messageId: string, path: string, signal?: AbortSignal) =>
     get<InboxFileContents>(messageUrl(messageId, `/guide/file`, `path=${encodeURIComponent(path)}`), signal),
@@ -1620,9 +1620,9 @@ export const inboxApi = {
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
   openIn: (attachmentId: string, appId: string) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in'), { attachment_id: attachmentId, app_id: appId }),
-  /** A referenced file in its scope: whether it is on this computer, its real path and kind. 403 through the tailnet. */
-  openInFileCheck: (scope: OpenInFileScope, path: string) =>
-    get<{ found: boolean; path?: string; kind?: string }>(inboxUrl(`/open-in/file?${new URLSearchParams({ ...scope, path })}`)),
+  /** A referenced file in its scope: whether it is on its thread's computer, its real path there and kind (none from a linked machine without `linked-reads`). */
+  openInFileCheck: async (scope: OpenInFileScope, path: string): Promise<{ found: boolean; path?: string; kind?: string }> =>
+    'thread' in scope && !readsServedFor(scope.thread) ? { found: false } : get<{ found: boolean; path?: string; kind?: string }>(inboxUrl('/open-in/file', new URLSearchParams({ ...scope, path }).toString(), 'thread' in scope ? machineOf(scope.thread) : null)),
   /** A file an agent's message names, for the pane: read only, wherever it is on that computer (never a secret). */
   referencedFile: (scope: ReferencedFileScope, path: string) => get<ReferencedFileView>(referencedFileUrl('view', scope, path)),
   /** The person commented on a file a message names: it becomes one of that message's attachments (once), on its thread's machine. */

@@ -1,16 +1,19 @@
 /**
  * Reads a linked computer's window makes of this Inbox's threads (mark `linked-reads`), called in process: the door's
  * routes (a linked machine reaches them, a phone does not), Viewed held as a `set`, a code span's hover held to the
- * thread's own folders for a linked machine, the file check over the tailnet, and search with a Tag filter asking
+ * thread's own folders for a linked machine, the file check over the tailnet and through the door, a review's
+ * Code review switch said with its snapshot, and search with a Tag filter asking
  * only the machines that take it. No Inbox starts and nothing launches; every file is a fixture under a temp folder.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { INBOX_LINKED_MARKS } from "@plannotator/core/inbox-types";
+import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { doorRouteOf } from "./inbox-devices";
+import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxOpenInRoute, type InboxOpenInLauncher } from "./inbox-open-in";
 import { doorWriteKind } from "./inbox-outbox";
 import { searchAcrossMachines, TAG_SEARCH_MARK } from "./inbox-search-machines";
@@ -26,6 +29,7 @@ describe("the door", () => {
     ["GET", `messages/${MSG}/guide/package-changes`, `/api/inbox/messages/${MSG}/guide/package-changes`],
     ["POST", `messages/${MSG}/guide/viewed`, `/api/inbox/messages/${MSG}/guide/viewed`],
     ["GET", "open-in/file/code", "/api/inbox/open-in/file/code"],
+    ["GET", "open-in/file", "/api/inbox/open-in/file"],
   ];
 
   test("a linked machine reaches each read; a phone gets the unknown route, as before", () => {
@@ -35,8 +39,7 @@ describe("the door", () => {
     }
   });
 
-  test("launching an app and the file check stay off the door, for a linked machine too", () => {
-    expect(doorRouteOf("GET", "open-in/file", true)).toBeNull();
+  test("launching an app stays off the door, for a linked machine too", () => {
     expect(doorRouteOf("POST", "open-in/file", true)).toBeNull();
     expect(doorRouteOf("POST", "open-in", true)).toBeNull();
     expect(doorRouteOf("GET", "open-in/apps", true)).toBeNull();
@@ -126,6 +129,39 @@ describe("the file check over the tailnet", () => {
     expect(String(checked.body.path)).toEndWith(join("project", "docs", "plan.md"));
     expect((await w.ask("/api/inbox/open-in/file", { thread: w.thread, path: "docs/plan.md" }, "window", "tailnet", "POST")).body).toEqual({ code: "local_only" });
     expect((await w.ask("/api/inbox/open-in/apps", {}, "window", "tailnet")).body).toEqual({ code: "local_only" });
+  });
+
+  test("a linked machine's window gets its thread's file and the path here (its Copy path), never another clone", async () => {
+    const w = world();
+    const checked = await w.ask("/api/inbox/open-in/file", { thread: w.thread, message: w.message, path: "docs/plan.md" }, "machine", "tailnet");
+    expect(checked.body).toMatchObject({ found: true, kind: "markdown" });
+    expect(String(checked.body.path)).toEndWith(join("project", "docs", "plan.md"));
+    // Every clone of a repository is past its thread: as if missing (this computer's window still finds it).
+    expect((await w.ask("/api/inbox/open-in/file", { repo: "github.com/o/r", path: "src/secret-plan.ts" }, "machine", "tailnet")).body).toEqual({ found: false });
+    expect((await w.ask("/api/inbox/open-in/file", { repo: "github.com/o/r", path: "src/secret-plan.ts" })).body).toMatchObject({ found: true });
+    // A bare call there (no window's mark) is refused, as the hover's text is.
+    expect((await w.ask("/api/inbox/open-in/file", { thread: w.thread, path: "docs/plan.md" }, "machine-bare", "tailnet")).status).toBe(403);
+  });
+});
+
+describe("a guided review's Code review switch", () => {
+  test("the snapshot's answer says this Inbox's switch, which is what takes or refuses a Viewed tick", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-linked-guide-")));
+    const store = InboxStore.open(join(root, "data"));
+    const prj = store.ensureProject({ name: "project", root });
+    const sha256 = "a".repeat(64);
+    const blob = inboxBlobPath(store.dir, sha256);
+    mkdirSync(dirname(blob), { recursive: true });
+    writeFileSync(blob, "{}");
+    const guide = { sha256, input_sha256: "b".repeat(64), bytes: 2, title: "Retries", sections: 1, files: 1, additions: 1, deletions: 0, review: true as const };
+    const { message } = store.sendMessage({ project_id: prj.id, author: { kind: "agent", host: "claude-code", session: "ses_a", name: "Claude Code" }, body: "Please review.", guide });
+    for (const on of [true, false]) {
+      const read = await inboxGuideRoute(new Request(`http://127.0.0.1/api/inbox/messages/${message.id}/guide`), `/api/inbox/messages/${message.id}/guide`, store, "s", () => on);
+      expect(((await read!.json()) as { code_review?: unknown }).code_review).toBe(on);
+      const viewedPath = `/api/inbox/messages/${message.id}/guide/viewed`;
+      const tick = await inboxGuideRoute(new Request(`http://127.0.0.1${viewedPath}`, { method: "POST", body: JSON.stringify({ viewed: [] }) }), viewedPath, store, "s", () => on);
+      expect(tick!.status).toBe(on ? 200 : 409);
+    }
   });
 });
 

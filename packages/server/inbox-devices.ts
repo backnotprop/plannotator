@@ -372,6 +372,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^open-in\/file\/(view|raw)$/, window: (m) => `/api/inbox/open-in/file/${m[1]}`, machineOnly: true },
   // A code span's hover text (mark `linked-reads`): held to the thread's own folders for a linked machine (inbox-open-in.ts).
   { method: "GET", route: /^open-in\/file\/code$/, window: () => "/api/inbox/open-in/file/code", machineOnly: true },
+  // Whether that file is there, and its path there (the hover's and a diff header's Copy path), held the same way.
+  // Only the GET: launching an app (its POST) is never on the door.
+  { method: "GET", route: /^open-in\/file$/, window: () => "/api/inbox/open-in/file", machineOnly: true },
   // And attached to its message there when the person comments on it from a linked machine's window.
   { method: "POST", route: /^open-in\/file\/attach$/, window: () => "/api/inbox/open-in/file/attach", machineOnly: true },
   // "Another folder on <machine>…": folder names under that machine's home, for a linked machine's window only.

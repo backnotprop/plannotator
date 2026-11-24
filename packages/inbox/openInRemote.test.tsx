@@ -235,3 +235,50 @@ test.skipIf(!hasDom)("over the tailnet this computer's file has Copy path too (n
   }
   expect(asked.filter((url) => url.includes('/open-in/'))).toEqual([]);
 });
+
+test.skipIf(!hasDom)("a file a linked machine's thread names: asked on that machine, Copy path alone with its path there; this computer's thread keeps its list", async () => {
+  const { OpenInFile } = await import('./components/OpenIn');
+  const FAR_THREAD = 'msg_01K7FARTHREAD000000000001';
+  const HERE_THREAD = 'msg_01K7HERETHREAD00000000001';
+  setSelfMachine(SELF, [
+    { id: SELF, self: true, name: 'Studio' },
+    { id: OTHER, name: 'MacBook', marks: ['linked-reads'], list_cursor: 1, state: 'online' },
+  ]);
+  rememberMachine([FAR_THREAD], OTHER);
+  const posted: string[] = [];
+  const stubbed = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method === 'POST') posted.push(url);
+    if (url.includes('/open-in/file?')) asked.push(url);
+    if (url.startsWith(`/api/inbox/m/${OTHER}/open-in/file?`)) return Response.json({ found: true, path: '/Users/ada/shop/src/retry.ts', kind: 'code' });
+    if (url.startsWith('/api/inbox/open-in/file?')) return Response.json({ found: true, path: '/work/shop/src/retry.ts', kind: 'code' });
+    return stubbed(input, init);
+  }) as typeof fetch;
+  const copied: string[] = [];
+  const savedClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+  try {
+    await render(<OpenInFile scope={{ thread: FAR_THREAD, message: FAR_THREAD }} path="src/retry.ts" label />);
+    await until(() => host!.querySelector('[data-open-in-copy-path]') !== null, 'the Copy path button');
+    const check = asked.find((url) => url.includes('/open-in/file?'))!;
+    expect(new URL(check, 'http://x').pathname).toBe(`/api/inbox/m/${OTHER}/open-in/file`);
+    // No app here can open a file on that machine's disk: no split button, no list.
+    expect(host!.querySelector('[data-open-in-caret]')).toBeNull();
+    expect(host!.querySelector('[data-open-in-primary]')).toBeNull();
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-open-in-copy-path]')!.click());
+    await until(() => copied.length === 1, 'the copy');
+    expect(copied).toEqual(['/Users/ada/shop/src/retry.ts']);
+    expect(posted).toEqual([]);
+    await unmount();
+
+    // This computer's thread: asked here, and the split button with this computer's apps.
+    asked = [];
+    await render(<OpenInFile scope={{ thread: HERE_THREAD, message: HERE_THREAD }} path="src/retry.ts" label />);
+    await until(() => host!.querySelector('[data-open-in-caret]') !== null, 'the split button');
+    expect(new URL(asked.find((url) => url.includes('/open-in/file?'))!, 'http://x').pathname).toBe('/api/inbox/open-in/file');
+  } finally {
+    if (savedClipboard) Object.defineProperty(navigator, 'clipboard', savedClipboard);
+    else delete (navigator as { clipboard?: unknown }).clipboard;
+  }
+});

@@ -18,3 +18,26 @@ export function machineServesReads(machine: string | null | undefined): boolean 
 export function readsServedFor(id: string | null | undefined): boolean {
   return machineServesReads(machineOf(id));
 }
+
+/** Whether this id (a thread, a message) is on a linked machine rather than this one. */
+export function onLinkedMachine(id: string | null | undefined): boolean {
+  const machine = machineOf(id);
+  return !!machine && machine !== selfMachineId();
+}
+
+/**
+ * Whether a switch's feature is on for a thread or message: the machine that owns it decides. This machine's own
+ * switch for its own; a linked machine's follows that machine's switch (`far`, as it said it), never this one's.
+ */
+export function ownerSwitch(id: string | null | undefined, here: boolean, far: boolean): boolean {
+  return onLinkedMachine(id) ? far : here;
+}
+
+/**
+ * Whether a thread's steps are read (null: none, this Inbox has no Steps switch). This computer's Steps switch for
+ * its own threads; a linked machine's thread is always asked, and its answer's `on` (that machine's switch) decides.
+ */
+export function threadStepsRead(threadId: string, here: { on: boolean } | null | undefined): boolean | null {
+  if (onLinkedMachine(threadId)) return true;
+  return here ? here.on : null;
+}
