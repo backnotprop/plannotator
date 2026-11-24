@@ -189,7 +189,7 @@ export const GridLineView = memo(function GridLineView({ line, clock, phone, com
         aria-label={gridLineSpoken(line, clock, phone)}
         aria-describedby={phone ? (open ? readoutId : undefined) : readoutId}
       >
-        <span className="ib-grid-t">{line.name}</span>
+        <span className="ib-grid-t" title={line.name}>{line.name}</span>
         {line.pr && !phone && <span className="ib-grid-pn">{line.pr}</span>}
       </button>
       {!phone && who}

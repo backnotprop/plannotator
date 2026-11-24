@@ -226,8 +226,19 @@ function piecesOf(start: number, prAt: number | null, end: number, over: GridPie
 
 export type GridPlace = { line: GridLine; place: "shown" | "earlier" | "counted" };
 
+/**
+ * Whether a thread is a piece of work Grid shows at all. The one place that says it: today every thread with an
+ * agent. What a thread with no PR carries to decide on: `steps` (a checklist, `done` of `total`, or null), `open` /
+ * `prompt` / `waiting_since` (a question to the person), `running` and `agentState` with `agentHere` (its agent works
+ * now, in this thread), `session_ended` and `agentState === "ended"` (its session ended), `last_agent_at`, `sent`.
+ */
+export function gridIsWork(t: GridThreadIn): boolean {
+  return t.agent !== null;
+}
+
 /** Where one thread sits now: a shown line, a line in Earlier, a count in the Since line only, or nothing. */
 export function gridPlace(t: GridThreadIn, now: number): GridPlace | null {
+  if (!gridIsWork(t)) return null;
   const start = ms(t.created_at) ?? now;
   const pr = prsOf(t.pulls);
   const prAt = pr?.at ?? null;

@@ -77,8 +77,8 @@ export function gridThreads({ sections, groups, machines, labels, seenOf }: Grid
     if (!was || at > was.at) latest.set(agent.key, { at, thread: row.thread_id });
   });
   return rows.flatMap((row, i): GridThreadIn[] => {
-    const agent = agents[i];
-    if (!agent) return [];
+    // Every row comes in; whether it is work is `gridIsWork`'s to say (packages/shared/inbox/grid.ts).
+    const agent = agents[i] ?? null;
     const machine = rowMachine(row, machines);
     const clock = (machine && clocks.get(machine)) || 0;
     const local = <T extends string | null | undefined>(iso: T): T => (clock && iso ? (new Date(Date.parse(iso) - clock).toISOString() as T) : iso);
@@ -94,10 +94,10 @@ export function gridThreads({ sections, groups, machines, labels, seenOf }: Grid
         id: row.thread_id,
         name: titleOf(row),
         machine,
-        agent: { key: agent.key, name: agent.name, host: agent.host },
-        agentState: agent.state,
-        agentHere: latest.get(agent.key)?.thread === row.thread_id,
-        agentEndedAt: local(agent.endedAt),
+        agent: agent ? { key: agent.key, name: agent.name, host: agent.host } : null,
+        agentState: agent?.state ?? null,
+        agentHere: agent ? latest.get(agent.key)?.thread === row.thread_id : false,
+        agentEndedAt: local(agent?.endedAt ?? null),
         terminal: terminalOf(agent),
         running: row.run === 'working' || row.run === 'starting',
         created_at: local(row.created_at),

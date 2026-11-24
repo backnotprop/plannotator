@@ -91,6 +91,11 @@ describe("groups", () => {
     expect(gridPlace({ ...answered, session_ended: true }, NOW)!.line.dropped?.why).toBe("agent ended");
   });
 
+  test("only work is drawn: a thread no agent is known for is not a line, whatever it carries", () => {
+    expect(gridPlace(thread({ agent: null, agentState: null, agentHere: false, open: 1, prompt: "Ship it?" }), NOW)).toBeNull();
+    expect(gridPlace(thread({ agent: null, agentState: null, agentHere: false }), NOW)).toBeNull();
+  });
+
   test("a message no agent has read or answered yet is Not started, at the time it was sent", () => {
     const placed = gridPlace(thread({ last_agent_at: null, sent: { at: ago(147), checked_at: null } }), NOW)!;
     expect(placed.line.group).toBe("plan");

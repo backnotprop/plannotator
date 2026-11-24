@@ -15,6 +15,13 @@
   --ib-grid-idle: color-mix(in oklch, var(--foreground) 15%, var(--card));
   padding-top: 16px;
   font-size: var(--ib-fs-13-5, 13.5px);
+  container-type: inline-size;
+}
+/* A narrower page (a 1280 window beside the sidebar) gives the names the room: the agent and the bar columns give way,
+   the bar's words keep theirs, and the clock labels every other hour (its lines stay hourly). */
+@container (max-width: 1080px) {
+  .ib-grid-ax, .ib-grid-ln, .ib-grid-vl { --ib-grid-w: 120px; --ib-grid-b: 204px; }
+  .ib-grid-axis > span[data-odd] { display: none; }
 }
 .ib-grid-h { gap: 16px; align-items: baseline; }
 .ib-grid-h h1 { font-size: var(--ib-fs-17, 17px); }

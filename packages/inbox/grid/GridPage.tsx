@@ -153,7 +153,7 @@ function GridPage({ phone, onOpen }: { phone: boolean; onOpen: (thread: string) 
         )}
         {!phone && model && (
           <span className="ib-grid-axis" aria-hidden="true">
-            {ticks.map((at) => (new Date(at).getHours() % step === 0 && pct(at) > 6 && pct(at) < 84 ? <span key={at} style={{ left: `${pct(at)}%` }}>{hm(at).replace(':00', '')}</span> : null))}
+            {ticks.map((at) => (new Date(at).getHours() % step === 0 && pct(at) > 6 && pct(at) < 84 ? <span key={at} style={{ left: `${pct(at)}%` }} data-odd={new Date(at).getHours() % 2 ? '' : undefined}>{hm(at).replace(':00', '')}</span> : null))}
             {look !== null && pct(look) > 0 && <i className="ib-grid-lkd" style={{ left: `${pct(look)}%` }} />}
             <span className="ib-grid-now">now</span>
           </span>
