@@ -24,6 +24,7 @@ import {
   SCHEDULED_FILE,
   SEQ_FLOOR_FILE,
   STEPS_FILE,
+  SWARM_FILE,
 } from "../schema";
 import type { InboxLog, InboxLogContents, InboxLogUsage } from "./log";
 
@@ -37,13 +38,14 @@ const FILE_OF: Record<InboxLine["kind"], string> = {
   thread_pull: PULLS_FILE,
   initiative: INITIATIVES_FILE,
   scheduled: SCHEDULED_FILE,
+  swarm: SWARM_FILE,
 };
 
 /** Files an older Inbox never reads: after a line there, `seq.json` keeps that Inbox from handing out its seq again. */
-const FLOORED: ReadonlySet<InboxLine["kind"]> = new Set(["card", "steps", "thread_pull", "initiative", "scheduled"]);
+const FLOORED: ReadonlySet<InboxLine["kind"]> = new Set(["card", "steps", "thread_pull", "initiative", "scheduled", "swarm"]);
 
-/** Every project file the store reads, in the order it always read them. */
-const PROJECT_FILES = [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE, PULLS_FILE];
+/** Every project file the store reads, in the order it always read them (swarm last: a thread's swarm follows its messages). */
+const PROJECT_FILES = [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE, PULLS_FILE, SWARM_FILE];
 
 export function jsonlInboxLog(dir: string): InboxLog {
   return new JsonlInboxLog(dir);
@@ -112,7 +114,7 @@ class JsonlInboxLog implements InboxLog {
   deleteThread(project: InboxProject, threadId: string, messageIds: ReadonlySet<string>, seq: number): void {
     this.keepSeqFloor(seq);
     const folder = this.folder(project);
-    for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, STEPS_FILE, PULLS_FILE]) {
+    for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, STEPS_FILE, PULLS_FILE, SWARM_FILE]) {
       const path = join(folder, name);
       let text: string;
       try {
@@ -128,6 +130,7 @@ class JsonlInboxLog implements InboxLog {
         if (line.kind === "annotation") return line.record.thread_id !== threadId;
         if (line.kind === "steps") return line.record.thread_id !== threadId;
         if (line.kind === "thread_pull") return line.record.thread_id !== threadId;
+        if (line.kind === "swarm") return line.record.thread_id !== threadId;
         return true;
       });
       const temp = `${path}.${process.pid}.tmp`;

@@ -54,6 +54,8 @@ export const CARDS_FILE = "cards.jsonl";
 export const STEPS_FILE = "steps.jsonl";
 /** Each thread's PRs (approval "inbox-pr-binding"), kind `thread_pull`: never read by routing, the list's sections, unread or notifications. */
 export const PULLS_FILE = "pulls.jsonl";
+/** Each thread's swarm (inbox-swarm-types.ts), kind `swarm`: never read by routing, the list's sections, unread or notifications. */
+export const SWARM_FILE = "swarm.jsonl";
 /**
  * The Board's initiatives (approval "board-initiatives"): one file in the
  * inbox folder, not per project (an initiative crosses projects), on the
@@ -68,7 +70,7 @@ export function inboxDir(dataDir: string): string {
   return join(dataDir, INBOX_DIR_NAME);
 }
 
-const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps", "initiative", "thread_pull", "scheduled"]);
+const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps", "initiative", "thread_pull", "scheduled", "swarm"]);
 
 /**
  * One line of a store file, or null when it is not a line this reader can

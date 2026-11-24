@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { InboxLine } from "@plannotator/core/inbox-types";
-import { ANNOTATIONS_FILE, CARDS_FILE, INBOX_PROJECTS_DIR, INITIATIVES_FILE, MESSAGES_FILE, PROJECT_FILE, PULLS_FILE, QUESTIONS_FILE, SCHEDULED_FILE, SEQ_FLOOR_FILE, STEPS_FILE } from "../../schema";
+import { ANNOTATIONS_FILE, CARDS_FILE, INBOX_PROJECTS_DIR, INITIATIVES_FILE, MESSAGES_FILE, PROJECT_FILE, PULLS_FILE, QUESTIONS_FILE, SCHEDULED_FILE, SEQ_FLOOR_FILE, STEPS_FILE, SWARM_FILE } from "../../schema";
 
 const FILE_OF: Record<InboxLine["kind"], string> = {
   project: PROJECT_FILE,
@@ -15,6 +15,7 @@ const FILE_OF: Record<InboxLine["kind"], string> = {
   thread_pull: PULLS_FILE,
   initiative: INITIATIVES_FILE,
   scheduled: SCHEDULED_FILE,
+  swarm: SWARM_FILE,
 };
 
 const UNPLACED = "unplaced";
