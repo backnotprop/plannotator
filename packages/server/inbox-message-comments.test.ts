@@ -7,6 +7,7 @@
  * side (select, comment, the chip, Send) is proved in
  * packages/inbox/messageComments.test.tsx and tests/e2e/inbox-message-comments.spec.ts.
  */
+import { annotationBody } from "../inbox/commentSaves";
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -265,6 +266,36 @@ test("a comment on a diagram part keeps its anchor through the door, an edit and
   const body = ((await reply.json()) as { reply: { body: string } }).reply.body;
   expect(body).toContain('Feedback on: "Tests pass?"\nDiagram node Tests pass? (B), line 5\n\n> Run it nightly too.');
   expect(await pending(again, sent.thread_id)).toHaveLength(0);
+});
+
+test("a native pin envelope is refused before a legacy decoder can write a plain comment, including across restart and Send", async () => {
+  const { project, dataDir } = world();
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const sent = await sendMessage(client, project, { attachments: ["notes.md"] });
+  const pin = diagramComment({ diagramAnchor: { v: 1, family: "plannotator-diagram", kind: "node", id: "queue",
+    label: "Queue", sourceLine: null, point: { kind: "panel", x: 0.5, y: 0.5 } } });
+  const requests = [
+    { route: `/api/inbox/messages/${sent.message_id}/annotations`, target: {} },
+    { route: "/api/inbox/annotations", target: { attachment_id: sent.attachments[0].id, version: "current" } },
+  ];
+  for (const { route, target } of requests) {
+    const request: Record<string, unknown> = { ...target, ...annotationBody(pin) };
+    // The previous route passes only body.annotation into the same required-object store guard.
+    const old = await post(server, route, { ...target, annotation: request.annotation });
+    expect(old.status).toBe(422);
+    expect(await old.json()).toMatchObject({ code: "validation_error", field: "annotation" });
+    const malformed = await post(server, route, { ...target, diagram_annotation: { ...pin, diagramAnchor: null } });
+    expect(malformed.status).toBe(422);
+    expect(await malformed.json()).toMatchObject({ field: "diagram_annotation" });
+  }
+  server.stop();
+  servers.splice(servers.indexOf(server), 1);
+  const reopened = await start(dataDir);
+  expect(await pending(reopened, sent.thread_id)).toEqual([]);
+  const reply = await post(reopened, `/api/inbox/messages/${sent.message_id}/reply`, { idempotency_key: "after-old-pin", words: "All clear." });
+  expect(reply.status).toBe(200);
+  expect((await reply.json()).reply.body).toBe("All clear.");
 });
 
 test("over the tailnet the owner's comment on a diagram part goes as a comment on words does; another site's is refused the same", async () => {

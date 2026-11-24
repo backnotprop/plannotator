@@ -152,7 +152,7 @@ export function TextEditor({ initial, label, ask, original, onSubmit, onDone, on
   onSubmit: (body: string) => SubmitResult; onDone: (body: string) => void; onCancel: () => void; onChange?: (body: string) => void;
 }) {
   const [text, setText] = useState(initial);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<{ message: string; unavailable: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -164,15 +164,19 @@ export function TextEditor({ initial, label, ask, original, onSubmit, onDone, on
   }, []);
   async function submit() {
     const body = text.trim();
-    if (!body || pending.current) return;
+    if (!body || pending.current || error?.unavailable) return;
     pending.current = true;
     setBusy(true);
-    setError('');
+    setError(null);
     try {
       if (await onSubmit(body) === false) throw new Error();
       if (mounted.current) onDone(body);
-    } catch {
-      if (mounted.current) setError(ask ? 'Couldn’t send the question. Try again.' : 'Couldn’t save the comment. Try again.');
+    } catch (cause) {
+      if (mounted.current) {
+        const unavailable = !ask && cause instanceof DOMException && cause.name === 'NotSupportedError';
+        const message = unavailable ? cause.message : ask ? 'Couldn’t send the question. Try again.' : 'Couldn’t save the comment. Try again.';
+        setError({ message, unavailable });
+      }
     } finally {
       pending.current = false;
       if (mounted.current) setBusy(false);
@@ -185,10 +189,10 @@ export function TextEditor({ initial, label, ask, original, onSubmit, onDone, on
         if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
         if (e.key === 'Enter' && (ask ? !e.shiftKey : e.ctrlKey || e.metaKey)) { e.preventDefault(); void submit(); }
       }} />
-    {error && <div className="ndr-error" role="alert">{error}</div>}
+    {error && <div className="ndr-error" role="alert">{error.message}</div>}
     <div className="ndr-editor-actions">
       {!ask && <Button size="xs" variant="ghost" onClick={onCancel} type="button">Cancel</Button>}
-      <Button size={ask === 'side' ? 'icon' : 'xs'} disabled={busy || !text.trim() || (text.trim() === original)} type="button" onClick={() => void submit()} aria-label={ask === 'side' ? 'Send question' : undefined}>
+      <Button size={ask === 'side' ? 'icon' : 'xs'} disabled={busy || error?.unavailable || !text.trim() || (text.trim() === original)} type="button" onClick={() => void submit()} aria-label={ask === 'side' ? 'Send question' : undefined}>
         {ask === 'thread' ? 'Send question to thread' : ask === 'side' ? <ArrowUp /> : original !== undefined ? 'Save' : 'Add comment'}
       </Button>
     </div>

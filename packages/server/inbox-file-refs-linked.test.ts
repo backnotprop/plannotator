@@ -47,11 +47,11 @@ async function windowPost(m: Machine, path: string, body: Json): Promise<Respons
 /** The same request as an agent's or a script's bare call makes it. */
 const barePost = (m: Machine, path: string, body: Json) => fetch(`${base(m)}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-async function agentNames(m: Machine): Promise<{ id: string; thread: string }> {
+async function agentNames(m: Machine, extra: Json = {}): Promise<{ id: string; thread: string }> {
   const client = new Client({ name: "inbox-file-refs-linked", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base(m)}/mcp`)));
   try {
-    const sent = (await client.callTool({ name: "send_message", arguments: { body: "The plan is in `docs/plan.md`; start at step 2.", project_path: m.w.project, agent_session: `ses-${m.name}`, agent_host: "claude-code" } })) as { structuredContent: { thread_id: string; message_id: string } };
+    const sent = (await client.callTool({ name: "send_message", arguments: { body: "The plan is in `docs/plan.md`; start at step 2.", project_path: m.w.project, agent_session: `ses-${m.name}`, agent_host: "claude-code", ...extra } })) as { structuredContent: { thread_id: string; message_id: string } };
     return { id: sent.structuredContent.message_id, thread: sent.structuredContent.thread_id };
   } finally {
     await client.close().catch(() => {});
@@ -107,6 +107,30 @@ describe("a file a message names, on a linked machine's thread, two real Inboxes
       [A, B],
       [B, A],
     ] as const;
+
+  test("native pin envelopes retain their anchors and replay their receipts through each linked door", async () => {
+    for (const [here, there] of both()) {
+      const remote = `/api/inbox/m/${there.id}`;
+      const contents = JSON.stringify({ title: "Delivery", columns: [{ id: "queue", title: "Queue" }] });
+      writeFileSync(join(there.w.project, "pins.diagram.json"), contents);
+      const { id, thread } = await agentNames(there, { subject: "Review pins", body: ["```plannotator-diagram", contents, "```"].join("\n"), attachments: ["pins.diagram.json"] });
+      const { attachments: [file] } = await getJson(there, `/api/inbox/threads/${thread}/attachments`);
+      const anchor = { v: 1, family: "plannotator-diagram", kind: "node", id: "queue", label: "Queue", sourceLine: null, point: { kind: "panel", x: .34, y: .7 } };
+      const pin = { id: crypto.randomUUID(), type: "COMMENT", text: "Show the retry path", originalText: "Queue",
+        blockId: "block-0", startOffset: 0, endOffset: 0, createdA: Date.now(), diagramAnchor: anchor };
+      const fileWrite = { idempotency_key: crypto.randomUUID(), attachment_id: file.id, version: file.sent_sha256, diagram_annotation: pin };
+      const messageWrite = { idempotency_key: crypto.randomUUID(), diagram_annotation: { ...pin, id: crypto.randomUUID() } };
+      for (const [path, body] of [[`${remote}/annotations`, fileWrite], [`${remote}/messages/${id}/annotations`, messageWrite]] as const) {
+        const save = await windowPost(here, path, body);
+        expect(save.status, await save.text()).toBe(200);
+        const replay = await windowPost(here, path, body);
+        expect(replay.status).toBe(200);
+        expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+      }
+      const records = (await getJson(there, `/api/inbox/threads/${thread}/attachments`)).annotations;
+      expect(records.filter((row: Json) => row.id === pin.id || row.id === messageWrite.diagram_annotation.id).map((row: Json) => row.annotation.diagramAnchor)).toEqual([anchor, anchor]);
+    }
+  }, 30_000);
 
   test("a diagram is read, annotated and questioned on its owning machine in both directions", async () => {
     for (const [here, there] of both()) {

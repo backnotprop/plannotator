@@ -8,6 +8,15 @@
  */
 import { parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
+import { InboxApiError } from './apiError';
+
+/** Older receivers read only `annotation`. Omit it so they refuse a native pin before they write anything. */
+export function annotationBody(annotation: object) {
+  const anchor = 'diagramAnchor' in annotation ? annotation.diagramAnchor : undefined;
+  return anchor && typeof anchor === 'object' && 'family' in anchor && anchor.family === 'plannotator-diagram'
+    ? { diagram_annotation: annotation } : { annotation };
+}
+
 
 /**
  * How one write ended: the record the server answered with, or a refusal or no answer (`on`: the message, file,
@@ -22,13 +31,22 @@ const watchers = new Set<CommentWrite[]>();
 export function trackCommentWrite<T extends { annotation: InboxAnnotationRecord }>(write: Promise<T>, how: { on: string; id?: unknown; remove?: boolean; annotation?: { diagramAnchor?: unknown; text?: unknown } }): Promise<T> {
   const anchor = parseDiagramAnchor(how.annotation?.diagramAnchor);
   if (anchor?.family === 'plannotator-diagram') {
-    // Older peers can answer successfully after dropping an anchor they do not understand.
+    // Confirm the exact part and edit before showing the pin as saved.
     write = write.then(answer => {
       const saved = answer.annotation?.annotation;
       if (saved?.text !== how.annotation?.text || JSON.stringify(parseDiagramAnchor(saved?.diagramAnchor)) !== JSON.stringify(anchor)) {
         throw new Error('The Inbox could not confirm this diagram comment.');
       }
       return answer;
+    }, cause => {
+      // An older store either misses the envelope or knows the drawing only as a download.
+      if (cause instanceof InboxApiError && cause.status === 422 && (
+        (cause.code === 'validation_error' && cause.field === 'annotation') ||
+        (cause.code === 'annotation_not_allowed' && cause.field === 'attachment_id')
+      )) {
+        throw new DOMException('The other computer needs a newer Plannotator to pin this comment.', 'NotSupportedError');
+      }
+      throw cause;
     });
   }
   const ended: Promise<CommentWrite> = write

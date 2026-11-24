@@ -300,3 +300,5 @@
 ## Plannotator diagram attachments
 
 The Inbox composer includes `/diagram` and a `.diagram.json` attachment opens in the native diagram canvas. The agent sends the editable source as an attachment. Readers can inspect links and project-file references, write a comment at a point on a part, or ask the owning session about the selection. The attachment uses the existing file feedback and sent-copy routes. The diagram renderer and font assets ship with Plannotator.
+
+Native diagram pins in messages and attachments use `diagram_annotation` as the request field on the existing annotation routes. Older receiving Inboxes reject the request before writing. The composer keeps the draft and tells the reader when the other computer needs an update.
