@@ -160,12 +160,12 @@ describe("routines and capability switches across linked computers", () => {
       const bName = ((await get(a.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === bId)!.name as string;
       const folder = join(root, "work");
       mkdirSync(folder, { recursive: true });
-      const turned = await fetch(`${at(a.port)}/api/inbox/capability`, {
+      const agentTurn = await fetch(`${at(a.port)}/api/inbox/capability`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ by: { session: "ses_ada", host: "claude-code", name: "Claude Code" }, project_path: folder, capability: "routines", on: false, computer: bName }),
       });
-      const result = { content: [{ text: ((await turned.json()) as { text: string }).text }] };
+      const result = { content: [{ text: ((await agentTurn.json()) as { text: string }).text }] };
       expect(result.content[0]!.text).toStartWith(`Turned off Routines on ${bName}. The person sees it in thread `);
       expect([(await get(b.port, "/api/inbox/settings")).scheduled_threads.on, (await get(a.port, "/api/inbox/settings")).scheduled_threads.on]).toEqual([false, false]);
       const lineId = /thread (msg_\S+)\.$/.exec(result.content[0]!.text)![1]!;
