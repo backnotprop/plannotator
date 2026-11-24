@@ -340,6 +340,23 @@ describe("an introduction, only between this person's own computers on this tail
 });
 
 describe("an ordinary link", () => {
+  test("whose other side links back is saved with its way back's device, whatever Tailscale says or cannot say", async () => {
+    // The same-tailnet check is live (no sandbox flag) and Tailscale names Laptop as another user's, then cannot be read:
+    // a code the person pasted is linked either way.
+    const tailnet = { readable: true, nodes: [{ host: "127.0.0.1", user: 2 }] };
+    const m = await mini({}, { tailscale: tailscaleOf(tailnet), tailnetCheckEnv: {} });
+    const laptop = linkingLaptop(m);
+    const path = "/api/inbox/control/machines/link";
+    const linkNow = () => m.machines.control(new Request(`http://127.0.0.1${path}`, { method: "POST", body: JSON.stringify({ link: laptopCode(laptop.url), back: "http://127.0.0.1:9" }) }), path);
+    for (const readable of [true, false]) {
+      tailnet.readable = readable;
+      const answer = await linkNow();
+      expect(answer?.status).toBe(201);
+      expect(InboxLinks.open(m.dataDir).get(LAPTOP)?.device_id).toMatch(/^dev_/);
+    }
+    expect(laptop.seen.map((r) => r.route)).not.toContain("unlink");
+  });
+
   test("whose way back was taken but whose offer is gone is not saved without its device: the other side forgets it", async () => {
     const m = await mini({}, { door: (door) => ({ ...door, offerDevice: () => null }) });
     const laptop = linkingLaptop(m);
