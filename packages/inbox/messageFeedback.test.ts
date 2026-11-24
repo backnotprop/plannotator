@@ -179,6 +179,21 @@ describe('which reply a comment rides', () => {
     expect(routed.carried.has('msg_B')).toBe(false);
   });
 
+  test('ordinary words alone go to the most recent agent', () => {
+    const t = thread([message('msg_A', 'ses_a'), message('msg_B', 'ses_b')]);
+    const routed = routeReplyContents(t, sendTargetsOf(t), [], true);
+    expect(routed.targets.map(target => target.message.id)).toEqual(['msg_B']);
+    expect(routed.carried.size).toBe(0);
+  });
+
+  test.each([true, false])('a plain file comment stays on the ordinary reply (with words: %s)', (hasWords) => {
+    const t = thread([message('msg_A', 'ses_a'), message('msg_B', 'ses_b')]);
+    const file = { ...record('f1', 'quote', 'comment', {}, 'msg_A'), message: undefined, attachment_id: 'att_1', path: '/p/a.md' };
+    const routed = routeReplyContents(t, sendTargetsOf(t), [file], hasWords);
+    expect(routed.targets.map(target => target.message.id)).toEqual(['msg_B']);
+    expect([...routed.carried]).toEqual([['msg_B', [file]]]);
+  });
+
   test('a file comment rides the last reply', () => {
     const t = thread([message('msg_A', 'ses_a'), message('msg_B', 'ses_b')]);
     const file = { ...record('f1', 'x', 'y'), message: undefined, attachment_id: 'att_1', path: '/p/a.md' } as InboxAnnotationRecord;
