@@ -103,8 +103,14 @@ export function useSkillReferenceAutocomplete(options: {
    * a deletion opens the list as a caret move does, as before.
    */
   quietOnDelete?: boolean;
+  /**
+   * The list's first row is active whenever the list is open (opt-in; a one-line field where `/` only ever means a
+   * skill, the Inbox's saved-emoji name): Enter and Tab take it, the arrows move from it. Typing re-filters and the
+   * first row of the new list is active again. Absent: the no-preselection invariant above, as before.
+   */
+  firstActive?: boolean;
 }): UseSkillReferenceAutocompleteResult {
-  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter, commands, onCommand, hostRowsFirst = false, quietOnDelete = false } = options;
+  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter, commands, onCommand, hostRowsFirst = false, quietOnDelete = false, firstActive = false } = options;
   // Seed from the memory cache only when the surface opted in — a disabled
   // composer must stay inert even after another surface warmed the catalog.
   const [fullCatalog, setCatalog] = useState<SkillCatalogEntry[]>(() =>
@@ -181,7 +187,7 @@ export function useSkillReferenceAutocomplete(options: {
   // Never let a stale activation point past the list (catalog refreshes can
   // shrink it without a query change). Out of range reads as "nothing active".
   const boundedActive =
-    activeIndex !== null && activeIndex >= 0 && activeIndex < items.length ? activeIndex : null;
+    activeIndex !== null && activeIndex >= 0 && activeIndex < items.length ? activeIndex : firstActive && items.length > 0 ? 0 : null;
 
   const readCaret = useCallback(() => {
     const el = textareaRef.current;
