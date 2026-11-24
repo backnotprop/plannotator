@@ -3473,6 +3473,9 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * 131 bytes off. Re-measured on the entry as the tool builds it from the default tool list (Pi's request shape), with
  * main as of 2026-11-24: 16,141 bytes; tokens scaled at the entry's bytes per token (3.7), 4,342. Board on: the
  * `card` action's measured share (1,929 bytes) on top, 18,070, tokens scaled at its own ratio, 4,932.
+ * The `routine` action's line out of the description (INBOX_AGENT_ACTIONS_NO_LINE, the owner 2026-11-24): `routine`
+ * is listed only while Routines are on, so the default entry is unchanged, re-measured the same way at 16,141 bytes;
+ * with the Board, the Checklist and Routines on, 20,601 → 20,439 bytes and the description 2,200 → 2,039 characters.
  */
 const INBOX_TOOL_COST_NOW = { bytes: 16141, tokens: 4342 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
