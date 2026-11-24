@@ -52,6 +52,9 @@ export * from "./inbox-steps";
 // The Board's initiatives (approval "board-initiatives"), the same way.
 export * from "./inbox-initiatives";
 export * from "./inbox-tag-colours";
+// Removing an agent from a thread (approval "inbox-remove-agent-from-thread"), the same way.
+export * from "./inbox-removed";
+import type { InboxRemoval } from "./inbox-removed";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
@@ -577,6 +580,12 @@ export interface InboxMessage {
    * links to it. Dropped by Unarchive. Absent otherwise and on older records. Additive.
    */
   moved_to?: InboxMovedTo | null;
+  /**
+   * On a root: each press of Remove on one of the thread's agents (approval "inbox-remove-agent-from-thread",
+   * `inboxRemovedNow`): the agent is out of the thread until the person writes to it again. The Undo of a press
+   * drops its entry. Absent on every other message and on older records. Additive.
+   */
+  removed?: InboxRemoval[] | null;
   /** The sender's idempotency key, when one was given. */
   idempotency_key: string | null;
   /**
@@ -3605,11 +3614,13 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * `agent-search`: they search and list this Inbox's threads too (`agent-search`, `agent-threads`; inbox-far-find.ts).
  * `combine-across` (approval "inbox-combine-across-computers"): a Combine here takes picked threads of a linked
  * machine too (read there, archived there through the outbox), so a linked machine's window offers this Inbox's
- * agents for picks on both. `artifact-pins` (approval "inbox-artifact-stars"): its threads' artifacts are pinned from
+ * agents for picks on both. `remove-agent` (approval "inbox-remove-agent-from-thread"): an agent of one of its threads
+ * is removed there and put back with Undo (`threads/:id/remove-agent`), so a linked machine's list offers Remove.
+ * `artifact-pins` (approval "inbox-artifact-stars"): its threads' artifacts are pinned from
  * a linked machine's window and kept here (`POST artifact-pins` through its door); its list carries its pins to a
  * linked machine (`artifact_pins`), and its Artifacts wall is read through its door (`GET artifacts`).
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "artifact-pins"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

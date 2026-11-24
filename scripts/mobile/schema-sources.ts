@@ -28,6 +28,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/inbox-pull-risk.ts',
   'packages/core/inbox-pulls.ts',
   'packages/core/inbox-qwen.ts',
+  'packages/core/inbox-removed.ts',
   'packages/core/inbox-review.ts',
   'packages/core/inbox-reviews.ts',
   'packages/core/inbox-rows-words.ts',

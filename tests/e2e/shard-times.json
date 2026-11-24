@@ -178,6 +178,7 @@
   "inbox-refresh.spec.ts": 11,
   "inbox-reload-hosts.spec.ts": 24,
   "inbox-remote-launch-picker.spec.ts": 32,
+  "inbox-remove-agent.spec.ts": 20,
   "inbox-replaced.spec.ts": 9,
   "inbox-reply-draft-files.spec.ts": 4,
   "inbox-reply-drafts.spec.ts": 14,
