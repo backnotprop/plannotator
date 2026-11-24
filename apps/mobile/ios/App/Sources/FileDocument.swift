@@ -8,10 +8,14 @@ struct WordsPage: View {
   let url: URL
   let item: AttachmentItem
   let shown: FileFacts.Shown
+  let context: CommentContext
 
   enum Read: Sendable {
-    case document(DocumentRows)
-    case text(TextRows)
+    /// `splits`: the phone splits this file into the window's own blocks, so a comment can name one
+    /// (`DocumentBlocks.matchesWindow`). Where it does not, a comment names no block: its words find the place.
+    case document(DocumentRows, splits: Bool)
+    /// Plain text is drawn by its paragraphs; a comment names the window's block on the line its words start on.
+    case text(TextRows, blocks: [DocumentBlock], splits: Bool)
     case code(TextRows)
   }
 
@@ -21,23 +25,26 @@ struct WordsPage: View {
   var body: some View {
     Group {
       switch read {
-      case .document(let document)?: DocumentView(document: document)
-      case .text(let rows)?: PlainTextView(rows: rows)
-      case .code(let rows)?: CodeLinesView(rows: rows)
+      case .document(let document, let splits)?: DocumentView(document: document, splits: splits, context: context)
+      case .text(let rows, let blocks, let splits)?: PlainTextView(rows: rows, blocks: blocks, splits: splits, context: context)
+      case .code(let rows)?: CodeLinesView(rows: rows, context: context)
       case nil:
         if unreadable { Standing(symbol: "doc", words: PhoneWords.fileNotShown(item.name)) } else { Waiting() }
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Token.background)
+    // A link in a document opens a site or a mail address, as in the window: never another app, never this one's
+    // own pairing link.
+    .environment(\.openURL, OpenURLAction { SelectableWords.opens($0) ? .systemAction : .discarded })
     .task(id: url) {
       let shown = shown
       let name = item.name
       let made = await Task.detached { () -> Read? in
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         switch shown {
-        case .document: return .document(DocumentRows(text: text, name: name))
-        case .text: return .text(TextRows.plain(text))
+        case .document: return .document(DocumentRows(text: text, name: name), splits: DocumentBlocks.matchesWindow(text))
+        case .text: return .text(TextRows.plain(text), blocks: DocumentBlocks.parse(text, frontmatter: DocumentBlocks.stripsFrontmatter(name: name)), splits: DocumentBlocks.matchesWindow(text))
         default: return .code(TextRows.code(text))
         }
       }.value
@@ -47,41 +54,63 @@ struct WordsPage: View {
   }
 }
 
-/// The steps of a document's type: a title, a section, a part, then the rest. Same faces as a message's words, a
-/// step or two larger, since a document is read at length.
-private enum DocumentRole {
-  static func heading(_ level: Int) -> Font {
-    switch level {
-    case 1: return .title2.weight(.bold)
-    case 2: return TextRole.prompt
-    case 3: return TextRole.heading
-    default: return TextRole.name
-    }
-  }
-}
-
 /// A Markdown document, drawn natively from the window's own blocks (`DocumentBlocks`): each block is a view named
 /// by the window's id for it, which is what a comment on words will be anchored to. A very long block is drawn in
 /// parts, and a long table a row at a time, each a row of the lazy stack (`DocumentRows`).
 struct DocumentView: View {
   let document: DocumentRows
+  let splits: Bool
+  let context: CommentContext
 
   var body: some View {
     let rows = document.rows
-    ScrollView {
-      LazyVStack(alignment: .leading, spacing: 0) {
-        ForEach(0..<rows.count, id: \.self) { index in
-          row(rows[index])
-            .padding(.top, index == 0 ? 0 : gap(rows[index - 1], rows[index]))
-            .id(name(index))
+    let comments = context.comments
+    ScrollViewReader { reader in
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 0) {
+          ForEach(0..<rows.count, id: \.self) { index in
+            row(rows[index], index: index, comments: comments)
+              .padding(.top, index == 0 ? 0 : gap(rows[index - 1], rows[index]))
+              .id(name(index))
+          }
         }
+        .padding(.horizontal, Space.page)
+        .padding(.top, Space.card)
+        .padding(.bottom, Space.section)
       }
-      .padding(.horizontal, Space.page)
-      .padding(.top, Space.card)
-      .padding(.bottom, Space.section)
+      .scrollEdgeEffectStyle(.soft, for: .top)
+      .scrollDismissesKeyboard(.interactively)
+      .accessibilityIdentifier("file-document")
+      // A comment is being written on words here: they come up to where the keyboard and the field do not cover them.
+      .onChange(of: context.desk.draft) { _, draft in
+        guard let draft, draft.file == context.item.id, case .words(let block, let start, _) = draft.target else { return }
+        let at = rows.firstIndex { splits ? document.blocks[$0.block].id == block : start / Self.blockStride == $0.block }
+        if let at { withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .easeInOut(duration: 0.25)) { reader.scrollTo(name(at), anchor: Self.overKeyboard) } }
+      }
+      // Back to a comment: its block comes to the middle of the page.
+      .onChange(of: context.desk.sought) { _, sought in
+        guard let comment = sought?.comment, comment.attachment == context.item.id, let at = rows.firstIndex(where: { holds(comment, block: $0.block) }) else { return }
+        withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .easeInOut(duration: 0.25)) { reader.scrollTo(name(at), anchor: .center) }
+      }
     }
-    .scrollEdgeEffectStyle(.soft, for: .top)
-    .accessibilityIdentifier("file-document")
+  }
+
+  /// Where on the page a thing being commented on rests while the keyboard is up: a fifth of the way down.
+  static let overKeyboard = UnitPoint(x: 0.5, y: 0.2)
+
+  /// A comment made where the phone does not share the window's blocks names none: it keeps its block's place in
+  /// the file in the millions of where it starts, so the feedback still reads in the file's order.
+  static let blockStride = 1_000_000
+  /// A long block's parts, and a list item's paragraphs, each start a hundred thousand on.
+  static let partStride = 100_000
+
+  private func holds(_ comment: FileComment, block index: Int) -> Bool {
+    splits ? comment.blockId == document.blocks[index].id : (comment.blockId ?? "").isEmpty && Int(comment.startOffset) / Self.blockStride == index
+  }
+
+  /// Where a block's words start for a comment's `startOffset`, and the block it names.
+  private func place(_ index: Int, part: Int) -> WordsPlace {
+    WordsPlace(block: splits ? document.blocks[index].id : "", base: (splits ? 0 : index * Self.blockStride) + part * Self.partStride)
   }
 
   /// A block's first row is named by the block's id; its other rows after it.
@@ -90,13 +119,20 @@ struct DocumentView: View {
     return index > 0 && document.rows[index - 1].block == document.rows[index].block ? "\(block)/\(index)" : block
   }
 
-  @ViewBuilder private func row(_ row: DocumentRows.Row) -> some View {
+  @ViewBuilder private func row(_ row: DocumentRows.Row, index at: Int, comments: [FileComment]) -> some View {
     let block = document.blocks[row.block]
+    let here = comments.filter { holds($0, block: row.block) }
     switch row {
     case .block(let index):
-      if let table = document.tables[index] { DocumentTable(table: table) } else { DocumentBlockView(block: block, number: document.numbers[block.id]) }
-    case .piece(_, let words, let first):
-      DocumentBlockView(block: block, number: document.numbers[block.id], part: words, first: first)
+      if let table = document.tables[index] {
+        DocumentTable(table: table)
+      } else {
+        DocumentBlockView(block: block, number: document.numbers[block.id], place: place(index, part: 0), comments: here, context: context)
+      }
+    case .piece(let index, let words, let first):
+      // A part's place among its block's parts: the rows before it of the same block.
+      let part = document.rows[..<at].reversed().prefix { $0.block == index }.count
+      DocumentBlockView(block: block, number: document.numbers[block.id], part: words, first: first, place: place(index, part: part * 10), comments: here, context: context)
     case .tableHead(let index):
       VStack(spacing: 0) {
         TableLine(cells: document.tables[index]?.head ?? [], columns: document.tables[index]?.columns ?? 0, strong: true)
@@ -127,6 +163,13 @@ struct DocumentView: View {
   }
 }
 
+/// Where a run of drawn words stands for a comment: the window's block it names ("" for none), and what its first
+/// letter counts as in the comment's `startOffset`.
+struct WordsPlace {
+  var block: String
+  var base: Int
+}
+
 struct DocumentBlockView: View {
   let block: DocumentBlock
   let number: Int?
@@ -134,7 +177,12 @@ struct DocumentBlockView: View {
   /// alert's name); nil: the whole block.
   var part: String?
   var first = true
+  var place = WordsPlace(block: "", base: 0)
+  /// The comments on this block.
+  var comments: [FileComment] = []
+  var context: CommentContext?
   @ScaledMetric(relativeTo: .body) private var markWidth: CGFloat = 22
+  @Environment(\.dynamicTypeSize) private var typeSize
 
   private var content: String { part ?? block.content }
 
@@ -147,30 +195,44 @@ struct DocumentBlockView: View {
     }
   }
 
-  private func words(_ content: String, _ font: Font = TextRole.body, ink: Color = Token.foreground) -> some View {
-    Text(MessageBody.attributed(content))
-      .font(font)
-      .lineSpacing(TextRole.bodyLeading)
-      .foregroundStyle(ink)
-      .textSelection(.enabled)
-      .frame(maxWidth: .infinity, alignment: .leading)
+  /// Words to read, select and comment on. `paragraph`: which of the block's paragraphs these are.
+  private func words(_ content: String, style: UIFont.TextStyle = .body, weight: UIFont.Weight? = nil, ink: Color = Token.foreground, leading: CGFloat = TextRole.bodyLeading, paragraph: Int = 0, state: String? = nil) -> some View {
+    let drawn = WordsInk.attributed(content, style: style, weight: weight, ink: ink, leading: leading, size: typeSize)
+    let base = place.base + paragraph * DocumentView.partStride / 100
+    return SelectableWords(
+      words: drawn, comments: context?.takes ?? false, marked: WordsInk.marks(comments, in: drawn, base: base), writing: context?.writing(block: place.block, base: base, in: drawn), state: state,
+      comment: { start, quote in context?.begin(.words(block: place.block, start: base + start, quote: quote)) },
+      opened: { context?.desk.edit($0) }
+    )
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   /// Words that hold paragraphs of their own (a list item, a quote, a `:::` block): each drawn in turn.
   private func paragraphs(_ content: String, ink: Color = Token.foreground) -> some View {
     VStack(alignment: .leading, spacing: Space.close) {
-      ForEach(Array(content.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, part in words(Self.flowed(part), ink: ink) }
+      ForEach(Array(content.components(separatedBy: "\n\n").enumerated()), id: \.offset) { index, part in
+        // A task is read with whether it is ticked, as a state after its words: it is not a switch here, and
+        // nothing says to toggle what cannot be toggled.
+        words(Self.flowed(part), ink: ink, paragraph: index, state: index == 0 && first ? block.checked.map { $0 ? PhoneWords.taskTicked : PhoneWords.taskOpen } : nil)
+      }
+    }
+  }
+
+  /// The steps of a document's type: a title, a section, a part, then the rest. Same faces as a message's words, a
+  /// step or two larger, since a document is read at length.
+  private var headingFace: (style: UIFont.TextStyle, weight: UIFont.Weight) {
+    switch block.level ?? 1 {
+    case 1: return (.title2, .bold)
+    case 2: return (.title3, .semibold)
+    case 3: return (.headline, .semibold)
+    default: return (.subheadline, .semibold)
     }
   }
 
   var body: some View {
     switch block.kind {
     case .heading:
-      Text(MessageBody.attributed(content))
-        .font(DocumentRole.heading(block.level ?? 1))
-        .foregroundStyle(Token.foreground)
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
+      words(content, style: headingFace.style, weight: headingFace.weight, leading: 0)
         .accessibilityAddTraits(.isHeader)
     case .paragraph:
       words(Self.flowed(content))
@@ -180,9 +242,6 @@ struct DocumentBlockView: View {
         paragraphs(content, ink: block.checked == true ? Token.mutedForeground : Token.foreground)
       }
       .padding(.leading, CGFloat(min(block.level ?? 0, 4)) * (markWidth + Space.close))
-      .accessibilityElement(children: .combine)
-      // A task is read as a box that is ticked or not, in the system's own words for one.
-      .accessibilityAddTraits(block.checked == nil ? [] : block.checked == true ? [.isToggle, .isSelected] : [.isToggle])
     case .blockquote:
       // A quote steps in and steps down: no bar beside it.
       VStack(alignment: .leading, spacing: Space.tight) {
@@ -288,69 +347,146 @@ struct TableLine: View {
   }
 }
 
-/// Plain text: its paragraphs as written, wrapped to the page; a long one in parts (`TextRows.plain`).
+/// Plain text: its paragraphs as written, wrapped to the page; a long one in parts (`TextRows.plain`). Words selected
+/// are commented on as in a document: the comment names the window's block on the line the words start on.
 struct PlainTextView: View {
   let rows: TextRows
+  let blocks: [DocumentBlock]
+  let splits: Bool
+  let context: CommentContext
+  @Environment(\.dynamicTypeSize) private var typeSize
+
+  /// The block a selection in a row starts in, and where in the file's order it stands.
+  private func place(_ row: TextRows.Row, index: Int, text: String, start: Int) -> (block: String, start: Int) {
+    let before = (text as NSString).substring(to: min(start, (text as NSString).length))
+    let line = rows.sourceLine(of: row) + before.components(separatedBy: "\n").count - 1
+    let order = index * DocumentView.partStride + start
+    guard splits, let block = DocumentBlocks.block(onLine: line, in: blocks) else { return ("", order) }
+    return (block.id, order)
+  }
 
   var body: some View {
-    ScrollView {
-      LazyVStack(alignment: .leading, spacing: 0) {
-        ForEach(0..<rows.rows.count, id: \.self) { index in
-          let row = rows.rows[index]
-          Text(rows.text(row))
-            .font(TextRole.body)
-            .lineSpacing(TextRole.bodyLeading)
-            .foregroundStyle(Token.foreground)
-            .textSelection(.enabled)
+    let comments = context.comments
+    ScrollViewReader { reader in
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 0) {
+          ForEach(0..<rows.rows.count, id: \.self) { index in
+            let row = rows.rows[index]
+            let text = rows.text(row)
+            let drawn = WordsInk.attributed(text, mono: false, size: typeSize, plain: true)
+            // A comment is found again by its words, in the row it was made in.
+            let here = comments.filter { Int($0.startOffset) / DocumentView.partStride == index }
+            SelectableWords(
+              words: drawn, comments: context.takes, marked: WordsInk.marks(here, in: drawn, base: index * DocumentView.partStride),
+              writing: context.writing(block: place(row, index: index, text: text, start: 0).block, base: index * DocumentView.partStride, in: drawn),
+              comment: { start, quote in
+                let at = place(row, index: index, text: text, start: start)
+                context.begin(.words(block: at.block, start: at.start, quote: quote))
+              },
+              opened: { context.desk.edit($0) }
+            )
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, index == 0 ? 0 : row.first ? Space.snug : TextRole.bodyLeading)
+            .id(index)
+          }
         }
+        .padding(.horizontal, Space.page)
+        .padding(.top, Space.card)
+        .padding(.bottom, Space.section)
       }
-      .padding(.horizontal, Space.page)
-      .padding(.top, Space.card)
-      .padding(.bottom, Space.section)
+      .scrollEdgeEffectStyle(.soft, for: .top)
+      .scrollDismissesKeyboard(.interactively)
+      .accessibilityIdentifier("file-text")
+      .onChange(of: context.desk.draft) { _, draft in
+        guard let draft, draft.file == context.item.id, case .words(_, let start, _) = draft.target else { return }
+        withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .easeInOut(duration: 0.25)) { reader.scrollTo(start / DocumentView.partStride, anchor: DocumentView.overKeyboard) }
+      }
+      .onChange(of: context.desk.sought) { _, sought in
+        guard let comment = sought?.comment, comment.attachment == context.item.id else { return }
+        withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .easeInOut(duration: 0.25)) { reader.scrollTo(Int(comment.startOffset) / DocumentView.partStride, anchor: .center) }
+      }
     }
-    .scrollEdgeEffectStyle(.soft, for: .top)
-    .accessibilityIdentifier("file-text")
   }
 }
 
 /// Code, a log or a data file: each line with its number, a long line wrapped under itself so nothing is cut and
-/// nothing scrolls sideways, and a very long one (a minified bundle) in pieces under its number. A line's first row
-/// is found by its number (`TextRows.row(ofLine:)`): what a comment on a line will be on.
+/// nothing scrolls sideways, and a very long one (a minified bundle) in pieces under its number.
+///
+/// A touch on a line starts a comment on it; while that comment is being written, a touch on another line takes
+/// the run of lines from the one to the other, and a touch inside the run starts again from that line. A comment
+/// is on the file's own lines (`TextRows.source`), however a long one is cut for the screen. Lines already
+/// commented on carry a tint; a touch on one opens its comment.
 struct CodeLinesView: View {
   let rows: TextRows
+  let context: CommentContext
   @ScaledMetric(relativeTo: .footnote) private var digit: CGFloat = 8
+
+  private func touched(_ line: Int, comments: [FileComment]) {
+    let writing = context.desk.lines(in: context.item.id)
+    // A line with a comment opens it, unless a run is being taken across it.
+    if writing == nil, let kept = comments.last(where: { $0.codeRange.map { ($0.lineStart...$0.lineEnd).contains(line) } ?? false }) { return context.desk.edit(kept) }
+    let run = FileComments.run(writing, touched: line)
+    UISelectionFeedbackGenerator().selectionChanged()
+    context.begin(.lines(run, code: rows.source(lines: run)))
+  }
 
   var body: some View {
     let gutter = max(Size.gutter, CGFloat(String(rows.lines).count) * digit)
-    ScrollView {
-      LazyVStack(alignment: .leading, spacing: 0) {
-        ForEach(0..<rows.rows.count, id: \.self) { index in
-          let row = rows.rows[index]
-          let words = rows.text(row)
-          HStack(alignment: .firstTextBaseline, spacing: Space.step) {
-            Text(row.first ? "\(row.line)" : " ")
-              .font(TextRole.code(.caption))
-              .monospacedDigit()
-              .foregroundStyle(Token.mutedForeground.opacity(0.8))
-              .frame(width: gutter, alignment: .trailing)
-              .accessibilityHidden(true)
-            Text(words.isEmpty ? " " : words)
-              .font(TextRole.code(.footnote))
-              .foregroundStyle(Token.foreground)
-              .textSelection(.enabled)
-              .frame(maxWidth: .infinity, alignment: .leading)
+    let comments = context.comments
+    let takes = context.takes
+    let writing = context.desk.lines(in: context.item.id)
+    let commented = comments.compactMap { $0.codeRange.map { $0.lineStart...$0.lineEnd } }
+    ScrollViewReader { reader in
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 0) {
+          ForEach(0..<rows.rows.count, id: \.self) { index in
+            let row = rows.rows[index]
+            let words = rows.text(row)
+            let chosen = writing?.contains(row.line) == true
+            let kept = commented.contains { $0.contains(row.line) }
+            HStack(alignment: .firstTextBaseline, spacing: Space.step) {
+              Text(row.first ? "\(row.line)" : " ")
+                .font(TextRole.code(.caption))
+                .monospacedDigit()
+                .foregroundStyle(chosen || kept ? Token.primary : Token.mutedForeground.opacity(0.8))
+                .frame(width: gutter, alignment: .trailing)
+                .accessibilityHidden(true)
+              Text(words.isEmpty ? " " : words)
+                .font(TextRole.code(.footnote))
+                .foregroundStyle(Token.foreground)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.top, index > 0 && row.first ? TextRole.codeLeading : 0)
+            .padding(.leading, Space.close)
+            .padding(.trailing, Space.card)
+            // The lines being commented on, and the ones already commented on: a ground, edge to edge.
+            .background(chosen ? Color(uiColor: SelectableWords.tint(0.22, dark: 0.4)) : kept ? Color(uiColor: SelectableWords.tint(0.1, dark: 0.2)) : Color.clear)
+            .contentShape(Rectangle())
+            .onTapGesture { if takes { touched(row.line, comments: comments) } }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(chosen ? [.isSelected] : [])
+            .accessibilityAction(named: PhoneWords.comment) { if takes { touched(row.line, comments: comments) } }
+            .accessibilityIdentifier(row.first ? "line/\(row.line)" : "")
+            .id(index)
           }
-          .padding(.top, index > 0 && row.first ? TextRole.codeLeading : 0)
         }
+        .padding(.top, Space.step)
+        .padding(.bottom, Space.section)
       }
-      .padding(.leading, Space.close)
-      .padding(.trailing, Space.card)
-      .padding(.top, Space.step)
-      .padding(.bottom, Space.section)
+      .scrollEdgeEffectStyle(.soft, for: .top)
+      .scrollDismissesKeyboard(.interactively)
+      .accessibilityIdentifier("file-code")
+      // The first line of a run being commented on comes up to where the keyboard does not cover it; stretching the
+      // run moves nothing.
+      .onChange(of: writing?.lowerBound) { was, line in
+        guard was == nil, let line, let at = rows.row(ofLine: line) else { return }
+        withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .easeInOut(duration: 0.25)) { reader.scrollTo(at, anchor: DocumentView.overKeyboard) }
+      }
+      .onChange(of: context.desk.sought) { _, sought in
+        guard let comment = sought?.comment, comment.attachment == context.item.id, let line = comment.codeRange?.lineStart, let at = rows.row(ofLine: line) else { return }
+        withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .easeInOut(duration: 0.25)) { reader.scrollTo(at, anchor: .center) }
+      }
     }
-    .scrollEdgeEffectStyle(.soft, for: .top)
-    .accessibilityIdentifier("file-code")
   }
 }

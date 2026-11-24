@@ -1,0 +1,119 @@
+/* Ship (approval "inbox-ship-mode", look "Glint"; pulls/ShipRow.tsx, ShipMenu.tsx, ShipLog.tsx). Water and sky, cool,
+   never the product's violet. Only a row that ships draws any of it; only transform and opacity move. */
+.pn-inbox {
+  --ib-sea-50: oklch(0.968 0.02 215); --ib-sea-100: oklch(0.935 0.042 212); --ib-sea-200: oklch(0.875 0.072 212);
+  --ib-sea-300: oklch(0.8 0.095 216); --ib-sea-600: oklch(0.52 0.115 234);
+  --ib-sky-100: oklch(0.94 0.035 248); --ib-sky-200: oklch(0.885 0.06 250);
+  --ib-sand-50: oklch(0.972 0.03 85); --ib-sand-100: oklch(0.935 0.06 82); --ib-sand-ink: oklch(0.52 0.12 70);
+  --ib-merged-ink: #6f3fc8; --ib-glint: rgb(255 255 255 / 0.95);
+}
+/* Dark is the theme without `.light` (ThemeProvider), as inbox.css says it. */
+:root:not(.light) .pn-inbox {
+  --ib-sea-50: oklch(0.29 0.03 225); --ib-sea-100: oklch(0.32 0.045 222); --ib-sea-200: oklch(0.37 0.065 220);
+  --ib-sea-300: oklch(0.44 0.085 220); --ib-sea-600: oklch(0.78 0.11 222);
+  --ib-sky-100: oklch(0.3 0.035 250); --ib-sky-200: oklch(0.37 0.055 250);
+  --ib-sand-50: oklch(0.3 0.035 80); --ib-sand-100: oklch(0.35 0.055 80); --ib-sand-ink: oklch(0.83 0.12 82);
+  --ib-merged-ink: #b392f0; --ib-glint: rgb(255 255 255 / 0.22);
+}
+
+/* The row: the water behind its lines, which stay on top. */
+.ib-prrow[data-ship] > :is(.ib-rvr-l1, .ib-rvr-l2, .ib-rvr-l2p) { position: relative; z-index: 1; }
+.ib-shp { position: absolute; inset: 1px 0; border-radius: 8px; overflow: hidden; pointer-events: none; }
+.ib-shp-rev, .ib-shp-in, .ib-shp-tint, .ib-shp-sand { position: absolute; inset: 0; }
+.ib-shp-rev { overflow: hidden; }
+.ib-shp-tint { background: linear-gradient(90deg, var(--ib-sea-50), var(--ib-sky-100) 60%, var(--ib-sea-50)); }
+.ib-shp-sand { opacity: 0; background: linear-gradient(90deg, var(--ib-sand-100), var(--ib-sand-50) 70%); transition: opacity 520ms ease-in-out; }
+.ib-shp-pool { position: absolute; top: -60px; width: 260px; height: 150px; animation: ib-shp-drift-x 9s ease-in-out infinite alternate; }
+.ib-shp-pool > span { display: block; width: 100%; height: 100%; animation: ib-shp-drift-y 7s ease-in-out infinite alternate; }
+.ib-shp-a { left: 4%; }
+.ib-shp-a > span { background: radial-gradient(closest-side, color-mix(in oklab, var(--ib-sea-300) 80%, transparent), color-mix(in oklab, var(--ib-sea-200) 40%, transparent) 55%, transparent); }
+.ib-shp-b { left: 50%; animation-duration: 11s; animation-direction: alternate-reverse; }
+.ib-shp-b > span { animation-duration: 8s; background: radial-gradient(closest-side, var(--ib-sky-200), color-mix(in oklab, var(--ib-sky-200) 40%, transparent) 55%, transparent); }
+/* The glint: a band of light that crosses the row every 4.2 s, in 1.7 s. Its box is the row's width, so 100% is across. */
+.ib-shp-glide { position: absolute; inset: -8px 0; animation: ib-shp-glide 4.2s linear 1.2s infinite both; transition: opacity 300ms; }
+.ib-shp-glint { position: absolute; top: 0; bottom: 0; left: 0; width: 70px; transform: skewX(-18deg);
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--ib-glint) 50%, transparent) 30%, var(--ib-glint) 50%, color-mix(in oklab, var(--ib-glint) 50%, transparent) 70%, transparent); }
+@keyframes ib-shp-drift-x { from { transform: translateX(-80px); } to { transform: translateX(80px); } }
+@keyframes ib-shp-drift-y { from { transform: translateY(-8px); } to { transform: translateY(8px); } }
+@keyframes ib-shp-glide { 0% { transform: translateX(-90px); opacity: 0; } 4%, 36% { opacity: 1; } 40%, 100% { transform: translateX(calc(100% + 20px)); opacity: 0; } }
+/* The launch: the water fills the row from the left, once. */
+.ib-shp[data-shp-launch] .ib-shp-rev { animation: ib-shp-fill 850ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.ib-shp[data-shp-launch] .ib-shp-in { animation: ib-shp-fill-in 850ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes ib-shp-fill { from { transform: translateX(-100%); } to { transform: none; } }
+@keyframes ib-shp-fill-in { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes ib-shp-bob { from { transform: translateY(-0.8px); } to { transform: translateY(0.8px); } }
+@keyframes ib-shp-rock { from { transform: rotate(-3deg); } to { transform: rotate(3deg); } }
+
+/* The sail, and the agent's mark a beat behind it. */
+.ib-shp-g { flex: none; display: block; fill: currentColor; }
+.ib-shp-sail { display: inline-flex; color: var(--ib-sea-600); animation: ib-shp-bob 1.5s ease-in-out infinite alternate; }
+.ib-shp-rock { display: inline-flex; transform-origin: 50% 90%; animation: ib-shp-rock 1.9s ease-in-out infinite alternate; }
+.ib-prrow[data-ship="shipping"] .ib-rvr-agent { animation: ib-shp-bob 1.5s ease-in-out -0.4s infinite alternate; }
+/* Off screen, the row holds still (ShipRow.tsx's one observer marks the row). */
+.ib-prrow[data-shp-off] :is(.ib-shp-pool, .ib-shp-pool > span, .ib-shp-glide, .ib-shp-sail, .ib-shp-rock, .ib-rvr-agent) { animation-play-state: paused; }
+
+/* Stuck: sand comes over the water, the light goes, everything stops. */
+.ib-prrow[data-ship="stuck"] .ib-shp-sand { opacity: 1; }
+.ib-prrow[data-ship="stuck"] .ib-shp-glide { opacity: 0; }
+.ib-prrow[data-ship="stuck"] :is(.ib-shp-pool, .ib-shp-pool > span, .ib-shp-glide, .ib-shp-sail, .ib-shp-rock) { animation-play-state: paused; }
+.ib-prrow[data-ship="stuck"] .ib-shp-sail { color: var(--ib-sand-ink); }
+.ib-shp-word { flex: none; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; }
+/* Stuck words sit between the title and the row's end. "Stuck:" is never cut; the reason after it keeps a floor (the
+   words' box never under min(8em, 26%) of the line) and is cut with "…" past it. Short of room, the words give way
+   faster than the title (flex-shrink 4) and never take more than 45% of the line, so the title keeps the larger
+   share down to its own floor. A long unbroken title (split in its middle) takes what the words leave. */
+.ib-prrow[data-ship="stuck"] .ib-shp-word { display: inline-flex; justify-content: flex-end; flex: 0 4 auto; min-width: min(8em, 26%); max-width: 45%; margin-left: auto; overflow: hidden; color: var(--ib-sand-ink); }
+.ib-shp-head { flex: none; white-space: pre; }
+.ib-shp-why { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-prrow[data-ship="stuck"] .ib-rvr-t { min-width: min(6em, 25%); }
+.ib-prrow[data-ship="stuck"] .ib-rvr-end { margin-left: 0; }
+/* Merged: the words take the end of the row, where the agent and the age were. */
+.ib-prrow[data-ship="merged"] .ib-rvr-end { position: relative; }
+.ib-prrow[data-ship="merged"] .ib-rvr-end > :is(.ib-rvr-agent, .ib-rvr-age) { visibility: hidden; }
+.ib-prrow[data-ship="merged"] .ib-shp-word { position: absolute; right: 0; top: 50%; transform: translateY(-50%); color: var(--ib-merged-ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ib-shp :is(.ib-shp-rev, .ib-shp-in, .ib-shp-pool, .ib-shp-pool > span),
+  .ib-shp[data-shp-launch] :is(.ib-shp-rev, .ib-shp-in),
+  .ib-prrow[data-ship] :is(.ib-shp-sail, .ib-shp-rock, .ib-rvr-agent) { animation: none; }
+  .ib-shp-glide { display: none; animation: none; transition: none; }
+  .ib-shp-sand { transition: none; }
+}
+
+/* The menu's Ship: the menu's own shape; only its sail has colour, and it says who will do it. */
+.ib-pmi .ib-shp-g { width: 15px; height: 15px; color: var(--ib-sea-600); }
+.ib-pmi .ib-shp-end { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; padding-left: 18px; color: var(--muted-foreground); }
+.ib-pm.ib-shp-agents { width: 340px; max-width: calc(100vw - 24px); padding: 6px; }
+.ib-shp-agents .ib-rpick-row { cursor: default; outline: none; }
+.ib-shp-agents .ib-rpick-row[data-highlighted] { background: color-mix(in oklch, var(--muted) 55%, transparent); }
+.ib-shp-agents .ib-rpick-name { pointer-events: none; }
+.ib-shp-agents .ib-rpick-tick { pointer-events: none; }
+.ib-shp-agents .ib-rpick-row[data-on] .ib-rpick-tick > span { background: var(--primary); box-shadow: none; color: var(--primary-foreground); }
+.ib-shp-sheet .ib-rpick-row[data-on] .ib-rpick-tick > span { background: var(--primary); box-shadow: none; color: var(--primary-foreground); }
+.pn-inbox .ib-shp-sheet-row { width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ib-shp-sheet .ib-rpick-name { height: 52px; pointer-events: none; }
+.pn-inbox .ib-shp-sheet-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+
+/* The ship log: a plain running list, newest first, and Stop. */
+.ib-shp-log { width: 372px; max-width: calc(100vw - 24px); padding: 6px 6px 8px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow); font-size: var(--ib-fs-13-5, 13.5px); outline: none; }
+.ib-shp-log-h { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 4px 0 10px; }
+.ib-shp-log-h .ib-shp-g { width: 15px; height: 15px; color: var(--ib-sea-600); }
+.ib-shp-log-h b { flex: 1; font-weight: 650; font-size: var(--ib-fs-14, 14px); }
+.pn-inbox .ib-shp-stop { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border: 0; border-radius: 7px; font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); background: var(--card); box-shadow: inset 0 0 0 1px var(--border); cursor: pointer; }
+.pn-inbox .ib-shp-stop:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-shp-who { display: flex; align-items: center; gap: 6px; padding: 0 10px 8px 33px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-shp-list { max-height: min(60vh, 420px); overflow-y: auto; border-top: 1px solid var(--ib-line, var(--border)); padding-top: 4px; }
+.ib-shp-e { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 0 6px; align-items: baseline; padding: 5px 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.ib-shp-e .ib-shp-tm { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; }
+.ib-shp-e code { background: var(--ib-fill, var(--muted)); border-radius: 4px; padding: 0 4px; font-size: var(--ib-fs-11-5, 11.5px); }
+.ib-shp-e[data-now] .ib-shp-tm { color: var(--ib-sea-600); font-weight: 550; }
+.ib-shp-e[data-kind="stuck"] > span:last-child { color: var(--ib-sand-ink); }
+.ib-shp-sheet .ib-shp-log { width: auto; max-width: none; box-shadow: none; padding: 0; }
+/* The sheet says "Ship log" in its own title. */
+.ib-shp-sheet .ib-shp-log-h > :is(.ib-shp-g, b) { display: none; }
+.ib-shp-sheet .ib-shp-stop { margin-left: auto; }
+.ib-shp-sheet .ib-shp-who { padding-left: 10px; }
+.ib-shp-pop { outline: none; }
+/* On the review's page: the same log, in the page's flow. */
+.ib-shp-onpage { margin: 14px 0 4px; }
+.ib-shp-onpage .ib-shp-log { width: auto; max-width: 560px; box-shadow: inset 0 0 0 1px var(--border); }

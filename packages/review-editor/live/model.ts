@@ -1,6 +1,7 @@
 import { newSideLines, oldSideLines } from '@plannotator/core/line-anchor';
 import { reviewAnchorNow, reviewConversations, REVIEW_ANCHOR_CODE_LINES_MAX, type InboxReviewAnchor, type ReviewConversation, type ReviewThreadNow } from '@plannotator/core/review-threads';
 import type { InboxMessage } from '@plannotator/core/inbox-types';
+import { splitInboxReplyBody } from '@plannotator/core/inbox-questions';
 
 export type LiveMessage = InboxMessage;
 
@@ -165,7 +166,18 @@ export function commentOfMessage(message: LiveMessage): { filePath: string; line
   const anchor = message.review_anchor;
   if (!anchor) return null;
   const whole = anchor.line_start === 0;
-  return { filePath: anchor.file, lineStart: anchor.line_start, lineEnd: anchor.line_end, side: anchor.side, scope: whole ? 'file' : 'line', text: message.body };
+  // Sent again, the Inbox writes its still-open sentence once more: the comment comes back without it.
+  return { filePath: anchor.file, lineStart: anchor.line_start, lineEnd: anchor.line_end, side: anchor.side, scope: whole ? 'file' : 'line', text: liveWords(message) };
+}
+
+/**
+ * A message's text as its author wrote it: a person's without the still-open sentence the Inbox wrote after their words
+ * for the agent (a reply to an agent's message with a question open, `splitInboxReplyBody`); an agent's as it is.
+ */
+function liveWords(message: LiveMessage): string {
+  if (message.author.kind !== 'person') return message.body;
+  const parts = splitInboxReplyBody(message.body);
+  return [parts.words, parts.rest].filter((part) => part !== '').join('\n\n');
 }
 
 export interface ForgeThreadComments {
@@ -175,8 +187,9 @@ export interface ForgeThreadComments {
 
 export function threadForgeText(thread: PlacedThread): string {
   const [first, ...rest] = thread.conversation.messages;
-  const lines = [first?.body.trim() ?? ''];
-  for (const message of rest) lines.push(`**${authorName(message)}:** ${message.body.trim()}`);
+  // The person's words only: the Inbox's sentence for the agent is never posted to the forge.
+  const lines = [first ? liveWords(first).trim() : ''];
+  for (const message of rest) lines.push(`**${authorName(message)}:** ${liveWords(message).trim()}`);
   return lines.filter(Boolean).join('\n\n');
 }
 

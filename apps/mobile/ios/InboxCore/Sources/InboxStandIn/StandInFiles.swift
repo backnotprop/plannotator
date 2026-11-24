@@ -160,6 +160,16 @@ extension StandInData {
   /// A page that tries every way out of its viewer once it has loaded: a fetch, a scripted click on a link to a site
   /// and on a phone number, and a move of `location` to another page. On the phone none of them goes anywhere; the page says what it
   /// tried, and what its policy refused.
+  /// A page whose frame is meant to let touches through (its own inline `pointer-events: none`) to the button under it.
+  public static let framedPageName = "framed.html"
+  public static let framedPage = """
+    <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>body{font:17px -apple-system,sans-serif;margin:0;padding:24px} .stack{position:relative;height:180px} button{position:absolute;left:0;top:0;width:100%;height:180px;font-size:20px} iframe{position:absolute;left:0;top:0;width:100%;height:180px;border:0;background:transparent}</style>
+    </head><body><h1>Framed</h1>
+    <div class="stack"><button onclick="this.textContent = 'Pressed'">Under the frame</button><iframe title="Overlay" srcdoc="<p></p>" style="pointer-events: none"></iframe></div>
+    </body></html>
+    """
+
   public static let leavingPageName = "leaving.html"
   public static let leavingPage = """
     <!doctype html>

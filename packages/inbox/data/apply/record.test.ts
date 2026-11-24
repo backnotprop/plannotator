@@ -91,6 +91,24 @@ describe('one stream record on a held thread', () => {
   });
 });
 
+describe("an archived root's moved_to (the read serves the target's name and whether it is open)", () => {
+  const moved = { thread_id: 'msg_BRIEF', subject: 'Morning brief' };
+  const archived = model([msg(T, { seq: 1, resolved_at: at, moved_to: { ...moved, open: true, name: 'Thursday brief' } })]);
+  test("the Inbox's quiet note to the moved agent is never drawn in the thread", () => {
+    const note = msg('msg_NOTE', { author: person, reply_to: T, moved_note: { thread_id: 'msg_BRIEF', questions: [`${T}/q1`] } });
+    expect(applyRecord(archived, message(43, note)).kind).toBe('none');
+  });
+  test('gained or dropped (the agent wrote again): the thread is read', () => {
+    expect(applyRecord(held, message(40, msg(T, { moved_to: moved }), false)).kind).toBe('reread');
+    expect(applyRecord(archived, message(41, msg(T, { resolved_at: at, moved_to: null }), false)).kind).toBe('reread');
+  });
+  test("another line of the root keeps the read's served name and link", () => {
+    const out = applyRecord(archived, message(42, msg(T, { resolved_at: at, moved_to: moved, thread_name: 'Retries' }), false));
+    if (out.kind !== 'applied') throw new Error('not applied');
+    expect(out.model.thread.messages[0]!.moved_to).toEqual({ ...moved, open: true, name: 'Thursday brief' });
+  });
+});
+
 describe('a reply from another window that carried comments', () => {
   test('its comment records come first; the reply then draws with their count, so it is never offered for Take back', () => {
     const ann = (seq: number, id: string): InboxEvent => ({ seq, kind: 'annotation', id, annotation: { thread_id: T, sent_reply_id: 'msg_X' } as never });

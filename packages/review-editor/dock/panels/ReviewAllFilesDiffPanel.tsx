@@ -1,4 +1,5 @@
 import React, { useCallback, useContext, useLayoutEffect, useMemo, useState } from 'react';
+import { NoMatchingReviewFiles } from '../../components/ReviewFileFilter';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { MarkdownPreviewFailed } from '../../components/DiffViewer';
@@ -7,7 +8,8 @@ import { CommitDescriptionHeader } from '../../components/CommitDescriptionHeade
 import { ImageDiffPreview } from '../../components/ImageDiffPreview';
 import { ImageViewMenu } from '../../components/image-diff/ImageViewMenu';
 import { differencesSupported } from '../../components/image-diff/differences';
-import { isSvgPath, setSvgView, svgViewOf, useSvgView, useSvgViewVersion } from '../../components/image-diff/svgView';
+import { isSvgPath, svgViewOf, useSvgViewVersion } from '../../components/image-diff/svgView';
+import { useSvgViews } from '../../components/image-diff/SvgViews';
 import { peekImageSizes, useImageSizesReady } from '../../components/image-diff/imageSizes';
 import { imagePreviewHeight } from '../../components/image-diff/previewHeight';
 import { imageDiffSettings } from '../../components/image-diff/imageDiffSettings';
@@ -27,20 +29,6 @@ import { PaneSlotContext, usePaneDiffStyle } from '../../workspace/paneContext';
  * slot republishes only on updateItem, but a context consumer inside it still
  * re-renders, so Changes <-> Read updates the label without touching the item.
  */
-function SvgViewControl({ file, iconOnly, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) {
-  const view = useSvgView(file.path);
-  return (
-    <ImageViewMenu
-      filePath={file.path}
-      comparable={file.status !== 'added' && file.status !== 'deleted'}
-      differencesAvailable={differencesSupported()}
-      source={{ active: view === 'source', onChoose: (source) => setSvgView(file.path, source ? 'source' : 'image') }}
-      iconOnly={iconOnly}
-      touch={touch}
-    />
-  );
-}
-
 function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) {
   const preview = useReviewStateOptional()?.markdownPreview;
   if (!preview) return null;
@@ -200,43 +188,8 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   // object every context re-render and churn the measuring ResizeObserver in
   // AllFilesCodeView (leadingContent is in its effect deps).
   const svgVersion = useSvgViewVersion();
-  const svgFiles = useMemo(
-    () => (imagesAvailable ? state.files.filter((file) => isSvgPath(file.path) || isSvgPath(file.oldPath)) : []),
-    [imagesAvailable, state.files],
-  );
-  const markdownPreview = useMemo(() => {
-    if (svgFiles.length === 0) return baseMarkdownPreview;
-    const isSvg = (file: DiffFile) => isSvgPath(file.path) || isSvgPath(file.oldPath);
-    const svgImagePaths = svgFiles.filter((file) => svgViewOf(file.path) === 'image').map((file) => file.path);
-    return {
-      previewedPaths: new Set([...(baseMarkdownPreview?.previewedPaths ?? []), ...svgImagePaths]),
-      isPreviewable: (file: DiffFile) => isSvg(file) || (baseMarkdownPreview?.isPreviewable(file) ?? false),
-      show: (filePath: string, view: Parameters<NonNullable<typeof baseMarkdownPreview>['show']>[1]) => {
-        if (isSvgPath(filePath)) setSvgView(filePath, view === 'source' ? 'source' : 'image');
-        else baseMarkdownPreview?.show(filePath, view);
-      },
-      onEditingFileChange: baseMarkdownPreview?.onEditingFileChange,
-      registerViewTarget: baseMarkdownPreview?.registerViewTarget,
-      renderViewControl: (args: { file: DiffFile; iconOnly: boolean; touch: boolean }) =>
-        isSvg(args.file) ? <SvgViewControl {...args} /> : baseMarkdownPreview?.renderViewControl(args) ?? null,
-      render: (args: { file: DiffFile; onHeightChange: () => void }) =>
-        isSvg(args.file) ? (
-          <ImageDiffPreview
-            key={`${snapshotId ?? ''}:${args.file.path}`}
-            filePath={args.file.path}
-            status={args.file.status}
-            patch={args.file.patch}
-            snapshotId={snapshotId}
-            variant="all-files"
-            compact={compact}
-            fallback={null}
-            onHeightChange={args.onHeightChange}
-          />
-        ) : (
-          baseMarkdownPreview?.render(args) ?? null
-        ),
-    };
-  }, [baseMarkdownPreview, svgFiles, svgVersion, snapshotId, compact]);
+  // A changed SVG: Image / Source through the same seam (image-diff/SvgViews.tsx).
+  const markdownPreview = useSvgViews(baseMarkdownPreview, { files: state.files, enabled: imagesAvailable, snapshotId, compact });
 
   const leadingContent = useMemo(
     () => (commitInfo ? <CommitDescriptionHeader key={commitInfo.sha} info={commitInfo} /> : undefined),
@@ -272,10 +225,13 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   );
   if (!imageSizesReady) return null;
 
+  if (state.filteredDiffFiles?.length === 0 && state.onClearFileFilter) {
+    return <NoMatchingReviewFiles onClear={state.onClearFileFilter} />;
+  }
   return (
     <>
     <AllFilesCodeView
-      files={state.files}
+      files={state.filteredDiffFiles ?? state.files}
       {...(state.callTreeHunkNotes && state.callTreeHunkNotes.length > 0 ? { hostLineNotes: state.callTreeHunkNotes } : {})}
       diffStyle={paneDiffStyle}
       diffOverflow={state.diffOverflow}

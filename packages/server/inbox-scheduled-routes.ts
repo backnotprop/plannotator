@@ -11,6 +11,7 @@ import { isWindowRequest, INBOX_WINDOW_ONLY_BODY } from "./inbox-cross-site";
 import type { InboxLoginItem } from "./inbox-scheduled-login";
 import type { InboxScheduled } from "./inbox-scheduled";
 import { createOnce } from "./inbox-scheduled-once";
+import type { FarRoutines } from "./inbox-scheduled-machines";
 
 /** Each Inbox's window creates under way, by `idempotency_key` (inbox-scheduled-once.ts). */
 const creating = new WeakMap<InboxScheduled, Map<string, Promise<unknown>>>();
@@ -79,10 +80,32 @@ type Json = (body: unknown, status?: number) => Response;
 export async function scheduledRoute(
   req: Request,
   path: string,
-  deps: { scheduled: InboxScheduled; on: () => boolean; launchOn: () => boolean; serverSession: string; json: Json; readBody: (req: Request) => Promise<Record<string, unknown>>; now?: () => number },
+  deps: {
+    scheduled: InboxScheduled;
+    on: () => boolean;
+    launchOn: () => boolean;
+    serverSession: string;
+    json: Json;
+    readBody: (req: Request) => Promise<Record<string, unknown>>;
+    now?: () => number;
+    /** The linked computers' routines, for the window's merged read (inbox-scheduled-machines.ts). */
+    far?: () => Promise<FarRoutines[]>;
+    /** A press in a window of a linked computer, through this Inbox's door (its token and the window's mark). */
+    farWindow?: (req: Request) => boolean;
+  },
 ): Promise<Response | null> {
   if (path !== "/api/inbox/scheduled" && !path.startsWith("/api/inbox/scheduled/")) return null;
   const { scheduled, json } = deps;
+  // The window's merged read: this computer's routines (while they are on here) and every linked computer's, each
+  // row with `machine`, and `computers`: which of them take routines, whether they are on there, and which are away.
+  if (req.method === "GET" && path === "/api/inbox/scheduled" && deps.far && new URL(req.url).searchParams.get("machines") === "1") {
+    const far = await deps.far();
+    return json({
+      scheduled: [...(deps.on() ? scheduled.list() : []), ...far.flatMap((one) => one.rows)],
+      launch_on: deps.launchOn(),
+      computers: far.map(({ machine, on, launch_on, away, read_at }) => ({ id: machine, on, launch_on, away, read_at })),
+    });
+  }
   if (!deps.on()) return json({ error: "Routines are off on this computer. Turn them on in Settings, Capabilities.", code: "routines_off" }, 404);
   const parts = path.slice("/api/inbox/scheduled".length).split("/").filter(Boolean);
   if (req.method === "GET") {
@@ -95,7 +118,7 @@ export async function scheduledRoute(
   if (checkServerSession(body, deps.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
   if (parts[0] === "preview" && parts.length === 1) return json(inboxScheduledPreview((body.schedule ?? null) as InboxScheduledSchedule, new Date(deps.now?.() ?? Date.now())));
   // Every write is the person's, from their window: an agent uses the routine tool.
-  if (!isWindowRequest(req, body, deps.serverSession)) return json({ ...INBOX_WINDOW_ONLY_BODY, error: "A routine is changed in the Inbox window; an agent uses the routine tool." }, 403);
+  if (!isWindowRequest(req, body, deps.serverSession) && deps.farWindow?.(req) !== true) return json({ ...INBOX_WINDOW_ONLY_BODY, error: "A routine is changed in the Inbox window; an agent uses the routine tool." }, 403);
   const person = { kind: "person" } as const;
   if (parts.length === 0) {
     if (!creating.has(scheduled)) creating.set(scheduled, new Map());
@@ -119,7 +142,8 @@ export async function scheduledRoute(
       return json({ scheduled: scheduled.get(id).scheduled, message_id: message.id, ...(message.scheduled_run?.failed ? { failed: message.scheduled_run.failed } : {}) }, 202);
     }
     case "stop":
-      return json({ scheduled: scheduled.rowOf(await scheduled.stopRun(id)) });
+      // `run`: the run the person pressed Stop on (its divider's id). Another run going now is left alone.
+      return json({ scheduled: scheduled.rowOf(await scheduled.stopRun(id, typeof body.run === "string" ? body.run : undefined)) });
     case "delete":
       await scheduled.remove(id, person);
       return json({ deleted: true });

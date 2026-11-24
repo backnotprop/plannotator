@@ -13,6 +13,10 @@ import { RunningDots } from './marks';
 import { createdWords, elapsedWords, lastRunWords, nextRunWords, shortScheduleWords, splitScheduled } from './words';
 
 export interface RowActs {
+  /** A linked computer's routine: that computer's name, said after the routine's own, as a project row says its computer. */
+  computer?: (row: InboxScheduledRow) => string | null;
+  /** Its computer is away: the row is as that computer last said, so no next run is claimed. */
+  away?: (row: InboxScheduledRow) => boolean;
   open: (row: InboxScheduledRow) => void;
   run: (row: InboxScheduledRow) => void;
   stop: (row: InboxScheduledRow) => void;
@@ -102,12 +106,14 @@ function lastCell(row: InboxScheduledRow, now: number): ReactNode {
 }
 
 function WideRow({ row, acts, now }: { row: InboxScheduledRow; acts: RowActs; now: number }) {
-  const next = nextRunWords(row, now);
+  const next = acts.away?.(row) ? '' : nextRunWords(row, now);
+  const computer = acts.computer?.(row) ?? null;
   return (
-    <div className="st-row st-cols" role="row" onClick={() => acts.open(row)} data-scheduled-row={row.id} data-state={row.state}>
+    <div className="st-row st-cols" role="row" onClick={() => acts.open(row)} data-scheduled-row={row.id} data-state={row.state} data-scheduled-computer={computer ?? undefined}>
       <span role="cell" className="st-name">
-        <button type="button" className="st-open" title={row.name} onClick={stopClick(() => acts.open(row))}>
+        <button type="button" className="st-open" title={computer ? `${row.name} · ${computer}` : row.name} onClick={stopClick(() => acts.open(row))}>
           {row.name}
+          {computer && <span className="st-dim-name"> · {computer}</span>}
         </button>
       </span>
       <span role="cell">
@@ -127,13 +133,14 @@ function WideRow({ row, acts, now }: { row: InboxScheduledRow; acts: RowActs; no
 }
 
 function ShortRow({ row, acts, now, selected }: { row: InboxScheduledRow; acts: RowActs; now: number; selected: boolean }) {
+  const computer = acts.computer?.(row) ?? null;
   return (
-    <div className="st-srow st-scols" role="row" onClick={() => acts.open(row)} data-scheduled-row={row.id} data-state={row.state} data-selected={selected ? '' : undefined}>
+    <div className="st-srow st-scols" role="row" onClick={() => acts.open(row)} data-scheduled-row={row.id} data-state={row.state} data-selected={selected ? '' : undefined} data-scheduled-computer={computer ?? undefined}>
       <span role="cell" className="st-sname">
         <button type="button" className="st-open" title={row.name} aria-current={selected ? 'true' : undefined} onClick={stopClick(() => acts.open(row))}>
           {row.name}
         </button>
-        <span className="st-when">{shortScheduleWords(row)}</span>
+        <span className="st-when">{computer ? `${shortScheduleWords(row)} · ${computer}` : shortScheduleWords(row)}</span>
       </span>
       {/* Run or Stop right of the name, every row's on one line: the name column is the longest name's width. */}
       <span role="cell" className="st-sbtn">

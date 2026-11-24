@@ -34,7 +34,7 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>To scan the pairing code on your computer.</string>
+	<string>To scan the pairing code on your computer, and to take a photo to attach.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>To reach Plannotator on your computer over this Wi-Fi.</string>
 	<key>UIApplicationSceneManifest</key>

@@ -18,8 +18,9 @@
  * it names none of (an older Inbox), its state is not known.
  *
  * The order: agents with something for the person first (the list's urgency order: Priority, Stopped on you, Holding
- * up work, Waiting on you, New), then the others alike, each run by the latest activity; inside an agent, the same
- * urgency order, then newest.
+ * up work, Waiting on you, New), then the others alike, each run by the latest activity; inside an agent, plain newest
+ * first by the time its row prints (`rowTimeIso`: its last message, the person's or the agent's), whatever its group
+ * (the owner, 2026-11-22: no urgency groups there, and Priority gets no special place).
  * Ended agents sit under their own band. An agent with something for the person starts open.
  *
  * Held order (held.ts, as List keeps its places, listView.ts `flatRows`): everything above is worked out when the list
@@ -33,8 +34,9 @@ import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
 import { agentHostName, agentRowName, agentSessions, namedAgents } from '../agents/model';
 import type { MachinesModel } from '../machines';
 import type { ListSort } from '../listView';
+import { rowTimeIso } from '../rowDelivery';
 
-/** The list's urgency order: a row's group, most urgent first; anything else after. */
+/** The list's urgency order: a row's group, most urgent first; anything else after. It orders the agents, never the rows under one. */
 export const AGENT_ROW_ORDER: readonly InboxListGroupId[] = ['priority', 'stopped', 'holding', 'waiting', 'new', 'sent', 'quiet'];
 /** Up to here a row is for the person: its agent comes first and starts open. */
 export const FOR_YOU = AGENT_ROW_ORDER.indexOf('new');
@@ -125,7 +127,7 @@ export function otherAgents(row: InboxListRow, sessions: readonly string[]): Inb
 }
 
 /** Finds a row's agent: the listed ones by launch and session, else one rebuilt from the session. */
-function agentFinder({ groups, machines, labels = {}, chains }: AgentsInputs): (row: InboxListRow) => ViewAgent | null {
+export function agentFinder({ groups, machines, labels = {}, chains }: AgentsInputs): (row: InboxListRow) => ViewAgent | null {
   const self = machines.self;
   const machineOf = (row: InboxListRow) => (machines.all.length === 0 ? null : (row.machine ?? self ?? null));
   const known = new Map<string | null, boolean>();
@@ -191,6 +193,8 @@ function agentFinder({ groups, machines, labels = {}, chains }: AgentsInputs): (
 }
 
 const byRank = (a: { rank: number; at: string }, b: { rank: number; at: string }) => a.rank - b.rank || b.at.localeCompare(a.at);
+/** An agent's threads: newest first, ties by id. */
+const byNewest = (a: { at: string; row: InboxListRow }, b: { at: string; row: InboxListRow }) => b.at.localeCompare(a.at) || a.row.thread_id.localeCompare(b.row.thread_id);
 
 /**
  * The view's agents, their rows and the threads with no agent, each in its place (above). `places`: what the last call
@@ -220,7 +224,7 @@ export function agentsLayout(inputs: AgentsInputs, places: AgentPlaces | null, s
         agent = now?.key ?? null;
         if (now) found.set(now.key, now);
       }
-      const place = holds ? old : { agent, group: section.id, rank: rankOf(section.id), at: row.last_at };
+      const place = holds ? old : { agent, group: section.id, rank: rankOf(section.id), at: rowTimeIso(row) };
       rowPlaces.set(row.thread_id, place);
       const list = rowsOf.get(agent) ?? [];
       list.push({ row, drawn: section.id, rank: place.rank, at: place.at });
@@ -230,15 +234,16 @@ export function agentsLayout(inputs: AgentsInputs, places: AgentPlaces | null, s
   const live: Array<AgentBlock & { rank: number; at: string }> = [];
   const ended: Array<AgentBlock & { rank: number; at: string }> = [];
   for (const [key, list] of rowsOf) {
-    list.sort((a, b) => byRank(a, b) || a.row.thread_id.localeCompare(b.row.thread_id));
+    list.sort(byNewest);
     if (key === null) continue;
     const old = places?.agents.get(key);
     const agent = found.get(key) ?? old?.agent;
     if (!agent) continue;
     const last = list.reduce((max, r) => (r.row.last_at > max ? r.row.last_at : max), '');
     const keep = old !== undefined && (!sorted || (sort.keep !== null && list.some((r) => r.row.thread_id === sort.keep)));
-    // Agents with nothing for the person rank alike, so they go by their newest thread (an old Sent never tops a fresh Quiet).
-    const rank = Math.min(list[0]!.rank, FOR_YOU + 1);
+    // Its most urgent thread (its rows are newest first). Agents with nothing for the person rank alike, so they go by
+    // their newest thread (an old Sent never tops a fresh Quiet).
+    const rank = list.reduce((min, r) => Math.min(min, r.rank), FOR_YOU + 1);
     const place = keep ? { ...old, agent } : { ended: agent.state === 'ended', rank, at: last, open: agent.state !== 'ended' && rank <= FOR_YOU, agent };
     agentPlaces.set(key, place);
     (place.ended ? ended : live).push({ agent, rows: list.map(({ row, drawn }) => ({ row, drawn })), open: place.open, last, rank: place.rank, at: place.at });
@@ -247,6 +252,6 @@ export function agentsLayout(inputs: AgentsInputs, places: AgentPlaces | null, s
   live.sort(order);
   ended.sort(order);
   const strip = ({ agent, rows, open, last }: AgentBlock) => ({ agent, rows, open, last });
-  const none = (rowsOf.get(null) ?? []).sort((a, b) => b.at.localeCompare(a.at) || a.row.thread_id.localeCompare(b.row.thread_id)).map(({ row, drawn }) => ({ row, drawn }));
+  const none = (rowsOf.get(null) ?? []).sort(byNewest).map(({ row, drawn }) => ({ row, drawn }));
   return { live: live.map(strip), ended: ended.map(strip), none, places: { epoch: sort.epoch, rows: rowPlaces, agents: agentPlaces } };
 }

@@ -138,8 +138,8 @@ describe("GET /api/inbox/skills", () => {
     skill(join(outside, ".claude", "skills"), "outside-skill", "description: Not a scratch folder.\n", "# Outside\n");
     process.env.HOME = outside;
     process.env.CLAUDE_CONFIG_DIR = join(outside, ".claude");
-    const names = async (codeReview: boolean, discovered: typeof listReferenceSkills, shape: boolean) =>
-      ((await inboxSkillCatalog(codeReview, discovered, shape).json()) as { skills: Json[] }).skills.map((s) => s.name);
+    const names = async (codeReview: boolean, discovered: typeof listReferenceSkills, routines: boolean) =>
+      ((await inboxSkillCatalog(codeReview, discovered, routines).json()) as { skills: Json[] }).skills.map((s) => s.name);
 
     process.env.PLANNOTATOR_TEST_SANDBOX = "1";
     expect(await names(true, listReferenceSkills, false)).not.toContain("outside-skill");
