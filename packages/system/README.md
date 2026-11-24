@@ -251,7 +251,7 @@ plannotator system schedule install --project <repo folder> --key <project key> 
 - `revision` loads the revision against the project's drawing folder, refuses it with one line per problem when it
   does not load or its `pr:` and `repo:` differ from `--pr`, and stores it as written under
   `<dataDir>/system/<key>/reviews/<host>/<owner>/<repo>/<n>@<sha7>.yaml`. The key is the Inbox's key for the folder
-  (`inboxProjectKey` of its project root, as the Shape store files under it).
+  (`inboxProjectKey` of its project root).
 - `tick` prints the `TickResult`; a failed tick exits 1. `schedule install` writes a plist that runs the installed
   binary, so it refuses to run from a source checkout; launchd runs a first check as soon as it loads the job, then
   every 15 minutes. `list` prints the keys as one JSON array.

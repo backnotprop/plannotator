@@ -424,7 +424,7 @@ test('one tag across machines: found by any machine’s id, written by this Inbo
 });
 
 test('Tags is in the sidebar’s menu and Customize only while the section is drawn, just above Agents', () => {
-  const base = { board: false, reviews: false, shape: false, usage: false, phone: false, agents: true };
+  const base = { board: false, reviews: false, usage: false, phone: false, agents: true };
   expect(drawnSidebarItems(base).has('tags')).toBe(false);
   const drawn = drawnSidebarItems({ ...base, tags: true });
   const items = sidebarMenuItems(INBOX_SIDEBAR_DEFAULT, drawn);
