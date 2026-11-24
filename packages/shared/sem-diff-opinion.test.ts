@@ -273,6 +273,43 @@ describe("Power Up key and opinion routes", () => {
     expect(JSON.stringify([saved.body, asked.body])).not.toContain(KEY);
   });
 
+  test("the endpoint, model and auth overrides never change where an OpenAI key is sent", async () => {
+    dir = mkdtempSync(join(tmpdir(), "pn-opinion-"));
+    const seen: SeenCall[] = [];
+    const decisions = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      seen.push({ url: String(input), auth: new Headers(init?.headers).get("authorization"), body });
+      return body.questions[0].type === "predicate"
+        ? Response.json({ answers: [{ type: "predicate", name: "q", probability: 0.99 }] })
+        : Response.json({ answers: [{
+            type: "choice", name: "q", choice: "moved", probabilities: [{ value: "moved", probability: 0.97 }],
+          }] });
+    }) as typeof fetch;
+    const overrides = {
+      PLANNOTATOR_OPINION_URL: "https://decisions.example.com/v1/systemone",
+      PLANNOTATOR_OPINION_MODEL: "override-model",
+      PLANNOTATOR_OPINION_AUTH: "api-key",
+    };
+    const saved = await route("/api/sem-diff/opinion/settings", "POST", { provider: "openai", apiKey: KEY }, decisions, overrides);
+    expect(saved.body).toMatchObject({ ok: true, provider: "openai" });
+    const asked = await route("/api/sem-diff/opinion", "POST", { candidates: [candidate] }, decisions, overrides);
+    expect(asked.body).toMatchObject({ ok: true, answers: [{ accept: true, model: "gpt-6-luna" }] });
+    // An override the Jev contract would refuse does not stop OpenAI either.
+    const broken = await route("/api/sem-diff/opinion", "POST", { candidates: [{ ...candidate, helper: "other" }] }, decisions, {
+      PLANNOTATOR_OPINION_URL: "ftp://bad.example.com",
+      PLANNOTATOR_OPINION_AUTH: "basic",
+    });
+    expect(broken.body).toMatchObject({ ok: true });
+    expect(seen).toHaveLength(3);
+    for (const call of seen) {
+      expect(call.url).toBe("https://api.openai.com/v1/decisions");
+      expect(call.auth).toBe(`Bearer ${KEY}`);
+      expect(call.body?.model).toBe("gpt-6-luna");
+    }
+    const settings = await route("/api/sem-diff/opinion/settings", "GET", null, decisions, overrides);
+    expect(settings.body).toEqual({ configured: true, provider: "openai" });
+  });
+
   test("a failed OpenAI key check keeps the active provider and distinguishes throttling from quota", async () => {
     dir = mkdtempSync(join(tmpdir(), "pn-opinion-"));
     const settings = "/api/sem-diff/opinion/settings";

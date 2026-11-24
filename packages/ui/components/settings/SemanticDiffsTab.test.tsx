@@ -233,4 +233,27 @@ describe('Settings › Semantic diffs › Power Up', () => {
     const powerUp = [...host!.querySelectorAll<HTMLButtonElement>('[role="switch"]')].find((b) => b.textContent?.includes('Power Up'))!;
     expect(powerUp.disabled).toBe(true);
   });
+
+  test.skipIf(!hasDom)('switching models drops what was typed but brings back the saved Custom endpoint', async () => {
+    globalThis.fetch = (async () => Response.json({
+      configured: true,
+      provider: 'custom',
+      url: 'https://decisions.example.com/v1/systemone',
+      endpoint: 'decisions.example.com',
+      model: 'house-model',
+      auth: 'bearer',
+    })) as unknown as typeof fetch;
+    await mount();
+    const radio = (name: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === name)!;
+    await type('Custom endpoint URL', 'https://typed.example.com/v1');
+    await type('Custom API key', 'typed-but-not-saved');
+    await act(async () => radio('OpenAI Decisions').click());
+    expect(host!.querySelector<HTMLInputElement>('input[aria-label="OpenAI API key"]')!.value).toBe('');
+    expect(host!.textContent).toContain('decisions.example.com keeps powering up until an OpenAI API key works.');
+    await act(async () => radio('Custom').click());
+    expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom endpoint URL"]')!.value).toBe('https://decisions.example.com/v1/systemone');
+    expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom model"]')!.value).toBe('house-model');
+    expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom API key"]')!.value).toBe('');
+    expect(host!.querySelector('[data-power-up-key-save]')!.textContent).toBe('Saved');
+  });
 });

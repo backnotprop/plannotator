@@ -66,7 +66,7 @@ const PROVIDER_SETTINGS = {
   jev: { title: 'Jev key', credential: 'a Jev key', label: 'TypeSafe API key', hint: 'Paste the key from your TypeSafe account', modelHint: 'Jev runs on your TypeSafe account.' },
   clef: { title: 'Workers AI', credential: 'a Clef token', label: 'Workers AI token', hint: 'Your Cloudflare account ID and a Workers AI token', modelHint: 'Clef runs on your Cloudflare account.' },
   openai: { title: 'OpenAI key', credential: 'an OpenAI API key', label: 'OpenAI API key', hint: 'Paste an OpenAI project API key', modelHint: 'OpenAI Decisions runs on your OpenAI API project.' },
-  custom: { title: 'Custom endpoint', credential: 'a custom endpoint key', label: 'Custom API key', hint: 'Endpoint URL, optional model, auth header, and API key', modelHint: 'Any endpoint implementing the systemone API.' },
+  custom: { title: 'Custom endpoint', credential: 'a custom endpoint key', label: 'Custom API key', hint: 'Endpoint URL, optional model, auth header, and API key', modelHint: 'Your own server, if it speaks the same API as Jev.' },
 } satisfies Record<Provider, { title: string; credential: string; label: string; hint: string; modelHint: string }>;
 const KEY_MESSAGE_ID = 'power-up-key-message';
 

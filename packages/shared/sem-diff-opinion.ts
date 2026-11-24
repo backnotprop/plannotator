@@ -277,6 +277,8 @@ function applyCustomMetadata(settings: OpinionSettings, secret: OpinionSecret | 
     settings.auth = target.auth;
     return;
   }
+  // The overrides never reroute OpenAI or Clef, so their settings name no overridden endpoint.
+  if (secret && !usesSystemone(secret)) return;
   if (envConfig.endpoint) settings.endpoint = envConfig.endpoint;
   if (envConfig.model) settings.model = envConfig.model;
 }
