@@ -511,12 +511,16 @@ test.skipIf(!hasDom)('words typed in Other save once after the pause, however ma
   const el = await renderApp();
   await openDecide(el);
   const field = () => cardEl()!.querySelector('textarea[data-question-other]') as HTMLTextAreaElement;
-  for (let i = 1; i <= 40; i += 1) typeInto(field(), `step ${i}`);
-  expect(picks()).toHaveLength(0);
-  await until(() => picks().length === 1, 'the save after the pause');
+  // The first letter answers the question (open → picked): that saves at once, as in the thread.
+  typeInto(field(), 'step 1');
+  await until(() => picks().length === 1, 'the first save');
+  // Every change after it is words only: one save, after the pause.
+  for (let i = 2; i <= 40; i += 1) typeInto(field(), `step ${i}`);
+  expect(picks()).toHaveLength(1);
+  await until(() => picks().length === 2, 'the save after the pause');
   await until(async () => (await questionsOf(world.decide.a))[0]?.answer?.other === 'step 40', 'the words saved');
   await sleep(800);
-  expect(picks()).toHaveLength(1);
+  expect(picks()).toHaveLength(2);
   // Typed, then closed at once: saved as the draft, not lost.
   typeInto(field(), 'step 41');
   closeDialog();
@@ -920,7 +924,7 @@ test.skipIf(!hasDom)("a Done waiting in the thread's reply draft goes with the s
   expect((await questionsOf(action))[0]!.state).toBe('sent');
 }, 30_000);
 
-test.skipIf(!hasDom)("an action item's Undo the server refuses (past its window) says so, and the card stays done", async () => {
+test.skipIf(!hasDom)("an action item's Done waits in the thread's draft, sends nothing, and Undo takes it back even past the old Undo window", async () => {
   const action = await agentSends({
     project: world.project,
     session: world.decide.sessionB,
@@ -933,13 +937,15 @@ test.skipIf(!hasDom)("an action item's Undo the server refuses (past its window)
   await goTo('Run the migration on staging');
   act(() => (dialog()!.querySelector('[data-decision-done]') as HTMLButtonElement).click());
   await until(async () => (await questionsOf(action))[0]?.action_result?.outcome === 'done', 'Done saved');
-  // The server's Undo window (400 ms here) passes; the window still offers Undo (its own is 9 s).
+  // Staged in the draft, not sent: past the actions route's own Undo window (400 ms here), it is still the person's.
   await sleep(900);
+  expect((await questionsOf(action))[0]!.state).toBe('picked');
   const undo = dialog()!.querySelector('[data-decision-undo]') as HTMLButtonElement;
   expect(undo).not.toBeNull();
   act(() => undo.click());
-  await until(() => dialog()!.querySelector('.ib-dm-error')?.textContent?.includes('Not undone') === true, 'the refusal');
-  expect(prompt()).not.toBe('Run the migration on staging');
+  await until(async () => !(await questionsOf(action))[0]?.action_result, 'the Done taken back');
+  await until(() => prompt() === 'Run the migration on staging', 'back on the action item');
+  expect(dialog()!.querySelector('.ib-dm-error')).toBeNull();
   expect(replies()).toHaveLength(0);
 }, 30_000);
 

@@ -2437,8 +2437,8 @@ function Inbox() {
     const held = pickSaves.current.held;
     pickSaves.current.held = [];
     // Only words typed in answers changed in this run: no list, decisions or drafts read for it. The Drafts page shows
-    // the words, and decision mode's cards are read from the decisions, so both read as before.
-    const quiet = pickSaves.current.textOnly && !paneClosed && routeRef.current.page !== 'drafts' && !decisionModeOnRef.current;
+    // the words, so it reads as before. Decision mode's cards draw from the thread held here, which the saves updated.
+    const quiet = pickSaves.current.textOnly && !paneClosed && routeRef.current.page !== 'drafts';
     pickSaves.current.textOnly = true;
     if (!pickSaves.current.owed) {
       // The records of these saves are still to come: read now what they will owe, so they owe nothing then.
