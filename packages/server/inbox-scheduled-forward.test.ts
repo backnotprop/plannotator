@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { createInboxMachines } from "./inbox-machines";
 import { InboxLinks } from "./inbox-links";
 import { ROUTINES_MARK } from "./inbox-scheduled-machines";
+import { MACHINE_WINDOW_HEADER } from "./inbox-outbox";
 
 const FAR = "ibx_01K00000000000000000000000";
 const TOKEN = "tok_test";
@@ -39,7 +40,7 @@ afterEach(() => {
 
 /** Studio's door: its list takes routines and the switches; `away()` drops its line and answers nothing until `back()`. */
 function studioDoor(marks: string[] = [ROUTINES_MARK, "capabilities"]) {
-  const state = { down: false, name: "Morning digest", writes: [] as { route: string; body: Record<string, unknown> }[], board: { on: true } };
+  const state = { down: false, name: "Morning digest", writes: [] as { route: string; body: Record<string, unknown>; window: boolean }[], board: { on: true } };
   const streams = new Set<ReadableStreamDefaultController<Uint8Array>>();
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -65,9 +66,11 @@ function studioDoor(marks: string[] = [ROUTINES_MARK, "capabilities"]) {
       if (req.method === "GET" && route === "capabilities") return Response.json({ capabilities: { board: state.board } });
       if (req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-        state.writes.push({ route, body });
+        state.writes.push({ route, body, window: req.headers.get(MACHINE_WINDOW_HEADER) === "1" });
         if (route === "scheduled/sch_1" && typeof body.name === "string") state.name = body.name;
         if (route === "capabilities" && body.board) state.board = body.board as { on: boolean };
+        // A run's answer, as Studio's window route gives it: 202, the run's divider.
+        if (route === "scheduled/sch_1/run") return Response.json({ scheduled: { id: "sch_1", name: state.name, state: "running" }, message_id: "msg_run_1" }, { status: 202 });
         return Response.json({ scheduled: { id: "sch_1", name: state.name } });
       }
       return Response.json({ code: "device_route_not_found" }, { status: 404 });
@@ -163,6 +166,15 @@ test("Studio away: Run once now is refused at the press and never runs later; a 
   await Bun.sleep(150);
   expect(door.state.writes.some((w) => w.route.endsWith("/run"))).toBe(false);
   expect(second.studio()?.state).toBe("online");
+});
+
+test("Studio online: Run once now from this window goes there at the press, keyed and with the window's mark, and its 202 is the run", async () => {
+  const door = studioDoor();
+  const { call, studio } = inbox(linked(door.url));
+  await until(() => studio()?.state === "online" && studio()?.list_cursor === 1, "Studio online");
+  const run = await call("POST", `/api/inbox/m/${FAR}/scheduled/sch_1/run`, { idempotency_key: "run-1" });
+  expect([run.status, run.body?.message_id, run.body?.scheduled?.state]).toEqual([202, "msg_run_1", "running"]);
+  expect(door.state.writes.map((w) => [w.route, w.body.idempotency_key, w.body.serverSession, w.window])).toEqual([["scheduled/sch_1/run", "run-1", undefined, true]]);
 });
 
 test("a held edit stays on Studio's last-known row on every read (a reload too) until Studio takes it; a held switch the same", async () => {

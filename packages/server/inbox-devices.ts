@@ -272,6 +272,10 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A thread's PRs (approval "inbox-pr-binding"): read, added and removed on the thread's own machine.
   { method: "GET", route: /^threads\/([^/]+)\/pulls$/, window: (m) => `/api/inbox/threads/${m[1]}/pulls`, machineOnly: true },
   { method: "POST", route: /^threads\/([^/]+)\/pulls$/, window: (m) => `/api/inbox/threads/${m[1]}/pulls`, machineOnly: true },
+  // Pinned artifacts (mark `artifact-pins`, approval "inbox-artifact-stars"): a linked machine's window pins and unpins
+  // this Inbox's threads' artifacts here, and reads this Inbox's Artifacts wall. A phone never sees artifact pins.
+  { method: "POST", route: /^artifact-pins$/, window: () => "/api/inbox/artifact-pins", machineOnly: true },
+  { method: "GET", route: /^artifacts$/, window: () => "/api/inbox/artifacts", machineOnly: true },
   { method: "GET", route: /^events$/, window: () => "/api/inbox/events" },
   // `to`: Send to another session (7.41), a person message no session took yet. `ack`: 👍 Looks good and its Undo (7.56).
   // `reask`: Re-ask, the agent asks its open questions again in one message (7.61).

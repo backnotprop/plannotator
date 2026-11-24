@@ -22159,10 +22159,10 @@
       }
     },
     {
-      "id": "undecided-door-get-capabilities",
-      "title": "door:GET capabilities",
+      "id": "undecided-door-get-artifacts",
+      "title": "door:GET artifacts",
       "surface": [
-        "door:GET capabilities"
+        "door:GET artifacts"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -22187,10 +22187,10 @@
       }
     },
     {
-      "id": "undecided-door-get-scheduled",
-      "title": "door:GET scheduled",
+      "id": "undecided-door-post-artifact-pins",
+      "title": "door:POST artifact-pins",
       "surface": [
-        "door:GET scheduled"
+        "door:POST artifact-pins"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -22215,20 +22215,6 @@
       }
     },
     {
-      "id": "undecided-door-get-scheduled-id",
-      "title": "door:GET scheduled/:id",
-      "surface": [
-        "door:GET scheduled/:id"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-24",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
       "id": "undecided-window-api-inbox-threads-id-remove-agent",
       "title": "window:/api/inbox/threads/:id/remove-agent",
       "surface": [
@@ -22237,20 +22223,6 @@
       "flows": [],
       "mobile": "undecided",
       "why": "The window's Remove on a \"to\" picker row (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now; the phone reaches it through the door route of the same name.",
-      "since": "2026-11-24",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
-      "id": "undecided-door-post-capabilities",
-      "title": "door:POST capabilities",
-      "surface": [
-        "door:POST capabilities"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22271,20 +22243,6 @@
       }
     },
     {
-      "id": "undecided-door-post-scheduled",
-      "title": "door:POST scheduled",
-      "surface": [
-        "door:POST scheduled"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-24",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
       "id": "undecided-field-inboxmessagewire-removed",
       "title": "field:InboxMessageWire.removed",
       "surface": [
@@ -22293,20 +22251,6 @@
       "flows": [],
       "mobile": "undecided",
       "why": "The thread's removals, on its root (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: it does not draw \"You removed <name> from this thread\", and it may still offer a removed agent as a recipient; writing to it brings it back, as on the computer.",
-      "since": "2026-11-24",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
-      "id": "undecided-door-post-scheduled-id",
-      "title": "door:POST scheduled/:id",
-      "surface": [
-        "door:POST scheduled/:id"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22327,20 +22271,6 @@
       }
     },
     {
-      "id": "undecided-door-post-scheduled-id-delete",
-      "title": "door:POST scheduled/:id/delete",
-      "surface": [
-        "door:POST scheduled/:id/delete"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-24",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
       "id": "undecided-field-inboxremoval-at",
       "title": "field:InboxRemoval.at",
       "surface": [
@@ -22349,20 +22279,6 @@
       "flows": [],
       "mobile": "undecided",
       "why": "Part of a thread's removal (InboxMessageWire.removed): when the person removed the agent. The iPhone app does not build it now.",
-      "since": "2026-11-24",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
-      "id": "undecided-door-post-scheduled-id-off",
-      "title": "door:POST scheduled/:id/off",
-      "surface": [
-        "door:POST scheduled/:id/off"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22383,10 +22299,38 @@
       }
     },
     {
-      "id": "undecided-door-post-scheduled-id-on",
-      "title": "door:POST scheduled/:id/on",
+      "id": "undecided-field-inboxremoval-name",
+      "title": "field:InboxRemoval.name",
       "surface": [
-        "door:POST scheduled/:id/on"
+        "field:InboxRemoval.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's name, for the line. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-session",
+      "title": "field:InboxRemoval.session",
+      "surface": [
+        "field:InboxRemoval.session"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's session. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-capabilities",
+      "title": "door:GET capabilities",
+      "surface": [
+        "door:GET capabilities"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -22397,14 +22341,112 @@
       }
     },
     {
-      "id": "undecided-field-inboxremoval-name",
-      "title": "field:InboxRemoval.name",
+      "id": "undecided-door-get-scheduled",
+      "title": "door:GET scheduled",
       "surface": [
-        "field:InboxRemoval.name"
+        "door:GET scheduled"
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's name, for the line. The iPhone app does not build it now.",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-scheduled-id",
+      "title": "door:GET scheduled/:id",
+      "surface": [
+        "door:GET scheduled/:id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-capabilities",
+      "title": "door:POST capabilities",
+      "surface": [
+        "door:POST capabilities"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled",
+      "title": "door:POST scheduled",
+      "surface": [
+        "door:POST scheduled"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id",
+      "title": "door:POST scheduled/:id",
+      "surface": [
+        "door:POST scheduled/:id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-delete",
+      "title": "door:POST scheduled/:id/delete",
+      "surface": [
+        "door:POST scheduled/:id/delete"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-off",
+      "title": "door:POST scheduled/:id/off",
+      "surface": [
+        "door:POST scheduled/:id/off"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-on",
+      "title": "door:POST scheduled/:id/on",
+      "surface": [
+        "door:POST scheduled/:id/on"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22475,20 +22517,6 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-24",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
-      "id": "undecided-field-inboxremoval-session",
-      "title": "field:InboxRemoval.session",
-      "surface": [
-        "field:InboxRemoval.session"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's session. The iPhone app does not build it now.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"

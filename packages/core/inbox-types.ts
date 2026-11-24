@@ -1427,7 +1427,9 @@ export interface InboxDelivery {
    * Written for an item the Inbox marked to go in by itself (approval
    * "inbox-busy-agent-reply"): true when it went into a running turn, false
    * when its session went idle after the mark (the session's own Ask question
-   * held the turn, so it went in when the turn ended). Absent otherwise.
+   * held the turn, so it went in when the turn ended). Also true, with no
+   * mark, when the Codex wake put it into the thread's running turn itself
+   * (`turn/steer`, inbox-codex-steer.ts). Absent otherwise.
    */
   into_turn?: boolean;
 }
@@ -3394,9 +3396,16 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * same build), +6 tokens, Board on the same. The rule's last sentence (pass the answers on, 2026-11-21): +80 more
  * (15,245 → 15,325), +22 tokens; the description stays 1,948 (2,039 with steps and the Board on).
  */
-const INBOX_TOOL_COST_NOW = { bytes: 15151, tokens: 4076 };
+/*
+ * The `capability` action, listed whatever is on (its name in `action`, its `capability`, `on` and `computer` fields; no
+ * line in the description): measured on the real Pi and OpenCode 2 requests in CI, 16,178 bytes (the entry built from the
+ * bundled tool list gives 15,702 with Pi's wrapper without the action, so +476, and main had drifted 3.6% over 15,151).
+ * Board on measured by inbox-board-switch.test.ts's request shape in CI at 18,107. Tokens scaled at the entry's bytes per
+ * token (3.7), not counted on Pi.
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 16178, tokens: 4352 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 17080, tokens: 4662 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 18107, tokens: 4942 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
@@ -3616,13 +3625,16 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * machine too (read there, archived there through the outbox), so a linked machine's window offers this Inbox's
  * agents for picks on both. `remove-agent` (approval "inbox-remove-agent-from-thread"): an agent of one of its threads
  * is removed there and put back with Undo (`threads/:id/remove-agent`), so a linked machine's list offers Remove.
+ * `artifact-pins` (approval "inbox-artifact-stars"): its threads' artifacts are pinned from
+ * a linked machine's window and kept here (`POST artifact-pins` through its door); its list carries its pins to a
+ * linked machine (`artifact_pins`), and its Artifacts wall is read through its door (`GET artifacts`).
  * `routines`: its routines are listed, made, changed and run from a linked machine's window through its door
  * (`scheduled…`; inbox-scheduled-machines.ts in the server). `capabilities`: its Settings → Capabilities switches are
  * read and turned from there (`capabilities`; core inbox-capability-switches.ts). `capability-note`: a switch an agent
  * there turns carries `capability_note` (the agent's name), and this Inbox posts its own line for it
  * (inbox-capability-note.ts in the server).
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "routines", "capabilities", "capability-note"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

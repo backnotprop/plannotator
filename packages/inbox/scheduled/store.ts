@@ -1,8 +1,9 @@
 /**
  * The routines, read once and shared by the page, the list rows and a thread's foot: this computer's and every linked
  * computer's that takes them (the merged read, client.ts). Read while Routines are on here or a linked computer takes
- * them, and something shows them; read again on a `scheduled` record, a run or skip line, and (while the page is open)
- * a launch's run line moving or any record of a linked computer (CONTRACT.md section 4).
+ * them, and something shows them; read again on a `scheduled` record, a run or skip line, a launch's run line moving
+ * while the page is open or a run is under way (a run's end is only that), any record of a linked computer while the
+ * page is open, a reconnect, and the window shown again while a run is under way (CONTRACT.md section 4).
  */
 import { useEffect, useSyncExternalStore } from 'react';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
@@ -102,10 +103,22 @@ onLinkedMachines(() => {
   if (wanted() && listeners.size > 0 && snap.rows === null && !reading) void readScheduled();
 });
 
-/** From the event stream (eventFrames.ts): `null` is a `deliveries` frame. */
-export function scheduledFrame(event: InboxEvent | null): void {
+/** A run under way: its end writes no store line, only the launch's run line moving (`event: deliveries`). */
+const anyRunning = () => !!snap.rows?.some((row) => row.state === 'running');
+
+/**
+ * From the event stream (eventFrames.ts): `null` is a `deliveries` frame, `'connect'` a (re)connect's `hello`. A run
+ * ending moves only its launch's run line, so `deliveries` reads again while the page is open or a run is under way
+ * (a list row's Running, a thread's foot); a reconnect reads again, as nothing replays a `deliveries` it missed.
+ */
+export function scheduledFrame(event: InboxEvent | null | 'connect'): void {
   if (!wanted() || listeners.size === 0) return;
-  if (event === null ? pages > 0 : event.kind === 'scheduled' || (event.kind === 'message' && !!(event.message.scheduled_run || event.message.scheduled_change))) void readScheduled();
+  if (event === 'connect' || (event === null ? pages > 0 || anyRunning() : event.kind === 'scheduled' || (event.kind === 'message' && !!(event.message.scheduled_run || event.message.scheduled_change)))) void readScheduled();
+}
+
+/** The window shown again (a wake, a tab brought back): a run under way may have ended unheard meanwhile. */
+function onShown() {
+  if (document.visibilityState === 'visible' && wanted() && listeners.size > 0 && (pages > 0 || anyRunning())) void readScheduled();
 }
 
 /** A linked computer's record (eventFrames.ts `machine`): its routines, run lines and runs moving, read again. */
@@ -115,9 +128,13 @@ export function scheduledMachineFrame(record: InboxEvent | null): void {
 }
 
 function subscribe(listener: () => void): () => void {
+  if (listeners.size === 0 && typeof document !== 'undefined') document.addEventListener('visibilitychange', onShown);
   listeners.add(listener);
   if (wanted() && snap.rows === null && !reading) void readScheduled();
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0 && typeof document !== 'undefined') document.removeEventListener('visibilitychange', onShown);
+  };
 }
 const current = () => snap;
 

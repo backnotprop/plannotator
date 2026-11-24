@@ -58,7 +58,7 @@ function door(answer: (path: string) => Response = () => Response.json({ ok: tru
 
 /** A path that the row's pattern matches: each `:id` tried with ids of the shapes the allowlist takes. */
 function concrete(row: { route: string; pattern: string }): string | null {
-  const ids = ["thr_1", "crd_1", "cmb_1", "a-0123abcd"];
+  const ids = ["thr_1", "crd_1", "cmb_1", "sch_1", "a-0123abcd"];
   const slots = row.route.split("/").filter((part) => part === ":id").length;
   const pattern = new RegExp(row.pattern);
   const fill = (route: string, left: number): string | null => {

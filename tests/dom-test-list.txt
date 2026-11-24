@@ -266,6 +266,7 @@ packages/inbox/pinnedThreads.test.tsx
 packages/inbox/priority.test.tsx
 packages/inbox/rowStar.test.tsx
 packages/inbox/artifactPins.test.tsx
+packages/inbox/filePinsReadFails.test.tsx
 packages/inbox/pinnedRowLabel.test.tsx
 packages/inbox/fileBack.test.tsx
 packages/inbox/archived.test.tsx
@@ -872,6 +873,7 @@ packages/inbox/scheduled/scheduledEditor.test.tsx
 packages/inbox/scheduled/routinesAcross.test.tsx
 packages/inbox/scheduled/scheduledThread.test.tsx
 packages/inbox/scheduled/scheduledRows.test.tsx
+packages/inbox/scheduled/rowRunEnds.test.tsx
 packages/inbox/scheduled/scheduledActions.test.tsx
 packages/inbox/scheduled/routineAutosave.test.tsx
 packages/inbox/scheduled/routineTabs.test.tsx
