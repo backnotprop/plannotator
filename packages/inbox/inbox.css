@@ -12822,6 +12822,9 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-pm-pos[data-phone] .ib-emrow-c { height: 60px; justify-content: flex-start; padding-top: 6px; }
 .ib-pm-pos[data-phone] .ib-emrow .ib-react-e { font-size: 28px; }
 .ib-pm-pos[data-phone] .ib-emrow-e > .ib-ic { width: 28px; height: 28px; }
+/* While a question waits only the skill emoji are there: they sit at the start, each its own size, not spread out. */
+.ib-emrow[data-skills-only], .ib-pm-pos[data-phone] .ib-emrow[data-skills-only] { justify-content: flex-start; }
+.ib-emrow[data-skills-only] .ib-emrow-c { flex: 0 0 auto; min-width: 44px; }
 /* A skill emoji's reply: its head line says it all ("You 😵‍💫 /bro"). */
 .ib-fl-skr { display: inline-flex; align-items: center; gap: 8px; }
 .ib-skr-e { font-size: var(--ib-fs-18, 18px); line-height: 1; }

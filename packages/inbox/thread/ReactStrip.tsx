@@ -181,7 +181,7 @@ export function MenuEmojiRow({ message, api, phone }: { message: InboxMessageWir
   const plain = api.plain();
   const cells = offeredCells(saved, plain);
   return (
-    <div ref={ref} className="ib-emrow" role="group" aria-label="Reactions" data-menu-reactions="">
+    <div ref={ref} className="ib-emrow" role="group" aria-label="Reactions" data-menu-reactions="" data-skills-only={plain ? undefined : ''}>
       {cells.map((reaction) => {
         const { tip, said } = cellWords(reaction);
         return (
