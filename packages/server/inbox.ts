@@ -370,6 +370,7 @@ import { INBOX_PULL_ASKS, inboxPullRiskAutoOf, inboxPullRefOfKey, inboxPullUrlOf
 import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { BranchDiffTooLarge, createInboxLocalWork, localBranchInPull } from "./inbox-local-work";
+import { createInboxLocalRefs, localFolderFormOk } from "./inbox-local-refs";
 import { createInboxBranchService } from "./inbox-branch-service";
 import { inboxFarBranchReviewRow } from "@plannotator/core/inbox-branch-reports";
 import { runtime as gitRuntime } from "./git";
@@ -1640,20 +1641,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const reviewIndex = createInboxReviewIndex(store);
   // Reviews' "On this computer" (inbox-local-work.ts): the projects newest activity first, and a branch with an open PR
   // (or, with Branch reviews on, an agent's report) left to its own row.
-  const localWork = createInboxLocalWork({
+  const localProjects = () => {
+    const seen = new Map<string, InboxProject>();
+    for (const row of store.listRows()) {
+      const project = row.project?.id ? store.project(store.canonicalProjectId(row.project.id)) : null;
+      if (project && !seen.has(project.id)) seen.set(project.id, project);
+    }
+    for (const project of store.listProjects().reverse()) if (!seen.has(project.id)) seen.set(project.id, project);
+    return [...seen.values()];
+  };
+  const localSkip = (projectId: string, branch: string, head: string) =>
+    (!!lastReviewsRead && localBranchInPull(lastReviewsRead.listed.pulls, lastReviewsRead.projectsByRepo, store.canonicalProjectId(projectId), branch, head)) ||
+    (branchReviewsOn() && branchService.reported(projectId, branch));
+  const localWork = createInboxLocalWork({ runtime: gitRuntime, projects: localProjects, skip: localSkip });
+  // Its + (inbox-local-refs.ts): any branch or worktree folder of a project, or a folder New message's folder opener
+  // accepts by its own rules (`launch.pickedFolder`); what the person opened is read again with the list (`keep`).
+  const localRefs = createInboxLocalRefs({
     runtime: gitRuntime,
-    projects: () => {
-      const seen = new Map<string, InboxProject>();
-      for (const row of store.listRows()) {
-        const project = row.project?.id ? store.project(store.canonicalProjectId(row.project.id)) : null;
-        if (project && !seen.has(project.id)) seen.set(project.id, project);
-      }
-      for (const project of store.listProjects().reverse()) if (!seen.has(project.id)) seen.set(project.id, project);
-      return [...seen.values()];
+    projects: localProjects,
+    project: (id) => store.project(id),
+    skip: localSkip,
+    pickedFolder: (folder) => launch.pickedFolder(folder),
+    anotherFolder: () => launch.enabled(),
+    get home() {
+      return launch.home;
     },
-    skip: (projectId, branch, head) =>
-      (!!lastReviewsRead && localBranchInPull(lastReviewsRead.listed.pulls, lastReviewsRead.projectsByRepo, store.canonicalProjectId(projectId), branch, head)) ||
-      (branchReviewsOn() && branchService.reported(projectId, branch)),
   });
   let lastReviewsRead: { projectsByRepo: Awaited<ReturnType<typeof pullProjects>>["projectsByRepo"]; wanted: Awaited<ReturnType<typeof pullProjects>>["wanted"]; listed: Awaited<ReturnType<typeof pulls.list>> } | null = null;
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.
@@ -6649,7 +6661,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       // Reviews' "On this computer" (inbox-local-work.ts): this computer's work in no PR, and a row's diff, read only.
       // The window's own reads: never through the door, never a program without the window's same-origin mark.
-      if (path === "/api/inbox/reviews/local" || path === "/api/inbox/reviews/local/diff") {
+      if (path === "/api/inbox/reviews/local" || path === "/api/inbox/reviews/local/diff" || path === "/api/inbox/reviews/local/refs") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -6659,9 +6671,40 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
         // `?project=`: a list filtered to one project gets all of its rows, up to the cap, whatever the others have.
-        if (path === "/api/inbox/reviews/local") return json({ serverSession, ...(await localWork.list(url.searchParams.get("project") || null)) });
-        const project = store.project(url.searchParams.get("project") ?? "");
+        // `keep=<row key>` (its +): what the person opened there, each read again (inbox-local-refs.ts), at most 20.
+        if (path === "/api/inbox/reviews/local") {
+          const keep = url.searchParams.getAll("keep");
+          const [answer, kept] = await Promise.all([localWork.list(url.searchParams.get("project") || null), keep.length > 0 ? localRefs.kept(keep) : null]);
+          return json({ serverSession, ...answer, ...(kept ? { kept } : {}) });
+        }
+        // The + (inbox-local-refs.ts): the projects, or one project's worktree folders and branches.
+        if (path === "/api/inbox/reviews/local/refs") {
+          const id = url.searchParams.get("project");
+          if (id === null) return json({ serverSession, ...(await localRefs.projects()) });
+          const project = store.project(id);
+          if (!project) return json({ error: "A project, and a branch or none.", code: "validation_error" }, 400);
+          const answer = await localRefs.refs(project).catch(() => undefined);
+          if (answer === undefined) return json({ error: "The branches could not be read.", code: "git_failed" }, 500);
+          if (!answer) return json({ error: "This project's folder isn't a git repository on this computer.", code: "not_git" }, 404);
+          return json({ serverSession, ...answer });
+        }
+        const projectId = url.searchParams.get("project");
+        const project = store.project(projectId ?? "");
         const branch = url.searchParams.get("branch");
+        // `folder=` (the +): a worktree git lists for that project's repository, or a folder the folder opener's own
+        // rules accept (no project then); never a path taken as given (inbox-local-refs.ts).
+        const folder = url.searchParams.get("folder");
+        if (folder !== null) {
+          if (branch !== null || (projectId && !project) || !localFolderFormOk(folder)) return json({ error: "A project, and a branch or none.", code: "validation_error" }, 400);
+          try {
+            const answer = await localRefs.diff(project, folder);
+            if (!answer) return json({ error: "This project's folder isn't a git repository on this computer.", code: "not_git" }, 404);
+            return json({ serverSession, ...answer });
+          } catch (cause) {
+            if (cause instanceof BranchDiffTooLarge) return json({ error: cause.message, code: "diff_too_large" }, 413);
+            return json({ error: cause instanceof Error ? cause.message : "The diff could not be read.", code: "git_failed" }, 500);
+          }
+        }
         if (!project || (branch !== null && !inboxPullSafeBranch(branch))) return json({ error: "A project, and a branch or none.", code: "validation_error" }, 400);
         try {
           const answer = await localWork.diff(project, branch);

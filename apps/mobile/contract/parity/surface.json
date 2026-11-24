@@ -327,6 +327,7 @@
       "/api/inbox/reviews/link",
       "/api/inbox/reviews/local",
       "/api/inbox/reviews/local/diff",
+      "/api/inbox/reviews/local/refs",
       "/api/inbox/rex/show",
       "/api/inbox/scheduled",
       "/api/inbox/scheduled/*",

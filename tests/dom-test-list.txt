@@ -722,6 +722,7 @@ packages/inbox/pulls/lineThreads.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/pulls/hidePulls.test.tsx
 packages/inbox/pulls/onThisComputer.test.tsx
+packages/inbox/pulls/openLocalPicker.test.tsx
 packages/inbox/compose/reviewBoxBranch.test.tsx
 packages/inbox/hidePullsList.test.tsx
 packages/inbox/shortcuts/useSheetEscape.test.tsx
