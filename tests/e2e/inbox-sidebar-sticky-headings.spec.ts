@@ -5,7 +5,10 @@
  * a heading stuck at the top is opaque on the sidebar's ground with its hairline; all the way down and back, two
  * headings never overlap, a heading leaving is pushed by the next, and the stuck heading's line and the header's line
  * never show at once; a heading pressed while stuck folds its section and stays at the top. When everything fits,
- * nothing sticks and no line shows (the spacing itself: inbox-sidebar-spacing.spec.ts).
+ * nothing sticks and no line shows (the spacing itself: inbox-sidebar-spacing.spec.ts). Nothing scrolls sideways; a
+ * row Shift+Tab reaches comes out below the stuck heading, never under it; the scrollbar's strip is clear of the
+ * sidebar's resize edge, so pressing and dragging there never resizes or closes the sidebar; and dark mode keeps the
+ * stuck heading opaque on its own ground (screenshots in the proof folder, `sidebar-sticky/`).
  *
  * Build the binary first (see inbox.spec.ts).
  */
@@ -20,6 +23,7 @@ import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scrat
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
+const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'sidebar-sticky');
 const CLOSED_COOKIE = 'plannotator-inbox-sidebar-closed';
 const NAMES = ['harbor', 'fern-api', 'quill-docs', 'ledger', 'harbor-web', 'fern-docs', 'quill-api', 'ledger-sync', 'harbor-ios', 'fern-tests', 'quill-cli', 'ledger-perf', 'harbor-e2e', 'fern-bot', 'quill-ui', 'ledger-tests'];
 
@@ -38,6 +42,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(proofDir, { recursive: true });
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: home,
@@ -221,6 +226,128 @@ for (const [device, phone] of [['computer', false], ['phone', true]] as const) {
         return Math.round(row.getBoundingClientRect().top - scroll.getBoundingClientRect().top);
       }, scope))
       .toBe(0);
+  });
+
+  test(`${device}: nothing scrolls sideways, at rest or with a heading stuck`, async () => {
+    const { page } = world;
+    const scope = await open(phone);
+    const { max } = await sweep(page, scope, [0]);
+    for (const place of [0, Math.round(max / 2), max]) {
+      const { frames } = await sweep(page, scope, [place]);
+      const sides = await page.evaluate((selector) => {
+        const scroll = document.querySelector<HTMLElement>(`${selector} .ib-sidescroll`)!;
+        return { scrollWidth: scroll.scrollWidth, clientWidth: scroll.clientWidth };
+      }, scope);
+      expect(sides.scrollWidth, `at ${frames[0]!.at}`).toBe(sides.clientWidth);
+    }
+  });
+
+  test(`${device}: a row Shift+Tab reaches comes out below the stuck heading, never under it`, async () => {
+    const { page } = world;
+    const scope = await open(phone);
+    // The fifth project's top 15 px into the scroll's top: under the stuck Projects heading.
+    const into = await page.evaluate((selector) => {
+      const scroll = document.querySelector<HTMLElement>(`${selector} .ib-sidescroll`)!;
+      const row = document.querySelectorAll<HTMLElement>(`${selector} .ib-projs .ib-proj`)[4]!;
+      return Math.round(row.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop + 15);
+    }, scope);
+    const { frames } = await sweep(page, scope, [into]);
+    const projects = frames[0]!.heads.find((head) => head.name === 'projects')!;
+    expect(projects.stuck).toBe(true);
+    const hidden = await page.evaluate((selector) => {
+      const scroll = document.querySelector<HTMLElement>(`${selector} .ib-sidescroll`)!;
+      const top = scroll.getBoundingClientRect().top;
+      const head = scroll.querySelector('.ib-secrow:has([data-sidebar-section="projects"])')!.getBoundingClientRect().bottom - top;
+      const rows = [...document.querySelectorAll<HTMLElement>(`${selector} .ib-projs .ib-proj`)];
+      const under = rows.findIndex((row) => row.getBoundingClientRect().top - top < head && row.getBoundingClientRect().bottom - top > 0);
+      rows[under + 1]!.focus({ preventScroll: true });
+      return { under, name: rows[under]!.textContent };
+    }, scope);
+    expect(hidden.under).toBeGreaterThanOrEqual(0);
+    await page.keyboard.press('Shift+Tab');
+    await expect
+      .poll(() =>
+        page.evaluate((selector) => {
+          const scroll = document.querySelector<HTMLElement>(`${selector} .ib-sidescroll`)!;
+          const box = scroll.getBoundingClientRect();
+          const focused = document.activeElement as HTMLElement;
+          const row = (focused.closest('.ib-projrow') ?? focused.closest('.ib-proj') ?? focused).getBoundingClientRect();
+          // Whole inside the scroll, and no heading over it.
+          const covered = [...scroll.querySelectorAll('.ib-secrow')].some((head) => {
+            const r = head.getBoundingClientRect();
+            return r.bottom > box.top && r.bottom - 0.5 > row.top && r.top + 0.5 < row.bottom;
+          });
+          return { name: focused.closest('.ib-projrow, .ib-proj')?.textContent ?? '', inside: row.top >= box.top - 0.5 && row.bottom <= box.bottom + 0.5, covered };
+        }, scope),
+      )
+      .toEqual({ name: expect.stringContaining(hidden.name!.trim()), inside: true, covered: false });
+  });
+}
+
+test('computer: the scrollbar strip is clear of the resize edge: pressing and dragging there never resizes or closes the sidebar', async () => {
+  const { page } = world;
+  const scope = await open(false);
+  const strip = await page.evaluate((selector) => {
+    const side = document.querySelector<HTMLElement>(`${selector} .ib-side`)!.getBoundingClientRect();
+    const scroll = document.querySelector<HTMLElement>(`${selector} .ib-sidescroll`)!;
+    const box = scroll.getBoundingClientRect();
+    // The sidebar's own edge: the hit zone nearest its right side.
+    const hit = [...document.querySelectorAll('.ib-handle-hit')].map((el) => el.getBoundingClientRect()).sort((a, b) => Math.abs(a.left + a.width / 2 - side.right) - Math.abs(b.left + b.width / 2 - side.right))[0]!;
+    // A classic scrollbar is up to 16 px wide: every point of that strip belongs to the scroll, none to the edge.
+    const handles: number[] = [];
+    for (let x = Math.floor(box.right) - 16; x < box.right; x++) {
+      for (const y of [box.top + 20, box.top + box.height / 2, box.bottom - 20]) {
+        if (document.elementFromPoint(x, y)?.closest('.ib-handle-hit')) handles.push(x);
+      }
+    }
+    // Where to press: the scroll's own strip at its right side (where its scrollbar's thumb is drawn), not a row.
+    let y = box.top + 30;
+    for (let at = box.top + 10; at < box.bottom - 10; at += 4) {
+      if (document.elementFromPoint(box.right - 1, at) === scroll) {
+        y = at;
+        break;
+      }
+    }
+    return { right: box.right, hitLeft: hit.left, handles, width: side.width, x: box.right - 1, y };
+  }, scope);
+  expect(strip.right).toBeLessThanOrEqual(strip.hitLeft);
+  expect(strip.handles).toEqual([]);
+  await page.mouse.move(strip.x, strip.y);
+  await page.mouse.down();
+  await page.mouse.move(strip.x + 30, strip.y + 80, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.locator(`${scope} .ib-sidescroll`)).toBeVisible();
+  const width = await page.evaluate((selector) => document.querySelector<HTMLElement>(`${selector} .ib-side`)!.getBoundingClientRect().width, scope);
+  expect(width).toBe(strip.width);
+});
+
+for (const [device, phone] of [['computer', false], ['phone', true]] as const) {
+  test(`${device}, dark: a stuck heading is opaque on the dark ground, with its hairline`, async () => {
+    const { page } = world;
+    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    try {
+      const scope = await open(phone);
+      const into = await page.evaluate((selector) => {
+        const scroll = document.querySelector<HTMLElement>(`${selector} .ib-sidescroll`)!;
+        const block = document.querySelector(`${selector} .ib-sidescroll .ib-secrow:has([data-sidebar-section="pinned"])`)!.parentElement!;
+        return Math.round(block.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop + 60);
+      }, scope);
+      const { frames } = await sweep(page, scope, [into]);
+      expect(frames[0]!.heads.find((head) => head.name === 'pinned')!.stuck).toBe(true);
+      const look = await page.evaluate((selector) => {
+        const row = document.querySelector(`${selector} .ib-sidescroll .ib-secrow:has([data-sidebar-section="pinned"])`)!;
+        const ground = getComputedStyle(row, '::before');
+        return { ground: ground.backgroundColor, side: getComputedStyle(document.querySelector(`${selector} .ib-side`)!).backgroundColor, line: ground.boxShadow, dark: matchMedia('(prefers-color-scheme: dark)').matches };
+      }, scope);
+      expect(look.dark).toBe(true);
+      expect(look.ground).toBe(look.side);
+      expect(look.ground).not.toMatch(/rgba\(.*, 0\)|transparent/);
+      expect(look.line).not.toBe('none');
+      if (!phone) await page.mouse.move(1000, 500);
+      await page.screenshot({ path: join(proofDir, `${device}-starred-stuck-dark.png`) });
+    } finally {
+      await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+    }
   });
 }
 

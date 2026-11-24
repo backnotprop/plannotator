@@ -679,6 +679,8 @@ export function Sidebar(props: SidebarProps) {
       )}
       {!phone && stack(layout.top)}
       <div className="ib-sidescroll" ref={projsRef} data-more={moreProjects ? '' : undefined}>
+        {/* The scroll's first pixel, taking no room: whether it has moved, for the lines under the header (stickyHeadings.ts). */}
+        <div className="ib-sidescroll-top" data-scroll-top="" aria-hidden="true" />
         {/* A phone's sheet has one scroll: the places scroll with the sections. */}
         {phone && stack(layout.top)}
         {starredShown && pins.length > 0 && !starredAbove && sheetSection('pinned',

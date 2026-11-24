@@ -536,18 +536,25 @@ button.ib-mut { border-radius: 6px; }
    Pinned section scrolls with the projects instead of pushing them and the foot off the window). */
 .ib-sidescroll { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; }
 /* A scroller clips sideways too: room for the selected row's ring and soft shadow (--ib-cur-shadow), taken back from the
-   sides so nothing moves. The room reaches the sidebar's sides, so a stuck heading's ground and hairline do too. The top
-   needs none: a section's heading comes first, 12 px down. */
-.ib-sidescroll { padding: 0 10px 3px; margin: 0 -10px -3px; }
+   sides so nothing moves. Its right edge, and so its scrollbar, stays clear of the sidebar's resize edge
+   (.ib-handle-hit). The top needs none: a section's heading comes first, 12 px down. */
+.ib-sidescroll { padding: 0 3px 3px; margin: 0 -3px -3px; }
+/* The scroll's first pixel (Sidebar.tsx): no room, nothing drawn; components/stickyHeadings.ts watches it. */
+.ib-sidescroll-top { flex: none; height: 1px; margin-bottom: -1px; visibility: hidden; pointer-events: none; }
 /* Each section's heading stays at the top of the scroll while its own rows pass under it, and the next heading pushes it
-   off (approval "inbox-sidebar-sticky-headings"; a phone's sheet the same). On the sidebar's ground, edge to edge, so no
-   row shows through; a hairline under it only while it is stuck (data-stuck, components/stickyHeadings.ts). */
+   off (approval "inbox-sidebar-sticky-headings"; a phone's sheet the same). On the sidebar's ground across the whole
+   scroll, so no row (nor the selected row's ring) shows through, and never wider than the scroll, so nothing scrolls
+   sideways; a hairline under it only while it is stuck (data-stuck, components/stickyHeadings.ts). */
 .pn-inbox .ib-sidescroll .ib-secrow { position: sticky; top: 0; z-index: 2; }
-.pn-inbox .ib-sidescroll .ib-secrow::before { content: ""; position: absolute; inset: 0 -10px; z-index: -1; background: var(--ib-ground); }
+.pn-inbox .ib-sidescroll .ib-secrow::before { content: ""; position: absolute; inset: 0 -3px; z-index: -1; background: var(--ib-ground); }
 .pn-inbox .ib-sidescroll .ib-secrow[data-stuck]::before { box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 70%, transparent); }
+/* A row that Tab, Shift+Tab or a click scrolls to stops below the stuck heading, never under it (the list does the same
+   for its stuck bar: .ib-lbody). A heading's own controls take it back, so a stuck heading taking focus never scrolls. */
+.pn-inbox .ib-sidescroll { --ib-sec-stuck: 31px; scroll-padding-top: var(--ib-sec-stuck); }
+.pn-inbox .ib-sidescroll .ib-secrow, .pn-inbox .ib-sidescroll .ib-secrow * { scroll-margin-top: calc(-1 * var(--ib-sec-stuck)); }
 /* The fixed places above the scroll: the same line under them while rows are under them and no heading is stuck
-   (data-edge, set in the same read as data-stuck, so the two lines never show at once). Takes no room. */
-.ib-side:not(.ib-sb-sheet-in > .ib-side) .ib-sidescroll::before { content: ""; position: sticky; top: 0; z-index: 3; flex: none; height: 1px; margin: 0 -10px -1px; }
+   (data-edge, set from the same picture as data-stuck, so the two lines never show at once). Takes no room. */
+.ib-side:not(.ib-sb-sheet-in > .ib-side) .ib-sidescroll::before { content: ""; position: sticky; top: 0; z-index: 3; flex: none; height: 1px; margin: 0 -3px -1px; }
 .ib-side:not(.ib-sb-sheet-in > .ib-side) .ib-sidescroll[data-edge]::before { background: color-mix(in oklch, var(--border) 70%, transparent); }
 .ib-sidescroll > * { flex-shrink: 0; }
 /* Only that scroll area gives up height when there are many projects or pins: Inbox and the foot keep theirs
@@ -12645,6 +12652,9 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 /* A heading: sticks to the top of the scroll while its own section passes under it (the rules by .ib-sidescroll above). Its fold area is everything left
    of its own buttons (Add agent, Add machine, the projects' order), which are in the row, never over it. */
 .pn-inbox .ib-sb-sheet-in .ib-sidescroll .ib-secrow { display: flex; align-items: center; flex: none; margin: 8px -10px 0; padding: 0 6px 0 10px; }
+/* The row already spans the sheet: its ground goes no wider, so the sheet never scrolls sideways. A stuck heading is 44 px. */
+.pn-inbox .ib-sb-sheet-in .ib-sidescroll .ib-secrow::before { inset: 0; }
+.pn-inbox .ib-sb-sheet-in .ib-sidescroll { --ib-sec-stuck: 45px; }
 .pn-inbox .ib-sb-sheet-in .ib-secrow > .ib-side-sec { flex: 1 1 auto; min-width: 0; width: auto; height: auto; min-height: 44px; margin-top: 0; padding: 4px 8px 4px 9px; gap: 8px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
 .pn-inbox .ib-sb-sheet-in .ib-side-sec-l { flex: 0 1 auto; }
 .ib-side-sec-c { flex: none; font-weight: 500; font-variant-numeric: tabular-nums; }

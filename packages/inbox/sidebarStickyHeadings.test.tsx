@@ -1,13 +1,16 @@
 /**
  * The sidebar's section headings stay at the top of its one scroll while their own rows pass under them (approval
  * "inbox-sidebar-sticky-headings"), on a computer as on a phone's sheet. What is proved on the window's own Sidebar,
- * at both widths: every section is a block of its own with its heading in a row of its own (so CSS sticky holds it
- * only while its own rows pass); the heading at the top while its section runs on under it is marked stuck (its
- * hairline), and the header's line shows only while rows are under the header and no heading is stuck, never both;
- * a heading pressed while stuck folds its section and stays where it was. The real sticking and spacing are drawn by
- * the browser: tests/e2e/inbox-sidebar-spacing.spec.ts.
+ * at both widths: the heading at the top while its section runs on under it is marked stuck (its hairline), and the
+ * header's line shows only while rows are under the header and no heading is stuck, never both; a section that appears
+ * later is watched too; a heading pressed while stuck folds its section and stays where it was. And what it costs: the
+ * marks are set up once and read no layout, so a render of the window (a poll, a live event, J/K) or a scroll adds no
+ * listener and forces no layout. The real sticking and spacing are drawn by the browser:
+ * tests/e2e/inbox-sidebar-sticky-headings.spec.ts and tests/e2e/inbox-sidebar-spacing.spec.ts.
  *
- * happy-dom does no layout: each box's place is given here, from where the scroll is.
+ * happy-dom does no layout and has no IntersectionObserver to watch: each box's place is given here, from where the
+ * scroll is, and a stand-in observer tells the sidebar what the browser's would (the box, the observer's own box, how
+ * much of it shows), never through the layout reads it counts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -23,19 +26,59 @@ const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as t
 const { PHONE_QUERY } = await import('./phone');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
+interface Box {
+  top: number;
+  bottom: number;
+}
+
+/** A stand-in IntersectionObserver: `flush()` tells each one what a browser's would after drawing. */
+class Watcher {
+  static all: Watcher[] = [];
+  readonly targets = new Set<Element>();
+  observed = 0;
+  constructor(
+    readonly cb: IntersectionObserverCallback,
+    readonly options: IntersectionObserverInit = {},
+  ) {
+    Watcher.all.push(this);
+  }
+  observe(el: Element) {
+    this.targets.add(el);
+    this.observed++;
+  }
+  unobserve(el: Element) {
+    this.targets.delete(el);
+  }
+  disconnect() {
+    this.targets.clear();
+  }
+  takeRecords() {
+    return [];
+  }
+}
+
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let phone = false;
 let savedMatchMedia: typeof window.matchMedia | undefined;
 let savedRect: typeof Element.prototype.getBoundingClientRect | undefined;
 let savedHeight: PropertyDescriptor | undefined;
+let savedIO: unknown;
 const stored = new Map<string, string>();
+/** Where the scroll is: the test's own, so its stand-ins never read the scroll. */
+let at = 0;
+/** Layout reads by the sidebar: getBoundingClientRect and offsetHeight of any box, and the scroll's scrollTop. */
+let reads = 0;
+let tops = 0;
 /** Where each box is, from the top of the scroll's box, at the scroll's current place. */
-let place: (el: Element) => { top: number; bottom: number } | null = () => null;
+let place: (el: Element) => Box | null = () => null;
 
 beforeEach(() => {
   if (!hasDom) return;
   phone = false;
+  at = 0;
+  reads = 0;
+  Watcher.all = [];
   stored.clear();
   setStorageBackend({
     getItem: (key) => stored.get(key) ?? null,
@@ -44,14 +87,23 @@ beforeEach(() => {
   });
   savedMatchMedia = window.matchMedia;
   window.matchMedia = ((query: string) => ({ media: query, matches: query === PHONE_QUERY && phone, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+  savedIO = (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
+  (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = Watcher;
   savedRect = Element.prototype.getBoundingClientRect;
   Element.prototype.getBoundingClientRect = function (this: Element) {
-    const at = place(this) ?? { top: 0, bottom: 0 };
-    return { top: at.top, bottom: at.bottom, left: 0, right: 200, x: 0, y: at.top, width: 200, height: at.bottom - at.top, toJSON() {} } as DOMRect;
+    reads++;
+    const box = where(this);
+    return { top: box.top, bottom: box.bottom, left: 0, right: 200, x: 0, y: box.top, width: 200, height: box.bottom - box.top, toJSON() {} } as DOMRect;
   };
-  // A heading is 30 px tall.
   savedHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
-  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get(this: HTMLElement) { return this.classList.contains('ib-secrow') ? 30 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get(this: HTMLElement) {
+      reads++;
+      const box = where(this);
+      return box.bottom - box.top;
+    },
+  });
 });
 afterEach(() => {
   if (!hasDom) return;
@@ -62,11 +114,44 @@ afterEach(() => {
   document.body.innerHTML = '';
   resetStorageBackend();
   if (savedMatchMedia) window.matchMedia = savedMatchMedia;
+  (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = savedIO;
   if (savedRect) Element.prototype.getBoundingClientRect = savedRect;
   if (savedHeight) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', savedHeight);
   else Reflect.deleteProperty(HTMLElement.prototype, 'offsetHeight');
   place = () => null;
 });
+
+/** The scroll's box is 400 px; its first pixel scrolls with it; the rest is the layout's. */
+function where(el: Element): Box {
+  if (el.classList.contains('ib-sidescroll')) return { top: 0, bottom: 400 };
+  if (el.hasAttribute('data-scroll-top')) return { top: -at, bottom: 1 - at };
+  return place(el) ?? { top: 0, bottom: 0 };
+}
+
+/** What each watcher's browser would tell it now: every box it watches, against its own box (the scroll, less its margin). */
+function flush() {
+  act(() => {
+    for (const watcher of Watcher.all) {
+      if (watcher.targets.size === 0) continue;
+      const inset = -parseFloat(String(watcher.options.rootMargin ?? '0px').split(' ')[0]!);
+      const bounds = { top: inset, bottom: 400, left: 0, right: 200, x: 0, y: inset, width: 200, height: 400 - inset } as DOMRectReadOnly;
+      const entries = [...watcher.targets].map((target) => {
+        const box = where(target);
+        const height = box.bottom - box.top;
+        const shown = Math.max(0, Math.min(box.bottom, bounds.bottom) - Math.max(box.top, bounds.top));
+        const isIntersecting = box.bottom >= bounds.top && box.top <= bounds.bottom;
+        return {
+          target,
+          rootBounds: bounds,
+          boundingClientRect: { top: box.top, bottom: box.bottom, height } as DOMRectReadOnly,
+          intersectionRatio: height > 0 ? shown / height : isIntersecting ? 1 : 0,
+          isIntersecting,
+        } as unknown as IntersectionObserverEntry;
+      });
+      watcher.cb(entries, watcher as unknown as IntersectionObserver);
+    }
+  });
+}
 
 const folder = (id: string, name: string) => ({ id, key: `${id}-abc123`, name, root: `/tmp/${id}`, created_at: '2026-10-11T10:00:00.000Z', threads: 1, unread: 0, listed: 1 });
 const PROJECTS = [folder('prj_a', 'harbor'), folder('prj_b', 'fern-api'), folder('prj_c', 'quill-docs'), folder('prj_d', 'ledger')];
@@ -84,6 +169,7 @@ const pin = (id: string) =>
     back_from_archive: false,
     questions: { open: 0, holds_up: [] },
   }) as unknown as InboxListRow;
+const PINS = [pin('t_a'), pin('t_b'), pin('t_c')];
 
 const noop = () => {};
 function draw(over: Partial<SidebarProps> = {}) {
@@ -106,7 +192,7 @@ function draw(over: Partial<SidebarProps> = {}) {
             update={null}
             restarting={false}
             updated={null}
-            pins={[pin('t_a'), pin('t_b'), pin('t_c')]}
+            pins={PINS}
             onInbox={noop}
             onProject={noop}
             onSettings={noop}
@@ -118,35 +204,50 @@ function draw(over: Partial<SidebarProps> = {}) {
       </SidebarProvider>,
     ),
   );
+  // The scroll's place is the test's: writes move it, and every read is counted.
+  const scroller = scroll();
+  if (!Object.getOwnPropertyDescriptor(scroller, 'scrollTop')) {
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get() {
+        tops++;
+        return at;
+      },
+      set(value: number) {
+        at = value;
+      },
+    });
+  }
 }
 const one = (selector: string) => document.querySelector<HTMLElement>(selector)!;
 const scroll = () => one('.ib-sidescroll');
-const heading = (section: 'pinned' | 'projects') => one(`[data-sidebar-section="${section}"]`).closest<HTMLElement>('.ib-secrow')!;
+const heading = (section: 'pinned' | 'projects') => document.querySelector(`[data-sidebar-section="${section}"]`)?.closest<HTMLElement>('.ib-secrow') ?? null;
 const stuck = () => [...document.querySelectorAll('.ib-secrow[data-stuck]')].map((row) => row.querySelector('[data-sidebar-section]')!.getAttribute('data-sidebar-section'));
 const edge = () => scroll().hasAttribute('data-edge');
-/** Scrolls to `top` and lets the sidebar read the result. */
+/** Scrolls to `top` and lets the browser tell the sidebar what it drew. */
 function scrollTo(top: number) {
-  act(() => {
-    scroll().scrollTop = top;
-    scroll().dispatchEvent(new Event('scroll'));
-  });
+  at = top;
+  act(() => void scroll().dispatchEvent(new Event('scroll')));
+  flush();
 }
 
 /**
- * A stand-in for the browser's layout: Starred's block from 12 to 132 and Projects' from 144 to 300, each heading 30 px
- * at the top of its block, held at the scroll's top (0) while its block runs on below it, as `position: sticky` does.
+ * A stand-in for the browser's layout: Starred's block from 12 to 132 and Projects' from 144 to 300 (Projects' alone
+ * from 12 when Starred is not drawn), each heading 30 px at the top of its block, held at the scroll's top (0) while
+ * its block runs on below it, as `position: sticky` does.
  */
 function layout(pinnedRows = 90) {
-  const blocks = { pinned: { top: 12, bottom: 42 + pinnedRows }, projects: { top: 54 + pinnedRows, bottom: 210 + pinnedRows } };
   place = (el) => {
-    const at = scroll().scrollTop;
-    if (el === scroll()) return { top: 0, bottom: 400 };
-    for (const name of ['pinned', 'projects'] as const) {
-      const block = heading(name).parentElement!;
-      const top = blocks[name].top - at;
-      const bottom = blocks[name].bottom - at;
-      if (el === block) return { top, bottom };
-      if (el === heading(name)) {
+    const starred = heading('pinned');
+    const blocks = starred
+      ? { pinned: { top: 12, bottom: 42 + pinnedRows }, projects: { top: 54 + pinnedRows, bottom: 210 + pinnedRows } }
+      : { projects: { top: 12, bottom: 168 } };
+    for (const [name, block] of Object.entries(blocks) as ['pinned' | 'projects', Box][]) {
+      const head = heading(name)!;
+      const top = block.top - at;
+      const bottom = block.bottom - at;
+      if (el === head.parentElement) return { top, bottom };
+      if (el === head) {
         const held = Math.min(Math.max(top, 0), bottom - 30);
         return { top: held, bottom: held + 30 };
       }
@@ -156,19 +257,6 @@ function layout(pinnedRows = 90) {
 }
 
 for (const width of ['computer', 'phone'] as const) {
-  test.skipIf(!hasDom)(`${width}: each section is a block with its heading in a row of its own, so the heading sticks only while its own rows pass`, () => {
-    phone = width === 'phone';
-    draw();
-    for (const section of ['pinned', 'projects'] as const) {
-      const block = heading(section).parentElement!;
-      expect(block.classList.contains('ib-sheet-sec')).toBe(true);
-      expect(block.parentElement).toBe(scroll());
-      // The heading and its rows, and nothing of another section.
-      expect(block.querySelector(section === 'pinned' ? '.ib-pins' : '.ib-projs')).not.toBeNull();
-      expect(block.querySelectorAll('.ib-secrow')).toHaveLength(1);
-    }
-  });
-
   test.skipIf(!hasDom)(`${width}: the heading at the top takes its hairline while its rows pass under it; the header's line shows only while none does`, () => {
     phone = width === 'phone';
     draw();
@@ -192,11 +280,65 @@ for (const width of ['computer', 'phone'] as const) {
     scrollTo(200);
     expect(stuck()).toEqual(['projects']);
     expect(edge()).toBe(false);
-    // Never both lines, all the way down and back.
-    for (let at = 0; at <= 300; at += 3) {
-      scrollTo(at);
+    // Never both lines, all the way down and back; and back at the top, none.
+    for (let top = 0; top <= 300; top += 3) {
+      scrollTo(top);
       expect(stuck().length + (edge() ? 1 : 0)).toBeLessThanOrEqual(1);
     }
+    scrollTo(0);
+    expect(stuck().length + (edge() ? 1 : 0)).toBe(0);
+  });
+
+  test.skipIf(!hasDom)(`${width}: renders and scrolls add no listener and read no layout`, () => {
+    phone = width === 'phone';
+    draw();
+    layout();
+    scrollTo(60);
+    expect(stuck()).toEqual(['pinned']);
+    const scroller = scroll();
+    const listeners: string[] = [];
+    const add = scroller.addEventListener.bind(scroller);
+    const remove = scroller.removeEventListener.bind(scroller);
+    scroller.addEventListener = ((type: string, ...rest: [EventListenerOrEventListenerObject, AddEventListenerOptions?]) => {
+      listeners.push(`+${type}`);
+      add(type, ...rest);
+    }) as typeof scroller.addEventListener;
+    scroller.removeEventListener = ((type: string, ...rest: [EventListenerOrEventListenerObject, EventListenerOptions?]) => {
+      listeners.push(`-${type}`);
+      remove(type, ...rest);
+    }) as typeof scroller.removeEventListener;
+    const watchers = Watcher.all.length;
+    const observed = Watcher.all.reduce((sum, w) => sum + w.observed, 0);
+    reads = 0;
+    tops = 0;
+    // The window draws again and again with nothing new for the sidebar (a poll, a live event, J/K in the list).
+    for (let i = 0; i < 5; i++) draw({ inboxCount: 3 + i });
+    expect(listeners).toEqual([]);
+    expect(Watcher.all.length).toBe(watchers);
+    expect(Watcher.all.reduce((sum, w) => sum + w.observed, 0)).toBe(observed);
+    expect(reads).toBe(0);
+    expect(tops).toBe(0);
+    // A scroll measures no box either: the browser tells where things are, after it has drawn. (The fade at the
+    // scroll's foot reads its own scrollTop on scroll, as before: useMoreBelow.)
+    scrollTo(200);
+    expect(stuck()).toEqual(['projects']);
+    expect(reads).toBe(0);
+  });
+
+  test.skipIf(!hasDom)(`${width}: a section drawn later is watched too`, async () => {
+    phone = width === 'phone';
+    draw({ pins: [] });
+    layout();
+    expect(heading('pinned')).toBeNull();
+    // Stars arrive: Starred's block is drawn above Projects, and its heading sticks like the others.
+    draw();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    scrollTo(60);
+    expect(stuck()).toEqual(['pinned']);
+    scrollTo(200);
+    expect(stuck()).toEqual(['projects']);
   });
 
   test.skipIf(!hasDom)(`${width}: a heading pressed while stuck folds its section and stays where it was`, () => {
@@ -207,8 +349,7 @@ for (const width of ['computer', 'phone'] as const) {
     const open = place;
     place = (el) => {
       if (!one('.ib-pins').hasAttribute('data-closed')) return open(el);
-      const at = scroll().scrollTop;
-      if (el === heading('pinned') || el === heading('pinned').parentElement) return { top: 12 - at, bottom: 42 - at };
+      if (el === heading('pinned') || el === heading('pinned')!.parentElement) return { top: 12 - at, bottom: 42 - at };
       return open(el);
     };
     scrollTo(60);
@@ -217,8 +358,12 @@ for (const width of ['computer', 'phone'] as const) {
     act(() => button.click());
     expect(button.getAttribute('aria-expanded')).toBe('false');
     // Still at the top of the scroll, where it was pressed: the scroll moved up under it instead of leaving it above.
-    expect(heading('pinned').getBoundingClientRect().top).toBe(0);
-    expect(scroll().scrollTop).toBe(12);
+    expect(heading('pinned')!.getBoundingClientRect().top).toBe(0);
+    expect(at).toBe(12);
+    // Folded, its section is its heading alone: nothing passes under it, so the header's line shows instead of its own.
+    flush();
+    expect(stuck()).toEqual([]);
+    expect(edge()).toBe(true);
   });
 }
 
@@ -228,5 +373,5 @@ test.skipIf(!hasDom)('a heading pressed at rest folds its section and nothing sc
   scrollTo(0);
   act(() => one('[data-sidebar-section="projects"]').click());
   expect(one('[data-sidebar-section="projects"]').getAttribute('aria-expanded')).toBe('false');
-  expect(scroll().scrollTop).toBe(0);
+  expect(at).toBe(0);
 });
