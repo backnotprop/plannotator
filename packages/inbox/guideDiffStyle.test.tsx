@@ -5,8 +5,10 @@
  * all and the "Diff display" gear in the review's top bar, before Close, and
  * no tab on any card. Every setting is code review's own (its
  * `plannotator-diff-*` cookie and config.json `diffOptions`); the popover
- * leaves out Whole file and Hide whitespace. On a phone there are no controls
- * and every diff is drawn Unified, the saved layout left as it is.
+ * leaves out Hide whitespace but has code review's Whole file, which the diffs
+ * obey. On a phone the gear alone, in the heading's row of the review's own
+ * actions (the bar keeps its room for the place), and every diff is drawn
+ * Unified, the saved layout left as it is.
  *
  * The whole window (InboxApp) over a REAL Inbox server in a temp data dir
  * (tests/helpers/inbox-dom-server.ts, `guide` mode: an agent sent a guided
@@ -15,9 +17,11 @@
  * The failures this catches: the controls missing from the bar (or a tab
  * left on a card), a click that does not reach the diffs or the server, a
  * choice config.json does not keep (code review would undo it), config.json's
- * options not adopted on load, the popover offering the two rows that need the
- * local repository, Collapse all not folding every file, and a phone drawing
- * two narrow columns or rewriting the person's setting.
+ * options not adopted on load, the popover offering Hide whitespace or
+ * hiding Whole file (code review's switch, which the diffs obey: hidden, a
+ * person who chose it there could not turn it off here), Collapse all not
+ * folding every file, and a phone drawing two narrow columns, rewriting the
+ * person's setting, or giving no way to Whole file.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -87,10 +91,10 @@ const configPath = () => join(dir!, 'data', 'config.json');
 const diffOptionsOnDisk = (): Record<string, unknown> =>
   existsSync(configPath()) ? ((JSON.parse(readFileSync(configPath(), 'utf8')) as { diffOptions?: Record<string, unknown> }).diffOptions ?? {}) : {};
 const styleOnDisk = () => diffOptionsOnDisk().diffStyle;
-/** config.json's `diffOptions` as code review left them: these, and its own Whole file and font. */
+/** config.json's `diffOptions` as code review left them: these, and its own Hide whitespace and font. */
 function writeOptionsOnDisk(options: Record<string, unknown>) {
   const current = existsSync(configPath()) ? (JSON.parse(readFileSync(configPath(), 'utf8')) as Record<string, unknown>) : {};
-  current.diffOptions = { expandUnchanged: true, fontSize: '13', ...options };
+  current.diffOptions = { hideWhitespace: true, fontSize: '13', ...options };
   writeFileSync(configPath(), JSON.stringify(current, null, 2));
 }
 const writeStyleOnDisk = (style: 'split' | 'unified' | undefined) => writeOptionsOnDisk(style ? { diffStyle: style } : {});
@@ -99,7 +103,7 @@ const cookieStyle = () => /(?:^|; )plannotator-diff-style=([^;]*)/.exec(document
 /** The page's own start: the cookies and the store say `style` and the defaults, and the Inbox has not read its settings yet. */
 function startPage(style: 'split' | 'unified') {
   resetInboxDiffOptionsForTests();
-  configStore.init({ diffOptions: { diffStyle: style, overflow: 'scroll', diffIndicators: 'bars', lineDiffType: 'word-alt', showLineNumbers: true, showDiffBackground: true, lineBgIntensity: 'subtle', tabSize: 2 } });
+  configStore.init({ diffOptions: { diffStyle: style, overflow: 'scroll', diffIndicators: 'bars', lineDiffType: 'word-alt', showLineNumbers: true, showDiffBackground: true, lineBgIntensity: 'subtle', tabSize: 2, expandUnchanged: false } });
 }
 
 beforeAll(async () => {
@@ -248,7 +252,7 @@ test.skipIf(!hasDom)('the one button switches every diff and saves the layout wh
   // And config.json, through the Inbox's settings route, keeping code review's other diff options.
   await until(() => styleOnDisk() === 'unified', 'config.json to say unified');
   expect(settingsPosts.some((body) => (body.diff_options as Record<string, unknown> | undefined)?.diff_style === 'unified')).toBe(true);
-  expect(diffOptionsOnDisk()).toMatchObject({ expandUnchanged: true, fontSize: '13' });
+  expect(diffOptionsOnDisk()).toMatchObject({ hideWhitespace: true, fontSize: '13' });
 
   act(() => toggle(el).click());
   expect(configStore.get('diffStyle')).toBe('split');
@@ -258,19 +262,25 @@ test.skipIf(!hasDom)('the one button switches every diff and saves the layout wh
 
 test.skipIf(!hasDom)("the options chosen in code review (config.json) are the ones the guide opens on, over this browser's cookies", async () => {
   startPage('split');
-  writeOptionsOnDisk({ diffStyle: 'unified', overflow: 'wrap', tabSize: 4, lineDiffType: 'char' });
+  writeOptionsOnDisk({ diffStyle: 'unified', overflow: 'wrap', tabSize: 4, lineDiffType: 'char', expandUnchanged: true });
   const el = await openGuide();
   await until(() => toggle(el).getAttribute('data-diff-layout-toggle') === 'unified', 'Unified from config.json');
   expect(configStore.get('diffStyle')).toBe('unified');
   expect(configStore.get('diffOverflow')).toBe('wrap');
   expect(configStore.get('diffLineDiffType')).toBe('char');
   expect(configStore.get('diffTabSize')).toBe(4);
+  // Whole file, chosen in code review, is the guide's too, and its switch in the popover says so.
+  expect(configStore.get('diffExpandUnchanged')).toBe(true);
+  act(() => bar(el).querySelector<HTMLButtonElement>('[data-diff-display-options]')!.click());
+  await until(() => !!document.querySelector('[data-diff-display-popup]'), 'the popover');
+  const whole = [...document.querySelectorAll<HTMLElement>('[data-diff-display-popup] [role="switch"]')].find((s) => s.textContent === 'Whole file');
+  expect(whole?.getAttribute('aria-checked')).toBe('true');
   // The reader applies the tab size, as code review does.
   await until(() => document.documentElement.style.getPropertyValue('--diffs-tab-size') === '4', 'the tab size on the page');
   await until(() => allDrawnIn(el, 'unified'), 'both diffs drawn unified');
 }, 30_000);
 
-test.skipIf(!hasDom)('the Diff display popover has no Whole file or Hide whitespace, and what it sets reaches config.json', async () => {
+test.skipIf(!hasDom)('the Diff display popover has Whole file but no Hide whitespace, and what it sets reaches config.json', async () => {
   startPage('split');
   writeStyleOnDisk('split');
   const el = await openGuide();
@@ -279,8 +289,8 @@ test.skipIf(!hasDom)('the Diff display popover has no Whole file or Hide whitesp
   await until(() => !!document.querySelector('[data-diff-display-popup]'), 'the popover');
   const popup = document.querySelector<HTMLElement>('[data-diff-display-popup]')!;
   const switches = [...popup.querySelectorAll('[role="switch"]')];
-  expect(switches.map((s) => s.textContent)).toEqual(['Wrap long lines', 'Line numbers', 'Backgrounds']);
-  expect(popup.textContent).not.toContain('Whole file');
+  expect(switches.map((s) => s.textContent)).toEqual(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Whole file']);
+  expect(switches[3]!.getAttribute('aria-checked')).toBe('false');
   expect(popup.textContent).not.toContain('Hide whitespace');
   // No Split / Unified row: the bar's button sets it.
   expect(popup.textContent).not.toContain('Unified');
@@ -292,7 +302,17 @@ test.skipIf(!hasDom)('the Diff display popover has no Whole file or Hide whitesp
   await until(() => diffOptionsOnDisk().overflow === 'wrap' && diffOptionsOnDisk().tabSize === 3, 'config.json to keep wrap and tab size 3');
   // One POST for the two, under the wire's names; code review's own options stay.
   expect(settingsPosts.filter((body) => 'diff_options' in body).at(-1)).toMatchObject({ diff_options: { overflow: 'wrap', tab_size: 3 } });
-  expect(diffOptionsOnDisk()).toMatchObject({ diffStyle: 'split', expandUnchanged: true, fontSize: '13' });
+  expect(diffOptionsOnDisk()).toMatchObject({ diffStyle: 'split', hideWhitespace: true, fontSize: '13' });
+
+  // Whole file: code review's own switch (its cookie and config.json `expandUnchanged`), on and back off.
+  act(() => (switches[3] as HTMLElement).click());
+  expect(configStore.get('diffExpandUnchanged')).toBe(true);
+  expect(document.cookie).toContain('plannotator-diff-expand-unchanged=true');
+  await until(() => diffOptionsOnDisk().expandUnchanged === true, 'config.json to keep Whole file on');
+  expect(settingsPosts.filter((body) => 'diff_options' in body).at(-1)).toMatchObject({ diff_options: { expand_unchanged: true } });
+  act(() => (switches[3] as HTMLElement).click());
+  expect(configStore.get('diffExpandUnchanged')).toBe(false);
+  await until(() => diffOptionsOnDisk().expandUnchanged === false, 'config.json to keep Whole file off');
 }, 30_000);
 
 test.skipIf(!hasDom)('Collapse all folds every file, then opens them all, and writes nothing', async () => {
@@ -314,13 +334,18 @@ test.skipIf(!hasDom)('Collapse all folds every file, then opens them all, and wr
   expect(settingsPosts.length).toBe(posts);
 }, 30_000);
 
-test.skipIf(!hasDom)('a phone draws no controls and every diff in one column, and leaves the saved layout alone', async () => {
+test.skipIf(!hasDom)('a phone draws only the Diff display gear and every diff in one column, and leaves the saved layout alone', async () => {
   phone = true;
   startPage('split');
   writeStyleOnDisk('split');
   const el = await openGuide();
   expect(sectionTabs(el)).toHaveLength(0);
-  expect(el.querySelector('[data-diff-controls]')).toBeNull();
+  // No Split / Unified and no Collapse all: the gear alone, so Whole file can still be turned off.
+  const controls = el.querySelector('[data-diff-controls]')!;
+  expect([...controls.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(['Diff display options']);
+  expect(bar(el).querySelector('[data-diff-controls]')).toBeNull();
+  expect(controls.closest('[data-guide-heading]')).not.toBeNull();
+  expect(el.querySelector('[data-diff-layout-toggle]')).toBeNull();
   expect(el.querySelector('[data-diff-style-switch]')).toBeNull();
   // Every diff in one column though the saved layout says Split.
   await until(() => allDrawnIn(el, 'unified'), 'both diffs drawn unified on a phone');

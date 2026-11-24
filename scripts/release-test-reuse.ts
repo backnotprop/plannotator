@@ -5,7 +5,12 @@
  *   bun run scripts/release-test-reuse.ts
  *
  * A release tag points at the version bump commit, which sits on top of a main
- * commit that the Test workflow already ran in full (sharded, about 7 min).
+ * commit that the Test workflow already passed (sharded, about 7 min in full).
+ * A passed run on main may be a light one: a push whose commits since the last
+ * passed run change only the site and the docs runs the tests those reach, not
+ * every test (PUSH_LIGHT in scripts/ci-affected.ts). Reuse stays sound: the
+ * code a light run's commit ships is the same as at the last full run, plus
+ * site and docs changes whose tests that light run ran.
  * The release's own `bun test` is one unsharded process of about 40 min, and
  * it tested the same code again. So the `test` job asks this script first:
  *

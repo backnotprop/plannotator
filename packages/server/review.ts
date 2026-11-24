@@ -128,7 +128,7 @@ import { type AgentJobInfo, REVIEW_OUTPUT_FAILED, getAgentJobAnnotationContext, 
 import { createCommitAvatarResolver } from "@plannotator/shared/commit-avatars";
 import { detectGeneratedFiles, detectGeneratedFilesByName } from "@plannotator/shared/generated-files";
 import { getRepoInfo } from "./repo";
-import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
+import { createRefCardsWithLinear, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
 import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse, type OpencodeClient } from "./shared-handlers";
 import { contentHash } from "./draft";
 import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "@plannotator/shared/review-draft";
@@ -1875,7 +1875,7 @@ export async function startReviewServer(
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for, and
   // never in remote mode. In a `--tailscale` session only this machine's tabs and the tailnet owner's get
   // them (`refCardsTailnetAllowed`): other devices must not drive the user's gh / glab.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  const refCards = createRefCardsWithLinear(options.refRunner);
   // The app page is served compressed only to sessions reachable from another
   // device: remote mode or --tailscale (#1617). Local sessions are unchanged.
   const compressAppHtml = isRemote || options.tailnetPublished === true;
@@ -3743,6 +3743,7 @@ export async function startReviewServer(
                   ? findRepoOnDiskChanges(gitRuntime, listing.root, diffFileStates(currentPatch), snapshotCapturedAt)
                   : Promise.resolve(null),
               lazyThreshold: options.repoFilesLazyThreshold,
+              signal: req.signal,
             });
             return Response.json(result.body, { status: result.status });
           }

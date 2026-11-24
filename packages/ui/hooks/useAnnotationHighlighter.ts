@@ -1592,10 +1592,13 @@ export function useAnnotationHighlighter({
     //
     // Only on a page with a notes list: drawing a document's notes at its end
     // takes their paragraphs out of the flow and shifts every later `<p>`
-    // count, while block ids stay. Anywhere else the positions win, as they
-    // always did: after an edit above two copies, the stored block id names
-    // the wrong copy and the positions the right one.
-    const hasNotes = Boolean(containerRef.current?.querySelector('[data-footnotes]'));
+    // count, while block ids stay. The same on a page with raw HTML the
+    // sanitizer drops (`[data-html-dropped]`, HtmlBlock): such a line used to
+    // print as a paragraph of text, so every later `<p>` count is one lower.
+    // Anywhere else the positions win, as they always did: after an edit above
+    // two copies, the stored block id names the wrong copy and the positions
+    // the right one.
+    const hasNotes = Boolean(containerRef.current?.querySelector('[data-footnotes], [data-html-dropped]'));
     const paintedOutsideStoredBlock = (ann: Annotation, firstDom: Node | null | undefined): boolean => {
       if (!hasNotes || !ann.blockId) return false;
       const painted = blockElementOf(firstDom)?.dataset.blockId;
@@ -1618,6 +1621,10 @@ export function useAnnotationHighlighter({
       // verdict, so it is neither attempted nor unanchored here (the same
       // rule the raw-HTML pinpoints follow on their surface).
       if (ann.diagramAnchor) return;
+      // A comment on an element of a live html block is restored inside that
+      // block's own page, by the block (html-embed), which reports its own
+      // verdict: neither attempted nor unanchored here.
+      if (ann.htmlBlockAnchor != null) return;
       // A comment on part of an image has no text either: the image viewer
       // draws its box, and the Viewer reports it unanchored when its image is
       // gone from the document.

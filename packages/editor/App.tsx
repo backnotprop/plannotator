@@ -58,6 +58,8 @@ import { Annotation, AnnotationType, Block, EditorMode, type CodeAnnotation, typ
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
+import { registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders';
+import { linearLinkCardProvider } from '@plannotator/ui/utils/linearLinkCards';
 import { Tooltip, TooltipProvider } from '@plannotator/ui/components/Tooltip';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { StickyHeaderLane } from '@plannotator/ui/components/StickyHeaderLane';
@@ -65,7 +67,7 @@ import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunnin
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { shareableDocumentMarkdown } from '@plannotator/ui/utils/sharing';
-import { getCallbackConfig, CallbackAction, executeCallback } from '@plannotator/ui/utils/callback';
+import { getCallbackConfig, CallbackAction, executeCallback, type ReturnLink } from '@plannotator/ui/utils/callback';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { tocHeadings } from '@plannotator/ui/utils/annotationHelpers';
@@ -87,7 +89,8 @@ import { getOctarineSettings, isOctarineConfigured } from '@plannotator/ui/utils
 import { getNotionSettings, getNotionParentPageId, isNotionConfigured, setNotionAvailable } from '@plannotator/ui/utils/notion';
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { agentSwitchTargetLabel, getAgentSwitchDefaults, getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
-import { adoptServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { adoptServerSession, currentServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
 import { assertSendOk, PLAN_REVISED_CODE, refusalCode, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
@@ -136,7 +139,8 @@ import { useAgentToolSetting } from '@plannotator/ui/hooks/useAgentToolSetting';
 import { useLatchedTrue } from '@plannotator/ui/hooks/useLatchedTrue';
 import { buildDefaultPrompt, draftAnnotationsToSend, useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { askScopeFromContext as askScopeFromContextFor } from './askScope';
-import { type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
+import { getPlanMaxWidth, type UIPreferences } from '@plannotator/ui/utils/uiPreferences';
+import { goalSetupMaxWidth } from './goalSetupWidth';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
 import { getInputMethod, refreshInputMethodStamp } from '@plannotator/ui/utils/inputMethod';
 import { getHtmlChromeState, mergeHtmlChromeState, saveHtmlChromeState, shouldRestoreHtmlChrome } from '@plannotator/ui/utils/htmlChrome';
@@ -381,7 +385,8 @@ import { configurePlannotatorUI } from '@plannotator/ui/configure';
 // copies rich text, and on a touch screen the toolbar sits below the selection
 // (clear of iOS's edit menu), inside the screen, with thumb-sized buttons;
 // @plannotator/ui hosts keep both unchanged unless they opt in.
-configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
+// A click on a #12 or a pasted PR / issue URL in the text opens its card pinned (utils/refCardClick).
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true, refCardClick: true });
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -681,6 +686,7 @@ const App: React.FC = () => {
   // Hover cards for issue, PR and MR links (ui RefHoverCard): the server reads them with this
   // computer's gh / glab (GET /api/ref, ref-cards.ts). Only when a Plannotator server serves
   // the page, never on a share link. A card shows only when the forge answered (`onlyWithData`).
+  // Linear issue links get one too, read with the Linear API key (ui linearLinkCards); without a key they stay plain.
   // (The transport is installed further down, once `isSharedSession` exists.)
   const refCardRootRef = useRef<HTMLDivElement>(null);
   const [origin, setOrigin] = useState<Origin | null>(null);
@@ -2825,7 +2831,11 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isApiMode || isSharedSession) return;
     setRefCardTransport(refCardRouteTransport('/api/ref'));
-    return () => setRefCardTransport(null);
+    const removeLinearCards = registerRefCardProvider(linearLinkCardProvider);
+    return () => {
+      removeLinearCards();
+      setRefCardTransport(null);
+    };
   }, [isApiMode, isSharedSession]);
 
   // The user's current direct-edit text: the open editor buffer, else the
@@ -5760,6 +5770,7 @@ const App: React.FC = () => {
   const askDocumentLatchRef = useRef<AskDocumentLatch>(EMPTY_ASK_DOCUMENT_LATCH);
 
   const aiChat = useAIChat({
+    storageKey: isLoading ? null : aiChatStorageKey(currentServerSession(), 'editor'),
     context: aiContext,
     providerId: aiConfig.providerId,
     model: aiConfig.model,
@@ -5960,6 +5971,9 @@ const App: React.FC = () => {
   // If a user adds code comments and hits the callback button, those comments are silently dropped.
   // Fix: either disable callbacks when codeAnnotations exist, or include annotationsOutput in the payload.
   const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
+  // The bot's answer may name where the link came from: the done screen shows
+  // it as a link the person clicks (never an automatic move; see callback.ts).
+  const [callbackReturnLink, setCallbackReturnLink] = useState<ReturnLink | null>(null);
 
   const callCallback = React.useCallback(async (action: CallbackAction) => {
     if (!callbackConfig || isSubmitting) return;
@@ -5974,6 +5988,7 @@ const App: React.FC = () => {
       if (result) {
         if (result.type === 'success') {
           toast.success(result.message);
+          setCallbackReturnLink(result.returnLink ?? null);
           setSubmitted(action === CallbackAction.Approve ? 'approved' : 'denied');
         } else {
           toast.error(result.message);
@@ -7118,10 +7133,8 @@ const App: React.FC = () => {
           : []),
       ];
 
-  const planMaxWidth = useMemo(() => {
-    const widths: Record<PlanWidth, number> = { compact: 832, default: 1040, wide: 1280 };
-    return widths[uiPrefs.planWidth] ?? 832;
-  }, [uiPrefs.planWidth]);
+  // Wide has no cap: the document fills the space between the side panels.
+  const planMaxWidth = useMemo(() => getPlanMaxWidth(uiPrefs.planWidth), [uiPrefs.planWidth]);
   const annotateReaderMaxWidth = canUseWideMode && wideModeType === 'wide' ? null : planMaxWidth;
   const agentTerminalPanel = shouldRenderAgentTerminal && agentTerminalCapability ? (
     <div
@@ -7902,7 +7915,7 @@ const App: React.FC = () => {
                   <GoalSetupSurface
                     ref={goalSetupSurfaceRef}
                     bundle={goalSetupBundle}
-                    maxWidth={planMaxWidth}
+                    maxWidth={goalSetupMaxWidth(uiPrefs.planWidth)}
                     onActionStateChange={setGoalSetupAction}
                     onSubmitted={() => setSubmitted('approved')}
                   />
@@ -8512,6 +8525,9 @@ const App: React.FC = () => {
           }
           agentLabel={agentName}
           footer={starAskFooter}
+          links={callbackReturnLink && (submitted === 'approved' || submitted === 'denied')
+            ? [{ ...callbackReturnLink, sameTab: true }]
+            : undefined}
         />
 
         <LookAndFeelAnnouncementDialog

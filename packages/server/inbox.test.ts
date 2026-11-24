@@ -1159,6 +1159,16 @@ describe("the window's routes: settings, restart, favicon", () => {
       expect(full.status).toBe(422);
       expect(await settings()).toMatchObject({ reactions_rev: 7 });
       expect((await (await change({ op: "remove", emoji: "🚀" })).json()).reactions).toEqual([{ emoji: "🎉" }, { emoji: "🧪" }, { emoji: "👀" }, { emoji: "❤️" }]);
+
+      // A skill on a saved emoji (approval "inbox-reactions-every-message"): saved, read back, kept by a rename, '' takes it away.
+      expect((await (await change({ op: "skill", emoji: "🧪", skill: "review-recheck" })).json()).reactions[1]).toEqual({ emoji: "🧪", skill: "review-recheck" });
+      expect((await change({ op: "name", emoji: "🧪", label: "Test it" })).status).toBe(200);
+      expect(((await settings()).reactions as unknown[])[1]).toEqual({ emoji: "🧪", label: "Test it", skill: "review-recheck" });
+      expect((onDisk().inboxReactions as unknown[])[1]).toEqual({ emoji: "🧪", label: "Test it", skill: "review-recheck" });
+      expect((await change({ op: "skill", emoji: "🧪", skill: "not a skill" })).status).toBe(422);
+      const whole = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, reactions: [{ emoji: "🧪", skill: "../ledger" }] });
+      expect(whole.status).toBe(422);
+      expect((await (await change({ op: "skill", emoji: "🧪", skill: "" })).json()).reactions[1]).toEqual({ emoji: "🧪", label: "Test it" });
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;
@@ -1221,14 +1231,14 @@ describe("the window's routes: settings, restart, favicon", () => {
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
     try {
       mkdirSync(dataDir, { recursive: true });
-      // What code review saved: these read back under the wire's names; Whole file and the font are code review's own.
-      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ diffOptions: { lineDiffType: "char", tabSize: 4, expandUnchanged: true, fontSize: "13", diffIndicators: "sideways" } }));
+      // What code review saved: these read back under the wire's names, Whole file among them; the font and Hide whitespace are code review's own.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ diffOptions: { lineDiffType: "char", tabSize: 4, expandUnchanged: true, hideWhitespace: true, fontSize: "13", diffIndicators: "sideways" } }));
       const server = await start(dataDir);
       const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { diff_options: Record<string, unknown>; diff_style: unknown };
       const onDisk = () => (JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { diffOptions?: Record<string, unknown> }).diffOptions;
       const save = (body: Record<string, unknown>) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
       // A value no build writes reads as never chosen.
-      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4, semantic: null });
+      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4, semantic: null, expand_unchanged: true });
 
       // Every field is checked, and the refusal names it; nothing is written.
       const refusals: [unknown, string][] = [
@@ -1236,7 +1246,8 @@ describe("the window's routes: settings, restart, favicon", () => {
         ["wrap", "diff_options"],
         [{}, "diff_options"],
         [{ font_size: "14" }, "diff_options.font_size"],
-        [{ expand_unchanged: true }, "diff_options.expand_unchanged"],
+        [{ hide_whitespace: true }, "diff_options.hide_whitespace"],
+        [{ expand_unchanged: "yes" }, "diff_options.expand_unchanged"],
         // Names Object.prototype has are not diff options either (a computed key, so `__proto__` is an own key on the wire).
         [{ toString: "x" }, "diff_options.toString"],
         [{ ["__proto__"]: "x" }, "diff_options.__proto__"],
@@ -1262,14 +1273,14 @@ describe("the window's routes: settings, restart, favicon", () => {
       const clash = await save({ diff_style: "split", diff_options: { diff_style: "unified" } });
       expect(clash.status).toBe(422);
       expect((await clash.json()).field).toBe("diff_style");
-      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 4, expandUnchanged: true, fontSize: "13", diffIndicators: "sideways" });
+      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 4, expandUnchanged: true, hideWhitespace: true, fontSize: "13", diffIndicators: "sideways" });
 
       // A change saves only its fields; the others, code review's included, stay.
-      const saved = await save({ diff_options: { overflow: "wrap", indicators: "classic", line_numbers: false, background_intensity: "strong", tab_size: 8, semantic: false } });
+      const saved = await save({ diff_options: { overflow: "wrap", indicators: "classic", line_numbers: false, background_intensity: "strong", tab_size: 8, semantic: false, expand_unchanged: false } });
       expect(saved.status).toBe(200);
       const answer = (await saved.json()) as { diff_options: Record<string, unknown> };
-      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8, semantic: false });
-      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 8, expandUnchanged: true, fontSize: "13", diffIndicators: "classic", overflow: "wrap", showLineNumbers: false, lineBgIntensity: "strong", semantic: false });
+      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8, semantic: false, expand_unchanged: false });
+      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 8, expandUnchanged: false, hideWhitespace: true, fontSize: "13", diffIndicators: "classic", overflow: "wrap", showLineNumbers: false, lineBgIntensity: "strong", semantic: false });
       expect((await read()).diff_options).toEqual(answer.diff_options);
 
       // `diff_style` alone (pages from before) sets the same field and is answered both ways.

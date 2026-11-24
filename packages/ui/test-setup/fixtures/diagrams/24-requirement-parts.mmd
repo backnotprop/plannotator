@@ -1,0 +1,20 @@
+requirementDiagram
+  requirement r1 {
+    id: 1
+    text: fast
+  }
+  functionalRequirement r2 {
+    id: 2
+    text: "safe & sound"
+  }
+  element e1 {
+    type: sim
+  }
+  element e2 {
+    type: sim
+  }
+  e1 - satisfies -> r1
+  r2 - traces -> r1
+  e1 - verifies -> r2
+  e2 - satisfies -> r1
+  e1 - verifies -> r1

@@ -1,12 +1,14 @@
-import React, { createContext, useContext, useState, useMemo, useSyncExternalStore } from "react";
+import React, { createContext, useContext, useEffect, useState, useMemo, useSyncExternalStore } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
 import { findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
 import { useHoverPreview } from "../hooks/useHoverPreview";
+import { matchInlineHtml } from '../utils/inlineHtmlTags';
 import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
-import { InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
+import { ImageRetryContext, InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
+import { probeImage } from "./imageRetryProbe";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import { BarePathContext, CodeSpan, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type BarePathWrap } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
@@ -17,6 +19,7 @@ import { HostTitle } from "./HostTitle";
 import { AuthorColorText } from "./AuthorColorText";
 import { matchAuthorColor } from "../utils/authorColor";
 import { plainTextLinkSpans, usePlainTextLinkers } from "../utils/refCardProviders";
+import { proseRefLinkProps } from "../utils/refCardClick";
 import { autolinkMayFollow, autolinkRunningPast, emailMayFollow, findWwwAutolinks, matchEmailAutolink, matchHtmlEntity, matchWwwAutolink, wwwAutolinkHref } from "../utils/inlineAutolinks";
 import { FOOTNOTE_REF_RE, footnoteKey } from "../utils/footnotes";
 import { FootnoteRef, useFootnoteScope } from "./footnotes/footnoteScope";
@@ -411,6 +414,7 @@ function emitPlainTextWithBareUrls(
           href={span.href ?? span.value}
           target="_blank"
           rel="noopener noreferrer"
+          {...proseRefLinkProps(span.href ?? span.value)}
           className="text-primary underline underline-offset-2 hover:text-primary/80"
         >
           {span.value}
@@ -475,8 +479,25 @@ const HostResolvedImage: React.FC<{
   writtenSrc?: string;
   onImageClick?: (src: string, alt: string) => void;
 }> = ({ src, alt, width, height, writtenSrc, onImageClick }) => {
-  const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const failed = failedSrc === src;
+  const retry = useContext(ImageRetryContext);
+  /** The src that failed, and the host's retry key then (`ImageRetryContext`). */
+  const [failure, setFailure] = useState<{ src: string; key: string | number | undefined } | null>(null);
+  const failed = failure?.src === src;
+  /** A src that failed, then loaded off the page: the element loads it again under a new fragment (not sent). */
+  const [reloaded, setReloaded] = useState<{ src: string; n: number } | null>(null);
+  const retryKey = retry?.key;
+  const retrying = failed && retry !== null && failure.key !== retryKey && retry.retries(src);
+  useEffect(() => {
+    if (!retrying) return;
+    // Off the page first (a few at a time in the window): the placeholder stays until the picture is there.
+    return probeImage(src, (loaded) => {
+      if (!loaded) return setFailure({ src, key: retryKey });
+      // The same element, a new URL string: WebKit does not load again a URL that failed for it when it is set again.
+      setReloaded((last) => ({ src, n: last?.src === src ? last.n + 1 : 1 }));
+      setFailure(null);
+    });
+  }, [retrying, src, retryKey]);
+  const shownSrc = reloaded?.src === src && !src.includes('#') ? `${src}#retry-${reloaded.n}` : src;
   return (
     <>
       {failed && (
@@ -486,7 +507,7 @@ const HostResolvedImage: React.FC<{
       )}
       <img
         key="image"
-        src={src}
+        src={shownSrc}
         alt={failed ? '' : alt}
         width={width}
         height={height}
@@ -498,7 +519,7 @@ const HostResolvedImage: React.FC<{
         loading="lazy"
         // Only for a host's smaller copy (`width`): the default stays as it was for every other host.
         decoding={width ? 'async' : undefined}
-        onError={() => setFailedSrc(src)}
+        onError={() => setFailure({ src, key: retryKey })}
         onClick={(e) => {
           e.stopPropagation();
           if (!failed) onImageClick?.(src, alt);
@@ -737,6 +758,40 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
 
+    // Raw HTML tags (utils/inlineHtmlTags): `<sub>` `<sup>` `<kbd>` `<mark>`
+    // draw as elements; a tag the sanitizer drops (`<iframe …>`, `<script>`)
+    // draws nothing, its words kept where they are prose. A bare `<iframe>`
+    // mention stays text. Never markup: React elements and text only.
+    const html = remaining[0] === '<' && !sourceLike ? matchInlineHtml(remaining) : null;
+    if (html) {
+      if (html.kind !== 'drop') {
+        const inner = (
+          <InlineMarkdown
+            text={html.inner}
+            onOpenLinkedDoc={onOpenLinkedDoc}
+            resolveLinkedDoc={resolveLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
+            onNavigateAnchor={onNavigateAnchor}
+            imageBaseDir={imageBaseDir}
+            onImageClick={onImageClick}
+            githubRepo={githubRepo}
+            repoHost={repoHost}
+            linkLabel={linkLabel}
+          />
+        );
+        parts.push(
+          html.kind === 'unwrap' ? <React.Fragment key={key++}>{inner}</React.Fragment>
+            : html.tag === 'kbd' ? <kbd key={key++} className="rounded border border-border bg-muted px-1 py-px font-mono text-[0.85em]">{inner}</kbd>
+              : html.tag === 'mark' ? <span key={key++} data-html-mark="" className="rounded-sm bg-warning/25 px-0.5 text-foreground">{inner}</span>
+                : html.tag === 'sub' ? <sub key={key++}>{inner}</sub>
+                  : <sup key={key++}>{inner}</sup>,
+        );
+      }
+      remaining = remaining.slice(html.length);
+      previousChar = ">";
+      continue;
+    }
+
     // Inline math: \( ... \) or $...$ — require non-space content and avoid
     // display fences.
     if (remaining.startsWith('\\(')) {
@@ -825,6 +880,7 @@ export const InlineMarkdown: React.FC<{
               href={safe}
               target="_blank"
               rel="noopener noreferrer"
+              {...proseRefLinkProps(safe)}
               className="text-primary underline underline-offset-2 hover:text-primary/80"
             >
               {url}
@@ -880,6 +936,7 @@ export const InlineMarkdown: React.FC<{
             href={crossRepoRef.href}
             target="_blank"
             rel="noopener noreferrer"
+            {...proseRefLinkProps(crossRepoRef.href)}
             className="text-primary font-medium hover:underline"
           >
             {crossRepoRef.label}
@@ -921,6 +978,7 @@ export const InlineMarkdown: React.FC<{
           href={url}
           target="_blank"
           rel="noopener noreferrer"
+          {...proseRefLinkProps(url)}
           className="text-primary underline underline-offset-2 hover:text-primary/80"
         >
           {url}
@@ -1157,6 +1215,7 @@ export const InlineMarkdown: React.FC<{
               href={href}
               target="_blank"
               rel="noopener noreferrer"
+              {...proseRefLinkProps(href)}
               className="text-primary font-medium hover:underline"
             >
               {label}

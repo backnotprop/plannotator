@@ -575,6 +575,7 @@ function canonicalPRUrl(ref: PRRef): string {
   const host = lower === "www.github.com" || lower === "www.gitlab.com" ? lower.slice(4) : lower;
   if (ref.platform === "github") return `https://${host}/${ref.owner}/${ref.repo}/pull/${ref.number}`;
   if (ref.platform === "gitlab") return `https://${host}/${ref.projectPath}/-/merge_requests/${ref.iid}`;
+  if (ref.platform === "forgejo") return `${ref.scheme ?? "https"}://${host}/${ref.owner}/${ref.repo}/pulls/${ref.number}`;
   return `https://${host}/${ref.workspace}/${ref.repo}/pull-requests/${ref.number}`;
 }
 
@@ -583,7 +584,7 @@ function prSnapshotSource(ref: PRRef, url: string): GuideSnapshotSource {
   return {
     kind: "pr",
     repo: getDisplayRepo(ref),
-    pr: { url, number: getPRNumber(ref), ...(ref.platform === "bitbucket" ? {} : { platform: ref.platform }) },
+    pr: { url, number: getPRNumber(ref), ...(ref.platform === "bitbucket" || ref.platform === "forgejo" ? {} : { platform: ref.platform }) },
   };
 }
 

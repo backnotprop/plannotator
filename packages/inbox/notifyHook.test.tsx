@@ -632,6 +632,19 @@ describe.if(hasDom)('useInboxNotifications', () => {
     expect(end).toBe('#thread=t1');
   });
 
+  test("a click on a thread's notice makes the open the person's (Recent activity); the thread opened with no click is not", async () => {
+    const { personOpened, resetRecentActsForTests, routeChanged } = await import('./recentActs');
+    resetRecentActsForTests();
+    // Opened with no click here (an agent's open): not the person's.
+    routeChanged(Date.now(), 'old');
+    expect(personOpened('old')).toBe(false);
+    await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
+    onOpenThread = (threadId) => routeChanged(Date.now(), threadId);
+    await act(async () => notices.at(-1)!.onclick!());
+    expect(personOpened('t1')).toBe(true);
+    resetRecentActsForTests();
+  });
+
   test("a click on a burst's notice, the list already at rest: the address changes and ends with no hash", async () => {
     await batch([message('t1', 't1'), message('t2', 't2')], list([{ id: 't1', section: 'new' }, { id: 't2', section: 'new' }]));
     const { steps, end } = await addressesDuring('', () => notices.at(-1)!.onclick!());

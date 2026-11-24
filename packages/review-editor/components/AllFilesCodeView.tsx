@@ -25,6 +25,7 @@ import type {
   ConventionalDecoration,
   ConventionalLabel,
   DiffAnnotationMetadata,
+  ImageAttachment,
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
@@ -99,6 +100,7 @@ import {
   type HostFileNote,
   type HostLineNote,
 } from './hostLineNotes';
+import { dropHostLineMarks, HOST_LINE_MARKS_CSS, keepHostLineMarks, NO_HOST_LINE_MARKS, type HostLineMark, type OnHostLineMark } from './hostLineMarks';
 import { applyFileLanguageFixes } from '../utils/highlightLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
@@ -230,6 +232,11 @@ export interface AllFilesCodeViewProps {
   /** What the host draws itself about a whole file (hostLineNotes.ts): in the file's header, under its path, above its
    *  first lines and the person's own file comments; read-only, never annotations. Absent: none, as before. */
   hostFileNotes?: readonly HostFileNote[];
+  /** The host's marks at the right edge of lines (hostLineMarks.ts): a button at each marked line's end, never over
+   *  code. Only a view of one file draws them. Absent: none, as before. */
+  hostLineMarks?: readonly HostLineMark[];
+  /** Hears the marks: hover, keyboard focus, a press (hostLineMarks.ts). */
+  onHostLineMark?: OnHostLineMark;
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   lineTarget?: AllFilesLineTarget | null;
@@ -327,7 +334,8 @@ export interface AllFilesCodeViewProps {
   onExplainAnnotation?: (id: string) => void;
   agentFindingSources?: ReadonlySet<string>;
   // Header actions (P3). Mirror AllFilesDiffView's header surface.
-  onAddFileCommentForFile?: (filePath: string, text: string) => void;
+  /** A file's comment box: its words and what was attached (pictures, files). */
+  onAddFileCommentForFile?: (filePath: string, text: string, images?: ImageAttachment[]) => void;
   viewedFiles?: Set<string>;
   onToggleViewed?: (filePath: string) => void;
   /** Chrome preference (#1277): false hides the header Viewed buttons; the `v`
@@ -506,7 +514,7 @@ export interface AllFilesCodeViewProps {
   askOnly?: boolean;
   /**
    * A host's choices for selected lines before the comment box (the Inbox's
-   * code review: Comment · Ask · Show me). Absent: a selection opens the
+   * code review: Comment · Ask). Absent: a selection opens the
    * comment box at once, as always.
    */
   selectionActions?: DiffSelectionActions;
@@ -773,6 +781,27 @@ function markdownPreviewFileDiff(full: FileDiffMetadata): FileDiffMetadata {
  */
 const SCROLLED_PAST_EPSILON_PX = 8;
 
+/** The reader's own input that can move the list (scrollbar and tree clicks are pointer presses). */
+const READER_INPUT_EVENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+
+/**
+ * How long the scroll a remount's restore makes belongs to the view (from the
+ * moment it is issued). Short and self-ending: after it, every scroll counts
+ * for Viewed as you scroll exactly as before, whatever produced it.
+ */
+const RESTORE_SCROLL_WINDOW_MS = 300;
+
+/** Input types that take no typing: a key pressed on one can move the list. */
+const NON_TEXT_INPUT_TYPES = new Set(['button', 'checkbox', 'color', 'file', 'image', 'radio', 'range', 'reset', 'submit']);
+
+/** Typing into a field (the file filter, a comment) is not moving the list. */
+function isTextEntryTarget(event: Event): boolean {
+  const target = event.composedPath()[0] ?? event.target;
+  if (!(target instanceof HTMLElement)) return false;
+  if (target instanceof HTMLInputElement) return !NON_TEXT_INPUT_TYPES.has(target.type);
+  return target.isContentEditable || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+}
+
 /** The one VirtualizedFileDiff method the image-header sizing needs. */
 type HeaderMetricsTarget = { setMetrics(metrics?: Partial<VirtualFileMetrics>, force?: boolean): void };
 const isHeaderMetricsTarget = (value: unknown): value is HeaderMetricsTarget =>
@@ -880,6 +909,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   annotations,
   hostLineNotes = NO_HOST_LINE_NOTES,
   hostFileNotes = NO_HOST_FILE_NOTES,
+  hostLineMarks = NO_HOST_LINE_MARKS,
+  onHostLineMark,
   selectedAnnotationId,
   scrollTargetAnnotation,
   lineTarget,
@@ -1115,6 +1146,46 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // file the reviewer merely arrived at, without touching anything, which is
   // the one thing auto-mark-viewed must never do.
   const hasScrolledRef = useRef(false);
+  // A remount (a file filter, a diff switch, a sort change) puts the reader
+  // back on their file, and that restore, clamped when the list got shorter,
+  // fires scroll events nobody made: on a short list it lands at the bottom and
+  // would mark the last file. So the restore's own scroll belongs to the view:
+  // from its scrollTo for RESTORE_SCROLL_WINDOW_MS, or until the reader's next
+  // wheel, touch, pointer press or key (outside a text field) once the
+  // restore's first scroll event has been seen; input before that event is
+  // ignored, so it cannot hand the restore's scroll to the reader.
+  const viewScrollRef = useRef(false);
+  const restoreScrollSeenRef = useRef(false);
+  const restoreRafRef = useRef<number | null>(null);
+  const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endViewScroll = useCallback(() => {
+    if (restoreTimerRef.current != null) clearTimeout(restoreTimerRef.current);
+    restoreTimerRef.current = null;
+    viewScrollRef.current = false;
+    restoreScrollSeenRef.current = false;
+  }, []);
+  useEffect(() => () => {
+    if (restoreRafRef.current != null) cancelAnimationFrame(restoreRafRef.current);
+    endViewScroll();
+  }, [endViewScroll]);
+  // Whether a scroll that counts has happened on this file set (see
+  // viewScrollRef). Gates the at-bottom signal and new pass candidates.
+  const readerScrolledRef = useRef(false);
+  // Listened for only where auto-view is wired: a read-only or portable host
+  // gets no window key listener from this view.
+  const tracksReaderInput = onFileScrolledPast != null && !readOnly;
+  useEffect(() => {
+    if (!tracksReaderInput) return;
+    const readerMoved = (event: Event) => {
+      if (!viewScrollRef.current || !restoreScrollSeenRef.current) return;
+      if (event.type === 'keydown' && isTextEntryTarget(event)) return;
+      endViewScroll();
+    };
+    for (const type of READER_INPUT_EVENTS) window.addEventListener(type, readerMoved, { capture: true, passive: true });
+    return () => {
+      for (const type of READER_INPUT_EVENTS) window.removeEventListener(type, readerMoved, { capture: true });
+    };
+  }, [tracksReaderInput, endViewScroll]);
 
   // The file CodeView last reported a selection / line-click in. The toolbar is
   // keyed off this file's path + patch, but the value is sourced from the
@@ -1621,10 +1692,21 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const previousVisible = visibleFileRef.current;
     const offset = restoredContentKeyRef.current === contentKey ? -visibleOffsetRef.current : 0;
     restoredContentKeyRef.current = contentKey;
+    endViewScroll();
+    readerScrolledRef.current = false;
     if (previousVisible) {
       const restoreId = filePathToItemId.get(previousVisible);
       if (restoreId != null) {
-        requestAnimationFrame(() => {
+        // A second remount in the same frame replaces the first one's restore.
+        if (restoreRafRef.current != null) cancelAnimationFrame(restoreRafRef.current);
+        restoreRafRef.current = requestAnimationFrame(() => {
+          restoreRafRef.current = null;
+          if (tracksReaderInput) {
+            // The window opens as the restore's scroll is issued.
+            endViewScroll();
+            viewScrollRef.current = true;
+            restoreTimerRef.current = setTimeout(endViewScroll, RESTORE_SCROLL_WINDOW_MS);
+          }
           restoringRef.current = true;
           try {
             viewerRef.current?.scrollTo({ type: 'item', id: restoreId, align: 'start', offset });
@@ -2691,6 +2773,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     for (const itemId of itemNodeRef.current.keys()) if (!semDiffsRef.current.has(itemId)) prefetchWholeFile(itemId);
   }, [semanticEnabled, prefetchWholeFile]);
 
+  // The host's line marks (hostLineMarks.ts): this view's file's, kept on its lines each time the file draws, and
+  // again on every drawn file when they change.
+  const onlyPath = files.length === 1 ? files[0]!.path : null;
+  const lineMarks = useMemo(() => (onlyPath ? hostLineMarks.filter((mark) => mark.filePath === onlyPath) : NO_HOST_LINE_MARKS), [hostLineMarks, onlyPath]);
+  const lineMarksRef = useRef(lineMarks);
+  lineMarksRef.current = lineMarks;
+  const onHostLineMarkRef = useRef(onHostLineMark);
+  onHostLineMarkRef.current = onHostLineMark;
+  useEffect(() => {
+    for (const node of itemNodeRef.current.values()) if (node.shadowRoot) keepHostLineMarks(node.shadowRoot, lineMarks, onHostLineMarkRef.current);
+  }, [lineMarks, onHostLineMark]);
+
   const handlePostRender = useStableCallback(
     (
       node: HTMLElement,
@@ -2702,6 +2796,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (!hasFirstCodePainted()) requestAnimationFrame(() => setTimeout(markFirstCodePainted, 0));
       if (phase === 'unmount') {
         clearItemSearchHighlights(node);
+        if (node.shadowRoot) dropHostLineMarks(node.shadowRoot);
         nodeToItemIdRef.current.delete(node);
         if (itemNodeRef.current.get(context.id) === node) itemNodeRef.current.delete(context.id);
         return;
@@ -2723,6 +2818,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (heldSelectionIdRef.current === context.id && context.fileDiff.isPartial !== true) setWholeAfterHold((n) => n + 1);
       if (flushesFiles) syncTrailingRow(node, context);
       if (powerUpStreamRef.current) keepPowerUpInStep(node);
+      if (node.shadowRoot) keepHostLineMarks(node.shadowRoot, lineMarksRef.current, onHostLineMarkRef.current);
       prefetchWholeFile(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
@@ -2989,6 +3085,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
               'F', a.id, a.text ?? '', a.source ?? '', a.author ?? '',
               a.reviewProfileLabel ?? '', a.conventionalLabel ?? '',
               (a.decorations ?? []).join(','), a.createdAt ?? 0, a.reasoning ?? '',
+              (a.images ?? []).map((image) => image.path),
             ])
           : JSON.stringify([
               a.id, a.lineEnd, a.side, a.type,
@@ -3476,8 +3573,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // Auto-mark-viewed (Rule 1): the file the reader just left becomes a
       // PASS CANDIDATE. It is not marked yet — the geometry still has to say
       // it genuinely scrolled out above.
+      // Only the reader's own scroll leaves a file; a restore jumping over it does not.
       const previousItemId = visibleItemIdRef.current;
-      if (previousItemId != null && previousItemId !== bestId) {
+      if (previousItemId != null && previousItemId !== bestId && readerScrolledRef.current) {
         passCandidateItemRef.current = previousItemId;
       }
       visibleItemIdRef.current = bestId;
@@ -3511,9 +3609,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // The last file can never scroll out above, so reaching the end of the
     // diff is its completion signal. Re-fires on every at-bottom tick; the
     // owner's dwell floor decides whether it actually marks. Gated on a real
-    // scroll having happened, because a diff shorter than the viewport is
-    // at-bottom from the mount seed onwards.
-    if (atBottom && hasScrolledRef.current && path != null && onFileScrolledPast
+    // scroll by the reader having happened, because a diff shorter than the
+    // viewport is at-bottom from the mount seed onwards, and a restore onto a
+    // shorter list lands there by itself.
+    if (atBottom && readerScrolledRef.current && path != null && onFileScrolledPast
         && !isCollapsed(bestId)) {
       onFileScrolledPast(path);
     }
@@ -3541,6 +3640,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
     scheduleWarmUp(WARM_UP_REST_MS);
     hasScrolledRef.current = true;
+    if (viewScrollRef.current) restoreScrollSeenRef.current = true;
+    else readerScrolledRef.current = true;
     onScrollPositionChange?.(position);
     if (scrollReportRafRef.current != null) return;
     scrollReportRafRef.current = requestAnimationFrame(() => {
@@ -4128,6 +4229,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             data-pn-touch-target-icon={compactTouchLayout || undefined}
             className="flex items-center justify-center w-6 h-6 rounded hover:bg-foreground/10 transition-colors flex-shrink-0"
             title={collapsed ? 'Expand diff' : 'Collapse diff'}
+            data-file-collapse-toggle={collapsed ? 'collapsed' : 'expanded'}
           >
             <svg
               className={`w-3 h-3 transition-transform ${collapsed ? '' : 'rotate-90'}`}
@@ -4285,10 +4387,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const getMinimapViewer = useCallback(() => viewerRef.current?.getInstance(), []);
   const getMinimapScroller = useCallback(() => scrollRef.current, []);
 
+  // The host's line marks: buttons inside each file's shadow root, so only a view of one file can say which file's lines.
+  const lineMarksCss = lineMarks.length > 0 ? HOST_LINE_MARKS_CSS : '';
+
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
-      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}`,
+      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}${lineMarksCss}`,
       ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
       diffStyle,
       overflow: diffOverflow,
@@ -4363,6 +4468,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       pierreTheme.syntaxTheme,
       powerUpActive,
       powerUpMotion,
+      lineMarksCss,
       diffStyle,
       diffOverflow,
       diffIndicators,
@@ -4530,8 +4636,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           contextText={fileCommentAnchor.filePath.split('/').pop() || fileCommentAnchor.filePath}
           isGlobal={false}
           draftKey={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${fileCommentAnchor.filePath}`}
-          onSubmit={(text) => {
-            onAddFileCommentForFile(fileCommentAnchor.filePath, text);
+          onSubmit={(text, images) => {
+            onAddFileCommentForFile(fileCommentAnchor.filePath, text, images);
             setFileCommentAnchor(null);
           }}
           onClose={() => setFileCommentAnchor(null)}

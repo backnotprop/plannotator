@@ -36,6 +36,7 @@ import {
 	handleCustomThemesScript,
 	customThemesPage,
 	handleFavicon,
+	handleAnnotateMediaRequest,
 	handleImageRequest,
 	handleStarAskRequest,
 	handleReferenceSkillsRequest,
@@ -308,6 +309,8 @@ export async function startPlanReviewServer(options: {
 
 	// Draft key for annotation persistence
 	const draftKey = options.mode !== "archive" ? contentHash(options.plan) : "";
+	// Linked documents this review served: their folders may play local videos.
+	const servedMediaDocuments = new Set<string>();
 	// Per-document draft copies of the plan's linked documents, plus the index
 	// that lets a reload offer them all: mirror of packages/server/index.ts
 	// (#1545, annotate-draft.ts). A document may be saved exactly when this
@@ -570,7 +573,10 @@ export async function startPlanReviewServer(options: {
 				json(res, crossOriginRefusalBody(), 403);
 				return;
 			}
-			await handleDocRequest(res, url, { anyPath: isThisMachineRequest(req) });
+			await handleDocRequest(res, url, { anyPath: isThisMachineRequest(req), onDocumentServed: (path) => servedMediaDocuments.add(path) });
+		} else if (url.pathname === "/api/annotate-media" && req.method === "GET") {
+			// A linked document's local <video> (HtmlBlock rewrites its src here).
+			handleAnnotateMediaRequest(req, res, url, servedMediaDocuments);
 		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
 			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {

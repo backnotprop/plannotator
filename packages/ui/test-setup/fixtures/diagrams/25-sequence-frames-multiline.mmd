@@ -1,0 +1,20 @@
+sequenceDiagram
+  participant A
+  participant B
+  rect rgb(200,200,255)
+    A->>B: in rect
+  end
+  critical crit
+    A->>B: c1
+  option other
+    B->>A: c2
+  end
+  break stop
+    A->>B: b1
+  end
+  loop
+    A->>B: line one<br/>line two
+  end
+  Note over A: two<br/>lines
+  A->>+B: act
+  B-->>-A: back
