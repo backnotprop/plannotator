@@ -63,6 +63,8 @@
 @import "../../packages/inbox/prs/prs.css";
 /* A PR's thread: its line, the empty thread before its first message, "Sent with" (packages/inbox/pulls/). */
 @import "../../packages/inbox/pulls/pullThread.css";
+/* Reviews' "On this computer" +: its heading's control and picker (packages/inbox/pulls/OpenLocalPicker.tsx). */
+@import "../../packages/inbox/pulls/openLocal.css";
 /* Plans (packages/inbox/plans/). */
 @import "../../packages/inbox/plans/plans.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
