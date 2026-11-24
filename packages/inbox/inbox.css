@@ -3846,9 +3846,9 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-phead > .ib-sp { flex: 1; }
   .ib-phead h2.ib-phsubj { padding: 0 4px; }
   .ib-phead:has(> h2.ib-phsubj[data-open]) { min-height: calc(48px + env(safe-area-inset-top)); }
-  /* A cut title is a 44 px target like the bar's other controls: its line is the bar's height, the words where they were. */
+  /* The title's line is the bar's height, cut or not: a cut title is a 44 px target like the bar's other controls, and one that fits has its mark and badge whole, the words where they were. */
   .pn-inbox button.ib-phsubj-t { min-height: 44px; }
-  .ib-phead h2.ib-phsubj:not([data-open]) button.ib-phsubj-t { line-height: 44px; }
+  .ib-phead h2.ib-phsubj:not([data-open]) .ib-phsubj-t { line-height: 44px; }
   .pn-inbox .ib-iconbtn { width: 44px; height: 44px; }
   .pn-inbox .ib-ptool { min-width: 44px; height: 44px; justify-content: center; }
   .ib-ptool-l { display: none; }
