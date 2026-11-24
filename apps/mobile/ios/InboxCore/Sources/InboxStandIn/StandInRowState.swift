@@ -48,6 +48,13 @@ struct StandInState {
   var changeAfterRead: (id: String, bytes: Data?)?
   /// The person's comments (`annotations.jsonl`): every record ever saved, by annotation id.
   var annotations: [String: InboxAnnotationRecord] = [:]
+  /// How long a 👍 waits before it goes to the agent (`INBOX_SET_ASIDE_DELAY_MS`, 10 s).
+  var ackWindow: TimeInterval = 10
+  /// Replies taken back, by id (they left their thread), and replies an agent already has.
+  var takenBack: [MessageID: InboxMessageWire] = [:]
+  var agentHas: Set<MessageID> = []
+  /// How many Take back answers are still to be lost on the way back (`loseTakeBackAnswers`).
+  var lostTakeBacks = 0
   /// Drawings kept (`inbox/markups/<sha256>.png`), by file name.
   var markups: [String: Data] = [:]
   /// Files the phone sent up and no Send named yet (StandInCompose.swift), the live sessions when set, the threads
@@ -177,7 +184,7 @@ extension StandInDoor {
     if parts.count == 3, parts[0] == "attachments", ["image", "video", "audio", "download"].contains(parts[2]) {
       return bytes(call, file: parts[1], ranged: parts[2] != "image")
     }
-    return nil
+    return getWriting(parts)
   }
 
   func attachmentState(_ file: StandInFile) -> InboxAttachmentState {
@@ -244,6 +251,7 @@ extension StandInDoor {
     }
     if parts == ["annotations"] { return saveComment(fields) }
     guard parts.count == 3 else { return nil }
+    if let written = postWriting(parts, fields) { return written }
     if parts[0] == "annotations", parts[2] == "remove" { return removeComment(parts[1]) }
     let id = ThreadID(parts[1])
     if parts[0] == "messages", parts[2] == "resolve" {

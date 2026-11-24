@@ -140,6 +140,17 @@ function seed(dataDir: string, project: string): World['seeded'] {
   return { ada: ada.thread_id, bob: bob.thread_id, charlie: charlie.thread_id };
 }
 
+/**
+ * A time zone where it is about noon now (12:00 to 12:59), so every seeded act (three hours back at most) and the
+ * whole run fall on one day there, and each row writes its time as a time of day. Run near midnight in the runner's
+ * zone, Charlie Dunn's act (41 min ago) and his agent's message (30 min ago) both fell on the day before: both read
+ * "Nov 23", and the row could not show which of the two it draws.
+ */
+function noonZone(now = new Date()): string {
+  const east = 12 - now.getUTCHours();
+  return east === 0 ? 'Etc/GMT' : `Etc/GMT${east > 0 ? '-' : '+'}${Math.abs(east)}`;
+}
+
 const ask = (prompt: string) => ['The draft is ready for a look.', '', ':::question', prompt, '', '- [ ] Yes', '- [ ] Not yet', ':::'].join('\n');
 
 /** When the person last acted in each thread, as the window's list read says. */
@@ -169,7 +180,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const charlie = await claude.send({ project_path: billing, subject: 'Charlie Dunn: invoice export', thread: 'charlie', body: ask('Export invoices as CSV too?') });
   const starred = await codex.send({ project_path: billing, subject: 'Release notes for 2.4', thread: 'notes', body: ask('Lead with the export change?') });
   const untouched = await codex.send({ project_path: billing, subject: 'Nightly e2e run', thread: 'nightly', body: 'All green tonight.' });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: noonZone() });
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -228,13 +239,12 @@ async function timesReadDown(page: Page, seeded: World['seeded']) {
   expect(acts[0]).toBeGreaterThan(acts[1]!);
   expect(acts[1]).toBeGreaterThan(acts[2]!);
   expect(times[2]!.shown).not.toBe(times[2]!.last);
-  // Today, as the clock writes it: each time earlier than the one above it.
+  // Today (the page's zone is `noonZone`), as the clock writes it: each time earlier than the one above it.
   const minutes = times.map((t) => /^(\d{1,2}):(\d{2})\s([AP])M$/.exec(t.shown ?? ''));
-  if (minutes.every(Boolean)) {
-    const at = minutes.map((m) => ((Number(m![1]) % 12) + (m![3] === 'P' ? 12 : 0)) * 60 + Number(m![2]));
-    expect(at[0]).toBeGreaterThan(at[1]!);
-    expect(at[1]).toBeGreaterThan(at[2]!);
-  }
+  expect(minutes.map((m, i) => (m ? null : times[i]!.shown))).toEqual([null, null, null]);
+  const at = minutes.map((m) => ((Number(m![1]) % 12) + (m![3] === 'P' ? 12 : 0)) * 60 + Number(m![2]));
+  expect(at[0]).toBeGreaterThan(at[1]!);
+  expect(at[1]).toBeGreaterThan(at[2]!);
 }
 
 /** Nothing on the page is wider than the screen: no sideways scroll, every row and its time inside it. */
