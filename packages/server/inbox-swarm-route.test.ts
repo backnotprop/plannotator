@@ -16,7 +16,7 @@ import type { SkillCatalogEntry } from "@plannotator/core/skill-references-rende
 import { SWARM_SKILL, swarmJoinLine } from "@plannotator/core/swarm-skill";
 import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { joinSwarm, saySwarm, startSwarm } from "@plannotator/shared/inbox/swarm";
+import { SWARM_NAME_MAX, SWARM_WORDS, joinSwarm, saySwarm, startSwarm } from "@plannotator/shared/inbox/swarm";
 import { farSwarmAnswer, swarmRoute, swarmWindowRoute, type SwarmRouteContext } from "./inbox-swarm-route";
 import { swarmWakeOf } from "./inbox-swarm-wake";
 import { createInboxFarTags } from "./inbox-far-tags";
@@ -150,6 +150,32 @@ test("a ghost message is a notice naming who wrote it; the swarm's first message
   expect(swarmWakeOf(store, root, { ...base(root.id), body: root.body }, true).body).toEndWith(swarmJoinLine(thread));
   // Off: nothing changes.
   expect(swarmWakeOf(store, said, base(said.id), false)).toEqual(base(said.id));
+});
+
+test("a member with a long name is still named as the agent who wrote, never as the person", () => {
+  const { store, thread, ctx } = world();
+  startSwarm(store, thread);
+  joinSwarm(store, thread, { session: "ses_codex", host: "codex", name: null });
+  const long = `Berth pricing ${"x".repeat(66)}`;
+  expect(long.length).toBe(80);
+  // A linked computer's session, its name as long as the door takes (80).
+  const joined = farSwarmAnswer(ctx, "ibx_01KAZ0000000000000000000PI", { ask: { action: "join", thread }, session: "ses_pi", host: "pi", name: long });
+  const name = store.swarmOf(thread)!.members.find((m) => m.session === "ses_pi")!.name;
+  expect(name).toBe(long.slice(0, SWARM_NAME_MAX));
+  expect(String(joined.text)).toContain(`as ${name}.`);
+  const said = saySwarm(store, thread, { session: "ses_pi", host: "pi", name: long }, "Tests are green.").message;
+  const notice = swarmWakeOf(store, said, { type: "reply", id: said.id, thread_id: "x", reply_to: null, subject: "s", body: "b", url: "http://127.0.0.1:1/x" }, true).notice!;
+  expect(notice).toBe(SWARM_WORDS.wake(name));
+  expect(notice.length).toBeLessThanOrEqual(300);
+  // A name longer still (a record from before the cap) is shortened in the line; `--to` takes the session.
+  store.writeSwarm({ ...store.swarmOf(thread)!, members: store.swarmOf(thread)!.members.map((m) => (m.session === "ses_pi" ? { ...m, name: "y".repeat(200) } : m)) });
+  const longer = saySwarm(store, thread, { session: "ses_pi", host: "pi", name: null }, "Again.").message;
+  const shortened = swarmWakeOf(store, longer, { type: "reply", id: longer.id, thread_id: "x", reply_to: null, subject: "s", body: "b", url: "http://127.0.0.1:1/x" }, true).notice!;
+  expect(shortened).not.toBe(SWARM_WORDS.wakePerson);
+  expect(shortened.length).toBeLessThanOrEqual(300);
+  expect(shortened).toStartWith("yyyy");
+  expect(shortened).toContain("--to ses_pi.");
+  expect(saySwarm(store, thread, { session: "ses_codex", host: "codex", name: null }, "Thanks.", "ses_pi").to).toBe("y".repeat(200));
 });
 
 test("the join line is handed even when the wake is built inside the write that starts the swarm: a held poll and a far member", async () => {

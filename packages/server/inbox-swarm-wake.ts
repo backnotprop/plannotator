@@ -16,11 +16,24 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { SWARM_WORDS } from "@plannotator/shared/inbox/swarm";
 import { inboxMessageStartsSwarm } from "@plannotator/shared/inbox/swarm-start";
 
+/** A notice is one line of at most this many characters. */
+const NOTICE_MAX = 300;
+
 /** The notice line words in a ghost thread are handed with (`SWARM_WORDS.wake`, or the person's); null outside one. */
 export function swarmNoticeOf(store: InboxStore, message: InboxMessage): string | null {
   if (!store.ghostParentOf(message.thread_id)) return null;
-  const notice = message.author.kind === "agent" ? SWARM_WORDS.wake(message.author.name ?? "An agent") : SWARM_WORDS.wakePerson;
-  return notice.length <= 300 ? notice : SWARM_WORDS.wakePerson;
+  const author = message.author;
+  if (author.kind !== "agent") return SWARM_WORDS.wakePerson;
+  const name = author.name ?? "An agent";
+  const notice = SWARM_WORDS.wake(name);
+  if (notice.length <= NOTICE_MAX) return notice;
+  // A name too long for the line is shortened, never read as the person's words; `--to` then takes the member's
+  // session, which `swarm say` takes as it takes a name.
+  const to = author.session && author.session.length <= 80 ? author.session : undefined;
+  const chars = [...name];
+  const line = () => SWARM_WORDS.wake(`${chars.join("")}…`, to ?? `${chars.join("")}…`);
+  while (chars.length > 1 && line().length > NOTICE_MAX) chars.pop();
+  return line();
 }
 
 export function swarmWakeOf(store: InboxStore, reply: InboxMessage, command: InboxReplyCommand, on: boolean): InboxReplyCommand {

@@ -201,3 +201,25 @@ test("a linked computer cannot act as a session that is not its own: a local mem
   // Its own session joins as before.
   expect(farSwarmAnswer(ctx, MACHINE_B, { ask: { action: "join", thread: a.thread }, session: FAR_PI.session, host: "pi" }).thread_id).toBe(a.thread);
 });
+
+test("a linked computer cannot act as a session a thread here is addressed to with no machine, though it is not live, never wrote and has not joined", () => {
+  const a = threadComputer();
+  // After a restart: nothing is live here, and these sessions never wrote and are not members.
+  const ctx: SwarmRouteContext = { ...a.ctx, ownSession: () => false };
+  const project = a.store.message(a.thread)!.project_id;
+  a.store.startPersonThread({
+    project_id: project,
+    body: "Pricing tests.",
+    idempotency_key: "k-to-here",
+    to: { host: "claude-code", session: "ses_to_here" },
+    tags: [{ host: "codex", session: "ses_tag_here", wakes: true }, { host: "pi", session: "ses_tag_b", wakes: true, machine: MACHINE_B }],
+  });
+  expect(a.store.sessionMachine("ses_to_here")).toBeNull();
+  const before = JSON.stringify(a.store.swarmOf(a.thread));
+  for (const session of ["ses_to_here", "ses_tag_here"]) {
+    expect(() => farSwarmAnswer(ctx, MACHINE_B, { ask: { action: "join", thread: a.thread }, session, host: "pi" })).toThrow(expect.objectContaining({ code: "not_your_session" }));
+  }
+  expect(JSON.stringify(a.store.swarmOf(a.thread))).toBe(before);
+  // The calling computer's session, named there with its machine, joins.
+  expect(farSwarmAnswer(ctx, MACHINE_B, { ask: { action: "join", thread: a.thread }, session: "ses_tag_b", host: "pi" }).thread_id).toBe(a.thread);
+});

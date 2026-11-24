@@ -197,8 +197,9 @@ export function farSwarmAnswer(ctx: SwarmRouteContext, machine: string, body: Re
   const session = typeof body.session === "string" ? body.session.trim() : "";
   if (!/^[A-Za-z0-9_.:-]{1,200}$/.test(session)) throw new InboxError("validation_error", "session: a session id.");
   // As the far tags' `asSession` (inbox-far-tags.ts): the session must be the calling computer's. Not one of this
-  // computer's own (live, a member without a machine, or written here), nor one a member or message puts elsewhere.
-  const elsewhere = ctx.store.sessionMachine(session);
+  // computer's own (live, a member without a machine, written here, or one a thread here is addressed to with no
+  // machine), nor one a member or message puts elsewhere.
+  const elsewhere = ctx.store.sessionMachine(session, { rootsHere: true });
   const otherMember = ctx.store.allSwarms().some((swarm) => swarm.members.some((m) => m.session === session && m.machine !== machine));
   if (ctx.ownSession?.(session) || otherMember || (elsewhere !== null && elsewhere !== machine)) {
     throw new InboxError("not_your_session", "That session is not one of your computer's: nothing was written.");

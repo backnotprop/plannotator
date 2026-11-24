@@ -4001,9 +4001,10 @@ export class InboxStore {
 
   /**
    * Where this store knows `session`: "here" when it wrote here as this computer's own (no `machine`), else the
-   * linked computer its messages, tags or addressing name (the first seen), else null.
+   * linked computer its messages, tags or addressing name (the first seen), else null. `rootsHere` (Swarm's check):
+   * a person's thread whose `to` or tags name it with no `machine` puts it here too, live or not, written or not.
    */
-  sessionMachine(session: string): string | null {
+  sessionMachine(session: string, options: { rootsHere?: boolean } = {}): string | null {
     let found: string | null = null;
     for (const message of this.messages.values()) {
       if (message.author.kind === "agent") {
@@ -4012,6 +4013,9 @@ export class InboxStore {
           found ??= message.author.machine;
         }
         continue;
+      }
+      if (options.rootsHere && message.id === message.thread_id) {
+        if ((message.to?.session === session && !message.to.machine) || message.tags?.some((tag) => tag.session === session && !tag.machine)) return "here";
       }
       for (const tag of message.tags ?? []) if (tag.session === session && tag.machine) found ??= tag.machine;
       if (message.to?.session === session && message.to.machine) found ??= message.to.machine;
@@ -8646,13 +8650,19 @@ export class InboxStore {
     return this.swarmSwitchOn() && !!swarm?.on && swarm.members.some((member) => member.session === session);
   }
 
-  /** The store's seq when this Inbox last saw the experimental switch go from off to on (0 until then). */
+  /**
+   * The switch's in-process marks: the store's seq the last time this Inbox saw it off, and, once it is seen on again,
+   * that seq as the on mark (0 until then). The routes refuse ghost writes while it is off, so whatever was written after
+   * the last time it was seen off was written after it came back, even when that write is the first thing to look.
+   */
   private swarmSwitchWas: boolean | null = null;
+  private swarmSwitchOffSeq = 0;
   private swarmSwitchOnSeq = 0;
 
   private swarmSwitchOn(): boolean {
     const on = this.swarmSwitch();
-    if (on && this.swarmSwitchWas === false) this.swarmSwitchOnSeq = this.seq;
+    if (!on) this.swarmSwitchOffSeq = this.seq;
+    else if (this.swarmSwitchWas === false) this.swarmSwitchOnSeq = this.swarmSwitchOffSeq;
     this.swarmSwitchWas = on;
     return on;
   }

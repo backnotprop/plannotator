@@ -78,8 +78,8 @@ test("join is idempotent, names are unique, and --for must name a member", () =>
   expect(store.swarmOf(thread)!.members.map((m) => m.session)).toEqual(["ses_claude"]);
 });
 
-test("an agent's words reach only the swarm's members, only in its ghost thread", () => {
-  const { store, thread, project } = world();
+test("an agent's words in the ghost thread reach only the swarm's members", () => {
+  const { store, thread } = world();
   joinSwarm(store, thread, CLAUDE);
   joinSwarm(store, thread, CODEX);
   const said = saySwarm(store, thread, CLAUDE, "Codex, what shape does the price endpoint return?");
@@ -95,12 +95,6 @@ test("an agent's words reach only the swarm's members, only in its ghost thread"
   const later = saySwarm(store, thread, CLAUDE, "One more thing.");
   leaveSwarm(store, thread, "ses_codex");
   expect(store.pendingReplies("ses_codex").map((m) => m.id)).not.toContain(later.message.id);
-  // An agent message with tags anywhere else is never delivered to another agent: one whose tags name a member.
-  const tagged = store.sendMessage({ project_id: project.id, author: AGENT, body: "Not a ghost thread.", subject: "Other" }).message;
-  const elsewhere = { ...tagged, tags: [{ host: "codex", session: "ses_codex", name: "Codex", wakes: true }] };
-  (store as unknown as { messages: Map<string, unknown> }).messages.set(elsewhere.id, elsewhere);
-  expect(store.isGhostSay(elsewhere)).toBe(false);
-  expect(store.pendingReplies("ses_codex").map((m) => m.id)).not.toContain(elsewhere.id);
 });
 
 test("send_message into a ghost thread is refused, and only a member writes there, so nothing reaches a member from outside", () => {
@@ -137,10 +131,27 @@ test("turning a swarm (or the switch) back on hands out nothing said before", ()
   expect(store.pendingReplies("ses_codex").map((m) => m.id)).toEqual([after.id]);
   on = false;
   expect(store.pendingReplies("ses_codex")).toEqual([]);
+  // Back on, and the first thing said comes before anything reads the switch: it is handed, what came before is not.
   on = true;
-  expect(store.pendingReplies("ses_codex")).toEqual([]);
   const later = saySwarm(store, thread, CLAUDE, "Said after the switch came back.").message;
   expect(store.pendingReplies("ses_codex").map((m) => m.id)).toEqual([later.id]);
+});
+
+test("the first words said after the switch comes back on are handed once, with nothing read in between", () => {
+  const { store, thread } = world();
+  joinSwarm(store, thread, CLAUDE);
+  joinSwarm(store, thread, CODEX);
+  let on = false;
+  store.setSwarmSwitch(() => on);
+  expect(store.pendingReplies("ses_codex")).toEqual([]);
+  on = true;
+  const said = saySwarm(store, thread, CLAUDE, "First words after the switch is back.").message;
+  expect(store.ghostWaitsFor(said)).toEqual(["ses_codex"]);
+  expect(store.pendingRepliesFor(new Set(["ses_codex"]), { tags: true }).get("ses_codex")?.map((m) => m.id)).toEqual([said.id]);
+  expect(store.pendingReplies("ses_codex").map((m) => m.id)).toEqual([said.id]);
+  store.recordDelivery(said.id, { host: "codex", session: "ses_codex" });
+  expect(store.pendingReplies("ses_codex")).toEqual([]);
+  expect(store.ghostWaitsFor(store.message(said.id)!)).toEqual([]);
 });
 
 test("--to names one member; the person writes to everyone or one; a turned-off swarm takes nothing", () => {

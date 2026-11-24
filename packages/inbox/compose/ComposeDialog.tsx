@@ -68,7 +68,10 @@ import { useSwarmPicks } from '../swarm/useSwarmPicks';
 import { useSwarmSwitch } from '../swarm/swarmOn';
 import { registerReloadFlush } from '../stalePage';
 import {
-  DRAFT_TOO_LONG, NOTHING_SENT_NO_AGENT, composeGroups, composeTargets,
+  DRAFT_TOO_LONG,
+  NOTHING_SENT_NO_AGENT,
+  composeGroups,
+  composeTargets,
   draftSnapshot,
   draftThreadName,
   draftTo,
@@ -103,6 +106,7 @@ import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
 import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewBoxPullAsk, walkthroughMessage, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewToWithChanges, reviewWorkOf, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
 import { ReviewRows } from './ReviewRows';
+import { ComposeNotes } from '../parts/ComposeNotes';
 import { LaunchTipCard } from './LaunchTipCard';
 import { LAUNCH_TIP_SAID, LAUNCH_TIP_TIMES, launchTipPlace, launchTipPlainOpen, type LaunchTipPlace } from './launchTip';
 
@@ -842,7 +846,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
         // A second review of the same changes is named too: "… (2)" rather than the request's first line.
         ...(box && 'thread_name_auto' in named ? { thread_name_numbered: true as const } : {}),
         ...(draft ? { draft_id: draft.id } : {}),
-        ...(boardChip && boardRequest ? { board_request: true as const } : {}), ...(transport ? {} : swarm.send),
+        ...(boardChip && boardRequest ? { board_request: true as const } : {}),
+        // Swarm: the other agents picked ride `tags` (never through the tour's or another machine's forward).
+        ...(transport ? {} : swarm.send),
       };
       // Another machine's project (remote launch) or running agent: through the forward, so that machine's Inbox takes it.
       const result = transport ? await transport.startThread(input) : await inboxApi.startThread(input, machine);
@@ -1266,7 +1272,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
           <Icon name="chevD" size={15} />
         </button>
       )}
-      {tipCard}{swarm.row}
+      {tipCard}
+      {swarm.row}
       {start && (
         <span className="ib-cp-startin">
           <span className="ib-cp-in">in</span>
@@ -1373,7 +1380,21 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otherMachines, there.machines, there.reads, linkedSessions, selfView?.name, home, groups, toStart?.launch, model?.launch, lastSent]);
   const toOpensOn = targetOn ?? start?.machine ?? HERE;
-  const swarm = useSwarmPicks({ on: useSwarmSwitch() && !transport && !box, first: target ? { session: target.session, machineKey: targetOn ?? HERE } : null, starting: start ? { machineKey: start.machine ?? HERE } : null, machines: toMachines, threadMachine: start ? start.machine : targetOn, selfId: selfView?.id ?? null, home, phone, host: dialogRef.current, after: afterPicker, words: body, setWords: setBody });
+  const swarmOn = useSwarmSwitch();
+  const swarm = useSwarmPicks({
+    on: swarmOn && !transport && !box,
+    first: target ? { session: target.session, machineKey: targetOn ?? HERE } : null,
+    starting: start ? { machineKey: start.machine ?? HERE } : null,
+    machines: toMachines,
+    threadMachine: start ? start.machine : targetOn,
+    selfId: selfView?.id ?? null,
+    home,
+    phone,
+    host: dialogRef.current,
+    after: afterPicker,
+    words: body,
+    setWords: setBody,
+  });
 
   const reviewRows = box && (
     <ReviewRows
@@ -1533,7 +1554,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
             <Icon name="cube" size={20} />
           </button>
         )}
-        {phoneTo}{swarm.phoneLine}
+        {phoneTo}
+        {swarm.phoneLine}
         {phone && noSkills && (
           <span className="ib-cp-hint" data-compose-hint="">
             No skills are installed
@@ -1689,7 +1711,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       ) : (
         picker && <ToPicker groups={groups} selected={toSelected} home={home} phone={false} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} machines={toMachines} opensOn={toOpensOn} />
       )}
-      {launchChoice.menu()}{swarm.picker}
+      {launchChoice.menu()}
+      {swarm.picker}
       {folderMenu && start && launch && (
         <FolderMenu
           projects={launch.projects}
@@ -1817,62 +1840,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
           />
         )}
       </div>
-      {start && !start.project.exists && (
-        <div className="ib-cp-note ib-warn" data-compose-note="folder-missing">
-          <Icon name="warn" size={16} />
-          <div>
-            {startUnplugged ? (
-              <b>
-                <bdi>{startUnplugged}</bdi> isn't connected.
-              </b>
-            ) : (
-              <b>
-                <bdi>{tildePath(start.project.root, startHome)}</bdi> isn't there any more.
-              </b>
-            )}
-            <p>
-              {startUnplugged ? (
-                <>
-                  Connect it to start {start.name} in <bdi>{start.project.name}</bdi>, or pick another project. Nothing is sent until you do.
-                </>
-              ) : (
-                <>
-                  It was moved or deleted. Pick another project{launch?.scratch ? ', or a new scratch folder,' : ''} to start {start.name} in. Nothing is sent until you do.
-                </>
-              )}
-            </p>
-            <button type="button" className="ib-btn ib-sm" onClick={() => setFolderMenu(true)} data-compose-pick-folder="">
-              Pick a project
-            </button>
-          </div>
-        </div>
-      )}
-      {model && !anyLive && !canStart && !endedNote && (
-        <div className="ib-cp-note" data-compose-note="none">
-          <Icon name="info" size={16} />
-          <div>
-            <b>No agent is running{projectName ? ` in ${projectName}` : ''}.</b>
-            <p>{box ? `A review needs one. Start Claude Code, Pi or OpenCode in the project and it shows up here.` : <>Nothing can be sent until one is. Save it as a draft; it waits under Drafts, and you send it when Claude Code, Pi or OpenCode is running.</>}</p>
-          </div>
-        </div>
-      )}
-      {endedNote && !target && (
-        <div className="ib-cp-note ib-warn" data-compose-note="ended">
-          <Icon name="warn" size={16} />
-          <div>
-            <b>The {hostLabel(endedNote.host)} session this {draft ? 'draft' : 'message'} was for has ended.</b>
-            <p>
-              {endedNote.project_name ? `It was in ${endedNote.project_name}` : 'It'}
-              {endedNote.started_at ? `, started ${whenTime(endedNote.started_at)}` : ''}. Pick a live session to send it, or keep it as a draft.
-            </p>
-            {anyLive && (
-              <button type="button" className="ib-btn ib-sm" onClick={() => setPicker(true)} data-compose-pick="">
-                Pick a session
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      <ComposeNotes
+        missing={start && !start.project.exists ? { agentName: start.name, projectName: start.project.name, root: tildePath(start.project.root, startHome), unplugged: startUnplugged, scratch: !!launch?.scratch } : null}
+        onPickFolder={() => setFolderMenu(true)}
+        none={model && !anyLive && !canStart && !endedNote ? { projectName, review: !!box } : null}
+        ended={endedNote && !target ? endedNote : null}
+        draft={!!draft}
+        onPickSession={anyLive ? () => setPicker(true) : null}
+      />
       {phone ? (
         // A phone: the words and the row are one card that floats over the keyboard (phoneComposer.css).
         <div className="ib-cp-pcard" data-compose-pcard="">

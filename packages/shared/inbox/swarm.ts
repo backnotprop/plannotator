@@ -53,7 +53,7 @@ export const SWARM_WORDS = {
   ghostNone: "Ghost thread: no messages yet.",
   ghostLatest: (shown: number, all: number) => (shown === all ? `Ghost thread (${all}):` : `Ghost thread, the latest ${shown} of ${all}:`),
   /** The wake's first line for a ghost message (one line, at most 300 characters). */
-  wake: (from: string) => `${from} wrote in the swarm's ghost thread. Answer only if it asks something or you have something they need: plannotator inbox swarm say "<text>" --to ${from}. Never reply only to acknowledge.`,
+  wake: (from: string, to: string = from) => `${from} wrote in the swarm's ghost thread. Answer only if it asks something or you have something they need: plannotator inbox swarm say "<text>" --to ${to}. Never reply only to acknowledge.`,
   wakePerson: "The person wrote to the swarm in the ghost thread. Answer with plannotator inbox swarm say; ask the person in the thread itself.",
 };
 
@@ -104,6 +104,12 @@ export function setSwarmOn(store: InboxStore, threadId: string, on: boolean): In
 
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
+/** The longest member name, `--as` or the host's own. */
+export const SWARM_NAME_MAX = 60;
+
+/** A member name: one clean line, at most `max` characters. */
+const memberName = (text: string, max = SWARM_NAME_MAX) => [...sanitizeSwarmDoing(text)].slice(0, max).join("").trim();
+
 /** `swarm join`: the caller is in, once (again: its name or parent updated). */
 export function joinSwarm(store: InboxStore, threadId: string, caller: SwarmCaller, options: { as?: string | null; for?: string | null } = {}): { swarm: InboxSwarmRecord; member: InboxSwarmMember; again: boolean } {
   // The join line is handed from the root's own words (inbox-swarm-wake.ts), so a join can come before the Inbox has
@@ -113,10 +119,12 @@ export function joinSwarm(store: InboxStore, threadId: string, caller: SwarmCall
   const swarm = onSwarm(store, threadId);
   const others = swarm.members.filter((m) => m.session !== caller.session);
   const existing = swarm.members.find((m) => m.session === caller.session) ?? null;
-  const asked = options.as ? sanitizeSwarmDoing(options.as).slice(0, 60) : "";
-  let name = asked || existing?.name || inboxAgentName({ kind: "agent", host: caller.host, name: caller.name });
+  const asked = options.as ? memberName(options.as) : "";
+  // The host's own name (a session's title can run long): one clean line of at most SWARM_NAME_MAX, its number too.
+  const given = memberName(inboxAgentName({ kind: "agent", host: caller.host, name: caller.name })) || inboxAgentName({ kind: "agent", host: caller.host, name: null });
+  let name = asked || existing?.name || given;
   if (asked && others.some((m) => sameName(m.name, asked))) throw refuse("name_taken", SWARM_WORDS.nameTaken(asked));
-  if (!asked && !existing) for (let n = 2; others.some((m) => sameName(m.name, name)); n++) name = `${inboxAgentName({ kind: "agent", host: caller.host, name: caller.name })} ${n}`;
+  if (!asked && !existing) for (let n = 2; others.some((m) => sameName(m.name, name)); n++) name = `${memberName(given, SWARM_NAME_MAX - String(n).length - 1)} ${n}`;
   let parent: string | null = existing?.for ?? null;
   if (options.for) {
     const of = others.find((m) => sameName(m.name, options.for!));
