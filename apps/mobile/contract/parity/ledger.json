@@ -22114,6 +22114,20 @@
       }
     },
     {
+      "id": "undecided-window-api-inbox-reviews-local-refs",
+      "title": "window:/api/inbox/reviews/local/refs",
+      "surface": [
+        "window:/api/inbox/reviews/local/refs"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-enum-inboxattachmentkind-plannotator-diagram",
       "title": "enum:InboxAttachmentKind.plannotator-diagram",
       "surface": [
@@ -22122,7 +22136,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-23",
+      "since": "2026-11-24",
       "ios": {
         "state": "not-started"
       }
@@ -22136,7 +22150,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-23",
+      "since": "2026-11-24",
       "ios": {
         "state": "not-started"
       }
@@ -22150,7 +22164,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-23",
+      "since": "2026-11-24",
       "ios": {
         "state": "not-started"
       }
@@ -22164,7 +22178,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-23",
+      "since": "2026-11-24",
       "ios": {
         "state": "not-started"
       }
