@@ -651,7 +651,8 @@ export function inboxReviewRows(input: {
   for (const thread of input.threads) push(thread.thread_id, thread, owned.get(thread.thread_id));
   // Curating only while someone can: with the agent ended the PR is back to not reviewed (its stack row, the stack view's Start a new review thread).
   // A thread archived before its review drops out earlier, as the PR's owner (the server's `pullOwnersNow`).
-  for (const [threadId, own] of owned) if (!byThread.has(threadId) && (own.link.agent?.ended !== true || input.started?.get(threadId)?.kind === "branch" || input.shipMerged?.has(threadId))) push(threadId, null, own);
+  // A ship that merged keeps its thread's row only once the thread owns no open PR: an open layer is its own row then.
+  for (const [threadId, own] of owned) if (!byThread.has(threadId) && (own.link.agent?.ended !== true || input.started?.get(threadId)?.kind === "branch" || (input.shipMerged?.has(threadId) && !own.pulls.some(inboxPullIsOpen)))) push(threadId, null, own);
   // A reported branch keeps its row with its agent ended: the person starts the review, with any agent.
   for (const [threadId, start] of input.started ?? []) if (!byThread.has(threadId) && !owned.has(threadId) && (start.kind === "branch" || !input.ended?.(threadId))) push(threadId, null, undefined);
   for (const stack of input.stacks) {

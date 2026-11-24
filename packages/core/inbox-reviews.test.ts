@@ -388,6 +388,14 @@ describe("landed PRs", () => {
     expect(handed()).toEqual([]);
   });
 
+  test("a thread whose ship merged one layer of its stack, its agent ended: the open layer is its own row, not the thread's", () => {
+    const top = pr({ number: 11, head: "feature-2", base: "feature" });
+    const tied: InboxPullLink = { ...link("s", "owner"), ask: "thread", agent: { host: "claude-code", session: "ses", name: "Claude Code", ended: true } };
+    const pulls = [merged(), top];
+    const rows = inboxReviewRows({ threads: [], stacks: inboxPullStacks(pulls), links: { [merged().key]: tied, [top.key]: tied }, pulls, landed: [landing({ thread_id: "s", through_review: null })], owners: new Map(pulls.map((p) => [p.key, { thread_id: "s" }])), shipMerged: new Set(["s"]) });
+    expect(rows.map((r) => [r.id === "s", r.reviewed, r.move, r.pull_keys])).toEqual([[false, false, "not_reviewed", [top.key]]]);
+  });
+
   test("a closed PR leaves too, and a later review comes back with a link to the PR", () => {
     const closed = landing({ state: "closed" });
     const round2 = review({ thread_id: "t", round: 2, latest_review_id: "t_r2" });
