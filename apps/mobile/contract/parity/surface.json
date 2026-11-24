@@ -190,6 +190,7 @@
       "/api/inbox/bridge/event",
       "/api/inbox/bridge/poll",
       "/api/inbox/capabilities",
+      "/api/inbox/capability",
       "/api/inbox/cards",
       "/api/inbox/cards/:id",
       "/api/inbox/cards/:id/favicon",

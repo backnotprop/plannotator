@@ -47,6 +47,7 @@
 
 import { childEnv } from "@plannotator/shared/child-env";
 import { INBOX_CAPABILITY_SWITCH_KEYS } from "@plannotator/core/inbox-types";
+import { CAPABILITY_NOTE_FIELD } from "./inbox-capability-note";
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { hostname } from "node:os";
@@ -206,6 +207,8 @@ interface DoorRoute {
   machineOnly?: true;
   /** The only body fields it takes (with `idempotency_key`); any other is refused (`422`) before the window route runs. */
   only?: readonly string[];
+  /** A field the door takes besides `only` and never hands to the window route: the caller's note, told after it applies. */
+  note?: string;
 }
 
 const ALLOWLIST: readonly DoorRoute[] = [
@@ -399,7 +402,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // Settings → Capabilities' switches (mark `capabilities`, core inbox-capability-switches.ts): a linked computer's
   // window reads them, and turns one on or off through the settings route with those keys alone. No other setting.
   { method: "GET", route: /^capabilities$/, window: () => "/api/inbox/capabilities", machineOnly: true },
-  { method: "POST", route: /^capabilities$/, window: () => "/api/inbox/settings", machineOnly: true, only: INBOX_CAPABILITY_SWITCH_KEYS },
+  // `capability_note`: which agent there turned it, so this computer posts its own line (inbox-capability-note.ts).
+  { method: "POST", route: /^capabilities$/, window: () => "/api/inbox/settings", machineOnly: true, only: INBOX_CAPABILITY_SWITCH_KEYS, note: CAPABILITY_NOTE_FIELD },
 ];
 
 /**
@@ -646,6 +650,8 @@ export interface InboxDevicesContext {
   phones?: boolean;
   /** Linked machines (inbox-machines.ts): the two door routes only a machine calls. Bound after both exist. */
   machines?: () => InboxDoorMachines | null;
+  /** A door write's note (`DoorRoute.note`), once its write applied: the device that sent it, the note as sent, the write. */
+  noted?: (device: InboxDevice, note: unknown, written: Record<string, unknown>) => void;
   /** A linked machine's agents' reads of this Inbox's threads and their files (inbox-far-read.ts). */
   agentRead?: { read: (url: URL, device: InboxDevice) => Response; file: (url: URL) => Promise<Response> };
   /** A linked machine's agents' search and thread list of this Inbox's threads (inbox-far-find.ts). */
@@ -1126,10 +1132,17 @@ export function createInboxDevices(context: InboxDevicesContext) {
     for (const refused of entry.refuse ?? []) {
       if (fields[refused.field] !== undefined) throw new InboxError("validation_error", refused.message, { field: refused.field });
     }
-    const outside = entry.only ? Object.keys(fields).find((field) => field !== "idempotency_key" && !entry.only!.includes(field)) : undefined;
+    const outside = entry.only ? Object.keys(fields).find((field) => field !== "idempotency_key" && field !== entry.note && !entry.only!.includes(field)) : undefined;
     if (outside !== undefined) throw new InboxError("validation_error", `${outside}: not taken here; only ${entry.only!.join(", ")}.`, { field: outside });
+    // The caller's note goes no further than here: the window route gets the write alone.
+    const note = entry.note && fields[entry.note] !== undefined ? fields[entry.note] : undefined;
+    if (entry.note && note !== undefined) {
+      const { [entry.note]: _note, ...rest } = fields;
+      text = JSON.stringify(rest);
+    }
     return claim(req, device, doorPath, key, async (response) => response, async () => {
       const response = await toWindow(req, device, windowPath, device.platform === MACHINE_PLATFORM ? (entry.fromMachine ?? "") : "", text, req.signal);
+      if (note !== undefined && response.ok) context.noted?.(device, note, JSON.parse(text) as Record<string, unknown>);
       // A route that takes only some fields answers only those: the settings route's answer says every setting.
       const answer = entry.only && response.ok ? JSON.stringify(onlyFields(await response.json().catch(() => ({})), entry.only)) : await response.text();
       const headers = new Headers(response.headers);

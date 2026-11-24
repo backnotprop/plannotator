@@ -153,6 +153,24 @@ describe("routines and capability switches across linked computers", () => {
       // Off is the routine's switch: the run Run now started is still going there (the fake agent never ends), so its
       // row says "running" until that run ends, turned off or not.
       await waitFor("the held turn off on B", async () => ((await get(b.port, `/api/inbox/scheduled/${id}`)).scheduled as Json).enabled === false, 45_000);
+
+      // An agent on A, asked by the person, turns B's Routines off by B's name (`plannotator inbox capability`): B's
+      // switch, not A's; one line for the person on A, naming B.
+      await waitFor("B back on A", async () => ((await get(a.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === bId)?.state === "online", 30_000);
+      const bName = ((await get(a.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === bId)!.name as string;
+      const folder = join(root, "work");
+      mkdirSync(folder, { recursive: true });
+      const agentTurn = await fetch(`${at(a.port)}/api/inbox/capability`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ by: { session: "ses_ada", host: "claude-code", name: "Claude Code" }, project_path: folder, capability: "routines", on: false, computer: bName }),
+      });
+      const result = { content: [{ text: ((await agentTurn.json()) as { text: string }).text }] };
+      expect(result.content[0]!.text).toStartWith(`Turned off Routines on ${bName}. The person sees it in thread `);
+      expect([(await get(b.port, "/api/inbox/settings")).scheduled_threads.on, (await get(a.port, "/api/inbox/settings")).scheduled_threads.on]).toEqual([false, false]);
+      const lineId = /thread (msg_\S+)\.$/.exec(result.content[0]!.text)![1]!;
+      expect((a.store.message(lineId)?.body ?? "")).toBe(`Turned off Routines on ${bName}.`);
+      expect(a.store.threadMessageIds(a.store.message(lineId)!.thread_id)).toHaveLength(1);
     } finally {
       a.stop();
       b.stop();

@@ -23039,6 +23039,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-window-api-inbox-capability",
+      "title": "window:/api/inbox/capability",
+      "surface": [
+        "window:/api/inbox/capability"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

@@ -3476,6 +3476,10 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * as the tool builds it from the default tool list (Pi's request shape), 16,141 → 15,890 bytes (−251). Not measured on
  * the real Pi (that test starts an Inbox and Pi; CI runs it). Board on the same −251, 17,819. Tokens scaled at each
  * entry's own bytes per token, −68: 4,275 and 4,864.
+ * The `routine` action's line out of the description (INBOX_AGENT_ACTIONS_NO_LINE, the owner 2026-11-24): `routine`
+ * is listed only while Routines are on, so the default entry and the Board's are unchanged by it (re-measured the same
+ * way before the `ship` change, 16,141 bytes either way); with the Board, the Checklist and Routines on it took
+ * 20,601 → 20,439 bytes and the description 2,200 → 2,039 characters.
  */
 const INBOX_TOOL_COST_NOW = { bytes: 15890, tokens: 4275 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
@@ -3704,11 +3708,13 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * linked machine (`artifact_pins`), and its Artifacts wall is read through its door (`GET artifacts`).
  * `routines`: its routines are listed, made, changed and run from a linked machine's window through its door
  * (`scheduled…`; inbox-scheduled-machines.ts in the server). `capabilities`: its Settings → Capabilities switches are
- * read and turned from there (`capabilities`; core inbox-capability-switches.ts).
+ * read and turned from there (`capabilities`; core inbox-capability-switches.ts). `capability-note`: a switch an agent
+ * there turns carries `capability_note` (the agent's name), and this Inbox posts its own line for it
+ * (inbox-capability-note.ts in the server).
  * `ships` (approval "inbox-ship-mode"): its ships are read, started and stopped through its door (`ships`, `ships/log`,
  * `ships/stop`), so a linked machine's Reviews draws them and offers its agents in Ship's list.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "ships"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
@@ -4519,6 +4525,6 @@ export function readInboxAgentFaces(value: unknown): Record<string, InboxAgentFa
 /** Whether `id` is a key or session an agent face entry may name. */
 export const isInboxAgentFaceId = isId;
 
-// Settings → Capabilities' switches, for a linked computer's window and the agents' capability action. Exported here,
+// Settings → Capabilities' switches, for a linked computer's window and `plannotator inbox capability`. Exported here,
 // not as a subpath of its own: a new subpath needs a core release before the UI package publishes.
 export * from "./inbox-capability-switches";

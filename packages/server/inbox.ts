@@ -224,6 +224,8 @@ import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-g
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
+import { capabilityNoteOf, postCapabilityNotes } from "./inbox-capability-note";
+import { capabilityRoute, type InboxCapabilityContext } from "./inbox-capability-agent";
 import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
 import { createRoutineGrants, sendRecipients } from "./inbox-routine-grants";
 import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
@@ -1904,6 +1906,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     projectRemoteKey: (root, waitMs) => farRemoteOf(repos, root, waitMs),
     snoozeMade: () => markSnoozeUsed(),
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
+  };
+  // `plannotator inbox capability` (inbox-capability-agent.ts): this computer's switches, turned through the settings
+  // route as Settings turns them; a linked computer's through the forward, as its Settings group does.
+  const capabilityAgent: InboxCapabilityContext = {
+    resolveProject,
+    here: () => inboxCapabilitySwitchesOf(settingsModel("local", false, null, false)),
+    set: async (key, on) => {
+      const answer = await globalThis.fetch(`${baseUrl.replace(/\/+$/, "")}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [key]: { on } }) });
+      const body = (await answer.json().catch(() => ({}))) as { code?: unknown; error?: unknown };
+      if (!answer.ok) throw new InboxError(typeof body.code === "string" ? body.code : "validation_error", typeof body.error === "string" ? body.error : "The switch did not turn.");
+      return inboxCapabilitySwitchesOf(settingsModel("local", false, null, false));
+    },
+    there: async (computer, change, by) => (machines ? machines.capabilitiesOn(computer, change, by ?? null) : null),
+    linked: () => machines?.linkedNames() ?? [],
+    // `project`: the agent's own project, by the lookup of the door it came through (a paired agent's is the door's).
+    tell: async (by, threadId, project, body) => {
+      const author = { kind: "agent" as const, host: by.host, session: by.session, name: by.name };
+      const thread = threadId ? store.message(threadId) : null;
+      // The Inbox's own kind of note: no sound (`launch_note`).
+      if (thread) return store.sendMessage({ author, body, launch_note: true, project_id: thread.project_id, reply_to: store.threadMessageIds(thread.thread_id).at(-1) ?? thread.thread_id }).message.thread_id;
+      const projectId = await project();
+      return projectId && store.project(projectId) ? store.sendMessage({ author, body, launch_note: true, project_id: projectId, subject: body }).message.thread_id : null;
+    },
   };
   const mcp = createMcpHandler(() => createInboxMcpServer(mcpContext), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
   // An initialize request gets a server built for its client: the person's rules are sized to what that client keeps.
@@ -7324,6 +7349,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json({ capabilities: inboxCapabilitySwitchesOf(settingsModel(via, false, null, false)) });
       }
+      // An agent's `plannotator inbox capability` (inbox-capability-agent.ts): this computer's own, never a device door's.
+      if (path === "/api/inbox/capability") {
+        const answer = await capabilityRoute(req, url, capabilityAgent, readBody, fromDeviceDoor.has(req));
+        if (answer) return answer;
+      }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") {
           // The page's load id (api.ts): kept with a claim's stamp as a record (`inboxReveals.shownLoad`).
@@ -8710,6 +8740,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       relay: { paired: async (device) => (relay ? relay.paired(device) : null), revoked: (device) => relay?.revoked(device) },
       phones: phonesOn,
       machines: () => machines ?? null,
+      // A switch an agent on a linked computer turned here: this computer's own line for its person, in this
+      // computer's home folder project (inbox-capability-note.ts). Its words are made here, never sent.
+      noted: (device, note, written) => {
+        const checked = capabilityNoteOf(note);
+        const name = machines?.machineOfDevice(device.id)?.name ?? device.name;
+        if (!checked || !name) return;
+        void resolveProject(projectRoots.home ?? homedir())
+          .then((project) => postCapabilityNotes(store, project.id, checked, name, written))
+          .catch((error: unknown) => process.stderr.write(`Inbox: a capability line from ${name} was not posted (${error instanceof Error ? error.message : String(error)})\n`));
+      },
       // A linked machine's agents read this Inbox's threads and their files (inbox-far-read.ts).
       // Each message's place is worded from the reading computer's side: who it is comes from its token (inbox-sent-from-reader.ts).
       agentRead: { read: (url, device) => agentReadDoorAnswer(mcpContext, url, machines?.readerNameOfDevice(device.id, device.name) ?? ""), file: (url) => agentFileDoorAnswer(store, url) },
