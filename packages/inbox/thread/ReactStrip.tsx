@@ -13,7 +13,7 @@ import { Menu } from '@base-ui/react/menu';
 import type { InboxMessageWire, InboxReaction } from '@plannotator/core/inbox-types';
 import { useSavedReactions } from '../reactions';
 import { machineOf } from '../inboxUrl';
-import { faceHover, hasSkill, skillPreview, skillSaid, skillTip, type MessageReactApi } from './messageReact';
+import { deliberatePress, faceHover, hasSkill, skillPreview, skillSaid, skillTip, type MessageReactApi } from './messageReact';
 
 const LOOKS_GOOD = 'Looks good';
 
@@ -99,6 +99,8 @@ function FaceButton({ messageId }: { messageId: string }) {
         }}
         onPointerLeave={(e) => e.pointerType === 'mouse' && faceHover.leave()}
         onClick={(e) => {
+          // A double-click or Shift-click here is the words' (thread/facePress.ts): it opens nothing.
+          if (e.detail > 1 || e.shiftKey) return;
           const where = at(e.currentTarget.parentElement);
           if (where) faceHover.openNow(where);
         }}
@@ -140,6 +142,7 @@ export function FaceStrip({ message, api }: { message: InboxMessageWire; api: Me
             aria-label={said}
             {...previewHandlers(reaction, agent, () => ref.current, message.id)}
             onClick={(e) => {
+              if (!deliberatePress(e)) return;
               close();
               api.react(message, reaction, e.currentTarget.querySelector('.ib-react-e'));
             }}
@@ -156,7 +159,8 @@ export function FaceStrip({ message, api }: { message: InboxMessageWire; api: Me
           aria-label="All reactions"
           data-react-all=""
           onPointerEnter={() => skillPreview.set(null)}
-          onClick={() => {
+          onClick={(e) => {
+            if (!deliberatePress(e)) return;
             close();
             api.openTray(message);
           }}

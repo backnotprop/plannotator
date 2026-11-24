@@ -55,9 +55,19 @@ export const useFaceStrip = () => useSyncExternalStore(faceStrip.subscribe, face
 export const FACE_OPEN_MS = 100;
 /** The grace after the pointer leaves the face or the strip, so moving from one to the other keeps it open. */
 export const FACE_CLOSE_MS = 140;
+/** A face a click opened: its emoji take no press this long, so a double-click on the words under it reacts with nothing. */
+export const STRIP_SETTLE_MS = 300;
+
+/**
+ * A press on an opened face's emoji that is a deliberate single press: not the second click of a double-click, not a
+ * Shift-click (that extends a selection), and not right after a click opened it (`STRIP_SETTLE_MS`).
+ */
+export const deliberatePress = (e: { detail: number; shiftKey: boolean }): boolean =>
+  e.detail <= 1 && !e.shiftKey && Date.now() - clickOpenedAt >= STRIP_SETTLE_MS;
 
 /** No face opens (thread/facePress.ts): '*' while a press selects text; a message's id once one is let go over its face. */
 let hushed: string | null = null;
+let clickOpenedAt = 0;
 let openTimer: ReturnType<typeof setTimeout> | null = null;
 let closeTimer: ReturnType<typeof setTimeout> | null = null;
 const clearTimers = () => {
@@ -94,9 +104,10 @@ export const faceHover = {
       faceHover.close();
     }, FACE_CLOSE_MS);
   },
-  /** A click, or the keyboard: open now. */
+  /** A click: open now. Its emoji take no press for `STRIP_SETTLE_MS` (`deliberate`). */
   openNow(at: FaceStripAt) {
     clearTimers();
+    clickOpenedAt = Date.now();
     faceStrip.set(at);
   },
   close() {

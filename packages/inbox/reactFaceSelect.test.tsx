@@ -5,6 +5,9 @@
  * - a press on the words and its drag are never prevented, and the face the drag reaches opens nothing (it lets the
  *   pointer through: a release over it lands on the words); let go over it, it stays shut until the pointer leaves;
  * - a press on the face that drags selects the words from the press to the pointer; one that does not move is its click;
+ * - text gestures win over the face: a double-click on a word under it (whose second press lands on the emoji its first
+ *   click opened) selects the word and sends nothing, a question waiting or not; a Shift-click extends the selection;
+ *   a reaction is only a deliberate single press on an emoji of a face already open;
  * - the stylesheet leaves the words' user-select alone and the face's slot takes no pointer.
  * DOM (happy-dom): `DOM_TESTS=1 bun test packages/inbox/reactFaceSelect.test.tsx --isolate`.
  */
@@ -13,9 +16,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAuthor, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
+import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxReaction, InboxThread } from '@plannotator/core/inbox-types';
 import { resetSavedReactionsForTests } from './reactions';
-import { FACE_OPEN_MS, faceHover } from './thread/messageReact';
+import { FACE_OPEN_MS, STRIP_SETTLE_MS, faceHover } from './thread/messageReact';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -41,13 +45,37 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 const restores: (() => void)[] = [];
+let acks: { id: string; on: boolean; reaction: InboxReaction | null | undefined }[] = [];
+let posts: string[] = [];
+
+const M4 = 'msg_01M8B00000000000000000004';
+const ASK = 'Which retry cap?\n\n:::question\nKeep the cap at 3?\n\n- [ ] Yes\n- [ ] No\n:::';
+/** THREAD and, after it, an agent message whose question is open (only skill emoji are offered then). */
+function asking(): InboxThread {
+  const questions = parseInboxQuestionBlocks(ASK).map(
+    (q) =>
+      ({
+        key: q.key, position: q.position, kind: q.kind, prompt: q.prompt, context: q.parsed.context, choices: q.parsed.choices,
+        recommendation: q.parsed.recommendation, suggested_text: q.parsed.suggested_text, stopped: q.stopped, holds_up: q.holds_up,
+        asked_by_agent_id: CLAUDE.session, orphaned: false, state: 'open', answer: null, revision: 1, sent_revision: 0, picked_by: null,
+        picked_at: null, sent_reply_id: null, message_id: M4, superseded_by: null,
+      }) as unknown as InboxQuestion,
+  );
+  return { ...THREAD, messages: [...THREAD.messages, { ...message(M4, CLAUDE, ASK, 4), questions } as InboxMessageWire] };
+}
 
 beforeEach(() => {
   if (!hasDom) return;
   resetSavedReactionsForTests([{ emoji: '🎉', label: 'Ship it' }]);
   savedFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  acks = [];
+  posts = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
+    if (init?.method === 'POST') {
+      posts.push(path);
+      return Response.json({ reply: null, questions: [], replayed: false });
+    }
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [] });
     return Response.json({});
@@ -83,7 +111,7 @@ async function settle(times = 2) {
   for (let i = 0; i < times; i++) await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
 }
 
-async function render() {
+async function render(thread: InboxThread = THREAD) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -91,7 +119,7 @@ async function render() {
     root = createRoot(host!);
     root.render(
       <ThreadPane
-        thread={THREAD}
+        thread={thread}
         sent={null}
         lookSeq={0}
         onQuestions={() => {}}
@@ -100,7 +128,7 @@ async function render() {
         file={null}
         onOpenFile={() => {}}
         onOpenGuide={() => {}}
-        onAck={() => {}}
+        onAck={(id, on, _agent, reaction) => acks.push({ id, on, reaction })}
         phone={false}
       />,
     );
@@ -113,8 +141,8 @@ const strip = () => document.querySelector(`[data-react-strip="${M3}"]`);
 const words = () => [...document.querySelectorAll<HTMLElement>(`[data-message-article="${M3}"] p`)].find((p) => p.textContent === WORDS)!;
 const wordsText = () => words().firstChild as Text;
 
-const mouse = (el: EventTarget, type: string, x: number, buttons = 1) => {
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, buttons, clientX: x, clientY: 10, detail: 1 });
+const mouse = (el: EventTarget, type: string, x: number, buttons = 1, more: MouseEventInit = {}) => {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, buttons, clientX: x, clientY: 10, detail: 1, ...more });
   act(() => void el.dispatchEvent(event));
   return event;
 };
@@ -201,4 +229,74 @@ test.skipIf(!hasDom)('the stylesheet leaves the words selectable and the face’
   expect(getComputedStyle(face().parentElement!).pointerEvents).toBe('none');
   // At rest the face is unseen and takes no pointer either (it shows on hover).
   expect(getComputedStyle(face()).opacity).toBe('0');
+});
+
+/** Each x is a letter of the words (no layout here): the face lets the pointer through, so a point reads the words. */
+function lettersByX() {
+  const caretAt = (x: number) => ({ offsetNode: wordsText(), offset: Math.min(WORDS.length, Math.max(0, Math.round(x / 10))) });
+  stub(document, 'caretPositionFromPoint', caretAt as unknown as Document['caretPositionFromPoint']);
+}
+
+/** A whole click on `el` at `x`: press, release, click, the `detail` the browser counts. */
+function click(el: Element, x: number, more: MouseEventInit = {}) {
+  mouse(el, 'mousedown', x, 1, more);
+  mouse(el, 'mouseup', x, 0, more);
+  mouse(el, 'click', x, 0, more);
+}
+
+for (const waits of [false, true]) {
+  test.skipIf(!hasDom)(`a double-click on a word under the face selects the word and sends nothing${waits ? ' (a question waits: its emoji is a skill)' : ''}`, async () => {
+    if (waits) resetSavedReactionsForTests([{ emoji: '🎉', label: 'Ship it' }, { emoji: '😵‍💫', skill: 'bro' }]);
+    await render(waits ? asking() : THREAD);
+    lettersByX();
+    // The first click opens the face at once; its last emoji now sits under the pointer.
+    click(face(), 400, { detail: 1 });
+    await settle();
+    const cells = [...strip()!.querySelectorAll<HTMLButtonElement>('button')];
+    expect(cells.map((c) => c.querySelector('.ib-react-e')?.textContent ?? 'face').at(-1)).toBe(waits ? '😵‍💫' : 'face');
+    const last = cells.at(-1)!;
+    // The second press of the double-click: the word under it is selected, as with no face there.
+    const down = mouse(last, 'mousedown', 400, 1, { detail: 2 });
+    expect(down.defaultPrevented).toBe(false);
+    expect(window.getSelection()!.toString()).toBe('March');
+    mouse(words(), 'mouseup', 400, 0, { detail: 2 });
+    // Its click reaches the emoji (the worst case): still nothing is sent.
+    mouse(last, 'click', 400, 0, { detail: 2 });
+    mouse(words(), 'dblclick', 400, 0, { detail: 2 });
+    await settle();
+    expect(acks).toEqual([]);
+    expect(posts).toEqual([]);
+    expect(document.querySelector('[data-reaction-tray]')).toBeNull();
+    expect(strip()).toBeNull();
+  });
+}
+
+test.skipIf(!hasDom)('a Shift-click on the face extends the selection to the word under it and opens nothing', async () => {
+  await render();
+  lettersByX();
+  window.getSelection()!.setBaseAndExtent(wordsText(), 4, wordsText(), 10);
+  expect(window.getSelection()!.toString()).toBe('ledger');
+  const down = mouse(face(), 'mousedown', 400, 1, { shiftKey: true });
+  expect(down.defaultPrevented).toBe(false);
+  expect(window.getSelection()!.toString()).toBe(WORDS.slice(4, 40));
+  mouse(words(), 'mouseup', 400, 0, { shiftKey: true });
+  mouse(face(), 'click', 400, 0, { shiftKey: true });
+  await settle();
+  expect(strip()).toBeNull();
+});
+
+test.skipIf(!hasDom)('a deliberate click on the face, then a press on an emoji, reacts; a press the moment it opened does not', async () => {
+  await render();
+  click(face(), 400);
+  await settle();
+  const ship = () => [...strip()!.querySelectorAll<HTMLButtonElement>('button')].find((c) => c.querySelector('.ib-react-e')?.textContent === '🎉')!;
+  // Right after the click opened it: nothing.
+  click(ship(), 300);
+  await settle();
+  expect(acks).toEqual([]);
+  expect(strip()).not.toBeNull();
+  await act(async () => void (await new Promise((resolve) => setTimeout(resolve, STRIP_SETTLE_MS + 30))));
+  click(ship(), 300);
+  await settle();
+  expect(acks).toEqual([{ id: M3, on: true, reaction: { emoji: '🎉', label: 'Ship it' } }]);
 });
