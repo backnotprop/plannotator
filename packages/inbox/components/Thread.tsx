@@ -5769,11 +5769,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               {ackOffered && !waiting && !draftKept && (
                 <ReactionTray
                   messageId={ackTarget!.id}
-                  agent={agentName(ackTarget!.author)}
+                  agent={messageAuthorName(ackTarget!)}
                   on={ackOn}
                   current={ackTarget!.ack?.reaction ?? null}
                   phone={phone}
-                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
+                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, messageAuthorName(ackTarget!), reaction, was)}
                   openRequest={trayRequest}
                 />
               )}

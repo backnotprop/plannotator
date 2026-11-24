@@ -36,16 +36,19 @@ export function messageAuthorName(message: AgentMessage): string {
 }
 
 /**
- * A thread no session wrote in, started by a script: every agent message in it is a script's post. Its one name
- * there is "Script" (the heads, the reply box, the read line, the archived foot), as `threadAskerName` gives it.
+ * The thread's first agent named (Thread.tsx `asker`: the read line, the archived foot, New message, the file panes):
+ * "Script" in a thread only a script wrote in; in one a script started and a session took over, the first agent that
+ * is not a script's post (the one a reply reaches, as the row names it, `rowWho`); else the root's author.
  */
-export function scriptOnlyThread(messages: readonly AgentMessage[]): boolean {
-  return isScriptPost(messages[0]) && messages.every((m) => m.author?.kind !== 'agent' || isScriptPost(m));
+export function threadAskerName(messages: readonly AgentMessage[]): string {
+  if (!isScriptPost(messages[0])) return inboxAgentName(messages[0]?.author);
+  const session = messages.find((m) => m.author?.kind === 'agent' && !isScriptPost(m));
+  return session ? inboxAgentName(session.author) : SCRIPT_AUTHOR_NAME;
 }
 
-/** The thread's first agent named (Thread.tsx `asker`): "Script" in a thread only a script wrote in. */
-export function threadAskerName(messages: readonly AgentMessage[]): string {
-  return scriptOnlyThread(messages) ? SCRIPT_AUTHOR_NAME : inboxAgentName(messages[0]?.author);
+/** An author named as the window names a script's post ("Script"), where only the author is at hand (a mark, a toast). */
+export function authorName(author: Author): string {
+  return isScriptAuthor(author) ? SCRIPT_AUTHOR_NAME : inboxAgentName(author);
 }
 
 /**

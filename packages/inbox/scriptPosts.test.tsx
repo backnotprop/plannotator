@@ -17,7 +17,7 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxListRow, InboxListSection, InboxMessageWire, InboxProject, InboxReplyDraftRow, InboxRowDelivery, InboxThread } from '@plannotator/core/inbox-types';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
-import { messageAuthorName, rowIsScript, rowRecipientName, threadAskerName } from './scriptAuthor';
+import { authorName, messageAuthorName, rowIsScript, rowRecipientName, threadAskerName } from './scriptAuthor';
 import { rowScriptOf, scriptTip } from './components/RowAgents';
 
 const hasDom = typeof document !== 'undefined';
@@ -45,10 +45,11 @@ describe('who is a script', () => {
     expect(scriptTip('Claude Code', rowScriptOf({}, CLAUDE, 'billing-svc'))).toBe('Claude Code');
   });
 
-  test("a thread only a script wrote in is the script's; one a session wrote in is not", () => {
+  test("a thread only a script wrote in is the script's; one a session took over is that session's", () => {
     const person = { author: { kind: 'person' } as InboxAuthor };
     expect(threadAskerName([{ author: SCRIPT }, person, { author: SCRIPT }])).toBe('Script');
-    expect(threadAskerName([{ author: SCRIPT }, { author: CLAUDE }])).not.toBe('Script');
+    // A session took the script's thread over: the thread's agent is that session, as its row names it.
+    expect(threadAskerName([{ author: SCRIPT }, person, { author: CLAUDE }, { author: SCRIPT }])).toBe('Claude Code');
     expect(threadAskerName([{ author: SHIM }])).toBe('An agent');
     expect(threadAskerName([{ author: CLAUDE }])).toBe('Claude Code');
   });
@@ -65,6 +66,16 @@ describe('who is a script', () => {
     // An agent's own row: its agent, whatever the delivery says, as before.
     expect(rowRecipientName({ delivery: delivery({ host: 'pi', name: null }) }, CLAUDE)).toBe('Claude Code');
     expect(rowRecipientName({}, SHIM)).toBe('An agent');
+  });
+
+  test("the window's toasts and notifications name a script's post Script, and a thread a session took over by that session", async () => {
+    const { markReadToast } = await import('./markRead');
+    const stopped = { subject: 'Disk at 91%', author: SCRIPT, questions: { open: 1, picked: 0, stopped: true, holds_up: [], prompt: null, actions: 0 } } as Parameters<typeof markReadToast>[0];
+    expect(markReadToast(stopped, 'open').detail).toBe('Script was stopped');
+    expect(markReadToast({ ...stopped, participants: [{ host: 'claude-code', session: 'ses-api', name: 'Claude Code' }] }, 'open').detail).toBe('Claude Code was stopped');
+    expect(authorName(SCRIPT)).toBe('Script');
+    expect(authorName(SHIM)).toBe('An agent');
+    expect(authorName(CLAUDE)).toBe('Claude Code');
   });
 });
 
@@ -237,6 +248,15 @@ describe('drawn', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(el.querySelector('textarea')!.getAttribute('aria-label')).toBe('Reply to Claude Code');
+  });
+
+  test.skipIf(!hasDom)("a reply's quote of a script's post names Script beside its terminal", async () => {
+    const { ReplyQuoteLine } = await import('./components/ReplyQuote');
+    const el = await draw(<ReplyQuoteLine message={message('msg_1', SCRIPT, 1, 'Disk at 91% on node 3.')} phone={false} onRemove={() => {}} />);
+    const quote = el.querySelector('[data-reply-quote]')!;
+    expect(quote.getAttribute('aria-label')).toStartWith("Replying to Script's message");
+    expect(quote.textContent).toContain('Script');
+    expect(quote.querySelector('[data-script-mark]')).not.toBeNull();
   });
 
   test.skipIf(!hasDom)("a script's row a Claude Code session took over: every row label names Claude Code, and no terminal is drawn on the row", async () => {

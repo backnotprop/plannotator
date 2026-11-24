@@ -22134,9 +22134,8 @@
         "field:InboxRowDelivery.script"
       ],
       "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-24",
+      "mobile": "rethink",
+      "why": "The phone names a script's post Script and draws its terminal from the author itself (Names.agent, AgentMark); it draws no row delivery line",
       "ios": {
         "state": "not-started"
       }

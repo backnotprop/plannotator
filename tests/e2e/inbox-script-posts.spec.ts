@@ -7,10 +7,14 @@
  *
  *  - the script's row draws the terminal where an agent's icon would be, and is named "Script"; the agent's row
  *    and the routine's row beside it draw what they always did;
- *  - the open script thread's heads draw the terminal and say "Script".
+ *  - the open script thread's heads draw the terminal and say "Script";
+ *  - a thread a script started and the session took over is the session's on its row and in its reply box, while
+ *    the script's own head still says "Script";
+ *  - the reply box of a thread only a script wrote in says "Reply to Script".
  *
  * Build the binary first (see inbox.spec.ts). PNGs at 1440 by 900 land in .local/proof/script-posts/ (CI artifact
- * inbox-window-proof-N): the list light and dark, the open thread light.
+ * inbox-window-proof-N): the list light and dark, the open thread light, the taken-over thread with its reply box,
+ * and the script-only thread's reply box.
  */
 
 import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
@@ -31,7 +35,7 @@ interface World {
   agents: SimAgent[];
   context: BrowserContext;
   page: Page;
-  threads: { agent: string; script: string; routine: string };
+  threads: { agent: string; script: string; taken: string; routine: string };
 }
 let world: World;
 
@@ -98,6 +102,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     idempotency_key: 'spend-1123',
   });
   await pause();
+  // A script starts a thread and the Claude Code session takes it over by replying in it.
+  const taken = script({ subject: 'Disk at 91% on node 3', body: 'Disk at 91% on node 3. Snapshots use 40 GB of it.', idempotency_key: 'disk-1123' });
+  await pause();
+  await claude.send({ project_path: billing, reply_to: taken.message_id, body: 'I can clear the snapshots older than a week, which frees about 30 GB. Say go and I will.' });
+  await pause();
   const agent = await claude.send({ project_path: billing, subject: 'Retry webhook on 429', thread: 'webhook', body: 'Plan is ready: back off with jitter on a 429, up to five tries.' });
 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
@@ -135,7 +144,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   await page.route(/\/api\/inbox\/scheduled(\?.*)?$/, (route) =>
     route.request().method() === 'GET' ? route.fulfill({ json: { scheduled: [routine], launch_on: false } }) : route.fallback(),
   );
-  world = { url, agents: [claude], context, page, threads: { agent: agent.thread_id as string, script: first.thread_id, routine: routineRun.thread_id as string } };
+  world = { url, agents: [claude], context, page, threads: { agent: agent.thread_id as string, script: first.thread_id, taken: taken.thread_id, routine: routineRun.thread_id as string } };
 });
 
 test.afterAll(async () => {
@@ -172,4 +181,34 @@ test("the open script thread: its heads draw the terminal and say Script", async
   await expect(heads.nth(1)).toHaveText('Script');
   await expect(page.locator('[data-message-article] [data-script-mark] svg[data-icon="terminal"]')).toHaveCount(2);
   await shot(page, '02-thread-head', ['light']);
+});
+
+/** Opens the open thread's reply box and returns its field. */
+async function openReply(page: Page) {
+  await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
+  const field = page.locator('textarea[aria-label^="Reply to"]').first();
+  await expect(field).toBeVisible();
+  return field;
+}
+
+test("a thread a script started that a Claude Code session took over: its row is the session's, the script's head still says Script, the reply goes to Claude Code", async () => {
+  const { page, threads } = world;
+  const row = page.locator(`[data-row="${threads.taken}"]`).first();
+  await expect(row.locator('[data-row-agents]')).toHaveAttribute('aria-label', 'Claude Code');
+  await expect(row.locator('[data-script-mark]')).toHaveCount(0);
+  await row.click();
+  const heads = page.locator('[data-message-article] .ib-fl-nm');
+  await expect(heads).toHaveCount(2);
+  await expect(heads.first()).toHaveText('Script');
+  await expect(heads.nth(1)).toHaveText('Claude Code');
+  await expect(await openReply(page)).toHaveAttribute('aria-label', 'Reply to Claude Code');
+  await shot(page, '03-taken-over-thread', ['light']);
+});
+
+test("the reply box in a thread only a script wrote in names Script, as its heads do", async () => {
+  const { page, threads } = world;
+  await page.locator(`[data-row="${threads.script}"]`).first().click();
+  await expect(page.locator('[data-message-article] .ib-fl-nm').first()).toHaveText('Script');
+  await expect(await openReply(page)).toHaveAttribute('aria-label', 'Reply to Script');
+  await shot(page, '04-reply-box-script-only', ['light']);
 });
