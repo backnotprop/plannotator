@@ -21,6 +21,17 @@ Piece 1 (this): several agents in New message, the swarm record, the ghost threa
 
 The only place an agent's words reach other agents. `store.isGhostSay(message)`: an agent message in a ghost thread with tags. `pendingReplies`, `pendingRepliesFor`, `pendingFor`, `recordDelivery` and `farSessions` accept it, for a tagged session that is a member of a swarm that is on, and only for a connection that words tags. Every other thread is exactly as before. A ghost message is handed as a notice (`moved` with its own `notice` line, `SWARM_WORDS.wake`), so it never reads as the person's reply. A far member's tag carries its `machine`; the far tags' `onPersonMessage` sends its wake there.
 
+### The window
+
+Approval `inbox-swarm-thread-ui`; all of it in `packages/inbox/swarm/` (styles `swarm.css`, `swarmBadge.css`), wired into ComposeDialog, Thread and App by single lines. The window learns the switch from `settings.experimental.swarm` (`useSwarmOn` in App, `useSwarmSwitch` anywhere); off, none of it renders and `thread.swarm` is absent anyway.
+
+- New message (`useSwarmPicks`): after the first To, "Add an agent" picks more agents from any computer (`ToPicker` / `PhoneToSheet` with `checked`), each a chip; the Swarm badge at the row's end puts `/swarm` in the words. Send posts the others as `tags` (`machine` only when the pick is not on the thread's computer). The Swarm tip shows once across windows: `POST reveal` `{swarm_tip}` (`swarmTipClaim`, config `inboxReveals.swarm_tip`), refused while Swarm is off.
+- A swarm thread (`useThreadSwarm`): the Ghost button first in the top bar (the Hug glyph, `ghost_unread` while above zero, no shortcut); the summary row in the meta line in place of "N sessions", whose chevron opens the status view (each member's computer, state as words, doing line; a sub-agent indented under its `for`; foot: Add an agent, Ghost thread, Turn off / Turn on).
+- The ghost pane (`GhostPane`): local state of the thread pane, beside the thread the way a file is (the list column steps aside), covering it when the room is too narrow and on a phone, where its back button returns. Opening it posts `seen` when there is something unread; its box posts `say` (`GhostTo`: everyone or one joined member). A file opening closes it and opening it closes the file.
+- The stream: a `swarm` line, and a ghost thread's message, go out as `{ kind: "swarm", id, thread_id: <swarm thread> }` (`eventPayload`), never as a message, so nothing notifies and the open thread re-reads (`threadOfRecord`, `applyRecord`).
+- The window route takes the page's `serverSession` and `idempotency_key` off the body before it reads it.
+- Deleting a thread deletes its ghost thread with it (`deleteThread`); the swarm record goes with the thread's lines.
+
 ### `plannotator inbox swarm`
 
 `apps/hook/server/inbox-swarm-command.ts`, a thin client over `POST /api/inbox/swarm` (`packages/server/inbox-swarm-route.ts`), with the capability command's guards: never through a device door, another site's page refused, a paired cloud agent through the agent door's `route`. `join <thread> [--as] [--for]` (idempotent; a name taken is refused; `--for` must name a member), `doing "<line>"` (control characters out, at most 200 characters), `status [<thread>]`, `say "<text>" [--to <name>]`, `leave`. Without `--thread`, `say`, `doing`, `status` and `leave` act in the one swarm the caller is in. The words agents read are `SWARM_WORDS` (`packages/shared/inbox/swarm.ts`), `INBOX_SWARM_USAGE` and `INBOX_SWARM_HELP_SECTION`.

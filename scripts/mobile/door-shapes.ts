@@ -74,7 +74,7 @@ export interface DoorRecordFrame {
   /** `message`: true on the message's first line. */
   first?: boolean;
   message?: InboxMessageWire;
-  /** `question`, `steps`, `thread_pull`. */
+  /** `question`, `steps`, `thread_pull`, `swarm` (a swarm line or a ghost thread's message: the swarm thread's id). */
   thread_id?: string;
   question?: InboxQuestion;
 }
