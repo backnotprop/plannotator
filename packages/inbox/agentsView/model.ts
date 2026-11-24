@@ -35,6 +35,7 @@ import { agentHostName, agentRowName, agentSessions, namedAgents } from '../agen
 import type { MachinesModel } from '../machines';
 import type { ListSort } from '../listView';
 import { rowTimeIso } from '../rowDelivery';
+import { lineFactsOf, type AgentLineFacts } from '../agentProfile/line';
 
 /** The list's urgency order: a row's group, most urgent first; anything else after. It orders the agents, never the rows under one. */
 export const AGENT_ROW_ORDER: readonly InboxListGroupId[] = ['priority', 'stopped', 'holding', 'waiting', 'new', 'sent', 'quiet'];
@@ -68,6 +69,9 @@ export interface ViewAgent {
   turnsUnknown: boolean;
   /** When it was last heard, for an ended one ("Ended 4:10 PM"); null when not known. */
   endedAt: string | null;
+  /** What it asks the person in its terminal now, and when its turn started or ended: its row's line (agentProfile/line.ts). */
+  asking: AgentLineFacts['asking'];
+  since: string | null;
   /** The list names it (else it was rebuilt from a row's session). */
   listed: boolean;
 }
@@ -148,9 +152,7 @@ function agentFinder({ groups, machines, labels = {}, chains }: AgentsInputs): (
         name: agentRowName(agent),
         project: agent.project?.name ?? null,
         machine: machines.all.length === 0 ? null : machine,
-        state: agent.state,
-        turnsUnknown: agent.turns_unknown === true,
-        endedAt: agent.state === 'ended' ? agent.last_seen_at : null,
+        ...lineFactsOf(agent),
         listed: true,
       };
       if (agent.launch) byLaunch.set(at(machine, agent.launch.thread_id), view);
@@ -185,6 +187,8 @@ function agentFinder({ groups, machines, labels = {}, chains }: AgentsInputs): (
       state: (known.get(machine) ?? false) ? 'ended' : null,
       turnsUnknown: false,
       endedAt: null,
+      asking: null,
+      since: null,
       listed: false,
     };
     rebuilt.set(key, view);

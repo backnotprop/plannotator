@@ -170,6 +170,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       live: entry.live,
       started_at: iso(entry.startedAt),
       last_seen_at: iso(entry.lastSeen),
+      ...(entry.live && typeof entry.since === "number" ? { state_since: iso(entry.since) } : {}),
       ...(entry.live && entry.model !== null ? { model: entry.model } : {}),
       ...(entry.live && entry.effort !== null ? { effort: entry.effort } : {}),
       ...(entry.live && entry.context !== null ? { context: entry.context } : {}),
@@ -284,10 +285,12 @@ export function inboxMergedAgents(self: string, own: InboxAgentsGroup, machines:
 }
 
 function sessionFactsChecked(agent: InboxAgent): InboxAgent {
-  const { model, effort, context, ...rest } = agent;
+  const { model, effort, context, state_since, ...rest } = agent;
   const checked = { model: modelIdOf(model), effort: effortLevelOf(effort), context: contextPercentOf(context) };
   return {
     ...rest,
+    // When its turn started or ended, as that machine said it: a time, else nothing.
+    ...(typeof state_since === "string" && state_since.length <= 40 && Number.isFinite(Date.parse(state_since)) ? { state_since } : {}),
     ...(checked.model === null ? {} : { model: checked.model }),
     ...(checked.effort === null ? {} : { effort: checked.effort }),
     ...(checked.context === null ? {} : { context: checked.context }),

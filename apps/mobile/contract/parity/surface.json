@@ -910,6 +910,7 @@
       "InboxAgent.session",
       "InboxAgent.started_at",
       "InboxAgent.state",
+      "InboxAgent.state_since",
       "InboxAgent.status_mark",
       "InboxAgent.title",
       "InboxAgent.turns_unknown",

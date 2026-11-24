@@ -22297,6 +22297,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxagent-state-since",
+      "title": "field:InboxAgent.state_since",
+      "surface": [
+        "field:InboxAgent.state_since"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

@@ -64,6 +64,27 @@ describe("who is listed, and how", () => {
     expect(group.agents[1]).toMatchObject({ host: "claude-code", label: "Fix login redirect", project: { id: "prj_ledger", name: "ledger" }, waiting: 0 });
   });
 
+  test("a live session carries when its turn started or ended (state_since), which a later poll in the same state never moves", async () => {
+    const { live, clock } = liveSessions();
+    const since = () => Object.fromEntries(inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)) })).agents.map((agent) => [agent.id, agent.state_since]));
+    const start = clock.t;
+    await poll(live, "ses-a", { busy: true });
+    await poll(live, "ses-quiet");
+    expect(since()).toEqual({ "ses-a": new Date(start).toISOString(), "ses-quiet": undefined });
+    clock.t += 90_000;
+    await poll(live, "ses-a", { busy: true });
+    expect(since()["ses-a"]).toBe(new Date(start).toISOString());
+    clock.t += 30_000;
+    const ended = clock.t;
+    await poll(live, "ses-a", { busy: false });
+    clock.t += 45_000;
+    await poll(live, "ses-a", { busy: false });
+    expect(since()["ses-a"]).toBe(new Date(ended).toISOString());
+    // A linked machine's value is kept only when it is a time.
+    const peer = inboxPeerAgentsGroup([{ agents: [{ id: "p1", session: "p1", host: "pi", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null, state_since: "2026-11-09T11:00:00.000Z" }, { id: "p2", session: "p2", host: "pi", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null, state_since: "<b>soon</b>" }] }], "ibx_studio")!;
+    expect(peer.agents.map((agent) => agent.state_since)).toEqual(["2026-11-09T11:00:00.000Z", undefined]);
+  });
+
   test("a live session carries its model and effort from its latest poll; a bad value, an older connection or an ended session carries none", async () => {
     const { live, clock } = liveSessions();
     await poll(live, "ses-set", { model: "claude-opus-5-5", effort: "high" });

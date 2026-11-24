@@ -1878,6 +1878,9 @@
             }
           ]
         },
+        "state_since": {
+          "type": "string"
+        },
         "model": {
           "type": "string"
         },

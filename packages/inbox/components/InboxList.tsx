@@ -57,6 +57,7 @@ import { FoldedBlocker, GroupBand, newSince } from './GroupBand';
 import { bandOnScreen, useBandTip, type BandTipHost } from '../bandTip';
 import { bandMenuOf, listMarkAllRows } from '../markAllRead';
 import { AgentsList } from '../agentsView/AgentsList';
+import { AgentCardSlot } from '../agentProfile/AgentCard';
 import { LineRow } from '../agentsView/LineRow';
 import { rowAgent, slotSession, cardOf, SnoozedUntil, RowTime, ListRows, BadgeWords, subjectOf, sentWordsOf, titleOf, RowTitle, countWords, liveCount, CountWords, EndedMark, LineCount, openCountsKey, OpenCounts, ClipText, RowWithAction } from './rowParts';
 import { ArchivedGroup } from './ArchivedGroup';
@@ -1178,6 +1179,8 @@ export function InboxList(props: InboxListProps) {
           bands={bands}
         >
           {onRowAction && <RowSwipeLayer ref={swipeLayerRef} />}
+          {/* The agent's card atop a list filtered to one agent (agentProfile/); the Agents view's row is its card. */}
+          <AgentCardSlot hidden={asAgents} />
           {props.stale}
           {props.ask}
           {awayLines.map((line) => (
@@ -1242,11 +1245,7 @@ export function InboxList(props: InboxListProps) {
         </ThreadRowMenu>
       {pick.sheet}
       <HeldNoticeSaid words={bar.words} place={`${props.scope ?? ''}\n${props.title}`} />
-      {props.reconnecting && (
-        <p className="ib-relink" data-inbox-reconnecting="">
-          Reconnecting…
-        </p>
-      )}
+      {props.reconnecting && <p className="ib-relink" data-inbox-reconnecting="">Reconnecting…</p>}
       {resizable && <ListColumnEdge controls={columnId} onCollapse={props.onHide} />}
     </section>
   );
