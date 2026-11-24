@@ -3616,8 +3616,11 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * machine too (read there, archived there through the outbox), so a linked machine's window offers this Inbox's
  * agents for picks on both. `remove-agent` (approval "inbox-remove-agent-from-thread"): an agent of one of its threads
  * is removed there and put back with Undo (`threads/:id/remove-agent`), so a linked machine's list offers Remove.
+ * `artifact-pins` (approval "inbox-artifact-stars"): its threads' artifacts are pinned from
+ * a linked machine's window and kept here (`POST artifact-pins` through its door); its list carries its pins to a
+ * linked machine (`artifact_pins`), and its Artifacts wall is read through its door (`GET artifacts`).
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

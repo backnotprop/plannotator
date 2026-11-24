@@ -218,8 +218,8 @@ import type { SettingsSection } from './settingsRoute';
 import { hiddenKnownAnswers } from './feedbackKnown';
 import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
-import { ArtifactsWall } from './components/ArtifactsWall';
-import { readArtifactPins } from './artifactPins';
+import { ArtifactsWall, wallRowRoute } from './components/ArtifactsWall';
+import { readArtifactPins, sayArtifactPinHeld } from './artifactPins';
 import { hearAgentFacesEvent, onAgentFaceRefused, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage } from './board/BoardPage';
@@ -2602,6 +2602,8 @@ function Inbox() {
    * machine takes it, and says so, without the warning.
    */
   const showError = (cause: unknown) => showToast(errorToast(cause, 'The thread did not change.'));
+  // A pin of a linked machine's artifact held for it says so with the clock, as a held star does (artifactPins.ts).
+  useEffect(() => sayArtifactPinHeld(showError));
   // A tray change the server refused (approval "inbox-reaction-tray"): already taken back on screen; the toast says why.
   useEffect(() => {
     onSavedReactionsFailed((cause) => showToast(errorToast(cause, 'Your saved emoji did not change.')));
@@ -5333,13 +5335,7 @@ function Inbox() {
       <ArtifactsWall
         pinned={route.pinned === true}
         onPinned={(pinned) => writeRoute({ page: 'artifacts', project: null, thread: null, pinned }, { replace: true })}
-        onOpen={(row) =>
-          go(
-            row.attachment
-              ? { page: 'inbox', project: null, thread: row.thread_id, file: { id: row.attachment.id, version: 'current', focus: null } }
-              : { page: 'inbox', project: null, thread: row.thread_id, guide: row.message_id },
-          )
-        }
+        onOpen={(row) => go(wallRowRoute(row))}
         phone={phone}
       />
     );
