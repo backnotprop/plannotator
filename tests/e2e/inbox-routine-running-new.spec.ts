@@ -167,7 +167,8 @@ test("a routine's second run, with the windows open: its row comes up under New 
   for (const { look, page } of pages) {
     await expect(running(page, threadId)).toBeVisible({ timeout: 30_000 });
     await expect(inNew(page, threadId)).toBeVisible();
-    // Shown, not announced: no "N new" for it, and the tab's title carries no count.
+    // Shown, not announced: the tab's title carries no count. That it raises no "N new" and is not bold is
+    // packages/inbox/scheduled/runEntersHeld.test.tsx's to prove.
     await expect(page.locator('[data-section-id="new"] [data-thread-id] [data-scheduled-badge="running"]')).toHaveCount(1);
     expect(await page.title()).not.toMatch(/^\(\d/);
     await page.screenshot({ path: join(shots, `second-run-started-${look}.png`) });

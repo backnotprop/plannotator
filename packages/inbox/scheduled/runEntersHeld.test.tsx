@@ -118,6 +118,9 @@ for (const phone of [false, true]) {
     expect([waitingCount(next), inboxTabCount(next), heldNotice(next, listGroups(model([running(), news]))).count]).toEqual([waitingCount(shown), inboxTabCount(shown), 0]);
     const el = draw(next, phone);
     expect(badge(el)).toBe('running');
+    // Not bold: every drawing of its row (the wide and the three-line one) reads as read.
+    const rows = [...el.querySelectorAll('[data-section-id="new"] [data-thread-id="msg_nightly"]')];
+    expect([rows.length > 0, rows.some((r) => r.classList.contains('ib-u'))]).toEqual([true, false]);
     // New's header counts the rows in it: the running one is one of them.
     expect(newCount(el)).toBe('2');
   });

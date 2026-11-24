@@ -394,13 +394,17 @@ export function priorityChangedRows(shown: readonly InboxListSection[], latest: 
  * seen or not) and is drawn in another group, so it is never left folded in
  * Quiet with questions open. A thread only read stays where it was left. A
  * thread snoozed or unsnoozed, or added to or removed from Priority, while it
- * was open goes to its place: that is what the person just asked for.
+ * was open goes to its place: that is what the person just asked for. A
+ * routine's run that started while it was open (`scheduled_running`) and is
+ * drawn in Quiet or Sent comes up under New, as `routineRunsEnter` brings it in
+ * for a closed thread; else a phone's Back left it folded for the whole run.
  */
 export function settlesOnBack(shown: readonly InboxListSection[], row: InboxListRow): boolean {
   const drawn = shown.find((section) => section.threads.some((other) => other.thread_id === row.thread_id));
   if (drawn && (drawn.id === INBOX_SNOOZED_BAND.id) !== !!row.snoozed) return true;
   if (row.snoozed) return false;
   if (drawn && (drawn.id === INBOX_PRIORITY_GROUP.id) !== inboxRowInPriority(row)) return true;
+  if (row.scheduled_running === true && (drawn?.id === 'quiet' || drawn?.id === 'sent')) return true;
   if (row.unseen > 0) return true;
   if (drawn?.id === INBOX_PRIORITY_GROUP.id) return false;
   const onYou = (section: string | undefined) => section === 'stopped' || section === 'holding' || section === 'waiting';
@@ -599,6 +603,8 @@ export function shownAfter(shown: InboxListSection[] | null, latest: InboxListSe
  * until the list settles, as every row does.
  */
 export function routineRunsEnter(shown: readonly InboxListSection[], latest: readonly InboxListSection[], open?: OpenThread | null): InboxListSection[] {
+  const newRows = latest.find((section) => section.id === 'new')?.threads ?? [];
+  if (!newRows.some((row) => row.scheduled_running === true)) return shown as InboxListSection[];
   const drawn = rowsById(shown);
   const entering = new Set<string>();
   for (const section of latest) {
