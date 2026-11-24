@@ -91,6 +91,11 @@ export interface MachineView {
   marks?: string[];
   /** Update on that machine, from its own state. Null: nothing to say (level, ahead, this machine, or no newer release known). */
   update?: MachineUpdateView | null;
+  /**
+   * How far its clock runs ahead of this Inbox's (ms, whole minutes; absent within two minutes, for this machine, and
+   * from an older Inbox). Grid (approval "inbox-agent-grid") reads its rows' times on its own clock.
+   */
+  clock_ms?: number;
 }
 
 /** A linked machine's update, as `machineUpdateView` (inbox-machines.ts) reads what it hears from there. */

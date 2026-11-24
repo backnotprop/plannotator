@@ -14,7 +14,7 @@ import { reviewAtOf, type ReviewAt } from './reviewAt';
 import { viewScopeOf, type PullViewScope } from '../pulls/viewScope';
 
 export interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans' | 'grid';
   /**
    * Plans (`#plans`, only while config.json `inboxPlans` is on; approval "inbox-plans"): the plan open (`#plans=pln_…`),
    * the version read (`&v=3`; absent: the newest), the two versions compared (`&from=3&to=5`), and `#plans&new` for
@@ -173,6 +173,8 @@ export function routeOf(fullHash: string): Route {
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
+  // Grid (approval "inbox-agent-grid"): `#grid`; with the switch off the page sends the address to the Inbox.
+  if (params.has('grid') && !params.get('thread')) return { page: 'grid', project: null, thread: null };
   // The Artifacts wall (the sidebar's Artifacts row). `#thread=…&artifacts` is a thread's own grid, below.
   if (params.has('artifacts') && !params.get('thread')) return { page: 'artifacts', project: null, thread: null, pinned: params.get('artifacts') === 'pinned' };
   if (params.has('routine') || params.has('routines')) {

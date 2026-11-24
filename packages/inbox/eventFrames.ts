@@ -6,6 +6,7 @@ import { parseRestartAgents } from './restartAgents';
 import { readHello, type RestartHello } from './sessionAdopt';
 import { scheduledFrame, scheduledMachineFrame } from './scheduled/store';
 import { readRunStateFrame, runEvents } from './data/runEvents';
+import { gridHeard } from './grid/gridOn';
 
 
 export interface MachineRecordFrame {
@@ -21,7 +22,7 @@ export interface InboxEventWindow {
   origin: string;
 }
 
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'runs', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'runs', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'machine', 'machines', 'cards', 'outbox', 'grid-seen', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -118,6 +119,10 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'priority':
       handlers.onPriority?.();
       return;
+    // Grid's looks changed (a phone's, another window's, a linked computer's): the list's `grid_seen` is read again.
+    case 'grid-seen':
+      gridHeard('grid-seen');
+      return;
     case 'artifact-pins':
       handlers.onArtifactPins?.();
       return;
@@ -149,6 +154,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
         const data = JSON.parse(frame.data) as { thread_ids?: unknown };
         const ids = Array.isArray(data.thread_ids) ? data.thread_ids.filter((id): id is string => typeof id === 'string') : [];
         if (ids.length > 0) handlers.onThreadPulls?.(ids);
+        // Their checks or review changed: Grid, while it shows, reads the list's PR summaries again (grid/gridOn.ts).
+        if (ids.length > 0) gridHeard('thread-pulls');
       } catch {
       }
       return;
