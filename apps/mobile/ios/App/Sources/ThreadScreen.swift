@@ -902,7 +902,8 @@ struct MessageView: View {
       ViewThatFits(in: .horizontal) {
         HStack(alignment: .center, spacing: Space.close) {
           if !first.isEmpty { Text(first).font(TextRole.meta).foregroundStyle(Token.mutedForeground).lineLimit(1) }
-          if offered { takeBackButton }
+          // Alone on its line (the Inbox has no line for a reply no agent has yet), its words keep the text's edge.
+          if offered { takeBackButton.padding(.leading, first.isEmpty ? -Space.close : 0) }
         }
         VStack(alignment: .leading, spacing: 0) {
           if !first.isEmpty { Text(first).font(TextRole.meta).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true) }
