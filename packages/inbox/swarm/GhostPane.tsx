@@ -164,7 +164,7 @@ function GhostMessage({ message }: { message: InboxMessage }) {
           <b className="ib-ghost-from">
             <bdi>{from}</bdi>
           </b>
-          <span className="ib-ghost-to">to {ghostToWords(message)}</span>
+          <span className="ib-ghost-msgto">to {ghostToWords(message)}</span>
           <span className="ib-sp" />
           <time className="ib-ghost-tm" dateTime={message.created_at}>
             {whenTime(message.created_at)}

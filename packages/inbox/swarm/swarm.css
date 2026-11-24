@@ -94,7 +94,7 @@
 .ib-ghost-main { min-width: 0; }
 .ib-ghost-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .ib-ghost-from { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
-.ib-ghost-to { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-ghost-msgto { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-ghost-line .ib-sp { flex: 1; }
 .ib-ghost-tm { flex: none; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-ghost-words { font-size: var(--ib-fs-14, 14px); line-height: 1.5; color: var(--foreground); overflow-wrap: anywhere; }
