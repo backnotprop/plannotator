@@ -220,7 +220,7 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
     setRules();
     const { risk, judge, key } = await reading("github", { whole: { stderr: "gh: (HTTP 406)", exitCode: 1 }, paged: { stdout: FILES_PAGE_1 } }, { answer: PAY_PLACE });
     await judge();
-    expect(risk.answer().judgments[key]).toEqual({ level: "high", why: "It charges twice." });
+    expect(risk.answer().judgments[key]).toEqual({ level: "high", why: "It charges twice.", head: "a".repeat(40) });
   });
 
   describe("an answer of Low from a read known to be incomplete", () => {
@@ -770,7 +770,8 @@ describe("no cost repeats", () => {
     first.risk.assess([pull(1)]);
     await settled();
     expect(first.runs).toHaveLength(1);
-    expect(first.risk.answer().judgments["github.com/n/b#1"]).toEqual({ level: "high", why: "It changes the billing webhook." });
+    // Each judgment names the head it was made at: a window holding it after a push draws none of its places.
+    expect(first.risk.answer().judgments["github.com/n/b#1"]).toEqual({ level: "high", why: "It changes the billing webhook.", head: "head-1" });
 
     const restarted = engine();
     restarted.risk.assess([pull(1)]);
@@ -785,7 +786,7 @@ describe("no cost repeats", () => {
     expect(pushed.risk.answer().judgments["github.com/n/b#1"]).toBeUndefined();
     release();
     await settled();
-    expect(pushed.risk.answer().judgments["github.com/n/b#1"]?.level).toBe("low");
+    expect(pushed.risk.answer().judgments["github.com/n/b#1"]).toMatchObject({ level: "low", head: "head-new" });
   });
 
   test("new rules mean a new judgment; a new model alone does not", async () => {
@@ -1524,7 +1525,7 @@ describe("a high or medium judgment's places (context notes, risk bars)", () => 
     restarted.risk.assess([pull(7)]);
     await settled();
     expect(restarted.runs).toEqual([]);
-    expect(restarted.risk.answer().judgments["github.com/n/b#7"]).toEqual({ level: "medium", why: "It changes billing." });
+    expect(restarted.risk.answer().judgments["github.com/n/b#7"]).toEqual({ level: "medium", why: "It changes billing.", head: "head-7" });
   });
 
   test("a judgment made from a diff the PR page can't draw keeps no places, so no count promises places it can't show", async () => {
@@ -1533,11 +1534,11 @@ describe("a high or medium judgment's places (context notes, risk bars)", () => 
     const perFile = engine({ patch: PATCH, read: { per_file: true }, answer: async () => ({ text: answer("high", [place]) }) });
     perFile.risk.assess([pull(7)]);
     await settled();
-    expect(perFile.risk.answer().judgments["github.com/n/b#7"]).toEqual({ level: "high", why: "It changes billing." });
+    expect(perFile.risk.answer().judgments["github.com/n/b#7"]).toEqual({ level: "high", why: "It changes billing.", head: "head-7" });
     // Known to be less than the whole (held-back files): High stays High, without places.
     const partial = engine({ patch: PATCH, read: { partial: true }, answer: async () => ({ text: answer("high", [place]) }) });
     partial.risk.assess([pull(8)]);
     await settled();
-    expect(partial.risk.answer().judgments["github.com/n/b#8"]).toEqual({ level: "high", why: "It changes billing." });
+    expect(partial.risk.answer().judgments["github.com/n/b#8"]).toEqual({ level: "high", why: "It changes billing.", head: "head-8" });
   });
 });
