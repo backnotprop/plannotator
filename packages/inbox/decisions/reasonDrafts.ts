@@ -89,8 +89,8 @@ export function createReasonDrafts(options: {
     const run = store.write(threadId, reasonDraftKey(id), text, keepalive).then(
       () => true,
       (cause: unknown) => {
-        // Newer words were typed since: their own save decides.
-        if ((texts.get(id) ?? '') !== text) return true;
+        // Newer words were typed since, or a write waits behind this one: that one decides.
+        if ((texts.get(id) ?? '') !== text || waiting.has(id)) return true;
         if (silent) {
           quietOwed.add(id);
           return true;

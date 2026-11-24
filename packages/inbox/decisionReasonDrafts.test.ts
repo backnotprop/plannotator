@@ -117,6 +117,24 @@ test('two writes of one reason never overlap: the last words land last', async (
   expect(s.saved.get(reasonDraftKey(ID))).toBe('last words');
 });
 
+test('a write that fails with another waiting behind it: the one behind decides, and a reload is not kept waiting', async () => {
+  const s = heldStore();
+  const failed: string[] = [];
+  const d = drafts(s.store, failed);
+  d.reasons.type(T, ID, 'Blocked on legal');
+  d.pause();
+  d.reasons.type(T, ID, 'Blocked on legal');
+  d.pause();
+  s.writes[0]!.answer(false);
+  await settle();
+  s.writes[1]!.answer(true);
+  await settle();
+  expect(failed).toEqual([]);
+  const settled = d.reasons.settled();
+  await settle();
+  expect(await settled).toBe(true);
+});
+
 test('emptying a reason after its mark saved: a failed write is not told, keeps no reload waiting, and goes again', async () => {
   const s = fakeStore();
   const failed: string[] = [];
