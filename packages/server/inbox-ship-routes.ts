@@ -1,13 +1,15 @@
 /**
  * Ship's routes (approval "inbox-ship-mode"), Bun only (the Inbox), behind Code review like every pull route:
  *
- * - `GET /api/inbox/ships`: this Inbox's ships, without their logs (`InboxShipView[]`).
+ * - `GET /api/inbox/ships`: this Inbox's ships, without their logs (`InboxShipView[]`), and `projects` (`host/repo` →
+ *   this Inbox's projects on it), so a window on a linked machine lists this computer's agents for a PR's repository.
  * - `GET /api/inbox/ships/log?id=`: one ship and its log, newest first.
  * - `POST /api/inbox/ships` `{ key, thread_id, to?, started?, idempotency_key }`: ship a pull request. With `to` (a
  *   live session `{ host, session }`, or a new one `{ launch: { agent, project_id, model?, effort? } }`), the
  *   instruction (core `shipMessage`) goes into the thread as the person's reply to that agent, then the record is made.
  *   With `started: true` the window already started a new thread with the instruction (a pull request with no thread,
- *   or an agent on another computer): only the record.
+ *   or an agent on another computer than the review's thread): only the record; its `to`, when a live session, is
+ *   who ships it until the thread says otherwise.
  * - `POST /api/inbox/ships/stop` `{ id }`: stop.
  *
  * A linked machine reaches them through the door (`machineOnly` rows in inbox-devices.ts), so a window on either
@@ -26,12 +28,14 @@ export type InboxShipTo = { host: string; session: string } | { launch: { agent:
 export interface InboxShipRoutesOptions {
   ships: InboxShipStore;
   watch: InboxShipWatch;
-  /** The pull request as the last list read it (the window only names one it listed). */
+  /** The pull request as the last list read it, else one read of it (a linked machine's window names one it listed). */
   findPull: (key: string) => Promise<InboxPull | null>;
   /** The thread's project, when it is a thread of this Inbox. */
   threadProject: (threadId: string) => string | null;
   /** Who works in the thread now (the window's `started` path): its last agent. */
   threadAgent: (threadId: string) => InboxShipAgent | null;
+  /** `host/repo` (lowercased) → this Inbox's projects on it. */
+  repoProjects: () => Promise<Record<string, string[]>>;
   /** Send the instruction into the thread as the person's reply to `to`; the agent it went to. */
   sendInstruction: (input: { threadId: string; to: InboxShipTo; words: string; idempotencyKey: string; req: Request }) => Promise<InboxShipAgent>;
   json: (body: unknown, status?: number) => Response;
@@ -66,7 +70,7 @@ export function createInboxShipRoutes(options: InboxShipRoutesOptions) {
       if (req.method === "GET") {
         const refused = options.guard(req, false, null);
         if (refused) return refused;
-        return json({ serverSession: options.serverSession, ships: options.ships.all().map(shipView) });
+        return json({ serverSession: options.serverSession, ships: options.ships.all().map(shipView), projects: await options.repoProjects() });
       }
       if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
       const body = await options.readBody(req);
@@ -82,8 +86,11 @@ export function createInboxShipRoutes(options: InboxShipRoutesOptions) {
       if (!pull) throw new InboxError("pull_not_found", "That pull request isn't in the list any more.", { field: "key" });
       if (pull.state !== "open" && pull.state !== "draft") throw new InboxError("pull_not_open", `It is ${pull.state} already.`);
       let agent: InboxShipAgent | null;
-      if (body.started === true) agent = options.threadAgent(threadId);
-      else {
+      if (body.started === true) {
+        // The thread's agent once it answered; before that, the live session the window started it with.
+        const to = toOf(body.to);
+        agent = options.threadAgent(threadId) ?? (to && "session" in to ? { host: to.host, session: to.session, name: null } : null);
+      } else {
         const to = toOf(body.to);
         if (!to) throw new InboxError("validation_error", "to: a session, or a new session to start.", { field: "to" });
         const idempotencyKey = text(body.idempotency_key, 200);

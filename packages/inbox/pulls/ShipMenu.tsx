@@ -1,19 +1,20 @@
 /**
  * Ship in a Reviews row's menu (approval "inbox-ship-mode"): first in the menu. On a desktop, Ship is a submenu
  * trigger: a click ships with the agent it shows (the one already on the review), and the submenu picks another. On a
- * phone, Ship opens the agent sheet. While the row ships: Ship log and Stop shipping instead.
+ * phone, Ship opens the agent sheet. While the row ships: Ship log and Stop shipping instead. Another computer's agents
+ * sit under its name (approved shot 3, "Mac mini").
  */
 import { Menu } from '@base-ui/react/menu';
 import { HostMark, Icon } from '../icons';
 import { agentName } from '../tags';
 import { BottomSheet } from '../components/BottomSheet';
-import type { PullThreadOption } from './threadTo';
+import type { ShipOption } from './shipStart';
 import { SailGlyph } from './ShipRow';
 
-const detailOf = (option: PullThreadOption) => [agentName(option.row.host), option.projectName].filter(Boolean).join(' · ');
+const detailOf = (option: ShipOption) => [agentName(option.row.host), option.projectName].filter(Boolean).join(' · ');
 
 /** One agent row, as the reply box lists it (`ReplyRecipient`): its mark, its name and where it works, and the tick. */
-function AgentRow({ option }: { option: PullThreadOption }) {
+function AgentRow({ option }: { option: ShipOption }) {
   const start = option.row.start;
   return (
     <>
@@ -58,12 +59,12 @@ function AgentRow({ option }: { option: PullThreadOption }) {
 export interface ShipMenuProps {
   /** The row ships now: Ship log and Stop shipping. */
   shipping: boolean;
-  options: readonly PullThreadOption[];
-  /** The option Ship starts on (its session id). */
+  options: readonly ShipOption[];
+  /** The option Ship starts on (its id). */
   chosen: string | null;
   phone: boolean;
   portal: HTMLElement | null;
-  onShip: (option: PullThreadOption) => void;
+  onShip: (option: ShipOption) => void;
   /** A phone: open the agent sheet. */
   onChoose: () => void;
   onLog: () => void;
@@ -87,7 +88,7 @@ export function ShipMenuItems({ shipping, options, chosen, phone, portal, onShip
       </>
     );
   }
-  const pick = options.find((o) => o.row.session === chosen) ?? null;
+  const pick = options.find((o) => o.id === chosen) ?? null;
   if (options.length === 0 && !pick) return null;
   const end = (
     <span className="ib-shp-end">
@@ -107,10 +108,8 @@ export function ShipMenuItems({ shipping, options, chosen, phone, portal, onShip
       </>
     );
   }
-  const live = options.filter((o) => !o.row.start);
-  const starts = options.filter((o) => o.row.start);
-  const item = (option: PullThreadOption) => (
-    <Menu.Item key={option.row.session} className="ib-rpick-row" label={option.row.label} onClick={() => onShip(option)} data-ship-agent={option.row.session} data-on={option.row.session === chosen ? '' : undefined}>
+  const item = (option: ShipOption) => (
+    <Menu.Item key={option.id} className="ib-rpick-row" label={option.row.label} onClick={() => onShip(option)} data-ship-agent={option.id} data-ship-machine={option.machine ?? undefined} data-on={option.id === chosen ? '' : undefined}>
       <AgentRow option={option} />
     </Menu.Item>
   );
@@ -135,9 +134,18 @@ export function ShipMenuItems({ shipping, options, chosen, phone, portal, onShip
         <Menu.Portal container={portal ?? undefined}>
           <Menu.Positioner className="ib-pm-pos" side="right" align="start" sideOffset={2}>
             <Menu.Popup className="ib-pm ib-rpick ib-shp-agents" aria-label="Ship with" data-ship-agents="">
-              {live.map(item)}
-              {live.length > 0 && starts.length > 0 && <Menu.Separator className="ib-pm-sep" />}
-              {starts.map(item)}
+              {shipSections(options).map((section, i) =>
+                section.kind === 'sep' ? (
+                  <Menu.Separator key={`sep${i}`} className="ib-pm-sep" />
+                ) : section.name === null ? (
+                  section.options.map(item)
+                ) : (
+                  <Menu.Group key={`g${i}`} data-ship-group={section.name}>
+                    <Menu.GroupLabel className="ib-pm-glabel">{section.name}</Menu.GroupLabel>
+                    {section.options.map(item)}
+                  </Menu.Group>
+                ),
+              )}
             </Menu.Popup>
           </Menu.Positioner>
         </Menu.Portal>
@@ -147,24 +155,61 @@ export function ShipMenuItems({ shipping, options, chosen, phone, portal, onShip
   );
 }
 
+type ShipSection = { kind: 'sep' } | { kind: 'group'; name: string | null; options: ShipOption[] };
+
+/**
+ * The list's sections, in its order: the review thread's computer's live agents, each other computer's agents under
+ * its name, then (after a line) the thread's computer's "New … session" rows.
+ */
+export function shipSections(options: readonly ShipOption[]): ShipSection[] {
+  const out: ShipSection[] = [];
+  const live = options.filter((o) => o.group === null && !o.row.start);
+  const starts = options.filter((o) => o.group === null && o.row.start);
+  if (live.length > 0) out.push({ kind: 'group', name: null, options: live });
+  for (const option of options) {
+    if (option.group === null) continue;
+    const last = out[out.length - 1];
+    if (last?.kind === 'group' && last.name === option.group) last.options.push(option);
+    else out.push({ kind: 'group', name: option.group, options: [option] });
+  }
+  if (out.length > 0 && starts.length > 0) out.push({ kind: 'sep' });
+  if (starts.length > 0) out.push({ kind: 'group', name: null, options: starts });
+  return out;
+}
+
 /** A phone's agent sheet: a tap ships with that agent. */
-export function ShipAgentSheet({ open, title, options, chosen, host, onShip, onClose }: { open: boolean; title: string; options: readonly PullThreadOption[]; chosen: string | null; host: HTMLElement | null; onShip: (option: PullThreadOption) => void; onClose: () => void }) {
+export function ShipAgentSheet({ open, title, options, chosen, host, onShip, onClose }: { open: boolean; title: string; options: readonly ShipOption[]; chosen: string | null; host: HTMLElement | null; onShip: (option: ShipOption) => void; onClose: () => void }) {
+  const row = (option: ShipOption) => (
+    <button
+      key={option.id}
+      type="button"
+      className="ib-rpick-row ib-shp-sheet-row"
+      onClick={() => onShip(option)}
+      aria-pressed={option.id === chosen}
+      data-ship-agent={option.id}
+      data-ship-machine={option.machine ?? undefined}
+      data-on={option.id === chosen ? '' : undefined}
+    >
+      <AgentRow option={option} />
+    </button>
+  );
   return (
     <BottomSheet open={open} onClose={onClose} title={title} host={host} attrs={{ 'data-ship-sheet': '' }}>
       <div className="ib-rpick ib-shp-sheet" role="group" aria-label="Ship with">
-        {options.map((option) => (
-          <button
-            key={option.row.session}
-            type="button"
-            className="ib-rpick-row ib-shp-sheet-row"
-            onClick={() => onShip(option)}
-            aria-pressed={option.row.session === chosen}
-            data-ship-agent={option.row.session}
-            data-on={option.row.session === chosen ? '' : undefined}
-          >
-            <AgentRow option={option} />
-          </button>
-        ))}
+        {shipSections(options).map((section, i) =>
+          section.kind === 'sep' ? (
+            <div key={`sep${i}`} className="ib-pm-sep" role="separator" />
+          ) : section.name === null ? (
+            section.options.map(row)
+          ) : (
+            <div key={`g${i}`} role="group" aria-label={section.name} data-ship-group={section.name}>
+              <div className="ib-pm-glabel" aria-hidden="true">
+                {section.name}
+              </div>
+              {section.options.map(row)}
+            </div>
+          ),
+        )}
       </div>
     </BottomSheet>
   );

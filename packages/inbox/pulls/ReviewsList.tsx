@@ -22,9 +22,8 @@ import type { InboxPullRiskAutoRun } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
 import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
 import { shipActive, type InboxShipView } from '@plannotator/core/inbox-ship';
-import { shipTarget, useShipAgents, type ShipTarget } from './shipStart';
+import { shipTarget, useShipAgents, type ShipOption, type ShipTarget } from './shipStart';
 import { ShipAgentSheet, ShipMenuItems } from './ShipMenu';
-import type { PullThreadOption } from './threadTo';
 
 const NO_ROWS: readonly InboxReviewRow[] = [];
 const NO_JUDGMENTS: RiskJudgments = {};
@@ -221,11 +220,11 @@ export function ReviewsMenu({
   const shipTo = target && ship ? shipTarget(target.row, target.pulls, ship.repoProjects) : null;
   const shipNow = shipTo ? (ship?.ships.get(shipTo.pull.key) ?? null) : null;
   const shipping = !!shipNow && shipActive(shipNow);
-  const agents = useShipAgents(shipping ? null : shipTo, menu.open && !!shipTo && !shipping);
+  const agents = useShipAgents(shipping ? null : shipTo, menu.open && !!shipTo && !shipping, ship?.projectsOf ?? noProjects);
   // A phone's agent sheet, after the menu closes.
   const [sheet, setSheet] = useState<ShipTarget | null>(null);
-  const sheetAgents = useShipAgents(sheet, sheet !== null);
-  const shipWith = (to: ShipTarget, option: PullThreadOption) => {
+  const sheetAgents = useShipAgents(sheet, sheet !== null, ship?.projectsOf ?? noProjects);
+  const shipWith = (to: ShipTarget, option: ShipOption) => {
     setSheet(null);
     menu.close();
     ship?.onShip(to, option);
@@ -289,11 +288,16 @@ export interface ShipHandlers {
   ships: ReadonlyMap<string, InboxShipView>;
   /** `host/repo` → the Inbox projects on it (the Reviews answer's). */
   repoProjects: Readonly<Record<string, string[]>>;
-  onShip: (target: ShipTarget, option: PullThreadOption) => void;
+  /** A computer's projects by repository (null: this one): whose agents Ship's list offers there. Absent: this one's. */
+  projectsOf?: (machine: string | null) => Readonly<Record<string, string[]>>;
+  onShip: (target: ShipTarget, option: ShipOption) => void;
   /** Open the ship log by its row (`anchor`). */
   onLog: (ship: InboxShipView, anchor: HTMLElement | null) => void;
   onStop: (ship: InboxShipView) => void;
 }
+
+const NO_PROJECTS: Readonly<Record<string, string[]>> = {};
+const noProjects = () => NO_PROJECTS;
 
 /** The ship a row draws: its one PR's; a folded stack's, any layer's (an unfolded one's layers draw their own). */
 function rowShip(row: InboxReviewRow, ships: ReadonlyMap<string, InboxShipView> | undefined, unfolded: boolean): InboxShipView | null {

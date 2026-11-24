@@ -1,7 +1,7 @@
 /**
  * Reviews' Ship (approval "inbox-ship-mode"), for PullsPage: the ships its rows draw (this computer's, and each linked
- * machine's that holds a row's thread), the menu's handlers, and the ship log by its row. Code review's page only:
- * nothing reads or draws while it is not shown.
+ * machine's that takes ships or holds a row's thread), the menu's handlers, and the ship log by its row. Code review's
+ * page only: nothing reads or draws while it is not shown.
  */
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import { shipActive, type InboxShipView } from '@plannotator/core/inbox-ship';
@@ -9,14 +9,14 @@ import type { InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { machineOf } from '../inboxUrl';
 import type { InboxToastModel } from '../components/Toast';
 import { errorToast } from '../toastError';
-import { stopShip, useShips } from '../data/ships';
-import { shipPull } from './shipStart';
+import { stopShip, useShips, useShipsSeen, useShipTakers } from '../data/ships';
+import { shipProjectsOf, shipPull } from './shipStart';
 import { ShipLog, ShipLogBody } from './ShipLog';
 import type { ShipHandlers } from './ReviewsList';
 
-/** The linked machines that hold a Reviews row's thread: their ships are read too. */
-export function shipMachines(answer: InboxReviewsAnswer | null): string[] {
-  const out = new Set<string>();
+/** The linked machines whose ships are read too: each that takes ships, and each that holds a Reviews row's thread. */
+export function shipMachines(answer: InboxReviewsAnswer | null, takers: readonly string[] = []): string[] {
+  const out = new Set<string>(takers);
   for (const row of answer?.rows ?? []) {
     const thread = row.thread_id ?? row.link?.thread_id ?? null;
     const machine = thread ? machineOf(thread) : null;
@@ -26,18 +26,31 @@ export function shipMachines(answer: InboxReviewsAnswer | null): string[] {
 }
 
 export function useShipping(answer: InboxReviewsAnswer | null, phone: boolean, onToast?: (toast: Omit<InboxToastModel, 'id'>, ms: number) => void): { ships: ReadonlyMap<string, InboxShipView>; handlers: ShipHandlers; log: ReactNode } {
-  const machines = useMemo(() => shipMachines(answer), [answer]);
+  const takers = useShipTakers();
+  const machines = useMemo(() => shipMachines(answer, takers), [answer, takers]);
   const ships = useShips(true, machines, answer);
   const [open, setOpen] = useState<{ ship: InboxShipView; anchor: HTMLElement | null } | null>(null);
   const fail = (cause: unknown, fallback: string) => onToast?.(errorToast(cause, fallback), 8000);
   const stop = (ship: InboxShipView) => {
     stopShip(ship.id, ship.machine ?? null).catch((cause) => fail(cause, 'Shipping didn’t stop. Try again.'));
   };
+  const local = answer?.projects;
+  const seen = useShipsSeen();
+  const projectsOf = useMemo(() => shipProjectsOf(local ?? {}), [local, seen]);
   const handlers: ShipHandlers = {
     ships,
     repoProjects: answer?.projects ?? {},
+    projectsOf,
     onShip: (target, option) => {
-      shipPull(target, option).catch((cause) => fail(cause, 'Ship didn’t start. Try again.'));
+      // One ship per pull request: one going on another computer stops once this one started.
+      const was = ships.get(target.pull.key);
+      const other = was && shipActive(was) && (was.machine ?? null) !== option.machine ? was : null;
+      shipPull(target, option, option.group).then(
+        () => {
+          if (other) stop(other);
+        },
+        (cause) => fail(cause, 'Ship didn’t start. Try again.'),
+      );
     },
     onLog: (ship, anchor) => setOpen({ ship, anchor }),
     onStop: stop,

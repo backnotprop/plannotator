@@ -7,12 +7,13 @@ Approval "inbox-ship-mode" (`.product/approved/inbox-ship-mode/`, look "Glint").
 - **The row menu.** A Reviews row about exactly one open pull request has **Ship** first in its right-click menu (`pulls/ShipMenu.tsx`, inside `ReviewsMenu`). A stack's unfolded layer row has it too. A row about several PRs has none, because one ship is one pull request. On a desktop, Ship is a submenu trigger:
   - One click ships with the agent already on the review: the live agent of the row's link (`shipTarget`, `pulls/shipStart.ts`). With none, it ships with New review's choice (`pullThreadDefault`).
   - The item's end shows that agent's mark and a chevron.
-  - The submenu lists the agents that can take it, in Start a thread's rows (`threadTo.ts`), with the default ticked:
-    - the live sessions of the thread's project (else the PR's projects);
-    - then "New … session" rows.
-  - The list comes from the computer that holds the thread: `GET sessions` on that linked machine for a far thread.
-- **A phone.** A long press opens the same menu. Ship opens the agent sheet (`ShipAgentSheet`) on the default, and a tap ships with that agent.
+  - The submenu lists the agents that can take it, in Start a thread's rows (`threadTo.ts`), with the default ticked (`shipOptions`; sections in `shipSections`, `ShipMenu.tsx`):
+    - the live sessions of the thread's project (else the PR's projects), on the computer that holds the thread;
+    - each other computer's live sessions and "New … session" rows in its projects on the PR's repository, under its name (approved shot 3, "Mac mini"): this computer's when the thread is on a linked one, and every online linked machine that takes ships (mark `ships`). Their sessions are read as New message reads them (`useMachineLaunches`); their projects by repository come from their ships read (`projects`);
+    - then the thread's computer's "New … session" rows.
+- **A phone.** A long press opens the same menu. Ship opens the agent sheet (`ShipAgentSheet`) on the default, with the same groups, and a tap ships with that agent.
 - **While a row ships**, its menu has **Ship log** and **Stop shipping** instead of Ship.
+- **The review thread's own view.** While the thread's pull request ships (in that thread, or on any computer for a PR in its `pull_keys`), the thread's ⋯ menu starts with **Ship log** and **Stop shipping** (`pulls/ThreadShip.tsx`, in `ThreadMore`). Ship log opens the same log by the ⋯ button, a sheet on a phone. A thread with no pull request reads no ships.
 
 ### What a press does
 
@@ -21,8 +22,8 @@ Approval "inbox-ship-mode" (`.product/approved/inbox-ship-mode/`, look "Glint").
   - for a live session, the reply reaches it on its usual path (bridge long-poll, `codex queue`, Pi, OpenCode);
   - for a new session (`to.launch`), it starts it as a reply's launch does (`launch.prepare`, then `sendReply` with `launch`).
   - It then makes the record and reads the PR at once.
-- **A PR with no thread.** The window starts one with the instruction as its first message (`inboxApi.startThread`) and ties the PR to it (`pulls/owner`, ask `thread`, as Start a thread does). It then sends `POST ships` `{ key, thread_id, started: true }`, which makes only the record. A PR some other thread took meanwhile ships in that thread.
-- **Ship again** on a PR already shipping on another thread stops the old ship first and tells its agent. There is one ship per PR per computer.
+- **A PR with no thread, or an agent on another computer than the review's thread.** A thread lives on one computer and its agent works where it runs, so the ship goes in a new thread on the agent's computer (`shipPull`, through the forward for a linked one). The window asks that computer whether a thread there already owns the PR (`pulls/owner` `validate_only`); one that does ships in it. Else it starts a thread there with the instruction as its first message (`inboxApi.startThread`; a write the forward would hold is cancelled, "<name> cannot be reached now."), ties the PR to it (`pulls/owner`, ask `thread`; skipped when that computer's list does not have the PR), then sends `POST ships` `{ key, thread_id, started: true, to }`, which makes only the record, with `to`'s live session as its agent until the thread names one. That computer reads the PR itself when its list does not have it (`readUnlistedPull`).
+- **Ship again** on a PR already shipping on another thread stops the old ship first and tells its agent. There is one ship per PR per computer; a window that ships a PR on one computer while it ships on another stops the other once the new one started.
 
 ### The record and the watch (server)
 
@@ -77,7 +78,7 @@ Approval "inbox-ship-mode" (`.product/approved/inbox-ship-mode/`, look "Glint").
 - **Merged.** Merged has no water; "Merged <time>" takes the row's end, where the agent and the age were.
 - **Rows that don't ship** draw none of this.
 - **Reading the ships.** The window reads ships with `useShips` (`data/ships.ts`):
-  - from this Inbox and from each linked machine that holds a row's thread;
+  - from this Inbox, each linked machine that takes ships (mark `ships`), and each that holds a row's thread; one read per computer at a time, shared by every view;
   - on each Reviews read, on `event: ships` (this Inbox's stream; `data/shipEvents.ts`) and on focus;
   - every 60 s while a linked machine's ship is active.
 
@@ -86,22 +87,26 @@ Approval "inbox-ship-mode" (`.product/approved/inbox-ship-mode/`, look "Glint").
 The ship log lists what the agent logged and what the Inbox saw, newest first, each with its time; a commit is drawn as code. It has **Stop** while the ship runs (`pulls/ShipLog.tsx`). It opens:
 
 - from a shipping row's menu: a popover by the row, a sheet on a phone;
+- from the review thread's ⋯ menu, the same;
 - on the PR's page (the launchpad), while the PR ships (`PageShipLog`).
+
+Its who line is the agent, the repository and, once a computer that ships is linked, the computer it ships on by name (`shipComputer`).
 
 ### Across computers and the phone
 
-- **Linked machines.** A ship lives on the computer that holds its thread. A window on another linked computer reaches it through the forward. The door rows are `machineOnly`:
+- **Linked machines.** A ship lives on the computer that holds its thread. A window on another linked computer reaches it through the forward, and offers that computer's agents for any PR (a new thread there). The list's mark `ships` says a machine takes them; an older machine is left out. `GET ships` also says that computer's projects by repository. The door rows are `machineOnly`:
   - `GET ships`
   - `GET ships/log`
   - `POST ships` (outbox kind `now`)
   - `POST ships/stop` (outbox kind `now`)
 - **The phone.** The phone layout of the window ships as a desktop does. The native app has no pull routes (they are `machineOnly`), so its ledger row `ship-mode` is `later` (`L-size`).
-- **Not built yet.** The submenu does not offer a linked machine's agents for a PR whose thread is on this computer. Starting a thread there needs that machine's own board to list the PR before `pulls/owner` can tie it.
+- **What does not cross.** A linked machine that is offline or too old to take ships is left out of the list. The native iPhone app has no pull routes (above).
 
 ### Tests
 
 - `packages/core/inbox-ship.test.ts`
 - `packages/server/inbox-ship-watch.test.ts`
 - `packages/server/inbox-ship-read.test.ts`
-- DOM: `packages/inbox/pulls/shipMode.test.tsx`
+- `packages/server/inbox-ship-routes.test.ts`
+- DOM: `packages/inbox/pulls/shipMode.test.tsx`, `packages/inbox/pulls/shipAcross.test.tsx` (another computer's agents, the thread's ⋯ menu)
 - e2e: `tests/e2e/inbox-ship.spec.ts` (shots in `ship/`)

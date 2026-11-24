@@ -1,0 +1,80 @@
+/**
+ * Ship's routes (inbox-ship-routes.ts) on their own, with the store and watch real (a temp data dir) and the rest of the
+ * Inbox stood in for. What regresses here breaks Ship across computers:
+ *  - a ships read that does not say the computer's projects by repository (a linked machine's window then lists none
+ *    of this computer's agents in Ship's list);
+ *  - a ship started in a thread a linked machine's window just started here (`started`) that names no agent until the
+ *    agent answers (the watch's wakes would then go to nobody);
+ *  - a pull request nobody here can read still shipping (its watch would read nothing, forever).
+ */
+import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { InboxPull } from "@plannotator/core/inbox-types";
+import { createInboxShipRoutes } from "./inbox-ship-routes";
+import { createInboxShipStore } from "./inbox-ship-store";
+import { createInboxShipWatch } from "./inbox-ship-watch";
+
+const KEY = "github.com/harbor/fern-api#614";
+const PULL = { key: KEY, url: "https://github.com/harbor/fern-api/pull/614", title: "Send a receipt after checkout", number: 614, repo: "harbor/fern-api", host: "github.com", state: "open" } as InboxPull;
+
+const closers: (() => void)[] = [];
+afterEach(() => {
+  for (const close of closers.splice(0)) close();
+});
+
+function world(over: { findPull?: (key: string) => Promise<InboxPull | null>; threadAgent?: () => null | { host: string; session: string; name: string } } = {}) {
+  const ships = createInboxShipStore(mkdtempSync(join(tmpdir(), "ship-routes-")));
+  const watch = createInboxShipWatch({ ships, read: async () => null, note: () => {}, everyMs: 60 * 60_000 });
+  closers.push(() => watch.close());
+  const sent: unknown[] = [];
+  const routes = createInboxShipRoutes({
+    ships,
+    watch,
+    serverSession: "s1",
+    json: (body, status = 200) => Response.json(body, { status }),
+    readBody: async (req) => (await req.json()) as Record<string, unknown>,
+    findPull: over.findPull ?? (async (key) => (key === KEY ? PULL : null)),
+    threadProject: (threadId) => (threadId === "msg_thread" ? "prj_fern" : null),
+    threadAgent: over.threadAgent ?? (() => null),
+    repoProjects: async () => ({ "github.com/harbor/fern-api": ["prj_fern"] }),
+    sendInstruction: async (input) => {
+      sent.push(input);
+      return { host: "claude-code", session: "ses_1", name: "Claude Code" };
+    },
+    guard: () => null,
+  });
+  const call = (method: "GET" | "POST", path: string, body?: unknown) =>
+    routes(new Request(`http://127.0.0.1${path}`, { method, ...(body ? { body: JSON.stringify(body), headers: { "content-type": "application/json" } } : {}) }), path.split("?")[0]!, new URL(`http://127.0.0.1${path}`)).then((r) => r!);
+  return { ships, sent, call };
+}
+
+test("a ships read says this computer's projects by repository, beside its ships", async () => {
+  const w = world();
+  const answer = (await (await w.call("GET", "/api/inbox/ships")).json()) as { ships: unknown[]; projects: Record<string, string[]> };
+  expect(answer.ships).toEqual([]);
+  expect(answer.projects).toEqual({ "github.com/harbor/fern-api": ["prj_fern"] });
+});
+
+test("a ship in a thread the window just started here ships with the live session it started it with, until the thread names its agent", async () => {
+  const w = world();
+  const res = await w.call("POST", "/api/inbox/ships", { key: KEY, thread_id: "msg_thread", started: true, to: { host: "codex", session: "ses_far" }, idempotency_key: "k1" });
+  expect(res.status).toBe(200);
+  expect(w.ships.get(KEY)!.agent).toEqual({ host: "codex", session: "ses_far", name: null });
+  // Nothing was sent: the window's new thread carried the instruction.
+  expect(w.sent).toEqual([]);
+});
+
+test("the thread's own agent wins over the started session once it answered", async () => {
+  const w = world({ threadAgent: () => ({ host: "codex", session: "ses_now", name: "Codex" }) });
+  await w.call("POST", "/api/inbox/ships", { key: KEY, thread_id: "msg_thread", started: true, to: { host: "codex", session: "ses_far" }, idempotency_key: "k1" });
+  expect(w.ships.get(KEY)!.agent.session).toBe("ses_now");
+});
+
+test("a pull request this computer can neither list nor read is refused, and nothing is sent", async () => {
+  const w = world({ findPull: async () => null });
+  await expect(w.call("POST", "/api/inbox/ships", { key: KEY, thread_id: "msg_thread", to: { host: "codex", session: "ses_far" }, idempotency_key: "k1" })).rejects.toMatchObject({ code: "pull_not_found" });
+  expect(w.sent).toEqual([]);
+  expect(w.ships.get(KEY)).toBeNull();
+});

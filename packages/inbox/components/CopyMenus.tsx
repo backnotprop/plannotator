@@ -23,6 +23,7 @@ import type { InboxToastModel } from './Toast';
 import { TAKE_BACK_LABEL } from '../takeBack';
 import { PaneMenuItems } from '../panes/PaneMenu';
 import { askNewThreadFromMessage, NEW_THREAD_FROM_MESSAGE_LABEL, newThreadFromMessageOffered, newThreadFromMessageSending } from '../thread/newThreadFromMessage';
+import { useThreadShipMenu } from '../pulls/ThreadShip';
 
 /**
  * Copy a message, copy a thread (design record "inbox-copy-message", option
@@ -321,6 +322,8 @@ export function ThreadMore(
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SnoozeView | null>(null);
+  // Ship (approval "inbox-ship-mode", item 7): while the thread's pull request ships, Ship log and Stop shipping lead.
+  const ship = useThreadShipMenu(thread, phone, ref.current, props.onToast);
   // Add tag's list, swapped in as Snooze's times are (approval "inbox-thread-tags").
   const [tagView, setTagView] = useState(false);
   const tags = useThreadTags();
@@ -615,6 +618,7 @@ export function ThreadMore(
                 <div className="ib-pm-title" dir="auto" aria-hidden="true">
                   {thread.subject ?? '(no subject)'}
                 </div>
+                {ship.items}
                 {launch && (launch.copyAttach || launch.stop || launch.remove) && (
                   <>
                     {launch.copyAttach && (
@@ -694,6 +698,7 @@ export function ThreadMore(
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
+      {ship.log}
     </Menu.Root>
   );
 }

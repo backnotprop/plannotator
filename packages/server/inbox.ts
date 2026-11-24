@@ -5320,10 +5320,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     serverSession,
     json,
     readBody: (req) => readBody(req),
+    // A PR this Inbox's list has, else one read of it: a linked machine's window ships here a PR its own list has.
     findPull: async (key) => {
       if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-      return pulls.find(key);
+      const ref = pulls.find(key) || linkReads.get(key) ? null : inboxPullRefOfKey(key);
+      const read = ref ? await readUnlistedPull(ref) : null;
+      if (read) linkReads.set(key, read);
+      return pulls.find(key) ?? linkReads.get(key) ?? null;
     },
+    repoProjects: async () => Object.fromEntries((await pullProjects()).projectsByRepo),
     threadProject: (threadId) => pullLinkStore.threadProject(threadId),
     threadAgent: (threadId) => {
       const agent = threadAgent(pullLinkStore, threadId);

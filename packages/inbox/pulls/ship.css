@@ -7,7 +7,8 @@
   --ib-sand-50: oklch(0.972 0.03 85); --ib-sand-100: oklch(0.935 0.06 82); --ib-sand-ink: oklch(0.52 0.12 70);
   --ib-merged-ink: #6f3fc8; --ib-glint: rgb(255 255 255 / 0.95);
 }
-:root.dark .pn-inbox, .dark .pn-inbox {
+/* Dark is the theme without `.light` (ThemeProvider), as inbox.css says it. */
+:root:not(.light) .pn-inbox {
   --ib-sea-50: oklch(0.29 0.03 225); --ib-sea-100: oklch(0.32 0.045 222); --ib-sea-200: oklch(0.37 0.065 220);
   --ib-sea-300: oklch(0.44 0.085 220); --ib-sea-600: oklch(0.78 0.11 222);
   --ib-sky-100: oklch(0.3 0.035 250); --ib-sky-200: oklch(0.37 0.055 250);
@@ -65,6 +66,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ib-shp :is(.ib-shp-rev, .ib-shp-in, .ib-shp-pool, .ib-shp-pool > span),
+  .ib-shp[data-shp-launch] :is(.ib-shp-rev, .ib-shp-in),
   .ib-prrow[data-ship] :is(.ib-shp-sail, .ib-shp-rock, .ib-rvr-agent) { animation: none; }
   .ib-shp-glide { display: none; }
   .ib-shp-sand { transition: none; }

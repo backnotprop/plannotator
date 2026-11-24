@@ -892,6 +892,7 @@ packages/ui/components/frame/card/card.dom.test.tsx
 packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx
 packages/inbox/pulls/branchReviews.test.tsx
 packages/inbox/pulls/reviewsCompact.test.tsx
+packages/inbox/pulls/shipAcross.test.tsx
 packages/inbox/pulls/shipMode.test.tsx
 packages/review-editor/App.treePanes.test.tsx
 packages/review-editor/components/FileHeader.counts.test.tsx

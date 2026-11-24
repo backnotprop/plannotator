@@ -9,6 +9,7 @@ import { shipActive, shipTimeWords, type InboxShipLogEntry, type InboxShipView }
 import { HostMark, Icon } from '../icons';
 import { BottomSheet } from '../components/BottomSheet';
 import { readShipLog, shipEvents } from '../data/ships';
+import { linkedMachineFacts, linkedMachinesWith, selfMachineName } from '../inboxUrl';
 import { SailGlyph } from './ShipRow';
 
 function useShipLog(ship: InboxShipView | null): InboxShipLogEntry[] | null {
@@ -35,6 +36,12 @@ function useShipLog(ship: InboxShipView | null): InboxShipLogEntry[] | null {
   return log && log.id === id ? log.entries : null;
 }
 
+/** The computer the agent ships on, by its name, once another computer that ships is linked (alone, there is one). */
+export function shipComputer(ship: Pick<InboxShipView, 'machine'>): string | null {
+  if (ship.machine) return linkedMachineFacts(ship.machine)?.name ?? null;
+  return linkedMachinesWith('ships').length > 0 ? selfMachineName() : null;
+}
+
 /** The log's body: its head with Stop, who ships it, the entries. */
 export function ShipLogBody({ ship, onStop, now = Date.now() }: { ship: InboxShipView; onStop: () => void; now?: number }) {
   const log = useShipLog(ship);
@@ -53,7 +60,7 @@ export function ShipLogBody({ ship, onStop, now = Date.now() }: { ship: InboxShi
       </div>
       <div className="ib-shp-who">
         {ship.agent.host && <HostMark host={ship.agent.host} agent={ship.agent.session} />}
-        {[ship.agent.name, ship.repo.split('/').pop()].filter(Boolean).join(' · ')}
+        {[ship.agent.name, ship.repo.split('/').pop(), shipComputer(ship)].filter(Boolean).join(' · ')}
       </div>
       <div className="ib-shp-list" role="list" aria-busy={log === null ? true : undefined}>
         {(log ?? []).map((entry, i) => (
