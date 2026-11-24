@@ -19,6 +19,7 @@ import { useMessageRefRepos } from '../messageRefRepo';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
+import { afterDraw, useThreadSwarm } from '../swarm/useThreadSwarm';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
@@ -4337,6 +4338,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
   const fileOpen = openAttachment !== null || (namedFile !== null && file === null);
+  const swarmUi = useThreadSwarm({ thread, title: barName || heading, phone, fileOpen, closeFile: () => (file ? onOpenFile(null) : onOpenNamedFile?.(null)), onAddAgent: () => { if (!box.open) openBox(); afterDraw(tagAnother); } });
   // The questions inside the open Markdown file (issue #2828): its cards answer like the body's, through the same
   // pick, draft and Send. A version changed since it was sent may ask otherwise: only the sent text takes answers then.
   const fileOwner = openAttachment ? thread.messages.find((m) => m.id === openAttachment.message_id) : undefined;
@@ -4569,8 +4571,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     <>
     <section
       ref={sectionRef}
-      className={`ib-pane${fileOpen ? ' ib-withfile' : ''}`}
-      data-full={threadAlone && !fileOpen ? '' : undefined}
+      className={`ib-pane${fileOpen || swarmUi.beside ? ' ib-withfile' : ''}`}
+      data-full={threadAlone && !fileOpen && !swarmUi.beside ? '' : undefined}
       aria-label={thread.subject ?? 'Thread'}
       data-thread-id={thread.thread_id}
       {...paneDrop.handlers}
@@ -4650,7 +4652,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             {/* The thread's title, always in the bar and nowhere in the body (the owner, 2026-11-15): its name (the list's
                 rule, `threadChipName`; in Reviews, `barName`) with its heading after it, muted, else its heading; cut, a
                 tap opens it whole (thread/ThreadBarTitle.tsx). The pane's h2, the focus target when focus has nowhere else to go. */}
-            <ThreadBarTitle key={thread.thread_id} thread={thread} name={barName} heading={heading} />
+            <ThreadBarTitle key={thread.thread_id} thread={thread} name={barName} heading={heading} />{!artifactsOn && swarmUi.button}
             {/* The thread's PRs (approval "inbox-pr-binding"): left of Artifacts, at its icon's size; none, no button
                 (the ⋯ menu's Add a pull request shows it with its card open on the Add field). */}
             {!artifactsOn && pullsOffered && (
@@ -4860,19 +4862,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         )}
         {/* The count and time; a one-message thread has none. No name chip: the top bar shows the name whenever the
             chip would (the owner, 2026-11-02: never the same words twice). */}
-        {!one && !reviewView && (
-          <div className="ib-tmeta" data-thread-meta="" data-sessions={sessions.length > 1 ? '' : undefined}>
-            {/* Two or more sessions: who at the start, the count and time at the end. */}
-            {sessions.length > 1 && <ThreadSessions sessions={sessions} phone={phone} agentFilter={agentFilter} onAgentFilter={onAgentFilter} />}
+        {(!one || !!swarmUi.row) && !reviewView && (
+          <div className="ib-tmeta" data-thread-meta="" data-sessions={sessions.length > 1 || swarmUi.row ? '' : undefined}>
+            {/* Two or more sessions: who at the start, the count and time at the end. A swarm thread: its summary row there (swarm/). */}
+            {swarmUi.row ?? (sessions.length > 1 && <ThreadSessions sessions={sessions} phone={phone} agentFilter={agentFilter} onAgentFilter={onAgentFilter} />)}
             <span className="ib-tmeta-rest" data-thread-meta-rest="">
                 <span>{plural(thread.messages.length, 'message')}</span>
                 <span className="ib-tdot" aria-hidden="true" />
                 <span>{spanWords(root.created_at, thread.messages[thread.messages.length - 1]!.created_at)}</span>
                 {showNew && (
-                  <>
-                    <span className="ib-tdot" aria-hidden="true" />
-                    <b>{fresh.size} new since you looked</b>
-                  </>
+                  <><span className="ib-tdot" aria-hidden="true" /><b>{fresh.size} new since you looked</b></>
                 )}
               </span>
           </div>
@@ -5772,7 +5771,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {lineError && !errorAbove && errorLine}
       </div>
     </section>
-    {protoWindow}
+    {protoWindow}{swarmUi.pane}
     {openAttachment && (
       <AttachmentPane
         ref={paneRef}

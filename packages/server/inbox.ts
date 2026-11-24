@@ -345,6 +345,7 @@ import {
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { bandTipClaim, bandTipDue, bandTipUsed, type BandTipState } from "@plannotator/shared/inbox/band-tip";
+import { swarmTipClaim } from "@plannotator/shared/inbox/swarm-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
@@ -4044,6 +4045,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return loadConfig().inboxReveals?.band_tip?.shownAt === at;
   };
+  /** The Swarm tip (packages/shared/inbox/swarm-tip.ts): once, the first time New message's Swarm badge appears; no tenure, no gap. */
+  const claimSwarmTip = (key: string | null): boolean => {
+    const at = new Date().toISOString();
+    const claim = swarmTipClaim(loadConfig().inboxReveals?.swarm_tip, key, at);
+    if (!claim.save) return claim.show;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, swarm_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it on every load.
+    return loadConfig().inboxReveals?.swarm_tip?.shownAt === at;
+  };
   /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
@@ -4281,9 +4291,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       case "project":
         // The display name (the folder's real name), as every other read gives it.
         return { seq: line.seq, kind: line.kind, id: line.id, project: { ...line.record, name: store.project(line.id)?.name ?? line.record.name } };
-      case "message":
+      case "message": {
+        // Swarm: a ghost thread's words are never a message a window lists or notifies about; its parent's swarm changed.
+        const ghostOf = store.ghostParentOf(line.record.thread_id);
+        if (ghostOf) return { seq: line.seq, kind: "swarm" as const, id: line.id, thread_id: ghostOf };
         // `first` (additive): this line is the message's first, not a later rewrite (a look, a resolve, an Unarchive).
         return { seq: line.seq, kind: line.kind, id: line.id, first: store.messageCursor(line.id) === line.seq, message: shownSubject(line.record) };
+      }
       case "question":
         // The store's one question state: a question an agent asked after the archive line is live (notifications, the sound).
         // `thread_id` (additive): its message's thread, so a window re-reads its open thread only for that thread's records.
@@ -4307,10 +4321,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       case "scheduled":
         // A routine changed: its id only, never its prompt or folder. A reader that does not know the kind skips it.
         return { seq: line.seq, kind: line.kind, id: line.id };
+      case "swarm":
+        // A thread's swarm changed (docs/agent-guides/inbox-swarm.md), or its ghost thread's words (above): silent, never
+        // a notification or unread. `thread_id` so a window reads that thread again. A reader that does not know it skips it.
+        return { seq: line.seq, kind: line.kind, id: line.id, thread_id: line.record.thread_id };
     }
   };
 
-  const eventStream = (req: Request, url: URL, via: RequestVia): Response => {
+  const eventStream =(req: Request, url: URL, via: RequestVia): Response => {
     // A reconnect: EventSource sends the last id it saw, while its URL still
     // carries the cursor it first opened with. The last id wins, so a tab that
     // slept or lost its connection catches up from where it was (and raises
@@ -7695,8 +7713,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || (id === "swarm_tip" && swarmOn()) || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip${swarmOn() ? ", swarm_tip" : ""} or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -7723,6 +7741,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Group tip: outside the line, its own stamp only (packages/shared/inbox/band-tip.ts).
         if (id === "band_tip") {
           return json({ show: claimBandTip(key ?? null, body.used === true), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Swarm tip (while Swarm is on): outside the line, its own stamp only (packages/shared/inbox/swarm-tip.ts).
+        if (id === "swarm_tip") {
+          return json({ show: claimSwarmTip(key ?? null), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {

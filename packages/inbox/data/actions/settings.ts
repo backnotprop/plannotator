@@ -72,7 +72,7 @@ export function useSettingsSaves(
   /** One experimental switch: decision mode, or Grid (approval "inbox-agent-grid"); the other keeps what it was. */
   const toggleExperimental = (next: boolean, feature: 'decision_mode' | 'grid' = 'decision_mode') =>
     saveSetting(
-      (s) => ({ ...s, experimental: { decision_mode: s.experimental?.decision_mode ?? { on: false, env: null }, ...(s.experimental?.grid ? { grid: s.experimental.grid } : {}), [feature]: { on: next, env: s.experimental?.[feature]?.env ?? null } } }),
+      (s) => ({ ...s, experimental: { decision_mode: s.experimental?.decision_mode ?? { on: false, env: null }, ...(s.experimental?.grid ? { grid: s.experimental.grid } : {}), ...(s.experimental?.swarm ? { swarm: s.experimental.swarm } : {}), [feature]: { on: next, env: s.experimental?.[feature]?.env ?? null } } }),
       () => inboxApi.saveExperimental({ [feature]: next }),
       (s, saved) => ({ ...s, experimental: saved.experimental }),
     );

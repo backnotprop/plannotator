@@ -111,8 +111,11 @@ test("the window reads the ghost thread, writes as the person, turns the swarm o
     return { status: res.status, json: (await res.json()) as { swarm: { on: boolean } | null; ghost: { body: string; author: { kind: string } }[] } };
   };
   expect((await call("GET")).json.ghost).toEqual([]);
-  const said = await call("POST", { say: { text: "Weekend rates are on tab 2." } });
+  // As the window sends it: every write carries the page's serverSession (api.ts `post`).
+  const said = await call("POST", { say: { text: "Weekend rates are on tab 2." }, serverSession: "srv_page" });
+  expect(said.status).toBe(200);
   expect(said.json.ghost.map((m) => [m.author.kind, m.body])).toEqual([["person", "Weekend rates are on tab 2."]]);
+  expect((await call("POST", { seen: true, serverSession: "srv_page" })).status).toBe(200);
   expect((await call("POST", { on: false })).json.swarm!.on).toBe(false);
   expect((await call("POST", { bogus: true })).status).toBe(422);
   state.on = false;

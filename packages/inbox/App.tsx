@@ -144,7 +144,7 @@ import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
 import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
 import { PlansRoute, usePlansOn } from './plans/PlansPage';
-import { GridRoute, useGridOn } from './grid/GridPage';
+import { GridRoute, useGridOn } from './grid/GridPage'; import { useSwarmOn } from './swarm/swarmOn';
 import { pageLinks } from './app/pageLinks';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
@@ -3640,7 +3640,7 @@ function Inbox() {
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
-  const gridOn = useGridOn(settings, refreshList);
+  const gridOn = useGridOn(settings, refreshList); useSwarmOn(settings);
 
   const projects = latest?.projects ?? [];
   /**

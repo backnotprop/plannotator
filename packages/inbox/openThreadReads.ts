@@ -108,6 +108,8 @@ export function threadOfRecord(event: InboxEvent): string | null {
       return id(event.annotation?.thread_id);
     case 'steps':
     case 'thread_pull':
+    // A thread's swarm, or its ghost thread's words (swarm/): that thread (its summary row and Ghost button) is read again.
+    case 'swarm':
       return id(event.thread_id);
     // A project (a rename, a combine, a label any thread's header reads), a Board card or initiative (the window
     // hands those to the Board before this), a routine (a thread's foot): any thread.
