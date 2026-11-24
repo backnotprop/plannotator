@@ -897,11 +897,12 @@ function stickyHeaderHeight(node: HTMLElement | undefined): number {
 
 /**
  * The diff in its own boundary: a draw that throws (a "+" on a line, the comment box under it) says so in the diff's
- * place, and the page around it stays (ui's RegionBoundary). No "Your work is saved.": an open comment box's words are
- * kept in memory only.
+ * place, and the page around it stays (ui's RegionBoundary). The selection a "+" sets is the host's, above the
+ * boundary: Try again clears it first, or the diff would draw it again and fail again. The words typed in the comment
+ * box are not in it (the toolbar's draft store keeps them by file and lines), so they are there when the box opens again.
  */
 export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = (props) => (
-  <RegionBoundary name="Diff">
+  <RegionBoundary name="Diff" onRetry={() => props.onLineSelection(null)}>
     <AllFilesCodeViewBody {...props} />
   </RegionBoundary>
 );

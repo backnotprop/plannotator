@@ -131,8 +131,9 @@ export const ReviewDiffBody: React.FC<{
   return (
     <div key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}:${state.feedbackDiffContext?.snapshotId ?? ''}`} className="h-full flex flex-col">
       <div className="flex-1 min-h-0 relative">
-      {/* A file whose diff throws while it draws says so here; the panels around it stay (ui's RegionBoundary). */}
-      <RegionBoundary name="Diff">
+      {/* A file whose diff throws while it draws says so here; the panels around it stay (ui's RegionBoundary). Try
+          again first clears the selection a "+" set (the app's, above the diff), which would fail it again. */}
+      <RegionBoundary name="Diff" onRetry={() => state.onLineSelection(null)}>
       <DiffViewer
         headerAccessory={switchControl}
         bodyOverride={originalView ? (
