@@ -14,11 +14,11 @@ import { join } from "node:path";
 export const INBOX_LOGIN_LABEL = "ai.plannotator.inbox";
 export const INBOX_LOGIN_UNIT = "plannotator-inbox.service";
 
-export type LoginRunner = (argv: string[]) => Promise<{ code: number }>;
+export type LoginRunner = (argv: string[]) => Promise<{ code: number; stdout?: string }>;
 
-/** The real runner: `launchctl` or `systemctl`, its exit code only, bounded so a hung one never holds Settings. */
+/** Bound login-item commands so a hung one never holds Settings. */
 export const execLoginCommand: LoginRunner = ([file, ...args]) =>
-  new Promise((resolve) => execFile(file!, args, { timeout: 10_000, windowsHide: true }, (error) => resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0 })));
+  new Promise((resolve) => execFile(file!, args, { timeout: 10_000, windowsHide: true }, (error, stdout) => resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout })));
 
 export type InboxLoginItem = {
   /** Where it would be written, or null where there is none (Windows). */
@@ -31,8 +31,28 @@ const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 /** One argument of a systemd ExecStart line: quoted, with `%` doubled (systemd's specifiers). */
 const unitArg = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%")}"`;
 
+const loginEnvironmentKeys = ["PATH", "NO_PROXY", "no_proxy"] as const;
+type LoginEnvironment = Partial<Record<(typeof loginEnvironmentKeys)[number], string>>;
+
+async function readLoginEnvironment(path: string, run: LoginRunner): Promise<LoginEnvironment> {
+  if (!existsSync(path)) return {};
+  try {
+    const result = await run(["/usr/bin/plutil", "-extract", "EnvironmentVariables", "json", "-o", "-", path]);
+    if (result.code !== 0 || !result.stdout) return {};
+    const previous: LoginEnvironment | null = JSON.parse(result.stdout);
+    const environment: LoginEnvironment = {};
+    for (const key of loginEnvironmentKeys) {
+      const value = previous?.[key];
+      if (typeof value === "string") environment[key] = value;
+    }
+    return environment;
+  } catch {
+    return {};
+  }
+}
+
 /** The plist launchd reads at login: the Inbox, no window, its output in the Inbox's own log. */
-export function inboxLoginPlist(o: { argv: readonly string[]; dataDir: string; log: string }): string {
+export function inboxLoginPlist(o: { argv: readonly string[]; dataDir: string; log: string; environment?: LoginEnvironment }): string {
   const string = (s: string) => `<string>${xml(s)}</string>`;
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -47,6 +67,7 @@ export function inboxLoginPlist(o: { argv: readonly string[]; dataDir: string; l
     "  <key>EnvironmentVariables</key>",
     "  <dict>",
     `    <key>PLANNOTATOR_DATA_DIR</key>${string(o.dataDir)}`,
+    ...Object.entries(o.environment ?? {}).map(([key, value]) => `    <key>${key}</key>${string(value)}`),
     "  </dict>",
     "  <key>RunAtLoad</key><true/>",
     "  <key>ProcessType</key><string>Background</string>",
@@ -83,16 +104,25 @@ export function inboxLoginItem(o: { platform: NodeJS.Platform; home: string; arg
   if (o.platform === "darwin") {
     const dir = join(o.home, "Library", "LaunchAgents");
     const path = join(dir, `${INBOX_LOGIN_LABEL}.plist`);
+    let pending: Promise<unknown> = Promise.resolve();
+    const enqueue = <T>(change: () => T | Promise<T>): Promise<T> => {
+      const next = pending.catch(() => {}).then(change);
+      pending = next;
+      return next;
+    };
     return {
       path,
-      async add() {
-        mkdirSync(dir, { recursive: true });
-        writeAtomic(path, inboxLoginPlist({ argv: o.argv, dataDir: o.dataDir, log: join(o.dataDir, "inbox", "inbox.log") }));
-        return "added";
+      add() {
+        return enqueue(async () => {
+          mkdirSync(dir, { recursive: true });
+          const environment = await readLoginEnvironment(path, o.run);
+          writeAtomic(path, inboxLoginPlist({ argv: o.argv, dataDir: o.dataDir, log: join(o.dataDir, "inbox", "inbox.log"), environment }));
+          return "added" as const;
+        });
       },
       // Only the file: launchd reads it at login, and an unload would end this Inbox if the login started it.
-      async remove() {
-        rmSync(path, { force: true });
+      remove() {
+        return enqueue(() => rmSync(path, { force: true }));
       },
     };
   }

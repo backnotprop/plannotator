@@ -5,10 +5,10 @@
  * unavailable otherwise with nothing left behind; Windows has none.
  */
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { inboxLoginItem } from "./inbox-scheduled-login";
+import { dirname, join } from "node:path";
+import { execLoginCommand, inboxLoginItem, type LoginRunner } from "./inbox-scheduled-login";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -36,6 +36,69 @@ test("macOS: a launchd item that starts the Inbox with no window; removing it de
   expect(w.ran).toEqual([]);
   await item.remove();
   expect(w.ran).toEqual([]);
+  expect(existsSync(item.path!)).toBe(false);
+});
+
+test("macOS: refreshing the launchd item preserves PATH and NO_PROXY from the existing file", async () => {
+  const w = world();
+  const run: LoginRunner = process.platform === "darwin" ? execLoginCommand : async (argv) => {
+    expect(argv).toEqual([
+      "/usr/bin/plutil", "-extract", "EnvironmentVariables", "json", "-o", "-",
+      join(w.home, "Library", "LaunchAgents", "ai.plannotator.inbox.plist"),
+    ]);
+    return { code: 0, stdout: JSON.stringify({
+      PATH: "/opt/homebrew/bin:/Users/test/bin/a&b:/usr/bin:/bin",
+      NO_PROXY: "localhost,example.invalid",
+      PLANNOTATOR_DATA_DIR: "/old/data",
+      EXAMPLE_TOKEN: "test-placeholder",
+    }) };
+  };
+  const item = inboxLoginItem({ platform: "darwin", home: w.home, argv: ["/opt/plannotator"], dataDir: w.dataDir, run });
+  mkdirSync(dirname(item.path!), { recursive: true });
+  writeFileSync(item.path!, `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+  <dict>
+    <key>Label</key><string>ai.plannotator.inbox</string>
+    <key>ProgramArguments</key><array><string>/old/plannotator</string></array>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>/opt/homebrew/bin:/Users/test/bin/a&amp;b:/usr/bin:/bin</string>
+      <key>NO_PROXY</key><string>localhost,example.invalid</string>
+      <key>PLANNOTATOR_DATA_DIR</key><string>/old/data</string>
+      <key>EXAMPLE_TOKEN</key><string>test-placeholder</string>
+    </dict>
+  </dict>
+</plist>
+`);
+
+  expect(await item.add()).toBe("added");
+  const plist = readFileSync(item.path!, "utf8");
+  expect(plist).toMatch(/<key>PATH<\/key>\s*<string>\/opt\/homebrew\/bin:\/Users\/test\/bin\/a&amp;b:\/usr\/bin:\/bin<\/string>/);
+  expect(plist).toMatch(/<key>NO_PROXY<\/key>\s*<string>localhost,example\.invalid<\/string>/);
+  expect(plist).toContain("<string>/opt/plannotator</string>");
+  expect(plist).toContain(`<key>PLANNOTATOR_DATA_DIR</key><string>${w.dataDir}</string>`);
+  expect(plist).not.toContain("/old/data");
+  expect(plist).not.toContain("EXAMPLE_TOKEN");
+});
+
+test("macOS: disabling the login item while it is being refreshed removes it", async () => {
+  const w = world();
+  const reading = Promise.withResolvers<void>();
+  const environment = Promise.withResolvers<{ code: number; stdout: string }>();
+  const item = inboxLoginItem({
+    platform: "darwin", home: w.home, argv: ["/opt/plannotator"], dataDir: w.dataDir,
+    run: () => {
+      reading.resolve();
+      return environment.promise;
+    },
+  });
+  await item.add();
+  const adding = item.add();
+  await reading.promise;
+  const removing = item.remove();
+  environment.resolve({ code: 0, stdout: '{"PATH":"/opt/homebrew/bin:/usr/bin"}' });
+  await Promise.all([adding, removing]);
   expect(existsSync(item.path!)).toBe(false);
 });
 
