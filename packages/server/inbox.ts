@@ -8221,6 +8221,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             return json({ message_id: messageId, questions, reply: null });
           }
           case "reply": {
+            // The sessions the person tagged with `@` (approval "inbox-tag-agents"): each one live
+            // with a connection that understands tags, or an MCP agent the Inbox knows; any other
+            // is refused before anything is written. A replay answers what it wrote, as it was.
+            const tagKey = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
+            const tagsNew = !(body.tags === undefined || body.tags === null || (tagKey && store.replyByKey(messageId, tagKey)));
+            // A far session its computer's agents do not list (that computer restarted since `@` opened) is read there
+            // once more: before the check below, so an agent's message written while it is read is not missed.
+            if (tagsNew) await farTags.prepare(body.tags);
             // Rule 11 (linked machines): a reply held on another machine says the newest seq of the thread the person
             // saw; when an agent wrote to the thread after it, the late words are refused, never put on the new question.
             // A replay answers what it wrote.
@@ -8247,13 +8255,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const launching = startsSession ? await replyLaunch.prepare(messageId, body, fromMachine ? { from: machines.machineOfDevice(door.device_id), window: door.window } : null) : null;
             const asked = body.to === undefined || startsSession ? undefined : store.message(messageId);
             const to = launching ? launching.to : body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
-            // The sessions the person tagged with `@` (approval "inbox-tag-agents"): each one live
-            // with a connection that understands tags, or an MCP agent the Inbox knows; any other
-            // is refused before anything is written. A replay answers what it wrote, as it was.
-            const tagKey = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
-            const tagsNew = !(body.tags === undefined || body.tags === null || (tagKey && store.replyByKey(messageId, tagKey)));
-            // A far session its computer's agents do not list (that computer restarted since `@` opened) is read there once more.
-            if (tagsNew) await farTags.prepare(body.tags);
             const tagged = tagsNew ? tagModes(messageId, body.tags) : undefined;
             const tags = tagged?.tags;
             const handoff = tagged?.handoff;

@@ -347,8 +347,11 @@ export interface OutboxView {
 /** At most this much of a held write's words rides its view. */
 const OUTBOX_WORDS_SHOWN = 2_000;
 
-const wordsOf = (body: Record<string, unknown>): string | null => {
-  const words = typeof body.words === "string" ? body.words : typeof body.body === "string" ? body.body : null;
+const wordsOf = (entry: OutboxEntry): string | null => {
+  const { body } = entry;
+  // An agent's answer in a thread there (inbox-mcp-far-reply.ts) holds send_message's arguments: its words are theirs.
+  const args = entry.route === FAR_AGENT_REPLY_ROUTE && body.args && typeof body.args === "object" ? (body.args as Record<string, unknown>) : null;
+  const words = args ? (typeof args.body === "string" ? args.body : null) : typeof body.words === "string" ? body.words : typeof body.body === "string" ? body.body : null;
   if (words === null) return null;
   return words.length > OUTBOX_WORDS_SHOWN ? `${words.slice(0, OUTBOX_WORDS_SHOWN)}…` : words;
 };
@@ -364,7 +367,7 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
   answer: entry.answer,
   notice: entry.notice,
   dismissed: entry.dismissed,
-  words: wordsOf(entry.body),
+  words: wordsOf(entry),
   thread: entry.thread ?? null,
   machine_name: entry.machine_name ?? null,
 });

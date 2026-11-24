@@ -71,6 +71,21 @@ describe("an agent's answer in another computer's thread", () => {
     expect(sent).toHaveLength(2);
   });
 
+  test("a session's key reused with the same words but another argument is refused, as a local send refuses it", async () => {
+    const { deps, sent } = laptop(writes);
+    const first = { body: "Both fixed.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "reply-2", done: [`${THREAD}/fix-a`] };
+    await farAgentReply(deps, first, next, undefined);
+    expect(sent).toHaveLength(1);
+    // The same done id with a space before it is the same call (the store trims it).
+    await farAgentReply(deps, { ...first, done: [` ${THREAD}/fix-a`] }, next, undefined);
+    expect(sent).toHaveLength(1);
+    await expect(farAgentReply(deps, { ...first, done: [`${THREAD}/fix-a`, `${THREAD}/fix-b`] }, next, undefined)).rejects.toMatchObject({ code: "idempotency_key_reused" });
+    await expect(farAgentReply(deps, { ...first, done: undefined }, next, undefined)).rejects.toMatchObject({ code: "idempotency_key_reused" });
+    await expect(farAgentReply(deps, { ...first, supersedes: [`${THREAD}/q1`] }, next, undefined)).rejects.toMatchObject({ code: "idempotency_key_reused" });
+    await expect(farAgentReply(deps, { ...first, thread: "Another name" }, next, undefined)).rejects.toMatchObject({ code: "idempotency_key_reused" });
+    expect(sent).toHaveLength(1);
+  });
+
   test("an older Plannotator there is refused as before, nothing held; one whose list this Inbox has not read yet is held", async () => {
     const older = laptop(writes, { takes: () => false });
     await expect(farAgentReply(older.deps, { body: "x", reply_to: THREAD, agent_session: "ses_one" }, next, undefined)).rejects.toMatchObject({ code: "thread_on_other_machine" });

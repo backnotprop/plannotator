@@ -19,6 +19,7 @@ import { childEnv } from "@plannotator/shared/child-env";
 import { planAgentBodyPictures } from "@plannotator/shared/inbox/agent-pictures";
 import { inboxBlobPath, recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { sameInboxSend, type InboxSendCall } from "@plannotator/shared/inbox/send-same";
 import type { OutboxEntry } from "./inbox-outbox";
 import type { PeerLink } from "./inbox-peer-link";
 import { FAR_AGENT_REPLY_ROUTE, TAG_ACROSS_MARK } from "./inbox-far-tags";
@@ -122,6 +123,15 @@ function branchHere(value: unknown, folder: string | undefined): unknown {
   return branch;
 }
 
+/** A far answer's send_message arguments as a local send compares them for a reused key (its `thread` is a reply's). */
+function farCall(args: Record<string, unknown>): InboxSendCall {
+  const text = (value: unknown) => (typeof value === "string" ? value : null);
+  const ids = (value: unknown) => (Array.isArray(value) ? value.map((id) => (typeof id === "string" ? id.trim() : JSON.stringify(id))) : value === undefined || value === null ? [] : [JSON.stringify(value)]);
+  const guide = args.guide && typeof args.guide === "object" ? text((args.guide as { input_sha256?: unknown }).input_sha256) : text(args.guide);
+  const live = ids(Array.isArray(args.live_sites) ? args.live_sites.map((site) => (site && typeof site === "object" ? (site as { id?: unknown }).id : site)) : args.live_sites);
+  return { body: text(args.body) ?? "", reply_to: text(args.reply_to), thread_name: null, reply_thread: text(args.thread)?.trim() || null, guide, supersedes: ids(args.supersedes), done: ids(args.done), live };
+}
+
 export async function farAgentReply(
   deps: FarReplyDeps,
   input: Record<string, unknown> & { body: string; reply_to?: string; idempotency_key?: string; agent_session?: string; agent_name?: string; agent_host?: string; project_path?: string },
@@ -149,7 +159,7 @@ export async function farAgentReply(
   const heldKey = `far-reply:${scoped(session, place.thread_id, key)}`;
   const before = deps.heldWrite(heldKey);
   const was = before?.body.args && typeof before.body.args === "object" ? (before.body.args as Record<string, unknown>) : null;
-  if (before && (was?.body !== pictures.body || was?.reply_to !== replyTo)) {
+  if (before && !sameInboxSend(farCall(was ?? {}), farCall({ ...input, body: pictures.body, reply_to: replyTo }))) {
     throw new InboxError("idempotency_key_reused", "This idempotency_key was already used for a different message.");
   }
   const uploads: string[] = [];
