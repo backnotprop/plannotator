@@ -57,11 +57,13 @@ export interface PeerLinkTimings {
   sendMs: number;
   /** A held answer's file with no byte moving (inbox-outbox-files.ts). */
   fileIdleMs: number;
+  /** A held answer's file whose try failed: its first pause before the next (doubled each time, up to `backoffMaxMs`). */
+  fileRetryMinMs: number;
   /** How long `deliveries` frames gather before one read of the list: each read is the whole list. */
   deliveriesMs: number;
 }
 
-export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000, fileIdleMs: OUTBOX_FILE_IDLE_MS, deliveriesMs: 5_000 };
+export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000, fileIdleMs: OUTBOX_FILE_IDLE_MS, fileRetryMinMs: 1_000, deliveriesMs: 5_000 };
 
 /** A record from the other machine's event stream, as the window's stream passes it on. */
 export interface PeerRecord {
@@ -260,7 +262,6 @@ export class PeerLink {
   /** Held answers' files, in their own lane (inbox-outbox-file-lane.ts): nothing in the write queue waits on one. */
   private readonly files: OutboxFileLane;
   private filesTimer: ReturnType<typeof setTimeout> | null = null;
-  private filesDelay = 0;
 
   constructor(private readonly options: PeerLinkOptions) {
     this.id = options.link.id;
@@ -272,6 +273,8 @@ export class PeerLink {
       upload: (file) => this.uploadFile(file),
       idleMs: this.t.fileIdleMs,
       onChange: () => this.flush(),
+      retryMinMs: this.t.fileRetryMinMs,
+      retryMaxMs: this.t.backoffMaxMs,
     });
   }
 
@@ -472,6 +475,8 @@ export class PeerLink {
             wasOnline = true;
             this.setState("online");
             void this.refreshList().then(() => this.refreshCards());
+            // A file that failed while the line was down goes now, not after its pause.
+            this.files.lineBack();
             this.flush();
           } else if (parsed.event === "record" && parsed.id !== null) {
             const seq = Number(parsed.id);
@@ -723,20 +728,17 @@ export class PeerLink {
   /** Send what waits for this machine (rule 15). A 5xx is tried again after a pause; anything else waits for the next hello. */
   flush(): void {
     if (!this.running || this.state !== "online") return;
-    // Files go in their own lane; a file that failed (the line) or stalled is tried again after a pause of its own.
+    // Files go in their own lane; a file whose try failed waits out its own pause there (a run before it ends passes
+    // it by), and the lane runs again when the soonest pause ends.
     void this.files.run().then((result) => {
       if (result === "revoked") return this.stream?.abort();
-      if (result === "empty") {
-        this.filesDelay = 0;
-        return;
-      }
-      this.filesDelay = Math.min(Math.max(this.filesDelay * 2, 1000), this.t.backoffMaxMs);
-      if (!this.filesTimer) {
-        this.filesTimer = setTimeout(() => {
-          this.filesTimer = null;
-          this.flush();
-        }, this.filesDelay);
-      }
+      const wait = this.files.nextTryIn();
+      if (wait === null) return;
+      if (this.filesTimer) clearTimeout(this.filesTimer);
+      this.filesTimer = setTimeout(() => {
+        this.filesTimer = null;
+        this.flush();
+      }, wait);
     });
     void this.options.outbox.drain(this.id, this.send).then((result) => {
       if (result === "server_error") {

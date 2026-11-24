@@ -8,7 +8,7 @@
  * refuse held for hours before it says so; the words-only path changed; an older computer's answer held.
  */
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, truncateSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_UPLOAD_MAX_BYTES, type InboxAttachment } from "@plannotator/core/inbox-types";
@@ -136,14 +136,15 @@ const stalls = async (body: ReadableStream<Uint8Array>, signal: AbortSignal) => 
  * This computer: the agent's, with its real outbox and store folder; `door` plays the thread's computer. `fileIdleMs`:
  * the link's no-progress limit for a file. `waitScale`: the agent's wait, scaled down so a test runs in a second.
  */
-function laptop(door: ReturnType<typeof studioDoor>, more: Partial<FarReplyDeps> = {}, dataDir = temp("laptop"), opts: { fileIdleMs?: number; waitScale?: number } = {}) {
+function laptop(door: ReturnType<typeof studioDoor>, more: Partial<FarReplyDeps> = {}, dataDir = temp("laptop"), opts: { fileIdleMs?: number; waitScale?: number; fileRetryMinMs?: number } = {}) {
   const outbox = InboxOutbox.open(dataDir);
   const storeDir = inboxDir(dataDir);
   const state = { online: false };
   const waits: number[] = [];
   let drained: Promise<unknown> = Promise.resolve();
   const link = new PeerLink({
-    ...(opts.fileIdleMs ? { timings: { fileIdleMs: opts.fileIdleMs } } : {}),
+    // A failed file's pause is none here, so each `back` is the next try; its own test sets one.
+    timings: { fileRetryMinMs: opts.fileRetryMinMs ?? 0, ...(opts.fileIdleMs ? { fileIdleMs: opts.fileIdleMs } : {}) },
     link: { id: STUDIO, name: "Studio", token: "tok_laptop", transport: { kind: "tailnet", address: "studio.test.ts.net:8443" } as never, device_id: null, linked_at: "2026-11-24T09:00:00.000Z" },
     transport: door.transport,
     outbox,
@@ -533,6 +534,76 @@ describe("its files at that computer's door", () => {
     expect(await files).toBe("empty");
     expect(await outbox.drain(STUDIO, send)).toBe("empty");
     expect(door.replies.map((reply) => reply.args.body)).toEqual(["Another agent.", "Big first.", "Then this."]);
+  });
+
+  test("a held file that cannot be read here fails every try: counted, and after the tries a notice, never retried for ever", async () => {
+    const door = studioDoor();
+    const { deps, outbox, back, storeDir } = laptop(door);
+    await farAgentReply(deps, { body: "Unreadable.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "e1", attachments: ["notes.md"] }, next, workFolder());
+    const [upload] = listInboxUploads(storeDir);
+    // The held copy cannot be read (as an I/O error does): the stream errors on this side, before a byte goes.
+    chmodSync(inboxBlobPath(storeDir, upload!.sha256), 0o000);
+    for (let i = 1; i < OUTBOX_MAX_SERVER_ERRORS; i++) {
+      expect(await back()).toBe("server_error");
+      expect([only(outbox).state, only(outbox).errors]).toEqual(["queued", i]);
+    }
+    expect(await back()).toBe("server_error");
+    expect(await back()).toBe("empty");
+    expect(outbox.notices()).toEqual([expect.objectContaining({ state: "refused", notice: expect.objectContaining({ kind: "refused" }), answer: { code: "upload_failed", error: "notes.md could not be sent to Studio." } })]);
+    expect(door.uploads.size).toBe(0);
+    expect(door.replies).toEqual([]);
+  });
+
+  test("a failed file waits out its pause, however often the lane is run; a line failure's pause ends when the link is back", async () => {
+    let fail: "server" | "line" | null = "server";
+    const door = studioDoor({ upload: () => (fail === "server" ? Response.json({ code: "internal", error: "Busy." }, { status: 500 }) : fail === "line" ? null : undefined) as never });
+    const { deps, outbox, lane, state } = laptop(door, {}, undefined, { fileRetryMinMs: 400 });
+    await farAgentReply(deps, { body: "Paused.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "p1", attachments: ["notes.md"] }, next, workFolder());
+    state.online = true;
+    expect(await lane.run()).toBe("server_error");
+    expect(door.uploadTries()).toBe(1);
+    // Every request the link makes runs the lane: inside the pause, nothing goes.
+    for (let i = 0; i < 3; i++) expect(await lane.run()).toBe("empty");
+    expect(door.uploadTries()).toBe(1);
+    expect(only(outbox).errors).toBe(1);
+    expect(lane.nextTryIn()).toBeGreaterThan(0);
+    await Bun.sleep(450);
+    fail = "line";
+    expect(await lane.run()).toBe("unreachable");
+    expect(door.uploadTries()).toBe(2);
+    expect(await lane.run()).toBe("empty");
+    expect(door.uploadTries()).toBe(2);
+    // The link's hello: the line is back, so the file goes at once.
+    fail = null;
+    lane.lineBack();
+    expect(await lane.run()).toBe("empty");
+    expect(door.uploads.size).toBe(1);
+    expect(lane.nextTryIn()).toBeNull();
+  });
+
+  test("taken back or unlinked while its file goes: the upload stops at once and the entry's other files never start", async () => {
+    for (const end of ["taken back", "unlinked"] as const) {
+      const door = studioDoor({ take: slowly(40) });
+      const { deps, outbox, lane, state } = laptop(door, {}, undefined, { fileIdleMs: 1000 });
+      const folder = workFolder();
+      writeFileSync(join(folder, "big.bin"), Buffer.alloc(20 * 64 * 1024, 7));
+      await farAgentReply(deps, { body: `Big, ${end}.`, reply_to: THREAD, agent_session: "ses_one", idempotency_key: `tb-${end}`, attachments: ["big.bin", "notes.md"] }, next, folder);
+      state.online = true;
+      const files = lane.run();
+      await Bun.sleep(60);
+      const key = only(outbox).key;
+      if (end === "taken back") expect(outbox.cancel(key)!.state).toBe("cancelled");
+      else outbox.dropMachine(STUDIO, "Studio");
+      const started = Date.now();
+      await files;
+      // About 800 ms of file was left: it stopped at once.
+      expect(Date.now() - started).toBeLessThan(200);
+      // Nor does that door, reading on, ever take a part of it as the file.
+      await Bun.sleep(150);
+      expect(door.uploads.size).toBe(0);
+      expect(door.keys).toHaveLength(1);
+      expect(only(outbox).state).toBe(end === "taken back" ? "cancelled" : "dropped");
+    }
   });
 
   test("online, the agent waits less than a host's tool time limit, then hears it waits; the answer goes once, later", async () => {
