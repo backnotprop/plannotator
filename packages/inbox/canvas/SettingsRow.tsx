@@ -12,7 +12,7 @@ export function CanvasSettingsRow({ value, onToggle }: { value: { on: boolean };
           Canvas
         </span>
         <span className="ib-desc">
-          A drawing board in every thread that you and your agents can both sketch on. Off, there is no pen and agents are not offered the canvas; every canvas is kept. Agents pick this up in their next session.
+          An Excalidraw board in every thread that you and your agents can both sketch on.
         </span>
       </span>
       <span className="ib-ctl">
