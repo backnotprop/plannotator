@@ -306,7 +306,7 @@ test.skipIf(!hasDom)("Settings → Capabilities: a linked computer's switches by
   await settle();
   await click(routines());
   await settle();
-  const shownHeld = () => [routines().getAttribute('aria-checked'), group().querySelector('[data-settings-linked-switch="scheduled_threads"]')!.hasAttribute('data-held'), group().querySelector('[data-settings-linked-switch="scheduled_threads"] .ib-desc')?.textContent];
+  const shownHeld = () => [routines().getAttribute('aria-checked'), group().querySelector('[data-settings-linked-switch="scheduled_threads"]')!.hasAttribute('data-held'), group().querySelector('[data-settings-linked-switch="scheduled_threads"] [data-settings-linked-held]')?.textContent];
   expect(shownHeld()).toEqual(['false', true, 'Waiting for Studio: this applies when Studio is back.']);
   // A reload of the page: the group is there, said away, its held turn still shown.
   act(() => root!.unmount());

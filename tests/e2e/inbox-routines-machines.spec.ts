@@ -10,6 +10,7 @@
  *  3. The Routines page lists Laptop's routine and Studio's, Studio's named "· Studio".
  *  4. Run on Studio's routine from Laptop: Studio starts it, and its row says Running.
  *  5. The same page at phone width.
+ *  6. Settings → Capabilities at phone width: Studio's switches with their lines.
  *
  * Pictures land in PLANNOTATOR_ROUTINES_MACHINES_SHOTS, else .local/proof/routines-across-computers (CI keeps
  * .local/proof/ as the shard's "inbox-window-proof" artifact). Build the binary first (see inbox.spec.ts).
@@ -150,6 +151,11 @@ test("1. Settings → Capabilities: Studio's switches under Laptop's, and Routin
   await expect(group.locator('h2')).toHaveText('Studio', { timeout: 20_000 });
   const routines = group.locator('[data-settings-linked-switch="scheduled_threads"] [role="switch"]');
   await expect(routines).toHaveAttribute('aria-checked', 'false');
+  // Each of Studio's switches has the line Laptop's own row has under its name (Laptop's Routines may add a line of its own).
+  await expect(group.locator('[data-settings-linked-switch="board"] .ib-desc')).toHaveText((await page.locator('[data-settings-board] .ib-desc').textContent())!);
+  const routinesLine = (await group.locator('[data-settings-linked-switch="scheduled_threads"] .ib-desc').textContent())!;
+  expect(routinesLine.length).toBeGreaterThan(0);
+  expect((await page.locator('[data-settings-scheduled] .ib-desc').textContent())!.startsWith(routinesLine)).toBe(true);
   await routines.click();
   await expect(routines).toHaveAttribute('aria-checked', 'true');
   await expect.poll(async () => (await read<{ scheduled_threads?: { on: boolean } }>(studio, '/api/inbox/settings')).scheduled_threads?.on).toBe(true);
@@ -207,5 +213,17 @@ test('5. The same page at phone width', async () => {
   await page.goto(`${laptop.url}#routines`);
   await expect(page.locator('[data-scheduled-computer="Studio"]')).toContainText('Studio', { timeout: 20_000 });
   await shot('05-routines-phone.png');
+  expect(errors).toEqual([]);
+});
+
+test("6. Settings → Capabilities at phone width: Studio's switches with their lines, wrapped as Laptop's", async () => {
+  await page.goto(`${laptop.url}#settings/capabilities`);
+  const group = page.locator(`[data-settings-linked-capabilities="${studio.id}"]`);
+  await expect(group.locator('h2')).toHaveText('Studio', { timeout: 20_000 });
+  await expect(group.locator('[data-settings-linked-switch="board"] .ib-desc')).toBeVisible();
+  // Nothing in the group runs past the phone's width.
+  expect(await group.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await group.scrollIntoViewIfNeeded();
+  await shot('06-settings-linked-capabilities-phone.png');
   expect(errors).toEqual([]);
 });

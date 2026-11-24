@@ -2003,7 +2003,7 @@ dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
 .ib-prow .ib-desc a:hover { text-decoration: underline; }
 .ib-prow .ib-desc code, .ib-sframe code { font-family: var(--font-mono); font-size: var(--ib-fs-11-5, 11.5px); color: var(--foreground); }
 /* Bro mode's command (the owner, 2026-11-08) moves to the next line whole, never split at its hyphen. */
-.ib-prow[data-settings-bro] .ib-desc code { white-space: nowrap; }
+.ib-prow[data-settings-bro] .ib-desc code, .ib-prow[data-settings-linked-switch="bro"] .ib-desc code { white-space: nowrap; }
 .ib-prow .ib-ctl { display: flex; align-items: center; gap: 10px; flex: none; }
 /* Settings → Appearance → Colors (components/Palettes.tsx): the half being assigned, then its palettes as tiles.
    The row's own head is an .ib-prow without its rule; the tiles sit under it, in the card. */

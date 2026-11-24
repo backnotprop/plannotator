@@ -1,4 +1,5 @@
 import { Switch } from '../components/SoundRow';
+import { CAPABILITY_LINES } from '../components/capabilityLines';
 
 /**
  * Settings → Capabilities → Routines (CONTRACT.md section 3), after Checklist. Where the Inbox cannot start
@@ -12,7 +13,7 @@ export function ScheduledSettingsRow({ value, onToggle }: { value: { on: boolean
           Routines
         </span>
         <span className="ib-desc">
-          Runs saved prompts on a schedule, on this computer, while the Inbox is running.
+          {CAPABILITY_LINES.scheduled_threads}
           {value.on && value.login === 'unavailable' && <> It does not start the Inbox when you log in on this computer.</>}
         </span>
       </span>

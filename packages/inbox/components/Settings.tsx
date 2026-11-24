@@ -4,6 +4,7 @@ import { INBOX_SYSTEM_SWITCH_SHOWN, INBOX_TEXT_SIZES } from '@plannotator/core/i
 import type { InboxSound } from '../sound';
 import { SoundRow, Switch } from './SoundRow';
 import { LinkedCapabilities } from './LinkedCapabilities';
+import { CAPABILITY_LINES } from './capabilityLines';
 import { type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
@@ -617,9 +618,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-board-label">
                     Board
                   </span>
-                  <span className="ib-desc">
-                    A page of the work in flight, one card per piece, that your agents keep current. Off, there is no Board page and agents are not offered cards; every card is kept. Agents pick this up in their next session.
-                  </span>
+                  <span className="ib-desc">{CAPABILITY_LINES.board}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={board.on} labelledBy="ib-board-label" onClick={() => onToggleBoard(!board.on)} />
@@ -632,9 +631,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-steps-label">
                     Checklist
                   </span>
-                  <span className="ib-desc">
-                    Your agents' plan for the work in a thread as a checklist, one step per line, under a button at the thread's foot. Off, agents are not offered a checklist and none shows; every checklist is kept. Agents pick this up in their next session.
-                  </span>
+                  <span className="ib-desc">{CAPABILITY_LINES.steps}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={steps.on} labelledBy="ib-steps-label" onClick={() => onToggleSteps(!steps.on)} />
@@ -648,9 +645,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-code-review-label">
                     Code review
                   </span>
-                  <span className="ib-desc">
-                    Review your agents' code changes and your pull requests from GitHub and GitLab: type / in a reply to ask for a review, then approve it, send feedback to the agent, or post it on the pull request. Off, agents are not offered reviews and the review skills leave the / list; guided reviews and <code>plannotator review</code> work as before either way. Agents pick this up in their next session.
-                  </span>
+                  <span className="ib-desc">{CAPABILITY_LINES.code_review}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={codeReview.on} labelledBy="ib-code-review-label" onClick={() => onToggleCodeReview(!codeReview.on)} />
@@ -663,7 +658,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-chapter-diagrams-label">
                     Chapter diagrams
                   </span>
-                  <span className="ib-desc">Agents may add a diagram above a chapter's code.</span>
+                  <span className="ib-desc">{CAPABILITY_LINES.chapter_diagrams}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={chapterDiagrams.on} labelledBy="ib-chapter-diagrams-label" onClick={() => onToggleChapterDiagrams(!chapterDiagrams.on)} />
@@ -677,7 +672,7 @@ function CapabilitiesSection({
                     <span className="ib-l" id="ib-system-label">
                       System
                     </span>
-                    <span className="ib-desc">A drawing of each project's system, kept current by an agent when main moves. Shows while Code review is on. Off, none of it shows; every drawing is kept. Yours alone.</span>
+                    <span className="ib-desc">{CAPABILITY_LINES.system}</span>
                   </span>
                   <span className="ib-ctl">
                     <Switch on={system.on} labelledBy="ib-system-label" onClick={() => onToggleSystem(!system.on)} />
@@ -754,9 +749,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-bro-label">
                     Bro mode
                   </span>
-                  <span className="ib-desc">
-                    Agents write to your Inbox in plain words. Applies to new agent sessions. In open Claude Code sessions, run <code>/reload-plugins plannotator</code>.
-                  </span>
+                  <span className="ib-desc">{CAPABILITY_LINES.bro}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={bro.on} labelledBy="ib-bro-label" onClick={() => onToggleBro(!bro.on)} />
@@ -769,7 +762,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-float-drafts-label">
                     Float reply drafts
                   </span>
-                  <span className="ib-desc">Keep an unsent reply in a small window in the corner when you leave its thread.</span>
+                  <span className="ib-desc">{CAPABILITY_LINES.float_drafts}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={floatDrafts.on} labelledBy="ib-float-drafts-label" onClick={() => onToggleFloatDrafts(!floatDrafts.on)} />

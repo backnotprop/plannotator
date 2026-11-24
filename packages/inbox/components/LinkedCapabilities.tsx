@@ -1,14 +1,16 @@
 /**
  * Settings → Capabilities on a linked computer (docs/agent-guides/inbox-machines.md, "Capabilities on a linked
  * computer"): under this computer's switches, one group per linked computer whose list takes them (mark
- * `capabilities`), headed by its name, with the same switches by the same names, read and turned there through this
+ * `capabilities`), headed by its name, with the same switches by the same names and the same line under each
+ * (capabilityLines.tsx; a switch with no line there shows its name alone), read and turned there through this
  * Inbox's forward (`/api/inbox/m/<machine>/capabilities`). System and Chapter diagrams follow this computer's rule:
  * Chapter diagrams only while Code review is on there, System only while it is on there. A computer that is away shows
  * what it last gave this Inbox (kept there, so a reload keeps the group), said to be away; a switch turned while it is
  * away waits in the outbox and is shown turned, with the waiting toast's words under its name, until that computer
  * takes or refuses it (the Inbox reads that from its outbox). An older Plannotator there has no group.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { CAPABILITY_LINES } from './capabilityLines';
 import { INBOX_CAPABILITY_SWITCHES, inboxCapabilitySwitchesOf, type InboxCapabilitySwitches, type InboxCapabilitySwitchKey } from '@plannotator/core/inbox-types';
 import { apiGet, apiPost, heldWords, InboxHeldError, type MachineView } from '../api';
 import { inboxUrl } from '../inboxUrl';
@@ -38,15 +40,46 @@ const farSwitchesOf = (answer: { capabilities?: unknown; away?: unknown; read_at
   held: Array.isArray(answer.held) ? answer.held.filter((key): key is string => typeof key === 'string') : [],
 });
 
+export interface LinkedSwitchRowModel {
+  key: InboxCapabilitySwitchKey;
+  name: string;
+  on: boolean;
+  /** The line under its name, as this computer's row has it (capabilityLines.tsx); null: its name alone. */
+  line: ReactNode;
+}
+
 /** The switches a computer's group shows, in Settings' order, by its own rules. */
-export function linkedSwitchRows(switches: InboxCapabilitySwitches): { key: InboxCapabilitySwitchKey; name: string; on: boolean }[] {
+export function linkedSwitchRows(switches: InboxCapabilitySwitches, lines: Partial<Record<InboxCapabilitySwitchKey, ReactNode>> = CAPABILITY_LINES): LinkedSwitchRowModel[] {
   return INBOX_CAPABILITY_SWITCHES.flatMap(({ key, name }) => {
     const value = switches[key];
     if (!value) return [];
     if (key === 'chapter_diagrams' && switches.code_review?.on !== true) return [];
     if (key === 'system' && (value.on !== true || switches.code_review?.on !== true)) return [];
-    return [{ key, name, on: value.on }];
+    return [{ key, name, on: value.on, line: lines[key] ?? null }];
   });
+}
+
+/** One switch of a linked computer, in the row this computer's switches use: its name, its line, and a held turn's words. */
+export function LinkedSwitchRow({ row, heading, held, waiting, onTurn }: { row: LinkedSwitchRowModel; heading: string; held: boolean; waiting: string | null; onTurn: () => void }) {
+  return (
+    <div className="ib-prow" data-settings-linked-switch={row.key} data-held={held ? '' : undefined}>
+      <span className="ib-txt">
+        <span className="ib-l" id={`${heading}-${row.key}`}>
+          {row.name}
+        </span>
+        {row.line != null && <span className="ib-desc">{row.line}</span>}
+        {/* Turned here, waiting for that computer: shown as turned until it takes or refuses it. */}
+        {waiting && held && (
+          <span className="ib-desc" data-settings-linked-held="">
+            {waiting}
+          </span>
+        )}
+      </span>
+      <span className="ib-ctl">
+        <Switch on={row.on} labelledBy={`${heading}-${row.key}`} onClick={onTurn} />
+      </span>
+    </div>
+  );
 }
 
 function MachineSwitches({ machine }: { machine: MachineView }) {
@@ -98,18 +131,7 @@ function MachineSwitches({ machine }: { machine: MachineView }) {
       </p>
       <div className="ib-card">
         {rows.map((row) => (
-          <div key={row.key} className="ib-prow" data-settings-linked-switch={row.key} data-held={far.held.includes(row.key) ? '' : undefined}>
-            <span className="ib-txt">
-              <span className="ib-l" id={`${heading}-${row.key}`}>
-                {row.name}
-              </span>
-              {/* Turned here, waiting for that computer: shown as turned until it takes or refuses it. */}
-              {waiting && far.held.includes(row.key) && <span className="ib-desc">{waiting}</span>}
-            </span>
-            <span className="ib-ctl">
-              <Switch on={row.on} labelledBy={`${heading}-${row.key}`} onClick={() => turn(row.key, !row.on)} />
-            </span>
-          </div>
+          <LinkedSwitchRow key={row.key} row={row} heading={heading} held={far.held.includes(row.key)} waiting={waiting} onTurn={() => turn(row.key, !row.on)} />
         ))}
       </div>
       {line && (

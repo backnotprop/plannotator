@@ -929,3 +929,4 @@ packages/inbox/commentRowFiles.test.tsx
 packages/inbox/sidebarStickyHeadings.test.tsx
 packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx
+packages/inbox/components/linkedCapabilityLines.test.tsx
