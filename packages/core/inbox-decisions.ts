@@ -12,108 +12,15 @@
  * becomes `~`), session ids and machine names (an agent is its host's name). Pictures are opaque refs; only the HTML
  * embeds their bytes.
  *
- * Pure and browser-safe (no `node:`): records in, the v1 shape out. It lives in core so a host can import the shape from
- * npm; Plannotator's own imports go through `@plannotator/shared/inbox/decision-export` (a re-export of this file) and
- * `@plannotator/shared/inbox/decision-data` (which re-exports the decision row rules below beside its disk-backed totals).
+ * Published as `@plannotator/core/inbox-decisions`: the shape's types, `DECISION_EXPORT_FORMAT` and the pure builder
+ * (records in, the v1 shape out), nothing else. The rules it runs on are `inbox-decision-rules.ts`, which is not in
+ * core's `exports`. Plannotator's own imports go through `@plannotator/shared/inbox/decision-export`. Browser-safe.
  */
 import { inboxAnswerTookRecommendation, toInboxQuestion } from "./inbox-questions";
-import { INBOX_HOST_NAMES, isInboxNote, type InboxMessage, type InboxQuestionRecord } from "./inbox-types";
+import type { InboxMessage, InboxQuestionRecord } from "./inbox-types";
+import { agentLabel, DECISION_EXPORT_OTHER_STATES, decisionExportZone, decisionRowOf, iso, ms, nameOnly, oneLine, ownWordsTime, scrubDecisionText, STATE_OF_FATE } from "./inbox-decision-rules";
 
-// ── A stored question's row (Decision data's rule; Settings -> Decision data reads the same) ──
-
-export type DecisionFate = "answered" | "skipped" | "set_aside" | "replaced" | "archived" | "open" | "picked_unsent";
-
-/** One question an agent asked; action items are not decisions. */
-export interface DecisionRow {
-  id: string;
-  thread_id: string;
-  project_id: string;
-  agent: string;
-  kind: string;
-  asked_at: number;
-  /** The last pick's moment, or the Send's when the Send carried the answer. */
-  answered_at: number | null;
-  sent_at: number | null;
-  fate: DecisionFate;
-  /** Whether the answer took the recommendation: null unless the question named one and was answered. */
-  took: boolean | null;
-  offered: boolean;
-  stopped: boolean;
-  holds_up: boolean;
-  files: boolean;
-  revisions: number;
-}
-
-const DAY_MS = 86_400_000;
-/** A time every later step can use, even moved into the reader's zone: `new Date(...).toISOString()` throws past this. */
-const readableTime = (at: unknown): at is number => typeof at === "number" && Number.isFinite(at) && Math.abs(at) <= 8.64e15 - 2 * DAY_MS;
-
-/** An agent as the person sees it: its host's name ("Claude Code"), never a session or machine. */
-export function agentLabel(author: { host?: string | null; name?: string | null }): string {
-  if (author.host) return INBOX_HOST_NAMES[author.host] ?? author.host;
-  if (author.name) return author.name;
-  return "An agent";
-}
-
-function tookRecommendation(question: InboxQuestionRecord): { offered: boolean; took: boolean | null } {
-  const recommended = question.parsed.choices.filter((choice) => choice.recommended).map((choice) => choice.label);
-  if (recommended.length === 0) return { offered: false, took: null };
-  const answer = question.answer;
-  if (!answer || answer.skipped) return { offered: true, took: null };
-  if (answer.other) return { offered: true, took: false };
-  const picked = new Set(answer.selected);
-  return { offered: true, took: picked.size === recommended.length && recommended.every((label) => picked.has(label)) };
-}
-
-/** The row of one stored question, or null when it is not a question an agent asked. */
-export function decisionRowOf(question: InboxQuestionRecord, byId: ReadonlyMap<string, InboxMessage>, headOf: (projectId: string) => string, closedByArchive: (message: InboxMessage) => boolean): DecisionRow | null {
-  if (question.kind === "action") return null;
-  const message = byId.get(question.message_id);
-  if (!message || message.author.kind !== "agent") return null;
-  const asked = ms(message.created_at);
-  if (asked === null) return null;
-  const sent = question.sent_reply_id ? ms(byId.get(question.sent_reply_id)?.created_at) : null;
-  let fate: DecisionFate;
-  if (question.superseded_by) fate = "replaced";
-  else if (question.set_aside) fate = "set_aside";
-  else if (question.answer && question.revision > 0 && question.sent_revision === question.revision) fate = question.answer.skipped ? "skipped" : "answered";
-  else if (closedByArchive(message)) fate = "archived";
-  else fate = question.answer ? "picked_unsent" : "open";
-  const decided = fate === "answered" || fate === "skipped";
-  const { offered, took } = tookRecommendation(question);
-  return {
-    id: question.id,
-    thread_id: message.thread_id,
-    project_id: headOf(question.project_id),
-    agent: agentLabel(message.author),
-    kind: question.kind,
-    asked_at: asked,
-    answered_at: decided ? (ms(question.picked_at) ?? sent) : null,
-    sent_at: decided ? sent : null,
-    fate,
-    took: fate === "answered" ? took : null,
-    offered,
-    stopped: question.stopped !== null,
-    holds_up: question.holds_up.length > 0,
-    files: (message.attachments?.length ?? 0) + (message.inline_images?.length ?? 0) > 0,
-    revisions: question.revision,
-  };
-}
-
-/**
- * When the person wrote this message in their own words, or null when it is not such a message: an agent's, a note the
- * Inbox wrote, a Re-ask press (the Inbox writes its words, the person typed none), or a reply that carried answers
- * (`carried`: the questions' `sent_reply_id`s). Decision data's "settled in words" and the decision export's
- * "Answered in words" both read it.
- */
-export function ownWordsTime(message: InboxMessage, carried: ReadonlySet<string>): number | null {
-  if (message.author.kind !== "person" || isInboxNote(message) || (message.reask?.length ?? 0) > 0) return null;
-  const at = ms(message.created_at);
-  if (!readableTime(at) || carried.has(message.id)) return null;
-  return at;
-}
-
-// ── The owner's choices (answers to brief section 8, 2026-11-10): each in this one place. ──
+// ── A question card's state ──
 
 /**
  * Every question card's state in the export ("Everything, with each question's state"). `decided` is Decision data's
@@ -123,40 +30,9 @@ export function ownWordsTime(message: InboxMessage, carried: ReadonlySet<string>
  */
 export type DecisionExportState = "decided" | "picked_unsent" | "answered_in_words" | "open" | "skipped" | "set_aside" | "archived" | "replaced";
 
-/** The quiet groups after the decisions, in this order: drafts (picked, not sent) first, so D-numbers follow the decisions, drafts, then the rest, as the posts list them. */
-export const DECISION_EXPORT_OTHER_STATES: readonly Exclude<DecisionExportState, "decided">[] = ["picked_unsent", "open", "answered_in_words", "skipped", "set_aside", "archived", "replaced"];
-
-/** A group's heading in both documents. */
-export const DECISION_EXPORT_STATE_TITLES: Readonly<Record<Exclude<DecisionExportState, "decided">, string>> = {
-  picked_unsent: "Draft, not sent to the agent",
-  answered_in_words: "Answered in words",
-  open: "Still open",
-  skipped: "Skipped",
-  set_aside: "Set aside",
-  archived: "Closed by the archive",
-  replaced: "Replaced",
-};
-
-const STATE_OF_FATE: Readonly<Record<DecisionFate, DecisionExportState>> = {
-  answered: "decided",
-  picked_unsent: "picked_unsent",
-  open: "open",
-  skipped: "skipped",
-  set_aside: "set_aside",
-  archived: "archived",
-  replaced: "replaced",
-};
-
-/** Each picture at most this many bytes in the HTML, the file's pictures together at most `FILE`; past either, the alt text shows. */
-export const DECISION_EXPORT_PICTURE_MAX_BYTES = 400 * 1024;
-export const DECISION_EXPORT_PICTURES_MAX_BYTES = 5 * 1024 * 1024;
-/** The index table cuts a long answer here, with "…". */
-export const DECISION_EXPORT_INDEX_ANSWER_CHARS = 70;
-
 // ── The v1 shape ──
 
 export const DECISION_EXPORT_FORMAT = "plannotator.decisions";
-export type DecisionExportFormat = "md" | "html" | "json";
 
 export interface DecisionExportPicture {
   alt: string;
@@ -247,89 +123,7 @@ export interface DecisionExportPictureSource {
   src: string;
 }
 
-// ── Privacy: what free text may not carry ──
-
-const LOCAL_HOST = String.raw`(?:localhost|[\w-]+\.localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1?\]|[\w.-]+\.local|[\w.-]+\.ts\.net|[\w.-]+\.internal|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2})`;
-const LOCAL_URL = new RegExp(String.raw`\b[a-z][a-z0-9+.-]*://${LOCAL_HOST}(?::\d+)?[^\s<>()"'\]]*`, "gi");
-const BARE_LOCAL = new RegExp(String.raw`\b${LOCAL_HOST}:\d{2,5}\b[^\s<>()"'\]]*`, "gi");
-/** Another account's home, written out: `/Users/x`, `/home/x`, `C:\Users\x`. */
-const HOME_PATH = /(?:\/Users\/|\/home\/|[A-Za-z]:\\Users\\)[^/\\\s"'`<>()]+/g;
-/** Shown where a local address was. */
-export const DECISION_EXPORT_LOCAL_LINK = "(local link)";
-
-/** Free text as the export may carry it: no local addresses, no home folder. */
-export function scrubDecisionText(text: string, home?: string | null): string {
-  let out = text.replace(LOCAL_URL, DECISION_EXPORT_LOCAL_LINK).replace(BARE_LOCAL, DECISION_EXPORT_LOCAL_LINK);
-  if (home && home.length > 1) out = out.split(home).join("~");
-  return out.replace(HOME_PATH, "~");
-}
-
-/** A path or address by its last part only: `docs/plan.html` -> `plan.html`, `http://localhost:3000/a/b` -> `b`. */
-function nameOnly(target: string): string {
-  const path = target.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, "").replace(/[?#].*$/, "");
-  const last = path.split(/[\\/]/).filter(Boolean).pop();
-  return last ?? "";
-}
-
-// ── Times ──
-
-/** The zone asked for, or UTC when the runtime does not know it. */
-export function decisionExportZone(tz: string | null | undefined): string {
-  if (!tz) return "UTC";
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: tz });
-    return tz;
-  } catch {
-    return "UTC";
-  }
-}
-
-const iso = (at: number | null): string | null => (at === null ? null : new Date(at).toISOString());
-const ms = (value: string | null | undefined): number | null => {
-  if (!value) return null;
-  const at = Date.parse(value);
-  return Number.isFinite(at) ? at : null;
-};
-
-/** "Nov 8", "Nov 8 at 2:02 PM", "Nov 8 – Nov 10, 2026": the reader's zone, English, as the Inbox writes dates. */
-export function decisionExportDates(tz: string) {
-  const zone = decisionExportZone(tz);
-  const day = new Intl.DateTimeFormat("en-US", { timeZone: zone, month: "short", day: "numeric" });
-  const dayYear = new Intl.DateTimeFormat("en-US", { timeZone: zone, month: "short", day: "numeric", year: "numeric" });
-  const time = new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit" });
-  const ymd = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" });
-  const year = (at: Date) => ymd.format(at).slice(0, 4);
-  return {
-    day: (value: string) => day.format(new Date(value)),
-    at: (value: string) => `${day.format(new Date(value))} at ${time.format(new Date(value))}`,
-    ymd: (value: string) => ymd.format(new Date(value)),
-    range: (from: string | null, to: string | null): string => {
-      if (!from || !to) return from ? dayYear.format(new Date(from)) : to ? dayYear.format(new Date(to)) : "";
-      const [a, b] = [new Date(from), new Date(to)];
-      if (ymd.format(a) === ymd.format(b)) return dayYear.format(a);
-      if (year(a) === year(b)) return `${day.format(a)} – ${dayYear.format(b)}`;
-      return `${dayYear.format(a)} – ${dayYear.format(b)}`;
-    },
-  };
-}
-
-/** `decisions-<subject slug, at most 50>-<yyyy-mm-dd>.<ext>`, the date in the reader's zone. */
-export function decisionExportFileName(doc: Pick<DecisionExportV1, "thread" | "exported_at" | "tz">, ext: DecisionExportFormat): string {
-  const slug =
-    doc.thread.subject
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 50)
-      .replace(/-+$/, "") || "thread";
-  return `decisions-${slug}-${decisionExportDates(doc.tz).ymd(doc.exported_at)}.${ext}`;
-}
-
 // ── The builder ──
-
-const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
 /**
  * The thread's export, and the pictures it names (for the server to read into `images`). Every fate comes from
@@ -472,36 +266,4 @@ export function buildDecisionExport(input: DecisionExportInput, options: Decisio
     images: {},
   };
   return { doc, pictures };
-}
-
-/** The decisions' agent-free summary for the index: the answer in one line, cut for a table. */
-export function decisionAnswerLine(item: Pick<DecisionExportItem, "answer">, cut: number | null = DECISION_EXPORT_INDEX_ANSWER_CHARS): string {
-  const answer = item.answer;
-  if (!answer) return "";
-  const parts = [...answer.selected];
-  if (answer.other) parts.push(`Other: ${answer.other}`);
-  if (answer.text) parts.push(answer.text);
-  const line = oneLine(parts.join(", "));
-  return cut !== null && line.length > cut ? `${line.slice(0, cut - 1).trimEnd()}…` : line;
-}
-
-/** The other questions by group, in `DECISION_EXPORT_OTHER_STATES` order, empty groups left out. */
-export function decisionExportGroups(doc: Pick<DecisionExportV1, "others">): { state: Exclude<DecisionExportState, "decided">; title: string; items: DecisionExportItem[] }[] {
-  return DECISION_EXPORT_OTHER_STATES.map((state) => ({ state, title: DECISION_EXPORT_STATE_TITLES[state], items: doc.others.filter((item) => item.state === state) })).filter((group) => group.items.length > 0);
-}
-
-/** The one line a non-decision says after its prompt (plain text; each document escapes it): its pick, its replacement, or its recommendation. */
-export function decisionOtherDetail(item: DecisionExportItem): string | null {
-  if (item.state === "replaced") return item.replaced_by ? `Replaced by “${item.replaced_by.prompt ?? item.replaced_by.id}”` : "Withdrawn";
-  if (item.answer && !item.answer.sent && !item.answer.skipped) {
-    const line = decisionAnswerLine(item, null);
-    const note = item.answer.note ? ` (note: ${oneLine(item.answer.note)})` : "";
-    if (line || note) return `Draft: ${line || "—"}${note}`;
-  }
-  if (item.state === "skipped" && item.answer?.note) return `Note: ${oneLine(item.answer.note)}`;
-  if (item.state === "open" || item.state === "answered_in_words") {
-    const rec = item.recommendation.labels.length > 0 ? item.recommendation.labels.join(", ") : item.recommendation.text;
-    return rec ? `Recommended: ${oneLine(rec)}` : null;
-  }
-  return null;
 }

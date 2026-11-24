@@ -9,11 +9,12 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { decisionRowOf, ownWordsTime, type DecisionFate, type DecisionRow } from "@plannotator/core/inbox-decisions";
 import { INBOX_HOST_NAMES, isInboxActionReport, type DecisionDataSummary, type DecisionGroup, type DecisionTrend, type InboxMessage, type InboxQuestionRecord } from "@plannotator/core/inbox-types";
+// A question's row and the person's own words are pure and the decision export's builder runs on them, so they are
+// core's (internal, not in core's `exports`: one definition, reached here by path).
+import { DAY_MS, decisionRowOf, ownWordsTime, readableTime, type DecisionFate, type DecisionRow } from "../../core/inbox-decision-rules";
 
-// A question's row and the person's own words are pure, so they live in core beside the decision export's shape.
-export { agentLabel, decisionRowOf, ownWordsTime, type DecisionFate, type DecisionRow } from "@plannotator/core/inbox-decisions";
+export { decisionRowOf, type DecisionRow } from "../../core/inbox-decision-rules";
 
 export interface DecisionDataInput {
   /** A project's id -> the head of its combined group (a project no longer stored: itself). */
@@ -40,9 +41,6 @@ export interface DecisionQuery {
   now: number;
 }
 
-const DAY_MS = 86_400_000;
-/** A time every later step can use, even moved into the reader's zone: `new Date(...).toISOString()` throws past this. */
-const readableTime = (at: unknown): at is number => typeof at === "number" && Number.isFinite(at) && Math.abs(at) <= 8.64e15 - 2 * DAY_MS;
 const readableTimeOrNull = (at: unknown): at is number | null => at === null || readableTime(at);
 const FATES: ReadonlySet<unknown> = new Set<DecisionFate>(["answered", "skipped", "set_aside", "replaced", "archived", "open", "picked_unsent"]);
 
