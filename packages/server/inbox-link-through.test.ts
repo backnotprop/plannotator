@@ -469,4 +469,15 @@ describe("the computer that asked, when its ask is refused", () => {
     expect(linkThroughAsks([entry(1, "delivered")], studio)).toEqual([]);
     expect(linkThroughAsks([entry(1, "refused", "not json")], studio)[0]!.why).toBe("Studio answered 404.");
   });
+
+  test("an ask given up on, or whose link went before it left, says so on its row too, never an idle row", () => {
+    const facts3 = [facts(STUDIO, "Studio", [LAPTOP, MINI])];
+    const parked = linkThroughAsks([{ ...entry(1, "parked"), notice: { kind: "may_have_been_delivered", at: "2026-11-24T00:01:00Z" } }], studio);
+    expect(parked).toEqual([{ via: STUDIO, with: MINI, why: "May have been delivered. Check on Studio." }]);
+    expect(linkThroughRows(LAPTOP, facts3, parked)[0]).toMatchObject({ status: "failed", why: "May have been delivered. Check on Studio." });
+    const dropped = linkThroughAsks([{ ...entry(1, "dropped"), left: false, notice: { kind: "not_delivered", at: "2026-11-24T00:01:00Z" } }], studio);
+    expect(linkThroughRows(LAPTOP, facts3, dropped)[0]).toMatchObject({ status: "failed", why: "Studio was unlinked before it went." });
+    // Link again: the newer ask is under way.
+    expect(linkThroughRows(LAPTOP, facts3, linkThroughAsks([entry(1, "parked"), entry(2, "queued")], studio))[0]).toMatchObject({ status: "linking", why: null });
+  });
 });

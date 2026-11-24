@@ -127,6 +127,10 @@ export function linkThroughAsks(entries: readonly OutboxEntry[], via: { id: stri
     else if (entry.state === "refused") {
       const words = linkThroughText((entry.answer as { error?: unknown } | null)?.error, 300);
       asks.push({ via: via.id, with: withId, why: words || `${via.name} answered ${entry.status ?? "with a refusal"}.` });
+    } else if (entry.state === "parked" || entry.state === "dropped") {
+      // Given up on, or its link went: the outbox's own words for it (outboxLine in packages/inbox/machines.ts), and Link again.
+      const mayHave = entry.state === "parked" || entry.notice?.kind === "may_have_been_delivered" || entry.left;
+      asks.push({ via: via.id, with: withId, why: mayHave ? `May have been delivered. Check on ${via.name}.` : `${via.name} was unlinked before it went.` });
     }
   }
   return asks;

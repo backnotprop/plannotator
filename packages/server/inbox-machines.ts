@@ -50,6 +50,8 @@ import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, 
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
+import { sameTailnetRefusal } from "./inbox-same-tailnet";
+import type { TailscaleRunResult } from "@plannotator/shared/tailscale";
 import type { FarArchived } from "./inbox-archived-merged";
 import { ARTIFACT_PINS_MARK, readFarWall } from "./inbox-artifacts-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
@@ -112,6 +114,8 @@ export interface InboxMachineDoor {
   revokeDevice: (deviceId: string, options?: { oweRefusal?: boolean }) => void;
   /** This Inbox's door on the tailnet (`host:8443`), or null while it is not published. */
   tailnetAddress: () => string | null;
+  /** This computer's `tailscale status --json` (inbox-same-tailnet.ts); absent, an introduction's link is not checked against it. */
+  tailnetStatus?: () => Promise<TailscaleRunResult>;
   /** Why the door is not published while it should be (its port held, Tailscale stopped), or null. */
   tailnetError: () => string | null;
   /** Publish the door on the tailnet now (the tailnet switch's own path). */
@@ -164,6 +168,8 @@ export interface InboxMachinesContext {
   /** Tests: the links' clocks. */
   timings?: MachineLinkTimings;
   now?: () => Date;
+  /** Where the same-tailnet check of an introduction's link reads the test sandbox flag (inbox-same-tailnet.ts). Default `process.env`. */
+  tailnetCheckEnv?: Record<string, string | undefined>;
 }
 
 /** The links' clocks, and `accountsMs`: how long a read of a machine's accounts waits. */
@@ -542,7 +548,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       else peer.poke();
     },
     held: () => links.list().flatMap((record) => linkThroughAsks(outbox.list(record.id), record)),
-    link: (input) => link(input),
+    link: (input) => link(input, { introduced: true }),
     introOffer: (forId, by) => {
       const opened = context.door.openIntroductionOffer(forId, by);
       links.keepSelf();
@@ -805,7 +811,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
    * ways is the person's consent to it). When it cannot be published, the
    * link is refused unless `one_way` says the person wants it that way.
    */
-  const link = async (input: { link?: unknown; address?: unknown; code?: unknown; back?: unknown; one_way?: unknown }) => {
+  const link = async (input: { link?: unknown; address?: unknown; code?: unknown; back?: unknown; one_way?: unknown }, how: { introduced?: boolean } = {}) => {
     const parsed = typeof input.link === "string" && input.link.trim() ? parseLinkOffer(input.link) : null;
     if (typeof input.link === "string" && input.link.trim() && !parsed) throw new InboxError("validation_error", "link: not a plannotator://link code.", { field: "link" });
     const secret = parsed?.secret ?? null;
@@ -838,6 +844,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     const back = backRaw ? checkTailnetAddress(backRaw) : null;
     try {
+      // A code a linked computer handed over (inbox-link-through.ts): only for one of this person's own computers on
+      // this tailnet, checked before its secret leaves here (inbox-same-tailnet.ts). A code pasted by hand is not.
+      if (how.introduced) {
+        const refused = await sameTailnetRefusal(url, context.door.tailnetStatus, context.tailnetCheckEnv);
+        if (refused) throw new InboxError("not_same_tailnet", refused);
+      }
       const target = await redeem({ kind: "tailnet", url }, { id: parsed?.id ?? null, secret, code });
       let deviceId: string | null = null;
       if (back) {
@@ -861,6 +873,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
           throw error;
         }
         deviceId = context.door.offerDevice(backOffer.secret);
+        if (!deviceId) {
+          // Its way back was taken, but the offer that names the device it made is gone: a link saved without it could
+          // not revoke that device at Unlink. Nothing half-made: the other machine forgets its side.
+          await tellUnlink(target.transport, target.token);
+          throw new InboxError("machine_not_linked", "That machine is not linked.");
+        }
       }
       const record: InboxLinkRecord = { id: target.id, name: target.name, token: target.token, transport: { kind: "tailnet", url }, device_id: deviceId, linked_at: new Date().toISOString() };
       save(record);
@@ -924,6 +942,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (introduced && introduced.for !== parsed.id) {
       context.door.revokeDevice(deviceId);
       return json({ error: "This link code was made for another computer.", code: "introduction_mismatch" }, 403);
+    }
+    // ...and only when it is one of this person's own computers on this tailnet (inbox-same-tailnet.ts).
+    const refused = introduced ? await sameTailnetRefusal(url, context.door.tailnetStatus, context.tailnetCheckEnv) : null;
+    if (refused) {
+      context.door.revokeDevice(deviceId);
+      return json({ error: refused, code: "not_same_tailnet" }, 403);
     }
     try {
       const target = await redeem({ kind: "tailnet", url }, parsed);

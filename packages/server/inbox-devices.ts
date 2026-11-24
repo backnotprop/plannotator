@@ -716,6 +716,11 @@ export const AGENT_PLATFORM = "agent";
 /** Machine offers kept, open or redeemed (a CLI offer and a link-back can be open at once). */
 const MACHINE_OFFERS_KEPT = 8;
 /**
+ * Introductions' offers open per computer introducing them, in their own list: however many a linked computer asks
+ * for, the person's own link codes and an ordinary link's way back keep their slots. A newer one replaces its oldest.
+ */
+const INTRODUCTION_OFFERS_PER_BROKER = 2;
+/**
  * An introduction's link code (inbox-link-through.ts) lives this long by this computer's clock: the computer it is for
  * redeems it the moment the broker hands it over, so this is its freshness, whatever the other clocks say.
  */
@@ -908,11 +913,13 @@ export function createInboxDevices(context: InboxDevicesContext) {
   /** The last offer made, kept after it closes so the window can say what reached the door while it showed. */
   let lastOffer: Offer | null = null;
   const phonesOn = context.phones !== false;
-  /**
-   * Machine offers (inbox-machines.ts), newest last, with the device each was redeemed for. An introduction's offer
-   * carries the computer it is for and the one that introduced it (`for`, `by`), and no six digits (`code` empty).
-   */
+  /** Machine offers (inbox-machines.ts), newest last, with the device each was redeemed for. */
   const machineOffers: (Offer & { deviceId: string | null; for?: string; by?: string })[] = [];
+  /**
+   * Introductions' offers (inbox-link-through.ts), newest last, apart from `machineOffers`: each carries the computer it
+   * is for and the one that introduced it (`for`, `by`), and no six digits (`code` empty).
+   */
+  let introOffers: (typeof machineOffers)[number][] = [];
   // A provisional device outlives no restart: the link-back that would complete it ended with the last run.
   for (const device of devices.list()) if (device.introduced) devices.revoke(device.id, now().toISOString());
   let name: string | null = null;
@@ -995,10 +1002,15 @@ export function createInboxDevices(context: InboxDevicesContext) {
       for: forId,
       by,
     };
-    keepMachineOffer(made);
+    // Its own list: a closed one goes, and `by` keeps at most INTRODUCTION_OFFERS_PER_BROKER open, its oldest replaced.
+    introOffers = introOffers.filter(isOpen);
+    const mine = introOffers.filter((o) => o.by === by);
+    const replaced = new Set(mine.slice(0, Math.max(mine.length - INTRODUCTION_OFFERS_PER_BROKER + 1, 0)));
+    introOffers = [...introOffers.filter((o) => !replaced.has(o)), made];
     return { secret: made.secret, expires_at: new Date(made.expiresAt).toISOString() };
   };
-  const openMachineOffers = () => machineOffers.filter((o) => !o.redeemed && o.wrong < PAIRING_CODE_TRIES && o.expiresAt > now().getTime());
+  const isOpen = (o: Offer) => !o.redeemed && o.wrong < PAIRING_CODE_TRIES && o.expiresAt > now().getTime();
+  const openMachineOffers = () => [...machineOffers, ...introOffers].filter(isOpen);
   const offerDevice = (secret: string) => machineOffers.find((o) => sameSecret(o.secret, secret))?.deviceId ?? null;
 
   /** A provisional device still unsettled when its time is up is revoked. */
@@ -2121,7 +2133,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     },
     /** `by` is no longer linked: every offer it had opened here closes, and every device still provisional from one goes. */
     dropIntroductions: (by: string) => {
-      for (const o of machineOffers) if (o.by === by) o.redeemed = true;
+      for (const o of introOffers) if (o.by === by) o.redeemed = true;
       for (const device of devices.list()) if (device.introduced?.by === by) revoke(device);
     },
     /** `oweRefusal`: a machine unlinked while it could not be told; the door stays up until its token is refused once. */
@@ -2139,6 +2151,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
       return found.deviceId ?? null;
     },
     tailnetAddress: () => tailnet.address,
+    /** `tailscale status --json`, without blocking (the same reader as the door's own looks): this computer and its tailnet's. */
+    tailnetStatus: () => readTailscale(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS),
     /** Why the door is not published, while it should be (a port held, Tailscale stopped), in the window's words. */
     tailnetError: () => tailnet.error,
     publishTailnet: (): { ok: true; address: string } | { ok: false; message: string } => {
