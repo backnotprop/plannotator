@@ -32,7 +32,9 @@
 import {
   INBOX_SHIP_ENDED_MS,
   INBOX_SHIP_READ_MISSES,
+  INBOX_SHIP_START_MS,
   SHIP_READ_STUCK,
+  SHIP_START_STUCK,
   shipActive,
   shipChanges,
   shipFailsAfter,
@@ -65,6 +67,8 @@ export interface InboxShipWatchOptions {
   mayBind?: (ship: InboxShip, session: string) => boolean;
   /** The launch a message started (its `launch.id`): a ship ties its own when it starts. */
   launchOf?: (messageId: string) => string | null;
+  /** An unbound ship's launch failed or was removed: why, in its own words (`shipLaunchFailed`). Absent: never. */
+  launchFailed?: (ship: InboxShip) => string | null;
   /** Since when the ship's session has ended with a note of the ship's still waiting for it; null when it has not. */
   endedWaiting?: (ship: InboxShip) => number | null;
   /**
@@ -160,6 +164,30 @@ export function createInboxShipWatch(options: InboxShipWatchOptions) {
     return ships.update(ship.key, (was) => (was.id === ship.id ? { ...was, bound: true, agent: { ...was.agent, host: who.host, session: who.session } } : was)) ?? ship;
   };
 
+  /**
+   * A new session's ship that has no session yet: bound when one is known (true: bound now, its waiting notes go out at
+   * its next read); Stuck "the agent didn't start" when its launch failed (at once, its reason in the log) or none was
+   * known `INBOX_SHIP_START_MS` after Ship; that Stuck ends by itself once the session is known.
+   */
+  const settleStart = (key: string): boolean => {
+    const held = ships.get(key);
+    if (!held || !shipActive(held) || !options.shipper) return false;
+    const wasBound = !!held.bound;
+    const ship = remember(held);
+    if (ship.bound) {
+      if (ship.stuck_by === "start") ships.update(key, (was) => (was.stuck_by === "start" ? { ...was, state: "shipping", reason: null, stuck_by: null } : was));
+      if (!wasBound || ship.stuck_by === "start") changed();
+      return !wasBound;
+    }
+    if (ship.state !== "shipping") return false;
+    const failed = options.launchFailed?.(ship) ?? null;
+    const why = failed ?? (now() - Date.parse(ship.started_at) >= INBOX_SHIP_START_MS ? "no session started" : null);
+    if (!why) return false;
+    ships.update(key, (was) => (was.state === "shipping" ? { ...was, state: "stuck", reason: SHIP_START_STUCK, stuck_by: "start", log: [...was.log, entry("stuck", `Stuck: ${SHIP_START_STUCK} (${why})`)] } : was));
+    changed();
+    return false;
+  };
+
   /** A read that failed: counted; a few in a row show Stuck with why in the log. The next read that works ends it. */
   const missed = (fresh: InboxShip, why: string) => {
     const misses = (fresh.misses ?? 0) + 1;
@@ -190,6 +218,7 @@ export function createInboxShipWatch(options: InboxShipWatchOptions) {
   };
 
   const readOnce = async (key: string): Promise<void> => {
+    settleStart(key);
     const held = ships.get(key);
     if (!held || !shipActive(held)) return;
     const ship = remember(held);
@@ -224,7 +253,8 @@ export function createInboxShipWatch(options: InboxShipWatchOptions) {
       let state = was.state;
       let reason = was.reason;
       let stuckBy = was.stuck_by ?? null;
-      if (stuckBy !== "agent") {
+      // The agent's own Stuck, and a new session that did not start, end only by themselves (`step`, `settleStart`).
+      if (stuckBy !== "agent" && stuckBy !== "start") {
         const why = failing ? `${failing} failing` : ended ? `${was.agent.name ?? "The agent"} ended` : null;
         if (why && (state !== "stuck" || reason !== why)) {
           state = "stuck";
@@ -346,8 +376,8 @@ export function createInboxShipWatch(options: InboxShipWatchOptions) {
         const told = sha ? [...was.told, sha].slice(-50) : was.told;
         const own = { bound: true, steps: (was.steps ?? 0) + 1, ...(bind ? { agent: { ...was.agent, session } } : {}) };
         if (step.kind === "stuck") return { ...was, ...own, state: "stuck", reason: text.slice(0, 60), stuck_by: "agent", told, log };
-        // Going on after saying stuck: shipping again.
-        const going = was.stuck_by === "agent" ? { state: "shipping" as const, reason: null, stuck_by: null } : {};
+        // Going on after saying stuck, or the new session that had not started calling: shipping again.
+        const going = was.stuck_by === "agent" || was.stuck_by === "start" ? { state: "shipping" as const, reason: null, stuck_by: null } : {};
         return { ...was, ...own, ...going, told, log };
       });
       changed();
@@ -361,6 +391,14 @@ export function createInboxShipWatch(options: InboxShipWatchOptions) {
         const ship = ships.get(pull.key);
         if (ship && shipActive(ship) && ship.seen && (pull.state !== "open" && pull.state !== "draft" ? true : !!pull.head_sha && pull.head_sha !== ship.seen.head_sha)) void look(ship.key);
       }
+    },
+
+    /**
+     * A launch moved (started, failed, removed): each new session's ship that has no session yet binds, or reads Stuck
+     * at once when its launch failed. One that binds now is read at once, so its waiting notes go out.
+     */
+    starting(): void {
+      for (const ship of ships.all()) if (shipActive(ship) && !ship.bound && settleStart(ship.key)) void look(ship.key);
     },
 
     /** Every active ship read once now (the tests' tick; the timer's). */

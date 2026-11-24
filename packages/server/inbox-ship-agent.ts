@@ -43,6 +43,20 @@ export function shipBinds(deps: Pick<InboxShipAgentDeps, "message">, ship: Ship)
 }
 
 /**
+ * Why the launch tied to an unbound ship will not report a session: its own error's words, or that it was removed.
+ * Null while it may still start, when it started, and for a ship no launch made.
+ */
+export function shipLaunchFailed(deps: Pick<InboxShipAgentDeps, "message">, ship: Ship): string | null {
+  if (ship.bound) return null;
+  const carried = ship.instruction_id ? deps.message(ship.instruction_id) : null;
+  const launch = carried?.launch;
+  if (!carried || !launch || (ship.launch_id ?? launch.id) !== launch.id || !placeholder(inboxLaunchedSession(carried))) return null;
+  if (launch.error) return launch.error.text.trim() || "its launch failed";
+  if (launch.deleted_at) return "its launch was removed";
+  return null;
+}
+
+/**
  * The shipping session as it stands; null when none is known yet (nothing is sent to anyone else: its notes wait). A
  * bound ship's is its record's (the person's choice, or the session it was bound to); else the first of `shipBinds`.
  */

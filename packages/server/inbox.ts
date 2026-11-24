@@ -359,7 +359,7 @@ import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createShipReader } from "./inbox-ship-read";
-import { shipBinds, shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
+import { shipBinds, shipLaunchFailed, shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
 import type { InboxShip } from "@plannotator/core/inbox-ship";
 import { inboxNoticeOf } from "@plannotator/core/inbox-ship";
 import { createInboxShipRoutes } from "./inbox-ship-routes";
@@ -5213,6 +5213,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const place = rexPlaceOf(session, inRex, rexUnconnectedNow());
     return place ? (rex.statuses(new Map([[session, place]])).get(session) ?? null) : null;
   };
+  // Ship's watch, made below: a launch that moved binds a new session's ship, or says Stuck when it failed.
+  let shipLaunchMoved: (() => void) | null = null;
   const launch = createInboxLaunch({
     rex,
     rexStatus: (session) => rexStatusOf(session),
@@ -5238,6 +5240,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onChange: () => {
       // A run line moved: a delivery move to every window, no label change; the Agents section shows the launch's state.
       for (const listener of deliveryListeners) listener(false, true, false, true);
+      shipLaunchMoved?.();
     },
     log: (line) => process.stderr.write(`${line}\n`),
     // The permission hook runs this Plannotator.
@@ -5338,6 +5341,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A new session's ship binds only to its own launch's session or its instruction's delivery's, never a first caller.
     mayBind: (ship, session) => shipBinds(shipAgentDeps, ship).includes(session),
     launchOf: (messageId) => store.message(messageId)?.launch?.id ?? null,
+    launchFailed: (ship) => shipLaunchFailed(shipAgentDeps, ship),
     note: (ship, body, kind) => {
       // Only ever to the shipping session: with none known, nobody is told (never the thread's latest agent).
       const to = shipShipper(shipAgentDeps, ship);
@@ -5358,6 +5362,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   });
   shipWatch.resume();
+  shipLaunchMoved = () => shipWatch.starting();
   const shipRoutes = createInboxShipRoutes({
     ships,
     watch: shipWatch,

@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxShip, InboxShipRead } from "@plannotator/core/inbox-ship";
 import type { InboxShipReadResult } from "./inbox-ship-read";
-import { shipBinds, shipShipper } from "./inbox-ship-agent";
+import { SHIP_START_STUCK } from "@plannotator/core/inbox-ship";
+import { shipBinds, shipLaunchFailed, shipShipper } from "./inbox-ship-agent";
 import { createInboxShipStore, INBOX_SHIPS_FILE } from "./inbox-ship-store";
 import { createInboxShipWatch, shipEndedWaiting } from "./inbox-ship-watch";
 
@@ -43,6 +44,7 @@ function world(
     shipper?: (ship: InboxShip) => { host: string; session: string } | null;
     mayBind?: (ship: InboxShip, session: string) => boolean;
     launchOf?: (messageId: string) => string | null;
+    launchFailed?: (ship: InboxShip) => string | null;
     bound?: boolean;
     answers?: { ship: InboxShip; to: string }[];
   } = {},
@@ -61,6 +63,7 @@ function world(
     ...(over.shipper ? { shipper: over.shipper } : {}),
     ...(over.mayBind ? { mayBind: over.mayBind } : {}),
     ...(over.launchOf ? { launchOf: over.launchOf } : {}),
+    ...(over.launchFailed ? { launchFailed: over.launchFailed } : {}),
     endedWaiting: () => endedAt,
     onStart: (ship, to) => (to ? over.answers?.push({ ship, to }) : started.push(ship)),
     onChange: () => (changes += 1),
@@ -367,7 +370,7 @@ describe("Ship's watch", () => {
   });
 
   // The thread's messages as the Inbox keeps them, and the shipper as the Inbox reads it (inbox-ship-agent.ts).
-  type Carried = { id: string; author: { kind: "person" }; to?: { host: string; session: string } | null; launch?: { id: string; session?: string | null; session_ref?: string | null } | null; delivery?: { state: "delivered"; host: string; session: string; at: string; read_by?: string | null } | null };
+  type Carried = { id: string; author: { kind: "person" }; to?: { host: string; session: string } | null; launch?: { id: string; session?: string | null; session_ref?: string | null; error?: { code: "failed"; text: string; at: string } | null; deleted_at?: string | null } | null; delivery?: { state: "delivered"; host: string; session: string; at: string; read_by?: string | null } | null };
   const thread = () => {
     const messages = new Map<string, Carried>();
     const deps = { message: (id: string) => (messages.get(id) ?? null) as never, threadMessageIds: () => [...messages.keys()] };
@@ -377,6 +380,7 @@ describe("Ship's watch", () => {
         shipper: (ship: InboxShip) => shipShipper(deps, ship),
         mayBind: (ship: InboxShip, session: string) => shipBinds(deps, ship).includes(session),
         launchOf: (id: string) => messages.get(id)?.launch?.id ?? null,
+        launchFailed: (ship: InboxShip) => shipLaunchFailed(deps, ship),
       },
     };
   };
@@ -459,6 +463,73 @@ describe("Ship's watch", () => {
     w.set(green({ checks: "failure", failing: ["lint"] }));
     await w.watch.tick();
     expect(w.notes.at(-1)).toMatchObject({ kind: "watch", to: "ses_reader" });
+  });
+
+  test("a new session whose launch failed reads Stuck at once, its launch's reason in the log; Stop still ends it", async () => {
+    const t = thread();
+    const w = make(null, green(), t.over);
+    await settle();
+    t.messages.set("msg_ship", launchedReply());
+    shipToNew(w);
+    await settle();
+    expect(w.now().state).toBe("shipping");
+    // The launch answers: it did not start. The launch's own change tells the watch, no tick needed.
+    t.messages.set("msg_ship", { ...launchedReply(), launch: { id: "lch_1", session: null, session_ref: null, error: { code: "failed", text: "Claude Code isn't installed here.", at: "2026-11-24T14:19:05Z" } } });
+    w.watch.starting();
+    expect(w.now().state).toBe("stuck");
+    expect(w.now().reason).toBe(SHIP_START_STUCK);
+    expect(w.now().log.at(-1)!.text).toBe(`Stuck: ${SHIP_START_STUCK} (Claude Code isn't installed here.)`);
+    // Ticks after it change nothing, and tell nobody.
+    await w.watch.tick();
+    expect(w.now().log.filter((e) => e.kind === "stuck")).toHaveLength(1);
+    w.watch.stop(w.now().id);
+    expect(w.now().state).toBe("stopped");
+  });
+
+  test("a new session that never reports a session reads Stuck at the watch's first tick, and nothing waits on it for ever", async () => {
+    const t = thread();
+    const w = make(null, green(), t.over);
+    await settle();
+    t.messages.set("msg_ship", launchedReply());
+    shipToNew(w);
+    await settle();
+    w.later(30_000);
+    await w.watch.tick();
+    expect(w.now().state).toBe("shipping");
+    // The watch's own tick, two minutes after Ship.
+    w.later(90_000);
+    await w.watch.tick();
+    expect(w.now().state).toBe("stuck");
+    expect(w.now().reason).toBe(SHIP_START_STUCK);
+    expect(w.now().log.at(-1)!.text).toBe(`Stuck: ${SHIP_START_STUCK} (no session started)`);
+    expect(w.notes.filter((n) => n.kind === "watch")).toEqual([]);
+  });
+
+  test("a session reported after Stuck binds the ship, it recovers by itself, and the notes that waited go out once", async () => {
+    const t = thread();
+    const w = make(null, green(), t.over);
+    await settle();
+    t.messages.set("msg_ship", launchedReply());
+    shipToNew(w);
+    await settle();
+    w.later(2 * 60_000);
+    w.set(green({ checks: "failure", failing: ["lint"] }));
+    await w.watch.tick();
+    expect(w.now().state).toBe("stuck");
+    expect(w.notes.filter((n) => n.kind === "watch")).toEqual([]);
+    // The launch reports its session late.
+    t.messages.set("msg_ship", { ...launchedReply(), to: { host: "claude-code", session: "ses_new" }, launch: { id: "lch_1", session: "ses_new", session_ref: "ref_1" } });
+    w.watch.starting();
+    await settle();
+    await settle();
+    expect(w.now().state).toBe("shipping");
+    expect(w.now().reason).toBeNull();
+    expect(w.now().agent.session).toBe("ses_new");
+    expect(w.notes.filter((n) => n.kind === "watch").map((n) => n.to)).toEqual(["ses_new"]);
+    expect(w.notes.at(-1)!.body).toContain("lint");
+    await w.watch.tick();
+    await w.watch.tick();
+    expect(w.notes.filter((n) => n.kind === "watch")).toHaveLength(1);
   });
 
   test("pushes the agent never logs hold a 'someone pushed' note back one read per head at most", async () => {

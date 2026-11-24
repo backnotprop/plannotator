@@ -122,10 +122,11 @@ export interface InboxShip {
   /** Stuck's few words. */
   reason: string | null;
   /**
-   * Who said stuck: the agent, the watch (a check failing on new heads), the session ending, or the pull request not
-   * read `INBOX_SHIP_READ_MISSES` times in a row.
+   * Who said stuck: the agent, the watch (a check failing on new heads), the session ending, the pull request not
+   * read `INBOX_SHIP_READ_MISSES` times in a row, or a new session that did not start (`start`: its launch failed, or
+   * no session was known `INBOX_SHIP_START_MS` after Ship; it ends by itself when the session is known).
    */
-  stuck_by?: "agent" | "checks" | "ended" | "read" | null;
+  stuck_by?: "agent" | "checks" | "ended" | "read" | "start" | null;
   /** The reads that failed in a row (0 or absent: the last read worked). */
   misses?: number;
   ended_at: string | null;
@@ -210,6 +211,10 @@ export const INBOX_SHIP_ENDED_MS = 10 * 60_000;
 export const INBOX_SHIP_READ_MISSES = 3;
 /** Stuck's words when the watch can't read the pull request. */
 export const SHIP_READ_STUCK = "can't read the pull request";
+/** A new session's ship with no session known this long after Ship (and no launch failure said why): Stuck. The watch's first tick, two minutes in, sees it. */
+export const INBOX_SHIP_START_MS = 90_000;
+/** Stuck's words when the new session a ship was given did not start (its launch failed, or it never reported a session). */
+export const SHIP_START_STUCK = "the agent didn't start";
 
 const short = (sha: string | null) => (sha ?? "").slice(0, 7);
 const names = (list: readonly string[]) => (list.length <= 3 ? list.join(", ") : `${list.slice(0, 3).join(", ")} and ${list.length - 3} more`);
