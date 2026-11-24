@@ -6950,7 +6950,11 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-dm-tiles [data-question-zoom] { right: 7px; top: 7px; width: 30px; height: 30px; border-radius: 8px; background: var(--card); box-shadow: var(--ib-float-shadow); }
 .ib-dm-more { display: flex; flex-wrap: wrap; gap: 4px; margin-left: -10px; }
 .ib-dm-more .ib-dm-lnk { color: var(--muted-foreground); }
-.ib-dm-nav { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding-top: 12px; flex: none; }
+.ib-dm-nav { position: relative; z-index: 2; display: flex; align-items: center; gap: 16px; padding: 0 22px 16px; flex: none; }
+.ib-dm-navsp { flex: 1 1 auto; }
+.ib-dm-send { flex: none; gap: 6px; }
+/* The thread's own question card inside the dialog: the card's width, no extra margin above it. */
+.ib-dm-qcard .question-block { margin-top: 4px; }
 .ib-dm-after { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-dm-banner { position: absolute; left: 50%; top: 14px; z-index: 3; translate: -50% 0; display: flex; align-items: center; gap: 8px; max-width: min(640px, calc(100% - 40px)); padding: 10px 14px; border-radius: var(--ib-lr-md, 9px); background: color-mix(in oklab, var(--warning, oklch(0.8 0.15 80)) 22%, var(--card)); font-size: var(--ib-fs-14, 14px); box-shadow: var(--ib-float-shadow); }
 .ib-dm-card:has(.ib-dm-banner) .ib-dm-main { padding-top: 66px; }
@@ -7006,7 +7010,10 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-dm-scope { display: none; }
   .pn-inbox .ib-dm-x { width: 44px; height: 44px; }
   .ib-dm-strip { padding: 4px 16px 10px; }
-  .ib-dm-stage { padding: 0 8px max(8px, env(safe-area-inset-bottom)); }
+  .ib-dm-stage { padding: 0 8px 8px; }
+  .ib-dm-nav { gap: 4px; padding: 0 8px max(8px, env(safe-area-inset-bottom)); }
+  .ib-dm-nav .ib-dm-lnk { min-height: 44px; min-width: 44px; justify-content: center; }
+  .ib-dm-send { min-height: 44px; }
   .ib-dm-card { flex-direction: column; overflow-y: auto; }
   .ib-dm-pics { flex: none; max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--border); padding: 12px; }
   .ib-dm-main { padding: 18px 16px 14px; overflow: visible; }

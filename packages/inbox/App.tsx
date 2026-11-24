@@ -372,7 +372,6 @@ function Inbox() {
   /** What opened decision mode: focus goes back there when the sitting ends. */
   const decideOpener = useRef<HTMLElement | null>(null);
   const [decideLeft, setDecideLeft] = useState(0);
-  const [decidePaused, setDecidePaused] = useState(0);
   const decisionModeOnRef = useRef(false);
   const questionListeners = useRef(new Set<(question: InboxQuestion) => void>());
   /**
@@ -3636,7 +3635,7 @@ function Inbox() {
     };
   }, [whatsNewVersion, whatsNewRetry]);
 
-  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
+  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
@@ -3669,7 +3668,7 @@ function Inbox() {
       },
     },
   });
-  const { decisionModeOn, decideInThread, sittingDecisions, closeDecide } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList });
+  const { decisionModeOn, decideInThread, sittingDecisions, closeDecide } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList, route });
   const snoozeBack = useSnoozeBack({ thread, route, listedOpenRow, looking, openThreadCovered, lookRef: paneReads.activeLook, trackLook, refreshList, snoozed: latest?.snoozed, refreshSnoozes, seen: inboxApi.seen });
   // The list's Archived group (approval "inbox-archived-group") and Settings → Archived's Unarchive.
   const archivedFilter = useCallback((rows: readonly InboxListRow[]) => filterShown([{ id: 'archived', label: 'Archived', threads: [...rows] }])[0]?.threads ?? rows, [filterShown]);
@@ -5052,7 +5051,7 @@ function Inbox() {
         context={context}
         error={settingsError}
         onToggleTool={toggleTool}
-        onToggleExperimental={(next, feature) => void toggleExperimental(next, feature)}
+        onToggleExperimental={(next, feature) => void toggleExperimental(next, feature)} onToggleDecisionMode={(next) => void toggleDecisionMode(next)}
         onToggleCookieHost={(next) => void toggleCookieHost(next)}
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
@@ -6229,9 +6228,8 @@ function Inbox() {
           refresh={refreshDecisions}
           subscribeQuestions={subscribeQuestions}
           onLeft={setDecideLeft}
-          onPaused={setDecidePaused}
           onTuck={(threadId, fileId, question) => {
-            setDecide((current) => (current ? { ...current, tucked: true } : current));
+            setDecide((current) => (current ? { ...current, tucked: true, file: fileId !== undefined } : current));
             if (question && !fileId) {
               // A card's "Open the thread" (approval "inbox-decide-thread-only"): the dialog closes into its pill and
               // the thread (already behind it) lands on that question, its prompt focused. The same thread replaces
@@ -6243,12 +6241,12 @@ function Inbox() {
               writeRoute({ page: 'inbox', project: same ? now.project : null, thread: threadId, msg: question.messageId }, same ? { replace: true } : {});
               return;
             }
-            writeRoute({ page: 'inbox', project: null, thread: threadId, file: fileId ? { id: fileId, version: 'current', focus: null } : null });
+            writeRoute({ page: 'inbox', project: null, thread: threadId, file: typeof fileId === 'string' ? { id: fileId, version: 'current', focus: null } : null, ...(fileId && typeof fileId !== 'string' ? { ref: fileId } : {}) });
           }}
           onClose={closeDecide}
         />
       )}
-      {decisionModeOn && decide?.tucked && <DecisionPill left={decideLeft} paused={decidePaused} thread={route.page === 'inbox' && route.thread === decide.thread ? null : decide.title} onResume={() => setDecide((current) => (current ? { ...current, tucked: false } : current))} />}
+      {decisionModeOn && decide?.tucked && <DecisionPill left={decideLeft} thread={route.page === 'inbox' && route.thread === decide.thread ? null : decide.title} onResume={() => setDecide((current) => (current ? { ...current, tucked: false } : current))} />}
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>

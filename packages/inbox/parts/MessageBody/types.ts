@@ -10,6 +10,8 @@ import type { SentAnswerGroup } from '../../sentReply';
 import type { FileRef } from '../../fileRefs';
 
 export interface MessageBodyProps {
+  /** Draw only this question's card (decision mode, one question at a time); absent: the whole message. */
+  onlyQuestion?: string;
   /** A question with a prototype (an option's, or one for all) was asked to open it (its key). Absent: no "Try prototype" tab. */
   onTryPrototype?: (key: string) => void;
   /**

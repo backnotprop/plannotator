@@ -62,6 +62,7 @@ export function MessageBody({
   replyFiles,
   contextNotes,
   onTryPrototype,
+  onlyQuestion,
 }: MessageBodyProps) {
   const { skills, pullDetails, actionsSent, replyParts, ownReply, replyFileList, shown, noteBlocks, noteAtLine, notesRef, restShown, feedbackShown, blocks, restBlocks, feedbackBlocks } = useBodyText({ message, sentActions, sentAnswers, replyFiles, projectRoot, contextNotes });
   const refRepo = useRefRepo(repo);
@@ -187,6 +188,7 @@ export function MessageBody({
         // `readOnly` is about the question cards (answerLocked locks them); with comments on, the text still takes them.
         readOnly={readOnly && !comments}
         questionAnswers={answers}
+        onlyQuestionKey={onlyQuestion}
         onAnswerQuestion={answerQuestion}
         renderQuestionFooter={renderFooter}
         // The Inbox records no decisions: a `Decision:` line an older agent wrote is context.

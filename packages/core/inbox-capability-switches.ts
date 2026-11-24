@@ -7,6 +7,7 @@
 export const INBOX_CAPABILITY_SWITCHES = [
   { key: "board", name: "Board", agent: "board" },
   { key: "steps", name: "Checklist", agent: "checklist" },
+  { key: "decision_mode", name: "Decision mode", agent: "decision_mode" },
   { key: "scheduled_threads", name: "Routines", agent: "routines" },
   { key: "code_review", name: "Code review", agent: "code_review" },
   { key: "chapter_diagrams", name: "Chapter diagrams", agent: "chapter_diagrams" },
