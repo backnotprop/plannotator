@@ -3,12 +3,12 @@
  * turns on and cleared when it turns off; a thread's "Decide these N", the sitting's queue, and opening and ending
  * one (focus back on what opened it). App holds the state.
  */
-import { useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { InboxDecision } from '@plannotator/core/inbox-types';
 import type { SettingsModel } from '../api';
 import type { Route } from './route';
 import { decideEntryShown } from '../decisions/entry';
-import { threadDecisions } from '../decisions/model';
+import { batchTouches, threadDecisions } from '../decisions/model';
 
 /** The sitting: its thread, open or tucked into its pill; `startNonce`: a new start while it is open moves it to that card. */
 export interface DecideSitting {
@@ -69,8 +69,27 @@ export function useDecideSitting({
       if (route.page === 'inbox' && route.thread === decide.thread) setDecide((current) => (current ? { ...current, tucked: false, file: false } : current));
     }
   }, [decide?.tucked, decide?.file, decide?.thread, fileOpen, route.page, route.thread]);
+  /**
+   * The threads whose decisions this window draws (a pane asked for its "Decide these N", or the sitting's). A batch of
+   * records reads the decisions (a scan of every open one) only when it touched one of them (`decisionsTouched`); a
+   * thread asked for the first time reads them once, so its count is never one the window did not keep up with.
+   */
+  const watched = useRef(new Set<string>());
+  const watch = (threadId: string) => {
+    if (watched.current.has(threadId)) return;
+    // Bounded: past 64 the set starts over, and the threads still on screen join again (one read each).
+    if (watched.current.size >= 64) watched.current.clear();
+    watched.current.add(threadId);
+    queueMicrotask(() => void refreshDecisions());
+  };
+  const decisionsTouched = useCallback((records: { any: boolean; threads: ReadonlySet<string>; applied: ReadonlySet<string>; own: ReadonlySet<string> }) => {
+    return decisionModeOnRef.current && batchTouches(records, watched.current);
+  }, [decisionModeOnRef]);
+  // The sitting's thread is always one of them.
+  if (decisionModeOn && decide) watch(decide.thread);
   /** A thread's "Decide these N": decision mode on, no sitting going, and two or more of its decisions waiting. */
   const decideInThread = (threadId: string) => {
+    if (decisionModeOn) watch(threadId);
     if (!decisionModeOn || !decisions || decide) return null;
     const count = threadDecisions(decisions, threadId).length;
     return decideEntryShown(count) ? { count, onDecide: () => openDecide(threadId) } : null;
@@ -95,5 +114,5 @@ export function useDecideSitting({
       target?.focus({ preventScroll: true });
     });
   };
-  return { decisionModeOn, decideInThread, sittingDecisions, closeDecide };
+  return { decisionModeOn, decideInThread, sittingDecisions, closeDecide, decisionsTouched };
 }

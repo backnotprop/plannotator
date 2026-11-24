@@ -1459,7 +1459,7 @@ function Inbox() {
         eventListTimer = null;
         const listRead = refreshList(false);
         void listRead.then((next) => next && flushNotifications(next));
-        void refreshDecisions();
+        if (decisionsTouched(records)) void refreshDecisions();
         // Each thread on screen reads what these records owe it (panes/shownReads.ts).
         const threadRead = shownReads.afterRecords(records, listRead);
         // pn:record-refresh: the event heard → the list and the open thread read again and drawn.
@@ -3669,7 +3669,7 @@ function Inbox() {
       },
     },
   });
-  const { decisionModeOn, decideInThread, sittingDecisions, closeDecide } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList, route });
+  const { decisionModeOn, decideInThread, sittingDecisions, closeDecide, decisionsTouched } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList, route });
   const snoozeBack = useSnoozeBack({ thread, route, listedOpenRow, looking, openThreadCovered, lookRef: paneReads.activeLook, trackLook, refreshList, snoozed: latest?.snoozed, refreshSnoozes, seen: inboxApi.seen });
   // The list's Archived group (approval "inbox-archived-group") and Settings → Archived's Unarchive.
   const archivedFilter = useCallback((rows: readonly InboxListRow[]) => filterShown([{ id: 'archived', label: 'Archived', threads: [...rows] }])[0]?.threads ?? rows, [filterShown]);
