@@ -22,15 +22,19 @@ import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { sameInboxSend, type InboxSendCall } from "@plannotator/shared/inbox/send-same";
 import type { OutboxEntry } from "./inbox-outbox";
-import { holdOutboxFiles, OUTBOX_FILE_SEND_MS, type OutboxFile } from "./inbox-outbox-files";
+import { checkOutboxFiles, holdOutboxFiles, type OutboxFile } from "./inbox-outbox-files";
 import type { PeerLink } from "./inbox-peer-link";
 import { FAR_AGENT_REPLY_ROUTE, TAG_ACROSS_MARK } from "./inbox-far-tags";
 import { farReplyRefusal } from "./inbox-mcp-far-read";
 
 /** How long send_message waits for the other computer's answer while it is online. */
 const FAR_REPLY_WAIT_MS = 6_000;
-/** And this much more when files go first (the time one file may take, as the agent waited for them before they were held). */
-const FAR_FILES_WAIT_MS = OUTBOX_FILE_SEND_MS;
+/**
+ * With files, which go first: the whole wait, kept well under the shortest tool time limit of a host that calls
+ * this (Codex's 60 s default for an MCP tool), so the agent never times out and sends it again under a new key. Past
+ * it the agent is told it waits, and the outbox goes on sending it, once.
+ */
+export const FAR_FILES_WAIT_MS = 45_000;
 
 export interface FarReplyDeps {
   /** The linked computer whose thread `id` (a message or thread id) is, and that thread; null: none (the send goes on as before). */
@@ -155,6 +159,8 @@ export async function farAgentReply(
   // now by the rules that computer's `uploads` route applies, never when it is back.
   let keptFiles: OutboxFile[] = [];
   if (!before && files.length > 0) {
+    // Size and name first, so a file that computer would refuse is never copied here.
+    checkOutboxFiles(files, here ?? "/");
     const read = await deps.readFiles(files.map((file) => file.path), here);
     keptFiles = await deps.holdFiles(read.map((attachment, i) => ({ attachment, name: files[i]!.name ?? attachment.name })));
   }
@@ -167,7 +173,7 @@ export async function farAgentReply(
     FAR_AGENT_REPLY_ROUTE,
     before?.body ?? { idempotency_key: heldKey, session, ...(input.agent_host ? { host: input.agent_host } : {}), ...(input.agent_name ? { name: input.agent_name } : {}), args },
     place.thread_id,
-    FAR_REPLY_WAIT_MS + (withFiles ? FAR_FILES_WAIT_MS : 0),
+    withFiles ? FAR_FILES_WAIT_MS : FAR_REPLY_WAIT_MS,
     // Refused after the agent was told it waits: the person sees it under that thread.
     { notify: true, files: keptFiles },
   );

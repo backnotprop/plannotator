@@ -8,16 +8,17 @@
  * refuse held for hours before it says so; the words-only path changed; an older computer's answer held.
  */
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_UPLOAD_MAX_BYTES, type InboxAttachment } from "@plannotator/core/inbox-types";
-import { inboxBlobPath, recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
+import { inboxBlobPath, inboxBlobsDir, recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { listInboxUploads, sweepInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { farAgentReply, FAR_REPLY_WORDS, type FarReplyDeps } from "./inbox-mcp-far-reply";
-import { InboxOutbox, type OutboxEntry } from "./inbox-outbox";
+import { rawCommandKeyRefusal } from "./inbox-devices";
+import { InboxOutbox, OUTBOX_MAX_SERVER_ERRORS, type OutboxEntry } from "./inbox-outbox";
 import { holdOutboxFiles, outboxHeldUploadsOnDisk, sendWithFiles } from "./inbox-outbox-files";
 import { PeerLink } from "./inbox-peer-link";
 import type { InboxPeerTransport } from "./inbox-transport";
@@ -28,26 +29,53 @@ const DAY = 24 * 3600_000;
 const temp = (name: string) => mkdtempSync(join(tmpdir(), `plannotator-far-files-${name}-`));
 const next = async () => "NEXT";
 
-/** The thread's computer's door: its uploads (bytes kept by id) and the answers it wrote. */
-function studioDoor(script: { upload?: (n: number) => Response | null; reply?: (body: Record<string, any>, n: number) => Response | null } = {}) {
+type DoorScript = {
+  upload?: (n: number) => Response | null | undefined;
+  /** How the door takes a file's bytes (a slow line, one that stops); default: all at once. */
+  take?: (body: ReadableStream<Uint8Array>, signal: AbortSignal) => Promise<string>;
+  /** The file landed there but its answer never came back (this Inbox crashed, the line went down). */
+  lost?: (n: number) => boolean;
+  reply?: (body: Record<string, any>, n: number) => Response | null | undefined;
+};
+
+/**
+ * The thread's computer's door: its uploads (bytes kept by id) and the answers it wrote. Its `uploads` route refuses a
+ * file without a key exactly as the real door does (its own `rawCommandKeyRefusal`), and answers a key it has seen
+ * with the first answer, as the real door's `claim` does.
+ */
+function studioDoor(script: DoorScript = {}) {
   const uploads = new Map<string, { name: string; bytes: string }>();
   const replies: Record<string, any>[] = [];
+  const others: string[] = [];
   const auth: (string | undefined)[] = [];
+  const keys: (string | null)[] = [];
+  const answered = new Map<string, unknown>();
   let n = 0;
   let r = 0;
   const transport = {
     spec: { kind: "tailnet", address: "studio.test.ts.net:8443" },
     describe: () => "studio",
     events: () => new Promise<Response>(() => {}),
-    request: async (route: string, search: string, init: { headers: Record<string, string>; body?: BodyInit | null }) => {
+    request: async (route: string, search: string, init: { headers: Record<string, string>; body?: BodyInit | null; signal?: AbortSignal }) => {
       auth.push(init.headers.Authorization);
       if (route === "uploads") {
-        const scripted = script.upload?.(n);
+        const query = new URLSearchParams(search);
+        keys.push(query.get("idempotency_key"));
+        const missing = rawCommandKeyRefusal(query);
+        if (missing) return missing;
+        const key = query.get("idempotency_key")!;
+        if (answered.has(key)) return Response.json(answered.get(key), { headers: { "Idempotent-Replayed": "true" } });
+        const tried = n;
+        const scripted = script.upload?.(tried);
         n += 1;
         if (scripted === null) throw new Error("the line went down");
         if (scripted) return scripted;
+        const signal = init.signal ?? new AbortController().signal;
+        const bytes = script.take ? await script.take(init.body as ReadableStream<Uint8Array>, signal) : await new Response(init.body).text();
         const id = `upl_01JZ00000000000000000000${String(uploads.size).padStart(2, "0")}`;
-        uploads.set(id, { name: new URLSearchParams(search).get("name")!, bytes: await new Response(init.body).text() });
+        uploads.set(id, { name: query.get("name")!, bytes });
+        answered.set(key, { upload: { upload_id: id } });
+        if (script.lost?.(tried)) throw new Error("the answer never came back");
         return Response.json({ upload: { upload_id: id } });
       }
       if (route === "agent-reply") {
@@ -61,18 +89,49 @@ function studioDoor(script: { upload?: (n: number) => Response | null; reply?: (
         const files = (body.args.attachments ?? []).map((id: string) => uploads.get(id)?.bytes ?? "MISSING");
         return Response.json({ text: `Wrote: ${body.args.body} [${files.join(" | ")}]`, structured: {} });
       }
+      if (route === "threads/msg_01JZ0000000000000000000000/read") {
+        others.push(route);
+        return Response.json({ ok: true });
+      }
       return Response.json({ code: "device_route_not_found" }, { status: 404 });
     },
   };
-  return { transport: transport as unknown as InboxPeerTransport, uploads, replies, auth, uploadTries: () => n };
+  return { transport: transport as unknown as InboxPeerTransport, uploads, replies, others, auth, keys, uploadTries: () => n };
 }
 
-/** This computer: the agent's, with its real outbox and store folder; `door` plays the thread's computer. */
-function laptop(door: ReturnType<typeof studioDoor>, more: Partial<FarReplyDeps> = {}, dataDir = temp("laptop")) {
+/** A door that takes a file's bytes a piece at a time, `ms` apart (a slow line that keeps moving). */
+const slowly = (ms: number) => async (body: ReadableStream<Uint8Array>) => {
+  const reader = body.getReader();
+  let length = 0;
+  for (;;) {
+    const piece = await reader.read();
+    if (piece.done) return `${length} bytes`;
+    length += piece.value.length;
+    await Bun.sleep(ms);
+  }
+};
+
+/** A door that takes the first piece, then no more: the request ends only when the sender gives up. */
+const stalls = async (body: ReadableStream<Uint8Array>, signal: AbortSignal) => {
+  await body.getReader().read();
+  return new Promise<string>((_resolve, reject) => {
+    if (signal.aborted) reject(signal.reason);
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+};
+
+/**
+ * This computer: the agent's, with its real outbox and store folder; `door` plays the thread's computer. `fileIdleMs`:
+ * the link's no-progress limit for a file. `waitScale`: the agent's wait, scaled down so a test runs in a second.
+ */
+function laptop(door: ReturnType<typeof studioDoor>, more: Partial<FarReplyDeps> = {}, dataDir = temp("laptop"), opts: { fileIdleMs?: number; waitScale?: number } = {}) {
   const outbox = InboxOutbox.open(dataDir);
   const storeDir = inboxDir(dataDir);
   const state = { online: false };
+  const waits: number[] = [];
+  let drained: Promise<unknown> = Promise.resolve();
   const link = new PeerLink({
+    ...(opts.fileIdleMs ? { timings: { fileIdleMs: opts.fileIdleMs } } : {}),
     link: { id: STUDIO, name: "Studio", token: "tok_laptop", transport: { kind: "tailnet", address: "studio.test.ts.net:8443" } as never, device_id: null, linked_at: "2026-11-24T09:00:00.000Z" },
     transport: door.transport,
     outbox,
@@ -90,10 +149,13 @@ function laptop(door: ReturnType<typeof studioDoor>, more: Partial<FarReplyDeps>
     placeOf: async (id) => (id === THREAD ? { machine: STUDIO, thread_id: THREAD } : null),
     nameOf: () => "Studio",
     takes: () => true,
+    // As inbox-machines.ts holds it: sent now while online (the sender loop runs on), the agent waiting up to `waitMs`.
     holdWrite: (machine, route, body, thread, waitMs, own = {}) => {
       const { entry } = outbox.submit(machine, route, body, thread, false, null, true, own);
+      waits.push(waitMs);
       if (!state.online) return outbox.waitSettled(entry.key, 0);
-      return outbox.drain(machine, send).then(() => outbox.waitSettled(entry.key, waitMs));
+      drained = outbox.drain(machine, send);
+      return outbox.waitSettled(entry.key, waitMs * (opts.waitScale ?? 1));
     },
     heldWrite: (key) => outbox.get(key),
     dismissHeld: (key) => void outbox.dismiss(key),
@@ -101,7 +163,7 @@ function laptop(door: ReturnType<typeof studioDoor>, more: Partial<FarReplyDeps>
     holdFiles: (files) => holdOutboxFiles(storeDir, files, new Date().toISOString()),
     ...more,
   };
-  return { outbox, storeDir, dataDir, state, deps, back, send };
+  return { outbox, storeDir, dataDir, state, deps, back, send, waits, drained: () => drained };
 }
 
 /** The agent's working folder with two files the body names. */
@@ -161,7 +223,8 @@ describe("an answer with files for a computer that is away", () => {
     const first = laptop(door);
     const folder = workFolder();
     await farAgentReply(first.deps, { body: "Both files.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "c1", attachments: ["notes.md", "shot.png"] }, next, folder);
-    expect(await first.back()).toBe("unreachable");
+    // A file that did not get there is a server error for this Inbox's own write, never the whole line down.
+    expect(await first.back()).toBe("server_error");
     const after = only(first.outbox);
     expect([after.state, after.left, after.sent_files]).toEqual(["sending", true, [...door.uploads.keys()]]);
     expect(door.uploads.size).toBe(1);
@@ -179,7 +242,9 @@ describe("an answer with files for a computer that is away", () => {
   });
 
   test("ids that computer forgot while it was away (its day-old uploads swept) are sent again once", async () => {
-    const door = studioDoor({ reply: (body, r) => (r === 0 ? null : r === 1 ? Response.json({ code: "validation_error", error: "attachments[0]: not a file sent to this computer." }, { status: 422 }) : undefined) as never });
+    // That computer's refusal as its door sends it (inbox-far-send.ts through `farTagWrite`): the field names the file.
+    const forgot = () => Response.json({ error: "attachments[0]: not a file sent to this computer.", code: "validation_error", field: "attachments[0]" }, { status: 422 });
+    const door = studioDoor({ reply: (_body, r) => (r === 0 ? null : r === 1 ? forgot() : undefined) });
     const { deps, outbox, back } = laptop(door);
     await farAgentReply(deps, { body: "Late.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "s1", attachments: ["notes.md"] }, next, workFolder());
     expect(await back()).toBe("unreachable");
@@ -272,7 +337,7 @@ describe("an answer with files for a computer that is away", () => {
     expect(door.replies).toEqual([entry.body]);
     // The file step alone: an entry with no files posts its body untouched.
     const posted: unknown[] = [];
-    await sendWithFiles(entry, { storeDir: "", machineName: "Studio", upload: async () => Response.json({}), note: () => {}, post: async (body) => (posted.push(body), null) });
+    await sendWithFiles(entry, { storeDir: "", machineName: "Studio", upload: async () => Response.json({}), idleMs: 1000, note: () => {}, post: async (body) => (posted.push(body), null) });
     expect(posted).toEqual([entry.body]);
   });
 
@@ -282,5 +347,114 @@ describe("an answer with files for a computer that is away", () => {
     await expect(farAgentReply(deps, { body: "x", reply_to: THREAD, agent_session: "ses_one", attachments: ["notes.md"] }, next, workFolder())).rejects.toMatchObject({ code: "thread_on_other_machine" });
     expect(outbox.list(STUDIO)).toEqual([]);
     expect(listInboxUploads(storeDir)).toEqual([]);
+  });
+});
+
+describe("its files at that computer's door", () => {
+  test("each file goes under its own key, the door's rule: a file with none is refused there", async () => {
+    // The stand-in refuses as the real door does, by the door's own function.
+    const bare = await (studioDoor().transport.request("uploads", "?name=notes.md", { method: "POST", headers: {}, body: "x" }) as Promise<Response>);
+    expect(bare.status).toBe(422);
+    expect(await bare.json()).toEqual(await rawCommandKeyRefusal(new URLSearchParams("name=notes.md"))!.json());
+    const door = studioDoor();
+    const { deps, outbox, back } = laptop(door);
+    await farAgentReply(deps, { body: "Two.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "k2", attachments: ["notes.md", "shot.png"] }, next, workFolder());
+    expect(await back()).toBe("empty");
+    expect(only(outbox).state).toBe("delivered");
+    expect(door.keys).toHaveLength(2);
+    expect(new Set(door.keys).size).toBe(2);
+    for (const key of door.keys) expect(key).toStartWith(only(outbox).key);
+  });
+
+  test("a file that landed but whose answer was lost is not taken twice: the retry, under the same key, gets its id", async () => {
+    const door = studioDoor({ lost: (n) => n === 0 });
+    const { deps, outbox, back } = laptop(door);
+    await farAgentReply(deps, { body: "Once.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "o1", attachments: ["notes.md"] }, next, workFolder());
+    expect(await back()).toBe("server_error");
+    expect(only(outbox).sent_files ?? []).toEqual([]);
+    expect(await back()).toBe("empty");
+    expect(door.uploads.size).toBe(1);
+    expect(door.keys[0]).toBe(door.keys[1]!);
+    expect(door.replies).toHaveLength(1);
+    expect(door.replies[0]!.args.attachments).toEqual([...door.uploads.keys()]);
+  });
+
+  test("a slow file that keeps moving goes, however long it takes", async () => {
+    const door = studioDoor({ take: slowly(40) });
+    const { deps, outbox, back } = laptop(door, {}, undefined, { fileIdleMs: 150 });
+    const folder = workFolder();
+    // Ten pieces, 40 ms apart: longer in all than the no-progress limit.
+    writeFileSync(join(folder, "big.bin"), Buffer.alloc(10 * 64 * 1024, 7));
+    await farAgentReply(deps, { body: "Big.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "b1", attachments: ["big.bin"] }, next, folder);
+    const started = Date.now();
+    expect(await back()).toBe("empty");
+    expect(Date.now() - started).toBeGreaterThan(150);
+    expect(only(outbox).state).toBe("delivered");
+    expect([...door.uploads.values()]).toEqual([{ name: "big.bin", bytes: `${10 * 64 * 1024} bytes` }]);
+  });
+
+  test("a file that stops moving: the person's write behind it goes, the line stays up, and after the tries it is a notice", async () => {
+    const door = studioDoor({ take: stalls });
+    const { deps, outbox, back } = laptop(door, {}, undefined, { fileIdleMs: 60 });
+    await farAgentReply(deps, { body: "Stuck.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "st1", attachments: ["notes.md"] }, next, workFolder());
+    // The person marks that computer's thread read in this window, behind the agent's answer.
+    const person = outbox.submit(STUDIO, "threads/msg_01JZ0000000000000000000000/read", { idempotency_key: "read-1" }, THREAD).entry;
+    // Not "unreachable": that would stop the queue and take the link's stream down.
+    expect(await back()).toBe("server_error");
+    expect(outbox.get(person.key)!.state).toBe("delivered");
+    expect(door.others).toHaveLength(1);
+    const files = outbox.list(STUDIO).find((e) => e.files)!;
+    expect([files.state, files.errors]).toEqual(["sending", 1]);
+    for (let i = 2; i < OUTBOX_MAX_SERVER_ERRORS; i++) expect(await back()).toBe("server_error");
+    expect(await back()).toBe("empty");
+    // Nothing of it reached that computer: "Not delivered" with why, never "may have been delivered".
+    expect(outbox.notices()).toEqual([expect.objectContaining({ key: files.key, state: "refused", notice: expect.objectContaining({ kind: "refused" }), answer: { code: "upload_failed", error: "notes.md could not be sent to Studio." } })]);
+    expect(door.replies).toEqual([]);
+  });
+
+  test("a refusal there that is not about the files never sends them again", async () => {
+    // The line goes down after the files, before the answer; then the thread is gone there.
+    const door = studioDoor({ reply: (_body, r) => (r === 0 ? null : Response.json({ code: "message_not_found", error: "No message." }, { status: 404 })) });
+    const { deps, outbox, back } = laptop(door);
+    await farAgentReply(deps, { body: "Gone.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "g1", attachments: ["notes.md"] }, next, workFolder());
+    expect(await back()).toBe("unreachable");
+    expect(await back()).toBe("empty");
+    expect(door.uploadTries()).toBe(1);
+    expect(outbox.notices()).toEqual([expect.objectContaining({ state: "refused", answer: { code: "message_not_found", error: "No message." } })]);
+  });
+
+  test("a file past the size that computer takes is refused before it is copied: nothing in the blobs or pending uploads", async () => {
+    const door = studioDoor();
+    const { deps, outbox, storeDir } = laptop(door);
+    const folder = workFolder();
+    // Sparse: its size, none of its bytes.
+    writeFileSync(join(folder, "huge.bin"), "");
+    truncateSync(join(folder, "huge.bin"), INBOX_UPLOAD_MAX_BYTES + 1);
+    await expect(farAgentReply(deps, { body: "Huge.", reply_to: THREAD, agent_session: "ses_one", attachments: ["notes.md", "huge.bin"] }, next, folder)).rejects.toMatchObject({ code: "upload_too_large" });
+    expect(existsSync(inboxBlobsDir(storeDir)) ? readdirSync(inboxBlobsDir(storeDir)) : []).toEqual([]);
+    expect(listInboxUploads(storeDir)).toEqual([]);
+    expect(outbox.list(STUDIO)).toEqual([]);
+  });
+
+  test("online, the agent waits less than a host's tool time limit, then hears it waits; the answer goes once, later", async () => {
+    const door = studioDoor({ take: slowly(30) });
+    // The agent's wait scaled down a thousand times: 45 ms for the files' 45 s.
+    const { deps, outbox, state, drained, waits } = laptop(door, {}, undefined, { waitScale: 1 / 1000 });
+    state.online = true;
+    const folder = workFolder();
+    writeFileSync(join(folder, "big.bin"), Buffer.alloc(8 * 64 * 1024, 1));
+    const sent = { body: "Later.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "l1", attachments: ["big.bin"] };
+    const result = await farAgentReply(deps, sent, next, folder);
+    expect(result!.text).toBe(`${FAR_REPLY_WORDS.held(THREAD, "Studio")} NEXT`);
+    expect(door.replies).toEqual([]);
+    await drained();
+    expect(door.replies).toHaveLength(1);
+    expect(only(outbox).state).toBe("delivered");
+    // Codex's MCP tool limit is 60 s by default: the agent's wait with files stays well under it, with time to spare.
+    expect(waits[0]!).toBeLessThanOrEqual(60_000 - 15_000);
+    const again = await farAgentReply(deps, sent, next, folder);
+    expect(again!.text).toStartWith("Wrote: Later.");
+    expect(door.replies).toHaveLength(1);
+    expect(door.uploads.size).toBe(1);
   });
 });

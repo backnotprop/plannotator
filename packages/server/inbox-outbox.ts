@@ -143,6 +143,8 @@ export interface OutboxEntry {
   files?: OutboxFile[];
   /** Their ids on that machine so far, saved as each one lands, so a retry sends no file twice. */
   sent_files?: string[];
+  /** Which try of the files those are (their keys there): one more each time that machine forgot the ids. */
+  files_try?: number;
 }
 
 /** Whether a settled entry may have been applied there: delivered (and not skipped there by its guard), given up after 5xx, or taken back after it left. */
@@ -151,8 +153,12 @@ export function outboxMayHaveApplied(entry: OutboxEntry): boolean {
   return entry.state === "parked" || ((entry.state === "dropped" || entry.state === "cancelled") && entry.left);
 }
 
-/** What one try got back: the owner's status and JSON body, or `null` when the machine could not be reached. */
-export type OutboxAnswer = { status: number; body: unknown } | null;
+/**
+ * What one try got back: the owner's status and JSON body, or `null` when the machine could not be reached.
+ * `unsent`: a server error before any of the write left (a held answer's file did not get there,
+ * inbox-outbox-files.ts), so the entry that keeps meeting it ends refused, never "may have been delivered".
+ */
+export type OutboxAnswer = { status: number; body: unknown; unsent?: true } | null;
 
 export type AnswerClass = "delivered" | "refused" | "revoked" | "retry";
 
@@ -472,9 +478,9 @@ export class InboxOutbox {
   }
 
   /** A held answer's files so far sent there (inbox-outbox-files.ts), saved before the next request leaves. */
-  noteSentFiles(key: string, sent: readonly string[]): void {
+  noteSentFiles(key: string, sent: readonly string[], attempt = 0): void {
     const entry = this.entries.get(key);
-    if (entry && pending(entry)) this.save({ ...entry, sent_files: [...sent] });
+    if (entry && pending(entry)) this.save({ ...entry, sent_files: [...sent], ...(attempt > 0 ? { files_try: attempt } : {}) });
   }
 
   /** A machine's entries in queue order (all of them, or only those not settled). */
@@ -688,6 +694,11 @@ export class InboxOutbox {
       if (answer === null || GATEWAY_STATUSES.has(answer.status)) return "unreachable";
       // A 5xx: counted, and parked once it keeps happening, so the queue moves on.
       const errors = current.errors + 1;
+      // Nothing of it ever reached that machine (a held answer's file that would not go): refused, a notice that says why.
+      if (errors >= OUTBOX_MAX_SERVER_ERRORS && answer.unsent) {
+        this.settle({ ...current, errors }, answer, "refused");
+        continue;
+      }
       if (errors >= OUTBOX_MAX_SERVER_ERRORS) {
         const at = this.now().toISOString();
         this.save({ ...current, errors, state: "parked", status: answer.status, answer: answer.body, settled_at: at, notice: { kind: "may_have_been_delivered", at } });

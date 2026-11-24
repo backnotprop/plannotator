@@ -26,7 +26,7 @@ import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
 import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
-import { OUTBOX_FILE_SEND_MS, sendWithFiles } from "./inbox-outbox-files";
+import { OUTBOX_FILE_IDLE_MS, sendWithFiles } from "./inbox-outbox-files";
 import { INBOX_SENT_FROM_HEADER } from "@plannotator/core/inbox-types";
 import type { InboxPeerTransport } from "./inbox-transport";
 import { farArchivedPage, type FarArchived } from "./inbox-archived-merged";
@@ -54,11 +54,13 @@ export interface PeerLinkTimings {
   requestMs: number;
   /** One outbox try. */
   sendMs: number;
+  /** A held answer's file with no byte moving (inbox-outbox-files.ts). */
+  fileIdleMs: number;
   /** How long `deliveries` frames gather before one read of the list: each read is the whole list. */
   deliveriesMs: number;
 }
 
-export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000, deliveriesMs: 5_000 };
+export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000, fileIdleMs: OUTBOX_FILE_IDLE_MS, deliveriesMs: 5_000 };
 
 /** A record from the other machine's event stream, as the window's stream passes it on. */
 export interface PeerRecord {
@@ -670,14 +672,16 @@ export class PeerLink {
     sendWithFiles(entry, {
       storeDir: this.options.outbox.storeDir,
       machineName: this.options.link.name,
-      upload: (name, path) =>
-        this.options.transport.request("uploads", `?name=${encodeURIComponent(name)}`, {
+      // Its key in the query, as that computer's door takes a file (and as a window's upload there sends one).
+      upload: (file) =>
+        this.options.transport.request("uploads", `?${new URLSearchParams({ name: file.name, idempotency_key: file.key })}`, {
           method: "POST",
-          headers: this.auth({ "Content-Type": "application/octet-stream" }),
-          body: Bun.file(path),
-          signal: AbortSignal.timeout(OUTBOX_FILE_SEND_MS),
+          headers: this.auth({ "Content-Type": "application/octet-stream", "Content-Length": String(file.size) }),
+          body: file.body,
+          signal: file.signal,
         }),
-      note: (sent) => this.options.outbox.noteSentFiles(entry.key, sent),
+      idleMs: this.t.fileIdleMs,
+      note: (sent, attempt) => this.options.outbox.noteSentFiles(entry.key, sent, attempt),
       post: (body) => this.post(entry, body),
     });
 
