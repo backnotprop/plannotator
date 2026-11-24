@@ -78,7 +78,7 @@ The rail, edges, versions panel, reading line and phone sheets around a document
 
 ### Lazy renderers and the eager entries (`utils/math`, `utils/generateIdentity`, `utils/mermaid`; 0.32.0)
 
-`Viewer` displays native diagram fences as source by default. To render and annotate them, wrap the viewer in `NativeDiagramProvider` from `@plannotator/ui/components/diagram/NativeDiagramProvider`. The provider loads the native canvas on the first diagram. Extended font outlines load from the host’s own assets when a label needs them.
+`Viewer` displays native diagram fences as source by default. To render and annotate them, wrap the viewer in `NativeDiagramProvider` from `@plannotator/ui/components/diagram/NativeDiagramProvider`. The provider loads the native canvas on the first diagram. Extended font outlines load from the host’s own assets when a label needs them. Native diagrams use the active surface’s theme colors, including custom light and dark palettes. Changing the theme keeps the current viewport, pins, and open comment editor. An explicitly authored paper or primary ink selects the drawing’s own palette. Individual header tones and compatible fills take precedence over the host defaults. The CLI exports the authored SVG.
 
 The Mermaid runtime, the Graphviz engine, KaTeX and the username dictionary are off the static import graph of `Viewer`, so a host that bundles by route does not download them for a plain markdown read. Graphviz has its own slot since 0.41.0 (`utils/graphviz`, the same shape as Mermaid's: lazy `import('@viz-js/viz')` on the first dot fence, or `setGraphvizRuntime` from the host) and the block shows the source fence under a status until the SVG lands. Mermaid, Graphviz, KaTeX and the dictionary sit behind synchronous slots:
 

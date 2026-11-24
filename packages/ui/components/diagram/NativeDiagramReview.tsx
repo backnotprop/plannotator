@@ -1,4 +1,4 @@
-import type { DiagramPart } from '@plannotator/diagrams';
+import type { DiagramPart, DiagramSpec } from '@plannotator/diagrams';
 import { MessageCircleQuestion, Paperclip } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -11,6 +11,7 @@ import {
   anchorOnPart, partKey, placeCommentPins, reviewSvg, screenRect,
   type NativeDiagramAnchor, type NativeDiagramComment, type NativeDiagramDrawing, type NativeDiagramFileReference,
 } from './nativeDiagramDrawing';
+import { nativeReviewSpec, readNativeDiagramPalette } from './nativeDiagramPalette';
 import './nativeDiagramReview.css';
 
 export type { NativeDiagramAnchor, NativeDiagramComment, NativeDiagramFileReference } from './nativeDiagramDrawing';
@@ -65,28 +66,108 @@ export function NativeDiagramReview(props: NativeDiagramReviewProps) {
   return <Loader key={props.source} {...props} />;
 }
 
+// Both the app and a reusable host may scope their palette to an ancestor.
+// The active custom sheet can also be replaced while its theme name stays the same.
+function observePalette(element: Element, refresh: () => void) {
+  const doc = element.ownerDocument;
+  const view = doc.defaultView;
+  if (!view) return () => {};
+  let frame: number | null = null;
+  const schedule = () => {
+    if (frame !== null) return;
+    frame = view.requestAnimationFrame(() => { frame = null; refresh(); });
+  };
+  const observer = new MutationObserver(schedule);
+  for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
+    observer.observe(ancestor, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-color-mode'] });
+  }
+  observer.observe(doc.head, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['href', 'media', 'disabled'] });
+  const onLoad = (event: Event) => { if (event.target instanceof HTMLLinkElement && event.target.relList.contains('stylesheet')) schedule(); };
+  doc.head.addEventListener('load', onLoad, true);
+  const media = view.matchMedia?.('(prefers-color-scheme: dark)');
+  media?.addEventListener('change', schedule);
+  return () => {
+    observer.disconnect();
+    doc.head.removeEventListener('load', onLoad, true);
+    media?.removeEventListener('change', schedule);
+    if (frame !== null) view.cancelAnimationFrame(frame);
+  };
+}
+
 function Loader(props: NativeDiagramReviewProps) {
   const descriptionId = useId();
+  const host = useRef<HTMLElement>(null);
   const [drawing, setDrawing] = useState<Drawing | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
-    let live = true;
-    let url: string | undefined;
-    async function render() {
-      try {
-        const spec = JSON.parse(props.source);
-        const { renderDiagram } = await import('@plannotator/diagrams');
-        if (!live) return;
-        const diagram = await renderDiagram(spec);
-        if (!live) return;
-        url = URL.createObjectURL(new Blob([diagram.svg], { type: 'image/svg+xml' }));
-        setDrawing({ title: spec.title, assetId: spec.id, diagram, svg: reviewSvg(diagram, url) });
-      } catch (e) {
-        if (live) setError(e instanceof Error ? e.message : String(e));
-      }
+    const element = host.current;
+    if (!element) return;
+    let spec: DiagramSpec;
+    try {
+      spec = JSON.parse(props.source);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
     }
-    void render();
-    return () => { live = false; if (url) URL.revokeObjectURL(url); };
+
+    let generation = 0;
+    let paletteKey: string | undefined;
+    let activeUrl: string | undefined;
+    let pendingUrl: string | undefined;
+    function discardPending() {
+      if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+      pendingUrl = undefined;
+    }
+    let root: SVGSVGElement | undefined;
+    let shownSvg: string | undefined;
+    const refresh = async () => {
+      const palette = readNativeDiagramPalette(element);
+      const key = JSON.stringify(palette);
+      if (key === paletteKey) return;
+      paletteKey = key;
+      const request = ++generation;
+      discardPending();
+      try {
+        const { renderDiagram } = await import('@plannotator/diagrams');
+        if (request !== generation) return;
+        // The renderer validates the original JSON, including any author overrides.
+        const diagram = await renderDiagram(nativeReviewSpec(spec, palette) as DiagramSpec);
+        if (request !== generation || diagram.svg === shownSvg) return;
+        const next = URL.createObjectURL(new Blob([diagram.svg], { type: 'image/svg+xml' }));
+        pendingUrl = next;
+        if (root) {
+          const image = new Image();
+          if (typeof image.decode === 'function') {
+            image.src = next;
+            await image.decode();
+            if (request !== generation) return;
+          }
+          // A palette only changes paint. Keep the camera, hit targets, focus and draft mounted.
+          root.querySelector('image')!.setAttribute('href', next);
+        } else {
+          root = reviewSvg(diagram, next);
+          setDrawing({ title: spec.title, assetId: spec.id, diagram, svg: root });
+        }
+        if (activeUrl) URL.revokeObjectURL(activeUrl);
+        activeUrl = next;
+        pendingUrl = undefined;
+        shownSvg = diagram.svg;
+      } catch (e) {
+        if (request !== generation) return;
+        discardPending();
+        // Leave a working image mounted. A subsequent theme notification may retry this palette.
+        paletteKey = undefined;
+        if (!root) setError(e instanceof Error ? e.message : String(e));
+      }
+    };
+    const stop = observePalette(element, refresh);
+    void refresh();
+    return () => {
+      generation++;
+      stop();
+      discardPending();
+      if (activeUrl) URL.revokeObjectURL(activeUrl);
+    };
   }, [props.source]);
 
   const parts = useMemo(() => new Map(drawing?.diagram.parts.map(p => [partKey(p), p])), [drawing]);
@@ -101,7 +182,7 @@ function Loader(props: NativeDiagramReviewProps) {
     props.onResolutionChange?.(resolution);
   }, [drawing, error, resolution, props.onResolutionChange]);
 
-  return <section className={cn('ndr annotation-exclude', props.inline && 'ndr-inline', props.className)} aria-label={drawing?.title ?? 'Diagram'} aria-describedby={drawing ? descriptionId : undefined}>
+  return <section ref={host} className={cn('ndr annotation-exclude', props.inline && 'ndr-inline', props.className)} aria-label={drawing?.title ?? 'Diagram'} aria-describedby={drawing ? descriptionId : undefined}>
     {drawing && <span className="sr-only" id={descriptionId}>{drawing.diagram.description}</span>}
     {drawing ? <ReviewSurface {...props} drawing={drawing} parts={parts} /> : error
       ? <div className="ndr-status" role="alert"><strong>Couldn’t draw the diagram</strong><p>{error}</p></div>

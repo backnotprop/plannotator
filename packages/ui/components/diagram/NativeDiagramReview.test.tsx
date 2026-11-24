@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderDiagram, type DiagramSpec } from '@plannotator/diagrams';
@@ -86,6 +86,107 @@ describe.if(typeof document !== 'undefined')('native diagram review', () => {
     expect(host.querySelector('[role=dialog]')?.textContent).toContain('Rename this part');
     await click('Edit'); await type('New label'); await click('Save');
     expect(edited).toBe('annotationNew label');
+  });
+
+  test('repaints the image when a scoped palette changes and retains the camera, pin, and editor', async () => {
+    const revoke = spyOn(URL, 'revokeObjectURL');
+    try {
+      await show({ comments: [{ id: 'existing', anchor, text: 'Saved' }], onCreateComment: () => {} });
+      const image = host.querySelector('[data-diagram-svg] image')!;
+      const currentUrl = () => image.getAttribute('href');
+      const oldUrl = currentUrl()!;
+      await click('Zoom in');
+      await click('panel Client');
+      await click('Comment');
+      await type('Unsaved review');
+      const wrapper = host.querySelector<HTMLElement>('[data-diagram-svg]')!;
+      const transform = wrapper.style.transform;
+      const input = host.querySelector('textarea')!;
+      const pin = button('Comment 1 on Client');
+      const position = pin.getAttribute('style');
+      const surface = host.querySelector<HTMLElement>('.ndr')!;
+      await act(async () => {
+        surface.style.setProperty('--background', '#101820');
+        surface.style.setProperty('--foreground', '#eaf0fa');
+        surface.style.setProperty('--primary', '#80aaff');
+        for (let i = 0; i < 30 && currentUrl() === oldUrl; i++) await new Promise(resolve => setTimeout(resolve, 5));
+      });
+      expect(currentUrl()).not.toBe(oldUrl);
+      expect(revoke).toHaveBeenCalledWith(oldUrl);
+      expect(host.querySelector('[data-diagram-svg] image')).toBe(image);
+      expect(wrapper.style.transform).toBe(transform);
+      expect(button('Comment 1 on Client')).toBe(pin);
+      expect(pin.getAttribute('style')).toBe(position);
+      expect(host.querySelector('textarea')).toBe(input);
+      expect(input.value).toBe('Unsaved review');
+      const newUrl = currentUrl()!;
+      await show({ source: '{' });
+      expect(revoke).toHaveBeenCalledWith(newUrl);
+      expect(host.querySelector('[role=alert]')?.textContent).toContain('Couldn’t draw the diagram');
+    } finally { revoke.mockRestore(); }
+  });
+
+  test('a failed palette can retry and a superseded decode cannot replace the visible image', async () => {
+    const revoke = spyOn(URL, 'revokeObjectURL');
+    const decode = spyOn(HTMLImageElement.prototype, 'decode');
+    async function until(check: () => boolean) {
+      for (let i = 0; i < 40 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 5));
+      expect(check()).toBe(true);
+    }
+    try {
+      await show();
+      const surface = host.querySelector<HTMLElement>('.ndr')!;
+      const image = surface.querySelector('image')!;
+      const current = () => image.getAttribute('href');
+      const first = current();
+      let failed = '';
+      decode.mockImplementationOnce(function (this: HTMLImageElement) {
+        failed = this.src;
+        return Promise.reject(new Error('Could not decode'));
+      });
+      await act(async () => {
+        surface.style.setProperty('--background', '#101820');
+        surface.style.setProperty('--foreground', '#eaf0fa');
+        await until(() => failed !== '' && revoke.mock.calls.some(([url]) => url === failed));
+      });
+      expect(current()).toBe(first);
+      const captures: string[] = [];
+      let complete = () => {};
+      decode.mockImplementation(function (this: HTMLImageElement) {
+        captures.push(this.src);
+        return new Promise<void>(resolve => { complete = resolve; });
+      });
+      await act(async () => {
+        surface.classList.add('retry');
+        await until(() => captures.length === 1);
+      });
+      const finishOlder = complete;
+      expect(current()).toBe(first);
+      await act(async () => {
+        surface.style.setProperty('--background', '#172331');
+        surface.style.setProperty('--background', '#26354a');
+        await until(() => captures.length === 2);
+        complete();
+        await until(() => current() === captures[1]);
+        finishOlder();
+      });
+      expect(current()).toBe(captures[1]!);
+      expect(revoke).toHaveBeenCalledWith(captures[0]!);
+      expect(revoke).toHaveBeenCalledWith(first!);
+      await act(async () => {
+        surface.style.setProperty('--background', '#28425b');
+        await until(() => captures.length === 3);
+      });
+      const finishUnmounted = complete;
+      await show({ source: '{' });
+      expect(revoke).toHaveBeenCalledWith(captures[1]!);
+      expect(revoke).toHaveBeenCalledWith(captures[2]!);
+      await act(async () => { finishUnmounted(); });
+      expect(host.querySelector('image')).toBeNull();
+    } finally {
+      decode.mockRestore();
+      revoke.mockRestore();
+    }
   });
 
   test('a native host composer takes the selected part without drawing a second editor', async () => {
