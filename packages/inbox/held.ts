@@ -92,9 +92,10 @@ function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, o
 
 /**
  * The thread's row now (`current`) carries agent activity the row drawn on screen (`drawn`) does not show: that news
- * waits behind "N new · Show". Mark all as read (markAllRead.ts) leaves such a thread out, so it stays new.
+ * waits behind "N new · Show". Mark all as read (markAllRead.ts) leaves such a thread out, so it stays new. `drawn`
+ * undefined: the list on screen has no row for the thread (one an agent wrote in is news).
  */
-export function waitsBehindShow(drawn: InboxListRow, current: InboxListRow): boolean {
+export function waitsBehindShow(drawn: InboxListRow | undefined, current: InboxListRow): boolean {
   return hasNewAgentActivity(drawn, current);
 }
 
@@ -583,5 +584,33 @@ export function waitingCount(sections: readonly InboxListSection[], projectId?: 
 export function shownAfter(shown: InboxListSection[] | null, latest: InboxListSection[], how: { adopt: boolean; keep: string | null; open: OpenThread | null; gone: ReadonlySet<string> }): InboxListSection[] {
   if (shown === null || !hasRows(shown)) return latest;
   if (how.adopt) return how.keep ? adoptKeepingOpen(shown, latest, how.keep) : latest;
-  return withoutRows(refreshHeldRows(shown, latest, how.open), how.gone);
+  return routineRunsEnter(withoutRows(refreshHeldRows(shown, latest, how.open), how.gone), latest, how.open);
+}
+
+/**
+ * A routine's run that starts comes into the held list at once, under New with its Running mark (the owner,
+ * 2026-11-24: while a routine's run is going, its thread sits under New until the run ends). Its divider is the
+ * person's message, not agent activity, so the held rules would leave it out (a thread not on screen) or folded where
+ * it was (Quiet, Sent) until a reload; a run going is shown, not news held back. Only a row the read places in New
+ * for its run (`scheduled_running`, shared/inbox/list.ts) moves, and only from Quiet or Sent or from off screen: a row
+ * the person put in Priority or snoozed, or one drawn in New or above, stays; the open thread's row never moves under
+ * the reader (it settles when it closes); and a row with agent words the list on screen does not show still waits
+ * behind "N new", so nothing else comes out of hold this way. When the run ends the row stays where it is on screen
+ * until the list settles, as every row does.
+ */
+export function routineRunsEnter(shown: readonly InboxListSection[], latest: readonly InboxListSection[], open?: OpenThread | null): InboxListSection[] {
+  const drawn = rowsById(shown);
+  const entering = new Set<string>();
+  for (const section of latest) {
+    if (section.id !== 'new') continue;
+    for (const row of section.threads) {
+      if (row.scheduled_running !== true || row.thread_id === open?.threadId) continue;
+      const at = drawnSection(shown, row.thread_id);
+      if (at !== null && at !== 'quiet' && at !== 'sent') continue;
+      if (waitsBehindShow(drawn.get(row.thread_id), row)) continue;
+      entering.add(row.thread_id);
+    }
+  }
+  if (entering.size === 0) return shown as InboxListSection[];
+  return addOwnThreads(withoutRows(shown, entering), latest, [...entering]);
 }
