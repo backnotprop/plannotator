@@ -23,7 +23,7 @@
 
 import { itemsOf, reaskSessionKey, reaskTargets } from "@plannotator/core/inbox-reask";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
-import type { InboxMessageWire, InboxSentFrom } from "@plannotator/core/inbox-types";
+import { inboxRemovedNow, type InboxMessageWire, type InboxSentFrom, type RemovalMessage } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 import type { InboxReaskInput, InboxStore } from "./store";
 
@@ -98,12 +98,16 @@ export function reaskThreadAll(store: InboxStore, threadId: string, key: string,
     if (asked?.author.kind !== "agent") continue;
     out.asked.push({ host: asked.author.host ?? null, session: asked.author.session ?? null, message_id: asked.id, reply_id: note.id });
   }
-  const targets = reaskTargets(thread.messages, live);
+  // An agent the person removed from the thread is not asked (approval "inbox-remove-agent-from-thread"): the note
+  // replies to its message, which is writing to it, so it would bring it back without the person choosing to.
+  const removed = inboxRemovedNow(thread.messages as unknown as readonly RemovalMessage[]);
+  const isOut = (m: InboxMessageWire) => m.author.kind === "agent" && !!m.author.session && removed.has(m.author.session);
+  const targets = reaskTargets(thread.messages, live).filter((t) => !isOut(t.message));
   const taken = new Set(targets.map((t) => reaskSessionKey(t.message)));
-  // Sessions with an item open the rule left out: asked again already (never a permission prompt).
+  // Sessions with an item open the rule left out: asked again already (never a permission prompt, nor a removed one).
   const left = new Set<string>();
   for (const m of thread.messages) {
-    if (m.author.kind !== "agent" || !live(m) || isInboxPermissionSession(m.author.session) || !itemsOf(m).some((q) => q.state === "open")) continue;
+    if (m.author.kind !== "agent" || !live(m) || isOut(m) || isInboxPermissionSession(m.author.session) || !itemsOf(m).some((q) => q.state === "open")) continue;
     if (!taken.has(reaskSessionKey(m))) left.add(reaskSessionKey(m));
   }
   out.already = left.size;

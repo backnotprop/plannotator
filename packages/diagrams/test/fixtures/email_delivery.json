@@ -1,0 +1,23 @@
+{
+  "title": "How an email is delivered",
+  "subtitle": "Written as JSON: no Python needed. Draw it with: open-diagram draw examples/email_delivery.json",
+  "tag": "EXAMPLE",
+  "steps": [[1, "Sign every message"], [2, "Check every link"]],
+  "steps_label": "This year",
+  "columns": [
+    [{"id": "app", "title": "Mail app", "tiles": ["Write", "Attach files", "Send"], "cols": 1}],
+    [{"id": "out", "title": "Sending server", "sub": "The sender's provider", "step": 1,
+      "tiles": ["Queue", {"label": "Digital signature", "status": "building"}, "Retry if busy"], "cols": 1}],
+    [{"id": "in", "title": "Receiving server", "sub": "The recipient's provider", "step": 2,
+      "tiles": ["Check the sender", "Spam filter", {"label": "Link scanner", "status": "planned"}], "cols": 1}],
+    [{"id": "inbox", "title": "Inbox", "tiles": ["Phone", "Laptop", {"label": "Smartwatch", "status": "trial"}],
+      "cols": 1, "tone": "neutral"}]
+  ],
+  "gap": 130,
+  "links": [
+    {"from": "app", "to": "out"},
+    {"from": "out", "to": "in", "label": "over the internet"},
+    {"from": "in", "to": "inbox"},
+    {"from": "in", "to": "out", "lane": "bottom", "label": "If delivery fails, a bounce message goes back"}
+  ]
+}
