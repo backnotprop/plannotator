@@ -15,7 +15,7 @@
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
@@ -129,9 +129,9 @@ test("a run's end takes Running off its list row, on a wide window and a phone a
   for (const page of [desk, hand]) await page.goto(world.url);
 
   // A routine made in the window, run once now: its turn keeps working (`hold`) until the spec lets it answer.
-  mkdirSync(join(world.home, 'code', 'acme-api'), { recursive: true });
-  const folder = realpathSync(join(world.home, 'code', 'acme-api'));
-  const made = await windowPost(desk, '/api/inbox/scheduled', { name: 'Nightly dependency check', prompt: 'Check the dependencies for updates.', schedule: null, folder: { path: folder }, agent: 'claude-code', attachments: [], enabled: true });
+  // A new scratch folder, made by the Inbox under its data dir: a typed path under the runner's temp dir is a system
+  // folder on Linux (`/tmp`), which a routine refuses as New message does.
+  const made = await windowPost(desk, '/api/inbox/scheduled', { name: 'Nightly dependency check', prompt: 'Check the dependencies for updates.', schedule: null, folder: { scratch: true }, agent: 'claude-code', attachments: [], enabled: true });
   expect(made.status, JSON.stringify(made.body)).toBe(201);
   const id = (made.body.scheduled as RoutineRow).id;
   const ran = await windowPost(desk, `/api/inbox/scheduled/${id}/run`, {});
