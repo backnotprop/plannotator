@@ -1,6 +1,11 @@
 import {defaults} from "./assets.js";
 import type {DiagramSpec,Panel,Section,Theme,Tile} from "./model.js";
 
+const MAX_ADDRESSABLE_PARTS = 512;
+const MAX_LABELLED_LINKS = 128;
+
+export type PreparedPanel = Panel & {sourcePath: string};
+
 type Check=(value:unknown,path:string)=>void;
 type Dict=Record<string,unknown>;
 const fail=(path:string,why:string):never=>{throw new TypeError(path+": "+why);};
@@ -132,6 +137,15 @@ export function prepare(s:DiagramSpec) {
     const t:Theme={...defaults,...settings,tones:{...defaults.tones,...s.theme?.tones},
         statuses:{...defaults.statuses,...s.theme?.statuses},
         link_labels:{...defaults.link_labels,...s.theme?.link_labels}};
+    let parts = 0, labelledLinks = 0;
+    function addPart(path: string) {
+        if (++parts > MAX_ADDRESSABLE_PARTS)
+            fail(path, `a diagram supports at most ${MAX_ADDRESSABLE_PARTS} addressable parts (panels, named sections, groups and links)`);
+    }
+    function addLabel(path: string) {
+        if (++labelledLinks > MAX_LABELLED_LINKS)
+            fail(path, `a diagram supports at most ${MAX_LABELLED_LINKS} labelled links, including mini-graph links`);
+    }
     const sectionIds=new Set<string>();
     const ids=new Set<string>(), found=new Set<string>();
     const overrides=new Map(Object.entries(s.statuses??{}));
@@ -152,25 +166,34 @@ export function prepare(s:DiagramSpec) {
         if(Array.isArray(v)) return v.map((x,i)=>tileState(x,`${p}[${i}]`));
         if(typeof v==="string") return v;
         if("content" in v) {
+            addPart(p);
             if (sectionIds.has(v.id)) fail(p+".id","duplicate section id "+v.id);
             sectionIds.add(v.id);
             return {...v,content:sectionState(v.content,p+".content")};
+        }
+        if ("graph" in v) {
+            v.graph.links.forEach((edge,i) => { if (edge[2]) addLabel(`${p}.graph.links[${i}][2]`); });
         }
         if("row" in v) return {row:v.row.map((x,i)=>sectionState(x,`${p}.row[${i}]`))};
         if("tiles" in v) return {...v,tiles:v.tiles.map((x,i)=>tileState(x,`${p}.tiles[${i}]`))};
         return v;
     }
-    const normalize=(v:Panel,p:string):Panel=>{
+    const normalize=(v:Panel,p:string,sourcePath=p):PreparedPanel=>{
+        addPart(sourcePath);
         const id=v.id??v.title;
         if(ids.has(id)) fail(p+".id","duplicate panel id "+id);
         ids.add(id);
         if(s.panels?(v.x===undefined||v.y===undefined):(v.x!==undefined||v.y!==undefined)) fail(p,"explicit x and y belong together in panels");
         if(v.tone!==undefined && !own(t.tones,v.tone)) color(v.tone,p+".tone");
         if (!v.tiles && (v.cols!==undefined || v.label!==undefined)) fail(p,"cols and label require tiles");
-        return {...v,id,status:state([v.title,id],v.status,p+".status"),
-            tiles:v.tiles?.map((x,i)=>tileState(x,`${p}.tiles[${i}]`)),sections:v.sections?.map((x,i)=>sectionState(x,`${p}.sections[${i}]`))};
+        return {...v,id,sourcePath,status:state([v.title,id],v.status,p+".status"),
+            tiles:v.tiles?.map((x,i)=>tileState(x,`${p}.tiles[${i}]`)),sections:v.sections?.map((x,i)=>sectionState(x,`${sourcePath}.sections[${i}]`))};
     };
-    const columns=s.columns?.map((col,i)=>(Array.isArray(col)?col:[col]).map((p,j)=>normalize(p,`columns[${i}][${j}]`)));
+    const columns=s.columns?.map((col,i)=>{
+        const path = `columns[${i}]`;
+        // Panel diagnostics historically use the normalized row index, including shorthand columns.
+        return Array.isArray(col) ? col.map((p,j)=>normalize(p,`${path}[${j}]`)) : [normalize(col,path+"[0]",path)];
+    });
     const ring=s.ring?.map((p,i)=>normalize(p,`ring[${i}]`)),center=s.center?.map((p,i)=>normalize(p,`center[${i}]`));
     const panels=s.panels?.map((p,i)=>normalize(p,`panels[${i}]`));
     for(const k of overrides.keys()) if(!found.has(k)) fail("statuses."+k,"no tile or panel with this name");
@@ -178,6 +201,8 @@ export function prepare(s:DiagramSpec) {
     const linkIds=new Set<string>();
     s.links?.forEach((l,i)=>{
         const p=`links[${i}]`;
+        addPart(p);
+        if (l.label) addLabel(p+".label");
         if (l.id !== undefined) {
             if (linkIds.has(l.id)) fail(p+".id","duplicate link id "+l.id);
             linkIds.add(l.id);
@@ -188,6 +213,7 @@ export function prepare(s:DiagramSpec) {
     });
     const groupIds=new Set<string>();
     s.groups?.forEach((group,i)=>{
+        addPart(`groups[${i}]`);
         const id=group.id ?? group.label;
         if (groupIds.has(id)) fail(`groups[${i}].id`,"duplicate group id "+id);
         groupIds.add(id);

@@ -2,16 +2,16 @@ import {fonts} from "./assets.js";
 import {panelBlock} from "./blocks.js";
 import {describe} from "./describe.js";
 import {extent,separation} from "./model.js";
-import type {Box, DiagramPart, Point, DiagramSpec, Fonts, Group, Panel, Placed, Weight} from "./model.js";
+import type {Box, DiagramPart, Point, DiagramSpec, Fonts, Group, Placed, Weight} from "./model.js";
 import {cap, escape, ExtraFontRequired, n, Painter} from "./paint.js";
 import {arrow, arrowVertices, route} from "./routes.js";
-import {prepare} from "./spec.js";
+import {prepare, type PreparedPanel} from "./spec.js";
 export type {DiagramSpec, DiagramImage, DiagramPart, DiagramReference, Box, Point, Side, Panel, Section, Connection, Theme} from "./model.js";
 
 function layout(c:Painter,s:DiagramSpec,input:ReturnType<typeof prepare>):Placed[] {
     const t=c.t,gap=s.gap??t.col_gap,rowGap=s.row_gap??t.row_gap;
-    const make=(panel:Panel):Placed=>{
-        const block=panelBlock(c,panel);
+    const make=(panel:PreparedPanel):Placed=>{
+        const block=panelBlock(c,panel,panel.sourcePath);
         return {id:panel.id!,panel,head:panel.sub?t.header_h_sub:t.header_h,block,x:panel.x??0,y:panel.y??0,w:block.w,h:block.h};
     };
     if(input.panels) return input.panels.map(make);

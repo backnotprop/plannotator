@@ -46,13 +46,23 @@ function grid(c: Painter, s: Tiles): Block {
         }};
 }
 
-function innerGraph(c: Painter, g: Graph): Block {
+const MAX_GRAPH_GRID_PX = 8192;
+
+function innerGraph(c: Painter, g: Graph, path: string): Block {
+    function checkGridExtent(width: number, height: number) {
+        if (width > MAX_GRAPH_GRID_PX || height > MAX_GRAPH_GRID_PX)
+            throw new TypeError(`${path}: the mini-graph grid exceeds ${MAX_GRAPH_GRID_PX} pixels on an axis. Bring node positions closer or reduce the label or panel width.`);
+    }
     const t = c.t, nodes = Object.entries(g.nodes).map(([id,label])=>{
         const [col,row] = g.at[id], w = c.width(label,t.body,"semibold")+26;
         return {id,label,x:col*132-w/2,y:row*58-13,w,h:26};
     });
     const bounds = extent(nodes);
-    return {w:bounds.w+32,h:bounds.h+32,draw(x,y,w,h) {
+    const width = bounds.w + 32, height = bounds.h + 32;
+    checkGridExtent(width, height);
+    return {w:width,h:height,draw(x,y,w,h) {
+        // A containing column or row can stretch a grid beyond its measured width.
+        checkGridExtent(w, h);
         c.rect(x,y,w,h,t.graph_fill,t.panel_stroke,.8,4);
         for (let gx=x+18;gx<x+w-1;gx+=18) c.line(gx,y+1,gx,y+h-1,t.graph_grid,.6);
         for (let gy=y+18;gy<y+h-1;gy+=18) c.line(x+1,gy,x+w-1,gy,t.graph_grid,.6);
@@ -96,7 +106,7 @@ function innerGraph(c: Painter, g: Graph): Block {
     }};
 }
 
-function section(c: Painter,s: Section): Block {
+function section(c: Painter,s: Section,path: string): Block {
     const t = c.t;
     if (Array.isArray(s)) return grid(c,{tiles:s});
     if (typeof s==="string" || "text" in s) {
@@ -106,14 +116,14 @@ function section(c: Painter,s: Section): Block {
         }};
     }
     if ("content" in s) {
-        const block = section(c,s.content);
+        const block = section(c,s.content,path+".content");
         return {...block, draw(x,y,w,h) {
             c.sections.push({kind:"section",id:s.id,title:s.title,refs:s.refs?.map(ref=>({...ref})) ?? [],x,y,w,h});
             block.draw(x,y,w,h);
         }};
     }
     if ("tiles" in s) return grid(c,s);
-    if ("graph" in s) return innerGraph(c,s.graph);
+    if ("graph" in s) return innerGraph(c,s.graph,path+".graph");
     if ("image" in s) {
         const {width, height} = s.image;
         return {w:width, h:height, draw(x,y,w) {
@@ -121,7 +131,7 @@ function section(c: Painter,s: Section): Block {
         }};
     }
     if ("row" in s) {
-        const items = s.row.map(v=>section(c,v)), gap = t.section_gap;
+        const items = s.row.map((v,i)=>section(c,v,`${path}.row[${i}]`)), gap = t.section_gap;
         const width = items.reduce((w,b)=>w+b.w,0)+(items.length-1)*gap;
         return {w:width,h:Math.max(...items.map(b=>b.h)),draw(x,y,w) {
             items.forEach((b,i)=>{ b.draw(x,y,b.w+(i===items.length-1?w-width:0),b.h); x+=b.w+gap; });
@@ -147,8 +157,8 @@ function section(c: Painter,s: Section): Block {
         }};
 }
 
-export function panelBlock(c: Painter,p: Panel): Block {
-    const t=c.t, blocks=(p.sections||[]).map(s=>section(c,s));
+export function panelBlock(c: Painter,p: Panel,path: string): Block {
+    const t=c.t, blocks=(p.sections||[]).map((s,i)=>section(c,s,`${path}.sections[${i}]`));
     if (p.tiles) blocks.unshift(grid(c,{tiles:p.tiles,cols:p.cols,label:p.label}));
     const hh=p.sub?t.header_h_sub:t.header_h, badge=p.step===undefined?0:30, st=p.status?t.statuses[p.status]:undefined;
     if (p.status) c.states.add(p.status);
