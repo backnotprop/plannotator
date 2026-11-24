@@ -29,6 +29,7 @@ import {
   resolveReviewProgress,
   resolveAgentTool,
   resolveExperimental,
+  savedExperimental,
   parseExperimentalEnv,
   agentToolHostOf,
   agentToolSaveFailed,
@@ -1424,6 +1425,19 @@ describe("experimental features", () => {
     writeFileSync(join(dir, "config.json"), JSON.stringify({ inboxLaunch: "off" }));
     saveConfig({ inboxLaunch: { enabled: true } });
     expect(loadConfig().inboxLaunch).toEqual({ enabled: true });
+  });
+
+  test("inboxCapabilityFlips merges key by key: a switch's flip time saved never drops another's saved meanwhile", () => {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ inboxCapabilityFlips: { board: { at: 1_000, by: null } } }));
+    saveConfig({ inboxCapabilityFlips: { steps: { at: 2_000, by: null } } });
+    saveConfig({ inboxCapabilityFlips: { board: { at: 3_000, by: null } } });
+    expect(loadConfig().inboxCapabilityFlips).toEqual({ board: { at: 3_000, by: null }, steps: { at: 2_000, by: null } });
+  });
+
+  test("a saved experimental choice is told from the untouched default", () => {
+    expect(savedExperimental({}, "grid")).toBeUndefined();
+    expect(savedExperimental({ experimental: { grid: false } }, "grid")).toBe(false);
+    expect(savedExperimental({ experimental: { decisionMode: "true" as unknown as boolean } }, "decision-mode")).toBe(true);
   });
 
   test("a hand-edited experimental value that is not an object is replaced, never spread", () => {

@@ -23137,6 +23137,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-frame-capability-set",
+      "title": "frame:capability-set",
+      "surface": [
+        "frame:capability-set"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
