@@ -45,7 +45,7 @@ export interface InboxCapabilityMcpContext {
     /** Turns one here, as Settings does; answers the switches after. */
     set: (key: InboxCapabilitySwitchKey, on: boolean) => Promise<InboxCapabilitySwitches>;
     /** A linked computer's (`change` null: read). Null: no linked computer has that name. */
-    there: (computer: string, change: { key: InboxCapabilitySwitchKey; on: boolean } | null) => Promise<InboxCapabilityThere | null>;
+    there: (computer: string, change: { key: InboxCapabilitySwitchKey; on: boolean } | null, by?: { name: string; host: string | null }) => Promise<InboxCapabilityThere | null>;
     /** The linked computers' names, for a name that matches none. */
     linked: () => string[];
     /**
@@ -165,7 +165,8 @@ export function registerInboxCapabilityTool(server: McpServer, context: InboxCap
         const current = before && !before.awaySince ? before.switches : null;
         if (current && !current[key]) throw new InboxError("not_offered", `${name} is not offered on ${before!.name}.`);
         if (current?.[key]?.on === on) return okComplete(`${name} was already ${state} (${before!.name}). Nothing changed.`, { computer: before!.name, capabilities: shown(current) });
-        const turned = await caps.there(computer, { key, on });
+        // Who turned it: that computer posts its own line for its person (inbox-capability-note.ts).
+        const turned = await caps.there(computer, { key, on }, { name: by.name, host: input.agent_host?.trim() || null });
         if (!turned) throw nowhere(computer);
         if (turned.held) {
           const line = await told(turned.name, true);

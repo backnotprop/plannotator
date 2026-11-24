@@ -224,7 +224,8 @@ import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-g
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
-import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, inboxScheduledOffText, type InboxScheduled } from "./inbox-scheduled";
+import { capabilityNoteOf, postCapabilityNotes } from "./inbox-capability-note";
+import { createInboxScheduled,INBOX_SCHEDULED_ERROR_STATUS, inboxScheduledOffText, type InboxScheduled } from "./inbox-scheduled";
 import { createRoutineGrants, sendRecipients } from "./inbox-routine-grants";
 import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
 import { execLoginCommand, inboxLoginItem, type InboxLoginItem } from "./inbox-scheduled-login";
@@ -1895,7 +1896,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!answer.ok) throw new InboxError(typeof body.code === "string" ? body.code : "validation_error", typeof body.error === "string" ? body.error : "The switch did not turn.");
         return inboxCapabilitySwitchesOf(settingsModel("local", false, null, false));
       },
-      there: async (computer, change) => (machines ? machines.capabilitiesOn(computer, change) : null),
+      there: async (computer, change, by) => (machines ? machines.capabilitiesOn(computer, change, by ?? null) : null),
       linked: () => machines?.linkedNames() ?? [],
       // `project`: the agent's own project, by the lookup of the door it came through (a paired agent's is the door's).
       tell: async (by, threadId, project, body) => {
@@ -8524,6 +8525,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       relay: { paired: async (device) => (relay ? relay.paired(device) : null), revoked: (device) => relay?.revoked(device) },
       phones: phonesOn,
       machines: () => machines ?? null,
+      // A switch an agent on a linked computer turned here: this computer's own line for its person, in this
+      // computer's home folder project (inbox-capability-note.ts). Its words are made here, never sent.
+      noted: (device, note, written) => {
+        const checked = capabilityNoteOf(note);
+        const name = machines?.machineOfDevice(device.id)?.name ?? device.name;
+        if (!checked || !name) return;
+        void resolveProject(projectRoots.home ?? homedir())
+          .then((project) => postCapabilityNotes(store, project.id, checked, name, written))
+          .catch((error: unknown) => process.stderr.write(`Inbox: a capability line from ${name} was not posted (${error instanceof Error ? error.message : String(error)})\n`));
+      },
       // A linked machine's agents read this Inbox's threads and their files (inbox-far-read.ts).
       // Each message's place is worded from the reading computer's side: who it is comes from its token (inbox-sent-from-reader.ts).
       agentRead: { read: (url, device) => agentReadDoorAnswer(mcpContext, url, machines?.readerNameOfDevice(device.id, device.name) ?? ""), file: (url) => agentFileDoorAnswer(store, url) },

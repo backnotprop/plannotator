@@ -38,7 +38,7 @@ afterEach(() => {
 });
 
 /** Studio's door: its list takes routines and the switches; `away()` drops its line and answers nothing until `back()`. */
-function studioDoor() {
+function studioDoor(marks: string[] = [ROUTINES_MARK, "capabilities"]) {
   const state = { down: false, name: "Morning digest", writes: [] as { route: string; body: Record<string, unknown> }[], board: { on: true } };
   const streams = new Set<ReadableStreamDefaultController<Uint8Array>>();
   const server = Bun.serve({
@@ -51,7 +51,7 @@ function studioDoor() {
       if (state.down) return new Response("away", { status: 503 });
       if (req.headers.get("authorization") !== `Bearer ${TOKEN}`) return Response.json({ code: "device_token_invalid" }, { status: 401 });
       if (route === "health") return Response.json({ ok: true, inbox_id: FAR, machine_links: 1, version: "0.29.9" });
-      if (route === "threads") return Response.json({ cursor: 1, sections: [], projects: [], marks: [ROUTINES_MARK, "capabilities"] });
+      if (route === "threads") return Response.json({ cursor: 1, sections: [], projects: [], marks });
       if (route === "events") {
         const body = new ReadableStream<Uint8Array>({
           start: (c) => {
@@ -190,4 +190,16 @@ test("a held edit stays on Studio's last-known row on every read (a reload too) 
   const [now] = await machines.farRoutines.read();
   expect([now!.away, now!.rows.map((r) => r.name)]).toEqual([false, ["Evening digest"]]);
   expect((await call("GET", `/api/inbox/m/${FAR}/capabilities`)).body).toMatchObject({ capabilities: { board: { on: false } }, away: false, held: [] });
+});
+
+test.each([
+  ["a Studio that takes the note", [ROUTINES_MARK, "capabilities", "capability-note"], { agent: "Claude Code", host: "claude-code" }],
+  ["an older Studio", [ROUTINES_MARK, "capabilities"], undefined],
+] as const)("an agent's turn tells Studio who turned it, so Studio posts its own line: %s", async (_what, marks, expected) => {
+  const door = studioDoor([...marks]);
+  const { machines, studio } = inbox(linked(door.url));
+  await until(() => studio()?.state === "online" && studio()?.list_cursor === 1, "Studio online");
+  expect(await machines.capabilitiesOn("Studio", { key: "board", on: false }, { name: "Claude Code", host: "claude-code" })).toMatchObject({ name: "Studio", held: null });
+  // Only the switch and who turned it; an older Studio (its door refuses a field it does not know) gets the write alone.
+  expect(door.state.writes.map((w) => [w.route, w.body.board, w.body.capability_note])).toEqual([["capabilities", { on: false }, expected]]);
 });

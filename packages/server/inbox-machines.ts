@@ -55,6 +55,7 @@ import type { InboxShowArchived } from "./inbox-show-archived";
 import { createFarRoutines } from "./inbox-scheduled-machines";
 import { inboxCapabilitySwitchesOf, type InboxCapabilitySwitches } from "@plannotator/core/inbox-types";
 import { createFarCapabilities } from "./inbox-capabilities-machines";
+import { CAPABILITY_NOTE_FIELD, CAPABILITY_NOTE_MARK } from "./inbox-capability-note";
 
 /** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
 const FAR_ARCHIVED_LIMIT_MAX = 200;
@@ -1093,7 +1094,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
    * write, through the forward and the outbox, so a computer that is away gets it when it is back. Null: no linked
    * computer has that name or id. A computer too old to take it is refused here, with nothing held or noticed.
    */
-  const capabilitiesOn = async (computer: string, change: { key: string; on: boolean } | null): Promise<MachineCapabilitiesAnswer | null> => {
+  const capabilitiesOn = async (computer: string, change: { key: string; on: boolean } | null, by: { name: string; host: string | null } | null = null): Promise<MachineCapabilitiesAnswer | null> => {
     const wanted = computer.trim().toLowerCase();
     const peer = [...peers.values()].find((candidate) => candidate.id === computer.trim() || (links.get(candidate.id)?.name ?? "").toLowerCase() === wanted);
     if (!peer) return null;
@@ -1102,8 +1103,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (peer.list && !peer.list.marks.includes("capabilities")) throw new InboxError("machine_needs_update", `Update Plannotator on ${name}: its capabilities cannot be turned from another computer yet. Nothing changed.`);
     const route = "capabilities";
     const url = new URL(`http://inbox.local/api/inbox/m/${machine}/${route}`);
+    // Who turned it, for that computer's own line, only to one whose door takes it (an older one refuses the field).
+    const note = by && peer.list?.marks.includes(CAPABILITY_NOTE_MARK) ? { [CAPABILITY_NOTE_FIELD]: { agent: by.name, host: by.host } } : {};
     const asked = change
-      ? new Request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idempotency_key: `agent-${crypto.randomUUID()}`, [change.key]: { on: change.on } }) })
+      ? new Request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idempotency_key: `agent-${crypto.randomUUID()}`, [change.key]: { on: change.on }, ...note }) })
       : new Request(url, { method: "GET" });
     const response = await forward(asked, url, machine, route, "local");
     const body = (await response.json().catch(() => ({}))) as { capabilities?: unknown; away?: unknown; read_at?: unknown; held?: unknown; code?: unknown; error?: unknown; machine?: { state?: string } | null; outbox?: OutboxView };

@@ -3618,9 +3618,11 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * is removed there and put back with Undo (`threads/:id/remove-agent`), so a linked machine's list offers Remove.
  * `routines`: its routines are listed, made, changed and run from a linked machine's window through its door
  * (`scheduled…`; inbox-scheduled-machines.ts in the server). `capabilities`: its Settings → Capabilities switches are
- * read and turned from there (`capabilities`; core inbox-capability-switches.ts).
+ * read and turned from there (`capabilities`; core inbox-capability-switches.ts). `capability-note`: a switch an agent
+ * there turns carries `capability_note` (the agent's name), and this Inbox posts its own line for it
+ * (inbox-capability-note.ts in the server).
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "routines", "capabilities"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "routines", "capabilities", "capability-note"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
