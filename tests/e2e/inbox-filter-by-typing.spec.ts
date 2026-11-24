@@ -165,14 +165,19 @@ test('the row closes the menu; the field eases in under the header, focused; the
 async function typeAndCatch(page: Page, text: string, pauseAt: number | null = null) {
   return field(page).evaluate(
     (input: HTMLInputElement, { text, pauseAt }) => {
+      // Only what this key starts counts: an earlier test's last key may still be playing its exit in the list.
+      const ghostsBefore = new Set(document.querySelectorAll('.ib-lbody [data-tflt-ghost]'));
+      const movingBefore = new Set(document.querySelector('.ib-lbody')!.getAnimations({ subtree: true }));
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
       input.dispatchEvent(new Event('input', { bubbles: true }));
-      const ghosts = [...document.querySelectorAll<HTMLElement>('.ib-lbody [data-tflt-ghost]')];
+      const body = document.querySelector('.ib-lbody')!;
+      const ghosts = [...body.querySelectorAll<HTMLElement>('[data-tflt-ghost]')].filter((g) => !ghostsBefore.has(g));
+      const moving = body.getAnimations({ subtree: true }).filter((a) => !movingBefore.has(a));
       if (pauseAt !== null) for (const a of document.getAnimations()) (a.pause(), (a.currentTime = pauseAt));
       return {
         ghosts: ghosts.length,
         hidden: ghosts.every((g) => g.getAttribute('aria-hidden') === 'true' && g.inert && !g.querySelector('[data-thread-id]')),
-        moving: document.querySelector('.ib-lbody')!.getAnimations({ subtree: true }).length,
+        moving: moving.length,
       };
     },
     { text, pauseAt },
