@@ -523,6 +523,9 @@ function reviewOwned(byThread: ReadonlyMap<string, InboxReviewThread>, pulls: It
   return owned;
 }
 
+/** Where a row kept for its merged ship's words goes instead of On you: calm, and in no count. */
+const SHIP_MERGED_MOVE = { move: "waiting", reason: "others" } as const;
+
 /**
  * What a read of the list changes in the records: a PR a thread owns seen merged is recorded (once: it keeps the review
  * it was first seen against), and a recorded PR seen open again (reopened) is forgotten.
@@ -622,9 +625,10 @@ export function inboxReviewRows(input: {
     const landed = open.length === 0 ? landingsOf(threadId, pulls, review) : [];
     // Only when every PR it owns is accounted for: one with no record may be open, just off this list.
     const allDone = landed.length > 0 && ownedKeys(threadId, review).every((key) => landed.some((landing) => landing.key === key));
-    // A ship that just merged keeps its row for its Merged words.
-    const shipMerged = allDone && !!input.shipMerged?.has(threadId);
-    if (allDone && !shipMerged && (!review ||landed.some((landing) => landing.through_review === review.latest_review_id) || (review.verdict?.verdict === "approved" && reviewIsOfLanding(review, landed)))) return;
+    const done = allDone && (!review || landed.some((landing) => landing.through_review === review.latest_review_id) || (review.verdict?.verdict === "approved" && reviewIsOfLanding(review, landed)));
+    // A ship that just merged keeps its row for its Merged words: only that, so it never asks anything of the person.
+    const shipMerged = done && !!input.shipMerged?.has(threadId);
+    if (done && !shipMerged) return;
     if (review?.resolved_at && review.reviewed_at <= review.resolved_at && open.length === 0) return;
     const stacks = stacksOf(open);
     for (const stack of stacks) attached.add(stack.id);
@@ -633,10 +637,13 @@ export function inboxReviewRows(input: {
     // A thread started from the PR's page asked for no review: nobody is curating, so the PR stays where its own state puts it.
     // Its ship merged, its stack gone with the merge: not reviewed, where its own PR's row was while open.
     const talk = !review && own?.link.via === "owner" && own.link.ask === "thread" ? (stacks[0] ? inboxReviewPullMove(stacks[0], input.posted) : shipMerged ? { move: "not_reviewed" as const, reason: "not_reviewed" as const } : null) : null;
+    const move = reported ? { move: "on_you" as const, reason: "branch_ready" as const } : (talk ?? inboxReviewMove(review, open, !!review && open.every((pull) => (input.posted?.get(pull.key)?.at ?? "") >= review.reviewed_at)));
     rows.push({
       id: threadId,
       reviewed: true,
-      ...(reported ? { move: "on_you" as const, reason: "branch_ready" as const } : (talk ?? inboxReviewMove(review, open, !!review && open.every((pull) => (input.posted?.get(pull.key)?.at ?? "") >= review.reviewed_at)))),
+      // Its PRs gone, the forge can't say what On you was (a teammate's PR the person answered there reads as unanswered):
+      // the group it had, else Waiting on others, never On you (inbox-ship.md, How a ship ends).
+      ...(shipMerged && move.move === "on_you" ? SHIP_MERGED_MOVE : move),
       thread_id: threadId,
       review,
       stacks,

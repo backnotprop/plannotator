@@ -388,6 +388,18 @@ describe("landed PRs", () => {
     expect(handed()).toEqual([]);
   });
 
+  test("a row kept for its ship's Merged words never moves to On you; an approval stays Ready to land", () => {
+    // A teammate's PR, reviewed in a thread and answered on the forge only (Waiting on others while open), then shipped and merged.
+    const theirs = pr({ number: 10, head: "feature", state: "merged", merged_at: MERGED_AT, mine: false });
+    const source = { kind: "pr" as const, pr: { url: landing().url } };
+    const posted = new Map([[theirs.key, { at: "2026-11-04T11:00:00.000Z", head: null }]]);
+    const kept = (thread: InboxReviewThread) => inboxReviewRows({ threads: [thread], stacks: [], links: {}, pulls: [theirs], landed: [landing()], posted, shipMerged: new Set(["t"]) });
+    const rows = kept(review({ thread_id: "t", source }));
+    expect(rows.map((r) => [r.id, r.move])).toEqual([["t", "waiting"]]);
+    expect(inboxReviewGroups(rows).on_you).toEqual([]);
+    expect(kept(review({ thread_id: "t", source, ...approved("t") })).map((r) => [r.id, r.move, r.reason])).toEqual([["t", "ready", "approved"]]);
+  });
+
   test("a thread whose ship merged one layer of its stack, its agent ended: the open layer is its own row, not the thread's", () => {
     const top = pr({ number: 11, head: "feature-2", base: "feature" });
     const tied: InboxPullLink = { ...link("s", "owner"), ask: "thread", agent: { host: "claude-code", session: "ses", name: "Claude Code", ended: true } };
