@@ -110,10 +110,10 @@
 .ndr-ask-context svg { margin-top: 2px; }
 .ndr-ask .ndr-editor { margin: 12px; border: 1px solid var(--border); border-radius: 12px; overflow: auto; }
 .ndr-ask .ndr-editor-actions { border: 0; }
-.ndr-ask-hint { margin: 0 16px; color: var(--muted-foreground); font-size: 12px; }
 .ndr-ask [data-ask-destination=side] .ndr-editor-actions button { width: 32px; height: 32px; border-radius: 50%; }
 @container (max-width: 640px) {
-  .ndr .ndr-card { inset: auto 8px max(8px, env(safe-area-inset-bottom)) !important; width: auto; max-height: calc(100% - 16px); }
+  .ndr .ndr-card[data-positioned-note] { width: calc(100% - 16px); max-height: calc(100% - 16px); }
+  .ndr .ndr-card:not([data-positioned-note]) { inset: auto 8px max(8px, env(safe-area-inset-bottom)) !important; width: auto; max-height: calc(100% - 16px); }
   .ndr [data-diagram-zoom-strip], .ndr .ndr-ask-button { height: 46px; bottom: max(10px, env(safe-area-inset-bottom)); }
   .ndr [data-diagram-zoom-strip] { left: 10px; }
   .ndr .ndr-ask-button { right: 10px; }

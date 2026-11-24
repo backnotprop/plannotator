@@ -14,6 +14,12 @@ test('a question about a person attachment follows the ordinary thread recipient
   expect(diagramReplyTarget(thread([agent], { resolved_at: '2026-10-01', archive_seq: 1 }), agent.id)).toBeUndefined();
 });
 
+test('a subsequent agent cannot take a question about an earlier sender’s diagram', () => {
+  const next = { ...agent, id: 'next', author: { ...agent.author, session: 'other', host: 'claude' } };
+  expect(diagramReplyTarget(thread([agent, next]), agent.id)).toBe(agent.id);
+  expect(diagramReplyTarget(thread([agent, next]), next.id)).toBe(next.id);
+});
+
 test('a lost response keeps the same key on a plain HTTP origin and only sends the diagram question', async () => {
   const descriptor = Object.getOwnPropertyDescriptor(crypto, 'randomUUID');
   Object.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true });

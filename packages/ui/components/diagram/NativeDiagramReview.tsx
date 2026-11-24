@@ -1,6 +1,6 @@
 import type { DiagramPart, DiagramSpec } from '@plannotator/diagrams';
 import { MessageCircleQuestion, Paperclip } from 'lucide-react';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
@@ -41,6 +41,7 @@ export interface NativeDiagramReviewProps {
   /** Where the host delivers a question and its reply. */
   askDestination?: 'side' | 'thread';
   onOpenFile?: (ref: NativeDiagramFileReference) => void;
+  onOpenLatest?: () => void;
   inline?: boolean;
   className?: string;
 }
@@ -191,7 +192,7 @@ function Loader(props: NativeDiagramReviewProps) {
 }
 
 function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestComment, onCreateComment, onEditComment, onSelectComment, selectedCommentId,
-  selectedPart, onSelectPart, onAskAI, askDestination = 'side', onOpenFile, inline }: NativeDiagramReviewProps & { drawing: Drawing; parts: ReadonlyMap<string, DiagramPart> }) {
+  selectedPart, onSelectPart, onAskAI, askDestination = 'side', onOpenFile, onOpenLatest, inline }: NativeDiagramReviewProps & { drawing: Drawing; parts: ReadonlyMap<string, DiagramPart> }) {
   const { diagram, svg, title, assetId } = drawing;
   const container = useRef<HTMLDivElement>(null);
   const canvas = useRef<DiagramCanvasHandle | null>(null);
@@ -199,6 +200,15 @@ function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestCommen
   const [asking, setAsking] = useState(false);
   const [notice, setNotice] = useState('');
   const drafts = useRef(new Map<string, string>());
+  const focusSaved = useRef<{ id?: string; previous: Set<string>; anchor: NativeDiagramAnchor; text: string } | null>(null);
+  useLayoutEffect(() => {
+    const saved = focusSaved.current;
+    if (!saved || card || asking) return;
+    const index = comments.findIndex(comment => saved.id ? comment.id === saved.id :
+      !saved.previous.has(comment.id) && partKey(comment.anchor) === partKey(saved.anchor) && comment.text.trim() === saved.text);
+    const pin = container.current?.querySelector<HTMLButtonElement>(`[data-native-pin="${index}"]`);
+    if (pin) { pin.focus({ preventScroll: true }); focusSaved.current = null; }
+  }, [comments, card, asking]);
   const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const stopTimers = useCallback(() => { clearTimeout(openTimer.current); clearTimeout(closeTimer.current); }, []);
@@ -351,8 +361,10 @@ function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestCommen
         aria-expanded={card?.commentId === comment.id} onClick={() => showComment(comment)}>
         <svg viewBox="0 0 26 25" aria-hidden="true"><path d={BUBBLE} /></svg><span>{comment.number ?? index + 1}</span>
       </button>)}
+      {onOpenLatest && <Button type="button" data-native-latest="" data-diagram-control="" className="absolute z-10 top-3 left-3 rounded-full" size="xs" variant="secondary" onClick={onOpenLatest}>Open latest</Button>}
       {onAskAI && !asking && <Button data-native-ask="" className="ndr-ask-button" variant="outline" onClick={ask}><MessageCircleQuestion />Ask AI</Button>}
       {card && activePart && anchorRect && !asking && <FloatingCard key={partKey(activePart) + (card.commentId ?? '')}
+        pinBounds={selectedPin ? pins.map(p => ({ left: p.x - 16, top: p.y - 16, width: 32, height: 32 })) : undefined}
         anchor={anchorRect} host={hostRef.current} mode={card.mode} heading={card.mode === 'references' ? activePart.title : `Comment on ${activePart.title}`}
         pinned={card.pinned} keyboardOpen={!!card.keyboard} onClose={() => close()} onEnter={stopTimers} onLeave={leavePreview}>
         {card.mode === 'write' ? <TextEditor key={card.commentId ?? 'new'} initial={drafts.current.get(commentKey) ?? selectedComment?.text ?? ''}
@@ -360,7 +372,10 @@ function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestCommen
           label={`Comment on ${activePart.title}`} original={selectedComment?.text}
           onSubmit={text => selectedComment ? onEditComment!(selectedComment.id, text) : onCreateComment!(card.anchor, text)}
           onCancel={() => { drafts.current.delete(commentKey); if (selectedComment) setCard({ ...card, mode: 'note' }); else close(); }}
-          onDone={() => { drafts.current.delete(commentKey); setNotice(`Comment saved on ${activePart.title}`); close(); }} /> :
+          onDone={text => {
+            focusSaved.current = { id: selectedComment?.id, previous: new Set(comments.map(c => c.id)), anchor: card.anchor, text };
+            drafts.current.delete(commentKey); setNotice(`Comment saved on ${activePart.title}`); close(false);
+          }} /> :
         card.mode === 'note' && selectedComment ? <div className="ndr-saved">
           <div className="ndr-note-heading">Comment {selectedComment.number ?? comments.indexOf(selectedComment) + 1}
             {onEditComment && <button type="button" onClick={() => setCard({ ...card, mode: 'write' })}>Edit</button>}</div>
@@ -380,7 +395,6 @@ function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestCommen
         </>}
       </FloatingCard>}
       {asking && onAskAI && <AskDrawer title={title} part={activePart ?? undefined} onClose={endAsk}>
-        {askDestination === 'thread' && <p className="ndr-ask-hint">Replies appear in this thread.</p>}
         <TextEditor ask={askDestination} initial={drafts.current.get(askKey) ?? ''} label="Question about the diagram" onCancel={endAsk}
           onChange={value => drafts.current.set(askKey, value)} onDone={() => { drafts.current.delete(askKey); endAsk(); }}
           onSubmit={question => onAskAI({ question, title, assetId, description: diagram.description, part: activePart ?? undefined })} />

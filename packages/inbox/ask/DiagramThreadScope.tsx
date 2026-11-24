@@ -36,10 +36,10 @@ export function DiagramThreadScope({ scope, thread, showToast, afterWrite, side,
     if (!thread || !threadId || isContested(source) || isContested(threadId)) return undefined;
     const target = diagramReplyTarget(thread, source);
     if (!target || isContested(target) || machineOf(target) !== machineOf(threadId) || machineOf(source) !== machineOf(threadId)) return undefined;
-    return (id, question, detail) => {
+    return (id, question, detail, revision) => {
       const current = latest.current.thread;
       if (id !== source || current?.thread_id !== threadId || diagramReplyTarget(current, source) !== target) return Promise.resolve(false);
-      return send(target, question, detail);
+      return send(target, question, detail, revision);
     };
   } }), [thread, threadId, side, send]);
   return <PaneScopeContext.Provider value={scope}>

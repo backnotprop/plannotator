@@ -1,3 +1,4 @@
+import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { Suspense, useContext, useEffect, useState } from 'react';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { NativeDiagramBlockContext, type NativeDiagramRenderer } from '@plannotator/ui/components/diagram/nativeDiagramEnabled';
@@ -59,16 +60,18 @@ function InlineDiagram({ renderBlock: NativeDiagramBlock, attachment, records, r
     }
   };
   return <div data-inline-diagram-attachment={attachment.id}>
-    <Suspense fallback={null}>
-      <NativeDiagramBlock block={blocks[0]!} annotations={annotations}
-        onAddAnnotation={readOnly ? undefined : save}
-        onEditAnnotation={readOnly ? undefined : (id, changes) => {
-          const prior = annotations.find((a) => a.id === id);
-          return prior ? save({ ...prior, ...changes }) : false;
-        }}
-        onOpenLatest={openLatest} onOpenFile={onOpenFile} onAskAI={diagramFileAsk(view, onSide, reply)} sourcePath={attachment.path}
-        embedded />
-    </Suspense>
+    <LazyBlockBoundary fallback={notice => <>{notice}<pre className="max-h-64 overflow-auto">{view.text}</pre></>}>
+      <Suspense fallback={null}>
+        <NativeDiagramBlock block={blocks[0]!} annotations={annotations}
+          onAddAnnotation={readOnly ? undefined : save}
+          onEditAnnotation={readOnly ? undefined : (id, changes) => {
+            const prior = annotations.find((a) => a.id === id);
+            return prior ? save({ ...prior, ...changes }) : false;
+          }}
+          onOpenLatest={openLatest} onOpenFile={onOpenFile} onAskAI={diagramFileAsk(view, onSide, reply)} sourcePath={attachment.path}
+          embedded />
+      </Suspense>
+    </LazyBlockBoundary>
     {error && <p role="alert">{error}</p>}
   </div>;
 }

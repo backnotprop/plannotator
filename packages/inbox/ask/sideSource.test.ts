@@ -68,7 +68,7 @@ describe('Side source', () => {
   });
 });
 
-test("a diagram question identifies the displayed version and the attachment's owning message", () => {
+test("a diagram question identifies the displayed version and the attachment's owning message", async () => {
   const sent = "a".repeat(64);
   const current = "b".repeat(64);
   const attachment: AttachmentView['attachment'] = {
@@ -82,7 +82,11 @@ test("a diagram question identifies the displayed version and the attachment's o
     const ask = diagramFileAsk(view, (question, source) => { calls.push({ question, source }); });
     ask?.('Where does this run?', { kind: 'selection', detail: 'Asset: delivery; panel queue' });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.source).toContain(`SHA-256: ${sha}`);
+    expect(calls[0]?.source).not.toContain('SHA-256:');
+    let revision: string | undefined;
+    const send = diagramFileAsk(view, undefined, async (_id, _question, _source, sha) => { revision = sha; return true; });
+    await send?.('Why?', { kind: 'selection', diagramScope: 'panel queue' });
+    expect(revision).toBe(sha);
     expect(calls[0]?.source).toContain('Message: msg_owner');
     expect(calls[0]?.source).toContain('panel queue');
     expect(diagramFileAsk(view)).toBeUndefined();

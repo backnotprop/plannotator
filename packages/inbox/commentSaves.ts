@@ -6,6 +6,7 @@
  * The list a Send was pressed with lacks a comment whose save had not answered
  * yet; over a slow link that answer can come many seconds later.
  */
+import { parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 
 /**
@@ -18,7 +19,18 @@ const inFlight = new Set<Promise<CommentWrite>>();
 const watchers = new Set<CommentWrite[]>();
 
 /** Track one write; it resolves (or rejects) as `write` does. */
-export function trackCommentWrite<T extends { annotation: InboxAnnotationRecord }>(write: Promise<T>, how: { on: string; id?: unknown; remove?: boolean }): Promise<T> {
+export function trackCommentWrite<T extends { annotation: InboxAnnotationRecord }>(write: Promise<T>, how: { on: string; id?: unknown; remove?: boolean; annotation?: { diagramAnchor?: unknown; text?: unknown } }): Promise<T> {
+  const anchor = parseDiagramAnchor(how.annotation?.diagramAnchor);
+  if (anchor?.family === 'plannotator-diagram') {
+    // Older peers can answer successfully after dropping an anchor they do not understand.
+    write = write.then(answer => {
+      const saved = answer.annotation?.annotation;
+      if (saved?.text !== how.annotation?.text || JSON.stringify(parseDiagramAnchor(saved?.diagramAnchor)) !== JSON.stringify(anchor)) {
+        throw new Error('The Inbox could not confirm this diagram comment.');
+      }
+      return answer;
+    });
+  }
   const ended: Promise<CommentWrite> = write
     .then(
       (answer): CommentWrite => ({ kind: 'answered', record: answer.annotation }),

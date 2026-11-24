@@ -1520,10 +1520,10 @@ export const inboxApi = {
     post<{ message_id: string; viewed: string[] }>(messageUrl(messageId, `/guide/viewed`), { viewed }),
   /** A comment on that guide's diff (the review app's line comment), new or edited; removed through `removeAnnotation`. */
   saveGuideAnnotation: (messageId: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id, annotation }),
   /** A comment on the text of an agent's message (the words selected), new or edited; removed through `removeAnnotation`. */
   saveMessageAnnotation: (messageId: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id, annotation }),
   // A question choice's running-app prototype, through the live proxy (packages/server/inbox-live.ts). `probe`: the
   // app is asked first, so a stopped one answers 422 live_not_answering instead of the proxy framing its error.
   liveSite: (threadId: string, siteId: string, probe = false) =>
@@ -1606,7 +1606,7 @@ export const inboxApi = {
   linkedPage: (attachmentId: string, path: string) =>
     get<LinkedPageView>(attachmentUrl(attachmentId, `/linked-page?path=${encodeURIComponent(path)}`)),
   saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }), { on: attachmentId, id: (annotation as { id?: unknown }).id }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }), { on: attachmentId, id: (annotation as { id?: unknown }).id, annotation }),
   removeAnnotation: (id: string) =>
     trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}), { on: id, id, remove: true }),
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */

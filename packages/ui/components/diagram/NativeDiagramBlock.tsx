@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { parseDiagramAnchor, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
 import { AnnotationType, type Annotation, type Block, type HostDraft } from '../../types';
 import { generateId } from '../../utils/generateId';
@@ -54,7 +54,16 @@ export function NativeDiagramBlock({
     blockId: block.id, startOffset: 0, endOffset: 0, type: AnnotationType.COMMENT,
     originalText: anchor.title, text, diagramAnchor: nativeReviewAnchor(anchor), createdA: Date.now(), author: getIdentity(),
   });
-  const create = onAddAnnotation && ((anchor: NativeDiagramAnchor, text: string) => onAddAnnotation(annotationFor(anchor, text)));
+  const pendingCreates = useRef(new Map<string, Annotation>());
+  const create = onAddAnnotation && (async (anchor: NativeDiagramAnchor, text: string) => {
+    const key = JSON.stringify([block.id, anchor.kind, anchor.id, anchor.x, anchor.y]);
+    // Reuse the ID when a save reached the peer but its acknowledgment did not arrive.
+    const next = pendingCreates.current.get(key) ?? annotationFor(anchor, text);
+    pendingCreates.current.set(key, next);
+    const saved = await onAddAnnotation({ ...next, text });
+    if (saved !== false) pendingCreates.current.delete(key);
+    return saved;
+  });
   const request = onHostDraft && ((anchor: NativeDiagramAnchor) => onHostDraft({
     annotation: annotationFor(anchor, ''), intent: 'compose', label: anchor.title, cancel: () => setPart(null),
   }));
@@ -83,23 +92,18 @@ export function NativeDiagramBlock({
     selectedCommentId: selectedAnnotationId, onSelectComment: onSelectAnnotation,
     selectedPart: part, onSelectPart: setPart, onAskAI: ask, askDestination: onAskAI?.destination,
     onOpenFile: onOpenFile && ((ref: NativeDiagramFileReference) => { setExpanded(false); onOpenFile(ref); }),
-    onResolutionChange: resolved,
+    onResolutionChange: resolved, onOpenLatest: onOpenLatest && (() => { setExpanded(false); onOpenLatest(); }),
   };
   const inline = embedded || block.diagramSourceLineOffset !== 0;
-  const latestAction = onOpenLatest && (
-    <button type="button" className="px-2 py-1 text-xs rounded text-muted-foreground hover:text-foreground" onClick={() => { setExpanded(false); onOpenLatest(); }}>Open latest</button>
-  );
   return (
     <div className="annotation-exclude my-5 relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block="plannotator-diagram" {...sourceLineAttrs(block)}>
       <div className="flex justify-end pb-1" data-print-hide="">
-        {latestAction}
         <button type="button" className="px-2 py-1 text-xs rounded text-muted-foreground hover:text-foreground" data-diagram-expand="" onClick={() => setExpanded(true)}>Expand diagram</button>
       </div>
       <NativeDiagramReview {...viewer} inline={inline} className={inline ? "h-[min(65vh,32rem)] min-h-64" : "h-[calc(100dvh-12rem)] min-h-80"} />
       {expanded && <PopoutDialog open title="Diagram" onClose={() => setExpanded(false)}
         className="h-[calc(var(--pn-viewport-height,100dvh)-2rem)] w-[calc(100vw-2rem)] max-w-none"
         dataAttributes={{ 'data-diagram-popout': '', 'data-block-id': block.id }}>
-        <div className="h-10 shrink-0 border-b border-border px-4 flex items-center gap-2 text-sm">Diagram{latestAction}</div>
         <NativeDiagramReview {...viewer} className="flex-1 min-h-0" />
       </PopoutDialog>}
     </div>
