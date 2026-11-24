@@ -37,7 +37,7 @@ Validation is strict: **unknown keys anywhere throw a `TypeError`** naming the e
 
 ### Layouts (choose exactly one)
 
-A diagram combines one outer layout of panels with optional `groups` (enclosing any subset of panels), `links` (connecting any pair of panels or a panel to itself), top-level framing chrome, and `theme` styling. Prefer automatic layouts (`columns` or `ring`) whenever they fit—they handle panel measurement, alignment, and spacing cleanly; use explicit `panels` when custom 2D coordinates are genuinely needed.
+A diagram combines one outer layout of panels with optional `groups` (enclosing any subset of panels), `links` (connecting any pair of panels or a panel to itself), top-level framing chrome, and `theme` styling. Prefer automatic layouts (`columns` or `ring`) whenever they fit—they handle panel measurement, alignment, and spacing cleanly; use explicit `panels` when custom 2D coordinates are genuinely needed. When the reader needs to trace a directional flow, keep the primary path moving cleanly (typically left-to-right or top-to-bottom) rather than doubling back unnecessarily—reserving rings, deliberate folds, and return paths for subjects that genuinely call for them—and make supporting panels' relationship to the main path clear (through proximity, containment, or a labelled control link when warranted) instead of leaving them ambiguously adrift.
 
 - **`columns`** — Places entries left to right; each entry is a single panel or a vertical stack (`Panel | Panel[]`). Panels stacked in the same column expand to match the widest panel in that column.
   - Controls: `gap` (horizontal spacing between columns, default `72`), `row_gap` (vertical spacing inside a stack, default `28`), `valign` (`"top" | "center" | "bottom"`, default `"center"`—vertical alignment of shorter columns against the tallest).
@@ -81,7 +81,7 @@ Every panel has `title` (required) and supports:
 
 Group panels that share ownership, lifecycle, trust boundary, or domain inside a dashed container instead of repeating the same qualifier text on separate boxes:
 `{ "id": "boundary-id", "label": "Boundary name", "members": ["panel-a", "panel-b"], "sub": "Optional summary", "refs": [...] }`
-Full nesting (one group wholly inside another) is supported; partially overlapping groups or enclosing non-member panels is reported as a layout problem.
+Full nesting (one group wholly inside another) is supported; partially overlapping groups or enclosing non-member panels is reported as a layout problem. Each group adds ~20 px of outer padding around its members, so leave extra gap when a labelled link crosses between groups.
 
 ### Connections and routing (`links`)
 
@@ -173,13 +173,13 @@ Arguments must be in the exact order `render <input> -o <output>` (or `--output`
 - **Exit `1` with layout diagnostics:** valid spec, **the SVG was written** for inspection, and each layout problem was printed to stderr.
 - **Exit `1` with invalid JSON, schema/limit error, or bad arguments:** fails before rendering; **no new SVG is written**, and the error is printed to stderr.
 
-To inspect measured panel bounds when adjusting placement (with `@plannotator/diagrams` installed locally):
+To inspect measured panel bounds, group boxes, and link `labelBox` clearances when adjusting placement (with `@plannotator/diagrams` installed locally):
 
 ```bash
-node --input-type=module -e 'import { readFileSync } from "node:fs"; import { renderDiagram } from "@plannotator/diagrams"; const { parts } = await renderDiagram(JSON.parse(readFileSync("my-diagram.diagram.json", "utf8"))); console.table(parts.filter(p => p.kind === "panel").map(({ id, x, y, w, h }) => ({ id, x, y, w, h })));'
+node --input-type=module -e 'import { readFileSync } from "node:fs"; import { renderDiagram } from "@plannotator/diagrams"; const { parts } = await renderDiagram(JSON.parse(readFileSync("my-diagram.diagram.json", "utf8"))); console.table(parts.filter(p => p.kind === "panel" || p.kind === "group" || (p.kind === "link" && p.labelBox)).map(p => { const b = p.kind === "link" ? p.labelBox : p; return { kind: p.kind, id: p.id, x: +b.x.toFixed(1), y: +b.y.toFixed(1), w: +b.w.toFixed(1), h: +b.h.toFixed(1) }; }));'
 ```
 
-Reported `x` and `y` include the renderer's outer canvas translation and `w` is measured—use the differences between panels (and their measured `w`/`h`) to calculate how far to move them.
+Reported `x` and `y` include the renderer's outer canvas translation and `w`/`h` are measured—compare panel edges, group borders, and each link's `labelBox` to calculate exact gaps and verify pill clearance without guessing.
 
 Iterate until exit `0`:
 - **Port facing away:** set `"start"` / `"end"` explicitly (e.g. `"bottom"` / `"top"` or `"auto"`) or add `"lane": "top" | "bottom"`.
@@ -188,7 +188,7 @@ Iterate until exit `0`:
 - **Overlap or panels too close:** separate coordinates in `panels` mode, or adjust `groups` so each group encloses only its own members without partial overlaps.
 - **Inner `graph` collision or extent error:** adjust `[col, row]` spacing in `graph.at`, reduce panel/label width, or split self-loops into a panel with a return lane.
 
-**Visual check (exit `0` checks geometry, not communication):** After a clean render, look at the actual rendered picture at its intended reading size (rasterize the `.svg` to PNG if your image viewer needs raster input). Trace the reader's primary paths—and any failure, fallback, or boundary crossings from the request—directly across the image to verify that no key hop or boundary was silently dropped and that critical hops stay visually distinct rather than cramped inside a tiny sub-block. Check focal hierarchy, overall proportions and dead whitespace, panel alignment, tangled line crossings (the renderer checks line-against-panel crossings, not line-against-line crossings), whether structured primitives (`tiles`, `card`, `graph`, `groups`) would communicate better than prose, and whether overview text and embedded images remain comfortably legible without zooming in—then do a deliberate polish pass (including targeted font-size, tone, or layout adjustments) if anything feels monotonous, cramped, or hard to trace. If your environment cannot view images, inspect the measured canvas `width`/`height` and panel bounds above alongside `renderDiagram(spec).description` to catch lopsided proportions, misaligned placements, or missing paths.
+**Visual check (exit `0` checks geometry, not communication):** After a clean render, look at the actual rendered picture at its intended reading size (rasterize the `.svg` to PNG if your image viewer needs raster input). Trace the reader's primary paths—and any failure, fallback, or boundary crossings from the request—directly across the image to verify that any directional path reads cleanly without awkward detours or ambiguously adrift panels, that no key hop or boundary was silently dropped, and that critical hops stay visually distinct rather than cramped inside a tiny sub-block. Check focal hierarchy, overall proportions and dead whitespace, panel alignment, tangled line crossings (the renderer checks line-against-panel crossings, not line-against-line crossings), cramped link labels (every label pill should sit on visible line shaft with breathing room from panels, arrowheads, and dashed group borders), whether structured primitives (`tiles`, `card`, `graph`, `groups`) would communicate better than prose, and whether overview text and embedded images remain comfortably legible without zooming in—then do a deliberate polish pass (including targeted font-size, tone, gap, or layout adjustments) if anything feels monotonous, cramped, or hard to trace. If your environment cannot view images, inspect the measured canvas `width`/`height` and bounds table above alongside `renderDiagram(spec).description` to catch lopsided proportions, cramped labels, misaligned placements, or missing paths.
 
 ## 5. Revise from pinned feedback
 
