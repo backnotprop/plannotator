@@ -12,6 +12,8 @@ export class InboxApiError extends Error {
     /** `question_revision_conflict`: the question's revision on the Inbox now, when the answer names it. */
     readonly currentRevision: number | null = null,
     readonly by: string | null = null,
+    /** The linked machine (`ibx_` id) that could not be asked, when a far read failed (Combine across computers). */
+    readonly machineId: string | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -30,6 +32,7 @@ export async function readJson<T>(response: Response): Promise<T> {
       typeof body.thread_id === 'string' ? body.thread_id : null,
       typeof body.current_revision === 'number' ? body.current_revision : null,
       typeof body.by === 'string' ? body.by : null,
+      typeof body.machine === 'string' ? body.machine : null,
     );
   }
   return body as T;

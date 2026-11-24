@@ -17,6 +17,7 @@ import {
 } from "../../utils/richClipboard";
 import {
   parseHtmlElementContext,
+  parseHtmlAnchorStructure,
   MAX_ELEMENT_CONTEXT_BYTES,
   MAX_PAGE_URL_LENGTH,
 } from "@plannotator/core/html-anchor";
@@ -284,6 +285,21 @@ export interface UseHtmlAnnotationOptions {
    *  (converted through `frameScale`). Delivered in readOnly mode too.
    *  Absent: ignored. */
   onPageTap?: (clientY: number) => void;
+  /**
+   * The host vouches that the document is, byte for byte, the one every
+   * annotation given was made on (`HtmlViewer` `structuralAnchors`). Then an
+   * element with no text and no stable id is anchored by its place and its
+   * signature (`HtmlElementAnchor.structure`). Default false: such an anchor
+   * from the page is dropped, and none is asked for on restore.
+   */
+  structuralAnchors?: boolean;
+  /**
+   * The composer's anchor carries the size of the element (or selection) it
+   * is for (`data-pin-width`, `data-pin-height`, on screen), so a comment card
+   * placed beside it clears the whole element and not only its top middle
+   * (`HtmlViewer` `inline`). Default false: a point, as before.
+   */
+  anchorSize?: boolean;
 }
 
 /** The page's laid-out width and the frame's own width, in the page's pixels. */
@@ -401,9 +417,20 @@ export function parseHtmlElementAnchor(value: unknown): HtmlElementAnchor | null
     return null;
   }
   const point = parseAnchorPoint(value.point);
-  if (text === undefined) return { selector, tagName, ...(point ? { point } : {}) };
+  // A structural anchor (core's caps: path depth, attribute count and length).
+  // One that is not valid rejects the whole anchor: it has nothing else to be
+  // found by. Whether this viewer takes structural anchors at all is decided
+  // where the message is handled (`structuralAnchors`).
+  let structure: HtmlElementAnchor["structure"];
+  if (value.structure !== undefined) {
+    const parsed = parseHtmlAnchorStructure(value.structure);
+    if (!parsed) return null;
+    structure = parsed;
+  }
+  const more = { ...(point ? { point } : {}), ...(structure ? { structure } : {}) };
+  if (text === undefined) return { selector, tagName, ...more };
   if (typeof text !== "string" || text.length > MAX_ANCHOR_TEXT_LENGTH) return null;
-  return { selector, tagName, text, ...(point ? { point } : {}) };
+  return { selector, tagName, text, ...more };
 }
 
 /** A `restore-draft` id (the host mints it): short, or none. */
@@ -608,6 +635,8 @@ export function useHtmlAnnotation({
   onContentWidth,
   onPageScrollUp,
   onPageTap,
+  structuralAnchors = false,
+  anchorSize = false,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
   "highlighterRef" | "highlightRange" | "highlightMathElement" | "commentDrafts" | "reopenCommentDraft" | "reopenComment"
@@ -641,6 +670,10 @@ export function useHtmlAnnotation({
    *  (null: none): take exactly one link offer with it (linkGuard.ts). */
   armLinkOffer: (key: string | null) => void;
 } {
+  const anchorSizeRef = useRef(anchorSize);
+  anchorSizeRef.current = anchorSize;
+  const structuralAnchorsRef = useRef(structuralAnchors);
+  structuralAnchorsRef.current = structuralAnchors;
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
   const [quickLabelPicker, setQuickLabelPicker] = useState<QuickLabelPickerState | null>(null);
@@ -818,6 +851,14 @@ export function useHtmlAnnotation({
     return anchorRef.current;
   }, []);
 
+  // `anchorSize`: the anchor says how large its element is on screen, for a comment box that goes beside it.
+  const sizeAnchor = useCallback((anchor: HTMLElement, rect: { width: number; height: number }) => {
+    if (!anchorSizeRef.current) return;
+    const s = frameScaleRef.current;
+    anchor.dataset.pinWidth = String(Math.max(0, rect.width * s));
+    anchor.dataset.pinHeight = String(Math.max(0, rect.height * s));
+  }, []);
+
   const positionAnchor = useCallback(
     (bridgeRect: { top: number; left: number; width: number; height: number }) => {
       const iframe = iframeRef.current;
@@ -834,9 +875,10 @@ export function useHtmlAnnotation({
       const s = frameScaleRef.current;
       anchor.style.top = `${iframeRect.top + bridgeRect.top * s}px`;
       anchor.style.left = `${iframeRect.left + (bridgeRect.left + bridgeRect.width / 2) * s}px`;
+      sizeAnchor(anchor, bridgeRect);
       return anchor;
     },
-    [iframeRef, getOrCreateAnchor],
+    [iframeRef, getOrCreateAnchor, sizeAnchor],
   );
 
   // A layout effect, like HtmlViewer's own listener: listening from the
@@ -881,6 +923,9 @@ export function useHtmlAnnotation({
       }
       const message = parseBridgeMessage(e.data);
       if (!message) return;
+      // A structural anchor is taken only by a viewer that asked for them: from any other page it is forged,
+      // and the element gets no anchor, as before.
+      if (!structuralAnchorsRef.current && "anchor" in message && message.anchor?.structure) message.anchor = undefined;
 
       const type = message.type;
       // Taken from the link guard's port only (above): on the window it is forgeable.
@@ -1148,6 +1193,7 @@ export function useHtmlAnnotation({
         const s = frameScaleRef.current;
         anchor.style.top = `${iframeRect.top + r.top * s}px`;
         anchor.style.left = `${iframeRect.left + (r.left + r.width / 2) * s}px`;
+        sizeAnchor(anchor, r);
         window.dispatchEvent(new Event("scroll"));
       }
 
@@ -1555,6 +1601,7 @@ export function useHtmlAnnotation({
           // and scopes the text search to it, falling back to document-wide.
           anchor: ann.htmlAnchor,
           additionalAnchors: additionalAnchors.length ? additionalAnchors : undefined,
+          ...(structuralAnchorsRef.current ? { structural: true } : {}),
         });
       }
     },

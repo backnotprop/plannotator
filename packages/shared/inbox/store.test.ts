@@ -1371,7 +1371,7 @@ class ThreadStateModel {
           const s = this.state(thread, message, q);
           return s === "open" || s === "picked";
         });
-        if (open.length === 0) return "refused:invalid_supersedes";
+        if (named.length === 0) return "refused:invalid_supersedes";
         this.addAgent(thread, tick, store);
         for (const q of open) q.superseded = true;
         return "ok";
@@ -2511,7 +2511,7 @@ const HAND_TRACES: TraceDef[] = [
   },
   {
     name: "hand-10-supersede-chain",
-    description: "A picked question is replaced by a stopped one (the pick is never sent), that by a holding one, that withdrawn with nothing in its place; superseding a closed question is refused.",
+    description: "A picked question is replaced by a stopped one (the pick is never sent), that by a holding one, that withdrawn with nothing in its place; superseding a closed question sends the message and leaves it closed.",
     events: [
       ROOT(STATE_BODIES.ask),
       PICK("m1", KEY.ask, "Yes"),

@@ -11,7 +11,7 @@ import { RowTagName, rowTintOf, tintProps, type ListTagColours, type RowTintProp
 import { RowAgents, RowAgentTiles } from './RowAgents';
 import { RowPullsMark } from '../threadPulls/ThreadPulls';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
-import { LazyRowTips, RowTip } from './RowTip';
+import { RowTip } from './RowTip';
 import { Icon } from '../icons';
 import { PinMark, PinnedWords } from '../parts/RowPin';
 import { notePressPointer, pressRow } from '../starPress';
@@ -23,7 +23,7 @@ import { rowLabel, scheduledLook, scheduledOf, ScheduledTile, useScheduled } fro
 import { HeldNoticeLine, HeldNoticeSaid, HoldViewOnBar, noticeLines, type ListNotice } from './HeldNoticeLine';
 import { listBarShows } from '../listNewState';
 import { useShowHold } from '../holdView';
-import { ThreadRowMenu, useRowDragA11y } from './RowMenu';
+import { ThreadRowMenu, bandMenuId, useRowDragA11y } from './RowMenu';
 import type { RowMenuAction } from '../rowMenu';
 import { WIDE_ROW_WAIT_WORDS, WaitWords, rowHasBadge } from './RowBadge';
 import { rowStatus } from './RowStatus';
@@ -53,10 +53,12 @@ import { sameListRow, type ListRowProps } from './listRowProps';
 import { useListPicks } from './useListPicks';
 import { PickBox, PickMark } from './PickBar';
 import type { BulkWrites } from '../bulkWrites';
-import { GroupBand } from './GroupBand';
+import { FoldedBlocker, GroupBand, newSince } from './GroupBand';
+import { bandOnScreen, useBandTip, type BandTipHost } from '../bandTip';
+import { bandMenuOf, listMarkAllRows } from '../markAllRead';
 import { AgentsList } from '../agentsView/AgentsList';
 import { LineRow } from '../agentsView/LineRow';
-import { rowAgent, slotSession, cardOf, SnoozedUntil, RowTime, BadgeWords, subjectOf, sentWordsOf, titleOf, RowTitle, countWords, liveCount, CountWords, EndedMark, LineCount, openCountsKey, OpenCounts, ClipText, RowWithAction } from './rowParts';
+import { rowAgent, slotSession, cardOf, SnoozedUntil, RowTime, ListRows, BadgeWords, subjectOf, sentWordsOf, titleOf, RowTitle, countWords, liveCount, CountWords, EndedMark, LineCount, openCountsKey, OpenCounts, ClipText, RowWithAction } from './rowParts';
 import { ArchivedGroup } from './ArchivedGroup';
 import type { ArchivedGroupHost } from '../data/actions/archivedGroup';
 import { useShowArchived } from '../showArchived';
@@ -167,6 +169,8 @@ export interface InboxListProps {
   onRowAction?: (row: InboxListRow, action: RowMenuAction) => unknown;
   /** The picks' actions (bulkWrites.ts): rows can be picked, from the row menu, the ⋮ or ⌘ / Shift and a click. Absent: no picking. */
   bulk?: BulkWrites;
+  /** The Group tip (bandTip.ts): a band's one-time tooltip about its menu. Absent: none. */
+  bandTip?: BandTipHost;
   /** A press on a starred row's star. Absent (an older Inbox keeps no pins): the star is only a mark. */
   onUnstar?: (row: InboxListRow) => void;
   /** Snooze a row until a moment, from its menu (approval "inbox-snooze"). Absent (an older Inbox keeps no snoozes): no Snooze. */
@@ -710,33 +714,6 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   );
 }
 
-/**
- * A closed group with an agent stopped or held up inside (Stopped on you, Holding up work, the Snoozed band): the
- * triangle, so a blocker never hides behind the fold.
- */
-function FoldedBlocker({ rows, group }: { rows: readonly InboxListRow[]; group: InboxListGroupId }) {
-  const stopped = rows.some((row) => row.section === 'stopped');
-  if (!stopped && !rows.some((row) => row.section === 'holding')) return null;
-  const snoozed = group === 'snoozed';
-  const words = snoozed
-    ? stopped
-      ? 'A snoozed thread is stopped on you'
-      : 'A snoozed thread is holding up work'
-    : stopped
-      ? 'A closed thread is stopped on you'
-      : 'A closed thread is holding up work';
-  return (
-    <span className="ib-zband-tri" data-stopped={stopped ? '' : undefined} data-snooze-blocker={snoozed ? '' : undefined} data-folded-blocker="" role="img" aria-label={words}>
-      <Icon name="warn" size={14} />
-    </span>
-  );
-}
-
-/** Something new came into a closed group since it was closed: an unread row whose latest agent message came after. */
-function newSince(rows: readonly InboxListRow[], since: number): boolean {
-  return rows.some((row) => row.unread && Date.parse(row.last_agent_at ?? row.last_at) > since);
-}
-
 const NO_UNSEEN: readonly UnseenRow[] = [];
 
 export function InboxList(props: InboxListProps) {
@@ -750,20 +727,21 @@ export function InboxList(props: InboxListProps) {
   });
   // The list's look options in its ⋮ menu (listLook.ts): smaller thread names on by default, the others off.
   const [look, setLook] = useListLook(props.rememberLook !== false);
-  // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu.
+  // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu; Recent activity (`sort.by`) draws List's one list whatever it is.
   const [view, setView] = useListView(props.rememberLook !== false);
-  const asList = view === 'list';
+  const asList = view === 'list' || props.sort?.by !== undefined;
   // Agents (agentsView/): its drawn rows (Select all picks only those), its Shows (each opens the agents rows land under).
-  const asAgents = view === 'agents', [agentRows, setAgentRows] = useState<readonly string[] | null>(null), [shows, setShows] = useState(0);
+  const asAgents = view === 'agents' && !asList, [agentRows, setAgentRows] = useState<readonly string[] | null>(null), [shows, setShows] = useState(0);
   // The starred threads as pills above the list, or (off, the default) the sidebar's Starred section (starredPills.ts).
   const [starredAbove, setStarredAbove] = useStarredAbove(props.rememberLook !== false);
   const showArchived = useShowArchived();
+  const [archivedRows, setArchivedRows] = useState<readonly InboxListRow[]>([]);
   // Settings → Rows' "Project" off: every row drawn as one project's list draws it (no project, its columns).
   const noProject = props.filtered || look.hideProject;
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
   // across a resize past the phone width, its scroll are kept).
   const bodyRef = useRef<HTMLDivElement>(null);
-  const pick = useListPicks({ sections: props.sections, isOpen: (id) => (asList && id !== 'snoozed') || ((!asAgents || id === 'snoozed') && groups.state(id).open), drawn: asAgents ? agentRows : null, body: bodyRef, bulk: props.bulk, phone: props.phone === true, narrow: props.narrow === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => props.sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null });
+  const pick = useListPicks({ sections: props.sections, isOpen: (id) => (asList && id !== 'snoozed') || ((!asAgents || id === 'snoozed') && groups.state(id).open), drawn: asAgents ? agentRows : null, body: bodyRef, bulk: props.bulk, phone: props.phone === true, narrow: props.narrow === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => props.sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null, archived: archivedRows });
   // ↑ ↓ Home End move focus between the rows (listKeys.ts), only while a row or the Quiet band has it.
   const listKey = (move: ListMove) => ({
     when: (event: KeyboardEvent) => {
@@ -854,6 +832,8 @@ export function InboxList(props: InboxListProps) {
   }, []);
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
+  /** Mark all as read (the ⋮'s, a band's menu): these drawn rows, each written as its thread is now (bulkWrites.ts `markAllRead`). */
+  const markAllRead = props.bulk ? (rows: readonly InboxListRow[]) => (rows.length > 0 ? props.bulk!.markAllRead(rows) : undefined) : undefined;
   // List's rows (listView.ts): every group's but the Snoozed band's, newest first, each keeping its place until the
   // list is sorted whole (`props.sort`), as the groups keep theirs. Only while List shows: a switch to List is a
   // sort of the whole list (the held list's rows, so nothing behind "N new" comes in).
@@ -861,8 +841,8 @@ export function InboxList(props: InboxListProps) {
   const sortEpoch = props.sort?.epoch;
   const sortKeep = props.sort?.keep ?? null;
   const flat = useMemo(
-    () => (asList ? flatRows(props.sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep }) : null),
-    [asList, props.sections, sortEpoch, sortKeep],
+    () => (asList ? flatRows(props.sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep, by: props.sort?.by }) : null),
+    [asList, props.sections, sortEpoch, sortKeep, props.sort?.by],
   );
   useLayoutEffect(() => {
     places.current = flat?.places ?? null;
@@ -933,7 +913,7 @@ export function InboxList(props: InboxListProps) {
     // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
     // rows: closed, they would come in out of sight and Show would seem to do nothing.
     const lands = props.notice?.lands;
-    if (lands && view === 'grouped') groups.open(lands); else if (asAgents) setShows((n) => n + 1);
+    if (lands && !asList && !asAgents) groups.open(lands); else if (asAgents) setShows((n) => n + 1);
     props.onShowNew();
   };
   // The row whose right-click menu is open: a muted background, as the project row's.
@@ -970,6 +950,12 @@ export function InboxList(props: InboxListProps) {
   });
   // Shift+F10 opens a row's menu (the context-menu key too), named on each row for assistive technology.
   const rowKeys = onRowAction ? shortcutAria({ scope: inboxListShortcuts, action: 'rowMenu' }) : undefined;
+  // A group band's menu (markAllRead.ts `bandMenuOf`). Not while picking: the band's box is the picks' then.
+  const bands = props.bulk && !pick.on ? bandMenuOf(props.sections, props.bulk, () => bandTip.menuOpened()) : undefined;
+  // The bands drawn that have a menu now, for the Group tip: none while picking, none while a thread covers the list.
+  const menuBands =
+    bands && props.covered !== true ? (asList || asAgents ? (listBand ? [listBand] : []) : visible).filter((section) => bands.actionsOf(section.id).length > 0).map((section) => section.id) : [];
+  const bandTip = useBandTip(props.bandTip, props.phone === true, menuBands, (id) => bandOnScreen(bodyRef.current, id));
   // The row callbacks keep one identity for the list's life (they call the latest props), so a row whose
   // data did not change is not rendered again when the list is (ListRow is memoized on its row's content).
   const latest = useRef(props);
@@ -1023,9 +1009,8 @@ export function InboxList(props: InboxListProps) {
       statusMark={look.statusMark}
       noAgents={look.hideAgents}
       noPulls={look.hidePulls}
-      // An Archived group's row is not picked (no box), though the list is picking.
-      picking={pick.on && drawn !== 'archived'}
-      picked={pick.on && drawn !== 'archived' && pick.has(row.thread_id)}
+      picking={pick.on}
+      picked={pick.on && pick.has(row.thread_id)}
       onPick={pick.onRowBox}
     />
   );
@@ -1144,6 +1129,7 @@ export function InboxList(props: InboxListProps) {
             view={props.rememberLook !== false ? { value: view, onChange: setView } : undefined}
             starredAbove={props.rememberLook !== false && props.starred ? { on: starredAbove, onChange: setStarredAbove } : undefined}
             onSelect={pick.start}
+            markAllRead={markAllRead ? { disabled: listMarkAllRows(props.sections).length === 0, onClick: () => void markAllRead(listMarkAllRows(props.sections)) } : undefined}
             showArchived={props.archived && props.rememberLook !== false ? { on: showArchived, onChange: props.archived.setOn } : undefined}
             tagColours={props.tagColours?.setShow ? { on: props.tagColours.show, onChange: props.tagColours.setShow } : undefined}
           />
@@ -1183,12 +1169,13 @@ export function InboxList(props: InboxListProps) {
           onSnoozeBlocked={props.onSnoozeBlocked}
           pinnedOf={props.pinned ? (row) => (!props.machines || machineTakes(row, props.machines, 'star') ? props.pinned!.has(row.thread_id) : null) : undefined}
           prioritizesOf={props.machines ? (row) => machineTakes(row, props.machines!, 'priority') : undefined}
-          onTarget={setMenuRow}
+          onTarget={(id) => setMenuRow(id)}
           onAction={(row, action) => onRowAction?.(row, action)}
           disabled={!onRowAction}
           held={props.selectedThreadId !== null}
           phone={props.phone === true}
           picks={pick.menu}
+          bands={bands}
         >
           {onRowAction && <RowSwipeLayer ref={swipeLayerRef} />}
           {props.stale}
@@ -1206,8 +1193,8 @@ export function InboxList(props: InboxListProps) {
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {/* So is a list whose rows are all archived, waiting for the list to settle without them (Archive all). */}
           {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && props.empty}
-          {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. */}
-          <LazyRowTips.Provider value={true}>
+          {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. Recent activity's times (`sort.by`). */}
+          <ListRows timeBy={props.sort?.by}>
           {flat && flat.rows.length > 0 && (
             // List: one run of rows, newest first, no bands; each row keeps the group it is drawn in for its actions.
             <div className="ib-group" data-section-id="list" data-flat-list="">
@@ -1226,6 +1213,12 @@ export function InboxList(props: InboxListProps) {
                 {pick.groupBox(section, open)}
                 <GroupBand
                   open={open}
+                  menu={menuRow === bandMenuId(section.id)}
+                  keys={bands && bands.actionsOf(section.id).length > 0 ? rowKeys : undefined}
+                  tip={bandTip.shown?.band === section.id ? bandTip.shown.words : null}
+                  tipEnd={props.phone === true}
+                  onPointed={() => bandTip.pointed(section.id)}
+                  onLeft={() => bandTip.left(section.id)}
                   onToggle={(band) => {
                     // Focus in a row of the group that closes goes to its header, not to the page.
                     const active = document.activeElement;
@@ -1244,8 +1237,8 @@ export function InboxList(props: InboxListProps) {
               </div>
             );
           })}
-          {props.archived && showArchived && <ArchivedGroup host={props.archived} renderRow={renderRow} phone={props.phone === true} onSearch={props.onSearch} />}
-          </LazyRowTips.Provider>
+          {props.archived && showArchived && <ArchivedGroup host={props.archived} renderRow={renderRow} onRows={setArchivedRows} phone={props.phone === true} onSearch={props.onSearch} />}
+          </ListRows>
         </ThreadRowMenu>
       {pick.sheet}
       <HeldNoticeSaid words={bar.words} place={`${props.scope ?? ''}\n${props.title}`} />

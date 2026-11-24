@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import type { DiffFileStatus } from '../types';
-import type { ReviewImageData, ReviewImageSide } from '../utils/reviewImage';
+import { readReviewImageBlob, type ReviewImageData, type ReviewImageSide } from '../utils/reviewImage';
 import { ALL_FILES_IMAGE_MAX_HEIGHT, LABELS_OVER_MIN_HEIGHT, LABELS_OVER_MIN_WIDTH, SIDE_BY_SIDE_GAP, SIDE_BY_SIDE_MIN_WIDTH, sideBySideColumns, sideBySidePaneWidth, stageLayout, type Size } from './image-diff/geometry';
 import { useImageDiffSettings } from './image-diff/imageDiffSettings';
 import { sidesFor, useImageSides, useNearViewport } from './image-diff/useImageSides';
@@ -23,6 +23,11 @@ export interface ImageDiffPreviewProps {
   patch?: string;
   lfsSupported?: boolean;
   onPreviewChange?: (shown: boolean) => void;
+  /**
+   * Where the image reads go: absent, code review's own `/api/review-image`. A host with its own routes (the Inbox)
+   * passes a fetch that sends `/api/review-image?path=…&side=…&snapshot=…` there; `snapshotId` must then be its own.
+   */
+  fetchImpl?: typeof fetch;
 }
 
 
@@ -62,6 +67,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   patch,
   lfsSupported = false,
   onPreviewChange,
+  fetchImpl,
 }) => {
   const lfs = lfsSupported && patch ? parseLfsPointerDiff(patch) : null;
   const lfsUnchanged = !!lfs?.old && lfs.old.oid === lfs.new?.oid;
@@ -75,6 +81,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     visible: visible && !lfsUnchanged,
     patch,
     knownBytes: { old: knownEntry?.old?.bytes, new: knownEntry?.new?.bytes },
+    ...(fetchImpl ? { fetchImpl } : {}),
   });
   const [natural, setNatural] = useState<Partial<Record<ReviewImageSide, Size>>>({});
   const settings = useImageDiffSettings();
@@ -134,7 +141,9 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
       return;
     }
     let live = true;
-    computeDifferences(diffKey, { url: before.url, size: beforeSize }, { url: after.url, size: afterSize }).then((result) => {
+    // A host's own route (the Inbox): its page policy refuses `fetch` of the sides' `blob:` URLs, so read them there.
+    const read = (side: ReviewImageSide) => (fetchImpl && snapshotId ? { read: () => readReviewImageBlob(snapshotId, filePath, side, fetchImpl) } : {});
+    computeDifferences(diffKey, { url: before.url, size: beforeSize, ...read('old') }, { url: after.url, size: afterSize, ...read('new') }).then((result) => {
       if (live) setMask(result);
     });
     return () => {

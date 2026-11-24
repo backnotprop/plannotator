@@ -132,14 +132,26 @@ export const SLICE_RULES: SliceRule[] = [
   },
 
   // --- Smaller areas named by their specs ---
-  { name: 'ref cards', paths: ['packages/server/ref-cards*', 'packages/shared/ref-cards*', 'packages/core/forge-ref*'], specs: ['ref-cards-review.spec.ts', 'inbox-ref-cards.spec.ts', 'inbox-open-in-refs.spec.ts'] },
+  { name: 'ref cards', paths: ['packages/server/ref-cards*', 'packages/shared/ref-cards*', 'packages/core/forge-ref*', 'packages/ui/components/RefHoverCard*', 'packages/ui/utils/refCard*', 'packages/inbox/pulls/refCardReviews*'], specs: ['ref-cards-review.spec.ts', 'inbox-ref-cards.spec.ts', 'inbox-open-in-refs.spec.ts', 'ref-card-click.spec.ts'] },
   { name: 'question card', paths: ['packages/ui/components/blocks/Question*', 'packages/ui/components/Question*'], specs: ['question-*.spec.ts'] },
   { name: 'chat window and Ask AI', paths: ['packages/ui/components/chat/**', 'packages/ai/**'], specs: ['chat-window.spec.ts', 'ask-ai-sanitize.spec.ts', 'annotate-ai-history.spec.ts'] },
+  { name: 'Pele diagram labels', paths: ['packages/ui/utils/pele*', 'packages/ui/utils/diagram-anchor-pele.ts', 'packages/ui/utils/diagram-engine.ts', 'packages/ui/utils/diagram-render.ts'], specs: ['pele-labels.spec.ts'] },
+  {
+    // The switch decides which engine draws a fence in the built apps; these specs expect Pele where it draws and Mermaid where a fence falls back.
+    name: 'diagram engine switch',
+    paths: ['packages/ui/utils/diagram-engine.ts', 'packages/ui/utils/pele.ts'],
+    specs: ['review-diagrams.spec.ts', 'inbox-mermaid-failure-webkit.spec.ts', 'inbox-thread-diagram-comments.spec.ts', 'vscode-guides-sanitize.spec.ts'],
+  },
   { name: 'phone surface', paths: ['packages/inbox/surface/**'], specs: ['surface.spec.ts'] },
   {
     name: 'VS Code Guides webview',
     paths: ['apps/vscode-extension/src/guides/**', 'apps/vscode-extension/scripts/esbuild.config.ts', 'apps/vscode-extension/package.json'],
     specs: ['vscode-guides-*.spec.ts'],
+  },
+  {
+    name: 'diagram engine (Mermaid, its math labels, the label sanitizer)',
+    paths: ['packages/ui/utils/diagram-render.ts', 'packages/ui/utils/mermaid*.ts', 'packages/ui/utils/math*.ts'],
+    specs: ['diagram-*.spec.ts', 'vscode-guides-sanitize.spec.ts'],
   },
   {
     name: 'packed pages and the build',
@@ -230,10 +242,16 @@ export const SLICE_RULES: SliceRule[] = [
       'packages/server/inbox-peer*',
       'packages/server/inbox-accounts*',
       'packages/server/inbox-cloud*',
+      'packages/server/inbox-far-read*',
+      'packages/server/inbox-machine-agent-read*',
+      'packages/server/inbox-mcp-far-read*',
+      'packages/server/inbox-machine-fetch-file*',
+      'apps/hook/server/inbox-call-far-fetch*',
+      'packages/shared/inbox/saved-file*',
       'packages/inbox/data/machineViews*',
       'packages/inbox/cloud/**',
     ],
-    specs: ['inbox-machines.spec.ts', 'inbox-machine-update.spec.ts', 'inbox-phones.spec.ts', 'inbox-accounts*.spec.ts', 'inbox-snooze-machines.spec.ts', 'inbox-cloud-*.spec.ts'],
+    specs: ['inbox-machines.spec.ts', 'inbox-machine-update.spec.ts', 'inbox-phones.spec.ts', 'inbox-accounts*.spec.ts', 'inbox-snooze-machines.spec.ts', 'inbox-machines-agent-read.spec.ts', 'inbox-cloud-*.spec.ts'],
   },
   { name: 'Inbox: guided reviews', stopgap: true, paths: ['packages/inbox/guide/**', 'packages/server/inbox-guides*'], specs: ['inbox-guides.spec.ts', 'inbox-request-guide.spec.ts'] },
   { name: 'Inbox: Ask window', stopgap: true, paths: ['packages/inbox/ask/**', 'packages/server/inbox-ask*'], specs: ['inbox-ask-window.spec.ts', 'inbox-reask.spec.ts'] },

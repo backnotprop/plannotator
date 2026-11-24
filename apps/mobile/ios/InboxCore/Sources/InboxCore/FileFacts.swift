@@ -4,6 +4,11 @@ import InboxWire
 /// What a file's tile and its viewer say of it, and how it is drawn: the window's own rules, held to the contract's
 /// `files` suite (apps/mobile/contract/vectors/files.json, made from the window's functions).
 public enum FileFacts {
+  /// Whether a link written in an attached document may open: a site or a mail address, as the window's document
+  /// links are (packages/ui/components/InlineMarkdown.tsx). Never another app's scheme, a file, or this app's own
+  /// pairing link: a document an agent wrote must not be able to start any of those with one tap.
+  public static func documentLinkOpens(_ url: URL) -> Bool { ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") }
+
   /// A text or code file larger than this is not drawn (packages/core/inbox-attachments.ts `INBOX_VIEW_MAX_BYTES`).
   public static let viewCap: Int64 = 16 * 1024 * 1024
 

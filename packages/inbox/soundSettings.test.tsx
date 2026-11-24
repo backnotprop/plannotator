@@ -5,7 +5,7 @@
  * and the hook itself against a recording AudioContext: nothing rings before
  * the first click or with the tab in front, a burst rings once, Play always
  * plays the Ding-dong; "every agent message" (the default, also with
- * nothing chosen) plays the Felt note for a plain reply, "when an agent asks
+ * nothing chosen) rings the Ding-dong for a plain reply, "when an agent asks
  * you or starts a thread" nothing; off stays off.
  * Never audible: the AudioContext is a stub that only counts.
  *
@@ -23,7 +23,7 @@ const hasDom = typeof document !== 'undefined';
 const { SettingsPage } = (hasDom ? await import('./components/Settings') : {}) as typeof import('./components/Settings');
 const { NotificationAsk } = (hasDom ? await import('./components/NotificationAsk') : {}) as typeof import('./components/NotificationAsk');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
-const { useInboxSound, endRingHold, DING_DONG, FELT_D5 } = (hasDom ? await import('./sound') : {}) as typeof import('./sound');
+const { useInboxSound, endRingHold, DING_DONG } = (hasDom ? await import('./sound') : {}) as typeof import('./sound');
 const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
 
 let root: Root | null = null;
@@ -240,7 +240,6 @@ function restoreStubs() {
 }
 
 const rings = () => timesPlayed(recorder, DING_DONG[0]!.freq);
-const notes = () => timesPlayed(recorder, FELT_D5);
 
 let api: InboxSound;
 /** As the Inbox sends it: no `when` is how an update finds everyone who had the sound and never chose. */
@@ -345,55 +344,55 @@ describe.if(hasDom)('useInboxSound', () => {
     }
   }
 
-  test('nothing chosen (an update): "every agent message"; a plain reply away plays the note, not the bell, five agents at once once, in front nothing', () => {
+  test('nothing chosen (an update): "every agent message"; a plain reply away rings the Ding-dong, five agents at once ring once, in front nothing', () => {
     mount(<Probe />);
     expect(api.settings.when).toBe('messages');
     armedAndAway();
     let rang = api.arrived(REPLY);
-    expect([notes(), rings()]).toEqual([1, 0]);
+    expect(rings()).toBe(1);
     expect(rang).toEqual({ asks: false, plain: true, fresh: false });
-    // Five agents posting at once: one burst, one note, and all of it the sound's (their notices silent: one sound).
+    // Five agents posting at once: one burst, one ring, and all of it the bell's (their notices silent: one sound).
     for (let i = 0; i < 5; i++) act(() => void (rang = api.arrived(REPLY)));
-    expect(notes()).toBe(1);
+    expect(rings()).toBe(1);
     expect(rang).toEqual({ asks: false, plain: true, fresh: false });
-    // The tab in front: nothing plays, and the burst ends.
+    // The tab in front: nothing rings, and the burst ends.
     front = { visible: true, focused: true };
     act(() => {
       window.dispatchEvent(new Event('focus'));
     });
     act(() => api.arrived(REPLY));
-    expect([notes(), rings()]).toEqual([1, 0]);
+    expect(rings()).toBe(1);
   });
 
-  test('agent chatter never swallows a question: A replies at 0 s (the note) and 20 s (quiet), B asks at 40 s and it rings', () => {
+  test('agent chatter never swallows a question: A replies at 0 s (rings) and 20 s (quiet), B asks at 40 s and it rings', () => {
     onClock((clock) => {
       mount(<Probe />);
       armedAndAway();
       act(() => api.arrived(REPLY));
       clock.t += 20_000;
       act(() => api.arrived(REPLY));
-      expect([notes(), rings()]).toEqual([1, 0]);
+      expect(rings()).toBe(1);
       clock.t += 20_000;
       let rang = api.arrived(QUESTION);
-      expect([notes(), rings()]).toEqual([1, 1]);
+      expect(rings()).toBe(2);
       // The bell rang for the question, so its notice is silent; a question in that question burst rings nothing and is
       // the bell's too (its notice silent: one sound per burst).
       expect(rang).toEqual({ asks: true, plain: false, fresh: false });
       clock.t += 5_000;
       act(() => void (rang = api.arrived(QUESTION)));
-      expect(rings()).toBe(1);
+      expect(rings()).toBe(2);
       expect(rang).toEqual({ asks: true, plain: false, fresh: false });
     });
   });
 
-  test('a question two seconds after a reply played the note still rings (this tab holds the ring lock, so it rings it itself)', async () => {
+  test('a question two seconds after a reply rang still rings (this tab holds the ring lock, so it rings it itself)', async () => {
     mount(<Probe />);
     armedAndAway();
     act(() => api.arrived(REPLY));
     await act(async () => {
       await Promise.resolve();
     });
-    expect([notes(), rings()]).toEqual([1, 0]);
+    expect(rings()).toBe(1);
     const real = Date.now;
     const at = real();
     Date.now = () => at + 2_000;
@@ -402,7 +401,7 @@ describe.if(hasDom)('useInboxSound', () => {
       await act(async () => {
         await Promise.resolve();
       });
-      expect([notes(), rings()]).toEqual([1, 1]);
+      expect(rings()).toBe(2);
       expect(rang).toEqual({ asks: true, plain: false, fresh: false });
     } finally {
       Date.now = real;
@@ -414,7 +413,7 @@ describe.if(hasDom)('useInboxSound', () => {
     mount(<Probe />);
     armedAndAway();
     let rang = api.arrived(REPLY);
-    expect([notes(), rings()]).toEqual([0, 0]);
+    expect(rings()).toBe(0);
     expect(rang).toEqual({ asks: false, plain: false, fresh: false });
     act(() => void (rang = api.arrived(QUESTION)));
     expect(rings()).toBe(1);

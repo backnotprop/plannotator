@@ -18,7 +18,7 @@ import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@p
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
-import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -120,7 +120,7 @@ export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_in
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
-export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip';
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip' | 'band_tip';
 
 /**
  * This page load's id, sent with every read and write (`X-Plannotator-Load`): the Inbox keeps it with a one-time
@@ -343,7 +343,7 @@ export interface SettingsModel {
   list_intro?: { due: boolean };
   /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
   snooze_intro?: { due: boolean };
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; band_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -974,7 +974,7 @@ const attachmentUrl = (attachmentId: string, rest = '', query?: string) => inbox
 const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encodeURIComponent(projectId)}${rest}`, undefined, machineOf(projectId));
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
-  setSelfMachine(model.self);
+  setSelfMachine(model.self, model.machines);
   // Starred rows too: another machine's archived star is in no section here.
   const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? []), ...(model.pins ?? [])];
   // This Inbox's own rows and projects first, every id in them (a row's delivery and message ids too): a linked
@@ -1052,7 +1052,7 @@ export interface SearchRequest {
   offset?: number;
   limit?: number;
   tags?: readonly string[] | null;
-  /** The project open in the list: a tie boost, never a filter. */
+  machines?: boolean;
   current?: string | null;
   /** Newest first instead of best match (sent only for `newest`, so a best-match request is what it was). */
   sort?: InboxSearchSort | null;
@@ -1207,7 +1207,7 @@ export function uploadFile(
 
 /** Search (read only). `signal` aborts a request a newer query replaced. */
 export async function searchInbox(request: SearchRequest, signal?: AbortSignal): Promise<SearchModel> {
-  const query = new URLSearchParams({ q: request.q });
+  const query = new URLSearchParams({ q: request.q, ...(request.machines && selfMachineId() ? { machines: '1' } : {}) });
   for (const key of ['project', 'status', 'from'] as const) if (request[key]) query.set(key, request[key]!);
   for (const tag of request.tags ?? []) query.append('tag', tag);
   if (request.group) query.set('group', request.group);
@@ -1215,7 +1215,7 @@ export async function searchInbox(request: SearchRequest, signal?: AbortSignal):
   if (request.limit) query.set('limit', String(request.limit));
   if (request.current) query.set('current', request.current);
   if (request.sort === 'newest') query.set('sort', 'newest');
-  return readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal }));
+  return rememberSearchMachines(await readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal })));
 }
 
 /** Remember a search the person opened a result from (the last 6), or forget them all. */
@@ -1392,10 +1392,10 @@ export const inboxApi = {
    * message the window showed; the look stops there, so a message that landed
    * after the window read the thread stays new (an older Inbox ignores it).
    */
-  seen: (threadId: string, throughSeq?: number | null) =>
+  seen: (threadId: string, throughSeq?: number | null, opened?: boolean) =>
     post<{ thread: InboxListRow }>(
-      threadUrl(threadId, `/seen`),
-      typeof throughSeq === 'number' ? { through_seq: throughSeq } : {},
+      threadUrl(threadId, `/seen`), // `opened`: the person chose the thread (recentActs.ts); an older Inbox ignores it.
+      { ...(typeof throughSeq === 'number' ? { through_seq: throughSeq } : {}), ...(opened ? { opened: true } : {}) },
     ),
   /** Mark read (the thread leaves the top for Quiet, its waiting questions closed) or its Undo. */
   markRead: (threadId: string, read: boolean) =>

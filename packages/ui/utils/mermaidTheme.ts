@@ -69,7 +69,8 @@
  * node outlines.
  */
 import type { Mermaid, MermaidConfig } from 'mermaid';
-import { MERMAID_CONFIG } from './mermaid';
+import { MERMAID_CONFIG, mermaidConfigForRemoteLoads } from './mermaid';
+import { getDiagramRemoteLoads } from './diagramRemoteLoadsPolicy';
 import { readThemeTokenValues } from './themeTokens';
 import {
   compositeOver,
@@ -81,6 +82,7 @@ import {
   parseOpaqueColor,
   quantize,
   relativeLuminance,
+  rgbToOklab,
   rgbToOklch,
   rotateHue,
   toHex,
@@ -118,6 +120,8 @@ export type MermaidThemeTokens = Partial<Record<MermaidThemeTokenName, string>>;
 export interface MermaidThemeSpec {
   theme: 'dark' | 'default';
   themeVariables: Record<string, unknown>;
+  /** The few rules no theme variable reaches (see `ganttOutsideLabelCss`). */
+  themeCSS?: string;
   /** The node shadow amount baked into `themeVariables.dropShadow` (0..1). */
   shadowAmount: number;
 }
@@ -170,6 +174,13 @@ const CATEGORICAL_COUNT = 12;
 const HUE_SEPARATION = 18;
 /** Opacity of the diagram container's `bg-muted/30` tint over the page. */
 const CANVAS_MUTED_ALPHA = 0.3;
+/**
+ * Minimum OKLab distance between a done gantt bar and a plain, active or
+ * critical one, so "finished" never reads as another kind of bar.
+ */
+const GANTT_DONE_MIN_DELTA_E = 0.1;
+/** A done bar is a filled shape on the page: at least the line minimum against it. */
+const GANTT_DONE_PAGE_CONTRAST_MIN = 3;
 
 // ---------------------------------------------------------------------------
 // Token reading (browser)
@@ -365,6 +376,40 @@ export function buildMermaidShadow(ground: RgbColor | undefined, amount: number)
   return `drop-shadow(${geometry} ${rgba(colour, alpha)})`;
 }
 
+/** Euclidean distance in OKLab. */
+function oklabDeltaE(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }): number {
+  const x = rgbToOklab(a);
+  const y = rgbToOklab(b);
+  return Math.hypot(x.L - y.L, x.a - y.a, x.b - y.b);
+}
+
+/**
+ * The done gantt bar: a neutral grey at the categorical lightness, fitted for
+ * the ink Mermaid writes its label in. Where that grey sits too close to a
+ * plain, active or critical bar (a palette whose critical or plain bar is
+ * itself near grey), its lightness moves away in the smallest steps until it
+ * is distinct from all of them, the label still reads and the bar still
+ * stands off the page. If no step satisfies all three, the fitted grey stays.
+ */
+function fitDoneTaskFill(ink: RgbColor, bars: RgbColor[], page: RgbColor, polarity: MermaidThemeMode): RgbColor {
+  const grey = quantize({ ...oklchToRgb({ L: CATEGORICAL_LIGHTNESS[polarity], C: 0, H: 0 }), a: 1 });
+  const fitted = fitFillForInk(grey, ink, polarity);
+  const ok = (c: RgbColor) =>
+    contrastRatio(ink, c) >= MERMAID_TEXT_CONTRAST_MIN &&
+    contrastRatio(page, c) >= GANTT_DONE_PAGE_CONTRAST_MIN &&
+    bars.every((bar) => oklabDeltaE(c, bar) >= GANTT_DONE_MIN_DELTA_E);
+  if (ok(fitted)) return fitted;
+  const L0 = rgbToOklch(fitted).L;
+  for (let k = 1; k <= 25; k++) {
+    for (const L of [L0 + 0.01 * k, L0 - 0.01 * k]) {
+      if (L < 0.05 || L > 0.98) continue;
+      const candidate = quantize({ ...oklchToRgb({ L, C: 0, H: 0 }), a: 1 });
+      if (ok(candidate)) return candidate;
+    }
+  }
+  return fitted;
+}
+
 /**
  * Push a fill's lightness away from `ink` until `ink` reads on it at 4.5:1.
  * Used for the categorical scale, whose single ink is fixed per mode.
@@ -479,6 +524,18 @@ export function buildMermaidThemeVariables(
   const scaleHex = scale.map(toHex);
   const scalePeer = scale.map((c) => toHex(mixOklab(c, scaleInk, 0.25)));
   const scaleLabel = scale.map((c) => toHex(text(scaleInk, c)));
+  const critTaskBkg = fitFillForInk(withOklchLightness(p.destructive, CATEGORICAL_LIGHTNESS[polarity]), scaleInk, polarity);
+  // A done gantt bar: a neutral grey, fitted for the ink Mermaid writes the
+  // label in (`taskTextDarkColor`, `.doneText0`; `muted` read at 1.0-1.8:1)
+  // and kept apart from the plain, active and critical bars (see
+  // `fitDoneTaskFill`). A tinted grey collided with a plain bar in palettes
+  // whose muted-foreground carries the primary hue.
+  const doneTaskBkg = fitDoneTaskFill(
+    parseCssColor(scaleLabel[0]) as RgbColor,
+    [scaleHex[0]!, scaleHex[1] ?? scaleHex[0]!].map((hex) => parseCssColor(hex) as RgbColor).concat(critTaskBkg),
+    canvas,
+    polarity,
+  );
 
   const h = toHex;
   // The shadow nodes, clusters and actors are painted with. Derived from the
@@ -602,10 +659,10 @@ export function buildMermaidThemeVariables(
     activeTaskBorderColor: h(primaryLine),
     activeTaskBkgColor: scaleHex[1] ?? scaleHex[0],
     gridColor: h(nodeBorder),
-    doneTaskBkgColor: h(p.muted),
+    doneTaskBkgColor: h(doneTaskBkg),
     doneTaskBorderColor: h(nodeBorder),
     critBorderColor: h(destructiveLine),
-    critBkgColor: h(fitFillForInk(withOklchLightness(p.destructive, CATEGORICAL_LIGHTNESS[polarity]), scaleInk, polarity)),
+    critBkgColor: h(critTaskBkg),
     todayLineColor: h(destructiveLine),
     vertLineColor: h(primaryLine),
 
@@ -732,13 +789,37 @@ export function buildMermaidThemeVariables(
     vars[`fillType${i}`] = scaleHex[i];
     vars[`venn${i + 1}`] = scaleHex[i];
   }
-  return { theme: mode === 'dark' ? 'dark' : 'default', themeVariables: vars, shadowAmount };
+  return {
+    theme: mode === 'dark' ? 'dark' : 'default',
+    themeVariables: vars,
+    themeCSS: ganttOutsideLabelCss(h(fg)),
+    shadowAmount,
+  };
+}
+
+/**
+ * A gantt label that does not fit its bar is drawn beside it, on the page, so
+ * it must be the page's text colour (`taskTextOutsideColor`). Mermaid's own
+ * sheet gets that right for plain, done and done-critical tasks only: an
+ * active or active-critical label keeps `taskTextDarkColor !important` (the
+ * ink for INSIDE a bar, close to the page background) outside the bar too, and
+ * no theme variable separates the two. This rule paints every outside label,
+ * whatever its kind, in `fg`; a clickable one keeps Mermaid's link colour.
+ * Mermaid scopes it under the diagram's id like the rest of its sheet.
+ */
+function ganttOutsideLabelCss(fg: string): string {
+  return `.taskTextOutsideLeft:not(.clickable), .taskTextOutsideRight:not(.clickable) { fill: ${fg} !important; }`;
 }
 
 /** The full Mermaid config for a spec: `MERMAID_CONFIG` with the theme swapped. */
 export function buildMermaidConfig(spec: MermaidThemeSpec | null): MermaidConfig {
   if (!spec) return MERMAID_CONFIG;
-  return { ...MERMAID_CONFIG, theme: spec.theme, themeVariables: spec.themeVariables };
+  return {
+    ...MERMAID_CONFIG,
+    theme: spec.theme,
+    themeVariables: spec.themeVariables,
+    ...(spec.themeCSS ? { themeCSS: spec.themeCSS } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -777,6 +858,20 @@ export type MermaidThemeApplyResult = 'unchanged' | 'dynamic' | 'static';
 let appliedRuntime: Pick<Mermaid, 'initialize'> | null = null;
 let appliedKey: string | null = null;
 let appliedKind: 'dynamic' | 'static' | null = null;
+/** The remote-loads policy the runtime was last initialized for (`'remote'`: as before; see `utils/diagramRemoteLoadsPolicy`). */
+let appliedLoads: RemoteLoadsMode = 'remote';
+
+/**
+ * How the runtime is initialized for `configurePlannotatorUI({ diagramRemoteLoads })`:
+ * `'remote'` as before (the default); `'local'` with the no-remote label pass
+ * and secure keys (`mermaidConfigForRemoteLoads`); `'local-fallback'` the same
+ * for a runtime the label hook does not reach.
+ */
+export type RemoteLoadsMode = 'remote' | 'local' | 'local-fallback';
+
+function configFor(config: MermaidConfig, loads: RemoteLoadsMode): MermaidConfig {
+  return mermaidConfigForRemoteLoads(config, loads === 'remote', loads !== 'local-fallback');
+}
 
 /**
  * Initialize `mermaid` for the `(palette, mode)` named by `key`, once per key
@@ -789,20 +884,25 @@ export function applyMermaidTheme(
   mermaid: Pick<Mermaid, 'initialize'>,
   key: string,
   root?: Element | null,
+  loads: RemoteLoadsMode = getDiagramRemoteLoads() ? 'remote' : 'local',
 ): MermaidThemeApplyResult {
-  if (appliedRuntime === mermaid && appliedKey === key) return 'unchanged';
+  if (appliedRuntime === mermaid && appliedKey === key && appliedLoads === loads) return 'unchanged';
   const spec = buildMermaidThemeVariables(readThemeTokens(root), modeFromKey(key), {
     shadowAmount: shadowAmountFromKey(key),
   });
   const sameRuntime = appliedRuntime === mermaid;
+  // A runtime fresh from its loader carries MERMAID_CONFIG for remote loads;
+  // any other policy, or a change of it, re-initializes even the static config.
+  const loadsChanged = sameRuntime ? appliedLoads !== loads : loads !== 'remote';
   appliedRuntime = mermaid;
   appliedKey = key;
+  appliedLoads = loads;
   if (!spec) {
-    if (sameRuntime && appliedKind === 'dynamic') mermaid.initialize(MERMAID_CONFIG);
+    if ((sameRuntime && appliedKind === 'dynamic') || loadsChanged) mermaid.initialize(configFor(MERMAID_CONFIG, loads));
     appliedKind = 'static';
     return 'static';
   }
-  mermaid.initialize(buildMermaidConfig(spec));
+  mermaid.initialize(configFor(buildMermaidConfig(spec), loads));
   appliedKind = 'dynamic';
   return 'dynamic';
 }
@@ -812,4 +912,5 @@ export function __resetMermaidThemeForTests(): void {
   appliedRuntime = null;
   appliedKey = null;
   appliedKind = null;
+  appliedLoads = 'remote';
 }

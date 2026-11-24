@@ -244,6 +244,8 @@ struct LaunchOptions {
   var open: ThreadID? { debug ? defaults.string(forKey: "open").map { ThreadID($0) } : nil }
   var resetFolds: Bool { debug && defaults.bool(forKey: "resetFolds") }
   var stageName: String? { debug ? defaults.string(forKey: "stage") : nil }
+  /// UI tests: each VoiceOver action a test needs is also a button (`voice-comment`).
+  var voiceActions: Bool { debug && defaults.bool(forKey: "voiceActions") }
 
   private var debug: Bool {
     #if DEBUG
@@ -326,6 +328,37 @@ struct LaunchOptions {
         case "online":
           await door.setOffline(false)
           await session.refresh()
+        case "writing":
+          // A reply being written: words, a quote of the thread's first message, a picture on the computer and a file
+          // the Inbox refused.
+          await session.open(StandInData.retry)
+          if let first = session.thread(StandInData.retry)?.thread.messages.first { session.setQuote(StandInData.retry, DraftQuote(of: first.id)) }
+          session.keepDraft(StandInData.retry, words: "Hold the rollout until the error dashboards are green for an hour.")
+          await session.attach(StandInMedia.flameGraph(), name: "error-dashboard.png", type: "image/png", to: .thread(StandInData.retry))
+          await door.refuseUploads("upload_refused")
+          await session.attach(Data("TOKEN=example".utf8), name: ".env", type: "text/plain", to: .thread(StandInData.retry))
+          await door.refuseUploads(nil)
+        case "retryfile":
+          // A file the computer could not receive just now, in the reply: its tile offers Try again.
+          await session.open(StandInData.retry)
+          await door.refuseUploads("upload_refused", words: "The file could not be received; try again.", field: "body")
+          await session.attach(StandInMedia.flameGraph(), name: "rollout-notes.png", type: "image/png", to: .thread(StandInData.retry))
+          await door.refuseUploads(nil)
+        case "compose":
+          // New message to the first live session, with words and a picture.
+          await session.readSessions()
+          if let group = session.sessions.projects.first, let live = group.sessions.first {
+            session.changeCompose {
+              $0.to = ComposeTo(live, in: group)
+              $0.words = "Add a retry budget to the export job, and tell me what it costs at peak."
+            }
+          }
+          await session.attach(StandInMedia.flameGraph(), name: "export-p99.png", type: "image/png", to: .compose)
+        case "noagents":
+          await door.setLiveSessions([])
+        case "relayfiles":
+          // The phone reaches the computer through the relay only: files wait for its network.
+          await door.setOptions { $0.refusesMarkups = WireErrorCode.relayUploadUnavailable.rawValue }
         case "replaced":
           // The agent replaces the question the phone's held pick and Send answer.
           if let (asked, question) = retry() {
@@ -353,11 +386,78 @@ struct LaunchOptions {
           await session.open(StandInData.files)
           await session.readAttachments(StandInData.files)
           if let plan = session.attachments(StandInData.files).first, (try? await session.openAttachment(plan)) != nil { session.attachmentClosed(plan) }
+        case "commented":
+          // The person read the plan and the code and left comments on both: they wait for the next Send.
+          await session.open(StandInData.files)
+          await session.readAttachments(StandInData.files)
+          let files = session.attachments(StandInData.files)
+          for file in files.prefix(2) { if (try? await session.openAttachment(file)) != nil { session.attachmentClosed(file) } }
+          if let plan = files.first(where: { $0.name == StandInData.planName }) {
+            session.addComment(thread: StandInData.files, item: plan, version: .current, annotation: FileComments.words(block: "block-3", start: 4, quote: "client drops its socket", comment: "Say which client: the phone's or the desktop's."))
+            session.addComment(thread: StandInData.files, item: plan, version: .current, annotation: FileComments.words(block: "block-7", start: 0, quote: "Stop after ten minutes and say so.", comment: "Say it where? A banner, or the status line."))
+          }
+          if let code = files.first(where: { $0.name == StandInData.codeName }) {
+            session.addComment(thread: StandInData.files, item: code, version: .current, annotation: FileComments.lines(lineStart: 3, lineEnd: 4, code: "const CAP_MS = 60_000\nconst GIVE_UP_MS = 10 * 60_000", comment: "Lower both on a metered connection?"))
+          }
+          await session.deliverHeld(thread: StandInData.files)
+        case "commentstanding":
+          // Two drawings on the flame graph that have not reached the computer: one it refused as too large (that
+          // comment is not saved, and no Send carries it), one that waits for a way that can carry it (it rides no Send until then).
+          let files = session.attachments(StandInData.files)
+          if let picture = files.first(where: { $0.name == "reconnect-flamegraph.png" }) {
+            func drawing(_ shade: CGFloat) -> Data {
+              UIGraphicsImageRenderer(size: CGSize(width: 24, height: 6)).pngData { context in
+                UIColor(white: shade, alpha: 1).setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 24, height: 6))
+              }
+            }
+            let mark = [PictureMark(kind: .stroke, points: [600, 150, 1800, 420], size: 12)]
+            await door.setOptions { $0.refusesMarkups = "markup_too_large" }
+            session.addComment(thread: StandInData.files, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "The flat top is the cap.", markup: nil), drawing: drawing(0.2), marks: mark)
+            await session.deliverHeld(thread: StandInData.files)
+            await door.setOptions { $0.refusesMarkups = "relay_upload_unavailable" }
+            session.addComment(thread: StandInData.files, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Is this gap the handshake?", markup: nil), drawing: drawing(0.6), marks: [PictureMark(kind: .pin, points: [1500, 300], size: 40)])
+            await session.deliverHeld(thread: StandInData.files)
+          }
+        case "sentwhileediting":
+          // The comments go in a Send (made on another screen, or by themselves) while the person changes one's words.
+          Task {
+            while session.editingComment == nil { try? await Task.sleep(for: .milliseconds(200)) }
+            try? await Task.sleep(for: .milliseconds(500))
+            _ = await session.send(thread: StandInData.files, words: "")
+          }
+        case "drawingonly":
+          // One drawing on the flame graph, made away from the computer's network: the relay cannot carry it, so it
+          // waits for the direct way, and nothing else waits for a Send.
+          await session.open(StandInData.files)
+          await session.readAttachments(StandInData.files)
+          if let picture = session.attachments(StandInData.files).first(where: { $0.name == "reconnect-flamegraph.png" }) {
+            let drawing = UIGraphicsImageRenderer(size: CGSize(width: 24, height: 6)).pngData { context in
+              UIColor(white: 0.6, alpha: 1).setFill()
+              context.fill(CGRect(x: 0, y: 0, width: 24, height: 6))
+            }
+            await door.setOptions { $0.refusesMarkups = "relay_upload_unavailable" }
+            session.addComment(thread: StandInData.files, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Is this gap the handshake?", markup: nil), drawing: drawing, marks: [PictureMark(kind: .pin, points: [1500, 300], size: 40)])
+            await session.deliverHeld(thread: StandInData.files)
+          }
+        case "drawingsent":
+          // The person pressed Send for that drawing alone: nothing is queued; it goes by itself later.
+          _ = await session.send(thread: StandInData.files, words: "")
+        case "drawingback":
+          // Back on the computer's network: the drawing goes, then its comment, in a Send of its own.
+          await door.setOptions { $0.refusesMarkups = nil }
+          await session.standInBackOnNetwork()
+          await session.deliverHeld(thread: StandInData.files)
+          await session.refresh()
         case "filechangesnext":
           // The agent edits the plan after the phone last asked how the thread's files stand.
           if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {
             await door.changeFileAfterNextRead(plan.id, to: Data(StandInData.plan.replacingOccurrences(of: "capped at 60 seconds", with: "capped at 30 seconds").utf8))
           }
+        case "framedpage":
+          // A page with a frame that lets touches through to a button under it.
+          _ = await door.addFile(thread: StandInData.files, message: StandInData.filesSecond, name: StandInData.framedPageName, kind: .html, bytes: Data(StandInData.framedPage.utf8))
+          await session.refresh()
         case "filespage":
           // A page that tries to leave: to the network, to a site, to the phone's dialer.
           _ = await door.addFile(thread: StandInData.files, message: StandInData.filesSecond, name: StandInData.leavingPageName, kind: .html, bytes: Data(StandInData.leavingPage.utf8))

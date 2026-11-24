@@ -22,6 +22,7 @@ import {
   addReplyMentions,
   backspaceMention,
   commitReplyEdit,
+  forgetReplyThread,
   mentionAt,
   mentionLabel,
   mentionReadable,
@@ -269,9 +270,11 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
   const putInRef = useRef(putIn);
   putInRef.current = putIn;
 
-  // The reply the person writes in is the one a phone's Mention in reply goes to.
+  // The reply the person writes in is the one a phone's Mention in reply goes to, until they empty it.
   useEffect(() => {
-    if (!off && text.trim() !== '' && fieldRef.current && fieldRef.current.ownerDocument.activeElement === fieldRef.current) noteReplyThread(threadId);
+    if (off || !fieldRef.current || fieldRef.current.ownerDocument.activeElement !== fieldRef.current) return;
+    if (text.trim() !== '') noteReplyThread(threadId);
+    else forgetReplyThread(threadId);
   }, [off, text, threadId, fieldRef]);
 
   // The way in from outside: the row menu's Mention in reply, a phone's sheet.

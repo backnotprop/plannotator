@@ -192,3 +192,55 @@ test("keys that alternate keep each one's lists and wait, and one key never has 
   expect((await ask("k|a"))?.models).toEqual(["a"]);
   expect(calls).toEqual(["k|a", "k|b", "k|b"]);
 });
+
+test("a read that fails with its reason (OpenCode) answers that reason until it is read again; a success clears it", async () => {
+  let clock = 0;
+  const why = (unread: "timeout" | "exit") => ({ models: [], efforts: [], effort_word: "Variant", unread });
+  let answer: ReturnType<typeof lists> | ReturnType<typeof why> = why("timeout");
+  let calls = 0;
+  const read = launchChoiceCache(async () => {
+    calls++;
+    return answer;
+  }, () => clock, { failedAgainMs: 15_000, failedAgainMaxMs: 60_000, binaryOf });
+  expect((await read("opencode2@2.2.7|a"))?.unread).toBe("timeout");
+  // Within the wait: the same reason, no read again.
+  clock += 5_000;
+  expect((await read("opencode2@2.2.7|a"))?.unread).toBe("timeout");
+  expect(calls).toBe(1);
+  // After it: read again, with its own reason this time, and the wait doubles.
+  answer = why("exit");
+  clock += 15_000;
+  expect((await read("opencode2@2.2.7|a"))?.unread).toBe("exit");
+  clock += 20_000;
+  expect((await read("opencode2@2.2.7|a"))?.unread).toBe("exit");
+  expect(calls).toBe(2);
+  answer = lists("opencode/big-pickle");
+  clock += 15_000;
+  expect(await read("opencode2@2.2.7|a")).toEqual(lists("opencode/big-pickle"));
+  expect(calls).toBe(3);
+});
+
+test("while a stale good list is served for a new key of the same binary, its failed read says nothing: the list shows as it was", async () => {
+  let clock = 0;
+  let answer: ReturnType<typeof lists> | { models: string[]; efforts: string[]; effort_word: string; unread: "exit" } = lists("opencode/big-pickle");
+  const read = launchChoiceCache(async () => answer, () => clock, { failedAgainMs: 15_000, binaryOf });
+  expect((await read("opencode2@2.2.7|a"))?.models).toEqual(["opencode/big-pickle"]);
+  answer = { models: [], efforts: [], effort_word: "Variant", unread: "exit" };
+  const served = await read("opencode2@2.2.7|b");
+  await Bun.sleep(0);
+  expect(served?.unread).toBeUndefined();
+  const again = await read("opencode2@2.2.7|b");
+  expect(again?.unread).toBeUndefined();
+  expect(again?.models).toEqual(["opencode/big-pickle"]);
+});
+
+test("a list still being read past the offer's wait answers the host's being-read lists; one that settles in time answers itself", async () => {
+  const reading = { models: [], efforts: [], effort_word: "Variant", reading: true as const };
+  let finish: (value: ReturnType<typeof lists> | null) => void = () => {};
+  const slow = new Promise<ReturnType<typeof lists> | null>((resolve) => (finish = resolve));
+  expect(await withinLaunchWait<{ models: string[] }>(slow, 20, reading)).toBe(reading);
+  finish(lists("opencode/big-pickle"));
+  expect((await withinLaunchWait<{ models: string[] }>(slow, 20, reading))?.models).toEqual(["opencode/big-pickle"]);
+  // Without one (Claude Code, Codex, Pi): nothing, as before.
+  expect(await withinLaunchWait(new Promise<null>(() => {}), 20)).toBeNull();
+});

@@ -9,7 +9,7 @@ import {
   type InboxCloudWake,
   type InboxCloudWakeItem,
 } from "@plannotator/core/inbox-cloud";
-import type { InboxMessage } from "@plannotator/core/inbox-types";
+import { inboxSentFromLine, type InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents, type InboxCloudWakeAgent } from "./inbox-cloud-agents";
 import { postCloudWebhook } from "./inbox-cloud-post";
@@ -100,7 +100,11 @@ export function createInboxCloudWake(options: {
     (timer as { unref?: () => void }).unref?.();
   };
 
-  const wakeItem = (item: InboxMessage): InboxCloudWakeItem => ({ id: item.id, at: item.created_at, body: item.body, files: item.attachments?.length ?? 0 });
+  // Where the person wrote it, when away from this computer (inbox-sent-from.ts): the one line under their words.
+  const wakeItem = (item: InboxMessage): InboxCloudWakeItem => {
+    const from = inboxSentFromLine(item);
+    return { id: item.id, at: item.created_at, body: from ? `${item.body}\n\n${from}` : item.body, files: item.attachments?.length ?? 0 };
+  };
 
   const wakeThread = async (agent: InboxCloudWakeAgent, threadId: string, listed: InboxMessage[]): Promise<number | null> => {
     const thread = store.thread(threadId);
@@ -182,7 +186,8 @@ export function createInboxCloudWake(options: {
       if (!agent || !hasCloudWake(agent)) continue;
       if (startPass) for (const item of all) if (item.cloud_wake?.state === "sending") setWake(item, session, { ...item.cloud_wake, state: "uncertain" });
       for (const item of all) if (POSTED.has(item.cloud_wake?.state ?? "")) store.handover.hand(item, session, "cloud");
-      const open = all.filter((item) => !inboxCloudWakeSettled(store.message(item.id)?.cloud_wake));
+      // The note that a session's questions moved never starts a run: it is for a session that comes on its own.
+      const open = all.filter((item) => !item.moved_note && !inboxCloudWakeSettled(store.message(item.id)?.cloud_wake));
       const byThread = new Map<string, InboxMessage[]>();
       for (const item of open) (byThread.get(item.thread_id) ?? byThread.set(item.thread_id, []).get(item.thread_id)!).push(item);
       for (const [threadId, items] of byThread) {

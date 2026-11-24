@@ -93,9 +93,9 @@ export class SimAgent {
     return this.call('send_message', { ...input, agent_name: this.name, agent_host: this.host }, options.wakes ? { [INBOX_WAKES_META_KEY]: true } : undefined);
   }
 
-  /** resolve_message: the agent archives the thread. */
-  resolve(messageId: string): Promise<Structured> {
-    return this.call('resolve_message', { message_id: messageId });
+  /** resolve_message: the agent archives the thread; `movedTo`, the thread its questions were asked again in. */
+  resolve(messageId: string, movedTo?: string): Promise<Structured> {
+    return this.call('resolve_message', { message_id: messageId, ...(movedTo ? { moved_to: movedTo } : {}) });
   }
 
   /** The Board's `card` tool (create, move, say, link, ship, drop, list); a refusal throws with the Inbox's words. */

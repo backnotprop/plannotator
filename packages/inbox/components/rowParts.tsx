@@ -3,7 +3,7 @@
  * marks, its hover action. Moved out of InboxList.tsx unchanged so the Agents view's one-line row (agentsView/) draws
  * them the same.
  */
-import { useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, type ReactNode } from 'react';
 import { HueDot, LetterMark, showsThreads, useRowMarks } from '../letterMarks';
 import { withShortcut } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
@@ -13,7 +13,7 @@ import { agentName, fullTime, shortTime, whenTime } from '../format';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
-import { opensTips, RowTip } from './RowTip';
+import { LazyRowTips, opensTips, RowTip } from './RowTip';
 import { AuthorMark, Icon } from '../icons';
 import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
@@ -72,11 +72,28 @@ export function SnoozedUntil({ row }: { row: InboxListRow }) {
   );
 }
 
+/**
+ * The time a list's rows show in place of their own (`rowTimeIso`), or null. Recent activity's (listFilterRecent.ts,
+ * the list's `ListSort.by`): when the person last acted in the thread, the time the list is sorted by, so the times
+ * read in order down the list. A row it gives no time keeps its own.
+ */
+export const RowTimeBy = createContext<((row: InboxListRow) => string) | null>(null);
+
+/** Around a list's rows: their tooltips mounted on first use (`LazyRowTips`, RowTip.tsx), and the time they show (`RowTimeBy`). */
+export function ListRows({ timeBy, children }: { timeBy?: ((row: InboxListRow) => string) | null; children: ReactNode }) {
+  return (
+    <LazyRowTips.Provider value={true}>
+      <RowTimeBy.Provider value={timeBy ?? null}>{children}</RowTimeBy.Provider>
+    </LazyRowTips.Provider>
+  );
+}
+
 /** The row's time. A thread back from a snooze shows a small clock before it until the person reads it. */
 export function RowTime({ row, relative = false }: { row: InboxListRow; relative?: boolean }) {
   // A relative time moves on by itself: the shared minute clock renders it again (only while it is on).
   const now = useRelativeClock(relative);
-  const iso = rowTimeIso(row);
+  const timeBy = useContext(RowTimeBy);
+  const iso = timeBy?.(row) || rowTimeIso(row);
   // Relative: a screen reader hears "4 minutes ago" (never "4m"), and the pointer's tooltip gives the clock time.
   const time = relative ? (
     <span className="ib-trel" data-relative-time="" title={whenTime(iso)}>
@@ -370,7 +387,7 @@ export function RowWithAction({
       className="ib-rw"
       data-row={row.thread_id}
       // Archived, waiting for the list to settle without it (approval "inbox-list-view", R7): faded in place.
-      data-archived={inboxRowArchived(row) && !onUnarchive ? '' : undefined}
+      data-archived={inboxRowArchived(row) && drawn !== 'archived' ? '' : undefined}
       data-menu={menu ? '' : undefined}
       onPointerEnter={(event) => {
         if (!actionTip && opensTips(event)) setActionTip(true);
