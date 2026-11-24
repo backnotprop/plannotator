@@ -1372,6 +1372,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     hasLinks: () => links.list().length > 0,
     /** A linked machine's name, or null when it is not linked. */
     nameOf: (machine: string): string | null => links.get(machine)?.name ?? null,
+    /** Every linked machine's id (a Ship tells each of them, inbox-ship-watch.ts `onStart`). */
+    linkedIds: (): string[] => links.list().map((link) => link.id),
     machinesView,
     /** Grid was turned on or off here: every link asks its machine again (inbox-peer-link.ts `gridChanged`). */
     gridChanged: () => {

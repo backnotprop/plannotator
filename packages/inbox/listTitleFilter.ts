@@ -4,7 +4,7 @@
  *
  * - A thread matches when every word typed is in its title: the name the list shows (`thread_name`) or its subject,
  *   so a thread renamed in the list is still found by the subject its agent gave it. Words can come in any order.
- * - Case and accents are ignored, as the menu's "Search filters" ignores them (listFilterSearch.ts `fold`). Spaces
+ * - Case and accents are ignored, as the menu's find fields ignore them (listFilterSearch.ts `fold`). Spaces
  *   only separate words: "  page   layout " is "page layout".
  * - It narrows rows, never groups: a group keeps its matches and its count follows; a group left with none goes.
  * - It applies on top of the menu's picks (agent, project, date…), never in place of them, and to every row the list

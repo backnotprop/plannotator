@@ -263,6 +263,14 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^reviews\/branches$/, window: () => "/api/inbox/reviews/branches", machineOnly: true },
   { method: "GET", route: /^pulls\/(risk|details|diff|file|repo-files|repo-file|avatar|media|media\/sizes)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   { method: "POST", route: /^pulls\/(close|reopen|merge|owner)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
+  // Ship (approval "inbox-ship-mode"): a ship lives on the machine of its agent's thread; a window on either ships,
+  // reads and stops it there.
+  { method: "GET", route: /^ships$/, window: () => "/api/inbox/ships", machineOnly: true },
+  { method: "GET", route: /^ships\/log$/, window: () => "/api/inbox/ships/log", machineOnly: true },
+  { method: "POST", route: /^ships$/, window: () => "/api/inbox/ships", machineOnly: true },
+  { method: "POST", route: /^ships\/stop$/, window: () => "/api/inbox/ships/stop", machineOnly: true },
+  // A linked computer's Inbox started shipping a pull request: an older ship of it here stops (one ship per PR).
+  { method: "POST", route: /^ships\/newer$/, window: () => "/api/inbox/ships/newer", machineOnly: true },
   // "Changed since you looked" (approval "inbox-pr-dashboard"): the look at a PR lives on the machine that lists it.
   { method: "POST", route: /^pulls\/looked$/, window: () => "/api/inbox/pulls/looked", machineOnly: true },
   // A thread's PRs (approval "inbox-pr-binding"): read, added and removed on the thread's own machine.

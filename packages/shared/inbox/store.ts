@@ -3277,6 +3277,42 @@ export class InboxStore {
     return notes;
   }
 
+  /**
+   * Ship's note to the shipping agent (server inbox-ship.ts): what the watch saw change, or the stop line. A person
+   * note addressed to that session (`to`), a reply to its latest message in the thread (else the root), so it wakes
+   * that session as any reply does and no other. Null when the thread is gone.
+   */
+  tellShip(threadId: string, input: { body: string; to: InboxAddressee | null; ship_note: NonNullable<InboxMessage["ship_note"]> }): InboxMessage | null {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) return null;
+    const members = this.threadMembers.get(threadId) ?? [threadId];
+    let answered: InboxMessage = root;
+    for (let i = members.length - 1; i >= 0; i -= 1) {
+      const m = this.messages.get(members[i]!);
+      if (m && m.author.kind === "agent" && (!input.to || m.author.session === input.to.session)) {
+        answered = m;
+        break;
+      }
+    }
+    const at = this.stamp();
+    const note: InboxMessage = {
+      id: inboxId("msg"),
+      project_id: root.project_id,
+      thread_id: threadId,
+      reply_to: answered.id,
+      author: { kind: "person" },
+      subject: null,
+      body: input.body,
+      created_at: at,
+      resolved_at: null,
+      idempotency_key: null,
+      ...(input.to ? { to: input.to } : {}),
+      ship_note: input.ship_note,
+    };
+    this.appendMessage(note, at);
+    return note;
+  }
+
   /** The open threads with a set-aside note due (a question a Mark read closed at least `afterMs` ago, not yet named). */
   setAsideDue(afterMs: number): string[] {
     const out: string[] = [];
