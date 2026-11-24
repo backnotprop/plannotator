@@ -281,6 +281,15 @@ Approval "star-ask" (2026-11-06, `.product/approved/star-ask/`, words decided by
 - Routes: `/api/star-ask/claim`, `/shown` and `/answer` on the plan, review and annotate servers (both runtimes), `/api/inbox/reveal` `id: "star"` and `/api/inbox/star-ask` in the Inbox (`server-and-storage.md`). The Inbox's place in the line: "The schedule of one-time dialogs" in `inbox-window.md`.
 - Tests (fakes only, never the real gh): `packages/shared/star-ask.test.ts`, `packages/server/star-ask-route.test.ts`, `packages/server/inbox-star-ask.test.ts`, `apps/pi-extension/server/star-ask.test.ts`, `packages/inbox/starReveal.test.ts`, `packages/ui/components/StarAskCard.test.tsx` (DOM).
 
+## Render errors stay in their part (`RegionBoundary`)
+
+Without a boundary, an error thrown while React draws unmounts the whole root: a blank page with nothing to report (the owner's Firefox "+" report, 2026-11-24). `packages/ui/components/RegionBoundary.tsx` keeps it in one part of the window. The part shows ui's problem notice (as `ProblemNotice` draws one): "This part didn't load", "Something went wrong drawing it.", and Try again (the part mounts afresh), Reload and Copy error. Copy error copies the error's name, message and stack, the part's name, the app version and the user agent. It copies nothing the person wrote and no file contents. The error goes to the console and to `reportError`, so a browser test that fails on `pageerror` still fails.
+
+- Where: around the diff (`AllFilesCodeView`'s export, so every host: the review app, the Inbox guide reader, the phone surface, guides.show, VS Code; and `DiffViewer` in `ReviewDiffPanel`); the Inbox guide reader (`GuideReader`'s default export, inside the lazy part: a chunk that cannot load is still `PanePart`'s "Couldn't load this view"); each Inbox thread pane (`thread/ThreadSlot.tsx`, `resetKey` the thread, so another thread opens normally); each app root (`apps/inbox` index and surface, `apps/review`, `apps/hook`, `apps/portal`, with `page`).
+- "Your work is saved." shows only with `saved`, and no part passes it today. Every part above can hold an open comment box, whose words live in memory only (`useAnnotationToolbar`'s draft store), and the thread pane's reply box does not save for a linked machine's thread. Try again in a thread pane loses no reply: the pane's unmount sends the waiting reply draft at once, and the remount reads it back (`packages/inbox/paneFailureKeepsReply.test.tsx`).
+- Tests: under React's act environment (every DOM test) the boundary lets the error through, so a test that draws something broken fails as before. A test of a boundary turns catching on with `catchRenderErrorsInTests()` and restores it (`packages/ui/components/RegionBoundary.test.tsx`).
+- A new region: wrap the smallest part that can fail alone, not every component, and keep `LazyBlockBoundary` for chunks that cannot load.
+
 ## Keyboard Shortcuts
 
 **Location:** `packages/ui/shortcuts/` (engine + scope data), `packages/editor/shortcuts.ts` and `packages/review-editor/shortcuts.ts` (per-app surfaces).

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
 import { closeTo } from '../app/focus';
 import { writeRoute } from '../app/writeRoute';
 import { CardChip } from '../board/CardChip';
@@ -84,8 +85,11 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
     reportScreen();
   });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
+  // A thread that throws while it draws says so in the pane; the sidebar and the list stay (ui's RegionBoundary). Try
+  // again mounts the pane afresh, which reads its reply draft back from the server (replyDraft.ts flushes on unmount).
   return (
     <PaneScopeContext.Provider value={scope}>
+      <RegionBoundary name="Thread pane" className="ib-pane ib-pempty" resetKey={threadId}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
           and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
       {threadId && !ready && ((!phone && !stack.thread) || awayWait) && (
@@ -276,6 +280,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           }}
         />
       )}
+      </RegionBoundary>
     </PaneScopeContext.Provider>
   );
 }
