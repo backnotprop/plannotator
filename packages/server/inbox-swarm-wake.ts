@@ -4,7 +4,7 @@
  *
  * - Words in a ghost thread (another member's `swarm say`, or the person's from the ghost pane): a notice
  *   (`moved` with its own first line, `notice`), so it never reads as the person's reply and asks for no answer in
- *   the thread: "<Name> wrote in the swarm's ghost thread. Answer there with plannotator inbox swarm say ...".
+ *   the thread (`SWARM_WORDS.wake`: answer in the ghost thread only when asked or needed, never only to acknowledge).
  * - The person's message that started a swarm (its skills block names `/swarm`): the words, then the join line with
  *   the thread's id (`swarmJoinLine`), so each agent can run it as it is.
  */
@@ -42,7 +42,9 @@ export function swarmWakeOf(store: InboxStore, reply: InboxMessage, command: Inb
       ...(command.now ? { now: true } : {}),
     };
   }
-  if (reply.thread_id === reply.id && store.swarmOf(reply.id)?.on && inboxMessageStartsSwarm(reply)) {
+  // Decided from the root itself, never from whether the swarm's record is written yet: a held poll or a far member's
+  // wake builds this inside the very write that starts it (inbox.ts). Only a swarm the person turned off says no.
+  if (reply.thread_id === reply.id && inboxMessageStartsSwarm(reply) && (store.swarmOf(reply.id)?.on ?? true)) {
     return { ...command, body: `${command.body}\n\n${swarmJoinLine(reply.id)}` };
   }
   return command;

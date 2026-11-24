@@ -115,6 +115,9 @@ test.beforeAll(async () => {
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
+    PLANNOTATOR_UPDATE_CHECK: '0',
+    NO_ANON_PING: '1',
+    PLANNOTATOR_INBOX_PHONES: '0',
     PLANNOTATOR_EXPERIMENTAL: 'swarm',
   };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });

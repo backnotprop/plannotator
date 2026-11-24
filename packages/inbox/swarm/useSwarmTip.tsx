@@ -48,11 +48,9 @@ export function useSwarmTip(badgeShown: boolean): { node: ReactNode; close: () =
 
   useEffect(() => {
     if (!open) return;
+    // A note, not a menu: the Escape that closes it goes on to New message, so one Escape still closes that.
     const key = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopPropagation();
-      setOpen(false);
+      if (event.key === 'Escape') setOpen(false);
     };
     const press = (event: PointerEvent) => {
       if (!card.current?.contains(event.target as Node)) setOpen(false);

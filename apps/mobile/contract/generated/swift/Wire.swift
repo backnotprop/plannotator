@@ -10108,12 +10108,13 @@ public struct InboxTag: Codable, Hashable, Sendable {
   public var joined: Bool?
   public var handedAway: Bool?
   public var machine: String?
+  public var cloudWake: InboxCloudWake?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["host", "session", "name", "label", "wakes", "delivery", "deliver_now_at", "deliver_now_by", "wait_started_at", "read_at", "joined", "handed_away", "machine"]
+  static let knownKeys: Set<String> = ["host", "session", "name", "label", "wakes", "delivery", "deliver_now_at", "deliver_now_by", "wait_started_at", "read_at", "joined", "handed_away", "machine", "cloud_wake"]
 
-  public init(host: String? = nil, session: String, name: String? = nil, label: String? = nil, wakes: Bool, delivery: InboxDelivery? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxTagDeliverNowBy? = nil, waitStartedAt: String? = nil, readAt: String? = nil, joined: Bool? = nil, handedAway: Bool? = nil, machine: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(host: String? = nil, session: String, name: String? = nil, label: String? = nil, wakes: Bool, delivery: InboxDelivery? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxTagDeliverNowBy? = nil, waitStartedAt: String? = nil, readAt: String? = nil, joined: Bool? = nil, handedAway: Bool? = nil, machine: String? = nil, cloudWake: InboxCloudWake? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.host = host
     self.session = session
     self.name = name
@@ -10127,6 +10128,7 @@ public struct InboxTag: Codable, Hashable, Sendable {
     self.joined = joined
     self.handedAway = handedAway
     self.machine = machine
+    self.cloudWake = cloudWake
     self.unknownFields = unknownFields
   }
 
@@ -10145,6 +10147,7 @@ public struct InboxTag: Codable, Hashable, Sendable {
     self.joined = try c.decodeIfPresent(Bool.self, forKey: WireKey("joined"))
     self.handedAway = try c.decodeIfPresent(Bool.self, forKey: WireKey("handed_away"))
     self.machine = try c.decodeIfPresent(String.self, forKey: WireKey("machine"))
+    self.cloudWake = try c.decodeIfPresent(InboxCloudWake.self, forKey: WireKey("cloud_wake"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -10163,6 +10166,7 @@ public struct InboxTag: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.joined, forKey: WireKey("joined"))
     try c.encodeIfPresent(self.handedAway, forKey: WireKey("handed_away"))
     try c.encodeIfPresent(self.machine, forKey: WireKey("machine"))
+    try c.encodeIfPresent(self.cloudWake, forKey: WireKey("cloud_wake"))
     try WireKey.write(unknownFields, to: &c)
   }
 }

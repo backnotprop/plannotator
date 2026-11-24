@@ -23445,6 +23445,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-swarm",
+      "title": "window:/api/inbox/threads/:id/swarm",
+      "surface": [
+        "window:/api/inbox/threads/:id/swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxtag-cloud-wake",
+      "title": "field:InboxTag.cloud_wake",
+      "surface": [
+        "field:InboxTag.cloud_wake"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

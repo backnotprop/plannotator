@@ -39,6 +39,8 @@ export interface InboxSwarmRecord {
   members: InboxSwarmMember[];
   /** The person last looked at the ghost thread (its agents' messages after it are the Ghost button's count). */
   person_seen_at?: string | null;
+  /** The store's seq when it was last turned on (started, or turned back on): ghost words written before it wait for nobody. */
+  on_seq?: number | null;
   started_at: string;
   updated_at: string;
 }

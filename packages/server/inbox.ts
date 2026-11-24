@@ -1936,6 +1936,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     machines: () => machines,
     farWakes,
     ownSession: (session) => live.allLive().some((entry) => entry.session === session),
+    serverSession,
   });
   // `plannotator inbox capability` (inbox-capability-agent.ts): this computer's switches, turned through the settings
   // route as Settings turns them; a linked computer's through the forward, as its Settings group does.
@@ -4100,8 +4101,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
     // Grid (approval "inbox-agent-grid"): the window's page of work in flight, drawn from what the window already reads.
     grid: { on: gridOn(), env: parseExperimentalEnv("grid") ?? null },
-    // Swarm: read by the window only; no Settings row turns it (config.json or the env var).
-    swarm: { on: swarmOn(), env: parseExperimentalEnv("swarm") ?? null },
+    // Swarm: read by the window only; no Settings row turns it (config.json or the env var). Off, it is not in the read.
+    ...(swarmOn() ? { swarm: { on: true, env: parseExperimentalEnv("swarm") ?? null } } : {}),
   });
 
   /** Save `experimental: { decision_mode?, grid? }` (one switch or both). `validateOnly`: check and write nothing. */
@@ -4330,7 +4331,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
 
-  const eventStream =(req: Request, url: URL, via: RequestVia): Response => {
+  const eventStream = (req: Request, url: URL, via: RequestVia): Response => {
     // A reconnect: EventSource sends the last id it saw, while its URL still
     // carries the cursor it first opened with. The last id wins, so a tab that
     // slept or lost its connection catches up from where it was (and raises

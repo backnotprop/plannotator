@@ -180,3 +180,24 @@ test("a far member is handed a ghost message once, as a notice its computer keep
   const command = farWakeCommand(writes[0]!.body.command, { reply_id: said.id, thread_id: said.thread_id }, "http://b/");
   expect(command).toMatchObject({ moved: true, notice: SWARM_WORDS.wake("Claude Code"), body: "Pi: take the tests?" });
 });
+
+test("a linked computer cannot act as a session that is not its own: a local member, another computer's, or one known elsewhere", () => {
+  const a = threadComputer();
+  // This computer's member, its session no longer live here (ownSession no longer names it).
+  const ctx: SwarmRouteContext = { ...a.ctx, ownSession: () => false };
+  const MACHINE_C = "ibx_01KAZ00000000000000000000C";
+  joinSwarm(a.store, a.thread, { session: "ses_far_c", host: "codex", name: null, machine: MACHINE_C, machine_name: "Laptop" });
+  // A session a message here puts on computer C, never joined.
+  a.store.sendReply(a.thread, { idempotency_key: "k-tag-c", words: "Codex, look.", tags: [{ host: "codex", session: "ses_tagged_c", name: "Codex", wakes: true, machine: MACHINE_C }] });
+  expect(a.store.sessionMachine("ses_tagged_c")).toBe(MACHINE_C);
+  const before = JSON.stringify(a.store.swarmOf(a.thread));
+  for (const session of [AGENT.session, "ses_far_c", "ses_tagged_c"]) {
+    for (const ask of [{ action: "join", thread: a.thread, as: "Mallory" }, { action: "say", thread: a.thread, text: "Stop." }, { action: "doing", thread: a.thread, text: "x" }, { action: "leave", thread: a.thread }]) {
+      expect(() => farSwarmAnswer(ctx, MACHINE_B, { ask, session, host: "pi" })).toThrow(expect.objectContaining({ code: "not_your_session" }));
+    }
+  }
+  expect(JSON.stringify(a.store.swarmOf(a.thread))).toBe(before);
+  expect(a.store.ghostMessages(a.store.swarmOf(a.thread)!.ghost_id!)).toEqual([]);
+  // Its own session joins as before.
+  expect(farSwarmAnswer(ctx, MACHINE_B, { ask: { action: "join", thread: a.thread }, session: FAR_PI.session, host: "pi" }).thread_id).toBe(a.thread);
+});

@@ -110,8 +110,12 @@ test("nothing waits once the swarm is turned off, while its switch is off, or fo
   let on = false;
   store.setSwarmSwitch(() => on);
   expect(Object.values(pending()).flat()).toEqual([]);
+  // Back on: what was said before is not handed out in a burst; what is said now waits.
   on = true;
-  expect(pending()[pi]).toEqual([said.id, person.id]);
+  expect(pending()[pi] ?? []).toEqual([]);
+  const now = saySwarm(store, thread, AUTHOR, "Back on.").message;
+  const personNow = saySwarm(store, thread, null, "The person, back on.").message;
+  expect(pending()[pi]).toEqual([now.id, personNow.id]);
   // A member who left gets neither an agent's words nor the person's.
   leaveSwarm(store, thread, pi);
   expect(pending()[pi]).toEqual([]);

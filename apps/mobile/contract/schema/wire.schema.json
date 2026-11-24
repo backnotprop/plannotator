@@ -7307,6 +7307,16 @@
         },
         "machine": {
           "type": "string"
+        },
+        "cloud_wake": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxCloudWake"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

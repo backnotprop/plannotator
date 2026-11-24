@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons';
+import { swarmEscapeIsOurs } from './escape';
 
 /**
  * Who the ghost box writes to: "to everyone", or one member picked from a small list. Drawn as the reply's recipient
- * chip and its list are (ReplyRecipient.tsx: `.ib-rto-chip`, `.ib-tg-menu.ib-rpick`), with the members' names only:
+ * chip and its list are (ReplyRecipient.tsx: `.ib-rto-chip`, its list's shape in `.ib-ghost-tolist`), with the members' names only:
  * a press on a row picks it, Escape or a press outside closes the list.
  */
 export function GhostTo({ members, to, onTo }: { members: readonly string[]; to: string | null; onTo: (to: string | null) => void }) {
@@ -15,7 +16,7 @@ export function GhostTo({ members, to, onTo }: { members: readonly string[]; to:
       if (wrap.current && !wrap.current.contains(event.target as Node)) setOpen(false);
     };
     const key = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || !swarmEscapeIsOurs(event, wrap.current)) return;
       event.preventDefault();
       event.stopPropagation();
       setOpen(false);
@@ -45,7 +46,7 @@ export function GhostTo({ members, to, onTo }: { members: readonly string[]; to:
         </svg>
       </button>
       {open && (
-        <div className="ib-tg-menu ib-rpick ib-ghost-tolist" role="group" aria-label="Who gets this" data-ghost-to-list="">
+        <div className="ib-tg-menu ib-ghost-tolist" role="group" aria-label="Who gets this" data-ghost-to-list="">
           {rows.map((row) => {
             const on = row.value === to;
             return (

@@ -9,6 +9,9 @@
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { SWARM_SKILL } from "@plannotator/core/swarm-skill";
 
+/** send_message into a swarm's ghost thread (DRAFT, with SWARM_WORDS): refused, nothing written; `swarm say` writes there. */
+export const SWARM_GHOST_SEND_REFUSED = "That is a swarm's ghost thread: nothing was sent. Write there with plannotator inbox swarm say.";
+
 export function inboxMessageStartsSwarm(message: { author: { kind: string }; body: string; thread_id?: string; ghost_of?: string }): boolean {
   if (message.author.kind !== "person" || !message.thread_id || message.ghost_of) return false;
   return splitInboxSkillsBlock(message.body)?.skills.some((skill) => skill.name === SWARM_SKILL.name) ?? false;

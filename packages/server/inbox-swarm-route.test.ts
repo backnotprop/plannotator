@@ -19,6 +19,8 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import { joinSwarm, saySwarm, startSwarm } from "@plannotator/shared/inbox/swarm";
 import { farSwarmAnswer, swarmRoute, swarmWindowRoute, type SwarmRouteContext } from "./inbox-swarm-route";
 import { swarmWakeOf } from "./inbox-swarm-wake";
+import { createInboxFarTags } from "./inbox-far-tags";
+import type { InboxMessage } from "@plannotator/core/inbox-types";
 
 /** The block the window composes for `/swarm` (its text pasted, as a human-only built-in). */
 const SWARM_REF = { name: SWARM_SKILL.name, root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true } as SkillCatalogEntry;
@@ -42,8 +44,8 @@ function world(on = true) {
     tags: [{ host: "codex", session: "ses_codex", wakes: true }],
   }).message;
   const state = { on };
-  const ctx: SwarmRouteContext = { store, on: () => state.on, live: () => null, ownSession: (s) => s === "ses_claude" };
-  return { store, thread: thread.id, ctx, state };
+  const ctx: SwarmRouteContext = { store, on: () => state.on, live: () => null, ownSession: (s) => s === "ses_claude", serverSession: "srv_page" };
+  return { store, thread: thread.id, ctx, state, project };
 }
 
 const readBody = async (req: Request) => (await req.json()) as Record<string, unknown>;
@@ -102,7 +104,7 @@ test("a linked computer's agent joins and speaks as its own session only", () =>
 });
 
 test("the window reads the ghost thread, writes as the person, turns the swarm off, and nothing answers while the switch is off", async () => {
-  const { ctx, thread, store, state } = world();
+  const { ctx, thread, store, state, project } = world();
   startSwarm(store, thread);
   joinSwarm(store, thread, { session: "ses_claude", host: "claude-code", name: null });
   const call = async (method: "GET" | "POST", body?: unknown) => {
@@ -116,8 +118,18 @@ test("the window reads the ghost thread, writes as the person, turns the swarm o
   expect(said.status).toBe(200);
   expect(said.json.ghost.map((m) => [m.author.kind, m.body])).toEqual([["person", "Weekend rates are on tab 2."]]);
   expect((await call("POST", { seen: true, serverSession: "srv_page" })).status).toBe(200);
+  // A tab from an earlier run of the Inbox is told so, and nothing is written.
+  const stale = await call("POST", { say: { text: "From an old tab." }, serverSession: "srv_old" });
+  expect(stale.status).toBe(409);
+  expect(store.ghostMessages(store.swarmOf(thread)!.ghost_id!).map((m) => m.body)).toEqual(["Weekend rates are on tab 2."]);
   expect((await call("POST", { on: false })).json.swarm!.on).toBe(false);
+  expect((await call("POST", { on: true, serverSession: "srv_page" })).json.swarm!.on).toBe(true);
   expect((await call("POST", { bogus: true })).status).toBe(422);
+  // Turn on never makes a swarm of a thread that is not one (a swarm starts from a message that names /swarm).
+  const plain = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "pi", session: "ses_pi", name: "Pi" }, body: "Not a swarm.", subject: "Plain" }).message.id;
+  const onPlain = await swarmWindowRoute(new Request(`http://127.0.0.1:1/api/inbox/threads/${plain}/swarm`, { method: "POST", body: JSON.stringify({ on: true }) }), new URL(`http://127.0.0.1:1/api/inbox/threads/${plain}/swarm`), ctx, readBody);
+  expect(onPlain!.status).toBe(409);
+  expect(store.swarmOf(plain)).toBeNull();
   state.on = false;
   expect((await call("GET")).status).toBe(404);
 });
@@ -138,4 +150,54 @@ test("a ghost message is a notice naming who wrote it; the swarm's first message
   expect(swarmWakeOf(store, root, { ...base(root.id), body: root.body }, true).body).toEndWith(swarmJoinLine(thread));
   // Off: nothing changes.
   expect(swarmWakeOf(store, said, base(said.id), false)).toEqual(base(said.id));
+});
+
+test("the join line is handed even when the wake is built inside the write that starts the swarm: a held poll and a far member", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-swarm-route-"));
+  roots.push(dir);
+  const store = InboxStore.open(dir, { now: () => new Date() });
+  const project = store.ensureProject({ name: "harbor", root: "/work/harbor" });
+  const FAR = "ibx_01KAZ00000000000000000000B";
+  const command = (reply: InboxMessage, now = false): InboxReplyCommand =>
+    swarmWakeOf(store, reply, { type: "reply", id: reply.id, thread_id: reply.thread_id, reply_to: reply.reply_to ?? null, subject: null, body: reply.body, url: "http://127.0.0.1:1/x", ...(now ? { now: true } : {}) }, true);
+  const farWrites: Record<string, unknown>[] = [];
+  const tags = createInboxFarTags({
+    store,
+    selfId: () => "ibx_01KAZ00000000000000000000A",
+    selfName: () => "Studio",
+    peers: () => [],
+    nameOf: () => "Mac mini",
+    holdWrite: (_machine, _route, body) => {
+      farWrites.push(body);
+      return null;
+    },
+    heldWrite: () => null,
+    commandFor: (reply, _session, now) => command(reply, now),
+    sendAs: async () => ({ text: "", structured: {} }),
+    ownSession: (s) => s === "ses_claude",
+  });
+  // As inbox.ts: a held poll answers inside the store's notify, and the far tags run in the same write, both before
+  // the Inbox's own start of the swarm.
+  const held: InboxReplyCommand[] = [];
+  store.subscribe((line) => {
+    if (line.kind !== "message" || line.record.author.kind !== "person") return;
+    for (const item of store.pendingReplies("ses_claude")) held.push(command(item));
+    tags.onPersonMessage(line.record);
+  });
+  const root = store.startPersonThread({
+    project_id: project.id,
+    body: `Add per-berth pricing. /swarm\n\n${SWARM_BLOCK}`,
+    idempotency_key: "k-held",
+    to: { host: "claude-code", session: "ses_claude" },
+    tags: [{ host: "pi", session: "ses_far_pi", wakes: true, machine: FAR }],
+  }).message;
+  expect(store.swarmOf(root.id)).toBeNull();
+  expect(held.map((c) => c.body.endsWith(swarmJoinLine(root.id)))).toEqual([true]);
+  expect(farWrites.map((w) => [w.session, String((w.command as InboxReplyCommand).body).endsWith(swarmJoinLine(root.id))])).toEqual([["ses_far_pi", true]]);
+  // The join that line asks for works before the Inbox has written the record.
+  expect(joinSwarm(store, root.id, { session: "ses_claude", host: "claude-code", name: null }).member.name).toBe("Claude Code");
+  expect(store.swarmOf(root.id)!.on).toBe(true);
+  // A swarm the person turned off is not offered.
+  store.writeSwarm({ ...store.swarmOf(root.id)!, on: false });
+  expect(command(store.message(root.id)!).body.endsWith(swarmJoinLine(root.id))).toBe(false);
 });

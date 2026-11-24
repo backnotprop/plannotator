@@ -68,7 +68,8 @@ export function createInboxCloudWake(options: {
   };
 
   const setWake = (item: InboxMessage, session: string, wake: InboxCloudWake) => {
-    const before = store.message(item.id)?.cloud_wake;
+    const latest = store.message(item.id);
+    const before = latest ? store.cloudWakeOf(latest, session) : null;
     if (before && before.state === wake.state && before.next_at === wake.next_at && before.run_url === wake.run_url && before.status === wake.status) return;
     try {
       store.recordCloudWake(item.id, wake, session, inboxCloudHostOf(agents.agent(session)?.preset ?? wake.preset ?? "other"));
@@ -76,15 +77,19 @@ export function createInboxCloudWake(options: {
     }
   };
 
-  const lastWakeOf = (threadId: string): number => {
-    const known = lastWake.get(threadId);
+  // The gap and the backoff are a thread's; in a ghost thread (Swarm) each member's own, as its wake state is.
+  const slotOf = (threadId: string, session: string) => (store.ghostParentOf(threadId) ? `${threadId} ${session}` : threadId);
+
+  const lastWakeOf = (threadId: string, session: string): number => {
+    const slot = slotOf(threadId, session);
+    const known = lastWake.get(slot);
     if (known !== undefined) return known;
     let latest = 0;
     for (const message of store.thread(threadId)?.messages ?? []) {
-      const wake = message.cloud_wake;
+      const wake = slot === threadId ? message.cloud_wake : store.cloudWakeOf(message, session);
       if (wake && POSTED.has(wake.state)) latest = Math.max(latest, Date.parse(wake.at) || 0);
     }
-    lastWake.set(threadId, latest);
+    lastWake.set(slot, latest);
     return latest;
   };
 
@@ -116,7 +121,8 @@ export function createInboxCloudWake(options: {
     const items = listed.filter((item) => store.handover.hand(item, agent.session, "cloud"));
     if (items.length === 0) return null;
     const at = now();
-    lastWake.set(threadId, at);
+    const slot = slotOf(threadId, agent.session);
+    lastWake.set(slot, at);
     for (const item of items) setWake(item, agent.session, { state: "sending", name: agent.name, preset: agent.preset, at: iso(at) });
     const context = store.wakeContext(items[items.length - 1]!, agent.session);
     const body = inboxCloudWakeBody(agent.preset, {
@@ -135,9 +141,9 @@ export function createInboxCloudWake(options: {
     };
     const retryLater = (status?: number): number => {
       giveBack();
-      const wait = Math.min((backoff.get(threadId) ?? (options.retryMs ?? RETRY_FIRST_MS) / 2) * 2, RETRY_MAX_MS);
-      backoff.set(threadId, wait);
-      lastWake.set(threadId, 0);
+      const wait = Math.min((backoff.get(slot) ?? (options.retryMs ?? RETRY_FIRST_MS) / 2) * 2, RETRY_MAX_MS);
+      backoff.set(slot, wait);
+      lastWake.set(slot, 0);
       settle({ state: "retrying", next_at: iso(done + wait), ...(status ? { status } : {}) });
       log(`Could not wake the cloud agent "${agent.name}"${status ? ` (it answered ${status})` : " (no connection)"}. Trying again later.`);
       return done + wait;
@@ -151,21 +157,21 @@ export function createInboxCloudWake(options: {
     const answer = inboxCloudAnswer(agent.preset, sent.status, sent.retryAfter, sent.body, done);
     switch (answer.kind) {
       case "started":
-        backoff.delete(threadId);
+        backoff.delete(slot);
         settle({ state: "started", ...(answer.run_url ? { run_url: answer.run_url } : {}) });
         return null;
       case "retry":
         return retryLater(answer.status);
       case "rate_limited":
         giveBack();
-        lastWake.set(threadId, 0);
+        lastWake.set(slot, 0);
         limitedUntil.set(agent.session, done + answer.wait_ms);
         settle({ state: "rate_limited", next_at: iso(done + answer.wait_ms) });
         log(`The cloud agent "${agent.name}" is at its hourly limit; the next wake waits.`);
         return done + answer.wait_ms;
       case "key_rejected":
         giveBack();
-        lastWake.set(threadId, 0);
+        lastWake.set(slot, 0);
         settle({ state: "key_rejected", status: answer.status });
         agents.markKeyRejected(agent.session);
         log(`The cloud agent "${agent.name}" refused its key. Paste the new key in Settings → Remote devices.`);
@@ -188,28 +194,36 @@ export function createInboxCloudWake(options: {
     for (const [session, all] of pending) {
       const agent = agents.agent(session);
       if (!agent || !hasCloudWake(agent)) continue;
-      // A ghost thread's words (Swarm) are for several agents, each woken once: another agent's wake state is not this one's.
-      const mine = (item: InboxMessage) => !store.ghostParentOf(item.thread_id) || store.message(item.id)?.cloud_wake?.name === agent.name;
-      if (startPass) for (const item of all) if (item.cloud_wake?.state === "sending" && mine(item)) setWake(item, session, { ...item.cloud_wake, state: "uncertain" });
-      for (const item of all) if (POSTED.has(item.cloud_wake?.state ?? "") && mine(item)) store.handover.hand(item, session, "cloud");
+      // Each item's wake state for this agent: a message's, or, in a ghost thread (Swarm), this member's own (its tag's),
+      // so a second cloud member's wake never overwrites the first one's. `wakeOf` reads the item as listed, `wakeNow` now.
+      const wakeOf = (item: InboxMessage) => store.cloudWakeOf(item, session);
+      const wakeNow = (item: InboxMessage) => {
+        const latest = store.message(item.id);
+        return latest ? store.cloudWakeOf(latest, session) : null;
+      };
+      if (startPass) for (const item of all) if (wakeOf(item)?.state === "sending") setWake(item, session, { ...wakeOf(item)!, state: "uncertain" });
+      for (const item of all) if (POSTED.has(wakeOf(item)?.state ?? "")) store.handover.hand(item, session, "cloud");
       // The note that a session's questions moved never starts a run: it is for a session that comes on its own. Nor do
       // Ship's stop and closed lines (`ship_note` `stop`): a run started only to be told to stop would act on the PR.
       // Ship's update note (`watch`) wakes a shipping cloud agent as any reply would.
-      const open = all.filter((item) => !item.moved_note && item.ship_note?.kind !== "stop" && !(inboxCloudWakeSettled(store.message(item.id)?.cloud_wake) && mine(item)));
+      const open = all.filter((item) => !item.moved_note && item.ship_note?.kind !== "stop" && !inboxCloudWakeSettled(wakeNow(item)));
       const byThread = new Map<string, InboxMessage[]>();
       for (const item of open) (byThread.get(item.thread_id) ?? byThread.set(item.thread_id, []).get(item.thread_id)!).push(item);
       for (const [threadId, items] of byThread) {
         if (stopped) return;
         if (agent.key_rejected_at) {
-          for (const item of items) if (item.cloud_wake?.state !== "key_rejected") setWake(item, session, { state: "key_rejected", name: agent.name, preset: agent.preset, at: iso(now()) });
+          for (const item of items) if (wakeOf(item)?.state !== "key_rejected") setWake(item, session, { state: "key_rejected", name: agent.name, preset: agent.preset, at: iso(now()) });
           continue;
         }
         const t = now();
-        const retryAt = Math.max(0, ...items.map((item) => (item.cloud_wake?.state === "retrying" || item.cloud_wake?.state === "rate_limited" ? Date.parse(item.cloud_wake.next_at ?? "") || 0 : 0)));
-        const due = Math.max(lastWakeOf(threadId) + gap, limitedUntil.get(session) ?? 0, retryAt);
+        const retryAt = Math.max(0, ...items.map((item) => {
+          const wake = wakeOf(item);
+          return wake?.state === "retrying" || wake?.state === "rate_limited" ? Date.parse(wake.next_at ?? "") || 0 : 0;
+        }));
+        const due = Math.max(lastWakeOf(threadId, session) + gap, limitedUntil.get(session) ?? 0, retryAt);
         if (t < due) {
           for (const item of items) {
-            const state = item.cloud_wake?.state;
+            const state = wakeOf(item)?.state;
             if (state === "retrying" || state === "rate_limited") continue;
             setWake(item, session, { state: "held", name: agent.name, preset: agent.preset, at: iso(t), next_at: iso(due) });
           }
@@ -270,7 +284,7 @@ export function createInboxCloudWake(options: {
       if (gone.size > 0) {
         for (const [session, items] of store.pendingRepliesFor(gone, { tags: true })) {
           for (const item of items) {
-            if (inboxCloudWakeSettled(item.cloud_wake)) continue;
+            if (inboxCloudWakeSettled(store.cloudWakeOf(item, session))) continue;
             setWake(item, session, { state: "unpaired", name: pinned.get(session) ?? "the cloud agent", at: iso(now()) });
           }
         }

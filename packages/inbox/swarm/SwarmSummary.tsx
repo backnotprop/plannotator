@@ -7,6 +7,7 @@ import { relativeWords, useRelativeClock } from '../relativeTime';
 import { SwarmBadgeLook } from './SwarmBadge';
 import { GhostGlyph } from './GhostGlyph';
 import { swarmApi } from './swarmApi';
+import { swarmEscapeIsOurs } from './escape';
 import { swarmMemberTree, swarmStateWords, swarmSummaryWords } from './swarmModel';
 
 /** The most marks the row draws. */
@@ -46,7 +47,7 @@ export function SwarmSummary({
       if (box.current && !box.current.contains(event.target as Node)) setOpen(false);
     };
     const key = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || !swarmEscapeIsOurs(event, box.current)) return;
       // This Escape closes the view, never the thread under it.
       event.preventDefault();
       event.stopPropagation();
@@ -108,7 +109,8 @@ function SwarmStatus({ threadId, swarm, onAddAgent, onGhost }: { threadId: strin
   const [ghostCount, setGhostCount] = useState<number | null>(null);
   const [turning, setTurning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The ghost thread's count: its whole length, read when the view opens.
+  // The ghost thread's count: its whole length, read when the view opens and again each time the thread is read again
+  // (the stream's swarm event, a ghost message included, reads it: a new `swarm`).
   useEffect(() => {
     let live = true;
     swarmApi.read(threadId).then(
@@ -118,7 +120,7 @@ function SwarmStatus({ threadId, swarm, onAddAgent, onGhost }: { threadId: strin
     return () => {
       live = false;
     };
-  }, [threadId]);
+  }, [threadId, swarm]);
 
   const threadMachine = machineOf(threadId);
   /** Where a member runs: its project (as the agents list says it) and its computer. */

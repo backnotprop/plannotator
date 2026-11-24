@@ -10,6 +10,7 @@ import { inboxAgentName, type InboxMessage, type InboxTag } from "@plannotator/c
 import { sanitizeSwarmDoing, type InboxSwarmMember, type InboxSwarmMemberWire, type InboxSwarmRecord, type InboxThreadSwarm } from "@plannotator/core/inbox-swarm-types";
 import { InboxError } from "./schema";
 import type { InboxStore } from "./store";
+import { inboxMessageStartsSwarm } from "./swarm-start";
 
 /** Who runs the command: its session, and, through a linked computer's door, that computer. */
 export interface SwarmCaller {
@@ -52,7 +53,7 @@ export const SWARM_WORDS = {
   ghostNone: "Ghost thread: no messages yet.",
   ghostLatest: (shown: number, all: number) => (shown === all ? `Ghost thread (${all}):` : `Ghost thread, the latest ${shown} of ${all}:`),
   /** The wake's first line for a ghost message (one line, at most 300 characters). */
-  wake: (from: string) => `${from} wrote in the swarm's ghost thread. Answer there with plannotator inbox swarm say "<text>" --to ${from}; the person reads it but is not notified.`,
+  wake: (from: string) => `${from} wrote in the swarm's ghost thread. Answer only if it asks something or you have something they need: plannotator inbox swarm say "<text>" --to ${from}. Never reply only to acknowledge.`,
   wakePerson: "The person wrote to the swarm in the ghost thread. Answer with plannotator inbox swarm say; ask the person in the thread itself.",
 };
 
@@ -90,7 +91,8 @@ export function startSwarm(store: InboxStore, threadId: string): InboxSwarmRecor
   if (was?.on && was.ghost_id && store.message(was.ghost_id)) return was;
   const ghost = store.ghostThreadFor(threadId);
   const at = new Date().toISOString();
-  return store.writeSwarm({ id: threadId, thread_id: threadId, project_id: root.project_id, on: true, ghost_id: ghost.id, members: was?.members ?? [], person_seen_at: was?.person_seen_at ?? null, started_at: was?.started_at ?? at, updated_at: at });
+  // Turned back on: the store stamps `on_seq`, so what was said before waits for nobody (no burst of old wakes).
+  return store.writeSwarm({ id: threadId, thread_id: threadId, project_id: root.project_id, on: true, ghost_id: ghost.id, members: was?.members ?? [], person_seen_at: was?.person_seen_at ?? null, on_seq: was?.on_seq ?? null, started_at: was?.started_at ?? at, updated_at: at });
 }
 
 /** Turn a thread's swarm on or off (the person's Turn off). Off keeps its members and ghost thread. */
@@ -104,6 +106,10 @@ const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().t
 
 /** `swarm join`: the caller is in, once (again: its name or parent updated). */
 export function joinSwarm(store: InboxStore, threadId: string, caller: SwarmCaller, options: { as?: string | null; for?: string | null } = {}): { swarm: InboxSwarmRecord; member: InboxSwarmMember; again: boolean } {
+  // The join line is handed from the root's own words (inbox-swarm-wake.ts), so a join can come before the Inbox has
+  // written the record: a root that starts a swarm starts it here.
+  const root = store.message(threadId);
+  if (!store.swarmOf(threadId) && root && root.thread_id === threadId && inboxMessageStartsSwarm(root)) startSwarm(store, threadId);
   const swarm = onSwarm(store, threadId);
   const others = swarm.members.filter((m) => m.session !== caller.session);
   const existing = swarm.members.find((m) => m.session === caller.session) ?? null;

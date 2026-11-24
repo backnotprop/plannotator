@@ -1071,6 +1071,8 @@ export interface InboxTag {
    * wake there, and takes that session's answer from there only. Absent for this computer's own sessions.
    */
   machine?: string;
+  /** In a swarm's ghost thread: this member's own cloud wake (elsewhere a message has one, `InboxMessage.cloud_wake`). */
+  cloud_wake?: InboxCloudWake | null;
 }
 
 /** How many sessions one reply may tag: any number (through 0.28.61, at most 8, for no stated reason). Kept so an importer still builds. */

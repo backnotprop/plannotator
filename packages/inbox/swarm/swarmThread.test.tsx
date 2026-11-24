@@ -284,6 +284,47 @@ test.skipIf(!hasDom)('the summary row replaces "N sessions"; its status view sho
   expect(swarmPosts).toEqual([{ on: false }]);
 });
 
+test.skipIf(!hasDom)('the status view\'s ghost count follows the stream: the thread read again brings the new count', async () => {
+  adoptSwarmOn(true);
+  const thread = swarmThread(SWARM);
+  await render(thread);
+  await press(q('[data-swarm-toggle]'));
+  expect(q('[data-swarm-ghost]')?.textContent).toBe('Ghost thread2');
+  // A ghost message arrives: the stream's swarm event reads the thread again (a new read, the same swarm words).
+  ghost = [...ghost, ghostMessage('msg_g3', { kind: 'person' }, 'From the phone.', [])];
+  act(() => {
+    root!.render(
+      <div className="pn-inbox">
+        <ThreadPane thread={{ ...thread, swarm: { ...SWARM } }} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
+      </div>,
+    );
+  });
+  await settle();
+  expect(q('[data-swarm-ghost]')?.textContent).toBe('Ghost thread3');
+});
+
+test.skipIf(!hasDom)('an Escape pressed in a dialog over the thread (New message) is the dialog\'s: the open status view leaves it alone', async () => {
+  adoptSwarmOn(true);
+  await render(swarmThread(SWARM));
+  await press(q('[data-swarm-toggle]'));
+  const dialog = document.createElement('div');
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  const field = document.createElement('textarea');
+  dialog.appendChild(field);
+  document.body.appendChild(dialog);
+  let reached = 0;
+  dialog.addEventListener('keydown', () => (reached += 1));
+  act(() => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(reached).toBe(1);
+  expect(q('[data-swarm-status]')).not.toBeNull();
+  dialog.remove();
+  // Pressed in the thread, it closes the view.
+  act(() => q('[data-swarm-toggle]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  await settle();
+  expect(q('[data-swarm-status]')).toBeNull();
+});
+
 test.skipIf(!hasDom)('the status view\'s Ghost thread opens the ghost pane and closes the view', async () => {
   adoptSwarmOn(true);
   await render(swarmThread(SWARM));

@@ -21,6 +21,7 @@ export function inboxSwarmContext(deps: {
   machines: () => InboxMachines | null | undefined;
   farWakes: { placeOf: (id: string) => { machine: string; thread_id: string } | null };
   ownSession: (session: string) => boolean;
+  serverSession?: string;
 }): SwarmRouteContext {
   const { store } = deps;
   const joins = createSwarmFarJoins(store.dir);
@@ -43,6 +44,7 @@ export function inboxSwarmContext(deps: {
     on: deps.on,
     live,
     ownSession: deps.ownSession,
+    serverSession: deps.serverSession,
     far: {
       placeOf: async (ref) => {
         const handed = deps.farWakes.placeOf(ref);

@@ -13,6 +13,7 @@ import type { InboxAuthor } from "@plannotator/core/inbox-types";
 import { INBOX_SWARM_DOING_MAX } from "@plannotator/core/inbox-swarm-types";
 import { InboxSearchIndex } from "./search";
 import { InboxStore } from "./store";
+import { SWARM_GHOST_SEND_REFUSED } from "./swarm-start";
 import { joinSwarm, leaveSwarm, markGhostSeen, saySwarm, setSwarmDoing, setSwarmOn, startSwarm, swarmWire, type SwarmCaller } from "./swarm";
 
 const roots: string[] = [];
@@ -94,10 +95,52 @@ test("an agent's words reach only the swarm's members, only in its ghost thread"
   const later = saySwarm(store, thread, CLAUDE, "One more thing.");
   leaveSwarm(store, thread, "ses_codex");
   expect(store.pendingReplies("ses_codex").map((m) => m.id)).not.toContain(later.message.id);
-  // An agent message with tags anywhere else is never delivered to another agent.
-  const elsewhere = store.sendMessage({ project_id: project.id, author: AGENT, body: "Not a ghost thread.", subject: "Other" }).message;
+  // An agent message with tags anywhere else is never delivered to another agent: one whose tags name a member.
+  const tagged = store.sendMessage({ project_id: project.id, author: AGENT, body: "Not a ghost thread.", subject: "Other" }).message;
+  const elsewhere = { ...tagged, tags: [{ host: "codex", session: "ses_codex", name: "Codex", wakes: true }] };
+  (store as unknown as { messages: Map<string, unknown> }).messages.set(elsewhere.id, elsewhere);
   expect(store.isGhostSay(elsewhere)).toBe(false);
   expect(store.pendingReplies("ses_codex").map((m) => m.id)).not.toContain(elsewhere.id);
+});
+
+test("send_message into a ghost thread is refused, and only a member writes there, so nothing reaches a member from outside", () => {
+  const { store, thread, ghost } = world();
+  joinSwarm(store, thread, CLAUDE);
+  joinSwarm(store, thread, CODEX);
+  const said = saySwarm(store, thread, CLAUDE, "Codex: the endpoint?").message;
+  const outsider: InboxAuthor = { kind: "agent", host: "pi", session: "ses_outsider", name: "Pi" };
+  for (const reply_to of [ghost, said.id]) {
+    expect(() => store.sendMessage({ project_id: store.message(thread)!.project_id, author: outsider, body: "- [ ] Ship it?", reply_to })).toThrow(SWARM_GHOST_SEND_REFUSED);
+  }
+  expect(() => store.writeGhostMessage(ghost, outsider, "Codex, stop.", [{ host: "codex", session: "ses_codex", name: "Codex", wakes: true }])).toThrow(expect.objectContaining({ code: "not_in_swarm" }));
+  expect(store.ghostMessages(ghost).map((m) => m.id)).toEqual([said.id]);
+  expect(store.pendingReplies("ses_codex").map((m) => m.id)).toEqual([said.id]);
+});
+
+test("turning a swarm (or the switch) back on hands out nothing said before", () => {
+  const { store, thread } = world();
+  joinSwarm(store, thread, CLAUDE);
+  joinSwarm(store, thread, CODEX);
+  const before = saySwarm(store, thread, CLAUDE, "Said before Turn off.").message;
+  const person = saySwarm(store, thread, null, "The person, before Turn off.").message;
+  setSwarmOn(store, thread, false);
+  expect(store.pendingReplies("ses_codex")).toEqual([]);
+  setSwarmOn(store, thread, true);
+  expect(store.pendingReplies("ses_codex").map((m) => m.id)).not.toContain(before.id);
+  expect(store.pendingReplies("ses_codex").map((m) => m.id)).not.toContain(person.id);
+  expect(store.ghostWaitsFor(before)).toEqual([]);
+  const after = saySwarm(store, thread, CLAUDE, "Said after Turn on.").message;
+  expect(store.pendingReplies("ses_codex").map((m) => m.id)).toEqual([after.id]);
+  // The experimental switch: off, then on again.
+  let on = true;
+  store.setSwarmSwitch(() => on);
+  expect(store.pendingReplies("ses_codex").map((m) => m.id)).toEqual([after.id]);
+  on = false;
+  expect(store.pendingReplies("ses_codex")).toEqual([]);
+  on = true;
+  expect(store.pendingReplies("ses_codex")).toEqual([]);
+  const later = saySwarm(store, thread, CLAUDE, "Said after the switch came back.").message;
+  expect(store.pendingReplies("ses_codex").map((m) => m.id)).toEqual([later.id]);
 });
 
 test("--to names one member; the person writes to everyone or one; a turned-off swarm takes nothing", () => {

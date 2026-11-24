@@ -101,14 +101,14 @@ export function useSwarmPicks(input: {
   const chips = picks.map((p) => (
     <button key={p.target.session} type="button" className="ib-cp-tobtn ib-swarm-also" data-compose-also={p.target.session} aria-label={`${hostLabel(p.target.host)}, ${p.target.project.name}. Change the other agents`} onClick={() => setOpen(true)}>
       <HostMark host={p.target.host} agent={p.target.session} />
-      <b>{hostLabel(p.target.host)}</b>
-      <span className="ib-cp-tod">· {p.target.label ?? p.target.project.name}</span>
+      {/* A phone: the mark alone, beside To's pill in the foot's row (its name is the button's label). */}
+      {!input.phone && <b>{hostLabel(p.target.host)}</b>}
+      {!input.phone && <span className="ib-cp-tod">· {p.target.label ?? p.target.project.name}</span>}
     </button>
   ));
   const add = (
     <button type="button" className="ib-swarm-add" data-compose-add-agent="" aria-label="Add an agent" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((was) => !was)}>
       <Icon name="plus" size={16} />
-      {input.phone && <span>Add an agent</span>}
     </button>
   );
   const badge = (
@@ -134,13 +134,13 @@ export function useSwarmPicks(input: {
       {badge}
     </>
   );
-  /** A phone: a line over the foot's row (To is the pill there). */
+  /** A phone: inline after To's pill in the foot's row, never a row of buttons of its own. */
   const phoneLine: ReactNode = input.phone ? (
-    <div className="ib-swarm-phoneline" data-compose-swarm-line="">
+    <span className="ib-swarm-phoneline" data-compose-swarm-line="">
       {chips}
       {add}
       {badge}
-    </div>
+    </span>
   ) : null;
   const opensOn = input.first?.machineKey ?? input.starting?.machineKey ?? machines[0]?.key;
   const picker: ReactNode = input.phone ? (

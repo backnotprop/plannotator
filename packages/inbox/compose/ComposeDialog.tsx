@@ -1507,7 +1507,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           )}
         </div>
       )}
-      {phoneStartIn}{swarm.phoneLine}
+      {phoneStartIn}
       <div className="ib-cp-foot" ref={footRef}>
         {phone && tipCard}
         {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, startHome)} facts={trustFacts} said={errorInDetails ? error : null} />}
@@ -1533,7 +1533,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             <Icon name="cube" size={20} />
           </button>
         )}
-        {phoneTo}
+        {phoneTo}{swarm.phoneLine}
         {phone && noSkills && (
           <span className="ib-cp-hint" data-compose-hint="">
             No skills are installed

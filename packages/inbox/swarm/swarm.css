@@ -8,7 +8,11 @@
 .pn-inbox .ib-swarm-add:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ib-swarm-end { display: inline-flex; align-items: center; margin-left: auto; align-self: center; }
 .ib-cp-to:has(.ib-swarm-end) .ib-cp-dsaved { margin-left: 10px; }
-.ib-swarm-phoneline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 12px; }
+/* A phone: the other agents' marks, the + and the badge inline after To's pill in the foot's row. */
+.ib-swarm-phoneline { display: inline-flex; align-items: center; gap: 2px; min-width: 0; flex: none; }
+.ib-swarm-phoneline .ib-swarm-also { padding: 0 4px; }
+.ib-swarm-phoneline .ib-swarm-add { min-width: 36px; height: 36px; padding: 0; }
+.ib-swarm-phoneline .ib-swarm-end { margin-left: 2px; }
 
 /* ── The ghost mark: the owner's drawing as a mask over the colour of the words around it ── */
 .ib-ghost-g { display: inline-block; flex: none; background-color: currentColor; -webkit-mask: var(--ib-ghost-src) center / contain no-repeat; mask: var(--ib-ghost-src) center / contain no-repeat; }
@@ -62,6 +66,11 @@
 .ib-swarm-fb:disabled { opacity: 0.5; cursor: default; }
 .ib-swarm-fn { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-swarm-fb .ib-ic, .ib-swarm-fb svg { flex: none; color: var(--muted-foreground); }
+/* The foot stays one row at any width (320 px included): its labels give way, with an ellipsis, before it overflows. */
+.ib-swarm-foot { min-width: 0; }
+.ib-swarm-fb { min-width: 0; }
+.ib-swarm-fb > span:not(.ib-swarm-fn) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-swarm-fb[data-swarm-turn] { flex: none; }
 
 /* ── A phone: the row on its own line, the view opens below it, one member per row ── */
 .ib-tmeta[data-sessions]:has(> .ib-swarm-line[data-phone]) > .ib-tmeta-rest { margin-left: 0; flex-basis: 100%; }
@@ -73,10 +82,18 @@
 .ib-swarm-line[data-phone] .ib-swarm-nm { flex-wrap: wrap; row-gap: 0; font-size: 15px; }
 .ib-swarm-line[data-phone] .ib-swarm-now { white-space: normal; font-size: 14px; }
 .ib-swarm-line[data-phone] .ib-swarm-fb { min-height: 44px; padding: 0 8px; font-size: 14px; }
+/* The narrowest phones (320 px): tighter, and the two marks that only decorate go, so the labels keep their words. */
+@media (max-width: 380px) {
+  .ib-swarm-line[data-phone] .ib-swarm-foot { gap: 0; }
+  .ib-swarm-line[data-phone] .ib-swarm-fb { padding: 0 6px; gap: 4px; }
+  .ib-swarm-line[data-phone] .ib-swarm-fb[data-swarm-add] > :first-child,
+  .ib-swarm-line[data-phone] .ib-swarm-fb[data-swarm-ghost] > :last-child { display: none; }
+}
 
 /* ── The ghost pane: beside the thread the way a file is; the list steps aside while it is open ── */
-.pn-inbox:has(.ib-ghostpane:not(.ib-full)) .ib-main { position: relative; }
-.pn-inbox:has(.ib-ghostpane:not(.ib-full)) .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
+/* `data-ib-ghost-beside`: held by GhostPane while it is beside the thread (no `:has()` on the window's root). */
+.pn-inbox[data-ib-ghost-beside] .ib-main { position: relative; }
+.pn-inbox[data-ib-ghost-beside] .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
 .ib-view.ib-ghostpane { display: flex; flex-direction: column; min-width: 0; background: var(--card); outline: none; }
 .ib-view.ib-ghostpane.ib-phone { padding-top: env(safe-area-inset-top); }
 .ib-ghost-back { flex: none; display: flex; align-items: center; height: 46px; padding: 0 10px; border-bottom: 1px solid var(--ib-hair); }
@@ -109,7 +126,8 @@
 .ib-ghost-box > .ib-ghost-err { margin: 0 0 6px; }
 .ib-ghost-field { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .ib-ghost-towrap { position: relative; flex: none; display: inline-flex; padding-top: 1px; }
-.ib-tg-menu.ib-rpick.ib-ghost-tolist { left: 0; right: auto; width: 240px; }
+/* The reply's list's shape (inbox.css `.ib-tg-menu.ib-rpick`), not its class: that class marks the reply box's list. */
+.ib-tg-menu.ib-ghost-tolist { left: 0; right: auto; bottom: calc(100% + 6px); margin: 0; width: 240px; max-width: calc(100vw - 24px); padding: 6px; }
 .ib-ghost-in { flex: 1; min-width: 0; min-height: 26px; max-height: 180px; padding: 3px 0; border: 0; background: none; color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); line-height: 1.45; resize: none; outline: none; field-sizing: content; }
 .ib-ghost-in::placeholder { color: var(--muted-foreground); }
 .ib-ghost-acts { display: flex; align-items: center; gap: 8px; margin-top: 8px; }

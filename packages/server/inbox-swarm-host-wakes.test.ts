@@ -118,3 +118,46 @@ test("cloud: every cloud member is woken once with the notice first; the author 
   for (const post of posts) expect(post.body.text).toContain(SWARM_WORDS.wake("Writer"));
   expect(store.pendingRepliesFor(new Set(list.map((a) => a.session)), { tags: true }).size).toBe(0);
 });
+
+test("cloud: each member keeps its own wake state; one that must retry keeps its backoff and the other is woken once", async () => {
+  const scratch = createFakeAgy();
+  fakes.push(scratch);
+  const store = InboxStore.open(join(scratch.root, "data"));
+  const thread = swarmIn(store);
+  const agent = (session: string, name: string): InboxCloudAgent => ({ session, name, preset: "other", url: `https://hooks.example.test/${name}`, key: "k-0123456789", project_id: null, created_at: "", key_set_at: "", key_rejected_at: null });
+  const down = agent("cloud.0000000000a1", "Down");
+  const up = agent("cloud.0000000000b2", "Up");
+  const list = [down, up];
+  for (const a of list) joinSwarm(store, thread, { session: a.session, host: "cloud", name: a.name });
+  const agents = { list: () => list, agent: (s: string) => list.find((a) => a.session === s) ?? null, markKeyRejected: () => {}, homeRoot: () => null } as unknown as InboxCloudAgents;
+  const posts: string[] = [];
+  const fetch = (async (url: string) => {
+    posts.push(url);
+    return new Response("{}", { status: url.endsWith("/Down") ? 503 : 200 });
+  }) as unknown as typeof globalThis.fetch;
+  let clock = Date.parse("2026-11-24T09:00:00.000Z");
+  const start = () => {
+    const wake = createInboxCloudWake({ store, agents, pin: () => {}, threadUrl: (id) => `http://127.0.0.1/#thread=${id}`, fetch, gapMs: 0, retryMs: 60_000, now: () => clock, log: () => {} });
+    stops.push(wake);
+    return wake;
+  };
+  const wake = start();
+  await wake.sweep();
+  const said = saySwarm(store, thread, CLAUDE, "Both: rerun the nightly.").message;
+  expect(await waitFor(() => posts.length >= 2)).toBe(true);
+  await wake.sweep();
+  await wake.sweep();
+  expect(posts.sort()).toEqual(["https://hooks.example.test/Down", "https://hooks.example.test/Up"]);
+  const latest = store.message(said.id)!;
+  expect(store.cloudWakeOf(latest, down.session)).toMatchObject({ state: "retrying", name: "Down" });
+  expect(store.cloudWakeOf(latest, up.session)).toMatchObject({ state: "started", name: "Up" });
+  // After a restart, nobody is woken again before the backoff ends; then only the one that failed.
+  wake.stop();
+  const again = start();
+  await again.sweep();
+  expect(posts).toHaveLength(2);
+  clock += 61_000;
+  await again.sweep();
+  expect(posts.filter((u) => u.endsWith("/Up"))).toHaveLength(1);
+  expect(posts.filter((u) => u.endsWith("/Down"))).toHaveLength(2);
+});

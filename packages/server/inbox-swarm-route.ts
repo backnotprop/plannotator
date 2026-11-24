@@ -33,6 +33,7 @@ import {
   type SwarmLiveState,
 } from "@plannotator/shared/inbox/swarm";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { FAR_REPLY_WORDS } from "./inbox-mcp-far-reply";
 import type { SwarmFarJoins, SwarmFarPlace, SwarmHeldSay } from "./inbox-swarm-far";
 
@@ -71,6 +72,8 @@ export interface SwarmRouteContext {
   };
   /** Whether `session` is one of this computer's own (a linked computer may not speak for it). */
   ownSession?: (session: string) => boolean;
+  /** The Inbox's server session: a window write from a page of an earlier run is refused (409), as every window write is. */
+  serverSession?: string;
 }
 
 const ASK_FIELDS = ["action", "thread", "as", "for", "text", "to", "by"];
@@ -193,7 +196,13 @@ export function farSwarmAnswer(ctx: SwarmRouteContext, machine: string, body: Re
   if (!raw) throw new InboxError("validation_error", "ask: the swarm command.");
   const session = typeof body.session === "string" ? body.session.trim() : "";
   if (!/^[A-Za-z0-9_.:-]{1,200}$/.test(session)) throw new InboxError("validation_error", "session: a session id.");
-  if (ctx.ownSession?.(session)) throw new InboxError("not_your_session", "That session is not one of your computer's: nothing was written.");
+  // As the far tags' `asSession` (inbox-far-tags.ts): the session must be the calling computer's. Not one of this
+  // computer's own (live, a member without a machine, or written here), nor one a member or message puts elsewhere.
+  const elsewhere = ctx.store.sessionMachine(session);
+  const otherMember = ctx.store.allSwarms().some((swarm) => swarm.members.some((m) => m.session === session && m.machine !== machine));
+  if (ctx.ownSession?.(session) || otherMember || (elsewhere !== null && elsewhere !== machine)) {
+    throw new InboxError("not_your_session", "That session is not one of your computer's: nothing was written.");
+  }
   const { by: _by, ...rest } = raw;
   const short = (value: unknown, max: number) => (typeof value === "string" && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value) ? value : null);
   const caller: SwarmCaller = { session, host: short(body.host, 64), name: short(body.name, 80), machine, machine_name: ctx.far?.nameOf(machine) ?? null };
@@ -227,8 +236,13 @@ export async function swarmWindowRoute(req: Request, url: URL, ctx: SwarmRouteCo
     if (req.method === "GET") return Response.json(read());
     if (req.method !== "POST") return Response.json({ error: "Use GET or POST." }, { status: 405 });
     // The door's writes carry an idempotency key in the body; these are answered now, never held, so it is not kept. The
-    // window's every write carries its page's `serverSession` (api.ts `post`): not one of this route's fields either.
-    const { idempotency_key: _key, serverSession: _session, ...body } = await readBody(req);
+    // window's every write carries its page's `serverSession` (api.ts `post`): checked as every window write is (a tab
+    // from before a restart is told to reload), then not one of this route's fields.
+    const raw = await readBody(req);
+    if (ctx.serverSession !== undefined && checkServerSession(raw, ctx.serverSession) === "mismatch") {
+      return Response.json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), { status: 409 });
+    }
+    const { idempotency_key: _key, serverSession: _session, ...body } = raw;
     const keys = Object.keys(body);
     if (keys.length !== 1 || !["say", "on", "seen"].includes(keys[0]!)) throw new InboxError("validation_error", "One of say, on or seen.");
     if (body.say !== undefined) {
@@ -238,6 +252,8 @@ export async function swarmWindowRoute(req: Request, url: URL, ctx: SwarmRouteCo
       markGhostSeen(store, threadId);
     } else if (body.on !== undefined) {
       if (typeof body.on !== "boolean") throw new InboxError("validation_error", "on: true or false.");
+      // Turn on is for a swarm turned off: a swarm starts from the person's message that names /swarm (swarm-start.ts).
+      if (!store.swarmOf(threadId)) throw new InboxError("not_a_swarm", SWARM_WORDS.notSwarm(threadId));
       setSwarmOn(store, threadId, body.on);
     } else if (body.seen === true) markGhostSeen(store, threadId);
     else throw new InboxError("validation_error", "seen: true.");

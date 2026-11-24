@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { holdPageMarkAbove } from '@plannotator/ui/utils/pageMarks';
 import { inboxAgentName, type InboxMessage } from '@plannotator/core/inbox-types';
 import type { InboxThreadSwarm } from '@plannotator/core/inbox-swarm-types';
 import { InlineMarkdown, SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
@@ -81,6 +82,14 @@ export function GhostPane({
     const body = bodyRef.current;
     if (body) body.scrollTop = body.scrollHeight;
   }, [ghost.length]);
+
+  // Beside the thread, the list column steps aside (swarm.css): `.pn-inbox` holds `data-ib-ghost-beside` while it is,
+  // an attribute in place of a `:has()` on the window's root (packages/inbox/pageMarks.ts says why).
+  useLayoutEffect(() => {
+    const section = sectionRef.current;
+    if (full || !section) return;
+    return holdPageMarkAbove(section, '.pn-inbox', 'data-ib-ghost-beside');
+  }, [full]);
 
   const members = (read?.swarm ?? swarm).members.filter((m) => m.joined);
   const on = (read?.swarm ?? swarm).on;

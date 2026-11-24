@@ -23,10 +23,13 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posts: { path: string; body: Record<string, unknown> }[] = [];
+/** The Inbox's answer to the Swarm tip's claim: shown (one test), else not. */
+let revealShows = false;
 
 beforeEach(() => {
   if (!hasDom) return;
   posts = [];
+  revealShows = false;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -34,7 +37,7 @@ beforeEach(() => {
       const body = typeof init.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
       posts.push({ path, body });
       if (path === '/api/inbox/messages') return Response.json({ thread_id: 'msg_01M4XXVG0ZCPSD10B1KPG7DPMZ' });
-      if (path.includes('/reveal')) return Response.json({ show: false, reveal: { next: null }, board: { on: false }, steps: { on: false } });
+      if (path.includes('/reveal')) return Response.json({ show: revealShows && body.id === 'swarm_tip', reveal: { next: null }, board: { on: false }, steps: { on: false } });
       return Response.json({});
     }
     if (path.startsWith('/api/inbox/sessions')) {
@@ -85,16 +88,46 @@ const click = (el: Element | null) => {
   act(() => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
 };
 
-async function open() {
+async function open(options: { phone?: boolean; onClose?: () => void } = {}) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(<ComposeDialog request={{ session: 'ses_claude' }} phone={false} current={null} lastSent={null} home="/home/charlie" onSent={() => {}} onJoined={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+    root.render(<ComposeDialog request={{ session: 'ses_claude' }} phone={options.phone ?? false} current={null} lastSent={null} home="/home/charlie" onSent={() => {}} onJoined={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={options.onClose ?? (() => {})} />);
   });
   await until(() => inDialog('[data-compose-to]:not([data-loading])') !== null, 'To');
 }
+
+test.skipIf(!hasDom)('the Swarm tip up, one Escape still closes New message', async () => {
+  const { resetSwarmTipForTests } = await import('./useSwarmTip');
+  resetSwarmTipForTests();
+  revealShows = true;
+  adoptSwarmOn(true);
+  let closed = 0;
+  await open({ onClose: () => (closed += 1) });
+  click(inDialog('[data-compose-add-agent]'));
+  click(document.querySelector('[data-compose-session="ses_codex"]'));
+  for (let i = 0; i < 300 && !document.querySelector('[data-swarm-tip]'); i++) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+  }
+  expect(document.querySelector('[data-swarm-tip]')).not.toBeNull();
+  act(() => words().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  await until(() => closed > 0, 'New message closed');
+  expect(closed).toBe(1);
+});
+
+test.skipIf(!hasDom)('a phone: the other agents sit inline after To in the foot\'s row, never a row of their own', async () => {
+  adoptSwarmOn(true);
+  await open({ phone: true });
+  const foot = inDialog('.ib-cp-foot')!;
+  const line = inDialog('[data-compose-swarm-line]')!;
+  expect(line.parentElement).toBe(foot);
+  expect(line.previousElementSibling?.matches('[data-compose-to]') || line.previousElementSibling?.querySelector('[data-compose-to]') !== null).toBe(true);
+  expect(line.tagName).toBe('SPAN');
+});
 
 test.skipIf(!hasDom)('Swarm on: two more agents join To beside the first, each checked in the picker, the badge puts /swarm in the words, and Send carries them as tags', async () => {
   adoptSwarmOn(true);
