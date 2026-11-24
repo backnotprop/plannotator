@@ -90,6 +90,8 @@ export function createInboxShipStore(dataDir: string): InboxShipStore {
       const was = load().get(key);
       if (!was) return null;
       const next = change(was);
+      // A tick that changed nothing writes nothing.
+      if (next === was || JSON.stringify(next) === JSON.stringify(was)) return was;
       load().set(key, { ...next, log: shipLogKept(next.log) });
       save();
       return next;

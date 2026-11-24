@@ -67,8 +67,11 @@ export interface InboxPullsMcpContext {
   sessionName?: SessionNameOf;
   /** For a short `group/project!45` (`parseProjectPullRefs`). Absent: gitlab.com. */
   projectHost?: ProjectHostOf;
-  /** Ship (inbox-ship-watch.ts): a step the shipping agent logs; null when the thread ships nothing. Absent: no Ship. */
-  shipStep?: (threadId: string, step: InboxShipStep) => InboxShip | null;
+  /**
+   * Ship (inbox-ship-watch.ts): a step the shipping agent logs; null when the thread ships nothing, or the calling
+   * session (`agent_session`) is not the one shipping it. Absent: no Ship.
+   */
+  shipStep?: (threadId: string, step: InboxShipStep, session: string | null) => InboxShip | null;
 }
 
 /** The agent a call's filled fields name. */
@@ -220,8 +223,8 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
           change = await changePullsAsAgent(context, { thread_id: root, add, remove, actor: pullsActor(input) });
           changed = pullsChangeText(change);
         }
-        // Ship: the shipping agent's step, in the ship log (nothing when this thread ships nothing).
-        const shipped = input.ship && context.shipStep ? context.shipStep(root, { kind: input.ship.kind, text: input.ship.text, sha: input.ship.sha ?? null }) : null;
+        // Ship: the shipping agent's step, in the ship log (nothing when this thread ships nothing, or another session calls).
+        const shipped = input.ship && context.shipStep ? context.shipStep(root, { kind: input.ship.kind, text: input.ship.text, sha: input.ship.sha ?? null }, reader) : null;
         const logged = input.ship ? (shipped ? ` Logged in the ship log of ${shipped.url}.` : " Nothing is shipping in this thread; nothing was logged.") : "";
         // The session has now seen the thread's PRs: the next wake says only what the person changed after this.
         noteSessionRead(store, reader, root, context.now?.() ?? Date.now());

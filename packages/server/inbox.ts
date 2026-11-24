@@ -357,7 +357,9 @@ import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
-import { readShipPull } from "./inbox-ship-read";
+import { createShipReader } from "./inbox-ship-read";
+import { shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
+import type { InboxShip } from "@plannotator/core/inbox-ship";
 import { createInboxShipRoutes } from "./inbox-ship-routes";
 import { createInboxShipStore } from "./inbox-ship-store";
 import { createInboxShipWatch, shipEndedWaiting } from "./inbox-ship-watch";
@@ -1858,7 +1860,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     pulls: threadPullStates,
     projectHost: projectRepoHost,
     // Ship: the shipping agent's `thread_pulls` `ship` (inbox-ship-watch.ts), only while Code review is on.
-    shipStep: (threadId, step) => (codeReviewOn() ? shipWatch.step(threadId, step) : null),
+    shipStep: (threadId, step, session) => (codeReviewOn() ? shipWatch.step(threadId, step, session) : null),
     // The attach hint's `#12`: the project's cached origin, and a PR the Pull requests list, a hover card or a lookup
     // already read. Never a git or forge call on the send's path: a number not known yet is looked up after it.
     knownPulls: (projectId) => {
@@ -4600,13 +4602,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // (approval "inbox-launched-agent-note"). Only the root, so only that session's first wake.
       ...(launchedWake ? { launched: launchedWake } : {}),
       // A thread the person started with no name yet, handed to a session that may name it: the wake asks it to.
-      ...(!reply.ack_of && !reply.moved_note && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
+      ...(!reply.ack_of && !reply.moved_note && !reply.ship_note && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
       // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line,
       // with the tray reaction the ack had when its window closed (approval "inbox-reaction-tray").
       ...(reply.ack_of ? { ack_of: reply.ack_of, ...(reply.ack_reaction ? { ack_reaction: reply.ack_reaction } : {}) } : {}),
       // The Inbox's note that this session's questions moved to another thread: the wake is a notice with no reply
-      // instruction (INBOX_MOVED_WAKE_INSTRUCTION). An older connection words it as a reply.
-      ...(reply.moved_note ? { moved: true as const } : {}),
+      // instruction (INBOX_MOVED_WAKE_INSTRUCTION). An older connection words it as a reply. Ship's note to the shipping
+      // agent is the same kind of notice: its own lines say what to do, and nothing in it asks for an answer.
+      ...(reply.moved_note || reply.ship_note ? { moved: true as const } : {}),
       // The person's Re-ask (approval "inbox-reask"): the wake takes INBOX_REASK_INSTRUCTION.
       ...((reply.reask?.length ?? 0) > 0 ? { reask: true } : {}),
       // What the note lists (#2059): the wake names action items only when it lists some.
@@ -5299,16 +5302,43 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullRepoProjects = async (pull: Pick<InboxPull, "host" | "repo">) => (await pullProjects()).projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? [];
   // Ship (inbox-ship-*.ts): the records, the watch that wakes the shipping agent, and the routes.
   const ships = createInboxShipStore(dataDir);
+  // Who ships it: the session Ship was given (a new session: the one its launch started), never the thread's latest agent.
+  const shipAgentDeps: InboxShipAgentDeps = {
+    message: (id) => store.message(id),
+    threadMessageIds: (threadId) => store.threadMessageIds(threadId),
+    sessionLive: (session) => live.isSessionLive(session),
+    launchDead: (threadId) => launch.didNotStart(threadId),
+  };
+  // A GitLab merge request is read as the Reviews list reads it (its own read, its cache); off the list, its state alone.
+  const shipListedPull = async (ship: InboxShip): Promise<InboxPull | { failed: string }> => {
+    const listed = await pulls.list((await pullProjects()).wanted, { refresh: false }).catch(() => null);
+    const found = pulls.find(ship.key);
+    if (found) return found;
+    // Off the list: its state and head only. Its pipeline is not known, never read as passing (no "merge it now").
+    const pull = await readUnlistedPull({ key: ship.key, platform: "gitlab", host: ship.host, repo: ship.repo, number: ship.number }).catch(() => null);
+    if (pull) return pull.state === "open" || pull.state === "draft" ? { ...pull, checks: "pending" } : pull;
+    const host = listed?.hosts.find((h) => h.host === ship.host);
+    return { failed: !host ? `glab isn't signed in to ${ship.host}` : host.error === "rate_limited" ? `${ship.host} is rate limiting glab` : `glab couldn't read ${ship.host}` };
+  };
   const shipWatch = createInboxShipWatch({
     ships,
-    read: (ship) => readShipPull(options.refRunner ?? refCliRunner, ship),
+    read: createShipReader({ run: options.refRunner ?? refCliRunner, listed: shipListedPull }),
+    shipper: (ship) => shipShipper(shipAgentDeps, ship),
     note: (ship, body, kind) => {
-      const agent = threadAgent(pullLinkStore, ship.thread_id);
-      const session = agent?.session ?? ship.agent.session;
-      const host = agent?.host ?? ship.agent.host;
-      store.tellShip(ship.thread_id, { body, to: session && host ? { host, session } : null, ship_note: { ship: ship.id, kind } });
+      // Only ever to the shipping session: with none known, nobody is told (never the thread's latest agent).
+      const to = shipShipper(shipAgentDeps, ship);
+      if (!to) return void process.stderr.write(`Inbox: Ship's note for ${ship.url} has nobody to go to.\n`);
+      store.tellShip(ship.thread_id, { body, to, ship_note: { ship: ship.id, kind } });
     },
-    endedWaiting: (ship) => shipEndedWaiting(store, ship, (threadId) => threadAgent(pullLinkStore, threadId)),
+    endedWaiting: (ship) => shipEndedWaiting(store, ship, (one) => shipSessionEnded(shipAgentDeps, one)),
+    // One ship per PR across computers: each linked computer hears of this one, now or when it is back (the outbox),
+    // and stops an older ship of it there.
+    onStart: (ship) => {
+      for (const machine of machines?.linkedIds() ?? []) {
+        const body = { key: ship.key, id: ship.id, started_at: ship.started_at, idempotency_key: `ship-newer-${ship.id}-${machine}` };
+        void machines.holdWrite(machine, "ships/newer", body, null, 0)?.catch(() => {});
+      }
+    },
     onChange: () => {
       for (const listener of shipListeners) listener();
     },
@@ -5363,13 +5393,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (result.replayed) launch.abandon(prepared.launch, prepared.project);
         else launch.begin(result.reply);
-        return { host: prepared.to.host, session: null, name: INBOX_HOST_NAMES[to.launch.agent] ?? to.launch.agent };
+        // The new session's placeholder: the session its launch starts is read from the reply (inbox-ship-agent.ts).
+        return { agent: { host: prepared.to.host, session: prepared.to.session, name: INBOX_HOST_NAMES[to.launch.agent] ?? to.launch.agent }, message_id: result.reply.id };
       }
       const target = live.replyTarget(threadId, to);
       if (!target) throw new InboxError("session_not_live", "That agent isn't running any more. Pick another.");
-      store.sendReply(answered.id, { words, to: target, questions: [], idempotency_key: idempotencyKey } as never);
+      const sent = store.sendReply(answered.id, { words, to: target, questions: [], idempotency_key: idempotencyKey } as never);
       const agent = threadAgent(pullLinkStore, threadId);
-      return { host: target.host, session: target.session, name: agent?.session === target.session ? agent.name : (INBOX_HOST_NAMES[target.host] ?? target.host) };
+      return { agent: { host: target.host, session: target.session, name: agent?.session === target.session ? agent.name : (INBOX_HOST_NAMES[target.host] ?? target.host) }, message_id: sent.reply.id };
+    },
+    fromMachine: (req) => {
+      const door = fromDeviceDoor.get(req);
+      const from = door?.platform === MACHINE_PLATFORM ? machines?.machineOfDevice(door.device_id) : null;
+      return from ? { id: from.machine, name: from.name ?? null } : null;
     },
   });
   const pullRiskAutoPick = { launch, lastReviewAgent: () => lastStartedReviewAgent(store, [...[...pullOwners.all().values()].map((owner) => owner.thread_id), ...pullOwners.started().keys()]) };

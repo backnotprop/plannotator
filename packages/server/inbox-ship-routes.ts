@@ -11,17 +11,20 @@
  *   or an agent on another computer than the review's thread): only the record; its `to`, when a live session, is
  *   who ships it until the thread says otherwise.
  * - `POST /api/inbox/ships/stop` `{ id }`: stop.
+ * - `POST /api/inbox/ships/newer` `{ key, id, started_at }`: a linked computer's Inbox (never a window) says it started
+ *   shipping this pull request; an older ship of it here stops (`watch.newer`). Sent through the outbox to every linked
+ *   computer at each Ship, so an offline one hears it when it is back.
  *
  * A linked machine reaches them through the door (`machineOnly` rows in inbox-devices.ts), so a window on either
  * computer ships the other's; a phone token gets the door's 404 (the native app has no pull routes).
  */
-import { shipMessage, shipView, type InboxShip, type InboxShipAgent } from "@plannotator/core/inbox-ship";
+import { shipForge, shipMessage, shipView, type InboxShip, type InboxShipAgent } from "@plannotator/core/inbox-ship";
 import type { InboxPull } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxShipStore } from "./inbox-ship-store";
 import type { InboxShipWatch } from "./inbox-ship-watch";
 
-export const INBOX_SHIP_ROUTES = ["/api/inbox/ships", "/api/inbox/ships/log", "/api/inbox/ships/stop"] as const;
+export const INBOX_SHIP_ROUTES = ["/api/inbox/ships", "/api/inbox/ships/log", "/api/inbox/ships/stop", "/api/inbox/ships/newer"] as const;
 
 export type InboxShipTo = { host: string; session: string } | { launch: { agent: string; project_id: string; model?: string; effort?: string } };
 
@@ -36,8 +39,13 @@ export interface InboxShipRoutesOptions {
   threadAgent: (threadId: string) => InboxShipAgent | null;
   /** `host/repo` (lowercased) → this Inbox's projects on it. */
   repoProjects: () => Promise<Record<string, string[]>>;
-  /** Send the instruction into the thread as the person's reply to `to`; the agent it went to. */
-  sendInstruction: (input: { threadId: string; to: InboxShipTo; words: string; idempotencyKey: string; req: Request }) => Promise<InboxShipAgent>;
+  /**
+   * Send the instruction into the thread as the person's reply to `to`: the agent it went to (a new session's
+   * placeholder until it starts) and the message that carried it.
+   */
+  sendInstruction: (input: { threadId: string; to: InboxShipTo; words: string; idempotencyKey: string; req: Request }) => Promise<{ agent: InboxShipAgent; message_id: string }>;
+  /** The linked computer a request came from through its door (`ships/newer`); null for any other request. */
+  fromMachine: (req: Request) => { id: string; name: string | null } | null;
   json: (body: unknown, status?: number) => Response;
   /** The pull routes' own guards (same origin, Code review, a window's press, the server session); a refusal, or null. */
   guard: (req: Request, write: boolean, body: Record<string, unknown> | null) => Response | null;
@@ -85,20 +93,30 @@ export function createInboxShipRoutes(options: InboxShipRoutesOptions) {
       const pull = await options.findPull(key);
       if (!pull) throw new InboxError("pull_not_found", "That pull request isn't in the list any more.", { field: "key" });
       if (pull.state !== "open" && pull.state !== "draft") throw new InboxError("pull_not_open", `It is ${pull.state} already.`);
+      // Only a forge whose pull request state the Inbox reads can ship (its watch would read nothing, for ever).
+      if (!shipForge(pull.platform)) throw new InboxError("pull_not_shippable", "Ship reads GitHub and GitLab pull requests only.", { field: "key" });
       let agent: InboxShipAgent | null;
+      let instruction: string | null;
       if (body.started === true) {
-        // The thread's agent once it answered; before that, the live session the window started it with.
+        // The window's new thread carried the instruction: its first message. The session the window started it with
+        // ships it (a new session: the one its launch starts, read from that message), never whoever wrote last.
         const to = toOf(body.to);
-        agent = options.threadAgent(threadId) ?? (to && "session" in to ? { host: to.host, session: to.session, name: null } : null);
+        const now = options.threadAgent(threadId);
+        agent = to && "session" in to ? { host: to.host, session: to.session, name: now?.session === to.session ? now.name : null } : now;
+        instruction = threadId;
       } else {
         const to = toOf(body.to);
         if (!to) throw new InboxError("validation_error", "to: a session, or a new session to start.", { field: "to" });
         const idempotencyKey = text(body.idempotency_key, 200);
         if (!idempotencyKey) throw new InboxError("validation_error", "idempotency_key: required.", { field: "idempotency_key" });
-        agent = await options.sendInstruction({ threadId, to, words: shipMessage(pull), idempotencyKey, req });
+        const sent = await options.sendInstruction({ threadId, to, words: shipMessage(pull), idempotencyKey, req });
+        agent = sent.agent;
+        instruction = sent.message_id;
       }
       const ship = options.watch.start({
         key: pull.key,
+        platform: pull.platform,
+        instruction_id: instruction,
         url: pull.url,
         title: pull.title,
         number: pull.number,
@@ -117,6 +135,20 @@ export function createInboxShipRoutes(options: InboxShipRoutesOptions) {
       const ship: InboxShip | null = options.ships.byId(url.searchParams.get("id") ?? "");
       if (!ship) return json({ error: "No such ship.", code: "ship_not_found" }, 404);
       return json({ serverSession: options.serverSession, ship: shipView(ship), log: [...ship.log].reverse() });
+    }
+    if (path === "/api/inbox/ships/newer") {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      // A linked computer's Inbox only; whatever this one's Code review setting, a stop is never refused (the outbox
+      // would drop it, and two agents would ship one pull request).
+      const machine = options.fromMachine(req);
+      if (!machine) return json({ error: "Only a linked computer's Inbox sends this.", code: "machine_only" }, 403);
+      const body = await options.readBody(req);
+      const key = text(body.key);
+      const id = text(body.id, 200);
+      const startedAt = text(body.started_at, 64);
+      if (!key || !id || !startedAt) throw new InboxError("validation_error", "key, id and started_at: the ship started there.", { field: "key" });
+      const stopped = options.watch.newer({ key, id, started_at: startedAt }, machine.name);
+      return json({ serverSession: options.serverSession, ok: true, stopped: stopped ? stopped.id : null });
     }
     // /api/inbox/ships/stop
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);

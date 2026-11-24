@@ -785,6 +785,22 @@
       "relay": true
     },
     {
+      "name": "POST ships/newer",
+      "method": "POST",
+      "path": "ships/newer",
+      "params": [],
+      "call": "postShipsNewer",
+      "window": "/api/inbox/ships/newer",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST pulls/looked",
       "method": "POST",
       "path": "pulls/looked",

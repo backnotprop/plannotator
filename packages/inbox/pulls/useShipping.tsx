@@ -42,15 +42,9 @@ export function useShipping(answer: InboxReviewsAnswer | null, phone: boolean, o
     repoProjects: answer?.projects ?? {},
     projectsOf,
     onShip: (target, option) => {
-      // One ship per pull request: one going on another computer stops once this one started.
-      const was = ships.get(target.pull.key);
-      const other = was && shipActive(was) && (was.machine ?? null) !== option.machine ? was : null;
-      shipPull(target, option, option.group).then(
-        () => {
-          if (other) stop(other);
-        },
-        (cause) => fail(cause, 'Ship didn’t start. Try again.'),
-      );
+      // One ship per pull request: the Inbox that starts it tells every linked computer (server inbox-ship-watch.ts
+      // `onStart`, through the outbox), and an older ship of it there stops, whether or not this window read it.
+      shipPull(target, option, option.group).catch((cause) => fail(cause, 'Ship didn’t start. Try again.'));
     },
     onLog: (ship, anchor) => setOpen({ ship, anchor }),
     onStop: stop,

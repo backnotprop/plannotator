@@ -10,7 +10,7 @@
  * computer, and its agent works where it runs. The row shows the ship whichever computer holds it (data/ships.ts).
  */
 import { useMemo } from 'react';
-import { shipMessage } from '@plannotator/core/inbox-ship';
+import { shipForge, shipMessage } from '@plannotator/core/inbox-ship';
 import { pullHandoffThreadName } from '@plannotator/core/inbox-pull-handoff';
 import { inboxPullIsOpen, inboxPullRepoKey, type InboxComposeLaunch, type InboxComposeProject, type InboxPull, type InboxPullStack, type InboxReviewRow } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi } from '../api';
@@ -48,7 +48,8 @@ export interface ShipOption extends PullThreadOption {
 export function shipTarget(row: InboxReviewRow, pulls: readonly InboxPull[], repoProjects: Readonly<Record<string, string[]>>): ShipTarget | null {
   if (pulls.length !== 1) return null;
   const pull = pulls[0]!;
-  if (!inboxPullIsOpen(pull)) return null;
+  // A forge whose pull request state the Inbox can't read never ships (its watch would read nothing).
+  if (!inboxPullIsOpen(pull) || !shipForge(pull.platform)) return null;
   const stack = row.stacks.find((s) => s.layers.some((l) => l.key === pull.key)) ?? null;
   if (!stack) return null;
   const link = row.link && (row.thread_id === null || row.link.thread_id === row.thread_id) ? row.link : null;

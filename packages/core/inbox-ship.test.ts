@@ -6,7 +6,6 @@ import { SHIP_INSTRUCTION } from "./inbox-ship-words";
 const read = (over: Partial<InboxShipRead> = {}): InboxShipRead => ({
   state: "open",
   head_sha: "a".repeat(40),
-  head_mine: true,
   base: "main",
   checks: "success",
   failing: [],

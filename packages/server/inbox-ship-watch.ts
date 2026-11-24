@@ -1,19 +1,25 @@
 /**
- * Ship's watch and its records' changes (approval "inbox-ship-mode"; plan `.ops/keep/ship-mode-build-20261124/PLAN.md`).
+ * Ship's watch and its records' changes (approval "inbox-ship-mode"; docs/agent-guides/inbox-ship.md).
  *
  * The watch lives in the Inbox, not in the agent, so it outlives the agent's session. While a ship is active one timer
  * (every `INBOX_SHIP_WATCH_MS`, the window poll's own cadence; nothing runs while none is) reads each shipping pull
  * request once (`readShipPull`) and tells the agent what changed (core `shipChanges`), all of a tick's changes in ONE
- * note, so one change is one wake and the same state read again sends nothing. The note is a person note addressed to
- * the shipping session (store `tellShip`), so every agent kind's own wake carries it: the bridge poll (Claude Code,
- * Pi, OpenCode), `codex queue` (Codex), and a launched session's respawn.
+ * note, so one change is one wake and the same state read again sends nothing. The note is the Inbox's own notice
+ * (store `tellShip`, `ship_note`), addressed to the shipping session (`shipper`: the one Ship was given, never the
+ * thread's latest agent), so every agent kind's own wake carries it: the bridge poll (Claude Code, Pi, OpenCode),
+ * `codex queue` (Codex), and a launched session's respawn (a watch note only: a stop never starts a session again).
  *
- * Stuck is shown, never enforced: the agent says so, a check failed on `INBOX_SHIP_STUCK_FAILS` different heads, or a
- * session the Inbox cannot restart ended with a note waiting. The watch keeps going either way. Merged (by anyone)
- * ends it; closed stops it with the closed line. Stop ends it at once with the stop line.
+ * Stuck is shown, never enforced: the agent says so, a check failed on `INBOX_SHIP_STUCK_FAILS` different heads, a
+ * session the Inbox cannot restart ended with a note waiting, or the pull request could not be read
+ * `INBOX_SHIP_READ_MISSES` times in a row. The watch keeps going either way, and a stuck the watch saw ends by itself
+ * when its cause does. Merged (by anyone) ends it; closed stops it with the closed line. Stop ends it at once with the
+ * stop line. One pull request ships once across computers: a Ship tells every linked computer (`onStart`), and a
+ * computer told of a newer ship of the same pull request stops its own (`newer`).
  */
 import {
   INBOX_SHIP_ENDED_MS,
+  INBOX_SHIP_READ_MISSES,
+  SHIP_READ_STUCK,
   shipActive,
   shipChanges,
   shipFailsAfter,
@@ -23,21 +29,28 @@ import {
   type InboxShip,
   type InboxShipAgent,
   type InboxShipLogEntry,
-  type InboxShipRead,
 } from "@plannotator/core/inbox-ship";
 import { shipClosedLine, shipStillLine, shipStopLine } from "@plannotator/core/inbox-ship-words";
+import type { InboxShipReadResult } from "./inbox-ship-read";
 import type { InboxShipStore } from "./inbox-ship-store";
 
 export const INBOX_SHIP_WATCH_MS = 2 * 60_000;
 
 export interface InboxShipWatchOptions {
   ships: InboxShipStore;
-  /** One read of the ship's pull request; null when it could not be read (the next tick tries again). */
-  read: (ship: InboxShip) => Promise<InboxShipRead | null>;
-  /** Write a note to the ship's agent in its thread (store `tellShip`). */
+  /** One read of the ship's pull request; `{ failed }` (or null) when it could not be read (the next tick tries again). */
+  read: (ship: InboxShip) => Promise<InboxShipReadResult | null>;
+  /** Write a note to the ship's agent in its thread (store `tellShip`), addressed to `shipper`'s session. */
   note: (ship: InboxShip, body: string, kind: "watch" | "stop") => void;
+  /**
+   * The shipping session as it stands: the record's, or the session a new one's launch started (read from the
+   * instruction's message). Absent: the record's.
+   */
+  shipper?: (ship: InboxShip) => { host: string; session: string } | null;
   /** Since when the ship's session has ended with a note of the ship's still waiting for it; null when it has not. */
   endedWaiting?: (ship: InboxShip) => number | null;
+  /** A ship started here: every linked computer is told, so an older ship of the same pull request there stops. */
+  onStart?: (ship: InboxShip) => void;
   /** A ship changed: the windows read again. */
   onChange?: () => void;
   now?: () => number;
@@ -46,6 +59,7 @@ export interface InboxShipWatchOptions {
 
 export interface InboxShipStart {
   key: string;
+  platform: InboxShip["platform"];
   url: string;
   title: string;
   number: number;
@@ -54,6 +68,7 @@ export interface InboxShipStart {
   thread_id: string;
   project_id: string;
   agent: InboxShipAgent;
+  instruction_id?: string | null;
 }
 
 export interface InboxShipStep {
@@ -87,16 +102,41 @@ export function createInboxShipWatch(options: InboxShipWatchOptions) {
     }
   };
   const entry = (kind: InboxShipLogEntry["kind"], text: string, by: InboxShipLogEntry["by"] = "inbox", sha?: string): InboxShipLogEntry => ({ at: iso(), by, kind, text, ...(sha ? { sha } : {}) });
+  /** Who ships it now: the record's session, or the one a new session's launch started. */
+  const shipperOf = (ship: InboxShip): { host: string; session: string } | null =>
+    options.shipper ? options.shipper(ship) : ship.agent.session && ship.agent.host ? { host: ship.agent.host, session: ship.agent.session } : null;
+  /** A new session started for the ship: its session is recorded, so its calls and its notes are its own. */
+  const remember = (ship: InboxShip): InboxShip => {
+    const who = shipperOf(ship);
+    if (!who || (who.session === ship.agent.session && who.host === ship.agent.host)) return ship;
+    return ships.update(ship.key, (was) => (was.id === ship.id ? { ...was, agent: { ...was.agent, host: who.host, session: who.session } } : was)) ?? ship;
+  };
+
+  /** A read that failed: counted; a few in a row show Stuck with why in the log. The next read that works ends it. */
+  const missed = (fresh: InboxShip, why: string) => {
+    const misses = (fresh.misses ?? 0) + 1;
+    const stuck = misses >= INBOX_SHIP_READ_MISSES && fresh.state === "shipping";
+    ships.update(fresh.key, (was) => ({
+      ...was,
+      misses,
+      ...(stuck ? { state: "stuck" as const, reason: SHIP_READ_STUCK, stuck_by: "read" as const, log: [...was.log, entry("stuck", `Stuck: ${SHIP_READ_STUCK} (${why})`)] } : {}),
+    }));
+    process.stderr.write(`Inbox: Ship could not read ${fresh.url} (${misses} in a row): ${why}\n`);
+    if (stuck) changed();
+  };
 
   /** One ship, read once: what changed goes to the log, and to the agent in one note. */
   const look = async (key: string): Promise<void> => {
-    const ship = ships.get(key);
-    if (!ship || !shipActive(ship) || reading.has(key)) return;
+    const held = ships.get(key);
+    if (!held || !shipActive(held) || reading.has(key)) return;
     reading.add(key);
     try {
-      const read = await options.read(ship);
+      const ship = remember(held);
+      const got = await options.read(ship);
       const fresh = ships.get(key);
-      if (!read || !fresh || !shipActive(fresh) || fresh.id !== ship.id) return;
+      if (!fresh || !shipActive(fresh) || fresh.id !== ship.id) return;
+      if (!got || "failed" in got) return missed(fresh, got?.failed ?? "no answer");
+      const read = got;
       // The first read is where the agent starts from (its instruction covers it): remembered, never told.
       const first = !fresh.seen;
       const all = shipChanges(first ? { ...fresh, seen: { head_sha: read.head_sha, comment: read.comment, sent: {} } } : fresh, read);
@@ -128,7 +168,8 @@ export function createInboxShipWatch(options: InboxShipWatchOptions) {
             stuckBy = null;
           }
         }
-        return { ...was, state, reason, stuck_by: stuckBy, fails, seen: shipSeenAfter(was, read, all), log };
+        const { misses: _misses, ...kept } = was;
+        return { ...kept, state, reason, stuck_by: stuckBy, fails, seen: shipSeenAfter(was, read, all), log };
       });
       if (!next) return;
       if (closed) options.note(next, shipClosedLine(shipPullName(next)), "stop");
@@ -147,8 +188,8 @@ export function createInboxShipWatch(options: InboxShipWatchOptions) {
     /** The person pressed Ship and the agent has its instruction: the record, and the watch's first read. */
     start(input: InboxShipStart): InboxShip {
       const was = ships.get(input.key);
-      // Shipped again (another agent): the one before is stopped and told.
-      if (was && shipActive(was) && was.thread_id !== input.thread_id) options.note(was, shipStopLine(shipPullName(was)), "stop");
+      // Shipped again with another agent (another thread, or another session in the same one): the one before is told to stop.
+      if (was && shipActive(was) && (was.thread_id !== input.thread_id || shipperOf(was)?.session !== input.agent.session)) options.note(was, shipStopLine(shipPullName(was)), "stop");
       const ship: InboxShip = {
         id: newId(),
         ...input,
@@ -165,8 +206,25 @@ export function createInboxShipWatch(options: InboxShipWatchOptions) {
       };
       ships.put(ship);
       changed();
+      options.onStart?.(ship);
       void look(ship.key);
       return ship;
+    },
+
+    /**
+     * Another computer started shipping this pull request (its Ship, through the outbox: an offline computer hears it
+     * when back). An active ship here that started before it stops, and its agent is told; a newer one here stays (the
+     * other computer hears of it the same way and stops its own). `where`: that computer's name, for the log.
+     */
+    newer(other: { key: string; id: string; started_at: string }, where: string | null): InboxShip | null {
+      const ship = ships.get(other.key);
+      if (!ship || !shipActive(ship) || ship.id === other.id) return null;
+      const older = ship.started_at < other.started_at || (ship.started_at === other.started_at && ship.id < other.id);
+      if (!older) return null;
+      const next = ships.update(ship.key, (was) => ({ ...was, state: "stopped", reason: "elsewhere", stuck_by: null, ended_at: iso(), log: [...was.log, entry("stopped", `Stopped: shipping on ${where ?? "another computer"}`)] }));
+      if (next) options.note(next, shipStopLine(shipPullName(next)), "stop");
+      changed();
+      return next;
     },
 
     /** Stop shipping: at once, whatever the agent is doing; the agent gets the stop line. */
@@ -180,10 +238,15 @@ export function createInboxShipWatch(options: InboxShipWatchOptions) {
       return next;
     },
 
-    /** The agent's `thread_pulls` `ship`: a line in the log; stuck says why; merged reads the pull request at once. */
-    step(threadId: string, step: InboxShipStep): InboxShip | null {
-      const ship = ships.ofThread(threadId);
-      if (!ship || !shipActive(ship)) return null;
+    /**
+     * The agent's `thread_pulls` `ship`: a line in the log; stuck says why; merged reads the pull request at once. Only
+     * the shipping session's call (`session`) changes the ship: any other session's is null, as when nothing ships.
+     */
+    step(threadId: string, step: InboxShipStep, session: string | null): InboxShip | null {
+      const held = ships.ofThread(threadId);
+      if (!held || !shipActive(held) || !session) return null;
+      const ship = remember(held);
+      if (shipperOf(ship)?.session !== session) return null;
       const text = step.text.trim().slice(0, 200) || (step.kind === "merged" ? "Merged" : step.kind === "stuck" ? "Stuck" : "Step");
       const sha = step.sha && /^[0-9a-f]{7,64}$/i.test(step.sha) ? step.sha.toLowerCase() : undefined;
       const next = ships.update(ship.key, (was) => {
@@ -222,15 +285,16 @@ export function createInboxShipWatch(options: InboxShipWatchOptions) {
 export type InboxShipWatch = ReturnType<typeof createInboxShipWatch>;
 
 /**
- * Since when a ship's note has waited for a session that ended (`threadAgent`'s `ended`: it woke before and polls no
- * more): the oldest of its notes not yet delivered, in ms. Null while the session is there or nothing waits.
+ * Since when a ship's note has waited for its shipping session, which ended (`ended`, of that session, never the
+ * thread's latest agent): the oldest of its notes not yet delivered, in ms. Null while the session is there or nothing
+ * waits.
  */
-export function shipEndedWaiting(
+export function shipEndedWaiting<S extends Pick<InboxShip, "id" | "thread_id">>(
   store: { threadMessageIds(threadId: string): readonly string[]; message(id: string): { created_at: string; ship_note?: { ship: string } | null; delivery?: unknown } | null | undefined },
-  ship: Pick<InboxShip, "id" | "thread_id">,
-  agentOf: (threadId: string) => { ended?: boolean } | null,
+  ship: S,
+  ended: (ship: S) => boolean,
 ): number | null {
-  if (agentOf(ship.thread_id)?.ended !== true) return null;
+  if (!ended(ship)) return null;
   for (const id of store.threadMessageIds(ship.thread_id)) {
     const m = store.message(id);
     if (m?.ship_note?.ship === ship.id && !m.delivery) return Date.parse(m.created_at);

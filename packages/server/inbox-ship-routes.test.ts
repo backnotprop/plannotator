@@ -17,7 +17,7 @@ import { createInboxShipStore } from "./inbox-ship-store";
 import { createInboxShipWatch } from "./inbox-ship-watch";
 
 const KEY = "github.com/harbor/fern-api#614";
-const PULL = { key: KEY, url: "https://github.com/harbor/fern-api/pull/614", title: "Send a receipt after checkout", number: 614, repo: "harbor/fern-api", host: "github.com", state: "open" } as InboxPull;
+const PULL = { key: KEY, platform: "github", url: "https://github.com/harbor/fern-api/pull/614", title: "Send a receipt after checkout", number: 614, repo: "harbor/fern-api", host: "github.com", state: "open", head: "receipts", base: "main", head_repo: "harbor/fern-api", mine: true, author: "charlie-dunn" } as InboxPull;
 
 const closers: (() => void)[] = [];
 afterEach(() => {
@@ -29,6 +29,7 @@ function world(over: { findPull?: (key: string) => Promise<InboxPull | null>; th
   const watch = createInboxShipWatch({ ships, read: async () => null, note: () => {}, everyMs: 60 * 60_000 });
   closers.push(() => watch.close());
   const sent: unknown[] = [];
+  const from: { machine: { id: string; name: string | null } | null } = { machine: null };
   const routes = createInboxShipRoutes({
     ships,
     watch,
@@ -41,13 +42,14 @@ function world(over: { findPull?: (key: string) => Promise<InboxPull | null>; th
     repoProjects: async () => ({ "github.com/harbor/fern-api": ["prj_fern"] }),
     sendInstruction: async (input) => {
       sent.push(input);
-      return { host: "claude-code", session: "ses_1", name: "Claude Code" };
+      return { agent: { host: "claude-code", session: "ses_1", name: "Claude Code" }, message_id: "msg_ship" };
     },
+    fromMachine: () => from.machine,
     guard: () => null,
   });
   const call = (method: "GET" | "POST", path: string, body?: unknown) =>
     routes(new Request(`http://127.0.0.1${path}`, { method, ...(body ? { body: JSON.stringify(body), headers: { "content-type": "application/json" } } : {}) }), path.split("?")[0]!, new URL(`http://127.0.0.1${path}`)).then((r) => r!);
-  return { ships, sent, call };
+  return { ships, sent, call, from };
 }
 
 test("a ships read says this computer's projects by repository, beside its ships", async () => {
@@ -66,10 +68,32 @@ test("a ship in a thread the window just started here ships with the live sessio
   expect(w.sent).toEqual([]);
 });
 
-test("the thread's own agent wins over the started session once it answered", async () => {
-  const w = world({ threadAgent: () => ({ host: "codex", session: "ses_now", name: "Codex" }) });
+test("the session the window started the thread with ships it, never another agent that wrote in the thread since", async () => {
+  const w = world({ threadAgent: () => ({ host: "codex", session: "ses_reviewer", name: "Codex" }) });
   await w.call("POST", "/api/inbox/ships", { key: KEY, thread_id: "msg_thread", started: true, to: { host: "codex", session: "ses_far" }, idempotency_key: "k1" });
-  expect(w.ships.get(KEY)!.agent.session).toBe("ses_now");
+  expect(w.ships.get(KEY)!.agent.session).toBe("ses_far");
+  expect(w.ships.get(KEY)!.instruction_id).toBe("msg_thread");
+});
+
+test("a Ship in this thread records the session the instruction went to and the message that carried it", async () => {
+  const w = world({ threadAgent: () => ({ host: "codex", session: "ses_reviewer", name: "Codex" }) });
+  await w.call("POST", "/api/inbox/ships", { key: KEY, thread_id: "msg_thread", to: { host: "claude-code", session: "ses_1" }, idempotency_key: "k1" });
+  expect(w.ships.get(KEY)!.agent.session).toBe("ses_1");
+  expect(w.ships.get(KEY)!.instruction_id).toBe("msg_ship");
+  expect(w.ships.get(KEY)!.platform).toBe("github");
+});
+
+test("a linked computer's word of a newer ship stops the older one here; a window's call is refused", async () => {
+  const w = world();
+  await w.call("POST", "/api/inbox/ships", { key: KEY, thread_id: "msg_thread", to: { host: "claude-code", session: "ses_1" }, idempotency_key: "k1" });
+  const later = new Date(Date.now() + 60_000).toISOString();
+  expect((await w.call("POST", "/api/inbox/ships/newer", { key: KEY, id: "shp_far", started_at: later })).status).toBe(403);
+  expect(w.ships.get(KEY)!.state).toBe("shipping");
+  w.from.machine = { id: "ibx_mini", name: "Mac mini" };
+  const res = await w.call("POST", "/api/inbox/ships/newer", { key: KEY, id: "shp_far", started_at: later });
+  expect(res.status).toBe(200);
+  expect(w.ships.get(KEY)!.state).toBe("stopped");
+  expect(w.ships.get(KEY)!.log.at(-1)!.text).toBe("Stopped: shipping on Mac mini");
 });
 
 test("a pull request this computer can neither list nor read is refused, and nothing is sent", async () => {

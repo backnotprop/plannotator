@@ -5,7 +5,7 @@
  * `inbox-ship-watch.ts`). Every line an agent reads is in `inbox-ship-words.ts`; the words here are the person's.
  * Pure, for the server, the window and the tests.
  */
-import { inboxPullLabel, type InboxPull, type InboxPullChecks, type InboxPullReview } from "./inbox-pulls";
+import { inboxPullLabel, inboxPullRefOfKey, type InboxPull, type InboxPullChecks, type InboxPullPlatform, type InboxPullReview } from "./inbox-pulls";
 import { authorOf, forkWords, pullTitleLine, pullUrl, safeBranch } from "./inbox-pull-handoff";
 import { SHIP_INSTRUCTION, shipWakeLines } from "./inbox-ship-words";
 
@@ -47,11 +47,6 @@ export interface InboxShipAgent {
 export interface InboxShipRead {
   state: "open" | "draft" | "merged" | "closed";
   head_sha: string | null;
-  /**
-   * The head commit is the person's (its author is the signed-in login): the agent works as the person, so its own
-   * pushes are never a stranger's commit to wake it for.
-   */
-  head_mine: boolean;
   base: string;
   checks: InboxPullChecks | null;
   /** The head commit's failed checks, by name. */
@@ -63,8 +58,9 @@ export interface InboxShipRead {
   /** GitHub says the branch is behind a base the repository requires it to be up to date with. */
   behind: boolean;
   /**
-   * The newest comment on the pull request or its code by someone other than the person (the agent works as the
-   * person, so its own answers never wake it), by id, and its author.
+   * The newest comment on the pull request or its code, by id, and its author. Anyone's, the signed-in login's too:
+   * the agent works as the person, so a comment of that login may be the person's own, and a spare wake is better
+   * than a missed review comment.
    */
   comment: string | null;
   commenter: string | null;
@@ -82,6 +78,8 @@ export interface InboxShip {
   id: string;
   /** The pull request's key (`InboxPull.key`). */
   key: string;
+  /** Its forge: the watch reads it the way the Reviews list reads that forge. Absent on a record from before: read from `key`. */
+  platform?: InboxPullPlatform;
   url: string;
   title: string;
   number: number;
@@ -89,13 +87,24 @@ export interface InboxShip {
   host: string;
   thread_id: string;
   project_id: string;
+  /**
+   * The shipping agent: every note and the stop line go to this session, and only its `thread_pulls` `ship` calls
+   * change the ship. A new session's placeholder until it starts; the watch then records the session it started.
+   */
   agent: InboxShipAgent;
+  /** The message that carried the instruction (a new session's launch is read from it). */
+  instruction_id?: string | null;
   started_at: string;
   state: InboxShipState;
   /** Stuck's few words. */
   reason: string | null;
-  /** Who said stuck: the agent, the watch (a check failing on new heads), or the session ending. */
-  stuck_by?: "agent" | "checks" | "ended" | null;
+  /**
+   * Who said stuck: the agent, the watch (a check failing on new heads), the session ending, or the pull request not
+   * read `INBOX_SHIP_READ_MISSES` times in a row.
+   */
+  stuck_by?: "agent" | "checks" | "ended" | "read" | null;
+  /** The reads that failed in a row (0 or absent: the last read worked). */
+  misses?: number;
   ended_at: string | null;
   merged_at: string | null;
   seen: InboxShipSeen | null;
@@ -107,15 +116,21 @@ export interface InboxShip {
 }
 
 /** What a window draws: the record without the watch's memory or the log (`GET /api/inbox/ships`). */
-export type InboxShipView = Omit<InboxShip, "seen" | "fails" | "told" | "log"> & {
+export type InboxShipView = Omit<InboxShip, "seen" | "fails" | "told" | "log" | "platform" | "instruction_id" | "misses"> & {
   /** A linked machine's ship (the window fills it from the machine it read). */
   machine?: string;
 };
 
 export const shipView = (ship: InboxShip): InboxShipView => {
-  const { seen: _seen, fails: _fails, told: _told, log: _log, ...view } = ship;
+  const { seen: _seen, fails: _fails, told: _told, log: _log, platform: _platform, instruction_id: _instruction, misses: _misses, ...view } = ship;
   return view;
 };
+
+/** A ship's forge: its record's, else its key's (a record from before `platform`). */
+export const shipPlatform = (ship: Pick<InboxShip, "platform" | "key">): InboxPullPlatform => ship.platform ?? inboxPullRefOfKey(ship.key)?.platform ?? "github";
+
+/** The forges whose pull request state the Inbox reads (the Reviews list's): only these offer Ship. */
+export const shipForge = (platform: string): platform is InboxPullPlatform => platform === "github" || platform === "gitlab";
 
 export const shipActive = (ship: Pick<InboxShip, "state">): boolean => ship.state === "shipping" || ship.state === "stuck";
 
@@ -125,6 +140,10 @@ export const INBOX_SHIP_LOG_MAX = 200;
 export const INBOX_SHIP_STUCK_FAILS = 3;
 /** A session the Inbox can't restart, ended with a note waiting this long: the row says Stuck. */
 export const INBOX_SHIP_ENDED_MS = 10 * 60_000;
+/** The pull request could not be read this many times in a row (`gh` missing or signed out): the row says Stuck. */
+export const INBOX_SHIP_READ_MISSES = 3;
+/** Stuck's words when the watch can't read the pull request. */
+export const SHIP_READ_STUCK = "can't read the pull request";
 
 const short = (sha: string | null) => (sha ?? "").slice(0, 7);
 const names = (list: readonly string[]) => (list.length <= 3 ? list.join(", ") : `${list.slice(0, 3).join(", ")} and ${list.length - 3} more`);
@@ -155,7 +174,8 @@ export function shipChanges(ship: Pick<InboxShip, "seen" | "told">, read: InboxS
     if (sent[change.kind] !== change.signature) out.push(change);
   };
   const head = read.head_sha;
-  if (head && seen.head_sha && head !== seen.head_sha && !read.head_mine && !ship.told.some((sha) => head.startsWith(sha) || sha.startsWith(head))) {
+  // The agent's own push is one it logged (`told`); any other new head wakes it, the person's own push too.
+  if (head && seen.head_sha && head !== seen.head_sha && !ship.told.some((sha) => head.startsWith(sha) || sha.startsWith(head))) {
     add({ kind: "new_commit", signature: head, log: "New commit", sha: short(head), line: shipWakeLines.newCommit(short(head)) });
   }
   if (read.failing.length > 0) {

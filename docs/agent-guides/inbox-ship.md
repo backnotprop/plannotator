@@ -21,9 +21,11 @@ Approval "inbox-ship-mode" (`.product/approved/inbox-ship-mode/`, look "Glint").
   - sends the instruction (core `shipMessage`: the approved `SHIP_INSTRUCTION`, then the PR's facts fenced as untrusted data) into the thread as the person's reply to `to`;
   - for a live session, the reply reaches it on its usual path (bridge long-poll, `codex queue`, Pi, OpenCode);
   - for a new session (`to.launch`), it starts it as a reply's launch does (`launch.prepare`, then `sendReply` with `launch`).
-  - It then makes the record and reads the PR at once.
-- **A PR with no thread, or an agent on another computer than the review's thread.** A thread lives on one computer and its agent works where it runs, so the ship goes in a new thread on the agent's computer (`shipPull`, through the forward for a linked one). The window asks that computer whether a thread there already owns the PR (`pulls/owner` `validate_only`); one that does ships in it. Else it starts a thread there with the instruction as its first message (`inboxApi.startThread`; a write the forward would hold is cancelled, "<name> cannot be reached now."), ties the PR to it (`pulls/owner`, ask `thread`; skipped when that computer's list does not have the PR), then sends `POST ships` `{ key, thread_id, started: true, to }`, which makes only the record, with `to`'s live session as its agent until the thread names one. That computer reads the PR itself when its list does not have it (`readUnlistedPull`).
-- **Ship again** on a PR already shipping on another thread stops the old ship first and tells its agent. There is one ship per PR per computer; a window that ships a PR on one computer while it ships on another stops the other once the new one started.
+  - It then makes the record and reads the PR at once. The record keeps the session the instruction went to and the message that carried it (`agent`, `instruction_id`): that session ships it, never the thread's latest agent (`inbox-ship-agent.ts` `shipShipper`). A new session's placeholder is replaced by the session its launch started, read from that message.
+- **A PR with no thread, or an agent on another computer than the review's thread.** A thread lives on one computer and its agent works where it runs, so the ship goes in a new thread on the agent's computer (`shipPull`, through the forward for a linked one). The window asks that computer whether a thread there already owns the PR (`pulls/owner` `validate_only`); one that does ships in it. Else it starts a thread there with the instruction as its first message (`inboxApi.startThread`; a write the forward would hold is cancelled, "<name> cannot be reached now."), ties the PR to it (`pulls/owner`, ask `thread`; skipped when that computer's list does not have the PR), then sends `POST ships` `{ key, thread_id, started: true, to }`, which makes only the record, with `to`'s session as its agent (a new session: the one the thread's first message launched). That computer reads the PR itself when its list does not have it (`readUnlistedPull`).
+- **Ship again** on a PR already shipping with another agent (another thread, or another session in the same one) stops the old ship first and tells its agent.
+- **One ship per PR across computers.** Each Ship sends `POST ships/newer` `{ key, id, started_at }` to every linked computer through the outbox (this Inbox's own write, held until it lands, so a computer asleep at the Ship hears it when it is back, after a restart too). A computer told of a newer ship of a PR it ships stops its own, logs "Stopped: shipping on <computer>" and tells its agent the stop line (`watch.newer`); a newer ship there stays, and the other computer stops its own the same way. The window does nothing for it.
+- **Forges.** Ship is offered for the forges whose PR state the Inbox reads (core `shipForge`): GitHub and GitLab. Any other is refused (`pull_not_shippable`) and the row has no Ship.
 
 ### The record and the watch (server)
 
@@ -34,24 +36,24 @@ Approval "inbox-ship-mode" (`.product/approved/inbox-ship-mode/`, look "Glint").
 - **The watch.** `packages/server/inbox-ship-watch.ts` reads each active ship's PR every 2 minutes (`INBOX_SHIP_WATCH_MS`):
   - the timer runs only while a ship is active;
   - it reads sooner when a Reviews read sees its head or state move;
-  - each read is one `gh api graphql` (`inbox-ship-read.ts`, through the Inbox's RefRunner; GitLab is not read).
+  - GitHub: each read is one `gh api graphql` (`inbox-ship-read.ts`, through the Inbox's RefRunner);
+  - GitLab: each read is the Reviews list's own read of the merge request (its cache; `createShipReader`). That read does not name failed jobs or comments: a failed pipeline is named "pipeline", and comments do not wake the agent there. A merge request off the list is read for its state and head only, its pipeline taken as pending (never "merge it now");
+  - a tick that changes nothing writes nothing to `ships.json`.
 - **What a read tells the agent.** It wakes the agent once per change (`shipChanges`), never twice for the same signature:
   - checks failed on a head;
   - changes requested;
-  - new comments by someone other than the person;
+  - new comments, by anyone (the signed-in login too: the person may comment with the same login the agent uses, and a spare note is better than a missed review comment);
   - conflicts with the base, else the base moved where the repository wants the branch up to date;
-  - someone else's commit;
+  - a new head the agent did not log (the person's own push with the same login too);
   - ready to merge, once per head.
-- **What a read never tells.** The first read is a baseline and wakes nobody: the instruction is the agent's first turn. The agent works as the person, so these are never a change:
-  - its own pushes (a head commit authored by the signed-in login, or a sha it logged);
-  - its own comments.
-
-  This stops wake loops.
-- **One note per read.** A read's changes go to the agent as one note, ending "You are still shipping #614." The note is a person message addressed to the shipping session, marked `ship_note: { ship, kind: "watch" | "stop" }` (an Inbox note, `isInboxNote`), and it wakes the agent through its usual path. The words are in `packages/core/inbox-ship-words.ts`.
+- **What a read never tells.** The first read is a baseline and wakes nobody: the instruction is the agent's first turn. A head the agent logged with `thread_pulls` `ship` `sha` (`told`) is its own push and wakes nobody.
+- **One note per read.** A read's changes go to the agent as one note, ending "You are still shipping #614." The note is the Inbox's own notice, stored as a person message marked `ship_note: { ship, kind: "watch" | "stop" }` (`isInboxNote`: never the person's reply, never Sent), addressed to the shipping session only. Its wake is a notice with no reply instruction (the command's `moved`, `INBOX_MOVED_WAKE_INSTRUCTION`), so it asks for no answer. The thread shows it as one quiet line, "Ship update sent to Claude Code · 2:47 PM" or "Stop shipping sent to Claude Code · 2:47 PM" (`pulls/ShipNote.tsx`); what it said is in the ship log. A watch note starts a stopped new session again (the job is not done); the stop and closed lines never do. The words are in `packages/core/inbox-ship-words.ts`.
+- **Only the shipping session's calls.** `thread_pulls` `ship` changes the ship only when its `agent_session` is the shipping session; any other session's call logs nothing and is told "Nothing is shipping in this thread; nothing was logged."
 - **Stuck.** Stuck is detection only; the watch goes on. The row reads Stuck when:
   - the agent says so (`thread_pulls` `ship` `{ kind: "stuck" }`), until it logs a step;
   - one check failed on 3 different heads (`INBOX_SHIP_STUCK_FAILS`), until it passes;
-  - the agent's session ended with a ship note waiting for 10 minutes (`INBOX_SHIP_ENDED_MS`, `shipEndedWaiting`).
+  - the shipping session ended with a ship note waiting for 10 minutes (`INBOX_SHIP_ENDED_MS`, `shipEndedWaiting`, `shipSessionEnded`);
+  - the PR could not be read 3 times in a row (`INBOX_SHIP_READ_MISSES`: `gh` or `glab` missing, signed out, refused): "Stuck: can't read the pull request", with why in the log and on stderr, until a read works.
 - **How a ship ends.**
   - Merged, by anyone: the record goes merged, with no wake. The row shows "Merged <time>" for 6 hours (`INBOX_SHIP_MERGED_SHOWN_MS`), then returns to normal.
   - Closed: the ship stops, and the agent gets the closed line.
@@ -99,6 +101,7 @@ Its who line is the agent, the repository and, once a computer that ships is lin
   - `GET ships/log`
   - `POST ships` (outbox kind `now`)
   - `POST ships/stop` (outbox kind `now`)
+  - `POST ships/newer` (outbox kind `set`; only a linked computer's Inbox sends it, never a window)
 - **The phone.** The phone layout of the window ships as a desktop does. The native app has no pull routes (they are `machineOnly`), so its ledger row `ship-mode` is `later` (`L-size`).
 - **What does not cross.** A linked machine that is offline or too old to take ships is left out of the list. The native iPhone app has no pull routes (above).
 
