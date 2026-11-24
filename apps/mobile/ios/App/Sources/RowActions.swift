@@ -21,6 +21,8 @@ final class RowActions {
     /// One act's Undo, and what a screen reader is told once it is taken back.
     case one(UndoOffer, said: String)
     case many(BulkUndo)
+    /// An act inside a file cover (a comment removed, a drawing added): its Undo is the cover's own.
+    case local(said: String)
   }
 
   /// The warning before a Mark read that closes questions unanswered.
@@ -115,12 +117,17 @@ final class RowActions {
       if await session.undo(offer) { say(said) } else if session.actionNotices.isEmpty { show(ActionWords.failed(ActionWords.threadDidNotChange)) }
     case .many(let group):
       if await session.undoMany(group) { say(ActionWords.movedBack) } else if session.actionNotices.isEmpty { show(ActionWords.failed(ActionWords.someDidNotMoveBack)) }
+    case .local:
+      break
     }
     told()
   }
 
   /// The reasons acts were not taken, said once: at once for an act the computer refused, later for acts that
   /// waited on the phone and gave way. Several at once (a bulk action sent when the computer was back) are counted.
+  /// Say something that offers no Undo (a new message sent), in the same toast.
+  func tell(_ words: ToastWords) { show(words) }
+
   func told() {
     var notices = session.actionNotices
     guard !notices.isEmpty else { return }

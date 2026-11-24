@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type MutableRefO
 import { createPortal } from 'react-dom';
 import { HostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import { Tip } from '../components/Tip';
+import { SideCircleMenu } from '../parts/SideCircleMenu';
 import { SIDE_CORNER, SIDE_CORNER_HIT, SIDE_CORNER_R, isRingShadow, parseBoxShadows, scoopFits, scoopMask, scoopMaskReact, scoopMaskStyle, shadowText, sideCornerHitPath, type ScoopGeometry } from './scoop';
 
 /**
@@ -9,7 +10,8 @@ import { SIDE_CORNER, SIDE_CORNER_HIT, SIDE_CORNER_R, isRingShadow, parseBoxShad
  * 2026-11-09): a circle holding the agent's mark, set into the window's bottom-right corner on the ground, and the
  * pane at that corner cut inward around it (scoop.ts). A press reopens the chat. It is ChatFrameLauncher's child
  * (useInboxAsk), so it shows only while the window is minimized, and it wears `data-chat-launcher`, so minimizing
- * moves focus here (ui's useChatFrameFocusReturn). No shortcut of its own, no words but its name and tooltip.
+ * moves focus here (ui's useChatFrameFocusReturn). No shortcut of its own, no words but its name and tooltip. A
+ * right-click or a long press opens its menu, Close (parts/SideCircleMenu.tsx): the circle goes, the chat stays.
  */
 
 /** A minimize from inside the window, and the window as it was: it shrinks into the circle from there. */
@@ -45,21 +47,18 @@ const PANES = [
 ].join(', ');
 
 /**
- * Something else's in the corner pane's bottom-right corner, which the cut would clip and the circle cover: a Shape
- * board open in the thread (its side panel and its More run to the pane's corner), a narrow file view's annotations
- * panel (open down its right edge to its foot), or the floating drafts' pile resting in the window's corner (a
- * thread with no reply foot on screen). The circle and the cut keep off; they come back when it goes.
+ * Something else's in the corner pane's bottom-right corner, which the cut would clip and the circle cover: a narrow
+ * file view's annotations panel (open down its right edge to its foot). The circle and the cut keep off; they come back when it goes. The
+ * floating drafts' pile never takes the corner: resting there, it sits just above the circle (useReplyFloaters).
  */
 function cornerOwned(pane: HTMLElement): boolean {
-  if (pane.querySelector('.ib-shape-inthread:not([hidden])')) return true;
-  if (pane.matches(FOLDED_PANEL) || pane.querySelector(FOLDED_PANEL)) return true;
-  return document.querySelector('[data-rf-corner][data-rf-spot="corner"]') !== null;
+  return pane.matches(FOLDED_PANEL) || pane.querySelector(FOLDED_PANEL) !== null;
 }
 const FOLDED_PANEL = '.ib-view.ib-fold.ib-panel-open';
 /** Classes on a pane that hand its corner to something else, or the whole window to a layer. */
 const OWNER_CLASSES = ['ib-fold', 'ib-panel-open', 'ib-wlayer'];
 /**
- * A whole-window layer (`ib-wlayer`: a file's full view, a guided review, a PR review, a Shape board, the tour's
+ * A whole-window layer (`ib-wlayer`: a file's full view, a guided review, a PR review, the tour's
  * viewer) over the corner: that corner is the layer's, and the circle is not shown over it.
  */
 function cornerLayer(corner: { right: number; bottom: number }): boolean {
@@ -110,18 +109,16 @@ export function cornerMoves(record: MutationRecord): boolean {
   if (target.closest(MOVES_NOTHING)) return false;
   const nodes = [...record.addedNodes, ...record.removedNodes];
   if (nodes.length === 0) return false;
-  // Inside a pane (not the pane's own container): nothing that moves it, only a board opening or closing in it.
-  if (target.closest(PANES)) return nodes.some((node) => node.nodeType === 1 && (node as Element).matches('.ib-shape-inthread'));
+  // Inside a pane (not the pane's own container): nothing that moves it.
+  if (target.closest(PANES)) return false;
   return nodes.some((node) => node.nodeType === 1 && !(node as Element).matches(MOVES_NOTHING));
 }
 
 /**
- * An attribute change that gives the corner to something else or takes it back (cornerOwned): the drafts' pile moving
- * to or from the window's corner, a board in a thread shown or hidden, a pane folding, opening its panel or going full.
+ * An attribute change that gives the corner to something else or takes it back (cornerOwned): a pane folding, opening
+ * its panel or going full.
  */
 function ownerChanged(record: MutationRecord, target: Element): boolean {
-  if (record.attributeName === 'data-rf-spot') return true;
-  if (record.attributeName === 'hidden') return target.matches('.ib-shape-inthread');
   if (record.attributeName !== 'class' || !target.matches(PANES)) return false;
   const was = new Set((record.oldValue ?? '').split(/\s+/));
   return OWNER_CLASSES.some((name) => was.has(name) !== target.classList.contains(name));
@@ -142,6 +139,8 @@ export interface SideChatCornerProps {
   opener: MutableRefObject<HTMLElement | null>;
   /** Whether the circle is on screen (not hidden for want of a pane to cut): false again when it unmounts. */
   onShown?: (shown: boolean) => void;
+  /** Close in the circle's menu (parts/SideCircleMenu.tsx): the circle goes for this thread, the chat stays. */
+  onClose: () => void;
 }
 
 interface Cut {
@@ -160,7 +159,7 @@ export function sideChatName(unseen: boolean, answering: boolean): string {
   return `Side chat${unseen ? ', new answer' : ''}${answering ? ', answering' : ''}`;
 }
 
-export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener, onShown }: SideChatCornerProps) {
+export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener, onShown, onClose }: SideChatCornerProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const dotRef = useRef<HTMLSpanElement | null>(null);
@@ -171,6 +170,7 @@ export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener
    * in this corner. Hidden until the first measure says otherwise.
    */
   const [covered, setCovered] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
   /** The last measure's verdict, read by the minimize's flight and focus in the same commit. */
   const shown = useRef(false);
   const paneRef = useRef<HTMLElement | null>(null);
@@ -252,7 +252,7 @@ export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener
     });
     // The window's root, which outlives the layouts inside it (a narrow window swaps the shell on its first frames).
     // Attributes: only those that hand the corner to something else or back (ownerChanged).
-    watch.observe(rootRef.current?.closest('.pn-inbox') ?? document.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['class', 'hidden', 'data-rf-spot'] });
+    watch.observe(rootRef.current?.closest('.pn-inbox') ?? document.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['class', 'hidden'] });
     // A theme or palette change: the pane's shadow is another list.
     const theme = new MutationObserver(soon);
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
@@ -369,34 +369,51 @@ export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener
 
   return (
     <div ref={rootRef} className="ib-sc" data-side-corner="" hidden={covered}>
-      <Tip content="Side chat" side="left" wide={false}>
-        <button
-          ref={buttonRef}
-          type="button"
-          className="ib-sc-btn"
-          aria-label={sideChatName(unseen, answering)}
-          data-chat-launcher={covered ? undefined : ''}
-          data-side-chat-corner=""
-          data-unseen={unseen ? '' : undefined}
-          data-answering={answering ? '' : undefined}
-          style={{ clipPath: `path('${hit}')`, width: SIDE_CORNER_HIT, height: SIDE_CORNER_HIT } as CSSProperties}
-          onClick={onOpen}
-        >
-          {answering && (
-            <svg className="ib-sc-work" viewBox={`0 0 ${work} ${work}`} aria-hidden="true" data-side-work="">
-              <circle cx={work / 2} cy={work / 2} r={work / 2 - 1.5} pathLength={100} strokeDasharray="22 78" />
-            </svg>
-          )}
-          <span ref={dotRef} className="ib-sc-dot">
-            <HostMark host={host} />
-          </span>
-          {unseen && <span className="ib-sc-new" aria-hidden="true" data-side-new="" />}
-        </button>
-      </Tip>
+      <SideCircleMenu button={() => buttonRef.current} anchor={() => dotRef.current} onClose={() => closeCircle(onClose, opener, paneRef.current)} onOpenChange={setMenuOpen}>
+        <Tip content="Side chat" side="left" wide={false} when={() => !menuOpen}>
+          <button
+            ref={buttonRef}
+            type="button"
+            className="ib-sc-btn"
+            aria-label={sideChatName(unseen, answering)}
+            data-chat-launcher={covered ? undefined : ''}
+            data-side-chat-corner=""
+            data-unseen={unseen ? '' : undefined}
+            data-answering={answering ? '' : undefined}
+            style={{ clipPath: `path('${hit}')`, width: SIDE_CORNER_HIT, height: SIDE_CORNER_HIT } as CSSProperties}
+            onClick={onOpen}
+          >
+            {answering && (
+              <svg className="ib-sc-work" viewBox={`0 0 ${work} ${work}`} aria-hidden="true" data-side-work="">
+                <circle cx={work / 2} cy={work / 2} r={work / 2 - 1.5} pathLength={100} strokeDasharray="22 78" />
+              </svg>
+            )}
+            <span ref={dotRef} className="ib-sc-dot">
+              <HostMark host={host} />
+            </span>
+            {unseen && <span className="ib-sc-new" aria-hidden="true" data-side-new="" />}
+          </button>
+        </Tip>
+      </SideCircleMenu>
       <div ref={flyRef} className="ib-sc-fly" aria-hidden="true" />
       {edge && edgeHost ? createPortal(edge, edgeHost) : null}
     </div>
   );
+}
+
+/**
+ * Close from the circle's menu: the circle goes, so focus that was on it (the menu key, Shift+F10) goes back where the
+ * chat was opened from, or into the pane at the corner, as a minimize with no circle to land on does.
+ */
+function closeCircle(onClose: () => void, opener: MutableRefObject<HTMLElement | null>, pane: HTMLElement | null) {
+  const back = opener.current;
+  const target = back?.isConnected && back.getClientRects().length > 0 ? back : pane?.querySelector<HTMLElement>(FOCUSABLE);
+  onClose();
+  requestAnimationFrame(() => {
+    const at = document.activeElement;
+    if (at && at !== document.body && at.isConnected) return;
+    target?.focus({ preventScroll: true });
+  });
 }
 
 function sameCut(a: Cut, b: Cut): boolean {

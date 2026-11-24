@@ -1,0 +1,31 @@
+{
+  "title": "When the standby region can receive traffic",
+  "subtitle": "The traffic controller promotes a standby only after the restore proof and the fencing receipt agree on the same epoch.",
+  "note": {"title": "Exercise 14", "lines": ["Oriel Index is fictional. The diagram follows epoch 118 through a regional cutover."]},
+  "tag": "RUNBOOK",
+  "steps_label": "Cutover",
+  "steps": [[1, "Collect evidence"], [2, "Match both receipts"], [3, "Promote standby"]],
+  "gap": 128,
+  "row_gap": 52,
+  "columns": [
+    {"id": "event", "title": "Incident commander", "tiles": ["Declare epoch 118", "Rollback authority"], "cols": 1, "footer": "Owner: Operations"},
+    [
+      {"id": "restore", "title": "Standby readiness", "step": 1, "tiles": ["Restore checkpoint", "Replay tail", {"label":"Fast replay", "status":"trial"}], "cols": 2, "footer": "Proof: Standby caught up"},
+      {"id": "fence", "title": "Writer fencing", "tiles": ["Revoke primary lease", "Store fence receipt"], "cols": 1, "footer": "Proof: Primary cannot write"}
+    ],
+    {"id":"gate", "title":"Promotion gate", "step":2, "tone":"accent", "sub":"Both receipts are required", "sections":[
+      {"card":{"title":"Evidence for epoch 118","rows":[["Restore","Checkpoint 7812 applied"],["Fence","Primary lease revoked"],["Mismatch","Keep traffic on hold"]]}}
+    ], "footer":"Owner: Control plane"},
+    {"id":"traffic", "title":"Traffic controller", "step":3, "tiles":["Route reads and writes", {"label":"Canary ramp", "status":"planned"}], "cols":1, "footer":"Owner: Edge operations"}
+  ],
+  "groups":[{"label":"Independent witnesses","members":["restore","fence"]}],
+  "links":[
+    {"from":"event","to":"restore","label":"restore"},
+    {"from":"event","to":"fence","label":"isolate"},
+    {"from":"restore","to":"gate","label":"checkpoint"},
+    {"from":"fence","to":"gate","label":"lease"},
+    {"from":"gate","to":"traffic","label":"both pass"},
+    {"from":"gate","to":"event","lane":"bottom","label":"epoch mismatch"},
+    {"from":"traffic","to":"event","lane":"top","label":"rollback"}
+  ]
+}

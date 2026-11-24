@@ -95,14 +95,12 @@ describe('the window\'s sheets, rewritten', () => {
       'ib-imgcompose': ['packages/inbox/components/ImageAttachmentView.tsx', 'packages/inbox/components/VideoAttachmentView.tsx'],
       'ib-fcomp': ['packages/inbox/components/FullScreenComposer.tsx'],
       'ib-rpick': ['packages/inbox/components/ReplyRecipient.tsx'],
-      'shp-dock': ['packages/ui/components/shape/ShapeSurface.tsx'],
-      'shp-pill': ['packages/ui/components/shape/ShapeSurface.tsx'],
       'pn-inbox': ['packages/inbox/App.tsx', 'packages/inbox/tour/Tour.tsx'],
     };
     const files = Bun.spawnSync(['git', 'ls-files', 'packages/inbox/*.tsx', 'packages/ui/*.tsx', 'packages/review-editor/*.tsx', 'apps/inbox/*.tsx'], { cwd: repoRoot })
       .stdout.toString()
       .split('\n')
-      .filter((file) => file && !/\.test\.tsx$/.test(file) && !file.includes('/standalone/'));
+      .filter((file) => file && !/\.test\.tsx$/.test(file));
     const drawn: Record<string, string[]> = {};
     for (const name of Object.keys(holders)) drawn[name] = [];
     for (const file of files) {

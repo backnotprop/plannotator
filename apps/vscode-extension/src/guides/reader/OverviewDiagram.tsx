@@ -47,6 +47,8 @@ export default function OverviewDiagram({ source, onChapter }: { source: string;
     <div
       ref={ref}
       className="pn-overview-diagram overflow-x-auto"
+      // Nothing the diagram draws leaves this box (in WebKit a label pinned to the window would cover the guide).
+      style={{ contain: "paint" }}
       onClick={(e) => follow(e.target)}
       onKeyDown={(e) => {
         if ((e.key === "Enter" || e.key === " ") && follow(e.target)) e.preventDefault();

@@ -250,6 +250,13 @@ function linksOfMessage(id: string, body: string, repo: RefRepo, fallbackHost?: 
   return links;
 }
 
+const NUMBERS_REPO = { display: '\u0001/\u0001' };
+const NUMBERS_BASE = 'https://github.com/\u0001/\u0001/issues/';
+
+export function bareRefNumbers(id: string, body: string): number[] {
+  return linksOfMessage(id, body, NUMBERS_REPO).flatMap((link) => (link.fromRef && link.href.startsWith(NUMBERS_BASE) ? [Number(link.href.slice(NUMBERS_BASE.length))] : []));
+}
+
 // ── What a link is ──
 
 const NAME = /^[A-Za-z0-9_.-]{1,100}$/;
@@ -419,17 +426,21 @@ function linkOf(entry: Entry): ThreadLink {
   return { ...base, kind: null, lead: null, text, tail: text === site ? null : site };
 }
 
+type RepoOf = InboxProjectRepo | null | undefined | ((id: string) => InboxProjectRepo | null | undefined);
+
+const asRefRepo = (repo: InboxProjectRepo | null | undefined): RefRepo => (repo?.display ? { display: repo.display, ...(repo.host ? { host: repo.host } : {}) } : null);
+
 /**
  * The thread's links, newest message first, each once. A link written twice
  * keeps its words wherever they were, and the url written out over one built
  * from a `#12`. A repository keeps its kinds together: pull requests, issues,
  * files, commits, the rest. Repositories and sites by their newest link.
  */
-export function threadLinks(messages: readonly Pick<InboxMessageWire, 'id' | 'body'>[], repo: InboxProjectRepo | null | undefined, fallbackHost?: string): ThreadLinks {
-  const refRepo: RefRepo = repo?.display ? { display: repo.display, ...(repo.host ? { host: repo.host } : {}) } : null;
+export function threadLinks(messages: readonly Pick<InboxMessageWire, 'id' | 'body'>[], repo: RepoOf, fallbackHost?: string): ThreadLinks {
   const seen = new Map<string, Entry>();
   for (let m = messages.length - 1; m >= 0; m--) {
     const message = messages[m]!;
+    const refRepo = asRefRepo(typeof repo === 'function' ? repo(message.id) : repo);
     for (const written of linksOfMessage(message.id, message.body, refRepo, fallbackHost)) {
       const entry = entryOfCached(written);
       if (!entry) continue;

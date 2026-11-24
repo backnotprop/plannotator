@@ -36,7 +36,7 @@ import { rename, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { inboxAttachmentId, type InboxInlineImage } from "@plannotator/core/inbox-types";
 import { inboxBlobPath, inboxBlobsDir } from "./attachments";
-import { inboxMessageImageRefsInOrder, readInboxMessageImageAsync } from "./message-images";
+import { inboxMessageImageRefsInOrder, readInboxMessageImageAsync, readInboxPictureAsync } from "./message-images";
 
 /** The most images one message's capture at send takes (the rest are captured on a later read). */
 export const INBOX_INLINE_IMAGES_MAX = 64;
@@ -59,6 +59,11 @@ export interface CaptureInlineImagesInput {
   max?: number;
   /** Stage the blobs as temp files until `commit` (a send the store may still refuse). */
   stage?: boolean;
+  /**
+   * Pictures sent as bytes in the same send (a paired cloud agent's, inbox-agent-door.ts), by the src as written: read
+   * from where the Inbox keeps those bytes, before any file of that name on disk. Every other src is read as usual.
+   */
+  files?: ReadonlyMap<string, { path: string; name: string }>;
 }
 
 export interface InlineImageFailure {
@@ -114,7 +119,9 @@ export async function captureInboxInlineImages(inboxDirPath: string, input: Capt
   const refs = (input.refs ?? inboxMessageImageRefsInOrder(input.body)).slice(0, input.max ?? INBOX_INLINE_IMAGES_MAX);
   for (const [index, ref] of refs.entries()) {
     if (index > 0) await yieldToLoop();
-    const read = await readInboxMessageImageAsync({ body: input.body, root: input.root, base: input.base ?? null, path: ref, anywhere: input.anywhere === true }).catch(() => null);
+    const file = input.files?.get(ref);
+    // The Inbox's own copy of an attached file: no hidden-folder rule (it lives under the data folder), the same image checks.
+    const read = await (file ? readInboxPictureAsync(file.path, () => false) : readInboxMessageImageAsync({ body: input.body, root: input.root, base: input.base ?? null, path: ref, anywhere: input.anywhere === true })).catch(() => null);
     if (!read || !read.ok) {
       if (!read) failures.push({ ref, code: "image_read_failed" });
       else failures.push({ ref, code: read.code, ...(read.notYet ? { notYet: true as const } : {}) });
@@ -136,7 +143,7 @@ export async function captureInboxInlineImages(inboxDirPath: string, input: Capt
       id: inboxAttachmentId(),
       path: read.real,
       named_path: read.named === read.real ? null : read.named,
-      name: basename(read.named) || basename(read.real),
+      name: file?.name ?? (basename(read.named) || basename(read.real)),
       kind: "image",
       sent_sha256: sha256,
       size: read.bytes.length,

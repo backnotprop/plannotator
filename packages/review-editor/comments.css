@@ -364,7 +364,7 @@
   padding: 0.5rem;
 }
 
-/* A host's selection chooser (SelectionChooser): the words Comment | Ask | Show me, before the comment box. */
+/* A host's selection chooser (SelectionChooser): the words Comment | Ask, before the comment box. */
 .review-selpop {
   display: inline-flex;
   background: var(--popover);
@@ -390,8 +390,6 @@
 .review-selpop-btn + .review-selpop-btn { border-left: 1px solid color-mix(in oklch, var(--foreground) 11%, transparent); }
 .review-selpop-btn:hover { background: color-mix(in oklch, var(--foreground) 7%, transparent); }
 .review-selpop-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-.review-selpop-btn.review-selpop-show { color: var(--primary); font-weight: 600; }
-.review-selpop-btn.review-selpop-show:hover { background: color-mix(in oklch, var(--primary) 9%, transparent); }
 @media (pointer: coarse) { .review-selpop-btn { height: 44px; padding: 0 12px; } }
 /* The diff's + mark offers the same thing as Comment: gone while the bar is open. Custom properties reach into the diff's shadow root (usePierreTheme). */
 html:has([data-selection-chooser]) { --review-selection-plus: none; }

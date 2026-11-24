@@ -17,7 +17,7 @@ import { buildSchema, schemaWith } from './schema';
 import { buildWords } from './words';
 
 const same = (a: unknown, b: unknown) => isDeepStrictEqual(a, b);
-const sample = (path: string) => path.replace(/\{path\}/g, 'a/b.png').replace(/\{card\}/g, 'crd_x').replace(/\{combine\}/g, 'cmb_x').replace(/\{action\}/g, 'a-0123abcd').replace(/\{\w+\}/g, 'x_1');
+const sample = (path: string) => path.replace(/\{path\}/g, 'a/b.png').replace(/\{card\}/g, 'crd_x').replace(/\{combine\}/g, 'cmb_x').replace(/\{action\}/g, 'a-0123abcd').replace(/\{routine\}/g, 'sch_x').replace(/\{\w+\}/g, 'x_1');
 
 /** door.json is the door: health lists its routes, each reaches the door for the token it names, a write has its key. */
 export function doorRules(): string[] {

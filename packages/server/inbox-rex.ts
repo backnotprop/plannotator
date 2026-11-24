@@ -178,6 +178,8 @@ export interface InboxRexOptions {
   showTimeoutMs?: number;
   /** How long a refused Show stays hidden (INBOX_REX_SHOW_REFUSED_MS; tests shorten it). */
   showRefusedMs?: number;
+  /** How long an idle read connection stays open (IDLE_CLOSE_MS; tests shorten it). */
+  idleCloseMs?: number;
   now?: () => number;
   /** Said in the hello. */
   version?: string;
@@ -246,6 +248,7 @@ export function createInboxRex(options: InboxRexOptions) {
   const openTimeout = options.openTimeoutMs ?? INBOX_REX_OPEN_TIMEOUT_MS;
   const showTimeout = options.showTimeoutMs ?? INBOX_REX_SHOW_TIMEOUT_MS;
   const showRefused = options.showRefusedMs ?? INBOX_REX_SHOW_REFUSED_MS;
+  const idleClose = options.idleCloseMs ?? IDLE_CLOSE_MS;
   const raiseApp = options.raiseApp ?? ((pid: number) => inboxRaiseApp(pid));
   const kept = sessionsKept(options.sessionsFile ?? null);
   const headless = options.headless === true;
@@ -325,11 +328,16 @@ export function createInboxRex(options: InboxRexOptions) {
   /** One read connection, reused while reads come, closed once idle. */
   let reader: Promise<RexConnection> | null = null;
   let idle: ReturnType<typeof setTimeout> | null = null;
+  let activeReads = 0;
+  let closed = false;
+  const clearIdle = () => {
+    if (idle) clearTimeout(idle);
+    idle = null;
+  };
   const dropReader = () => {
     const was = reader;
     reader = null;
-    if (idle) clearTimeout(idle);
-    idle = null;
+    clearIdle();
     void was?.then((c) => c.close()).catch(() => undefined);
   };
   const readConnection = (): Promise<RexConnection> => {
@@ -351,8 +359,9 @@ export function createInboxRex(options: InboxRexOptions) {
     return mine;
   };
   const keepReader = () => {
-    if (idle) clearTimeout(idle);
-    idle = setTimeout(dropReader, IDLE_CLOSE_MS);
+    if (closed || activeReads > 0 || !reader) return;
+    clearIdle();
+    idle = setTimeout(dropReader, idleClose);
     (idle as { unref?: () => void }).unref?.();
   };
 
@@ -361,15 +370,18 @@ export function createInboxRex(options: InboxRexOptions) {
   /** Run `work` on the read connection within the read deadline; null on any failure (and a slow Rex is left alone a while). */
   const read = async <T>(work: (rex: RexConnection) => Promise<T>): Promise<T | null> => {
     lastLate = false;
-    if (sockets.length === 0) return null;
+    if (closed || sockets.length === 0) return null;
     if (now() < quietUntil) {
       lastLate = true;
       return null;
     }
+    activeReads++;
+    clearIdle();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const late = new Promise<"late">((resolve) => {
       timer = setTimeout(() => resolve("late"), readTimeout);
     });
+    let succeeded = false;
     try {
       const answer = await Promise.race([readConnection().then(work), late]);
       if (answer === "late") {
@@ -378,13 +390,15 @@ export function createInboxRex(options: InboxRexOptions) {
         dropReader();
         return null;
       }
-      keepReader();
+      succeeded = true;
       return answer as T;
     } catch {
       dropReader();
       return null;
     } finally {
       if (timer) clearTimeout(timer);
+      activeReads--;
+      if (succeeded) keepReader();
     }
   };
 
@@ -858,6 +872,7 @@ export function createInboxRex(options: InboxRexOptions) {
 
     /** Close what is open (the Inbox stops). */
     close(): void {
+      closed = true;
       dropReader();
       if (showBack) clearTimeout(showBack);
     },

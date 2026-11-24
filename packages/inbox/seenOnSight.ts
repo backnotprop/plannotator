@@ -21,6 +21,8 @@ import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { isPersonLook } from './folding';
 import { pageInFront } from './sound';
 import { usePaneScope } from './panes/scope';
+/** The opening look says whether the person chose the thread (recentActs.ts, for Recent activity). */
+export { personOpened } from './recentActs';
 
 /** How long the first lines must stay on screen. */
 export const SEEN_DWELL_MS = 1000;
@@ -141,6 +143,17 @@ export function followBy(lines: Span, view: Span, room = 12): number {
   return Math.max(0, lines.bottom - (view.bottom - room));
 }
 
+/**
+ * Whether the recheck runs: while the window is in front. Behind another window it stops (`focus` starts it again), but
+ * not while focus is in a frame of the page (an attached HTML page): coming back into that frame raises no event here,
+ * so the recheck keeps looking (each look is two property reads while the window is behind).
+ */
+function recheckWhile(): boolean {
+  if (pageInFront()) return true;
+  if (document.visibilityState === 'hidden') return false;
+  return document.activeElement instanceof HTMLIFrameElement || document.querySelector('iframe') !== null;
+}
+
 /** A native modal dialog is open over the window (the Inbox's update and sound dialogs are `<dialog>`s). */
 function dialogOpen(): boolean {
   return typeof document !== 'undefined' && document.querySelector('dialog[open]') !== null;
@@ -238,7 +251,8 @@ export function useSeenOnSight({ bodyRef, candidates, covered: cover, pill, onSe
     if (!body || candidates.length === 0) return;
     const articleOf = (id: string) => body.querySelector<HTMLElement>(`[data-message-article="${CSS.escape(id)}"]`);
     const showing = (id: string): boolean => {
-      if (state.current.covered || dialogOpen() || !pageInFront()) return false;
+      // The cheap checks first: a window behind (or a hidden tab) reads nothing of the page.
+      if (state.current.covered || !pageInFront() || dialogOpen()) return false;
       const article = articleOf(id);
       if (!article) return false;
       const view = body.getBoundingClientRect();
@@ -247,6 +261,12 @@ export function useSeenOnSight({ bodyRef, candidates, covered: cover, pill, onSe
       return firstLinesInView(lines, view, band) && onTop(article, lines, view);
     };
     const evaluate = () => {
+      // Nothing is seen behind another window or in a hidden tab: every dwell stops, and no message is measured.
+      if (!pageInFront()) {
+        for (const id of candidates) clearTimeout(timers.get(id));
+        for (const id of candidates) timers.delete(id);
+        return;
+      }
       for (const id of candidates) {
         if (!showing(id)) {
           const timer = timers.get(id);
@@ -273,28 +293,38 @@ export function useSeenOnSight({ bodyRef, candidates, covered: cover, pill, onSe
       const article = articleOf(id);
       if (article) observer?.observe(article);
     }
+    // A sheet, a popover or the toast opening or closing over the first lines
+    // raises none of the events here: look again while there is something to see,
+    // and only while the window is in front (`recheckWhile`).
+    let recheck: ReturnType<typeof setInterval> | null = null;
+    const attention = () => {
+      const run = recheckWhile();
+      if (run && recheck === null) recheck = setInterval(evaluate, RECHECK_MS);
+      if (!run && recheck !== null) {
+        clearInterval(recheck);
+        recheck = null;
+      }
+      evaluate();
+    };
     body.addEventListener('scroll', evaluate, { passive: true });
     window.addEventListener('resize', evaluate);
-    window.addEventListener('focus', evaluate);
-    window.addEventListener('blur', evaluate);
-    document.addEventListener('visibilitychange', evaluate);
+    window.addEventListener('focus', attention);
+    window.addEventListener('blur', attention);
+    document.addEventListener('visibilitychange', attention);
     // A dialog closing hands focus back inside the page.
-    document.addEventListener('focusin', evaluate);
-    // A sheet, a popover or the toast opening or closing over the first lines
-    // raises none of the events above: look again while there is something to see.
-    const recheck = setInterval(evaluate, RECHECK_MS);
+    document.addEventListener('focusin', attention);
     evaluateRef.current = evaluate;
-    evaluate();
+    attention();
     return () => {
       evaluateRef.current = null;
-      clearInterval(recheck);
+      if (recheck !== null) clearInterval(recheck);
       observer?.disconnect();
       body.removeEventListener('scroll', evaluate);
       window.removeEventListener('resize', evaluate);
-      window.removeEventListener('focus', evaluate);
-      window.removeEventListener('blur', evaluate);
-      document.removeEventListener('visibilitychange', evaluate);
-      document.removeEventListener('focusin', evaluate);
+      window.removeEventListener('focus', attention);
+      window.removeEventListener('blur', attention);
+      document.removeEventListener('visibilitychange', attention);
+      document.removeEventListener('focusin', attention);
     };
     // The candidates by their ids (a new list each render).
     // eslint-disable-next-line react-hooks/exhaustive-deps

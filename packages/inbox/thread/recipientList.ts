@@ -1,5 +1,5 @@
 /** The reply pill's list (approval "inbox-reply-recipient"): who it offers, named and ordered by replyRecipients.ts. */
-import type { InboxThread } from '@plannotator/core/inbox-types';
+import { inboxCanRemove, inboxRemovedNow, type InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableModel } from '../api';
 import type { AskingSession } from '../components/ReplyRoute';
 import { canTakeAlone, latestBy, recipientRows, recipientState, sessionFolder, type RecipientPerson, type RecipientRow } from '../replyRecipients';
@@ -24,12 +24,19 @@ export function replyRecipientList(input: {
   start: ReplyStart | null;
   /** The name the person gave a session (Rename… on its sidebar row), or null. */
   givenNameOf?: (session: string) => string | null;
+  /** The thread's machine takes Remove (this Inbox's own thread, or a linked one with the `remove-agent` mark). */
+  removeOn?: boolean;
 }): RecipientRow[] {
   const { thread, askerEnded, asking, live, taggable, gone, rcptDefault } = input;
   const people: RecipientPerson[] = [...input.participants];
+  // An agent the person removed is in no row until they write to it again (core inbox-removed.ts).
+  const removed = inboxRemovedNow(thread.messages);
   const add = (host: string | null, session: string) => {
-    if (!people.some((p) => p.session === session)) people.push({ host, session });
+    if (!removed.has(session) && !people.some((p) => p.session === session)) people.push({ host, session });
   };
+  /** Remove on a row (approval "inbox-remove-agent-from-thread"): one of the thread's agents, never the last one. */
+  const removable = (session: string) =>
+    !!input.removeOn && input.participants.length > 1 && input.participants.some((p) => p.session === session) && inboxCanRemove(thread.messages, session);
   const handed = activeHandoff(thread) ?? tookOverReply(thread);
   if (handed?.to) add(handed.to.host, handed.to.session);
   // The agent asked has ended: the live sessions take its place in the list (its project's, and writers from other folders).
@@ -43,6 +50,6 @@ export function replyRecipientList(input: {
     (session) => sessionFolder(session, thread, taggable) ?? (gone.has(session) || live?.sessions.some((s) => s.session === session) ? thread.project.name : null),
     (session) => recipientState(session, taggable, ended),
     input.givenNameOf,
-  ).map((row) => ({ ...row, alone: canTakeAlone(row.state, row.session === rcptDefault || latestBy(thread, row.session) !== undefined) }));
+  ).map((row) => ({ ...row, alone: canTakeAlone(row.state, row.session === rcptDefault || latestBy(thread, row.session) !== undefined), ...(removable(row.session) ? { removable: true } : {}) }));
   return askerEnded && input.start ? [...rows, input.start.row] : rows;
 }
