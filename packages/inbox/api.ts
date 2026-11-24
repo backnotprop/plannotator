@@ -16,7 +16,7 @@ import type { SystemModel } from '@plannotator/system';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
-import { createListReader, type ListReadAnswer } from './listRead';
+import { createListReader, listGridAsked, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
@@ -1222,7 +1222,7 @@ export function saveRecentSearch(input: { q: string } | { clear: true }): Promis
 
 /** The window's list reads (listRead.ts): `since` names the list it holds; empty asks for the whole list. */
 const listReader = createListReader<ListModel>((since) =>
-  get<ListReadAnswer<ListModel>>(inboxUrl(`/threads?archived=exclude&snoozed=exclude&machines=1&since=${encodeURIComponent(since)}`)),
+  get<ListReadAnswer<ListModel>>(inboxUrl(`/threads?archived=exclude&snoozed=exclude&machines=1${listGridAsked() ? '&grid=1' : ''}&since=${encodeURIComponent(since)}`)),
 );
 
 /** Tests only: the next list read is a whole one. */

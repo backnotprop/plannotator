@@ -226,6 +226,21 @@ describe("the page", () => {
     expect(line(second, "b")).not.toBe(line(first, "b"));
     expect(line(second, "b").detail?.words).toBe("tests running");
   });
+
+  test("the minute works out again only the lines whose bar runs to now; a landed line waits for its mark", () => {
+    const derive = createGridModel();
+    const landed = thread({ id: "land", pulls: [pull({ state: "merged", added_at: ago(90), read_at: ago(30) })], seen: { through: NOW, at: NOW } });
+    const moving = thread({ id: "move", running: true });
+    const line = (m: ReturnType<typeof derive>, id: string) => [...m.groups.flatMap((g) => g.lines), ...m.earlier].find((l) => l.id === id);
+    const first = derive([landed, moving], NOW);
+    const later = derive([{ ...landed }, { ...moving }], NOW + GRID_MIN);
+    expect(line(later, "land")).toBe(line(first, "land"));
+    expect(line(later, "move")).not.toBe(line(first, "move"));
+    // Seen, it leaves for Earlier at its three hours: the clock alone moves it.
+    const past = derive([landed, moving], NOW + 3 * GRID_HOUR);
+    expect(past.groups.flatMap((g) => g.lines).map((l) => l.id)).toEqual(["move"]);
+    expect(past.earlier.map((l) => l.id)).toEqual(["land"]);
+  });
 });
 
 describe("words", () => {

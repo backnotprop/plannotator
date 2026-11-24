@@ -24,6 +24,7 @@ const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as 
 const { GridRoute, useGridOn } = (hasDom ? await import('./GridPage') : {}) as typeof import('./GridPage');
 const { forgetGridSeen } = (hasDom ? await import('./gridSeen') : {}) as typeof import('./gridSeen');
 const { gridHeard } = (hasDom ? await import('./gridOn') : {}) as typeof import('./gridOn');
+const { listGridAsked } = (hasDom ? await import('../listRead') : {}) as typeof import('../listRead');
 const { setInboxAgents } = (hasDom ? await import('../agentsList') : {}) as typeof import('../agentsList');
 const { putList } = (hasDom ? await import('../data/queries/list') : {}) as typeof import('../data/queries/list');
 const { readRoute } = (hasDom ? await import('../app/route') : {}) as typeof import('../app/route');
@@ -281,8 +282,11 @@ test.skipIf(!hasDom)('many PR threads and a burst of list reads: no request of i
   for (let i = 0; i < 20; i++) gridHeard('thread-pulls');
   await settle(200);
   expect(reads).toBe(1);
+  // Only while Grid is on and shows do the list reads ask for Grid's fields.
+  expect(listGridAsked()).toBe(true);
   act(() => root!.unmount());
   root = null;
+  expect(listGridAsked()).toBe(false);
   // Not showing: PR events read nothing; a look made elsewhere still reads the list once.
   for (let i = 0; i < 5; i++) gridHeard('thread-pulls');
   await settle(200);
@@ -291,6 +295,23 @@ test.skipIf(!hasDom)('many PR threads and a burst of list reads: no request of i
   await settle(200);
   expect(reads).toBe(2);
   act(() => other.unmount());
+
+  // Grid off: a PR's checks changing, or a look, reads no list, and no read asks for Grid's fields.
+  function Off() {
+    useGridOn({ experimental: { decision_mode: { on: false, env: null }, grid: { on: false, env: null } } }, () => reads++);
+    return null;
+  }
+  const off = createRoot(document.body.appendChild(document.createElement('div')));
+  act(() => off.render(<Off />));
+  const before = reads;
+  for (let i = 0; i < 5; i++) {
+    gridHeard('thread-pulls');
+    gridHeard('grid-seen');
+  }
+  await settle(200);
+  expect(reads).toBe(before);
+  expect(listGridAsked()).toBe(false);
+  act(() => off.unmount());
 });
 
 test.skipIf(!hasDom)('seen: only a line on screen in a tab that shows; kept on its own computer; a line behind "N more" never', async () => {

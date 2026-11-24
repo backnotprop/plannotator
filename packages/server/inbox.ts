@@ -358,7 +358,7 @@ import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createInboxGridSeen, gridSeenOf } from "./inbox-grid-seen";
-import { gridRowDecorator } from "./inbox-grid-row";
+import { gridRowDecorator, gridRowStripped } from "./inbox-grid-row";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullRiskAuto, type PullRiskAuto } from "./inbox-pull-risk-auto";
@@ -1476,7 +1476,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullOwners = createInboxPullLinks(dataDir);
   const pullLooked = createInboxPullLooked(dataDir);
   // Grid's looks at this Inbox's threads (inbox-grid-seen.ts): inbox/grid-seen.json, written only when a window with Grid on sends one.
-  const gridSeen = createInboxGridSeen(dataDir);
+  const gridSeen = createInboxGridSeen(dataDir, (thread) => store.message(thread) !== null);
   // PRs the person hid from Reviews, the PR board and the Inbox list (inbox-pull-hidden.ts): nothing is done on the forge.
   const pullHidden = createInboxPullHidden(dataDir);
   const pullHiddenChanged = () => {
@@ -2052,7 +2052,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * and the agents' counts alike, until something newer than its newest hide happens in it; never a pinned or a
    * snoozed one (`listHiding`). Each row carries `hide_pulls`, its open PRs not hidden. Nothing is written to the thread.
    */
-  const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include", hidePulls = false) => {
+  // `grid`: the read asked for Grid's fields (`grid=1`, sent only while Grid is on there); without it, the list as before Grid.
+  const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include", hidePulls = false, grid = false) => {
     // One pass over the store feeds both the folders' counts and the sections.
     // `pinned_at`, `snoozed` and `priority` (additive) on the window's and the phone's rows only: never on anything an agent reads.
     const pinnedAt = new Map(store.pins().map((pin) => [pin.thread_id, pin.pinned_at]));
@@ -2093,11 +2094,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     const withPulls = (row: InboxListRow): InboxListRow => {
       const pulls = pullsByThread.get(row.thread_id);
-      const summary = pulls ? inboxThreadPullsSummary(pulls.sort((a, b) => a.added_at.localeCompare(b.added_at) || a.id.localeCompare(b.id)), threadPullStates.live) : undefined;
+      const summary = pulls ? inboxThreadPullsSummary(pulls.sort((a, b) => a.added_at.localeCompare(b.added_at) || a.id.localeCompare(b.id)), grid ? threadPullStates.live : undefined) : undefined;
       return summary ? { ...row, pulls: summary } : row;
     };
     // Grid (approval "inbox-agent-grid", inbox-grid-row.ts): the thread's last look on Grid and its checklist's progress.
-    const withGrid = gridRowDecorator(gridSeen, stepsOn() ? store.allSteps() : null);
+    const withGrid = grid ? gridRowDecorator(gridSeen, stepsOn() ? store.allSteps() : null) : (row: InboxListRow) => row;
     // `tags` (additive, approval "inbox-thread-tags"): the live tags a thread is in, on the window's and the phone's rows only.
     const tagsOf = store.allThreadTags();
     const withTags = (row: InboxListRow): InboxListRow => {
@@ -2136,7 +2137,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return tags.length > 0 ? { ...rest, tags } : rest;
     };
     const rows: InboxListRow[] = merged
-      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => withActed(inboxRowAsOf(withoutStepsWaiting(withFarTags(row)), now)))]
+      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => withActed(inboxRowAsOf(withoutStepsWaiting(withFarTags(grid ? row : gridRowStripped(row))), now)))]
       : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
@@ -2153,8 +2154,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       serverSession,
       version,
       cursor: store.cursor(),
-      /** This Inbox's clock as it answered (additive): a linked machine reads how far apart the two run (`clock_ms`). */
-      now: now.toISOString(),
+      /** This Inbox's clock as it answered (additive, a Grid read only): a linked machine reads how far apart the two run (`clock_ms`). */
+      ...(grid ? { now: now.toISOString() } : {}),
       update: updates.current(),
       /** This Inbox started on a newer version than the last one: the sidebar's "What's new in X" link. */
       updated: updates.updated(),
@@ -4018,9 +4019,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       change[configKey] = on;
     }
     if (validateOnly) return experimentalState();
+    const gridWas = gridOn();
     saveConfig({ experimental: change });
     const saved = loadConfig().experimental as Record<string, unknown> | undefined;
     if (Object.entries(change).some(([key, on]) => saved?.[key] !== on)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    // Grid turned on or off: the linked machines are asked again with or without Grid's fields and looks.
+    if (gridOn() !== gridWas) machines?.gridChanged();
     return experimentalState();
   };
 
@@ -4296,8 +4300,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onPriority = () => send(`event: priority\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("priority") === "1") priorityListeners.add(onPriority);
         // Grid's looks changed (inbox-grid-seen.ts): the list reads `grid_seen` again. Windows, and a linked machine that asks.
-        const onGridSeen = () => send(`event: grid-seen\ndata: {}\n\n`);
-        if (windowId || url.searchParams.get("grid-seen") === "1") gridSeenListeners.add(onGridSeen);
+        // A window hears it only while Grid is on here; a linked machine asks only while Grid is on there.
+        const gridSeenAsked = url.searchParams.get("grid-seen") === "1";
+        const onGridSeen = () => (gridSeenAsked || gridOn() ? send(`event: grid-seen\ndata: {}\n\n`) : undefined);
+        if (windowId || gridSeenAsked) gridSeenListeners.add(onGridSeen);
         // A thread's tags changed (any window's, a linked machine's, a rename's marks, or a deletion): the list reads
         // `tags` again. Windows, and a linked machine that asks (`tags=1`, as `pins=1`).
         const onThreadTags = () => send(`event: tags\ndata: {}\n\n`);
@@ -6136,7 +6142,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const merged = url.searchParams.get("machines") === "1";
         const snoozedMode = snoozedModeOf(url);
         // A linked machine's read lists every thread: its own window hides by its own records (inbox-pull-hidden.ts).
-        const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode, fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM));
+        // Grid's fields only for a read that asks (`grid=1`): a window while Grid is on, a linked machine while it is on there.
+        const gridRead = url.searchParams.get("grid") === "1" && (fromDeviceDoor.get(req)?.platform === MACHINE_PLATFORM || gridOn());
+        const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode, fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM, gridRead));
         const liveNow = new Set(live.allLive().map((s) => s.session));
         const remembered = (all: Record<string, string>) => {
           const out: Record<string, string> = {};
@@ -6160,7 +6168,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
         if (since === null) return json(model);
-        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
+        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}${gridRead ? "|grid" : ""}`, model, since || null));
       }
       // Show in Rex (inbox-rex.ts): Rex's app goes to the pane a live session said it lives in, on the person's click,
       // for any session the list places in Rex (`rexHints`). From this computer's own window: this computer's app (on a
@@ -8553,6 +8561,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       holds: (kind, id) =>
         kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : kind === "cards" ? store.card(id) !== null : store.message(id) !== null,
       ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
+      gridOn,
       showArchivedSaid: (value) => {
         try {
           showArchived.adopt(value);

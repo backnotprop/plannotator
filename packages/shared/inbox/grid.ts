@@ -238,7 +238,18 @@ export function gridIsWork(t: GridThreadIn): boolean {
 
 /** Where one thread sits now: a shown line, a line in Earlier, a count in the Since line only, or nothing. */
 export function gridPlace(t: GridThreadIn, now: number): GridPlace | null {
-  if (!gridIsWork(t)) return null;
+  return gridPlaceTimed(t, now).placed;
+}
+
+/**
+ * `gridPlace`, and `until`: the first time after `now` its answer can change with the clock alone (its inputs the
+ * same). A line whose bar runs to now changes each minute; a landed, dropped or not started one only when it crosses
+ * one of its marks (3 h, 12 h, 3 days, a week); nothing drawn stays so.
+ */
+export function gridPlaceTimed(t: GridThreadIn, now: number): { placed: GridPlace | null; until: number } {
+  const next = (...marks: number[]) => marks.reduce((first, mark) => (mark > now && mark < first ? mark : first), Infinity);
+  const timed = (placed: GridPlace | null, until: number) => ({ placed, until });
+  if (!gridIsWork(t)) return timed(null, Infinity);
   const start = ms(t.created_at) ?? now;
   const pr = prsOf(t.pulls);
   const prAt = pr?.at ?? null;
@@ -267,37 +278,69 @@ export function gridPlace(t: GridThreadIn, now: number): GridPlace | null {
   } satisfies Partial<GridLine>;
   const idleOver = (end: number): GridPiece | null => (!working && end - moved >= GRID_QUIET_MS ? { kind: "idle", from: moved, to: end } : null);
 
+  // The marks an ended line crosses: first sight, its 3 hours, 12 hours unseen, Earlier's week.
+  const endMarks = (at: number) => [at + GRID_FIRST_SIGHT_MS, at + GRID_KEEP_MS, at + GRID_LANDED_MAX_MS, Math.max(at + GRID_KEEP_MS, t.seen?.at ?? 0) + GRID_EARLIER_MS];
+  const minute = now + GRID_MIN;
+
   if (ask) {
     const since = ms(t.waiting_since) ?? moved;
-    return { place: "shown", line: { ...base, group: "you", ask, pieces: piecesOf(start, prAt, now, { kind: "wait", from: since, to: now }), at: since } };
+    return timed({ place: "shown", line: { ...base, group: "you", ask, pieces: piecesOf(start, prAt, now, { kind: "wait", from: since, to: now }), at: since } }, minute);
   }
   if (pr?.state === "merged") {
     const at = pr.end ?? moved;
-    if (t.seen === null && now - at >= GRID_FIRST_SIGHT_MS) return null;
+    if (t.seen === null && now - at >= GRID_FIRST_SIGHT_MS) return timed(null, Infinity);
     const line: GridLine = { ...base, group: "land", fresh: unseen(at), unseen: unseen(at), merged: at, pieces: piecesOf(start, prAt, at, null), at };
-    if (unseen(at)) return { place: now - at < GRID_LANDED_MAX_MS ? "shown" : "counted", line };
-    return now - at < GRID_KEEP_MS ? { place: "shown", line } : afterSeen(at, line);
+    const until = next(...endMarks(at));
+    if (unseen(at)) return timed({ place: now - at < GRID_LANDED_MAX_MS ? "shown" : "counted", line }, until);
+    return timed(now - at < GRID_KEEP_MS ? { place: "shown", line } : afterSeen(at, line), until);
   }
   let dropped: GridLine["dropped"] = null;
   if (pr?.state === "closed") dropped = { at: pr.end ?? moved, why: "PR closed" };
   else if (ended && !working) dropped = { at: Math.max(moved, ms(t.agentEndedAt) ?? moved), why: "agent ended" };
   else if (!working && now - moved >= GRID_DROP_QUIET_MS) dropped = { at: moved + GRID_DROP_QUIET_MS, why: "quiet 3 days" };
   if (dropped) {
-    if (t.seen === null && now - dropped.at >= GRID_FIRST_SIGHT_MS) return null;
+    if (t.seen === null && now - dropped.at >= GRID_FIRST_SIGHT_MS) return timed(null, Infinity);
     const line: GridLine = { ...base, group: "drop", detail: null, unseen: unseen(dropped.at), dropped, pieces: piecesOf(start, prAt, dropped.at, idleOver(dropped.at)), at: dropped.at };
-    return unseen(dropped.at) || now - dropped.at < GRID_KEEP_MS ? { place: "shown", line } : afterSeen(dropped.at, line);
+    return timed(unseen(dropped.at) || now - dropped.at < GRID_KEEP_MS ? { place: "shown", line } : afterSeen(dropped.at, line), next(...endMarks(dropped.at)));
   }
   if (!t.last_agent_at && t.sent && !t.sent.checked_at && !working) {
     const at = ms(t.sent.at) ?? start;
-    return { place: "shown", line: { ...base, group: "plan", planned: at, pieces: [], at } };
+    // Not started stays as it is until three quiet days drop it.
+    return timed({ place: "shown", line: { ...base, group: "plan", planned: at, pieces: [], at } }, next(moved + GRID_DROP_QUIET_MS));
   }
   // Every other thread with an agent is open work: Moving, then Not moving after 20 quiet minutes, then Dropped.
   const quiet = !working && now - moved >= GRID_QUIET_MS;
-  return {
-    place: "shown",
-    line: { ...base, group: quiet ? "quiet" : "move", pieces: piecesOf(start, prAt, now, quiet ? idleOver(now) : null), at: quiet ? moved : start },
-  };
+  return timed(
+    {
+      place: "shown",
+      line: { ...base, group: quiet ? "quiet" : "move", pieces: piecesOf(start, prAt, now, quiet ? idleOver(now) : null), at: quiet ? moved : start },
+    },
+    minute,
+  );
 }
+
+/** Two of Grid's inputs for one thread are the same (field by field; no JSON): its place need not be worked out again. */
+export function gridSameIn(a: GridThreadIn, b: GridThreadIn): boolean {
+  if (a === b) return true;
+  for (const key of Object.keys(a) as (keyof GridThreadIn)[]) {
+    const x = a[key];
+    const y = b[key];
+    if (x === y) continue;
+    if (key === "pulls") {
+      const p = x as GridThreadIn["pulls"];
+      const q = y as GridThreadIn["pulls"];
+      if (p.length !== q.length || p.some((pull, i) => !sameFlat(pull, q[i]!))) return false;
+    } else if (!x || !y || typeof x !== "object" || typeof y !== "object" || !sameFlat(x, y)) return false;
+  }
+  return Object.keys(a).length === Object.keys(b).length;
+}
+
+const sameFlat = (x: object, y: object): boolean => {
+  const a = x as Record<string, unknown>;
+  const b = y as Record<string, unknown>;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+};
 
 const hasPr = (l: GridLine) => l.pieces.some((p) => p.kind === "pr");
 const ORDER: Readonly<Record<GridGroup, (a: GridLine, b: GridLine) => number>> = {
@@ -332,22 +375,21 @@ function byAgent(lines: GridLine[]): GridLine[] {
  * costs O(n) to compare and O(n log n) to sort, n the threads.
  */
 export function createGridModel(): (threads: readonly GridThreadIn[], now: number) => GridModel {
-  let held = new Map<string, { key: string; now: number; placed: GridPlace | null; json: string }>();
+  type Held = { input: GridThreadIn; now: number; until: number; placed: GridPlace | null };
+  let held = new Map<string, Held>();
   return (threads, now) => {
-    const next = new Map<string, { key: string; now: number; placed: GridPlace | null; json: string }>();
+    const next = new Map<string, Held>();
     const placedAll: GridPlace[] = [];
     let look: number | null = null;
     for (const t of threads) {
       if (t.seen && (look === null || t.seen.at > look)) look = t.seen.at;
-      const key = JSON.stringify(t);
       const was = held.get(t.id);
-      let entry = was && was.key === key && was.now === now ? was : null;
+      // Kept, the same object (a memoized line does not draw again), while its inputs are the same and the clock has
+      // not reached a mark that changes it: a minute for a bar that runs to now, else 3 h, 12 h, 3 days or a week.
+      let entry = was && now >= was.now && now < was.until && gridSameIn(was.input, t) ? was : null;
       if (!entry) {
-        let placed = gridPlace(t, now);
-        const json = placed ? `${placed.place}${JSON.stringify(placed.line)}` : "";
-        // The same line as before: the same object, so a memoized line does not draw again.
-        if (placed && was?.placed && was.json === json) placed = was.placed;
-        entry = { key, now, placed, json };
+        const { placed, until } = gridPlaceTimed(t, now);
+        entry = { input: t, now, until, placed };
       }
       next.set(t.id, entry);
       if (entry.placed) placedAll.push(entry.placed);

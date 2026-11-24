@@ -48,7 +48,7 @@ interface DoorScript {
 }
 
 function door(script: DoorScript) {
-  const stats = { events: 0, threads: 0, cards: 0, posts: [] as string[], windowMarks: [] as (string | null)[], lastEventId: [] as (string | null)[], eventAsks: [] as string[] };
+  const stats = { events: 0, threads: 0, cards: 0, posts: [] as string[], windowMarks: [] as (string | null)[], lastEventId: [] as (string | null)[], eventAsks: [] as string[], threadAsks: [] as string[] };
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -60,6 +60,7 @@ function door(script: DoorScript) {
       if (route === "health") return script.health ? script.health() : Response.json({ ok: true, inbox_id: B, machine_links: 1, version: "test" });
       if (route === "threads") {
         stats.threads += 1;
+        stats.threadAsks.push(url.search);
         return script.threads ? script.threads() : Response.json({ cursor: script.cursor ?? 0, sections: [{ threads: [{ thread_id: "msg_a", project: { id: "prj_a" } }] }], projects: [] });
       }
       if (route === "threads/archived" && script.archived) return script.archived();
@@ -415,6 +416,23 @@ describe("the list (rule 5)", () => {
     expect(new URLSearchParams(d.stats.eventAsks[0]).get("pins")).toBe("1");
     expect(told).toEqual(["pins"]);
     expect(pinsAtTold).toEqual(["msg_a"]);
+  });
+
+  test("Grid off asks that machine for nothing of Grid; turned on, the list and the stream ask again with it, and the line stays online", async () => {
+    let gridOn = false;
+    const d = door({ cursor: 3 });
+    const states: string[] = [];
+    const { peer } = link(d.url, { gridOn: () => gridOn, onChange: () => void states.push(peer.state) });
+    peer.start();
+    await until("its list", () => peer.list !== null);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).has("grid-seen")).toBe(false);
+    expect(d.stats.threadAsks.every((search) => !new URLSearchParams(search).has("grid"))).toBe(true);
+    gridOn = true;
+    const from = states.length;
+    peer.gridChanged();
+    await until("asked again", () => d.stats.eventAsks.length === 2 && d.stats.threadAsks.some((search) => new URLSearchParams(search).get("grid") === "1"));
+    expect(new URLSearchParams(d.stats.eventAsks[1]).get("grid-seen")).toBe("1");
+    expect(states.slice(from)).not.toContain("offline");
   });
 
   test("its archived threads are read only when asked; asleep, it answers with the last page for that ask, away; an older door, nothing", async () => {

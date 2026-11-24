@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { InboxListRow, InboxSteps } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { createInboxGridSeen, gridSeenOf, INBOX_GRID_SEEN_FILE } from "./inbox-grid-seen";
-import { gridRowDecorator } from "./inbox-grid-row";
+import { gridRowDecorator, gridRowStripped } from "./inbox-grid-row";
 import { peerClockMs } from "./inbox-peer-link";
 
 /** A scratch data folder in the system's temp folder. */
@@ -71,4 +71,23 @@ test("a linked machine's clock: whole minutes ahead or behind, nothing within tw
   expect(peerClockMs("2026-11-24T10:21:10.000Z", arrived)).toBe(21 * 60_000);
   expect(peerClockMs("2026-11-24T09:35:00.000Z", arrived)).toBe(-25 * 60_000);
   expect(peerClockMs(undefined, arrived)).toBe(0);
+});
+
+test("a look is never forgotten for age or count while its thread is here; one whose thread is gone is", () => {
+  const dir = scratch();
+  const here = new Set(["msg_kept", "msg_new"]);
+  const seen = createInboxGridSeen(dir, (thread) => here.has(thread));
+  seen.mark([{ thread: "msg_kept", through: 1, at: 1 }, { thread: "msg_gone", through: 1, at: 1 }]);
+  // Thousands of newer looks: the oldest one, of a thread still here, stays.
+  for (let i = 0; i < 12; i += 1) seen.mark(Array.from({ length: 200 }, (_, j) => ({ thread: `msg_n${i}_${j}`, through: 10 + i, at: 10 + i })).concat([{ thread: "msg_new", through: 9, at: 9 }]));
+  expect(seen.get("msg_kept")).toEqual({ through: 1, at: 1 });
+  expect(seen.get("msg_gone")).toBeUndefined();
+  expect(createInboxGridSeen(dir, () => true).get("msg_kept")).toEqual({ through: 1, at: 1 });
+});
+
+test("a list read that did not ask for Grid gets a linked machine's row without Grid's fields; one without them is the same object", () => {
+  const far = { thread_id: "msg_a", grid_seen: { through: 1, at: 2 }, steps_progress: { done: 1, total: 2, doing: null, at: "x" }, pulls: { count: 1, headline: { key: "k", state: "open" }, items: [{ key: "k" }] } } as unknown as InboxListRow;
+  expect(gridRowStripped(far)).toEqual({ thread_id: "msg_a", pulls: { count: 1, headline: { key: "k", state: "open" } } } as unknown as InboxListRow);
+  const plain = { thread_id: "msg_b", pulls: { count: 1, headline: { key: "k", state: "open" } } } as unknown as InboxListRow;
+  expect(gridRowStripped(plain)).toBe(plain);
 });

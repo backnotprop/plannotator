@@ -11,6 +11,7 @@
  */
 import { useEffect } from 'react';
 import type { SettingsModel } from '../api';
+import { listGridAsked, setListGrid } from '../listRead';
 import { setSidebarUnsaved } from '../sidebarLayout';
 
 const AGAIN_MS = 150;
@@ -27,16 +28,26 @@ export function useGridOn(settings: Pick<SettingsModel, 'experimental'> | null, 
   useEffect(() => {
     const read = () => refreshList(false);
     reader = read;
+    askGrid();
     return () => {
       if (reader === read) reader = null;
     };
-  }, [refreshList]);
+  }, [refreshList, on]);
   return on;
 }
 
 /** The page is on screen (counted: a remount overlaps its unmount). */
 export function gridShown(on: boolean): void {
   shown = Math.max(0, shown + (on ? 1 : -1));
+  askGrid();
+}
+
+/** The list reads ask for Grid's fields only while it is on and shows; when they start to, the list is read again. */
+function askGrid(): void {
+  const ask = isOn && shown > 0;
+  if (ask === listGridAsked()) return;
+  setListGrid(ask);
+  if (ask) listAgain();
 }
 
 /** One list read for a burst of events. */

@@ -8,7 +8,8 @@
  *   inbox/grid-seen.json   { v: 1, seen: { [thread id]: { through, at } } }
  *
  * Each field keeps the larger value (a look held in an outbox lands as of then, never over a later one). A time
- * ahead of this machine's clock is now. The newest `GRID_SEEN_KEPT` threads are kept. Written whole to a temp file,
+ * ahead of this machine's clock is now. A look is kept while this Inbox holds its thread (never dropped for age: a
+ * line still shown or in Earlier keeps its look). Written whole to a temp file,
  * then renamed, 0600; a file that cannot be read is moved aside, never written over. Nothing is written until a
  * window with Grid on sends a look.
  */
@@ -17,7 +18,6 @@ import { join } from "node:path";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_GRID_SEEN_FILE = "grid-seen.json";
-export const GRID_SEEN_KEPT = 2000;
 /** One write names at most this many threads (a page of lines). */
 export const GRID_SEEN_MAX = 200;
 
@@ -49,7 +49,8 @@ export interface InboxGridSeenStore {
   mark(seen: readonly { thread: string; through: number; at: number }[]): Record<string, GridSeen>;
 }
 
-export function createInboxGridSeen(dataDir: string): InboxGridSeenStore {
+/** `holds`: whether this Inbox still holds a thread (archived ones too); a look at one it no longer holds is dropped. */
+export function createInboxGridSeen(dataDir: string, holds?: (thread: string) => boolean): InboxGridSeenStore {
   const dir = inboxDir(dataDir);
   const file = join(dir, INBOX_GRID_SEEN_FILE);
   let held: Map<string, GridSeen> | null = null;
@@ -99,10 +100,9 @@ export function createInboxGridSeen(dataDir: string): InboxGridSeenStore {
         map.set(thread, next);
         changed = true;
       }
-      if (map.size > GRID_SEEN_KEPT) {
-        const oldest = [...map.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, map.size - GRID_SEEN_KEPT);
-        for (const [thread] of oldest) map.delete(thread);
-      }
+      // Only a thread this Inbox no longer holds is forgotten: one that is still here may still have a line (shown or
+      // in Earlier), and losing its look would bring a seen landing or drop back as unseen.
+      if (changed && holds) for (const thread of map.keys()) if (!holds(thread)) map.delete(thread);
       if (changed) save(map);
       return Object.fromEntries(seen.flatMap(({ thread }) => (map.has(thread) ? [[thread, map.get(thread)!]] : [])));
     },

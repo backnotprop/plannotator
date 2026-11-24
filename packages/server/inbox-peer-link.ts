@@ -160,6 +160,8 @@ export interface PeerLinkOptions {
   onDeliveries?: (change: { sessions: boolean; agents: boolean; labels: boolean }) => void;
   /** That machine removed this one (401 device_revoked): the owner of the link cleans up. */
   onRevoked: () => void;
+  /** Grid is on here (experimental): only then does this Inbox ask that machine for Grid's fields and looks. */
+  gridOn?: () => boolean;
   timings?: Partial<PeerLinkTimings>;
 }
 
@@ -231,6 +233,8 @@ export class PeerLink {
   private wake: (() => void) | null = null;
   private listing: Promise<void> | null = null;
   private listAgain = false;
+  /** The stream is ended on purpose to ask again for what this Inbox wants (Grid turned on or off): dial at once, still online. */
+  private redial = false;
   private cardsWanted = false;
   private cardsReading: Promise<void> | null = null;
   private cardsAgain = false;
@@ -302,6 +306,17 @@ export class PeerLink {
     this.wake?.();
   }
 
+  /**
+   * Grid was turned on or off here: its list is read again with or without Grid's fields, and its stream asks again
+   * with or without `grid-seen` (a quiet redial: the line stays online).
+   */
+  gridChanged(): void {
+    void this.refreshList();
+    if (!this.stream) return;
+    this.redial = true;
+    this.stream.abort();
+  }
+
   // ── The line: health, then the event stream from the cursor; redial with backoff. ──
 
   private async loop() {
@@ -314,6 +329,10 @@ export class PeerLink {
         this.setState("revoked", "This machine was removed on the other Inbox.");
         this.options.onRevoked();
         break;
+      }
+      if (ended === "redial") {
+        backoff = this.t.backoffMinMs;
+        continue;
       }
       if (ended === "online-ended") backoff = this.t.backoffMinMs;
       else if (ended !== "needs_update") this.setState("offline", ended);
@@ -383,7 +402,9 @@ export class PeerLink {
     let response: Response;
     try {
       // The reread events and `deliveries=1`: none writes a record, so the stream tells this machine when to read the list again.
-      const asks = [...PEER_REREAD_EVENTS, "deliveries"].map((event) => `${event}=1`).join("&");
+      // `grid-seen` only while Grid is on here: off, nothing of Grid is asked for.
+      const gridOn = this.options.gridOn?.() === true;
+      const asks = [...PEER_REREAD_EVENTS.filter((event) => event !== "grid-seen" || gridOn), "deliveries"].map((event) => `${event}=1`).join("&");
       response = await this.options.transport.events(headers, this.cursor === null ? `?${asks}` : `?cursor=${this.cursor}&${asks}`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;
@@ -461,6 +482,10 @@ export class PeerLink {
       if (this.stream === abort) this.stream = null;
     }
     if (silent) return "no heartbeat for 20 s";
+    if (this.redial) {
+      this.redial = false;
+      if (wasOnline && this.running) return "redial";
+    }
     return wasOnline ? (this.running ? (this.setState("offline", "the connection closed"), "online-ended") : "stopped") : "the event stream ended";
   }
 
@@ -475,7 +500,8 @@ export class PeerLink {
       do {
         this.listAgain = false;
         try {
-          const response = await this.options.transport.request("threads", "", { method: "GET", headers: this.auth(), signal: AbortSignal.timeout(this.t.requestMs) });
+          // `grid=1` only while Grid is on here: that machine adds Grid's fields to its rows only then.
+          const response = await this.options.transport.request("threads", this.options.gridOn?.() === true ? "?grid=1" : "", { method: "GET", headers: this.auth(), signal: AbortSignal.timeout(this.t.requestMs) });
           if (!response.ok) continue;
           this.acceptList((await response.json()) as Json);
         } catch {
