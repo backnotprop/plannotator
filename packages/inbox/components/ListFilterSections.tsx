@@ -4,11 +4,13 @@
  * filters down to just those projects within that list").
  *
  * - A long section (Agent, Tag or Project with more than eight rows, listFilterSearch.ts) gets its own field under its
- *   heading ("Find an agent", "Find a tag", "Find a project") and a list of about seven rows that scrolls inside the
- *   menu. The rows ticked when the menu opened, or when its field last changed, come first in that scroll (inside its
- *   cap, so forty ticked tags never stretch the section); a row ticked meanwhile stays where it is, so nothing moves
- *   under the pointer or the keyboard. Typing narrows that section only,
- *   the match bold; nothing matching says so in that section ("No projects match “zzz”"). An × empties the field.
+ *   heading ("Find an agent", "Find a tag", "Find a project") and a list of seven rows and half the eighth that scrolls
+ *   inside the menu (the cut placed in CSS, the separator under the ticked rows counted: `--ib-lflt-pins`). The rows
+ *   ticked when the menu opened, or when its field last changed, come first in that scroll (inside its cap, so forty
+ *   ticked tags never stretch the section); a row ticked meanwhile stays where it is, so nothing moves under the
+ *   pointer or the keyboard. Typing narrows that section only, the match bold (in a ticked row too); the first match,
+ *   the row Enter acts on, is brought into view in the section's list as the words change (`showFirstMatch`); nothing
+ *   matching says so in that section ("No projects match “zzz”"). An × empties the field.
  * - A section of eight rows or fewer is the plain menu's: no field, no cap. Nothing sits at the menu's top.
  * - Keys: the field is a stop in the menu's ↑ ↓ order, between its heading and its first row. ↓ from the field goes to
  *   the first row under it, ↑ from that row back to the field; at the inner list's ends the arrows go on to the next
@@ -27,7 +29,7 @@
  *
  * Only drawn while the menu is open: its state (the words, the pins) starts afresh with each open.
  */
-import { Fragment, useId, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
@@ -74,7 +76,8 @@ function lit(label: string, hit: readonly [number, number] | null) {
   );
 }
 
-function drawRow({ row, hit }: FilterSearchRow<FilterRow>) {
+/** A row; `first`: the section's first match, the row Enter in its field acts on (`showFirstMatch` keeps it in view). */
+function drawRow({ row, hit }: FilterSearchRow<FilterRow>, first = false) {
   if (row.opens) {
     return (
       <Menu.Item key={row.key} className="ib-pmi" label={row.opens} onClick={row.onToggle} data-checked={row.on ? '' : undefined} {...row.data}>
@@ -95,10 +98,12 @@ function drawRow({ row, hit }: FilterSearchRow<FilterRow>) {
       checked={row.on}
       onCheckedChange={row.onToggle}
       closeOnClick={false}
+      data-list-filter-first={first ? '' : undefined}
       {...row.data}
     >
       {row.mark}
-      <span className="ib-pmi-l" dir="auto">
+      {/* `data-hit`: a ticked row's label drops to the plain rows' weight, so its match is drawn bold as theirs is. */}
+      <span className="ib-pmi-l" dir="auto" data-hit={hit ? '' : undefined}>
         {lit(row.label, hit)}
       </span>
       <span className="ib-pmi-n">{formatCount(count)}</span>
@@ -132,6 +137,29 @@ function goTo(to: HTMLElement | null) {
   if (!to) return;
   to.focus({ preventScroll: true });
   to.scrollIntoView?.({ block: 'nearest' });
+}
+
+/**
+ * The section's first match (the row Enter acts on) brought into view in its own list as the words change: forty
+ * ticked rows pinned above would leave it below the cut. Only that list scrolls (never the menu or the page), at once
+ * (no motion), and only when the row is not already in full view; it then sits under the lower half of the row before
+ * it, so the ticked rows above still show. One read of layout per change of the words, none per render.
+ */
+export function showFirstMatch(list: HTMLElement) {
+  const row = list.querySelector<HTMLElement>('[data-list-filter-first]');
+  if (!row) return;
+  const box = list.getBoundingClientRect();
+  const at = row.getBoundingClientRect();
+  const top = at.top - box.top + list.scrollTop;
+  if (top >= list.scrollTop && top + at.height <= list.scrollTop + list.clientHeight) return;
+  const rows = [...list.querySelectorAll<HTMLElement>('.ib-pmi')];
+  const before = rows[rows.indexOf(row) - 1];
+  if (!before) {
+    list.scrollTop = 0;
+    return;
+  }
+  const above = before.getBoundingClientRect();
+  list.scrollTop = Math.max(0, Math.round(above.top - box.top + list.scrollTop + above.height / 2));
 }
 
 /**
@@ -182,16 +210,16 @@ type ViewportLike = Pick<EventTarget, 'addEventListener' | 'removeEventListener'
  * the person scrolls the sheet themselves (a touch, a pen or the wheel anywhere but the field) it is theirs until the
  * field next takes focus.
  */
-export function bringUp(input: HTMLInputElement, viewport: ViewportLike | null = typeof window !== 'undefined' ? window.visualViewport : null) {
+export function bringUp(input: HTMLInputElement, viewport: ViewportLike | null = typeof window !== 'undefined' ? window.visualViewport : null): () => void {
   const menu = input.closest<HTMLElement>('[data-list-filter-menu]');
   const group = input.closest<HTMLElement>('[data-list-filter-long]');
-  if (!menu || !group) return;
+  if (!menu || !group) return () => {};
   const lift = () => {
     const pad = parseFloat(getComputedStyle(menu).paddingTop) || 0;
     menu.scrollTop += group.getBoundingClientRect().top - menu.getBoundingClientRect().top - pad;
   };
   lift();
-  if (!viewport) return;
+  if (!viewport) return () => {};
   const atFocus = viewport.height;
   let theirs = false;
   /** The keyboard is up (the viewport `KEYBOARD_RISE_PX` or more shorter than at focus). */
@@ -224,15 +252,16 @@ export function bringUp(input: HTMLInputElement, viewport: ViewportLike | null =
   const moves = ['touchstart', 'pointerdown', 'wheel'] as const;
   viewport.addEventListener('resize', onResize);
   for (const name of moves) menu.addEventListener(name, own, { capture: true, passive: true });
-  input.addEventListener(
-    'blur',
-    () => {
-      viewport.removeEventListener('resize', onResize);
-      clearTimeout(rising);
-      for (const name of moves) menu.removeEventListener(name, own, { capture: true });
-    },
-    { once: true },
-  );
+  /** Ends it: on blur, or (WebKit fires no blur when a focused node is removed) when the field goes with the menu. */
+  const stop = () => {
+    viewport.removeEventListener('resize', onResize);
+    clearTimeout(rising);
+    rising = undefined;
+    for (const name of moves) menu.removeEventListener(name, own, { capture: true });
+    input.removeEventListener('blur', stop);
+  };
+  input.addEventListener('blur', stop);
+  return stop;
 }
 
 function FindField({
@@ -256,6 +285,13 @@ function FindField({
   onEnter: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  /** The phone's lift while the field has focus (`bringUp`): ended on blur, and as the menu closes with focus here. */
+  const lifting = useRef<(() => void) | null>(null);
+  const endLift = () => {
+    lifting.current?.();
+    lifting.current = null;
+  };
+  useEffect(() => endLift, []);
   return (
     <div className="ib-lflt-find" data-list-filter-find-box="">
       <Icon name="search" />
@@ -266,9 +302,13 @@ function FindField({
         onChange={(event) => onChange(event.currentTarget.value)}
         onFocus={(event) => {
           onTyping(true);
-          if (phone) bringUp(event.currentTarget);
+          endLift();
+          if (phone) lifting.current = bringUp(event.currentTarget);
         }}
-        onBlur={() => onTyping(false)}
+        onBlur={() => {
+          endLift();
+          onTyping(false);
+        }}
         onKeyDown={(event) => {
           // During IME composition every key is the IME's: no step, no emptying, no close.
           if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
@@ -287,9 +327,10 @@ function FindField({
             event.preventDefault();
             onChange('');
           } else if (event.key === 'Enter') {
-            // As the one field this replaced did: the first match ticks or unticks; focus and the words stay.
+            // As the one field this replaced did: the first match ticks or unticks; focus and the words stay. A held
+            // Enter acts once (its repeats would flip the row on and off).
             event.preventDefault();
-            onEnter();
+            if (!event.repeat) onEnter();
           }
         }}
         // A search field, as Base UI's Menu.Input is (role searchbox, aria-controls on its list), so a screen reader in
@@ -361,17 +402,25 @@ export function FilterMenuRows({
   const back = useRef<HTMLInputElement | null>(null);
   const idBase = useId();
 
+  /** The section whose words changed: its first match is brought into view once its rows are drawn. */
+  const changed = useRef<string | null>(null);
+
   const setQuery = (id: string, text: string) => {
     held.current = status.current?.closest<HTMLElement>('[data-list-filter-menu]')?.scrollTop ?? null;
+    changed.current = id;
     setPins((was) => ({ ...was, ...pinsOf(sections, long, id) }));
     setQueries((was) => ({ ...was, [id]: text }));
     setLast(id);
   };
   useLayoutEffect(() => {
     const menu = status.current?.closest<HTMLElement>('[data-list-filter-menu]');
-    if (held.current === null || !menu) return;
-    holdScroll(menu, held.current, phone ? spacer.current : null);
+    const id = changed.current;
+    changed.current = null;
+    if (!menu) return;
+    if (held.current !== null) holdScroll(menu, held.current, phone ? spacer.current : null);
     held.current = null;
+    const list = id === null ? null : menu.querySelector<HTMLElement>(`[data-list-filter-long="${id}"] [data-list-filter-scroll]`);
+    if (list) showFirstMatch(list);
   }, [queries, phone]);
 
   const drawn = sections.filter((section) => section.rows.length > 0);
@@ -387,6 +436,8 @@ export function FilterMenuRows({
         const f = found.get(section.id);
         const query = queries[section.id] ?? '';
         const listId = `${idBase}-${section.id}`;
+        const first = f && firstMatch(f);
+        const parted = !!f && f.pinned.length > 0 && (f.rows.length > 0 || f.matches === 0);
         return (
           <Fragment key={section.id}>
             {i > 0 && <Menu.Separator className="ib-pm-sep" />}
@@ -425,17 +476,23 @@ export function FilterMenuRows({
                   phone={phone}
                   onChange={(text) => setQuery(section.id, text)}
                   onTyping={onTyping}
-                  onEnter={() => firstMatch(f)?.row.onToggle()}
+                  onEnter={() => first?.row.onToggle()}
                 />
-                {/* The ticked rows first, inside the same capped scroll, so a section never grows past its cap. */}
-                <div id={listId} className="ib-lflt-scroll" data-list-filter-scroll="">
+                {/* The ticked rows first, inside the same capped scroll, so a section never grows past its cap. Its
+                    cap (inbox.css) counts the separator under them when it sits above the cut: `--ib-lflt-pins`. */}
+                <div
+                  id={listId}
+                  className="ib-lflt-scroll"
+                  data-list-filter-scroll=""
+                  style={parted ? ({ '--ib-lflt-pins': f.pinned.length } as React.CSSProperties) : undefined}
+                >
                   {f.pinned.length > 0 && (
                     <div className="ib-lflt-pins" data-list-filter-pins="">
-                      {f.pinned.map(drawRow)}
+                      {f.pinned.map((item) => drawRow(item, item === first))}
                     </div>
                   )}
-                  {f.pinned.length > 0 && (f.rows.length > 0 || f.matches === 0) && <div className="ib-pm-sep" aria-hidden="true" />}
-                  <div data-list-filter-rows="">{f.rows.map(drawRow)}</div>
+                  {parted && <div className="ib-pm-sep" aria-hidden="true" />}
+                  <div data-list-filter-rows="">{f.rows.map((item) => drawRow(item, item === first))}</div>
                 </div>
                 {f.searching && f.matches === 0 && (
                   <div className="ib-lflt-none" data-list-filter-none="">

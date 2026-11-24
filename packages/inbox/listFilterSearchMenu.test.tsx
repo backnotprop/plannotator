@@ -12,7 +12,9 @@
  * the field by the menu's type-ahead or its row keys; the type-ahead gone from the plain rows; Escape closing before it
  * empties the field, or Escape on a row leaving the words; IME composition keys acting; the × without a name or leaving
  * focus nowhere; hover taking focus from the field, or a click on a row leaving focus on the row; a field appearing or
- * going while the menu is open; the menu's scroll not held as the rows run out.
+ * going while the menu is open; the menu's scroll not held as the rows run out; with forty ticked rows, the row Enter
+ * acts on left out of view, or a held Enter flipping it on and off; the phone's viewport listener left behind when the
+ * sheet closes with the field focused.
  *
  * Scroll chaining at the inner list's ends, the phone's momentum and keyboard are browser checks:
  * tests/e2e/inbox-filter-section-fields.spec.ts.
@@ -29,7 +31,7 @@ import type { ThreadTagsHost } from './threadTags';
 
 const hasDom = typeof document !== 'undefined';
 const { ListFilterButton } = (hasDom ? await import('./components/ListFilter') : {}) as typeof import('./components/ListFilter');
-const { holdScroll, bringUp } = (hasDom ? await import('./components/ListFilterSections') : {}) as typeof import('./components/ListFilterSections');
+const { holdScroll, bringUp, showFirstMatch } = (hasDom ? await import('./components/ListFilterSections') : {}) as typeof import('./components/ListFilterSections');
 const { ThreadTagsContext } = await import('./threadTags');
 const { NO_LIST_FILTER, resetListFilterForTests } = await import('./listFilter');
 const { TITLE_FILTER_LABEL } = await import('./listTitleFilter');
@@ -262,7 +264,9 @@ describe.skipIf(!hasDom)('a long section', () => {
     expect(menu()!.querySelector('.ib-pmi')!.hasAttribute('data-list-filter-title')).toBe(true);
     expect(menu()!.querySelector('input') === input).toBe(true);
     expect($('[data-list-filter-group="tags"] [data-list-filter-find]')).toBeNull();
-    // A click open leaves focus in the menu, not in a field.
+    // A click open leaves focus in the menu, not in a field, once Base UI's opening focus has landed (a frame on;
+    // happy-dom finds no field to focus, so the browser check is tests/e2e/inbox-filter-section-fields.spec.ts).
+    await wait(60);
     expect(document.activeElement === input).toBe(false);
   });
 
@@ -367,6 +371,25 @@ describe.skipIf(!hasDom)('a long section', () => {
     expect(scroll.firstElementChild === pins).toBe(true);
   });
 
+  test('forty ticked tags and words typed: the row Enter acts on is the one marked to be kept in view', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => `tag-${String(i).padStart(2, '0')}`);
+    render(['api', 'web'], { ...NO_LIST_FILTER, tags: many.slice(0, 40).map((_, i) => `tag_${i}`) }, many);
+    await press(funnel());
+    const marked = () => [...group('tags').querySelectorAll('[data-list-filter-first]')].map((n) => n.querySelector('.ib-pmi-l')!.textContent);
+    expect(marked()).toEqual([]);
+    // Below all forty ticked rows: the first match that is not ticked.
+    await type('tags', 'tag-5');
+    expect(pinned('tags')).toHaveLength(40);
+    expect(marked()).toEqual(['tag-50']);
+    await key('Enter');
+    expect(picks.tags).toContain('tag_50');
+    // A ticked row that matches comes first, and is the one marked.
+    await type('tags', 'tag-07');
+    expect(marked()).toEqual(['tag-07']);
+    await key('Enter');
+    expect(picks.tags).not.toContain('tag_7');
+  });
+
   test('200 tags: only Tag gets a field; typing finds the few, a ticked one pinned above them', async () => {
     const many = Array.from({ length: 200 }, (_, i) => `tag-${String(i).padStart(3, '0')}`);
     many[17] = 'Billing ✨';
@@ -450,6 +473,22 @@ describe.skipIf(!hasDom)('keys', () => {
     // Ticked here, it stays where it was: Enter again unticks it.
     await key('Enter');
     expect(picks.projects).toEqual([]);
+    expect(document.activeElement === field('projects')).toBe(true);
+  });
+
+  test('a held Enter acts once: its repeats do not flip the row back and forth', async () => {
+    render(LONG);
+    await press(funnel());
+    await type('projects', 'bil');
+    await key('Enter');
+    expect(picks.projects).toEqual(['prj_billing']);
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => {
+        document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true }));
+      });
+      await settle();
+    }
+    expect(picks.projects).toEqual(['prj_billing']);
     expect(document.activeElement === field('projects')).toBe(true);
   });
 
@@ -624,6 +663,54 @@ describe.skipIf(!hasDom)('the scroll held as rows run out', () => {
   });
 });
 
+describe.skipIf(!hasDom)('the first match kept in view as the words change', () => {
+  /** A list 247 px tall (seven rows and a half) of 33 px rows, the separator 8 px more after `pins` of them. */
+  function list(count: number, pins: number, target: number) {
+    const el = document.createElement('div');
+    let top = 0;
+    Object.defineProperty(el, 'scrollTop', { get: () => top, set: (v: number) => (top = v) });
+    Object.defineProperty(el, 'clientHeight', { get: () => 247 });
+    el.getBoundingClientRect = () => ({ top: 100, height: 247 }) as DOMRect;
+    const rows: HTMLElement[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const r = document.createElement('div');
+      r.className = 'ib-pmi';
+      if (i === target) r.setAttribute('data-list-filter-first', '');
+      const at = i * 33 + (i >= pins && pins > 0 ? 8 : 0);
+      r.getBoundingClientRect = () => ({ top: 100 + at - top, height: 32 }) as DOMRect;
+      el.append(r);
+      rows.push(r);
+    }
+    const shown = (i: number) => {
+      const at = rows[i]!.getBoundingClientRect().top - 100;
+      return at >= 0 && at + 32 <= 247;
+    };
+    return { el, shown, scroll: () => top, setScroll: (v: number) => (top = v) };
+  }
+
+  test('forty ticked rows above it: the first match below the cut comes into full view, half the row above it showing', () => {
+    const l = list(60, 40, 40);
+    expect(l.shown(40)).toBe(false);
+    showFirstMatch(l.el);
+    expect(l.shown(40)).toBe(true);
+    // The last ticked row's lower half shows above the separator and the match.
+    expect(l.scroll()).toBe(39 * 33 + 16);
+  });
+
+  test('already in full view: the list does not move; above the view (scrolled past it) it comes back', () => {
+    const l = list(60, 4, 4);
+    showFirstMatch(l.el);
+    expect(l.scroll()).toBe(0);
+    l.setScroll(600);
+    showFirstMatch(l.el);
+    expect(l.shown(4)).toBe(true);
+    const first = list(20, 0, 0);
+    first.setScroll(300);
+    showFirstMatch(first.el);
+    expect(first.scroll()).toBe(0);
+  });
+});
+
 describe.skipIf(!hasDom)("a phone's field brought to the sheet's top", () => {
   /** A sheet whose section sits 200 px below its top at scroll 0, a field in it, and a visual viewport 800 px tall. */
   function sheet() {
@@ -693,6 +780,29 @@ describe.skipIf(!hasDom)("a phone's field brought to the sheet's top", () => {
     await s.resize(450);
     expect(s.scroll()).toBe(320);
     s.done();
+  });
+
+  test('the sheet closing with the field focused lets go of the viewport, though no blur comes (WebKit)', async () => {
+    const listening = new Set<unknown>();
+    const fake = { height: 800, addEventListener: (_: string, fn: unknown) => void listening.add(fn), removeEventListener: (_: string, fn: unknown) => void listening.delete(fn) };
+    const was = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+    Object.defineProperty(window, 'visualViewport', { value: fake, configurable: true });
+    try {
+      render(LONG, NO_LIST_FILTER, [], true);
+      await press(funnel());
+      const before = new Set(listening);
+      await focusOn(field('projects')!);
+      // The field's own listener (the sheet's keyboard watch, phone.ts, has its own).
+      const own = [...listening].filter((fn) => !before.has(fn));
+      expect(own).toHaveLength(1);
+      // The menu goes with focus still in the field (no blur reaches it, as in WebKit).
+      await act(async () => root!.unmount());
+      root = null;
+      expect(listening.has(own[0])).toBe(false);
+    } finally {
+      if (was) Object.defineProperty(window, 'visualViewport', was);
+      else delete (window as { visualViewport?: unknown }).visualViewport;
+    }
   });
 
   test('a touch on the field itself is not the person scrolling; after blur nothing moves it', async () => {

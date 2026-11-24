@@ -381,6 +381,12 @@ function FilterMenu({
   // A field has focus: the pointer only hovers rows then (Base UI's hover would move focus from the field to the row).
   const [typing, setTyping] = useState(false);
   if (!open && typing) setTyping(false);
+  const popup = useRef<HTMLDivElement>(null);
+  // Base UI puts focus on the popup's first tabbable element as it opens. After a click or a tap no row is tabbable
+  // yet, so that was a long section's field (its line drawn as focused, the pointer's hover off, a phone's keyboard
+  // rising): the popup itself takes focus instead, as in a menu with no field. A keyboard open is Base UI's as always
+  // (its first row). `initialFocus` is Base UI's own (MenuPopup passes it on) but not in its types.
+  const initialFocus = { initialFocus: (type: string) => (type === 'keyboard' ? true : (popup.current ?? true)) };
 
   return (
     <Menu.Root handle={handle} open={open} onOpenChange={onOpenChange} modal={phone} highlightItemOnHover={!typing}>
@@ -388,6 +394,8 @@ function FilterMenu({
         {phone && <Menu.Backdrop className="ib-pm-scrim" />}
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined} data-list-filter-fields={fields}>
           <Menu.Popup
+            ref={popup}
+            {...initialFocus}
             className="ib-pm ib-pc-menu ib-lflt-menu"
             aria-label="Filter"
             finalFocus={finalFocus}

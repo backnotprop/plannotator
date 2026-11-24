@@ -12235,9 +12235,14 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-lflt-none { padding: 8px 8px 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: normal; overflow-wrap: anywhere; }
 .ib-lflt-hit { font-weight: 650; }
 .ib-lflt-menu .ib-lflt-find { margin-bottom: 2px; }
-/* A long section's rows: about seven, then they scroll inside the menu (half a row shows there is more). No
+/* A long section's rows: seven, then they scroll inside the menu, the cut always through the middle of the eighth row
+   so half a row shows there is more. Rows are 32 px with 1 px between; the separator under the ticked rows
+   (ListFilterSections.tsx sets `--ib-lflt-pins` to their number while it is drawn) is 9 px where the gap was 1, so
+   when it sits above the cut the cut moves down by 8 px. No layout read: the number alone places it. No
    overscroll-behavior: at either end a wheel, a trackpad or a thumb goes on to scroll the menu or the sheet. */
-.ib-lflt-scroll { max-height: calc(7.5 * 32px); overflow-y: auto; }
+.ib-lflt-scroll { --ib-lflt-row: 32px; --ib-lflt-whole: 7; max-height: calc(var(--ib-lflt-whole) * (var(--ib-lflt-row) + 1px) + var(--ib-lflt-row) / 2 + 8px * clamp(0, var(--ib-lflt-whole) + 1 - var(--ib-lflt-pins, 99), 1)); overflow-y: auto; }
+/* A ticked row's label is drawn heavier; with a match in it, it takes the plain rows' weight so the match shows bold. */
+.ib-lflt-menu .ib-pmi[data-checked] .ib-pmi-l[data-hit] { font-weight: 400; }
 /* One width while a section has a field: the menu is as wide as its widest row could make it, so rows going away
    never narrow it and move its left edge under the pointer. */
 .ib-pm.ib-pc-menu.ib-lflt-menu[data-list-filter-fields] { width: 300px; }
@@ -12293,9 +12298,9 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
   .pn-inbox .ib-lflt { width: 44px; height: 44px; border-radius: 8px; color: var(--foreground); }
   .pn-inbox .ib-lflt:hover, .pn-inbox .ib-lflt[data-popup-open] { background: none; }
   .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu { max-height: 72vh; }
-  /* The phone's sheet: each long section's field a thumb's height, 16px so iOS does not zoom; its rows about five
-     and a half (48 px each), scrolling with momentum and handing on to the sheet at their ends. */
-  .ib-pm-pos[data-phone] .ib-lflt-scroll { max-height: calc(5.5 * 48px); }
+  /* The phone's sheet: each long section's field a thumb's height, 16px so iOS does not zoom; its rows five and a half
+     (48 px each, the cut placed as on a desktop), scrolling with momentum and handing on to the sheet at their ends. */
+  .ib-pm-pos[data-phone] .ib-lflt-scroll { --ib-lflt-row: 48px; --ib-lflt-whole: 5; }
   .ib-pm-pos[data-phone] .ib-lflt-find { gap: 12px; padding: 0 2px 0 12px; }
   .ib-pm-pos[data-phone] .ib-lflt-find > svg.ib-ic { width: 18px; height: 18px; }
   .pn-inbox .ib-pm-pos[data-phone] .ib-lflt-find input { height: 48px; font-size: var(--ib-fs-16-in, 16px); }
