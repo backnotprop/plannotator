@@ -6,6 +6,11 @@
  * agent's or a script's bare call through the forward reads and attaches nothing.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { diagramReplyTarget, diagramThreadReply } from "../inbox/ask/diagramThreadReply";
+import { artifactKey, threadArtifacts } from "../inbox/artifacts";
+import { diagramFileAsk } from "../inbox/ask/sideSource";
+import type { AttachmentView } from "../inbox/api";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -42,11 +47,11 @@ async function windowPost(m: Machine, path: string, body: Json): Promise<Respons
 /** The same request as an agent's or a script's bare call makes it. */
 const barePost = (m: Machine, path: string, body: Json) => fetch(`${base(m)}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-async function agentNames(m: Machine): Promise<{ id: string; thread: string }> {
+async function agentNames(m: Machine, extra: Json = {}): Promise<{ id: string; thread: string }> {
   const client = new Client({ name: "inbox-file-refs-linked", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base(m)}/mcp`)));
   try {
-    const sent = (await client.callTool({ name: "send_message", arguments: { body: "The plan is in `docs/plan.md`; start at step 2.", project_path: m.w.project, agent_session: `ses-${m.name}`, agent_host: "claude-code" } })) as { structuredContent: { thread_id: string; message_id: string } };
+    const sent = (await client.callTool({ name: "send_message", arguments: { body: "The plan is in `docs/plan.md`; start at step 2.", project_path: m.w.project, agent_session: `ses-${m.name}`, agent_host: "claude-code", ...extra } })) as { structuredContent: { thread_id: string; message_id: string } };
     return { id: sent.structuredContent.message_id, thread: sent.structuredContent.thread_id };
   } finally {
     await client.close().catch(() => {});
@@ -102,6 +107,154 @@ describe("a file a message names, on a linked machine's thread, two real Inboxes
       [A, B],
       [B, A],
     ] as const;
+
+  test("native pin envelopes retain their anchors and replay their receipts through each linked door", async () => {
+    for (const [here, there] of both()) {
+      const remote = `/api/inbox/m/${there.id}`;
+      const contents = JSON.stringify({ title: "Delivery", columns: [{ id: "queue", title: "Queue" }] });
+      writeFileSync(join(there.w.project, "pins.diagram.json"), contents);
+      const { id, thread } = await agentNames(there, { subject: "Review pins", body: ["```plannotator-diagram", contents, "```"].join("\n"), attachments: ["pins.diagram.json"] });
+      const { attachments: [file] } = await getJson(there, `/api/inbox/threads/${thread}/attachments`);
+      const anchor = { v: 1, family: "plannotator-diagram", kind: "node", id: "queue", label: "Queue", sourceLine: null, point: { kind: "panel", x: .34, y: .7 } };
+      const pin = { id: crypto.randomUUID(), type: "COMMENT", text: "Show the retry path", originalText: "Queue",
+        blockId: "block-0", startOffset: 0, endOffset: 0, createdA: Date.now(), diagramAnchor: anchor };
+      const fileWrite = { idempotency_key: crypto.randomUUID(), attachment_id: file.id, version: file.sent_sha256, diagram_annotation: pin };
+      const messageWrite = { idempotency_key: crypto.randomUUID(), diagram_annotation: { ...pin, id: crypto.randomUUID() } };
+      for (const [path, body] of [[`${remote}/annotations`, fileWrite], [`${remote}/messages/${id}/annotations`, messageWrite]] as const) {
+        const save = await windowPost(here, path, body);
+        expect(save.status, await save.text()).toBe(200);
+        const replay = await windowPost(here, path, body);
+        expect(replay.status).toBe(200);
+        expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+      }
+      const records = (await getJson(there, `/api/inbox/threads/${thread}/attachments`)).annotations;
+      expect(records.filter((row: Json) => row.id === pin.id || row.id === messageWrite.diagram_annotation.id).map((row: Json) => row.annotation.diagramAnchor)).toEqual([anchor, anchor]);
+    }
+  }, 30_000);
+
+  test("a diagram is read, annotated and questioned on its owning machine in both directions", async () => {
+    for (const [here, there] of both()) {
+      const source = JSON.stringify({ title: `Delivery on ${there.name}`, columns: [{ id: "queue", title: "Queue" }] });
+      writeFileSync(join(there.w.project, "delivery.diagram.json"), source);
+      const client = new Client({ name: "diagram-review", version: "1" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${base(there)}/mcp`)));
+      try {
+        const sent = await client.callTool({ name: "send_message", arguments: {
+          body: "Please review the delivery path.", subject: "Delivery", attachments: ["delivery.diagram.json"],
+          project_path: there.w.project, agent_session: "diagram-author", agent_host: "codex",
+        } });
+        const thread = (sent.structuredContent as Json).thread_id;
+        const listing = await getJson(there, `/api/inbox/threads/${thread}/attachments`);
+        const attachment = listing.attachments[0];
+        expect(attachment.kind).toBe("plannotator-diagram");
+        const remote = `/api/inbox/m/${there.id}`;
+        const draft = "Ordinary reply still in progress";
+        expect((await windowPost(there, `/api/inbox/threads/${thread}/draft`, { body: draft, base: null })).status).toBe(200);
+        const send = diagramThreadReply(async (id, input) => {
+          const read = await (await windowGet(here, `${remote}/threads/${thread}`)).json();
+          const response = await windowPost(here, `${remote}/messages/${id}/reply`, { ...input, seen_through_seq: read.cursor });
+          const result = await response.json();
+          expect(response.status, JSON.stringify(result)).toBe(200);
+          return result;
+        }, held => expect(held).toBe(false));
+        const revised = JSON.stringify({ title: `Revised on ${there.name}`, columns: [{ id: "queue", title: "Checkout queue" }] });
+        writeFileSync(join(there.w.project, "delivery.diagram.json"), revised);
+        for (const [version, content] of [["sent", source], ["current", revised]] as const) {
+          const response = await windowGet(here, `${remote}/attachments/${attachment.id}/view?version=${version}`);
+          const view = await response.json() as AttachmentView;
+          const sha = createHash("sha256").update(content).digest("hex");
+          expect(view).toMatchObject({ text: content, version: version === "sent" ? attachment.sent_sha256 : "current" });
+          let context = "";
+          diagramFileAsk(view, (_question, source) => { context = source ?? ""; })!("Where are retries handled?", { kind: "selection", detail: "panel queue" });
+          expect(version === "sent" ? view.version : view.attachment.current?.sha256).toBe(sha);
+          expect(context).toContain(`Version: ${view.version}`);
+          expect(context).not.toContain("SHA-256:");
+          expect(context).toContain(`Attachment: ${attachment.id}`);
+          const ask = diagramFileAsk(view, undefined, send)!;
+          expect(ask.destination).toBe("thread");
+          expect(await ask(`Where are retries handled in ${version}?`, { kind: "selection", diagramScope: "Asset: delivery\npanel: Queue (queue)", detail: "full diagram text" })).toBe(true);
+          const ownerRead = await client.callTool({ name: "read_thread", arguments: { thread_id: thread, format: "full" } });
+          const reply = (ownerRead.structuredContent as Json).thread.messages.at(-1);
+          expect(reply.author.kind).toBe("person");
+          expect(reply.body).toContain(`Where are retries handled in ${version}?`);
+          expect(reply.body).toContain("panel: Queue (queue)");
+          expect(reply.body).toContain(`Version: ${view.version}`);
+          expect(reply.body).not.toContain("SHA-256:");
+          expect(reply.body).toContain(`Attachment: ${attachment.id}`);
+          expect(reply.body).not.toContain("full diagram text");
+          expect((await getJson(there, `/api/inbox/threads/${thread}/draft`)).draft.body).toBe(draft);
+        }
+        // A person can attach a diagram to their own reply. Questions still reach the thread's agent.
+        const { serverSession } = await getJson(there, "/api/inbox/health");
+        const upload = await fetch(`${base(there)}/api/inbox/uploads?name=mine.diagram.json&serverSession=${serverSession}`, { method: "POST", body: source });
+        expect(upload.status).toBe(200);
+        const { upload: file } = await upload.json();
+        const attached = await windowPost(there, `/api/inbox/messages/${attachment.message_id}/reply`, { idempotency_key: crypto.randomUUID(), words: "My diagram", uploads: [file.upload_id] });
+        expect(attached.status).toBe(200);
+        const personFile = (await getJson(there, `/api/inbox/threads/${thread}/attachments`)).attachments.find((item: Json) => item.name === "mine.diagram.json");
+        const personView = await (await windowGet(here, `${remote}/attachments/${personFile.id}/view?version=sent`)).json() as AttachmentView;
+        const personThread = await (await windowGet(here, `${remote}/threads/${thread}`)).json();
+        const target = diagramReplyTarget(personThread.thread, personFile.message_id);
+        expect(target).toBe(attachment.message_id);
+        expect(personFile.message_id).not.toBe(target);
+        await diagramFileAsk(personView, undefined, (_id, question, source) => send(target!, question, source))!(
+          "Do you see my diagram?", { kind: "selection", diagramScope: "panel: Queue (queue)" });
+        const readMine = await client.callTool({ name: "read_thread", arguments: { thread_id: thread, format: "full" } });
+        const question = (readMine.structuredContent as Json).thread.messages.at(-1);
+        expect(question.body).toContain("Do you see my diagram?");
+        expect(question.body).toContain(`Message: ${personFile.message_id}`);
+        expect(question.body).toContain(`Attachment: ${personFile.id}`);
+        expect(question.body).toContain(`Version: ${personFile.sent_sha256}`);
+        expect(question.body).not.toContain("SHA-256:");
+        const anchor = { v: 1, family: "plannotator-diagram", kind: "node", id: "queue", label: "Queue", sourceLine: null, point: { kind: "panel", x: 0.34, y: 0.7 } };
+        const save = await windowPost(here, `${remote}/annotations`, { idempotency_key: crypto.randomUUID(), attachment_id: attachment.id, version: attachment.sent_sha256,
+          annotation: { id: crypto.randomUUID(), type: "COMMENT", text: "Show the retry path", originalText: "Queue", blockId: "block-0", startOffset: 0, endOffset: 0, createdA: Date.now(), diagramAnchor: anchor },
+        });
+        expect(save.status, await save.text()).toBe(200);
+        const onOwner = await getJson(there, `/api/inbox/threads/${thread}/attachments`);
+        expect(onOwner.annotations).toContainEqual(expect.objectContaining({
+          attachment_id: attachment.id, version: attachment.sent_sha256, annotation: expect.objectContaining({ diagramAnchor: anchor }),
+        }));
+      } finally {
+        await client.close();
+      }
+    }
+  }, 30_000);
+
+  test("linked artifact tiles follow a verified file across an agent restart, leaving a copied diagram separate", async () => {
+    for (const [here, there] of both()) {
+      const files = ["lineage.diagram.json", "separate.diagram.json"];
+      const source = JSON.stringify({ id: "same-root-id", title: "Delivery", columns: [{ title: "Queue" }] });
+      for (const file of files) writeFileSync(join(there.w.project, file), source);
+      const client = new Client({ name: "diagram-lineage", version: "1" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${base(there)}/mcp`)));
+      try {
+        async function send(session: string, attachments: string[], replyTo?: string) {
+          const result = await client.callTool({ name: "send_message", arguments: {
+            project_path: there.w.project, agent_host: "codex", agent_session: session, attachments,
+            body: "Review these drawings.", reply_to: replyTo,
+          } });
+          expect(result.isError).not.toBe(true);
+          return result.structuredContent as Json;
+        }
+        const first = await send("lineage-original", files);
+        const next = await send("lineage-restarted", [files[0]!], first.message_id);
+        expect(next.thread_id).toBe(first.thread_id);
+        const remote = `/api/inbox/m/${there.id}/threads/${first.thread_id}`;
+        const read = await (await windowGet(here, remote)).json();
+        const listing = await (await windowGet(here, remote + "/attachments")).json();
+        const [old, copy] = read.thread.messages[0].attachments;
+        const [latest] = read.thread.messages[1].attachments;
+        const rows = threadArtifacts(read.thread.messages, listing.attachments);
+        const verified = !!old.diagram_file_id && old.diagram_file_id === latest.diagram_file_id;
+        expect(rows.map(artifactKey).sort()).toEqual((verified ? [old.id, copy.id] : [old.id, copy.id, latest.id]).sort());
+        const current = rows.find(row => artifactKey(row) === (verified ? old.id : latest.id));
+        expect(current?.type === "file" && current.attachment.id).toBe(latest.id);
+      } finally {
+        await client.close();
+      }
+    }
+  });
 
   test("each machine offers file refs on the other's threads: its list names the mark", async () => {
     for (const [here, there] of both()) {

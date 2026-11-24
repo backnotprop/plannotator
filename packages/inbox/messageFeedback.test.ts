@@ -13,7 +13,7 @@ import { splitInboxSkillsBlock, INBOX_REPLY_SKILL_AUDIENCE } from '@plannotator/
 import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { messageFeedback, recordTag } from './attachments';
 import { inboxSkillsBlock, withSkillsBlock } from './skills';
-import { routeSendAnnotations, sendTargetsOf } from './sendTargets';
+import { routeReplyContents, routeSendAnnotations, sendTargetsOf } from './sendTargets';
 
 const AT = '2026-10-19T21:58:00.000Z';
 const time = () => '2:58 PM';
@@ -166,6 +166,32 @@ describe('which reply a comment rides', () => {
     const routed = routeSendAnnotations(t, sendTargetsOf(t), [record('c1', 'retry', 'Cap it.', {}, 'msg_A')]);
     expect(routed.targets.map((x) => x.message.id)).toEqual(['msg_A2']);
     expect(routed.carried.get('msg_A2')!.map((r) => r.id)).toEqual(['c1']);
+  });
+
+  test('a diagram attachment comment goes to its agent when a different agent writes last', () => {
+    const t = thread([message('msg_A', 'ses_a'), message('msg_B', 'ses_b')]);
+    const file = { ...record('f1', 'x', 'y', {}, 'msg_A'), message: undefined, attachment_id: 'att_1', path: '/p/a.diagram.json' };
+    file.annotation.diagramAnchor = { v: 1, family: 'plannotator-diagram', id: 'a', kind: 'node', label: 'A', sourceLine: null, point: { kind: 'panel', x: .5, y: .5 } };
+    const routed = routeReplyContents(t, sendTargetsOf(t), [file], false);
+    expect(routed.targets.map(target => target.message.id)).toEqual(['msg_A']);
+    expect(routeReplyContents(t, sendTargetsOf(t), [file], true).targets.map(target => target.message.id)).toEqual(['msg_A', 'msg_B']);
+    expect(routed.carried.get('msg_A')?.map(r => r.id)).toEqual(['f1']);
+    expect(routed.carried.has('msg_B')).toBe(false);
+  });
+
+  test('ordinary words alone go to the most recent agent', () => {
+    const t = thread([message('msg_A', 'ses_a'), message('msg_B', 'ses_b')]);
+    const routed = routeReplyContents(t, sendTargetsOf(t), [], true);
+    expect(routed.targets.map(target => target.message.id)).toEqual(['msg_B']);
+    expect(routed.carried.size).toBe(0);
+  });
+
+  test.each([true, false])('a plain file comment stays on the ordinary reply (with words: %s)', (hasWords) => {
+    const t = thread([message('msg_A', 'ses_a'), message('msg_B', 'ses_b')]);
+    const file = { ...record('f1', 'quote', 'comment', {}, 'msg_A'), message: undefined, attachment_id: 'att_1', path: '/p/a.md' };
+    const routed = routeReplyContents(t, sendTargetsOf(t), [file], hasWords);
+    expect(routed.targets.map(target => target.message.id)).toEqual(['msg_B']);
+    expect([...routed.carried]).toEqual([['msg_B', [file]]]);
   });
 
   test('a file comment rides the last reply', () => {

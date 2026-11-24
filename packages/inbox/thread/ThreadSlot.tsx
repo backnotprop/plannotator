@@ -13,7 +13,7 @@ import { machineOf } from '../inboxUrl';
 import { machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from '../machines';
 import { MAIN_PANE, type PaneId } from '../panes/model';
 import type { PaneOnScreen } from '../panes/onScreen';
-import { PaneScopeContext } from '../panes/scope';
+import { DiagramThreadScope } from '../ask/DiagramThreadScope';
 import { priorityAction } from '../priority';
 import { threadLink } from '../rowMenu';
 import { threadBoardCard } from '../steps/model';
@@ -84,8 +84,9 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
     reportScreen();
   });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
+  const side = threadId === route.thread && !machineOf(threadId) && !phone ? host.ask.side : undefined;
   return (
-    <PaneScopeContext.Provider value={scope}>
+    <DiagramThreadScope scope={scope} thread={thread} side={side} showToast={host.showToast} afterWrite={host.afterWrite}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
           and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
       {threadId && !ready && ((!phone && !stack.thread) || awayWait) && (
@@ -199,7 +200,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           draftSignal={host.draftSignals.of(thread.thread_id)}
           filesSignal={host.filesSignals.of(thread.thread_id)}
           onReplyOpened={() => host.setReplyFor(null)}
-          onSide={host.ask.side}
+          onSide={side}
           onSideWords={host.ask.sideWords}
           replyWords={host.askReply?.threadId === thread.thread_id ? host.askReply.words : null}
           onReplyWordsTaken={() => host.setAskReply(null)}
@@ -276,6 +277,6 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           }}
         />
       )}
-    </PaneScopeContext.Provider>
+    </DiagramThreadScope>
   );
 }

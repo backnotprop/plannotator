@@ -25,7 +25,7 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
-import { bundledSkillPaths } from "./bundled-skill.ts";
+import { BUNDLED_DIAGRAM_SKILL_PATH, bundledSkillPaths } from "./bundled-skill.ts";
 import { buildPromptVariables, formatTodoList, loadPlannotatorConfig, renderTemplate, resolveExecutionMode, resolvePhaseProfile } from "./config.ts";
 import {
 	type ChecklistItem,
@@ -549,7 +549,8 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	// static `pi.skills` manifest entry, so it can yield to the copy the CLI
 	// installer puts in ~/.agents/skills instead of colliding with it (#1642).
 	pi.on("resources_discover", () => {
-		const skillPaths = bundledSkillPaths(pi.getCommands());
+		const commands = pi.getCommands();
+		const skillPaths = [...bundledSkillPaths(commands), ...bundledSkillPaths(commands, BUNDLED_DIAGRAM_SKILL_PATH, "diagram")];
 		return skillPaths.length > 0 ? { skillPaths } : undefined;
 	});
 

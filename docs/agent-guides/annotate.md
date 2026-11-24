@@ -212,3 +212,9 @@ The advertised `appUrl` is the proxy under its LOCALHOST spelling with the targe
 **Live restore resilience:** a `find-and-mark` that resolves nothing in live mode keeps its record, seeded with unresolved placeholder targets from the durable anchor/text params, so the mutation-driven reconcile re-acquires the pin once a lazy route or data-dependent tree finishes rendering. Srcdoc restores keep the old fail-closed drop (a static document would never re-resolve).
 
 **Known limitations (documented, not bugs):** hardcoded absolute origins in the app, origin-pinned CORS to secondary APIs, and OAuth `redirect_uri` flows land outside the proxy; frame-busting apps break the wrapper; content-encoded HTML that survives the encoding strip renders without the bridge; cross-page annotation clicks do not navigate; a redirect to a DIFFERENT loopback service (another port) is passed through un-rewritten and the iframe leaves the proxy, which is why the probe refuses such targets up front. Manual smoke loop: `scripts/live-annotate-smoke.sh` (not CI).
+
+## Measured diagrams
+
+Run `plannotator diagram new checkout` to create a starter under the configured Plannotator data directory for this project. The command prints its absolute path. An explicit path such as `./checkout.diagram.json` creates the file there. Keep its top-level ID and its part IDs when revising it.
+
+Open the source with `plannotator annotate checkout.diagram.json`. Select a panel, boundary, section, or connection to inspect its references or leave a numbered comment. Submit feedback through Annotate as usual. A self-contained `plannotator-diagram` fenced block uses the same canvas in a plan. For a static SVG, run `plannotator diagram render checkout.diagram.json -o checkout.svg`.

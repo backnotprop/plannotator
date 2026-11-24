@@ -43,7 +43,22 @@ describe("pi annotate server: diagram sources", () => {
 		else process.env.PLANNOTATOR_ANNOTATE_HISTORY = savedHistory;
 	});
 
-	test("/api/plan names the engine and keeps the raw text", async () => {
+	test("a native diagram opens as itself, both as the root and through a plan link", async () => {
+    const text = JSON.stringify({ title: "Order flow", columns: [{ id: "receive", title: "Receive" }] });
+    const file = join(dir, "orders.diagram.json");
+    writeFileSync(file, text);
+    const server = await startAnnotateServer({ markdown: text, filePath: file, htmlContent: MINIMAL_HTML });
+    try {
+      const plan = await (await fetch(`${server.url}/api/plan`)).json();
+      expect(plan).toMatchObject({ plan: text, renderAs: "plannotator-diagram" });
+      const sibling = await (await fetch(`${server.url}/api/doc?path=${encodeURIComponent(file)}`)).json();
+      expect(sibling).toMatchObject({ markdown: text, renderAs: "plannotator-diagram" });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("/api/plan names the engine and keeps the raw text", async () => {
 		const file = join(dir, "flow.mmd");
 		writeFileSync(file, MERMAID, "utf-8");
 		const server = await startAnnotateServer({ markdown: MERMAID, filePath: file, htmlContent: MINIMAL_HTML });

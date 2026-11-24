@@ -6,6 +6,7 @@
  * - an approval call is ever planned (a tool's is always refused), or Details lists an approval that is not up;
  * - the button reads the wrong word for where the share stands.
  */
+import { parseDiagramAnchor } from "./diagram-anchor";
 import { describe, expect, test } from "bun:test";
 import { isPlanAssetPath, planId, type PlanComment } from "./plans";
 import { isSpaceShareRecord, spaceCommentAnchor, spaceExternalKey, spaceImportedFields, spaceFilePath, isSpacePath, newSpaceId, newSpaceShareRecord, planSpaceShare, spaceKeepApproval, SPACE_FILE_MAX, SPACE_OPEN_FILES_MAX, SPACE_TEXT_MAX, spaceShareButton, spacePagePath, isSpaceId, type LocalSpace, type SpaceShareStatus } from "./space-share";
@@ -105,6 +106,10 @@ describe("the steps", () => {
     expect(spaceCommentAnchor(comment("Z", { text: "x", originalText: "q", author: "swift-otter", mentions: ["@maya"], createdA: 1, images: [{ path: "/p.png", name: "p" }] }))).toEqual({ id: "Z", text: "x", originalText: "q" });
     // An allow-list: a tool, page, PR and artifact addresses, an element's description and anything unknown stay; the
     // id and an answer to a question go, as the space's parsers read them.
+    const nativeAnchor = { v: 1, family: "plannotator-diagram", kind: "node", id: "worker", label: "Worker", sourceLine: null, point: { kind: "panel", x: 0.25, y: 0.7 } };
+    const shared = spaceCommentAnchor(comment("D", { diagramAnchor: { ...nativeAnchor, point: { ...nativeAnchor.point, extra: "/private" } } }));
+    expect(shared.diagramAnchor).toEqual(nativeAnchor);
+    expect(parseDiagramAnchor(shared.diagramAnchor)).toEqual(nativeAnchor);
     const leaky = spaceCommentAnchor(comment("L", { type: "COMMENT", text: "x", originalText: "q", source: "eslint", pageUrl: "/p", prUrl: "https://github.com/a/b/pull/1", artifact: { artifactUrl: "https://x/a", sourceUrl: "https://x/s" }, elementContext: { tag: "div" }, futureField: "?", imageRegion: { v: 1, src: "https://example.com/i.png", sourceLine: null, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } }));
     expect(leaky).toEqual({ id: "L", type: "COMMENT", text: "x", originalText: "q", imageRegion: { v: 1, src: "https://example.com/i.png", sourceLine: null, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } });
     // A picture's reference: relative inside the plan or on the web goes (the parser needs one); one naming this computer stays.

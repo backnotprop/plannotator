@@ -204,6 +204,8 @@ export function formatTopLevelHelp(options: { board?: boolean; scheduled?: boole
     "  plannotator [--browser <name>]",
     "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [DIRECTORY | PR_URL]",
     "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator diagram new <name | path.diagram.json>",
+    "  plannotator diagram render <input.diagram.json> -o <output.svg>",
     "  plannotator annotate-last [--stdin] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [--json] [--hook]",
     "  plannotator copilot-last [--gate] [--json] [--hook]",
     "  plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
@@ -1092,6 +1094,14 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "  plannotator review --base feature/part-1   # review one layer of a stacked branch",
     "  plannotator review --patch-file reading.diff",
     "  plannotator review https://github.com/owner/repo/pull/123",
+  ].join("\n"),
+  diagram: [
+    "Usage: plannotator diagram new <name | path.diagram.json>",
+    "       plannotator diagram render <input.diagram.json> -o <output.svg>",
+    "",
+    "A name creates an editable diagram in this project's Plannotator data directory.",
+    "An explicit .diagram.json path creates it there. The command prints the path.",
+    "Open that file with plannotator annotate to review it.",
   ].join("\n"),
   annotate: [
     "Usage:",

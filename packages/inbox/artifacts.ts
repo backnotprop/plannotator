@@ -26,6 +26,7 @@
 
 import type { InboxAttachmentState, InboxGuideRef, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { isInboxAnnotatableKind } from '@plannotator/core/inbox-types';
+import { inboxDiagramRevisions } from '@plannotator/core/inbox-artifact-pins';
 import { agentName, whenTime } from './format';
 
 /** Who sent the message an artifact came in, and when, in the window's words. */
@@ -55,6 +56,8 @@ export interface FileArtifact extends ArtifactOrigin {
    * this artifact, and the viewer's stepping counts it once.
    */
   alsoIds: readonly string[];
+  /** Attachment IDs of earlier sends, in order. The first is the pin key. */
+  previousEditions?: readonly string[];
 }
 
 /** A guided review: one per message that carries one; it opens the guide reader. */
@@ -67,7 +70,7 @@ export type Artifact = FileArtifact | GuideArtifact;
 
 /** The key a tile and a list use: the file's id, or `guide:<message id>`. */
 export function artifactKey(artifact: Artifact): string {
-  return artifact.type === 'file' ? artifact.attachment.id : `guide:${artifact.messageId}`;
+  return artifact.type === 'file' ? artifact.previousEditions?.[0] ?? artifact.attachment.id : `guide:${artifact.messageId}`;
 }
 
 /** Who sent a message and when, as a tile says it (also the Artifacts wall's, from its rows). */
@@ -142,7 +145,15 @@ export function threadArtifacts(
       out.push({ type: 'file', messageId: attachment.message_id, sender: 'the agent', sentAt: whenTime(attachment.sent_at), at: attachment.sent_at, fromPerson: false, host: null, attachment, inline, alsoIds: [] });
     }
   }
-  return out;
+  const authors = new Map(messages.map((message) => [message.id, message.author]));
+  const revisions = inboxDiagramRevisions(out.flatMap((item) => item.type === 'file'
+    ? [{ attachment: item.attachment, author: authors.get(item.messageId) }] : []));
+  return out.flatMap((item): Artifact[] => {
+    if (item.type !== 'file') return [item];
+    const family = revisions.get(item.attachment.id);
+    if (!family) return [item];
+    return item.attachment.id === family.at(-1) ? [{ ...item, previousEditions: family.slice(0, -1) }] : [];
+  });
 }
 
 /**
@@ -164,9 +175,15 @@ export function artifactsNewestFirst(artifacts: readonly Artifact[]): Artifact[]
 export function artifactOfFile(artifacts: readonly Artifact[], attachmentId: string): FileArtifact | null {
   for (const artifact of artifacts) {
     if (artifact.type !== 'file') continue;
-    if (artifact.attachment.id === attachmentId || artifact.alsoIds.includes(attachmentId)) return artifact;
+    if (artifact.attachment.id === attachmentId || artifact.alsoIds.includes(attachmentId) || artifact.previousEditions?.includes(attachmentId)) return artifact;
   }
   return null;
+}
+
+/** From a sent message, offer the latest sent attachment only when the displayed edition is older. */
+export function latestDiagramFor(artifacts: readonly Artifact[], attachment: Pick<InboxAttachmentState, 'id' | 'sent_sha256'>): InboxAttachmentState | null {
+  const latest = artifactOfFile(artifacts, attachment.id);
+  return latest?.previousEditions?.includes(attachment.id) && latest.attachment.sent_sha256 !== attachment.sent_sha256 ? latest.attachment : null;
 }
 
 /** The pin key of an open file: its artifact's (the shown image's id for an attached twin), else its own id. */

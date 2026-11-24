@@ -1,0 +1,7 @@
+interface:
+  display_name: "Plannotator Diagram"
+  short_description: "Create an editable diagram and render it to SVG"
+  default_prompt: "Use $diagram to make an editable diagram for my reader."
+
+policy:
+  allow_implicit_invocation: false

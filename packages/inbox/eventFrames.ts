@@ -6,6 +6,7 @@ import { parseRestartAgents } from './restartAgents';
 import { readHello, type RestartHello } from './sessionAdopt';
 import { scheduledFrame } from './scheduled/store';
 import { readRunStateFrame, runEvents } from './data/runEvents';
+import { observePinReceipts } from './outboxReceipt';
 
 
 export interface MachineRecordFrame {
@@ -70,6 +71,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'heartbeat':
       return;
     case 'hello':
+      observePinReceipts();
       handlers.onConnect?.(readHello(frame.data) ?? undefined);
       return;
     case 'reach':
@@ -240,7 +242,10 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'outbox':
       try {
         const data = JSON.parse(frame.data) as OutboxView;
-        if (typeof data.key === 'string' && typeof data.machine === 'string') handlers.onOutbox?.(data);
+        if (typeof data.key === 'string' && typeof data.machine === 'string') {
+          observePinReceipts(data);
+          handlers.onOutbox?.(data);
+        }
       } catch {
       }
       return;

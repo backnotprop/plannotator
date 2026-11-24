@@ -231,21 +231,21 @@ test.skipIf(!hasDom)('the reply box: the picker, the underline and its line, Esc
   // A bare `/` at the start of a word opens the whole catalog, nothing active.
   await type(box, '/');
   await until(() => menu() !== null, 'the picker');
-  expect(rows()).toEqual(['picture-it', 'readback', 'write-better']);
+  expect(rows()).toEqual(['picture-it', 'diagram', 'readback', 'write-better']);
   expect(document.querySelector('[data-skill-item-active]')).toBeNull();
   // Not at the start of a word: no menu (`and/or`).
   await type(box, 'and/');
   expect(menu()).toBeNull();
 
   // A query filters; Escape after typing it closes the menu, not the box.
-  await type(box, 'Please /rea');
+  await type(box, 'Please /readb');
   await until(() => rows().join() === 'readback', 'the filtered picker');
   await press(box, 'Escape');
   expect(menu()).toBeNull();
   expect(textarea(el)).not.toBeNull();
 
   // Arrowed onto, Enter inserts it.
-  await type(box, 'Please run /rea');
+  await type(box, 'Please run /readb');
   await until(() => menu() !== null, 'the picker again');
   await press(box, 'ArrowDown');
   expect(document.querySelector('[data-skill-item-active]')?.getAttribute('data-skill-item')).toBe('readback');
@@ -379,7 +379,7 @@ test.skipIf(!hasDom)('a comment on an attached file: its skill rides the one blo
   const el = await renderApp(`#thread=${world.filed}`);
   // The window's own catalog is this computer's skills (the comment composers' picker reads it too).
   const { fetchSkillCatalog } = await import('@plannotator/ui/utils/skillCatalog');
-  expect((await fetchSkillCatalog()).map((s) => s.name)).toEqual(['picture-it', 'readback', 'write-better']);
+  expect((await fetchSkillCatalog()).map((s) => s.name)).toEqual(['picture-it', 'diagram', 'readback', 'write-better']);
   // The comment waits to be sent: the foot offers "Edit draft".
   await until(() => [...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Edit draft'), 'the waiting comment');
   act(() => button(el, 'Edit draft').click());
@@ -428,7 +428,7 @@ test.skipIf(!hasDom)('compose (a message you start): the field takes a skill, th
   expect(dialog()).not.toBeNull();
   // The dismissed trigger stays closed until the caret leaves it.
   await type(field, 'Plan the retry budget.');
-  await type(field, 'Plan the retry budget. /rea');
+  await type(field, 'Plan the retry budget. /readb');
   await until(() => rows().join() === 'readback', 'the skill picker');
   // Escape closes the picker only, never the dialog.
   await press(field, 'Escape');

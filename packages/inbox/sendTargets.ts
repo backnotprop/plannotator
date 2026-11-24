@@ -2,6 +2,7 @@
  * The replies one Send makes (pure, for the tests): the agent messages it
  * answers, and which reply each waiting annotation rides.
  */
+import { parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
 import { inboxActionInDraft, inboxRemovedFrom, inboxWordsDefault, type InboxAnnotationRecord, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 import { activeHandoff } from './tags';
 import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
@@ -22,7 +23,7 @@ export interface SendTarget {
 
 /**
  * Where each waiting annotation goes (review of #1997): a comment on an agent
- * message's text goes to the session that wrote that message. One whose
+ * message's text or attached native diagram goes to the session that wrote that message. One whose
  * message the last reply already reaches (that message, or one its session
  * wrote) rides the last reply with the words, the file and the guide
  * comments; any other rides a reply to its own message, which joins the
@@ -42,7 +43,8 @@ export function routeSendAnnotations(
   const put = (id: string, record: InboxAnnotationRecord) => carried.set(id, [...(carried.get(id) ?? []), record]);
   const extra: SendTarget[] = [];
   for (const record of records) {
-    const message = record.message ? thread.messages.find((m) => m.id === record.message_id) : undefined;
+    const aboutSender = !!record.message || parseDiagramAnchor(record.annotation.diagramAnchor)?.family === 'plannotator-diagram';
+    const message = aboutSender ? thread.messages.find((m) => m.id === record.message_id) : undefined;
     if (!message || message.author.kind !== 'agent' || message.id === last.message.id || sameSession(message, last.message)) {
       put(last.message.id, record);
       continue;
@@ -60,6 +62,15 @@ export function routeSendAnnotations(
   const order = new Map(thread.messages.map((m, index) => [m.id, index]));
   const before = [...targets.slice(0, -1), ...extra].sort((a, b) => (order.get(a.message.id) ?? 0) - (order.get(b.message.id) ?? 0));
   return { targets: [...before, last], carried };
+}
+
+/** An annotation for an earlier author can leave the default words recipient with an empty reply. */
+export function routeReplyContents(thread: InboxThread, plain: readonly SendTarget[], records: readonly InboxAnnotationRecord[], hasWordsOrUploads: boolean) {
+  const routed = routeSendAnnotations(thread, plain, records);
+  const targets = routed.targets.filter(({ message, questions, skip, actions }, index, all) =>
+    routed.carried.has(message.id) || questions.length > 0 || skip.length > 0 || actions.length > 0 ||
+    (hasWordsOrUploads && index === all.length - 1));
+  return { targets, carried: routed.carried };
 }
 
 /** Two agent messages one session wrote (a message with no session matches none). */

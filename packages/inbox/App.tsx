@@ -45,7 +45,6 @@ import { configStore } from '@plannotator/ui/config';
 import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
-import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { inboxPullIsOpen, inboxPullStacks, type InboxDecision, type InboxHealth, type InboxListRow, type InboxListSection, type InboxQuestion, type InboxAgentRow, type InboxAgentsModel, type InboxPull, type InboxPullStack, type InboxTourChange, type InboxComposeLaunch, type InboxReaction, type InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill } from './decisions/entry';
@@ -163,7 +162,8 @@ import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
 import { useLaunchTipClaim } from './data/actions/launchTip';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
-import { namesCapability, withCapabilities } from './capabilities';
+import { NativeDiagramProvider } from '@plannotator/ui/components/diagram/NativeDiagramProvider';
+import { capabilityListener } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeListLookOptions } from './listLook';
 import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark, useSidebarCustomizerOpen } from './sidebarLayout';
@@ -1690,14 +1690,7 @@ function Inbox() {
           if (!hearAgentFacesEvent(data)) listAfterEvents(60);
         },
         onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
-        // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
-        onCapabilities: (capabilities) => {
-          // Code review and Routines (/create-routine) move the "/" list: the next box reads the catalog again.
-          if (capabilities.code_review || capabilities.scheduled_threads) reloadSkillCatalog();
-          // The Board too (its sidebar row; capabilities.ts): settings sync everywhere.
-          if (namesCapability(capabilities)) setSettings((current) => (current ? withCapabilities(current, capabilities) : current));
-          else void refreshSettings();
-        },
+        onCapabilities: capabilityListener(setSettings, refreshSettings),
         onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
           setUpdate(next);
           if (nextUpdated !== undefined) setUpdated(nextUpdated);
@@ -5336,7 +5329,7 @@ function Inbox() {
         onOpen={(row) =>
           go(
             row.attachment
-              ? { page: 'inbox', project: null, thread: row.thread_id, file: { id: row.attachment.id, version: 'current', focus: null } }
+              ? { page: 'inbox', project: null, thread: row.thread_id, file: { id: row.attachment.id, version: row.attachment.kind === 'plannotator-diagram' ? 'sent' : 'current', focus: null } }
               : { page: 'inbox', project: null, thread: row.thread_id, guide: row.message_id },
           )
         }
@@ -5558,6 +5551,7 @@ function Inbox() {
   );
 
   return (
+    <NativeDiagramProvider>
     <InitiativeTagsContext.Provider value={initiativeTags}>
     <LiveInitiativesContext.Provider value={liveTags}>
     <ThreadTagsContext.Provider value={threadTagsHost}>
@@ -6290,6 +6284,7 @@ function Inbox() {
     </ThreadTagsContext.Provider>
     </LiveInitiativesContext.Provider>
     </InitiativeTagsContext.Provider>
+    </NativeDiagramProvider>
   );
 }
 

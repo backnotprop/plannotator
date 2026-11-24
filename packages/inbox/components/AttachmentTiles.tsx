@@ -19,6 +19,7 @@ export function iconOf(attachment: InboxAttachmentState): IconName {
     case 'code':
       return 'code';
     case 'mermaid':
+    case 'plannotator-diagram':
     case 'graphviz':
       return 'diagram';
     case 'image':
@@ -67,6 +68,7 @@ export function sizeLine(attachment: InboxAttachmentState): string {
 
 /** The changed line a tile or caption shows, or null when the file on disk is what was sent. */
 export function changedLine(attachment: InboxAttachmentState, short = false): string | null {
+  if (attachment.kind === 'plannotator-diagram') return null;
   if (attachment.unavailable) {
     if (short) return attachment.unavailable.code === 'attachment_missing' ? 'No longer on disk' : 'Changed type';
     return attachment.unavailable.code === 'attachment_missing' ? 'No longer on disk; the sent version opens' : 'Changed type; the sent version opens';

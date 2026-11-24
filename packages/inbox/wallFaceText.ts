@@ -43,6 +43,8 @@ export function wallTypeLabel(row: Pick<InboxArtifactRow, 'attachment'>, pages: 
       return 'Markdown';
     case 'mermaid':
       return 'Mermaid diagram';
+    case 'plannotator-diagram':
+      return 'Diagram';
     case 'graphviz':
       return 'Graphviz diagram';
     case 'pdf':

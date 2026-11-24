@@ -87,6 +87,7 @@ export function fileSwipeMode(kind: InboxAttachmentKind, tooLarge: boolean): Fil
     // recording's bar scrubs under the finger.
     case 'html':
     case 'mermaid':
+    case 'plannotator-diagram':
     case 'graphviz':
     case 'video':
     case 'audio':

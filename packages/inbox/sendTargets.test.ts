@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { inboxAskingMessage, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
-import { replyKeysToRenew, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SentContents } from './sendTargets';
+import { replyKeysToRenew, routeReplyContents, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SentContents } from './sendTargets';
 import { askingSessionOf } from './thread/helpers';
 
 type State = 'open' | 'picked' | 'sent';
@@ -22,6 +22,14 @@ const message = (id: string, session: string | null, states: State[]): InboxMess
 const thread = (messages: InboxMessageWire[]) => ({ thread_id: 'msg_1', messages }) as unknown as InboxThread;
 
 describe('sendTargetsOf', () => {
+  test('answers alone go only to the earlier agent who asked', () => {
+    const asker = message('msg_1', 'ses_a', ['picked']);
+    const t = thread([asker, message('msg_2', 'ses_b', [])]);
+    const routed = routeReplyContents(t, sendTargetsOf(t), [], false);
+    expect(routed.targets).toEqual([{ message: asker, questions: [{ key: 'q-msg_1-0', revision: 1 }], skip: [], actions: [] }]);
+    expect(routed.carried.size).toBe(0);
+  });
+
   test("the owner's case: one session, 8 messages, the newest answered: one reply, to it, skipping nothing", () => {
     const messages = [message('msg_1', 'ses_a', ['open', 'open', 'open', 'open'])];
     for (let i = 2; i <= 7; i++) messages.push(message(`msg_${i}`, 'ses_a', ['open']));

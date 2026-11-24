@@ -10,12 +10,17 @@
  *
  * DOM-gated: the rendering tests run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
+import { NativeDiagramProvider } from "@plannotator/ui/components/diagram/NativeDiagramProvider";
 import { afterEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
-import { attachmentSequence, stepAnnouncement, type AttachmentStep } from './stepping';
+import { stepsOf, attachmentSequence, stepAnnouncement, type AttachmentStep } from './stepping';
 import { clearFileDrafts } from './fileCommentDrafts';
+
+import { latestDiagramFor, threadArtifacts, type Artifact } from './artifacts';
+import { rememberMachine, resetMachineRoutes } from './inboxUrl';
+import { InlineDiagrams } from './components/InlineDiagrams';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
@@ -92,13 +97,15 @@ interface Harness {
 }
 
 /** The pane as the thread drives it: a step opens the next file in place. */
-function Pane({ start, full = false, harness, steps = STEPS, phone = false }: { start: InboxAttachmentState; full?: boolean; harness: Harness; steps?: AttachmentStep[]; phone?: boolean }) {
+function Pane({ start, full = false, harness, steps = STEPS, phone = false, editions = [] }: { editions?: Artifact[]; start: InboxAttachmentState; full?: boolean; harness: Harness; steps?: AttachmentStep[]; phone?: boolean }) {
   const [open, setOpen] = useState(start);
   const noop = () => {};
   const all = steps.map((s) => s.attachment);
+  const latest = latestDiagramFor(editions, open);
   return (
     <AttachmentPane
       attachment={open}
+      onOpenLatestDiagram={latest ? () => setOpen(latest) : undefined}
       attachments={all}
       records={[]}
       agent="Claude"
@@ -522,3 +529,59 @@ test.skipIf(!hasDom)('the arrows stand down inside a block that scrolls sideways
   expect(harness.steps.map((s) => s.id)).toEqual([shotB.id]);
 });
 
+
+test.skipIf(!hasDom)('on a linked thread the inline drawing and old pane read the exact sent blob, and Open latest loads the newest sent blob', async () => {
+  const machine = 'ibx_01K7AAAAAAAAAAAAAAAAAAAAAA';
+  const first = file('att_old', 'a.diagram.json', 'plannotator-diagram', M1, { diagram_file_id: 'f'.repeat(64), diagram_id: 'checkout', changed_since_sent: true });
+  const next = file('att_new', 'b.diagram.json', 'plannotator-diagram', M2, { diagram_file_id: 'f'.repeat(64), diagram_id: 'checkout', sent_sha256: 'b'.repeat(64) });
+  const rows = threadArtifacts([message(M1, first.sent_at), message(M2, next.sent_at)], [first, next]);
+  const steps = stepsOf(rows);
+  rememberMachine([M1, M2, first.id, next.id], machine);
+  const reads: string[] = [];
+  const inlineOpens: string[] = [];
+  globalThis.fetch = (async (input) => {
+    const path = String(input);
+    if (path.includes('/view')) {
+      reads.push(path);
+      const attachment = path.includes(first.id) ? first : next;
+      const title = path.endsWith('version=sent') ? (attachment === first ? 'Original checkout' : 'Revised checkout') : 'Unsent working file';
+      const text = JSON.stringify({ id: 'checkout', title, columns: [{ id: 'api', title: 'API' }] });
+      return Response.json({ attachment, version: attachment.sent_sha256, text, html: null, serverSession: 'diagram-test' });
+    }
+    return Response.json({}, { status: 404 });
+  }) as typeof fetch;
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  try {
+    await act(async () => root!.render(<NativeDiagramProvider>
+      <InlineDiagrams files={[first, next]} artifacts={rows} onOpenLatest={(a) => { inlineOpens.push(a.id); }} records={[]} readOnly onSaved={() => {}} />
+      <Pane start={first} harness={{ steps: [], closed: 0, saved: [] }} steps={steps} editions={rows} />
+    </NativeDiagramProvider>));
+    await settle();
+    const sent = (id: string) => `/api/inbox/m/${machine}/attachments/${id}/view?version=sent`;
+    expect(reads).toEqual([sent(first.id), sent(next.id), sent(first.id)]);
+    const oldInline = host.querySelector(`[data-inline-diagram-attachment="${first.id}"]`)!;
+    // The native review block loads lazily inside Suspense.
+    for (let i = 0; i < 30 && !oldInline.querySelector('[data-native-latest]'); i++) await settle();
+    expect(oldInline.textContent).toContain('Open latest');
+    expect(host.querySelector(`[data-inline-diagram-attachment="${next.id}"]`)?.textContent).not.toContain('Open latest');
+    await act(async () => oldInline.querySelector<HTMLButtonElement>('[data-diagram-expand]')!.click());
+    const expanded = document.querySelector('[data-diagram-popout]')!;
+    const openLatest = (element: Element) => [...element.querySelectorAll('button')].find((button) => button.textContent === 'Open latest');
+    await act(async () => openLatest(expanded)!.click());
+    for (let i = 0; i < 30 && !expanded.querySelector('[aria-label="Revised checkout"] [data-native-focus]'); i++) await settle();
+    expect(inlineOpens).toEqual([]);
+    expect(expanded.textContent).toContain('Revised checkout');
+    expect(openLatest(expanded)).toBeUndefined();
+    const latest = openLatest(pane());
+    expect(latest).toBeDefined();
+    await act(async () => latest!.click());
+    await settle();
+    expect(reads.at(-1)).toBe(sent(next.id));
+    expect(pane().textContent).not.toContain('Open latest');
+    expect(pane().textContent).not.toContain('Showing the sent version');
+  } finally {
+    resetMachineRoutes();
+  }
+});

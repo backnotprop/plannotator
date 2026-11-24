@@ -86,6 +86,15 @@ const viewerProps = {
   disableCodePathValidation: true,
 };
 
+// Capture the settled DOM. Both native rendering and syntax highlighting load lazily.
+async function waitForElement(parent: Element, selector: string) {
+  const until = Date.now() + 4000;
+  while (!parent.querySelector(selector) && Date.now() < until) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+  }
+  expect(parent.querySelector(selector)).not.toBeNull();
+}
+
 function globalCommentButton(): Element | null {
   return document.querySelector('button[title="Add global comment"]');
 }
@@ -118,6 +127,23 @@ describe('Viewer consumer props', () => {
     expect(document.body.textContent).toContain('hello world');
   });
 
+  test.skipIf(!hasDom)('displays native diagram source until its host enables review', async () => {
+    const { NativeDiagramProvider } = await import('./diagram/NativeDiagramProvider');
+    const source = JSON.stringify({ title: 'Queue', columns: [[{ title: 'Client' }]] });
+    const diagram: Block = { id: 'diagram', type: 'code', language: 'plannotator-diagram', content: source, order: 0, startLine: 1 };
+    const document = <Viewer {...viewerProps} blocks={[diagram]} />;
+    await mount(document);
+    expect(host?.querySelector('code')?.textContent).toBe(source);
+    expect(host?.querySelector('[data-diagram-block]')).toBeNull();
+
+    await act(async () => { root?.render(<NativeDiagramProvider>{document}</NativeDiagramProvider>); });
+    await waitForElement(host!, '[data-diagram-block="plannotator-diagram"] [data-native-hit]');
+
+    await act(async () => { root?.render(<NativeDiagramProvider enabled={false}>{document}</NativeDiagramProvider>); });
+    expect(host?.querySelector('code')?.textContent).toBe(source);
+    expect(host?.querySelector('[data-diagram-block]')).toBeNull();
+  });
+
   test.skipIf(!hasDom)('readOnly fenced code never opens composers or mutates the rendered code', async () => {
     const additions: unknown[] = [];
     await mount(
@@ -133,6 +159,7 @@ describe('Viewer consumer props', () => {
     const codeBlock = document.querySelector<HTMLElement>('[data-block-id="code-1"]');
     const code = codeBlock?.querySelector('code');
     if (!codeBlock || !code) throw new Error('Fenced code block did not render');
+    await waitForElement(code, 'span');
     const renderedCode = code.innerHTML;
 
     await act(async () => {

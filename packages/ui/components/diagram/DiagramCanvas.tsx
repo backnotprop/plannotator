@@ -124,6 +124,8 @@ export function DiagramCanvas({
   autoFocus,
   className,
   wheelZoom = 'always',
+  showZoomPercent = false,
+  ariaLabel,
 }: {
   /** The last good render's sanitized svg root, or null before the first. */
   svgNode: SVGSVGElement | null;
@@ -139,7 +141,7 @@ export function DiagramCanvas({
   /** The mounted svg root after each injection (null on unmount). */
   onSvgRoot: (root: SVGSVGElement | null) => void;
   onHoverElement: (element: Element | null) => void;
-  onClickElement: (element: Element | null, shiftKey: boolean) => void;
+  onClickElement: (element: Element | null, shiftKey: boolean, point?: { clientX: number; clientY: number }) => void;
   onEscape: () => DiagramEscapeOutcome;
   /** The overlay layer, given the live viewport and host. */
   overlay: (handle: DiagramCanvasHandle) => ReactNode;
@@ -154,6 +156,8 @@ export function DiagramCanvas({
   /** Default `always` (today's canvas). An inline diagram in a document
    * passes `modifier` so the reader's wheel scrolls the page past it. */
   wheelZoom?: DiagramWheelZoom;
+  showZoomPercent?: boolean;
+  ariaLabel?: string;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -423,7 +427,7 @@ export function DiagramCanvas({
       if (!click) return;
       const element = targetUnder(event);
       if (event.pointerType !== 'touch') {
-        onClickElement(element, event.shiftKey);
+        onClickElement(element, event.shiftKey, { clientX: event.clientX, clientY: event.clientY });
         return;
       }
       // A finger. The second tap of a double tap begun on empty space zooms,
@@ -438,7 +442,7 @@ export function DiagramCanvas({
       // A part clicks at once, inside the touch (iOS shows the keyboard only
       // for a focus made there); a double tap on it opens its composer.
       if (element !== null) {
-        onClickElement(element, event.shiftKey);
+        onClickElement(element, event.shiftKey, { clientX: event.clientX, clientY: event.clientY });
         return;
       }
       // Empty space waits for a second tap.
@@ -503,7 +507,7 @@ export function DiagramCanvas({
       ref={hostRef}
       data-diagram-canvas=""
       tabIndex={0}
-      aria-label={CANVAS_LABEL[wheelZoom]}
+      aria-label={ariaLabel ?? CANVAS_LABEL[wheelZoom]}
       className={cn(
         'relative h-full w-full touch-pan-y select-none overflow-hidden outline-none',
         panning ? 'cursor-grabbing' : 'cursor-grab',
@@ -550,8 +554,9 @@ export function DiagramCanvas({
         >
           <Minus aria-hidden="true" />
         </Button>
-        <Button type="button" variant="ghost" size="icon" className="size-7" aria-label="Fit diagram" title="Fit (0)" onClick={fit}>
+        <Button type="button" variant="ghost" size="icon" className={showZoomPercent ? "h-7 w-auto gap-1 px-1.5" : "size-7"} aria-label="Fit diagram" title="Fit (0)" onClick={fit}>
           <Maximize2 aria-hidden="true" />
+          {showZoomPercent && <span className="font-mono text-xs">{Math.round(viewport.scale * 100)}%</span>}
         </Button>
         <Button
           type="button"

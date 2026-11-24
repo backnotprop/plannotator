@@ -7,7 +7,7 @@
 import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE, inboxReviewTitleLine } from '@plannotator/core/inbox-review';
 import { indexQuestionBlocks, type IndexedQuestion } from '@plannotator/core/question-block';
 import { inboxUrl, machineOf } from './inboxUrl';
-import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
+import { diagramRenderKindForPath, isDiagramRenderKind, shouldStripFrontmatter } from '@plannotator/core/annotatable';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
 import { htmlBlockAnchorLines, parseHtmlBlockAnchor } from '@plannotator/core/html-block-anchor';
 import { codeFenceFor } from '@plannotator/core/markdown-structure';
@@ -30,9 +30,9 @@ import type { PrototypeNames } from './prototypes';
 
 /** Plannotator's blocks for a file: one diagram block for a diagram source, one code block for code, the markdown pipeline for text, none for HTML or a binary kind. */
 export function attachmentBlocks(kindValue: InboxAttachmentKind | string, text: string, name: string): Block[] {
-  const kind = readInboxAttachmentKind(kindValue);
+  const kind = inboxViewKind(kindValue, name);
   if (kind === 'html' || kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'pdf' || kind === 'file') return [];
-  if (kind === 'mermaid' || kind === 'graphviz') return diagramDocumentBlocks(text, kind);
+  if (isDiagramRenderKind(kind)) return diagramDocumentBlocks(text, kind);
   if (kind === 'code') return codeDocumentBlocks(text, name);
   return parseMarkdownToBlocks(text, shouldStripFrontmatter(name) ? undefined : { frontmatter: false });
 }
@@ -49,6 +49,7 @@ const CODE_VIEW_TEXT_EXTENSIONS = new Set(['log', 'yaml', 'yml', 'json', 'jsonc'
 /** The kind the window draws a file as: its stored kind, except data and log files, drawn as code. */
 export function inboxViewKind(kindValue: InboxAttachmentKind | string, name: string): InboxAttachmentKind {
   const kind = readInboxAttachmentKind(kindValue);
+  if ((kind === 'text' || kind === 'code') && diagramRenderKindForPath(name) === 'plannotator-diagram') return 'plannotator-diagram';
   if (kind !== 'text') return kind;
   const lower = name.toLowerCase();
   if (lower.endsWith('.env.example')) return 'code';
@@ -115,6 +116,12 @@ export function codeDocumentBlocks(text: string, name: string): Block[] {
       startLine: 1,
     },
   ];
+}
+
+export function fileCommentCounts(records: readonly InboxAnnotationRecord[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const record of records) counts.set(record.path, (counts.get(record.path) ?? 0) + 1);
+  return counts;
 }
 
 export function annotationOf(record: InboxAnnotationRecord): Annotation {

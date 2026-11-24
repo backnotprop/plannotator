@@ -36,13 +36,15 @@ export function useBodyComments({ comments, message, blocks, onPick, pictures = 
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
   const painted = useRef<Set<string>>(new Set());
-  const addComment = useCallback((annotation: Annotation) => {
+  const addComment = useCallback(async (annotation: Annotation) => {
+    if (annotation.diagramAnchor?.family === 'plannotator-diagram') return commentsRef.current?.onSave(annotation) ?? false;
     painted.current.add(annotation.id);
-    void commentsRef.current?.onSave(annotation).then((saved) => {
-      if (saved) return;
+    const saved = await commentsRef.current?.onSave(annotation).catch(() => false);
+    if (!saved) {
       painted.current.delete(annotation.id);
       viewerRef.current?.removeHighlight(annotation.id);
-    });
+    }
+    return !!saved;
   }, []);
   const restoreReport = useCallback((report: { attempted: readonly string[]; unanchored: readonly string[] }) => commentsRef.current?.onUnanchored?.(report), []);
   // Side (ask/useInboxAsk.tsx): read through refs, as every kept closure here (#2948): naming `comments`, the message

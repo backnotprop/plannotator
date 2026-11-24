@@ -29,10 +29,10 @@ export type ReferencedFileView =
     };
 
 /** Where a file a message names is asked about: its thread (whose machine holds it) and the message. */
-export type ReferencedFileScope = { thread: string; message: string };
+export type ReferencedFileScope = { thread: string; message: string; from?: 'root' };
 
 export const referencedFileUrl = (route: 'view' | 'raw', scope: ReferencedFileScope, path: string) =>
-  inboxUrl(`/open-in/file/${route}`, new URLSearchParams({ thread: scope.thread, message: scope.message, path }).toString(), machineOf(scope.thread));
+  inboxUrl(`/open-in/file/${route}`, new URLSearchParams({ ...scope, path }).toString(), machineOf(scope.thread));
 
 /** An image's or a film's bytes, of a file a message names: through its thread's machine, as every route of it. */
 export const referencedFileRawUrl = (scope: ReferencedFileScope, path: string) => referencedFileUrl('raw', scope, path);

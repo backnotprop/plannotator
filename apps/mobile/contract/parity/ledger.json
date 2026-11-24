@@ -17649,6 +17649,7 @@
       "title": "The window's outbox",
       "surface": [
         "window:/api/inbox/outbox",
+        "window:/api/inbox/outbox/:id",
         "window:/api/inbox/outbox/:id/dismiss"
       ],
       "flows": [],
@@ -22293,6 +22294,104 @@
       "flows": [],
       "mobile": "undecided",
       "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's session. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxattachmentkind-plannotator-diagram",
+      "title": "enum:InboxAttachmentKind.plannotator-diagram",
+      "surface": [
+        "enum:InboxAttachmentKind.plannotator-diagram"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachment-diagram-id",
+      "title": "field:InboxAttachment.diagram_id",
+      "surface": [
+        "field:InboxAttachment.diagram_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-diagram-id",
+      "title": "field:InboxAttachmentState.diagram_id",
+      "surface": [
+        "field:InboxAttachmentState.diagram_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxinlineimage-diagram-id",
+      "title": "field:InboxInlineImage.diagram_id",
+      "surface": [
+        "field:InboxInlineImage.diagram_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachment-diagram-file-id",
+      "title": "field:InboxAttachment.diagram_file_id",
+      "surface": [
+        "field:InboxAttachment.diagram_file_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-diagram-file-id",
+      "title": "field:InboxAttachmentState.diagram_file_id",
+      "surface": [
+        "field:InboxAttachmentState.diagram_file_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxinlineimage-diagram-file-id",
+      "title": "field:InboxInlineImage.diagram_file_id",
+      "surface": [
+        "field:InboxInlineImage.diagram_file_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"

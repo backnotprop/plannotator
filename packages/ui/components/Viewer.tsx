@@ -83,7 +83,9 @@ import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/ancho
 import { DiagramBlockPending } from './diagram/DiagramPending';
 import type { DiagramReopenRequest } from './diagram/reopen';
 import { LazyBlockBoundary } from './LazyBlockBoundary';
-import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
+import { NativeDiagramBlockContext } from './diagram/nativeDiagramEnabled';
+import type { NativeDiagramFileReference } from './diagram/nativeDiagramDrawing';
+import { isGraphvizLanguage, isMermaidLanguage, isNativeDiagramLanguage } from './diagramLanguages';
 import { isHtmlEmbedLanguage, isSvgFenceLanguage } from './html-embed/languages';
 import type { HtmlEmbedHost } from './html-embed/HtmlEmbedBlock';
 import { getIdentity } from '../utils/identity';
@@ -213,6 +215,12 @@ export interface ViewerProps {
   fillHeight?: boolean;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
+  /** A host with a diagram-specific question action, such as an Inbox thread's Side. */
+  onAskDiagramAI?: CommentAskAIHandler;
+  /** Opens a diagram's repository-relative source reference in this document's host. */
+  expandedDiagramEdition?: React.ReactNode;
+  renderExpandedDiagramFile?: (ref: NativeDiagramFileReference, close: () => void) => React.ReactNode;
+  onOpenDiagramFile?: (ref: NativeDiagramFileReference) => void;
   /**
    * Opt-in host capability: decide what a link to a local path does
    * (`[the mock](mock.html)`, markdown and raw-HTML `<a href>` alike; never
@@ -245,7 +253,7 @@ export interface ViewerProps {
   imageRegionComments?: boolean;
   /** Delete and edit from the lightbox's drawer of region comments (with
    *  `imageRegionComments`). Absent: the drawer's cards are read-only. */
-  onDeleteAnnotation?: (id: string) => void;
+  onDeleteAnnotation?: (id: string) => void | boolean | Promise<void | boolean>;
   onEditAnnotation?: (id: string, updates: Partial<Annotation>) => void;
   /** Directory the active document lives in — used by the code-path validator
    *  so out-of-tree relative references (e.g. `../foo.ts` in a linked doc)
@@ -925,6 +933,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   maxWidth,
   onOpenLinkedDoc,
   onOpenCodeFile,
+  onOpenDiagramFile, renderExpandedDiagramFile, expandedDiagramEdition, onAskDiagramAI,
   resolveLocalLink,
   linkedDocInfo,
   imageBaseDir,
@@ -993,6 +1002,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // (the selection toolbar, comment-only, and its composer); everything else
   // of authoring stays off. Without it this is exactly `!authoringOff`.
   const textCommentsOnly = answerOnly && textComments && !readOnly;
+  const NativeDiagramBlock = React.useContext(NativeDiagramBlockContext);
   const selectionCommentsOn = !authoringOff || textCommentsOnly;
   const hostComposes = onHostDraft !== undefined && !authoringOff;
   const viewerAnnotationHeader = authoringOff ? undefined : annotationHeader;
@@ -1932,13 +1942,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // With no diagram in the document nobody can resolve a diagram comment:
   // it is unanchored, and the highlighter (which skips it) will not say so.
   useEffect(() => {
-    if (diagramBlockKey !== '' || onRestoreReport === undefined) return;
+    if (onRestoreReport === undefined) return;
     // `!= null`, not `!== undefined`: a nullish anchor is no anchor at all —
     // the highlighter restores such a row by text, so it must not be counted
     // here as a diagram comment nothing could resolve.
-    const ids = annotations.filter((ann) => ann.diagramAnchor != null).map((ann) => ann.id);
+    const nativeBlocks = new Set(blocks.filter((b) => NativeDiagramBlock && b.type === 'code' && isNativeDiagramLanguage(b.language)).map((b) => b.id));
+    const ids = annotations.filter((ann) => ann.diagramAnchor != null && (
+      ann.diagramAnchor.family === 'plannotator-diagram' ? !nativeBlocks.has(ann.blockId) : diagramBlockKey === ''
+    )).map((ann) => ann.id);
     if (ids.length > 0) onRestoreReport({ attempted: ids, unanchored: ids });
-  }, [annotations, diagramBlockKey, onRestoreReport]);
+  }, [annotations, blocks, diagramBlockKey, NativeDiagramBlock, onRestoreReport]);
 
   // The host's `belowTitle` slot (see the prop). Absent → the block list is
   // returned as is, so the DOM is the one without the prop. The wrapper's
@@ -2101,6 +2114,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             <LazyBlockBoundary key={group.block.id} fallback={embedFallback(group.block)}>
               <Suspense fallback={<CodeBlock block={group.block} isHovered={false} />}>
                 <SvgFenceBlock block={group.block} />
+              </Suspense>
+            </LazyBlockBoundary>
+          ) : group.block.type === 'code' && NativeDiagramBlock && isNativeDiagramLanguage(group.block.language) ? (
+            <LazyBlockBoundary key={group.block.id} fallback={embedFallback(group.block)}>
+              <Suspense fallback={<CodeBlock block={group.block} isHovered={false} />}>
+                <NativeDiagramBlock block={group.block} annotations={annotations}
+                  selectedAnnotationId={selectedAnnotationId} onSelectAnnotation={onSelectAnnotation}
+                  onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
+                  onEditAnnotation={selectionCommentsOn ? onEditAnnotation : undefined}
+                  onDeleteAnnotation={selectionCommentsOn ? onDeleteAnnotation : undefined}
+                  onRestoreReport={onRestoreReport} onOpenFile={onOpenDiagramFile} renderExpandedFile={renderExpandedDiagramFile} latestEdition={expandedDiagramEdition}
+                  onHostDraft={hostComposes ? onHostDraft : undefined}
+                  onAskAI={onAskDiagramAI ?? (selectionCommentsOn ? onAskAI : undefined)} sourcePath={linkedDocInfo?.filepath ?? sourceInfo} />
               </Suspense>
             </LazyBlockBoundary>
           ) : group.block.type === 'code' && isMermaidLanguage(group.block.language) ? (

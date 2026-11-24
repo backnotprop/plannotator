@@ -21,7 +21,7 @@ export function useFileRefs({ message, projectRoot, onOpenFileRef, onOpenAttachm
   // A file the message carries opens as that attachment (comments and all); any other file read only.
   openFileRefRef.current = refsOn
     ? (ref) => {
-        const attached = attachmentForLink(ref.path, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
+        const attached = ref.from === 'root' ? undefined : attachmentForLink(ref.path, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
         if (attached) attachmentRef.current(attached);
         else hostRef.current?.(ref);
       }

@@ -51,6 +51,7 @@
     "test:e2e:inbox": "playwright test -c tests/e2e/playwright.config.ts",
     "test:e2e:quarantine": "bun run scripts/e2e-quarantine.ts",
     "e2e:slice": "bun run scripts/e2e-slice.ts",
+    "gen:diagram-skill": "bun scripts/sync-diagram-skill.ts",
     "ci:affected": "bun run scripts/ci-affected.ts",
     "verify:inbox-live": "bun scripts/inbox-live-verify.ts",
     "test:parity:inbox-thread": "bun scripts/inbox-thread-parity.ts"

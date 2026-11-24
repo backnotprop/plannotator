@@ -81,7 +81,7 @@ const BUILTIN_DOC_PATTERN =
 	String.raw`(?:\.(?:mdx?|txt|adoc|asciidoc|mmd|mermaid|dot|gv|html?|ya?ml|jsonc?|json5|toml|ini|cfg|conf|properties|csv|tsv|log|xml)|\.env\.example)`;
 
 /** Which diagram engine a diagram-source extension belongs to. */
-export type DiagramRenderKind = "mermaid" | "graphviz";
+export type DiagramRenderKind = "mermaid" | "graphviz" | "plannotator-diagram";
 
 const MERMAID_FILE_RE = /\.(?:mmd|mermaid)$/i;
 const GRAPHVIZ_FILE_RE = /\.(?:dot|gv)$/i;
@@ -94,14 +94,15 @@ const GRAPHVIZ_FILE_RE = /\.(?:dot|gv)$/i;
  */
 export function diagramRenderKindForPath(input: string): DiagramRenderKind | null {
 	const trimmed = input.trim();
+	if (/\.diagram\.json$/i.test(trimmed)) return "plannotator-diagram";
 	if (MERMAID_FILE_RE.test(trimmed)) return "mermaid";
 	if (GRAPHVIZ_FILE_RE.test(trimmed)) return "graphviz";
 	return null;
 }
 
-/** True when `value` is one of the two diagram render kinds. */
+/** True when `value` is one of the diagram render kinds. */
 export function isDiagramRenderKind(value: unknown): value is DiagramRenderKind {
-	return value === "mermaid" || value === "graphviz";
+	return value === "mermaid" || value === "graphviz" || value === "plannotator-diagram";
 }
 
 /**

@@ -19,6 +19,7 @@ export interface MessageActs {
   openOptionSet: (messageId: string, key: string, image: InboxInlineImage, choice: number) => void;
   pick: (messageId: string, key: string, answer: QuestionAnswer | null) => void;
   markAction: (messageId: string, key: string, mark: ActionMark | null) => Promise<boolean>;
+  deleteMessageComment?: (id: string) => Promise<boolean>;
   saveMessageComment: (messageId: string, annotation: Annotation) => Promise<boolean>;
   noteUnanchored: (report: { attempted: readonly string[]; unanchored: readonly string[] }) => void;
   repaintHits: (messageId: string) => void;

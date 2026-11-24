@@ -56,7 +56,7 @@ import {
   type InboxUpload,
 } from "@plannotator/core/inbox-types";
 import { cutText } from "@plannotator/core/inbox-questions";
-import { decideInboxAttachmentKind, inboxAttachmentCurrentInfo, inboxBlobPath, inboxBlobsDir, openInboxAttachmentVersion, scanInboxFile } from "./attachments";
+import { decideInboxAttachmentKind, inboxAttachmentCurrentInfo, inboxBlobPath, inboxBlobsDir, sentDiagramIdentity, openInboxAttachmentVersion, scanInboxFile } from "./attachments";
 import { InboxError } from "./schema";
 
 export const INBOX_UPLOADS_DIR = "uploads";
@@ -455,6 +455,7 @@ export async function inboxUploadAttachments(inboxDirPath: string, ids: readonly
         named_path: null,
         name: upload.name,
         kind: upload.kind,
+        ...await sentDiagramIdentity(upload.kind, upload.size, blob),
         sent_sha256: upload.sha256,
         size: upload.size,
         sent_at: at,

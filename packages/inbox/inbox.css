@@ -9496,6 +9496,7 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
 /* Ask AI (ask/): the shared chat window floats in this layer, over everything but the toast and the menus. The height
    follows the phone's keyboard (--ib-vvh, phone.ts). The layer lets the page take the clicks around the window. */
 .ib-ask-layer { position: fixed; top: 0; left: 0; right: 0; height: var(--ib-vvh, 100dvh); z-index: 41; pointer-events: none; isolation: isolate; }
+body:has([data-diagram-popout]) .ib-ask-layer { z-index: 55; }
 .ib-ask-layer [data-chat-window] { pointer-events: auto; border-color: var(--ib-float-line-s, var(--border)); }
 /* The minimized side chat (ask/SideChatCorner.tsx; the owner, 2026-11-20, the 28 px circle): a circle in the window's
    bottom-right corner on the ground, the pane beside it cut inward around it (scoop.ts). The pocket's radius is the

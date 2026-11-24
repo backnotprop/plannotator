@@ -79,7 +79,7 @@ const ELEMENT_OUTLINE_CLOSE = /^\s{0,3}`{4,}\s*$/;
  * drawing (`svg`) or a diagram (`mermaid`, `dot`, `graphviz`, `gv`): any indentation, three or more backticks,
  * that language first (`isHtmlEmbedLanguage`, `isSvgFenceLanguage`, `isMermaidLanguage`, `isGraphvizLanguage`).
  */
-const DRAWN_FENCE = /^(\s*`{3,}\s*)(html|svg|mermaid|dot|graphviz|gv)(?=\s|$)/i;
+const DRAWN_FENCE = /^(\s*`{3,}\s*)(html|svg|mermaid|dot|graphviz|gv|plannotator-diagram)(?=\s|$)/i;
 /** What a drawn fence's language becomes in the feedback: markup as `xml`, a diagram's source as `text`. */
 const AS_CODE = (_line: string, fence: string, language: string) => `${fence}${/^(?:html|svg)$/i.test(language) ? 'xml' : 'text'}`;
 

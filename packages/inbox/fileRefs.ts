@@ -16,6 +16,8 @@ export interface FileRef {
   path: string;
   line?: number;
   lineEnd?: number;
+  /** File paths authored in a diagram start at its repository root. */
+  from?: 'root';
 }
 
 /** Names the pane can show, or offer, besides code: documents, pages, pictures, films and plain data. */

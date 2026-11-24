@@ -29,6 +29,9 @@ import { PictureRetry } from './PictureRetry';
 import { useBodyLinks } from './useBodyLinks';
 import { useFileRefs } from './useFileRefs';
 import { useQuestionCards } from './useQuestionCards';
+import { diagramFileReader } from '../../components/DiagramFileReader';
+import { useDiagramQuestionRoutes } from '../../ask/DiagramThreadScope';
+import { diagramAsk, messageSideSource } from '../../ask/sideSource';
 import { useBodyComments } from './useBodyComments';
 import { useCommentPictures } from '../../commentPictures';
 
@@ -65,6 +68,7 @@ export function MessageBody({
 }: MessageBodyProps) {
   const { skills, pullDetails, actionsSent, replyParts, ownReply, replyFileList, shown, noteBlocks, noteAtLine, notesRef, restShown, feedbackShown, blocks, restBlocks, feedbackBlocks } = useBodyText({ message, sentActions, sentAnswers, replyFiles, projectRoot, contextNotes });
   const refRepo = useRefRepo(repo);
+  const { side: diagramSide, reply: diagramReply, threadId: diagramThreadId } = useDiagramQuestionRoutes(message.id);
   // The body's pictures are drawn whole in a box; a very long one shows its top with "Show all"
   // (images.ts fitMessageImage, inbox.css). A click on a picture still opens it in the viewer.
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -158,13 +162,21 @@ export function MessageBody({
         blocks={blocks}
         markdown={shown}
         annotations={commentList}
-        onAddAnnotation={comments ? addComment : noop}
+        onAddAnnotation={comments ? addComment : noop} onDeleteAnnotation={comments?.onDelete}
+        onEditAnnotation={comments ? (id, changes) => {
+          const original = commentList.find(a => a.id === id);
+          return original ? addComment({ ...original, ...changes }) : false;
+        } : undefined}
         onSelectAnnotation={comments ? selectBadge : noop}
         selectedAnnotationId={comments ? (comments.revealed ?? comments.openId ?? selectedBadge) : null}
         textComments={comments !== undefined}
         textDeletions={comments !== undefined && message.author.kind === 'agent'}
         questionTextComments={comments !== undefined}
         suggestComment={comments?.suggest}
+        onAskDiagramAI={diagramAsk(message.id, context => messageSideSource(message,
+          { selected: context.text ?? '', blockId: '', blocks, annotations: commentList }), comments?.onSide ?? diagramSide, diagramReply)}
+        renderExpandedDiagramFile={diagramFileReader(diagramThreadId, message.id)}
+        onOpenDiagramFile={refsOn ? (ref) => openFileRefRef.current?.({ from: 'root', path: ref.path, line: ref.start, lineEnd: ref.end }) : undefined}
         onSide={comments?.onSide ? side : undefined}
         sideButton={sideButton}
         allowImages={pictures}

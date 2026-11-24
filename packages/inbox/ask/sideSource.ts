@@ -9,6 +9,9 @@
  * comment the person already has on those words.
  */
 import { inboxAgentName } from '@plannotator/core/inbox-types';
+import type { AttachmentView } from '../api';
+import type { DiagramThreadReply } from './diagramThreadReply';
+import type { CommentAskAIContext, CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import type { Annotation, Block } from '@plannotator/ui/types';
 
 /** A time as the person reads it in the thread: "Nov 8, 11:55 AM". */
@@ -74,4 +77,29 @@ export function fileSideSource(
   const heading = where.blockId ? headingBefore(where.blocks, where.blockId) : null;
   const under = heading ? `, under "${heading}"` : '';
   return `[Quoted from ${file.name} (${file.named_path ?? file.path}, attached to this thread; ${which})${line}${under}.${commentsOn(where.annotations, where.selected).join('')}]`;
+}
+
+type Side = (words: string, source?: string) => void;
+type DiagramAsk = CommentAskAIHandler & { destination?: 'thread'; relatedSurface?: string };
+
+/** Keep a private Side private. When that host is absent the drawer labels its explicit thread send. */
+export function diagramAsk(messageId: string, provenance: (context: CommentAskAIContext) => string, onSide?: Side, reply?: DiagramThreadReply, revision?: string): DiagramAsk | undefined {
+  if (onSide) {
+    const side: CommentAskAIHandler = (question, context) => onSide(question, [provenance(context), context.detail].filter(Boolean).join('\n'));
+    return Object.assign(side, { relatedSurface: '[data-chat-window]' });
+  }
+  if (!reply) return undefined;
+  const send: CommentAskAIHandler = (question, context) => reply(messageId, question,
+    [provenance(context), context.diagramScope].filter(Boolean).join('\n'), revision);
+  return Object.assign(send, { destination: 'thread' as const });
+}
+
+/** The exact attachment bytes under review accompany a question, including on a linked machine. */
+export function diagramFileAsk(view: AttachmentView, onSide?: Side, reply?: DiagramThreadReply): DiagramAsk | undefined {
+  const file = view.attachment;
+  const sha = view.version === 'current' ? file.current?.sha256 : view.version;
+  return diagramAsk(file.message_id, () => [
+    `Diagram file: ${file.path}`, `Attachment: ${file.id}`, `Message: ${file.message_id}`,
+    `Version: ${view.version}`,
+  ].join('\n'), onSide, reply, sha);
 }

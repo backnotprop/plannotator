@@ -87,6 +87,7 @@ export interface MessageBodyProps {
    */
   comments?: {
     annotations: readonly Annotation[];
+    onDelete?: (id: string) => Promise<boolean>;
     onSave: (annotation: Annotation) => Promise<boolean>;
     onUnanchored?: (report: { attempted: readonly string[]; unanchored: readonly string[] }) => void;
     onPainted?: () => void;

@@ -54,6 +54,7 @@ import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
 import { inboxAudioServedType } from "@plannotator/shared/inbox/audio";
 import { byteRangeResponse, decideByteRange, handleRangeStream } from "./inbox-byte-range";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createHtmlAssetRegistry } from "./html-assets";
 import { MAX_REVIEW_IMAGE_PREVIEW_BYTES, MAX_REVIEW_IMAGE_PREVIEW_PIXELS } from "@plannotator/shared/diff-paths";
@@ -290,6 +291,17 @@ async function readVersion(store: InboxStore, attachment: InboxAttachment, versi
   const read = await readInboxAttachmentText(store.dir, attachment, version);
   if (!read.ok) throw new InboxError(read.code, read.message);
   return read.bytes;
+}
+
+/** Require a valid native anchor before accepting the envelope that older Inbox versions reject. */
+function annotationFromBody(body: Record<string, unknown>): unknown {
+  if (!("diagram_annotation" in body)) return body.annotation;
+  const pin = body.diagram_annotation;
+  if ("annotation" in body || !pin || typeof pin !== "object" || !("diagramAnchor" in pin)
+      || parseDiagramAnchor(pin.diagramAnchor)?.family !== "plannotator-diagram") {
+    throw new InboxError("validation_error", "diagram_annotation: a native diagram comment with a part anchor.", { field: "diagram_annotation" });
+  }
+  return pin;
 }
 
 export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContext) {
@@ -633,7 +645,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       const record = store.saveAnnotation({
         attachment_id: typeof body.attachment_id === "string" ? body.attachment_id : "",
         version: body.version,
-        annotation: body.annotation,
+        annotation: annotationFromBody(body),
       });
       return json({ annotation: record });
     }
@@ -647,7 +659,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       const body = await guardedBody(req);
       if (body instanceof Response) return body;
-      return json({ annotation: store.saveMessageAnnotation(messageAnnotation[1]!, body.annotation) });
+      return json({ annotation: store.saveMessageAnnotation(messageAnnotation[1]!, annotationFromBody(body)) });
     }
 
     // A comment on the diff of the guided review a message carries: the review

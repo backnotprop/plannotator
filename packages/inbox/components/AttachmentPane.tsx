@@ -1,8 +1,8 @@
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
-import type { SelectionActionContext } from '@plannotator/ui/utils/selectionActions';
-import { fileSideSource } from '../ask/sideSource';
-import { useSideButton } from '../ask/sideButton';
+import { ExpandedDiagramEdition } from './InlineDiagrams';
+import { diagramFileReader } from './DiagramFileReader';
+import { useFileQuestions } from '../ask/useFileQuestions';
 import {
   formatInboxVideoTime,
   inboxAttachmentKindLabel,
@@ -21,6 +21,7 @@ import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { PaneToolstrip } from '../parts/PaneToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
 import { HtmlViewer, type HtmlViewerFrame } from '@plannotator/ui/components/html-viewer';
+import type { NativeDiagramFileReference } from '@plannotator/ui/components/diagram/nativeDiagramDrawing';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types';
@@ -64,7 +65,8 @@ import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
 import { contentsButtonMode, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
-import { scrollerOf } from './fileScroller';
+import { scrollerOf, fileFootRow } from './fileScroller';
+export { fileFootRow, FILE_FOOT_ROW } from './fileScroller';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
 import { ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
 import { FileContentsRail } from '../parts/FileContentsRail';
@@ -94,7 +96,7 @@ import { useShortcutScope } from '../panes/scope';
 import { inboxFileViewerShortcuts } from '../shortcuts/fileViewer.shortcuts';
 import { ShortcutHint, withShortcut } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
-import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
+import { inOverlay, isComposingKey, isEditableTarget, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { escapeRung, type EscapeRung } from '../escapeLadder';
 import { Tip } from './Tip';
 import { CopyFileButton } from './CopyFileButton';
@@ -126,18 +128,6 @@ export const CODE_ROW_BELOW_NOTE = 8;
 /** How long full screen's step chip names the new file. */
 export const FULL_VIEW_CHIP_MS = 1600;
 
-/** What sits at a file's foot in full screen (an image's or a film's comment row, a phone's "Comment at"): the toolbar, the chips and the toast keep above it. */
-export const FILE_FOOT_ROW = '[data-image-composer], [data-file-foot]';
-
-/**
- * The file's foot row as drawn: the first FILE_FOOT_ROW that is not hidden (full screen's composer keeps
- * the comment row drawn but `hidden` while the card is minimized, and the pill is then the foot).
- */
-export function fileFootRow(section: ParentNode): HTMLElement | null {
-  for (const row of section.querySelectorAll<HTMLElement>(FILE_FOOT_ROW)) if (!row.closest('[hidden]')) return row;
-  return null;
-}
-
 /** Hide / Show tools: the html-annotate scope's existing chord (⌘⇧X), HTML files only, through the file viewer's scope. */
 const TOOLS_CHORD = inboxFileViewerShortcuts.shortcuts.toggleTools.bindings[0]!;
 
@@ -149,6 +139,9 @@ const paneEscapes = new WeakSet<Event>();
 
 export interface AttachmentPaneProps {
   attachment: InboxAttachmentState;
+  onOpenLatestDiagram?: () => void;
+  latestDiagram?: InboxAttachmentState | null;
+  onOpenDiagramFile?: (ref: NativeDiagramFileReference) => void;
   /**
    * The file's pin (approval "inbox-artifact-stars"): its thread and its artifact key (the shown image's id for an
    * image both shown and attached). Pin / Unpin sits in the viewer's bar and the pane's header. Absent (the tour): none.
@@ -344,15 +337,6 @@ interface FileMemory {
 
 const NO_ANNOTATIONS: Annotation[] = [];
 const noop = () => {};
-/** Focus that shows its ring (the keyboard's), not a finger's press. Where `:focus-visible` is unknown, counted as shown. */
-const focusVisible = (el: Element) => {
-  try {
-    return el.matches(':focus-visible');
-  } catch {
-    return true;
-  }
-};
-
 const recordKey = (path: string, version: string) => (version === 'current' ? path : `${path}#${version.slice(0, 12)}`);
 
 /**
@@ -388,7 +372,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
 
   // The current file cannot be read (gone, or no longer the file that was sent): the sent version opens.
   const currentUnavailable = attachment.unavailable !== null;
-  const effectiveVersion = currentUnavailable ? 'sent' : version;
+  const kind = inboxViewKind(attachment.kind, attachment.name);
+  const effectiveVersion = currentUnavailable || kind === 'plannotator-diagram' ? 'sent' : version;
   const downloadName = `Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`;
   // Images in a Markdown file load relative to its folder, for the version on screen (#2228); one
   // that cannot load is drawn as its alt text, as in a message body (Thread.tsx).
@@ -397,8 +382,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     (src) => source.markdownImage?.(src) ?? { kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) },
     [imageBaseDir, source],
   );
-  // Data and log files are drawn as code (inboxViewKind).
-  const kind = inboxViewKind(attachment.kind, attachment.name);
   // Text kinds read through the view route; an image draws from its own route, a PDF or a file downloads.
   const readsText = isInboxTextKind(kind);
 
@@ -1447,12 +1430,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     // Once per ask (its seq), and again when the text it waits for is drawn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questionFocus?.seq, questionFocusKey, view, scrollViewport]);
-  // Side: the words, and where they came from (the file, its version, the line and heading; ask/sideSource.ts).
-  const sideButton = useSideButton();
-  const sideFrom = props.onSide
-    ? (text: string, context: SelectionActionContext) =>
-        props.onSide!(text, fileSideSource(attachment, props.version, { selected: text, blockId: context.blockId, blocks: isHtml ? [] : blocks, annotations }))
-    : undefined;
+  const { sideFrom, sideButton, diagramQuestion, diagramThreadId } = useFileQuestions(attachment, props.version, view, isHtml ? [] : blocks, annotations, props.onSide);
   // A Markdown file with 2 or more headings has Contents (contents.ts). On a desktop, Side by side and Full screen
   // alike: ui's contents rail in the page's right gutter. Where the rail yields (its own rule: a gutter under 68 px,
   // a pane under 480 px), when it is hidden, and on a phone: a Contents button over the file (ContentsPanel.tsx).
@@ -1550,7 +1528,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     for (const id of listedIds.current) if (!ids.has(id)) viewerRef.current?.removeHighlight(id);
     listedIds.current = ids;
   }, [annotations]);
-
   const save = useCallback(
     (annotation: Annotation): Promise<boolean> => {
       // The file is closing (or Escape set a comment aside): the composer's words become its draft, not a comment.
@@ -1559,20 +1536,21 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         caught.push(recordsRef.current.some((r) => r.id === annotation.id) ? { kind: 'edit', id: annotation.id, text: annotation.text ?? '' } : { kind: 'comment', annotation });
         return Promise.resolve(true);
       }
-      savedHere.current.push({ at: anchorKeyOf(annotation), id: annotation.id, text: (annotation.text ?? '').trim() });
-      // Written again on what a set-aside draft was on: that draft is spent.
-      if (waiting.current.length > 0 || reopening.current.length > 0) {
-        const at = anchorKeyOf(annotation);
-        const spent = (d: FileCommentDraft) => (d.kind === 'comment' && anchorKeyOf(d.annotation) === at) || (d.kind === 'edit' && d.id === annotation.id);
-        waiting.current = waiting.current.filter((d) => !spent(d));
-        reopening.current = reopening.current.filter((entry) => !spent(entry.draft));
-      }
       const answer = (async () => {
         try {
           const record = await source.saveAnnotation(attachment, annotationVersion, annotation);
+          savedHere.current.push({ at: anchorKeyOf(annotation), id: annotation.id, text: (annotation.text ?? '').trim() });
+          // Written again on what a set-aside draft was on: that draft is spent.
+          if (waiting.current.length > 0 || reopening.current.length > 0) {
+            const at = anchorKeyOf(annotation);
+            const spent = (d: FileCommentDraft) => (d.kind === 'comment' && anchorKeyOf(d.annotation) === at) || (d.kind === 'edit' && d.id === annotation.id);
+            waiting.current = waiting.current.filter((d) => !spent(d));
+            reopening.current = reopening.current.filter((entry) => !spent(entry.draft));
+          }
           props.onSaved(record);
           return true;
         } catch (cause) {
+          if (annotation.diagramAnchor?.family === 'plannotator-diagram') throw cause; // Report inside its open editor.
           setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
           return false;
         }
@@ -1721,22 +1699,24 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
 
   const remove = async (id: string) => {
-    viewerRef.current?.removeHighlight(id);
     try {
       await source.removeAnnotation(id);
+      viewerRef.current?.removeHighlight(id);
       props.onRemoved(id);
+      return true;
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not removed.');
+      return false;
     }
   };
 
   const edit = (id: string, updates: Partial<Annotation>) => {
     const record = props.records.find((r) => r.id === id);
-    if (!record) return;
+    if (!record) return false;
     const annotation = annotationOf(record);
     // A drawing's words emptied again: the agent's stand-in comes back.
     const text = updates.text !== undefined && updates.text.trim() === '' && isWordlessMarkup(annotation) ? MARKUP_ONLY_TEXT : updates.text;
-    void save({ ...annotation, ...updates, ...(text !== undefined ? { text } : {}) });
+    return save({ ...annotation, ...updates, ...(text !== undefined ? { text } : {}) });
   };
 
   // ── A comment being written when the file closes (approval "inbox-file-close-keeps-comment-draft") ──
@@ -2203,7 +2183,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const firstOpened = whenTime(attachment.captured_at ?? attachment.sent_at);
   const shown = view?.attachment ?? attachment;
   /** The version line's words (versionLineWords.ts): the line beside the thread and full screen's chip say the same. */
-  const words = versionLineWords({
+  const words = kind === 'plannotator-diagram' ? null : versionLineWords({
     unavailable: currentUnavailable ? attachment.unavailable!.message : null,
     version: effectiveVersion,
     changed: shown.changed_since_sent,
@@ -2482,7 +2462,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           </Tip>
         </div>
       )}
-      {full ? (
+      {props.onOpenLatestDiagram ? (
+        <div className={full ? 'ib-fvver' : 'ib-changed'} role="status">
+          <button type="button" className="ib-vlink" onClick={props.onOpenLatestDiagram}>Open latest</button>
+        </div>
+      ) : full ? (
         versionChip && !linkedTop && (
           // A fact about the file: it stays when the toolbar tucks.
           <Tip content={versionChip.full}>
@@ -2594,7 +2578,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 }}
                 // Keyboard focus holds it shown; a finger's press does not (a tapped button may keep focus), and
                 // leaving lets it fade again only after keyboard focus held it (hold(false) wakes only then).
-                onFocus={(e) => (focusVisible(e.currentTarget) ? sizeIcon.hold(true) : sizeIcon.wake())}
+                onFocus={(e) => (keyboardFocused(e.currentTarget) ? sizeIcon.hold(true) : sizeIcon.wake())}
                 onBlur={() => sizeIcon.hold(false)}
                 aria-label={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
                 title={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
@@ -2691,7 +2675,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               wheelHint={wheelHint}
               suggestion={suggestion?.comment}
               onSelect={setSelectedId}
-              onRemove={remove}
+              onRemove={async id => { await remove(id); }}
               onNotice={props.onToast}
             />
           )}
@@ -2720,7 +2704,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               phone={phone}
               poster={source.posterUrl?.(attachment) ?? undefined}
               suggestion={suggestion ?? undefined}
-              onRemove={remove}
+              onRemove={async id => { await remove(id); }}
               onNotice={props.onToast}
             />
           )}
@@ -2811,11 +2795,17 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 markdown={view.text}
                 imageBaseDir={imageBaseDir}
                 resolveLocalLink={kind === 'markdown' ? resolveFileLink : undefined}
+                onOpenDiagramFile={props.onOpenDiagramFile} renderExpandedDiagramFile={diagramFileReader(diagramThreadId, attachment.message_id)}
+                expandedDiagramEdition={props.latestDiagram && <ExpandedDiagramEdition attachment={props.latestDiagram}
+                  records={props.records} onSaved={props.onSaved} onRemoved={props.onRemoved} readOnly={!!props.readOnly}
+                  onOpenFile={props.onOpenDiagramFile} onSide={props.onSide} />}
+                onAskDiagramAI={diagramQuestion}
+                onEditAnnotation={edit} onDeleteAnnotation={props.readOnly ? undefined : remove}
                 questionDecisionLines={false}
                 {...fileQuestionProps}
                 annotations={annotations}
                 mentionSource={props.mentionSource}
-                onAddAnnotation={(annotation) => void save(annotation)}
+                onAddAnnotation={save}
                 onSelectAnnotation={setSelectedId}
                 selectedAnnotationId={selectedId}
                 mode={isText ? mode : 'comment'}

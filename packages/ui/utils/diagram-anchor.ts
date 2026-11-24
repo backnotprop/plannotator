@@ -397,6 +397,7 @@ export function targetFromElement(
     // A Graphviz svg never reaches this codec: its finder is
     // diagram-anchor-graphviz.ts, paired by the renderer slot.
     case 'graphviz':
+    case 'plannotator-diagram':
       return null;
   }
 }

@@ -17,7 +17,7 @@ import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@p
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
-import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
+import { attachmentUrl, messageUrl, projectUrl, threadUrl, inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -109,7 +109,9 @@ import type {
 } from '@plannotator/core/inbox-types';
 
 import { newUuid } from './uuid';
-import { trackCommentWrite } from './commentSaves';
+import { annotationBody, trackCommentWrite } from './commentSaves';
+import { InboxHeldError, outboxResult, waitForPinReceipt } from './outboxReceipt';
+export { InboxHeldError, heldWords } from './outboxReceipt';
 
 /**
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
@@ -741,29 +743,6 @@ export async function get<T>(path: string, signal?: AbortSignal, arriving?: (res
   return answer;
 }
 
-/**
- * A write to another machine its Inbox could not confirm yet (linked machines, rule 12): held in this Inbox's
- * outbox (`202`), "Sending…" while that machine is online, "Will send when … is back" while it is not. Never
- * "done": the window waits for the outbox's own frame.
- */
-export class InboxHeldError extends InboxApiError {
-  constructor(
-    readonly outbox: OutboxView,
-    readonly machine: MachineView | null,
-  ) {
-    super(202, 'held', heldWords(machine));
-    this.name = 'InboxHeldError';
-  }
-}
-
-/** What a held write says, by its machine's state. */
-export function heldWords(machine: Pick<MachineView, 'name' | 'state'> | null): string {
-  const name = machine?.name ?? 'the other machine';
-  return machine && machine.state !== 'online' && machine.state !== 'connecting'
-    ? `Waiting for ${name}: this applies when ${name} is back.`
-    : `Sending to ${name}: this applies once ${name} confirms.`;
-}
-
 /** A read that gives no answer in `timeoutMs` (a held connection, a stalled server) fails with this. */
 export class InboxReadTimeout extends Error {
   constructor(readonly timeoutMs: number) {
@@ -925,17 +904,9 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
   if (machine && response.status === 202) {
     const held = (await response.json().catch(() => ({}))) as { outbox?: OutboxView; machine?: MachineView | null };
     if (held.outbox) {
-      const entry = held.outbox;
-      // Still on its way: held. A key sent before and already settled (replayed) says how it ended instead.
-      if (entry.state === 'queued' || entry.state === 'sending') throw new InboxHeldError(entry, held.machine ?? null);
-      if (entry.state === 'delivered') {
-        rememberMachine(idsIn(entry.answer), machine);
-        return entry.answer as T;
-      }
-      // Taken back with Cancel: a Send retried with its key never sends it after all.
-      if (entry.state === 'cancelled') throw new InboxApiError(409, 'outbox_cancelled', `Cancelled. It was never sent to ${held.machine?.name ?? 'the other machine'}.`);
-      const why = entry.answer && typeof entry.answer === 'object' ? (entry.answer as { error?: unknown }).error : null;
-      throw new InboxApiError(409, 'not_delivered', typeof why === 'string' && why ? why : `Not delivered to ${held.machine?.name ?? 'the other machine'}.`);
+      const answer = await outboxResult<T>(held.outbox, held.machine ?? null, !!body.diagram_annotation);
+      rememberMachine(idsIn(answer), machine);
+      return answer;
     }
   }
   const answer = await readJson<T>(response);
@@ -943,6 +914,23 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
   // events): any other answer can echo another machine's id (a kept draft names its project).
   if (machine) rememberMachine(idsIn(answer), machine);
   return answer;
+}
+
+/** A native pin keeps its editor open through a held write. Other threads' Sends need not wait for that machine. */
+function saveAnnotationAt(path: string, on: string, annotation: object, target: Record<string, unknown> = {}) {
+  type Saved = { annotation: InboxAnnotationRecord };
+  const body = annotationBody(annotation);
+  const how = { on, id: (annotation as { id?: unknown }).id, annotation };
+  const write = trackCommentWrite(post<Saved>(path, { ...target, ...body }), how);
+  if (!body.diagram_annotation) return write;
+  return write.catch(async cause => {
+    if (!(cause instanceof InboxHeldError)) throw cause;
+    const key = cause.outbox.key;
+    const receipt = await waitForPinReceipt(key, () => get<{ entry: OutboxView }>(inboxUrl(`/outbox/${encodeURIComponent(key)}`)));
+    const saved = await trackCommentWrite(outboxResult<Saved>(receipt, cause.machine, true), how);
+    rememberMachine(idsIn(saved), receipt.machine);
+    return saved;
+  });
 }
 
 /** The thread a message belongs to, for another machine's messages (learned from its thread reads). */
@@ -961,14 +949,6 @@ function threadHeader(path: string): Record<string, string> {
 /** The cursor of the last read of another machine's thread: a reply there says what the person saw (rule 11). */
 const remoteThreadCursor = new Map<string, number>();
 
-/** `/threads/<id><rest>` on the machine that owns the thread. */
-const threadUrl = (threadId: string, rest = '', query?: string) => inboxUrl(`/threads/${encodeURIComponent(threadId)}${rest}`, query, machineOf(threadId));
-/** `/messages/<id><rest>` on the machine that owns the message. */
-const messageUrl = (messageId: string, rest = '', query?: string) => inboxUrl(`/messages/${encodeURIComponent(messageId)}${rest}`, query, machineOf(messageId));
-/** `/attachments/<id><rest>` on the machine that owns the file. */
-const attachmentUrl = (attachmentId: string, rest = '', query?: string) => inboxUrl(`/attachments/${encodeURIComponent(attachmentId)}${rest}`, query, machineOf(attachmentId));
-/** `/projects/<id><rest>` on the machine that owns the project. */
-const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encodeURIComponent(projectId)}${rest}`, undefined, machineOf(projectId));
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
   setSelfMachine(model.self, model.machines);
@@ -1528,10 +1508,10 @@ export const inboxApi = {
     post<{ message_id: string; viewed: string[] }>(messageUrl(messageId, `/guide/viewed`), { viewed }),
   /** A comment on that guide's diff (the review app's line comment), new or edited; removed through `removeAnnotation`. */
   saveGuideAnnotation: (messageId: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id, annotation }),
   /** A comment on the text of an agent's message (the words selected), new or edited; removed through `removeAnnotation`. */
   saveMessageAnnotation: (messageId: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
+    saveAnnotationAt(messageUrl(messageId, '/annotations'), messageId, annotation),
   // A question choice's running-app prototype, through the live proxy (packages/server/inbox-live.ts). `probe`: the
   // app is asked first, so a stopped one answers 422 live_not_answering instead of the proxy framing its error.
   liveSite: (threadId: string, siteId: string, probe = false) =>
@@ -1614,7 +1594,7 @@ export const inboxApi = {
   linkedPage: (attachmentId: string, path: string) =>
     get<LinkedPageView>(attachmentUrl(attachmentId, `/linked-page?path=${encodeURIComponent(path)}`)),
   saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }), { on: attachmentId, id: (annotation as { id?: unknown }).id }),
+    saveAnnotationAt(inboxUrl('/annotations', undefined, machineOf(attachmentId)), attachmentId, annotation, { attachment_id: attachmentId, version }),
   removeAnnotation: (id: string) =>
     trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}), { on: id, id, remove: true }),
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
@@ -1627,7 +1607,7 @@ export const inboxApi = {
   referencedFile: (scope: ReferencedFileScope, path: string) => get<ReferencedFileView>(referencedFileUrl('view', scope, path)),
   /** The person commented on a file a message names: it becomes one of that message's attachments (once), on its thread's machine. */
   attachReferencedFile: (scope: ReferencedFileScope, path: string) =>
-    post<{ attachment: InboxAttachmentState }>(inboxUrl('/open-in/file/attach', undefined, machineOf(scope.thread)), { thread: scope.thread, message: scope.message, path, idempotency_key: crypto.randomUUID() }),
+    post<{ attachment: InboxAttachmentState }>(inboxUrl('/open-in/file/attach', undefined, machineOf(scope.thread)), { ...scope, path, idempotency_key: crypto.randomUUID() }),
   openInFileCode: (scope: OpenInFileScope, path: string) => get<OpenInFileCode>(inboxUrl(`/open-in/file/code?${new URLSearchParams({ ...scope, path })}`)),
   openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),

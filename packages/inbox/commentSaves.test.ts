@@ -8,7 +8,8 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
-import { failedCommentWrite, trackCommentWrite, watchCommentWrites, withCommentWrites } from './commentSaves';
+import { InboxApiError } from './apiError';
+import { annotationBody, failedCommentWrite, trackCommentWrite, watchCommentWrites, withCommentWrites } from './commentSaves';
 
 const record = (id: string, change: Partial<InboxAnnotationRecord> = {}): InboxAnnotationRecord => ({
   id,
@@ -101,4 +102,33 @@ test("the Send's list takes what the writes answered: a new comment, an edit, a 
     ['c1', 'edited'],
     ['c3', 'c3'],
   ]);
+});
+
+test('a successful response that dropped a diagram anchor stays a failed comment write', async () => {
+  const anchor = { v: 1, family: 'plannotator-diagram', kind: 'node', id: 'queue', label: 'Queue', sourceLine: null, point: { kind: 'panel', x: .5, y: .5 } };
+  const annotation = { text: 'Draft words', diagramAnchor: anchor };
+  const watch = watchCommentWrites();
+  try {
+    const old = record('c1', { annotation: { id: 'c1', type: 'COMMENT', text: annotation.text } });
+    await expect(trackCommentWrite(Promise.resolve({ annotation: old }), { id: 'c1', on: 'file', annotation })).rejects.toThrow('confirm');
+    expect(await watch.settled()).toContainEqual({ kind: 'failed', remove: false, on: 'file', id: 'c1' });
+    const current = { ...old, annotation };
+    expect(await trackCommentWrite(Promise.resolve({ annotation: current }), { id: 'c1', on: 'file', annotation })).toEqual({ annotation: current });
+  } finally { watch.stop(); }
+});
+
+test('only native pins use the fail-closed envelope and report a download-only or legacy receiver', async () => {
+  const plain = { diagramAnchor: { family: 'mermaid' } };
+  expect(annotationBody(plain)).toEqual({ annotation: plain });
+  const pin = { diagramAnchor: { v: 1, family: 'plannotator-diagram', kind: 'node', id: 'a', label: 'A', point: { kind: 'panel', x: .5, y: .5 } } };
+  expect(annotationBody(pin)).toEqual({ diagram_annotation: pin });
+  for (const refusal of [
+    new InboxApiError(422, 'annotation_not_allowed', 'Download only', 'attachment_id'),
+    new InboxApiError(422, 'validation_error', 'An annotation object is required', 'annotation'),
+  ]) {
+    await expect(trackCommentWrite(Promise.reject(refusal), { on: 'file', annotation: pin })).rejects.toMatchObject({ name: 'NotSupportedError' });
+    await expect(trackCommentWrite(Promise.reject(refusal), { on: 'file', annotation: plain })).rejects.toBe(refusal);
+  }
+  const invalid = new InboxApiError(422, 'validation_error', 'The pin is invalid', 'diagram_annotation');
+  await expect(trackCommentWrite(Promise.reject(invalid), { on: 'file', annotation: pin })).rejects.toBe(invalid);
 });

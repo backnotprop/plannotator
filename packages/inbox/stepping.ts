@@ -44,7 +44,8 @@ export function stepsOf(artifacts: readonly Artifact[]): AttachmentStep[] {
   const steps: AttachmentStep[] = [];
   for (const artifact of artifacts) {
     if (artifact.type !== 'file') continue;
-    steps.push({ attachment: artifact.attachment, sender: artifact.sender, sentAt: artifact.sentAt, messageId: artifact.messageId, inline: artifact.inline, ...(artifact.alsoIds.length > 0 ? { alsoIds: artifact.alsoIds } : {}) });
+    const alsoIds = artifact.previousEditions ? [...artifact.alsoIds, ...artifact.previousEditions] : artifact.alsoIds;
+    steps.push({ attachment: artifact.attachment, sender: artifact.sender, sentAt: artifact.sentAt, messageId: artifact.messageId, inline: artifact.inline, ...(alsoIds.length > 0 ? { alsoIds } : {}) });
   }
   return steps;
 }

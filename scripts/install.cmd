@@ -1222,7 +1222,7 @@ if "!VIBE_AVAILABLE!"=="1" if "!SKIP_VIBE!"=="0" (
     echo 2.25+, so no config.toml flag is needed.
     echo.
     echo The Vibe-specific skills are not installed on Windows. Vibe picks up the
-    echo shared review and annotate skills from %USERPROFILE%\.agents\skills instead;
+    echo shared review, annotate and /diagram skills from %USERPROFILE%\.agents\skills instead;
     echo /plannotator-last is not supported for Vibe on Windows yet.
 )
 
@@ -1513,6 +1513,7 @@ if "!CLONE_OK!"=="1" (
             if exist "!CLAUDE_SKILLS_DIR!\plannotator" rmdir /s /q "!CLAUDE_SKILLS_DIR!\plannotator" >nul 2>&1
             xcopy /s /i /y /q "apps\skills\core\plannotator" "!CLAUDE_SKILLS_DIR!\plannotator\" >nul 2>&1
         )
+        call :InstallDiagramSkill "!CLAUDE_SKILLS_DIR!"
         echo Installed Claude Code skills to !CLAUDE_SKILLS_DIR!\
     )
     if exist "apps\skills\core" (
@@ -1524,6 +1525,7 @@ if "!CLONE_OK!"=="1" (
                 xcopy /s /i /y /q "apps\skills\core\%%S" "!AGENTS_SKILLS_DIR!\%%S\" >nul 2>&1
             )
         )
+        call :InstallDiagramSkill "!AGENTS_SKILLS_DIR!"
         echo Installed shared agent skills to !AGENTS_SKILLS_DIR!\
     ) else (
         echo Tag !TAG! predates the core/extra skill layout - skipping core skill install
@@ -1581,6 +1583,7 @@ if "!CLONE_OK!"=="1" (
             if not exist "!KIRO_AGENTS_DIR!" mkdir "!KIRO_AGENTS_DIR!"
             copy /y "apps\kiro-cli\agents\plannotator.json" "!KIRO_AGENTS_DIR!\plannotator.json" >nul 2>&1
         )
+        call :InstallDiagramSkill "!KIRO_SKILLS_DIR!"
         echo Installed Kiro skills to !KIRO_SKILLS_DIR!\ and agent to !KIRO_AGENTS_DIR!\plannotator.json
     )
 
@@ -1844,7 +1847,7 @@ if "!VIBE_AVAILABLE!"=="1" (
         echo No files under !VIBE_HOME! were written or removed.
     ) else (
         echo Vibe detected. The Windows installer writes nothing under !VIBE_HOME!.
-        echo Vibe uses the shared review and annotate skills from ~/.agents/skills
+        echo Vibe uses the shared review, annotate and /diagram skills from ~/.agents/skills
         echo ^(/plannotator-last is not supported for Vibe on Windows yet^). The
         echo plan-review hook is macOS/Linux-only; see the manual setup instructions
         echo printed above to wire plan review on a macOS/Linux box.
@@ -1989,6 +1992,20 @@ REM of these flags writes an empty set, which is how a manual re-run with no
 REM flags goes back to defaults. Best effort: a failed write never fails the
 REM install.
 REM ======================================================================
+:InstallDiagramSkill
+setlocal EnableDelayedExpansion
+set "SRC=apps\skills\core\diagram"
+set "DEST=%~1\diagram"
+if not exist "!SRC!\SKILL.md" goto :eof
+for %%D in ("!DEST!") do set "ATTR=%%~aD"
+if defined ATTR if not "!ATTR:l=!"=="!ATTR!" goto :eof
+if exist "!DEST!" if not exist "!DEST!\.plannotator-installed" goto :eof
+if not exist "!DEST!\agents" mkdir "!DEST!\agents" >nul 2>&1
+copy /y "!SRC!\agents\openai.yaml" "!DEST!\agents\" >nul
+copy /y "!SRC!\.plannotator-installed" "!DEST!\" >nul
+copy /y "!SRC!\SKILL.md" "!DEST!\" >nul
+goto :eof
+
 :WriteInstallFlags
 set "IFL="
 if "!MINIMAL_FLAG!"=="1" call :AddInstallFlag minimal

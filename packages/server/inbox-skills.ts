@@ -23,6 +23,9 @@
  */
 import { INBOX_BUILTIN_SKILL_ROOT, INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
 import { CREATE_ROUTINE_SKILL } from "@plannotator/core/create-routine-skill";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { DIAGRAM_SKILL } from "@plannotator/core/diagram-skill";
 import { PICTURE_IT_SKILL } from "@plannotator/core/picture-it-skill";
 import { composeInboxSkillsBlock, inboxBuiltinSkillContent } from "@plannotator/core/inbox-skills-compose";
 import { INBOX_MESSAGE_SKILL_AUDIENCE } from "@plannotator/core/skill-reference-block";
@@ -40,6 +43,13 @@ function noStore(res: Response): Response {
   return res;
 }
 
+interface InboxCatalogOptions {
+  codeReview?: boolean;
+  routines?: boolean;
+}
+
+type DiscoverSkills = () => ReturnType<typeof listReferenceSkills>;
+
 /**
  * The catalog with Plannotator's own review skills first (code review in the
  * Inbox, approval "inbox-code-review-direction"), while the person has Code
@@ -47,22 +57,28 @@ function noStore(res: Response): Response {
  * the window pastes their instructions into the reply that names one, and no
  * folder (the window carries their text, `@plannotator/core/inbox-review`).
  * A skill of the person's own with the same name wins: the built-in is left
- * out. Off, the catalog is exactly the discovered skills. `/create-routine` the same way while Routines are on. `/picture-it` always, first.
+ * out. `/create-routine` is offered while Routines are on. `/picture-it` and `/diagram` are always available.
  */
-export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills, routines = false): Response {
-  return Response.json({ skills: inboxSkillEntries(codeReview, discovered, routines) });
+export function inboxSkillCatalog(options: InboxCatalogOptions, discovered?: DiscoverSkills): Response;
+/** Older callers pass the review and routines switches positionally. */
+export function inboxSkillCatalog(codeReview: boolean, discovered?: DiscoverSkills, routines?: boolean): Response;
+export function inboxSkillCatalog(options: InboxCatalogOptions | boolean, discovered: DiscoverSkills = listReferenceSkills, routines = false): Response {
+  const switches = typeof options === "boolean" ? { codeReview: options, routines } : options;
+  return Response.json({ skills: inboxSkillEntries(switches, discovered) });
 }
 
-function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills>, routines: boolean): SkillCatalogEntry[] {
+function inboxSkillEntries({ codeReview, routines }: InboxCatalogOptions, discovered: DiscoverSkills): SkillCatalogEntry[] {
   let skills: ReturnType<typeof listReferenceSkills>;
   try {
-    skills = discovered();
+    // Use the bundled instructions for Plannotator's installed copy so linked devices
+    // can compose the same reply. A person's own /diagram still takes precedence.
+    skills = discovered().filter((skill) => skill.name !== DIAGRAM_SKILL.name || !existsSync(join(skill.dir, ".plannotator-installed")));
   } catch {
     skills = [];
   }
   const own = new Set(skills.map((skill) => skill.name));
   // `/create-routine` (packages/core/create-routine-skill.ts) while Routines are on.
-  const offered = [PICTURE_IT_SKILL, ...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
+  const offered = [PICTURE_IT_SKILL, DIAGRAM_SKILL, ...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
   const builtins = offered.filter((skill) => !own.has(skill.name)).map((skill) => ({
     name: skill.name,
     root: INBOX_BUILTIN_SKILL_ROOT as SkillCatalogEntry["root"],
@@ -83,7 +99,7 @@ export function inboxSkillsBlockFor(
   switches: InboxSkillSwitches,
   sources: { discovered: () => ReturnType<typeof listReferenceSkills>; read: (name: string) => ReferenceSkillContent | null } = { discovered: listReferenceSkills, read: readReferenceSkillContent },
 ): string {
-  const catalog = inboxSkillEntries(switches.codeReview, sources.discovered, switches.routines);
+  const catalog = inboxSkillEntries(switches, sources.discovered);
   const refs = names.flatMap((name) => catalog.find((entry) => entry.name === name) ?? []);
   const contents = new Map<string, SkillExportContent>();
   for (const ref of refs) {
@@ -95,9 +111,9 @@ export function inboxSkillsBlockFor(
 }
 
 /** The answer for a skills path, or null for any other path. `codeReview`, `routines`: the person's switches. */
-export function inboxSkillsRoute(req: Request, url: URL, options: { codeReview?: boolean; routines?: boolean } = {}): Response | null {
+export function inboxSkillsRoute(req: Request, url: URL, options: InboxCatalogOptions = {}): Response | null {
   if (url.pathname !== INBOX_SKILLS_PATH && url.pathname !== INBOX_SKILL_CONTENT_PATH) return null;
   if (req.method !== "GET") return noStore(Response.json({ error: "Use GET." }, { status: 405 }));
   if (isCrossSiteRequest(req)) return noStore(Response.json(INBOX_CROSS_SITE_BODY, { status: 403 }));
-  return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true, undefined, options.routines === true) : handleReferenceSkillContent(req));
+  return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options) : handleReferenceSkillContent(req));
 }

@@ -49,9 +49,9 @@ import { ulid } from "./inbox-types";
  * window reading a newer store, a newer kind on a phone) treats it as `file`,
  * a download (`readInboxAttachmentKind`).
  */
-export type InboxAttachmentKind = "markdown" | "text" | "html" | "mermaid" | "graphviz" | "code" | "image" | "video" | "audio" | "pdf" | "file";
+export type InboxAttachmentKind = "markdown" | "text" | "html" | "mermaid" | "graphviz" | "plannotator-diagram" | "code" | "image" | "video" | "audio" | "pdf" | "file";
 
-const KNOWN_KINDS: ReadonlySet<string> = new Set(["markdown", "text", "html", "mermaid", "graphviz", "code", "image", "video", "audio", "pdf", "file"]);
+const KNOWN_KINDS: ReadonlySet<string> = new Set(["markdown", "text", "html", "mermaid", "graphviz", "plannotator-diagram", "code", "image", "video", "audio", "pdf", "file"]);
 
 /** A kind as a reader should treat it: a value it does not know is `file` (a download). */
 export function readInboxAttachmentKind(kind: unknown): InboxAttachmentKind {
@@ -76,6 +76,13 @@ export function isInboxAnnotatableKind(kind: unknown): boolean {
   return k !== "pdf" && k !== "file";
 }
 
+/** A root ID names a logical drawing, independently of its current title or filename. */
+export function readInboxDiagramId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const id = value.trim();
+  return id.length > 0 && id.length <= 256 ? id : undefined;
+}
+
 export interface InboxAttachment {
   /** `att_<ULID>`. */
   id: string;
@@ -86,6 +93,10 @@ export interface InboxAttachment {
   /** The file name, for display. */
   name: string;
   kind: InboxAttachmentKind;
+  /** Optional logical ID from the immutable .diagram.json sent with this attachment. */
+  diagram_id?: string;
+  /** Opaque identity of the originating file, when available, for recognizing a rename. */
+  diagram_file_id?: string;
   /** The sha256 of the bytes sent: the blob `inbox/blobs/<sent_sha256>`. */
   sent_sha256: string;
   /** Size in bytes of the sent version. */
@@ -408,6 +419,8 @@ export function inboxAttachmentKindLabel(kind: InboxAttachmentKind | string, nam
       return "HTML";
     case "mermaid":
       return "Mermaid";
+    case "plannotator-diagram":
+      return "Diagram";
     case "graphviz":
       return "Graphviz";
     case "text":

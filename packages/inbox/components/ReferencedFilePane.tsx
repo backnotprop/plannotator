@@ -8,8 +8,11 @@
  * (`inboxApi.attachReferencedFile`), saves the comment there, and the attachment opens in its place: from then on it is
  * commented, counted and sent like any attachment. A file the message already carries opens as that attachment.
  */
+import { useDiagramQuestionRoutes } from '../ask/DiagramThreadScope';
+import { diagramAsk } from '../ask/sideSource';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
+import type { NativeDiagramFileReference } from '@plannotator/ui/components/diagram/nativeDiagramDrawing';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
@@ -77,6 +80,7 @@ function standIn(view: Extract<ReferencedFileView, { found: true }>, messageId: 
 export function ReferencedFilePane({
   threadId,
   fileRef,
+  inspect = false,
   phone,
   full,
   onOpen,
@@ -85,6 +89,8 @@ export function ReferencedFilePane({
 }: {
   threadId: string;
   fileRef: OpenFileRef;
+  /** Inspect the reference beside its diagram, including files already attached to the message. */
+  inspect?: boolean;
   agent?: string;
   phone: boolean;
   /** The window has room for the file only (a phone, a narrow window): it covers the thread. */
@@ -99,8 +105,8 @@ export function ReferencedFilePane({
   const [view, setView] = useState<ReferencedFileView | null>(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const scope = useMemo<ReferencedFileScope>(() => ({ thread: threadId, message: fileRef.messageId }), [threadId, fileRef.messageId]);
-  const key = `${fileRef.messageId}\u0000${fileRef.path}`;
+  const scope = useMemo<ReferencedFileScope>(() => ({ thread: threadId, message: fileRef.messageId, ...(fileRef.from ? { from: fileRef.from } : {}) }), [threadId, fileRef.messageId, fileRef.from]);
+  const key = `${fileRef.messageId}\u0000${fileRef.from ?? ""}\u0000${fileRef.path}`;
   const attachedRef = useRef(onAttached);
   attachedRef.current = onAttached;
   useEffect(() => {
@@ -113,7 +119,7 @@ export function ReferencedFilePane({
       .then((answer) => {
         if (!live) return;
         // The message carries this file already: it opens as that attachment, comments and all.
-        if (answer.found && answer.attachment_id) void attachedRef.current(answer.attachment_id, null);
+        if (!inspect && answer.found && answer.attachment_id) void attachedRef.current(answer.attachment_id, null);
         else setView(answer);
       })
       .catch(() => live && setFailed(true));
@@ -122,7 +128,7 @@ export function ReferencedFilePane({
     };
     // `key` names the message and the path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, key]);
+  }, [threadId, key, inspect]);
 
   const sectionRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -170,7 +176,7 @@ export function ReferencedFilePane({
   const name = view?.name ?? fileRef.path.split('/').pop() ?? fileRef.path;
   const found = view?.found ? view : null;
   // A PR's version is shown: a comment attaches this computer's file, so it is taken only where that is the same text.
-  const writes = source.writes && !(found?.pull && !found.local_matches);
+  const writes = !inspect && source.writes && !(found?.pull && !found.local_matches);
   // Drawn as an attachment of that kind is (inboxViewKind): a log or data file as code, with its lines and their
   // numbers, so a comment made here anchors the same way once it is attached.
   const kind = found ? inboxViewKind(found.kind, found.name) : null;
@@ -200,6 +206,7 @@ export function ReferencedFilePane({
       data-referenced-file={fileRef.path}
     >
       <div className="ib-vhead">
+        {inspect && <button type="button" className="ib-vlink" onClick={onClose}>Back to diagram</button>}
         {full && (
           <Tip content="Back to the thread">
             <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Back to the thread" data-ref-back="">
@@ -215,7 +222,7 @@ export function ReferencedFilePane({
         </span>
         <span className="ib-sp" />
         {htmlComments && <HtmlSurfaceControls armed={armed} onToggleArmed={() => setArmed((v) => !v)} />}
-        {!full && (
+        {!full && !inspect && (
           <Tip content="Close">
             <button type="button" className="ib-iconbtn" onClick={onClose} aria-label={`Close ${name}`}>
               <Icon name="x" />
@@ -251,8 +258,8 @@ export function ReferencedFilePane({
               <span className="ib-refmissing-t">{reason === 'refused' ? 'does not show here.' : 'is not on this computer.'}</span>
             </div>
           )}
-          {found && found.contents !== undefined && (kind === 'markdown' || kind === 'text') && (
-            <RefDocument key={key} text={found.contents} name={name} kind={kind} scope={scope} folder={folder} onOpenLink={openFromDoc} onComment={writes ? save : undefined} />
+          {found && found.contents !== undefined && (kind === 'markdown' || kind === 'text' || kind === 'plannotator-diagram') && (
+            <RefDocument key={key} text={found.contents} name={name} origin={found} kind={kind} scope={scope} folder={folder} onOpenLink={openFromDoc} onOpenDiagramFile={ref => onOpen({ messageId: fileRef.messageId, path: ref.path, from: 'root', line: ref.start, lineEnd: ref.end })} onComment={writes ? save : undefined} />
           )}
           {found && found.contents !== undefined && (kind === 'code' || kind === 'mermaid' || kind === 'graphviz') && (
             <div className="ib-codeview" data-code-view="">
@@ -322,7 +329,7 @@ export function ReferencedFilePane({
               )}
             </InboxFileSourceProvider>
           )}
-          {found && (found.tooLarge || (kind !== null && !['markdown', 'text', 'code', 'mermaid', 'graphviz', 'html', 'image', 'video'].includes(kind))) && (
+          {found && (found.tooLarge || (kind !== null && !['markdown', 'text', 'code', 'mermaid', 'graphviz', 'plannotator-diagram', 'html', 'image', 'video'].includes(kind))) && (
             <div className="ib-refmissing" role="status" data-ref-missing="kind">
               <span className="ib-refmissing-ic">
                 <Icon name="doc" size={22} />
@@ -340,23 +347,28 @@ export function ReferencedFilePane({
 /** A referenced document: its pictures and links from its own folder; a selection comments (`onComment`) when it may. */
 function RefDocument({
   text,
+  origin,
   name,
   kind,
   scope,
   folder,
+  onOpenDiagramFile,
   onOpenLink,
   onComment,
 }: {
   text: string;
   name: string;
-  kind: 'markdown' | 'text';
+  kind: 'markdown' | 'text' | 'plannotator-diagram';
+  origin: Extract<ReferencedFileView, { found: true }>;
   scope: ReferencedFileScope;
   folder: string;
   onOpenLink: (href: string) => void;
+  onOpenDiagramFile?: (ref: NativeDiagramFileReference) => void;
   onComment?: (annotation: Annotation) => Promise<boolean>;
 }) {
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const viewer = useRef<ViewerHandle>(null);
+  const { side, reply } = useDiagramQuestionRoutes(scope.message);
   const blocks = useMemo(() => attachmentBlocks(kind, text, name), [kind, text, name]);
   const resolveImage = useCallback<ImageResolver>(
     (src) => {
@@ -381,6 +393,12 @@ function RefDocument({
             onSelectAnnotation={noop}
             selectedAnnotationId={null}
             resolveLocalLink={resolveLocalLink}
+            onOpenDiagramFile={onOpenDiagramFile}
+            onAskDiagramAI={diagramAsk(scope.message, () => [
+              `Diagram file: ${origin.path}`, `Message: ${scope.message}`,
+              origin.pull ? `Version: ${origin.pull.label} (${origin.pull.url})` : 'Version: referenced checkout',
+              origin.attachment_id && `Attachment: ${origin.attachment_id}`,
+            ].filter(Boolean).join('\n'), side, reply)}
             questionDecisionLines={false}
             stickyActions={false}
             disableCodePathValidation

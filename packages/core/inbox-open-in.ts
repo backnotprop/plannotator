@@ -66,6 +66,7 @@ export function inboxOpenInPolicy(attachment: { kind: unknown; path: string }, p
       return { browser: false, editors: true, systemDefault: platform !== "linux" && DEFAULT_TEXT_EXTENSIONS.has(ext) };
     case "code":
     case "mermaid":
+    case "plannotator-diagram":
     case "graphviz":
       return { browser: false, editors: true, systemDefault: false };
     case "image":

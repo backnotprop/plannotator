@@ -237,3 +237,11 @@ describe('the sequence family and the whole-diagram kind (additive within v: 1)'
     expect(parseDiagramAnchor({ v: 1, family: 'sequence', kind: 'node', label: 'x' })).toBeNull();
   });
 });
+
+test("a native pin keeps its stable part and position inside that part", () => {
+  const anchor = { v: 1, family: "plannotator-diagram", kind: "edge", id: "dispatch", label: "Queue orders", sourceLine: null, point: { kind: "link", x: 0.75, y: 0.2 } };
+  expect(parseDiagramAnchor(JSON.parse(JSON.stringify(anchor)))).toEqual(anchor);
+  expect(diagramAnchorLocationLine(parseDiagramAnchor(anchor)!)).toBe("Diagram link Queue orders (dispatch)");
+  expect(parseDiagramAnchor({ ...anchor, point: { ...anchor.point, x: 1.1 } })).toBeNull();
+  expect(parseDiagramAnchor({ ...anchor, point: undefined })).toBeNull();
+});

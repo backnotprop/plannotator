@@ -21,7 +21,7 @@ import { outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
-import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
+import { annotationOf, attachmentFeedback, attachmentImageUrl, fileCommentCounts, inboxViewKind, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
 import { closedByArchive, fileQuestionRecords, type FileQuestions } from '../fileQuestions';
@@ -29,6 +29,7 @@ import { ArchivedFoot } from '../parts/ArchivedFoot';
 import { ThreadMeta } from '../parts/ThreadMeta';
 import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, changedCount } from './AttachmentTiles';
+import { InlineDiagrams } from './InlineDiagrams';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import type { PageStart } from './htmlPageFrame';
 import type { OpenInSurface } from './OpenIn';
@@ -37,7 +38,7 @@ import { stepsOf } from '../stepping';
 import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId, openChoiceSetOf } from '../optionSets';
 import { PrototypeWindow, openingOption, type PrototypeOption } from './PrototypeWindow';
 import { prototypeNames, questionPrototypePages } from '../prototypes';
-import { artifactKey, artifactOfFile, newestViewableFile, openArtifactKey, threadArtifacts } from '../artifacts';
+import { artifactKey, artifactOfFile, latestDiagramFor, newestViewableFile, openArtifactKey, threadArtifacts } from '../artifacts';
 import { ArtifactsView } from './ArtifactsView';
 import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
 import { threadLinks } from '../threadLinks';
@@ -196,7 +197,7 @@ import { keepEqualByKey } from '../thread/keepEqual';
 import { useKeptScroll } from '../thread/keptScroll';
 import { sentActionsOf } from '../thread/sentActions';
 import { leftoverWords } from '../thread/leftover';
-import { answersItself, replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
+import { answersItself, replyKeysToRenew, routeReplyContents, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
 import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
@@ -291,6 +292,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const archiveSeq = thread.archive_seq ?? null;
   const afterArchive = (message: InboxMessageWire) => archived && archiveSeq !== null && (message.seq ?? 0) > archiveSeq;
   const liveMessage = (message: InboxMessageWire) => !archived || afterArchive(message);
+  const fileReadOnly = (message: InboxMessageWire) => !liveMessage(message) || message.author.kind === 'person';
   const cameBack = archived && thread.messages.some((m) => m.author.kind === 'agent' && afterArchive(m));
   const resolved = archived && !cameBack;
   // Whom a reply to `message` goes to, named: a second agent by its own name, the thread's first agent as `asker`
@@ -986,7 +988,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Read again when a message's files change; a real read that did not change them says so (App's filesSignal).
   const filesRevision = useRef(thread);
   if (!sameThreadFiles(filesRevision.current, thread)) filesRevision.current = thread;
-  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged, filesSignal);
+  const { model: files, load: reloadFiles, saveRecord, dropRecord, removeComment } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged, filesSignal);
   const attachments: InboxAttachmentState[] = useMemo(() => files?.attachments ?? [], [files]);
   // The images the messages' text shows, captured as files (approval "inbox-image-viewer"): opened, stepped and commented like attachments.
   const inlineImages: InboxAttachmentState[] = useMemo(() => files?.inline_images ?? [], [files]);
@@ -1267,8 +1269,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       saveRecord(result.annotation);
       return true;
     } catch (cause) {
-      // A Delete on another machine's message, refused (422) by an Inbox too old to take one (it does not say
-      // `message_deletions`): say so, with that machine's Update, not its store's words (approval "inbox-toolbar-delete").
+      if (annotation.diagramAnchor?.family === 'plannotator-diagram') throw cause; // Its editor keeps the words and explains the refusal.
+      // Offer Update when a linked Inbox predates message deletions (approval "inbox-toolbar-delete").
       const home = machineOf(messageId) ?? machineOf(thread.thread_id);
       if (home !== null && annotation.type === AnnotationType.DELETION && cause instanceof InboxApiError && cause.status === 422 && machine?.message_deletions !== true) {
         const line = `${machine?.name ?? 'That machine'} needs an update to delete words`;
@@ -1415,7 +1417,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const openFromMessage = (attachment: Pick<InboxAttachmentState, 'id' | 'kind' | 'ref'> & { name?: string }, view: FileView | null = null, opening?: () => void, set: string | null = null, version: 'current' | 'sent' = 'current') => {
     const go = () => {
       opening?.();
-      openFile(attachment, version, null, view, set ?? openChoiceSetOf(thread.messages, steps, attachment.id));
+      openFile(attachment, inboxViewKind(attachment.kind, attachment.name ?? '') === 'plannotator-diagram' ? 'sent' : version, null, view, set ?? openChoiceSetOf(thread.messages, steps, attachment.id));
       setPaneFocus((n) => n + 1);
     };
     const pane = paneRef.current;
@@ -1473,16 +1475,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (paneRef.current && file && file.id !== attachment.id) paneRef.current.leave(attachment.name, go);
     else go();
   };
-  const countsByPath = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const record of fileRecords) counts.set(record.path, (counts.get(record.path) ?? 0) + 1);
-    return counts;
-  }, [fileRecords]);
-  const saveRecord = useCallback(
-    (record: InboxAnnotationRecord) => patchRecords((list) => [...list.filter((r) => r.id !== record.id), record]),
-    [patchRecords],
-  );
-  const dropRecord = useCallback((id: string) => patchRecords((list) => list.filter((r) => r.id !== id)), [patchRecords]);
+  const countsByPath = useMemo(() => fileCommentCounts(fileRecords), [fileRecords]);
   const editRecord = async (record: InboxAnnotationRecord, text: string) => {
     try {
       const next = { ...annotationOf(record), text };
@@ -1498,8 +1491,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   const removeRecord = async (record: InboxAnnotationRecord) => {
     try {
-      await inboxApi.removeAnnotation(record.id);
-      dropRecord(record.id);
+      await removeComment(record.id);
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : 'The comment was not removed.');
     }
@@ -3200,14 +3192,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       // that asked them, with no words, and the words go only to the aimed one. Each half keeps its own key.
       const wordsTo = aimed && !aimedAt && carries ? aimedAway : undefined;
       // A comment on another session's message rides a reply to that message (routeSendAnnotations).
-      const { targets, carried } = routeSendAnnotations(current, plain, pendingAnnotations);
+      const { targets, carried } = routeReplyContents(current, plain, pendingAnnotations, words !== '' || uploads.length > 0);
       if (targets.length === 0) {
         setError('Write a reply or pick an answer first.');
         return;
       }
       /** One request of this Send: its target, the key it keeps across retries, its comments, and where it goes. */
       const parts = targets.map((t) => ({ target: t, key: replyKeyOf(t.message), own: carried.get(t.message.id) ?? [], wordsTo: undefined as typeof wordsTo }));
-      if (wordsTo) {
+      if (wordsTo && parts.at(-1)!.target.message.id === plain.at(-1)?.message.id) {
         const tail = parts.at(-1)!;
         const t = tail.target;
         const wordsPart = { target: { message: t.message, questions: [], skip: [], actions: [] }, key: `w:${wordsTo.session}`, own: tail.own, wordsTo };
@@ -4343,6 +4335,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
+  const latestDiagram = openAttachment?.kind === 'plannotator-diagram' ? latestDiagramFor(artifactList, openAttachment) : null;
   const fileOpen = openAttachment !== null || (namedFile !== null && file === null);
   // The questions inside the open Markdown file (issue #2828): its cards answer like the body's, through the same
   // pick, draft and Send. A version changed since it was sent may ask otherwise: only the sent text takes answers then.
@@ -4516,7 +4509,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     quoteWordsAtPress.current = { id: messageId, words: selectedWordsIn(article) };
   };
   const tryPrototype = (messageId: string, key: string) => setProto({ messageId, key });
-  const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf, setPageStart, openFileRef };
+  const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, deleteMessageComment: removeComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf, setPageStart, openFileRef };
   const acts = useRef(newest);
   acts.current = newest;
   const copyHost: CopyMenuHost = {
@@ -5139,6 +5132,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   draw={drawMessageBody}
                 />
                 </>
+                )}
+                {(message.attachments?.length ?? 0) > 0 && (
+                  <InlineDiagrams files={attachments.filter((a) => a.message_id === message.id)} records={fileRecords}
+                    readOnly={fileReadOnly(message)} onSaved={saveRecord} onRemoved={dropRecord} artifacts={artifactList} onOpenLatest={openFromMessage}
+                    onOpenFile={onOpenNamedFile && fileRefsHere ? (ref) => openFileRef(message.id, { from: 'root', path: ref.path, line: ref.start, lineEnd: ref.end }) : undefined}
+                    onSide={onSide} />
                 )}
                 {/* An agent's files, and the person's own (compose): the same tiles and viewers. */}
                 {(message.attachments?.length ?? 0) > 0 && (
@@ -5780,7 +5779,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         ref={paneRef}
         pageStart={pageStart}
         attachment={openAttachment}
+        onOpenDiagramFile={onOpenNamedFile && fileRefsHere ? (ref) => openFileRef(openAttachment.message_id, { from: 'root', path: ref.path, line: ref.start, lineEnd: ref.end }) : undefined}
         pin={{ threadId: thread.thread_id, key: openArtifactKey(artifactList, openAttachment.id) }}
+        latestDiagram={latestDiagram} onOpenLatestDiagram={latestDiagram ? () => openFromMessage(latestDiagram, currentView) : undefined}
         attachments={allFiles}
         // The files' annotations only: a guided-review comment is on the guide's diff, not on a file.
         records={fileRecords}
@@ -5826,11 +5827,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         focusId={file!.focus}
         focusRequest={paneFocus}
         fromPerson={thread.messages.find((m) => m.id === openAttachment.message_id)?.author.kind === 'person'}
-        readOnly={(() => {
-          const owner = thread.messages.find((m) => m.id === openAttachment.message_id) ?? root;
-          // The person does not comment on their own upload.
-          return !liveMessage(owner) || owner.author.kind === 'person';
-        })()}
+        readOnly={fileReadOnly(thread.messages.find((m) => m.id === openAttachment.message_id) ?? root)}
         onSaved={saveRecord}
         onRemoved={dropRecord}
         onToast={onToast}
