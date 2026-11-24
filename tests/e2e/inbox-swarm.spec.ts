@@ -10,7 +10,8 @@
  *     `plannotator inbox swarm` sends). The thread: the summary row in place of "N sessions" and the Ghost button
  *     first in the bar with the count of their words; the status view with each state and each doing line.
  *  3. The Ghost button: the pane beside the thread (the thread still in view), each message "X to Y", the count gone;
- *     the person writes to everyone from its box, and the ghost thread holds the words.
+ *     the person writes to everyone from its box, and the ghost thread holds the words. Closed again, an agent's new
+ *     words reach the open thread by the stream (a `swarm` event) and the count comes back.
  *  4. A second swarm thread nobody has talked in yet: the empty ghost pane.
  *  5. A phone (390 × 844): the thread, and the ghost pane as its own page whose "‹ <thread title>" goes back.
  *
@@ -262,6 +263,12 @@ test('the ghost pane opens beside the thread with the agents\' words; the person
   expect(said.body).toContain('Keep every amount in cents');
   expect((said.tags ?? []).map((t) => t.session).sort()).toEqual([CLAUDE.session, CODEX.session].sort());
   await shot(page, '04-ghost-pane-beside-thread');
+
+  // The stream: with the pane closed, an agent's new words reach the open thread as a swarm event, and the count comes back.
+  await pane.locator('[data-ghost-close]').click();
+  await expect(pane).toHaveCount(0);
+  await swarmAsk(CODEX, { action: 'say', thread: threadId, text: 'All 14 are listed in refunds-short.csv.', to: 'Claude Code' });
+  await expect(ghost.locator('[data-ghost-unread]')).toHaveText('1', { timeout: 20_000 });
 });
 
 test('a swarm nobody has talked in yet: the empty ghost pane', async ({ page }) => {
