@@ -1098,7 +1098,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     return { machine, name, snoozed: body.snoozed ?? null, held: null, ended: until === null && !!row.snoozed && inboxSnoozeRunning(row.snoozed.until) };
   };
 
-  // ── An agent's capability switch on a linked computer (the `capability` tool, inbox-mcp-capability.ts) ──
+  // ── An agent's capability switch on a linked computer (`plannotator inbox capability`, inbox-capability-agent.ts) ──
 
   /**
    * That computer's switches (`change` null: read while it is online), or one of them turned there: the window's own

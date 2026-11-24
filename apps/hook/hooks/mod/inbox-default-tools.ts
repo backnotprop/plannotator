@@ -408,57 +408,5 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
       "properties": {},
       "additionalProperties": false
     }
-  },
-  {
-    "name": "capability",
-    "description": "The Plannotator Inbox's capabilities, the switches in Settings, Capabilities. Turn one on or off when the person asks you to; not on your own initiative. Without `on`, it lists each one and whether it is on. `computer`: a linked computer's name, to read or turn one there. A turn posts one line for the person: in thread_id, the thread you work in, if you pass it, else in a new thread in your project.",
-    "inputSchema": {
-      "type": "object",
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "properties": {
-        "capability": {
-          "description": "Which one. Required with `on`.",
-          "type": "string",
-          "enum": [
-            "board",
-            "checklist",
-            "routines",
-            "code_review",
-            "chapter_diagrams",
-            "bro_mode",
-            "float_drafts"
-          ]
-        },
-        "on": {
-          "description": "true turns it on, false turns it off. Leave it out to list them.",
-          "type": "boolean"
-        },
-        "computer": {
-          "description": "A linked computer's name, as the Inbox shows it. Default: this computer.",
-          "type": "string"
-        },
-        "thread_id": {
-          "description": "The thread you are working in: the line for the person goes there.",
-          "type": "string"
-        },
-        "project_path": {
-          "description": "Absolute path of the repository or folder you work in; the thread lands in that project's row. The `plannotator inbox mcp` shim fills it from its working folder.",
-          "type": "string"
-        },
-        "agent_session": {
-          "description": "Your session id; the `plannotator inbox mcp` shim fills it.",
-          "type": "string"
-        },
-        "agent_name": {
-          "description": "How the person sees you, e.g. \"Claude Code\".",
-          "type": "string"
-        },
-        "agent_host": {
-          "description": "Your agent host, e.g. claude-code, codex, cursor.",
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
-    }
   }
 ]

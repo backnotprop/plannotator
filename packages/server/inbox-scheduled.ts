@@ -38,13 +38,7 @@ import type { InboxAttachment } from "@plannotator/core/inbox-types";
 import type { InboxLaunch, InboxLaunchTarget } from "./inbox-launch";
 
 export const INBOX_SCHEDULED_OFF_TEXT =
-  "routines_off: Routines are off on this computer, so nothing was written. They are turned on in Settings, Capabilities, or with the capability action when the person asks you to.";
-
-/** The same refusal where Routines are not offered at all (Windows): no switch turns them on there. */
-export const INBOX_SCHEDULED_NOT_OFFERED_TEXT = "routines_off: Routines are not offered on this computer, so nothing was written.";
-
-/** A routine call while Routines are off: `offered` false where this computer has no Routines switch. */
-export const inboxScheduledOffText = (offered: boolean): string => (offered ? INBOX_SCHEDULED_OFF_TEXT : INBOX_SCHEDULED_NOT_OFFERED_TEXT);
+  "routines_off: Routines are off on this computer, so nothing was written. The person turns them on in Settings, Capabilities.";
 
 /** Who asked: the person in the window, or an agent session (and the thread it asked from). */
 export type InboxScheduledBy = { kind: "person" } | { kind: "agent"; host: string; session: string; name: string; thread_id: string | null };

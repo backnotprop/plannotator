@@ -1,16 +1,15 @@
 /**
- * The `capability` tool (inbox-mcp-capability.ts) against a stand-in context: no Inbox runs. What regresses: the tool
- * missing from tools/list while capabilities are off (it is how one is turned on); a turn not taking, or taking on the
- * wrong computer; the person's line posted twice, posted for a turn that changed nothing, or not said when it had
- * nowhere to go; a linked computer's held turn reported as done; a linked computer too old for it, or a name that
- * matches none, answered as if it worked.
+ * `plannotator inbox capability` on the Inbox's side (inbox-capability-agent.ts) against a stand-in context: no Inbox
+ * runs. What regresses: a turn not taking, or taking on the wrong computer; the person's line posted twice, posted for
+ * a turn that changed nothing, or not said when it had nowhere to go; a linked computer's held turn reported as done;
+ * a linked computer too old for it, or a name that matches none, answered as if it worked; the route taking a field it
+ * should refuse; a paired cloud agent's turn through the door not named as that agent, or naming someone else.
  */
 import { describe, expect, test } from "bun:test";
-import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import type { InboxCapabilitySwitches, InboxCapabilitySwitchKey } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { capabilityLineText, registerInboxCapabilityTool, type InboxCapabilityMcpContext } from "./inbox-mcp-capability";
-import { inboxScheduledOffText } from "./inbox-scheduled";
+import { capabilityAskOf, capabilityLineText, capabilityRoute, type InboxCapabilityContext } from "./inbox-capability-agent";
+import { inboxAgentRouteAction } from "./inbox-agent-routes";
 
 type Result = { isError?: boolean; content: { text: string }[]; structuredContent?: Record<string, unknown> };
 
@@ -20,10 +19,9 @@ function world(options: { far?: "online" | "away" | "older" | "last-said" } = {}
   const lines: { thread: string | null; project: string | null; body: string; by: string }[] = [];
   const turns: string[] = [];
   let settle: (end: { taken: boolean; why: string | null }) => void = () => {};
-  const context: InboxCapabilityMcpContext = {
-    // The door's own lookup (a paired agent's project is the door's): the line lands in the project it names.
+  const context: InboxCapabilityContext = {
+    // The project an agent's path names: the line lands in it.
     resolveProject: async (path) => ({ id: `prj:${path}` }),
-    capabilities: {
       here: () => structuredClone(here),
       set: async (key: InboxCapabilitySwitchKey, on: boolean) => {
         turns.push(`here ${key} ${on}`);
@@ -53,36 +51,21 @@ function world(options: { far?: "online" | "away" | "older" | "last-said" } = {}
         lines.push({ thread, project, body, by: by.name });
         return thread ?? "msg_new";
       },
-    },
   };
-  const handler = createMcpHandler(
-    () => {
-      const server = new McpServer({ name: "test", version: "1" });
-      registerInboxCapabilityTool(server, context);
-      return server;
-    },
-    { legacy: "stateless" },
-  );
-  let id = 0;
-  const rpc = async (method: string, params: Record<string, unknown>) => {
-    const response = await handler.fetch(
-      new Request("http://127.0.0.1/mcp", { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) }),
-    );
-    const text = await response.text();
-    const data = text.split("\n").find((line) => line.startsWith("data:"));
-    return JSON.parse(data ? data.slice(5) : text) as { result: any };
+  // As the route answers the command: `{ text, ...structured }`, or a refusal `<code>: <message>`.
+  const call = async (args: Record<string, unknown>): Promise<Result> => {
+    const response = await capabilityRoute(new Request("http://127.0.0.1/api/inbox/capability", { method: "POST", body: JSON.stringify({ by: { session: "ses_ada", host: "claude-code", name: "Claude Code" }, project_path: "/work/api", ...args }) }), new URL("http://127.0.0.1/api/inbox/capability"), context, (req) => req.json());
+    const { text, code, error, ...structured } = (await response!.json()) as Record<string, unknown>;
+    return response!.ok ? { content: [{ text: text as string }], structuredContent: structured } : { isError: true, content: [{ text: `${code}: ${error}` }] };
   };
-  const agent = { agent_session: "ses_ada", agent_host: "claude-code", agent_name: "Claude Code", project_path: "/work/api" };
-  const call = async (args: Record<string, unknown>) => (await rpc("tools/call", { name: "capability", arguments: { ...agent, ...args } })).result as Result;
-  return { here, there, lines, turns, rpc, call, settle: (end: { taken: boolean; why: string | null }) => settle(end) };
+  return { here, there, lines, turns, context, call, settle: (end: { taken: boolean; why: string | null }) => settle(end) };
 }
 
 const SHELL_NOW = "Agents get the routine action in their next session (a session's tools are listed once, at its start); from a shell it works now: `plannotator routine --help`.";
 
-describe("the capability tool", () => {
-  test("is listed with every capability off, and turns one on here: one line for the person, in the thread named", async () => {
+describe("plannotator inbox capability, on the Inbox's side", () => {
+  test("turns one on here: one line for the person, in the thread named", async () => {
     const w = world();
-    expect(((await w.rpc("tools/list", {})).result.tools as { name: string }[]).map((tool) => tool.name)).toEqual(["capability"]);
     const turned = await w.call({ capability: "routines", on: true, thread_id: "msg_work" });
     expect(turned.isError).toBeFalsy();
     // This session's tools were listed with Routines off: the result says where the action is, and what works now.
@@ -109,8 +92,6 @@ describe("the capability tool", () => {
   test("a hidden switch (System) is not an agent's: never named, listed or turned, even while it is on", async () => {
     const w = world();
     w.here.system = { on: true };
-    const tools = (await w.rpc("tools/list", {})).result.tools as { inputSchema: { properties: { capability: { enum: string[] } } } }[];
-    expect(tools[0]!.inputSchema.properties.capability.enum).not.toContain("system");
     const listed = await w.call({});
     expect(listed.content[0]!.text).not.toContain("system");
     expect(Object.keys(listed.structuredContent!.capabilities as object)).not.toContain("system");
@@ -127,7 +108,7 @@ describe("the capability tool", () => {
 
   test("with no thread and no project there is nowhere to post: the result says so", async () => {
     const w = world();
-    const turned = await w.call({ capability: "board", on: true, project_path: undefined });
+    const turned = await w.call({ capability: "board", on: true, project_path: undefined, by: { session: "ses_ada", host: "claude-code", name: "Claude Code" } });
     expect(turned.content[0]!.text).toStartWith("Turned on Board on this computer. There was no thread to post a line for the person in");
     expect(w.lines).toEqual([]);
   });
@@ -186,13 +167,50 @@ describe("the capability tool", () => {
     expect([older.turns, older.lines]).toEqual([[], []]);
   });
 
-  test("where Routines are not offered (Windows), a routine call is not told a switch turns them on", () => {
-    expect(inboxScheduledOffText(true)).toContain("with the capability action");
-    expect(inboxScheduledOffText(false)).toBe("routines_off: Routines are not offered on this computer, so nothing was written.");
-  });
-
   test("the person's line: which way, which capability, and the computer only when it is not this one", () => {
     expect(capabilityLineText("Checklist", false, null, false)).toBe("Turned off Checklist.");
     expect(capabilityLineText("Routines", true, "Studio", false)).toBe("Turned on Routines on Studio.");
+  });
+
+  test("the route refuses a field it does not take, and a capability or a state an agent cannot name", () => {
+    expect(() => capabilityAskOf({ capability: "routines", on: true, force: true })).toThrow("force: not taken here.");
+    expect(() => capabilityAskOf({ capability: "system", on: true })).toThrow("capability: one of");
+    expect(() => capabilityAskOf({ capability: "routines", on: "yes" })).toThrow("on: true or false.");
+  });
+
+  test("a list by GET, here or on a linked computer by its name", async () => {
+    const w = world({ far: "online" });
+    const get = async (query: string) => (await (await capabilityRoute(new Request(`http://127.0.0.1/api/inbox/capability${query}`), new URL(`http://127.0.0.1/api/inbox/capability${query}`), w.context, async () => ({})))!.json()) as Record<string, unknown>;
+    expect((await get("")).text).toBe("On this computer: board off, checklist off, routines off, bro_mode off.");
+    expect(await get("?computer=Studio")).toMatchObject({ text: "On Studio: board on, routines off.", computer: "Studio" });
+    expect(w.turns).toEqual([]);
+  });
+});
+
+describe("a paired cloud agent's turn, through the agent door's route", () => {
+  const handled = () => {
+    const seen: { method: string; path: string; body: Record<string, unknown> | null }[] = [];
+    const handle = async (req: Request) => {
+      seen.push({ method: req.method, path: new URL(req.url).pathname + new URL(req.url).search, body: req.method === "POST" ? ((await req.json()) as Record<string, unknown>) : null });
+      return Response.json({ text: "ok" });
+    };
+    return { seen, handle };
+  };
+  const by = { host: "codex-cloud", session: "ses_cloud", name: "Codex Cloud", project: () => "prj_cloud" };
+
+  test("the turn is the pairing's agent's, in its own project: what the agent sent cannot name another", async () => {
+    const door = handled();
+    await inboxAgentRouteAction(door.handle, by, "route", { method: "POST", path: "/api/inbox/capability", body: { capability: "routines", on: true, thread_id: "msg_1" } });
+    expect(door.seen).toEqual([{ method: "POST", path: "/api/inbox/capability", body: { capability: "routines", on: true, thread_id: "msg_1", by: { host: "codex-cloud", session: "ses_cloud", name: "Codex Cloud" }, project_id: "prj_cloud" } }]);
+    for (const field of ["by", "project_path", "project_id"]) {
+      await expect(inboxAgentRouteAction(door.handle, by, "route", { method: "POST", path: "/api/inbox/capability", body: { capability: "routines", on: true, [field]: "x" } })).rejects.toThrow(`body: ${field}: not taken here`);
+    }
+    expect(door.seen).toHaveLength(1);
+  });
+
+  test("a list goes as a read, a linked computer's too", async () => {
+    const door = handled();
+    await inboxAgentRouteAction(door.handle, by, "route", { method: "GET", path: "/api/inbox/capability?computer=Studio" });
+    expect(door.seen.map((one) => [one.method, one.path])).toEqual([["GET", "/api/inbox/capability?computer=Studio"]]);
   });
 });

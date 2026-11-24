@@ -33,7 +33,7 @@ export const INBOX_CAPABILITY_AGENT_SWITCHES = INBOX_CAPABILITY_SWITCHES.filter(
 
 export type InboxCapabilityAgentId = (typeof INBOX_CAPABILITY_SWITCHES)[number]["agent"];
 
-/** The `capability` tool's names for them (docs/agent-guides/inbox-machines.md): the Settings row's name, in snake case. */
+/** `plannotator inbox capability`'s names for them (docs/agent-guides/inbox-machines.md): the Settings row's name, in snake case. */
 export const INBOX_CAPABILITY_AGENT_IDS = INBOX_CAPABILITY_AGENT_SWITCHES.map((s) => s.agent) as [InboxCapabilityAgentId, ...InboxCapabilityAgentId[]];
 
 /** `GET /api/inbox/capabilities`: each switch this Inbox offers now, and whether it is on. One it does not offer is absent. */

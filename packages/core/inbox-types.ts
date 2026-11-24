@@ -4511,6 +4511,6 @@ export function readInboxAgentFaces(value: unknown): Record<string, InboxAgentFa
 /** Whether `id` is a key or session an agent face entry may name. */
 export const isInboxAgentFaceId = isId;
 
-// Settings → Capabilities' switches, for a linked computer's window and the agents' capability action. Exported here,
+// Settings → Capabilities' switches, for a linked computer's window and `plannotator inbox capability`. Exported here,
 // not as a subpath of its own: a new subpath needs a core release before the UI package publishes.
 export * from "./inbox-capability-switches";

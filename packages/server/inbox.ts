@@ -225,7 +225,8 @@ import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-r
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { capabilityNoteOf, postCapabilityNotes } from "./inbox-capability-note";
-import { createInboxScheduled,INBOX_SCHEDULED_ERROR_STATUS, inboxScheduledOffText, type InboxScheduled } from "./inbox-scheduled";
+import { capabilityRoute, type InboxCapabilityContext } from "./inbox-capability-agent";
+import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
 import { createRoutineGrants, sendRecipients } from "./inbox-routine-grants";
 import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
 import { execLoginCommand, inboxLoginItem, type InboxLoginItem } from "./inbox-scheduled-login";
@@ -1894,29 +1895,30 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     findOnMachines: () => machines?.agentFind ?? null,
     projectRemoteKey: (root, waitMs) => farRemoteOf(repos, root, waitMs),
     snoozeMade: () => markSnoozeUsed(),
-    // The capability tool (inbox-mcp-capability.ts): this computer's switches, turned through the settings route as
-    // Settings turns them; a linked computer's through the forward, as its Settings group does.
-    capabilities: {
-      here: () => inboxCapabilitySwitchesOf(settingsModel("local", false, null, false)),
-      set: async (key, on) => {
-        const answer = await globalThis.fetch(`${baseUrl.replace(/\/+$/, "")}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [key]: { on } }) });
-        const body = (await answer.json().catch(() => ({}))) as { code?: unknown; error?: unknown };
-        if (!answer.ok) throw new InboxError(typeof body.code === "string" ? body.code : "validation_error", typeof body.error === "string" ? body.error : "The switch did not turn.");
-        return inboxCapabilitySwitchesOf(settingsModel("local", false, null, false));
-      },
-      there: async (computer, change, by) => (machines ? machines.capabilitiesOn(computer, change, by ?? null) : null),
-      linked: () => machines?.linkedNames() ?? [],
-      // `project`: the agent's own project, by the lookup of the door it came through (a paired agent's is the door's).
-      tell: async (by, threadId, project, body) => {
-        const author = { kind: "agent" as const, host: by.host, session: by.session, name: by.name };
-        const thread = threadId ? store.message(threadId) : null;
-        // The Inbox's own kind of note: no sound (`launch_note`).
-        if (thread) return store.sendMessage({ author, body, launch_note: true, project_id: thread.project_id, reply_to: store.threadMessageIds(thread.thread_id).at(-1) ?? thread.thread_id }).message.thread_id;
-        const projectId = await project();
-        return projectId && store.project(projectId) ? store.sendMessage({ author, body, launch_note: true, project_id: projectId, subject: body }).message.thread_id : null;
-      },
-    },
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
+  };
+  // `plannotator inbox capability` (inbox-capability-agent.ts): this computer's switches, turned through the settings
+  // route as Settings turns them; a linked computer's through the forward, as its Settings group does.
+  const capabilityAgent: InboxCapabilityContext = {
+    resolveProject,
+    here: () => inboxCapabilitySwitchesOf(settingsModel("local", false, null, false)),
+    set: async (key, on) => {
+      const answer = await globalThis.fetch(`${baseUrl.replace(/\/+$/, "")}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [key]: { on } }) });
+      const body = (await answer.json().catch(() => ({}))) as { code?: unknown; error?: unknown };
+      if (!answer.ok) throw new InboxError(typeof body.code === "string" ? body.code : "validation_error", typeof body.error === "string" ? body.error : "The switch did not turn.");
+      return inboxCapabilitySwitchesOf(settingsModel("local", false, null, false));
+    },
+    there: async (computer, change, by) => (machines ? machines.capabilitiesOn(computer, change, by ?? null) : null),
+    linked: () => machines?.linkedNames() ?? [],
+    // `project`: the agent's own project, by the lookup of the door it came through (a paired agent's is the door's).
+    tell: async (by, threadId, project, body) => {
+      const author = { kind: "agent" as const, host: by.host, session: by.session, name: by.name };
+      const thread = threadId ? store.message(threadId) : null;
+      // The Inbox's own kind of note: no sound (`launch_note`).
+      if (thread) return store.sendMessage({ author, body, launch_note: true, project_id: thread.project_id, reply_to: store.threadMessageIds(thread.thread_id).at(-1) ?? thread.thread_id }).message.thread_id;
+      const projectId = await project();
+      return projectId && store.project(projectId) ? store.sendMessage({ author, body, launch_note: true, project_id: projectId, subject: body }).message.thread_id : null;
+    },
   };
   const mcp = createMcpHandler(() => createInboxMcpServer(mcpContext), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
   // An initialize request gets a server built for its client: the person's rules are sized to what that client keeps.
@@ -4820,7 +4822,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           : call.params?.name === "steps" && !stepsOn()
             ? INBOX_STEPS_OFF_TEXT
             : call.params?.name === "routine" && !scheduledCap.on()
-              ? inboxScheduledOffText(scheduledCap.wire().scheduled_threads !== undefined)
+              ? INBOX_SCHEDULED_OFF_TEXT
               : null;
     return text ? json({ jsonrpc: "2.0", id: call.id, result: { content: [{ type: "text", text }], isError: true } }) : null;
   };
@@ -7209,6 +7211,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === "/api/inbox/capabilities") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json({ capabilities: inboxCapabilitySwitchesOf(settingsModel(via, false, null, false)) });
+      }
+      // An agent's `plannotator inbox capability` (inbox-capability-agent.ts): this computer's own, never a device door's.
+      if (path === "/api/inbox/capability" && !fromDeviceDoor.has(req)) {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const answer = await capabilityRoute(req, url, capabilityAgent, readBody);
+        if (answer) return answer;
       }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") {

@@ -395,7 +395,7 @@ describe("what an agent's tool carries", () => {
     const before = parseInboxToolList(await rawList(w.base));
     await w.setCodeReview(true);
     const served = parseInboxToolList(await rawList(w.base));
-    expect(served.map((tool) => tool.name)).toEqual(expect.arrayContaining(["card", "steps", "capability", ...(process.platform === "win32" ? [] : ["routine"])]));
+    expect(served.map((tool) => tool.name)).toEqual(expect.arrayContaining(["card", "steps", ...(process.platform === "win32" ? [] : ["routine"])]));
     for (const build of [inboxAgentTool, modAgentTool]) {
       const tool = build(served)!;
       expect(tool.description.length).toBeLessThan(2_048);

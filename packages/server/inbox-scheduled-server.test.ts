@@ -93,7 +93,7 @@ describe("the switch", () => {
     expect(await w.tools()).not.toContain("routine");
     const refused = await w.call({ op: "create", name: "Morning triage", prompt: "Triage.", schedule: w.daily, agent: FAKE });
     expect(refused.isError).toBe(true);
-    expect(refused.content[0]!.text).toBe("routines_off: Routines are off on this computer, so nothing was written. They are turned on in Settings, Capabilities, or with the capability action when the person asks you to.");
+    expect(refused.content[0]!.text).toBe("routines_off: Routines are off on this computer, so nothing was written. The person turns them on in Settings, Capabilities.");
     const list = await fetch(`${w.base}/api/inbox/scheduled`);
     expect(list.status).toBe(404);
     expect(((await list.json()) as { code: string }).code).toBe("routines_off");
@@ -114,21 +114,21 @@ describe("the switch", () => {
   });
 });
 
-describe("the capability action (inbox-mcp-capability.ts)", () => {
-  test("listed while Routines are off; an agent the person asked turns them on, one line in its thread, and the routine tool is listed", async () => {
+describe("plannotator inbox capability (inbox-capability-agent.ts)", () => {
+  test("with Routines off, an agent the person asked turns them on: one line in its thread, and the routine tool is listed", async () => {
     const w = await world();
-    expect(await w.tools()).toContain("capability");
     expect(await w.tools()).not.toContain("routine");
-    const turn = async () => (await w.rpc("tools/call", { name: "capability", arguments: { agent_session: "ses_maya", agent_host: "claude-code", agent_name: "Claude Code", project_path: w.folder, capability: "routines", on: true, thread_id: w.thread } })).result as ToolResult;
-    const turned = await turn();
+    // The agent tool never lists a capability action: turning one is the command's.
+    expect(await w.tools()).not.toContain("capability");
+    const turn = async () => (await (await fetch(`${w.base}/api/inbox/capability`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ by: { session: "ses_maya", host: "claude-code", name: "Claude Code" }, project_path: w.folder, capability: "routines", on: true, thread_id: w.thread }) })).json()) as { text: string };
     const shellNow = "Agents get the routine action in their next session (a session's tools are listed once, at its start); from a shell it works now: `plannotator routine --help`.";
-    expect(turned.content[0]!.text).toBe(`Turned on Routines on this computer. The person sees it in thread ${w.thread}. ${shellNow}`);
+    expect((await turn()).text).toBe(`Turned on Routines on this computer. The person sees it in thread ${w.thread}. ${shellNow}`);
     expect((await (await fetch(`${w.base}/api/inbox/settings`)).json()).scheduled_threads.on).toBe(true);
     expect(await w.tools()).toContain("routine");
     const said = () => w.server.store.threadMessageIds(w.thread).map((m) => w.server.store.message(m)!).filter((m) => m.body === "Turned on Routines.");
     expect(said().map((m) => m.author.kind === "agent" && m.author.name)).toEqual(["Claude Code"]);
     // Again: nothing changes and no second line.
-    expect((await turn()).content[0]!.text).toBe(`Routines was already on (this computer). Nothing changed. ${shellNow}`);
+    expect((await turn()).text).toBe(`Routines was already on (this computer). Nothing changed. ${shellNow}`);
     expect(said()).toHaveLength(1);
   });
 });

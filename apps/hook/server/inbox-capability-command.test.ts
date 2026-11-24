@@ -1,12 +1,14 @@
 /**
- * `plannotator inbox capability` (inbox-capability-command.ts): its parse into the `capability` tool's fields, and its
- * help. What regresses: a turn sent as the wrong field or the wrong way; a typo turning something on; bad usage
- * starting the Inbox; the help losing the rule that a turn is the person's request.
+ * `plannotator inbox capability` (inbox-capability-command.ts): what it asks the Inbox, and its help. No Inbox runs:
+ * a stand-in for the Inbox's route. What regresses: a turn sent the wrong way or as someone else; a typo turning
+ * something on; bad usage starting the Inbox; the Inbox's answer (the line it posted, a linked computer's, an away
+ * one's) not reaching stdout whole; a refusal printed as a result; the help losing the rule that a turn is the
+ * person's request.
  */
 import { expect, test } from "bun:test";
 import { INBOX_CAPABILITY_USAGE, parseCapabilityCommand, runInboxCapabilityCommand } from "./inbox-capability-command";
 
-test("a turn is the tool's capability and on, with the computer and the thread; nothing is a list", () => {
+test("a turn is the capability and on, with the computer and the thread; nothing is a list", () => {
   expect(parseCapabilityCommand(["routines", "on", "--computer", "Studio", "--thread", "msg_1"])).toEqual({ ok: true, call: { capability: "routines", on: true, computer: "Studio", thread_id: "msg_1" }, session: null });
   expect(parseCapabilityCommand(["board", "off", "--session", "ses_1"])).toEqual({ ok: true, call: { capability: "board", on: false }, session: "ses_1" });
   expect(parseCapabilityCommand(["--computer", "Studio"])).toEqual({ ok: true, call: { computer: "Studio" }, session: null });
@@ -18,14 +20,58 @@ test("a capability it does not know, a state that is not on or off, or a lone na
   }
 });
 
-test("help and bad usage start no Inbox: help on stdout with exit 0, bad usage exit 2", async () => {
-  let started = 0;
+function inbox(answer: (path: string, body: Record<string, unknown> | null) => { status: number; json: unknown }) {
+  const asked: { method: string; path: string; body: Record<string, unknown> | null }[] = [];
   const out: string[] = [];
   const err: string[] = [];
-  const deps = { cwd: "/work/api", env: {}, askAiChild: false, ensureRunning: async () => void started++, out: async (text: string) => void out.push(text), err: (text: string) => void err.push(text) };
-  expect(await runInboxCapabilityCommand(["--help"], deps as never)).toBe(0);
-  expect(out.join("")).toContain("Turn one on or off when the person asks you to; not on your own initiative.");
-  expect(await runInboxCapabilityCommand(["routines", "maybe"], deps as never)).toBe(2);
-  expect(err.join("")).toContain(INBOX_CAPABILITY_USAGE.split("\n")[0]!);
-  expect(started).toBe(0);
+  let started = 0;
+  const deps = {
+    cwd: "/work/api",
+    env: { CODEX_THREAD_ID: "019a2b3c-1111-7222-8333-444455556666" } as Record<string, string | undefined>,
+    ensureRunning: async () => {
+      started++;
+      return {} as never;
+    },
+    out: async (text: string) => void out.push(text),
+    err: (text: string) => void err.push(text),
+    fetchRoute: async (path: string, init?: { method?: string; body?: string }) => {
+      const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+      asked.push({ method: init?.method ?? "GET", path, body });
+      const { status, json } = answer(path, body);
+      return Response.json(json, { status });
+    },
+  };
+  return { deps, asked, out, err, started: () => started };
+}
+
+test("a turn is a POST as this shell's session, in its folder; the Inbox's answer is stdout, the line it posted included", async () => {
+  const text = "Turned on Routines on this computer. The person sees it in thread msg_1.";
+  const w = inbox(() => ({ status: 200, json: { text, capabilities: { scheduled_threads: { on: true } } } }));
+  expect(await runInboxCapabilityCommand(["routines", "on", "--thread", "msg_1"], w.deps)).toBe(0);
+  expect(w.asked).toHaveLength(1);
+  expect(w.asked[0]).toMatchObject({ method: "POST", path: "/api/inbox/capability", body: { capability: "routines", on: true, thread_id: "msg_1", project_path: "/work/api" } });
+  expect(w.asked[0]!.body!.by).toMatchObject({ session: "019a2b3c-1111-7222-8333-444455556666", host: "codex" });
+  expect(JSON.parse(w.out.join(""))).toEqual({ text, capabilities: { scheduled_threads: { on: true } } });
+});
+
+test("a list is a read, of a linked computer by its name; an away computer's answer says so", async () => {
+  const w = inbox(() => ({ status: 200, json: { text: "On Studio: board on. Studio is away: these are as it last said, at 2026-11-24T14:10:00.000Z.", computer: "Studio", away: true } }));
+  expect(await runInboxCapabilityCommand(["--computer", "Studio Mini"], w.deps)).toBe(0);
+  expect(w.asked).toEqual([{ method: "GET", path: "/api/inbox/capability?computer=Studio%20Mini", body: null }]);
+  expect(JSON.parse(w.out.join(""))).toMatchObject({ computer: "Studio", away: true });
+});
+
+test("a refusal is `<code>: <message>` on stderr, exit 1, nothing on stdout", async () => {
+  const w = inbox(() => ({ status: 404, json: { code: "machine_not_found", error: "No linked computer is named Mini. Linked: Studio. Leave computer out for this computer." } }));
+  expect(await runInboxCapabilityCommand(["board", "on", "--computer", "Mini"], w.deps)).toBe(1);
+  expect([w.out, w.err.join("")]).toEqual([[], "machine_not_found: No linked computer is named Mini. Linked: Studio. Leave computer out for this computer.\n"]);
+});
+
+test("help and bad usage ask the Inbox nothing: help on stdout with exit 0, bad usage exit 2", async () => {
+  const w = inbox(() => ({ status: 200, json: { text: "" } }));
+  expect(await runInboxCapabilityCommand(["--help"], w.deps)).toBe(0);
+  expect(w.out.join("")).toContain("Turn one on or off when the person asks you to; not on your own initiative.");
+  expect(await runInboxCapabilityCommand(["routines", "maybe"], w.deps)).toBe(2);
+  expect(w.err.join("")).toContain(INBOX_CAPABILITY_USAGE.split("\n")[0]!);
+  expect([w.asked, w.started()]).toEqual([[], 0]);
 });

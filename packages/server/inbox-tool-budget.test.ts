@@ -1,13 +1,16 @@
 /**
  * Claude Code cuts a tool description at 2,048 characters, which would cut off the last line, the `--help` pointer.
- * What regresses: an action's line (`capability`, `routine`, or a new one) pushing `plannotator_inbox` past it in the
- * worst case, every capability that adds an action on (the Board, the Checklist, Routines), in both builders (the
- * shared one and the Claude Code mod's byte copy). No Inbox runs: the bundled list and each action's real definition.
+ * What regresses: an action's line (`routine`, or a new one) pushing `plannotator_inbox` past it in the worst case,
+ * every capability that adds an action on (the Board, the Checklist, Routines), in both builders (the shared one and
+ * the Claude Code mod's byte copy); and a `capability` action coming back into the tool (the owner, 2026-11-24: turning
+ * a capability is `plannotator inbox capability`, in the CLI help only). No Inbox runs: the bundled list and each
+ * action's real definition.
  */
 import { expect, test } from "bun:test";
 import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
-import { inboxAgentTool, INBOX_TOOL_HELP_NOTE, type InboxToolInfo } from "@plannotator/shared/inbox/connection";
-import { inboxAgentTool as modAgentTool } from "../../apps/hook/hooks/mod/inbox-contract";
+import { inboxAgentTool, INBOX_TOOL_ACTIONS, INBOX_TOOL_HELP_NOTE, type InboxToolInfo } from "@plannotator/shared/inbox/connection";
+import { inboxAgentTool as modAgentTool, INBOX_TOOL_ACTIONS as MOD_TOOL_ACTIONS } from "../../apps/hook/hooks/mod/inbox-contract";
+import { INBOX_MCP_TOOLS } from "./inbox-mcp";
 import { INBOX_DEFAULT_TOOLS } from "../../apps/hook/hooks/mod/inbox-default-tools";
 import { registerInboxCardTool } from "./inbox-mcp-cards";
 import { registerInboxStepsTool } from "./inbox-mcp-steps";
@@ -35,12 +38,18 @@ async function servedWithEverythingOn(): Promise<InboxToolInfo[]> {
 
 test("with the Board, the Checklist and Routines on, the agent tool's description stays under 2,048 and ends with the help line", async () => {
   const served = await servedWithEverythingOn();
-  expect(served.map((tool) => tool.name)).toEqual(expect.arrayContaining(["capability", "card", "steps", "routine"]));
+  expect(served.map((tool) => tool.name)).toEqual(expect.arrayContaining(["card", "steps", "routine"]));
   for (const build of [inboxAgentTool, modAgentTool]) {
     const tool = build(served)!;
     expect(tool.description.length).toBeLessThan(2_048);
     expect(tool.description.endsWith(INBOX_TOOL_HELP_NOTE)).toBe(true);
     // Every action stays callable: the description only lost lines, never an action.
-    expect((tool.inputSchema.properties as Record<string, { enum?: string[] }>).action!.enum).toEqual(served.map((one) => one.name));
+    const actions = (tool.inputSchema.properties as Record<string, { enum?: string[] }>).action!.enum!;
+    expect(actions).toEqual(served.map((one) => one.name));
+    expect(actions).not.toContain("capability");
   }
+});
+
+test("the agent tool has no capability action: not in the contract's actions, the bundled list or the Inbox's tools", () => {
+  for (const actions of [INBOX_TOOL_ACTIONS, MOD_TOOL_ACTIONS, INBOX_MCP_TOOLS, INBOX_DEFAULT_TOOLS.map((tool) => tool.name)]) expect(actions).not.toContain("capability");
 });

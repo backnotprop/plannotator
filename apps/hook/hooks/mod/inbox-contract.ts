@@ -25,24 +25,11 @@ export const INBOX_TOOL_ACTIONS = [
   'submit_guide',
   'get_guide_brief',
   'card',
-  'capability',
   'steps',
   'routine',
 ] as const
 
 export type InboxToolAction = (typeof INBOX_TOOL_ACTIONS)[number]
-
-/**
- * What a call to an action this Inbox does not list says, for an action a
- * capability switch serves: an Inbox that lists `capability` has the action,
- * and the switch was off when this session's tools were listed. It may be on
- * now (the list is made once, at the start), which this session cannot know.
- */
-const INBOX_ACTION_OFF: Record<string, string> = {
-  card: "this session's tools were listed while the Board was off. If it is on now, the card action comes in your next session, and from a shell it works now: `plannotator card --help`. If it is off, the capability action turns it on when the person asks",
-  steps: "this session's tools were listed while the Checklist was off. If it is on now, the steps action comes in your next session, and from a shell it works now: `plannotator inbox steps <thread> --json '<list>'`. If it is off, the capability action turns it on when the person asks",
-  routine: "this session's tools were listed while Routines were off or not offered on this computer. If they are on now, the routine action comes in your next session, and from a shell it works now: `plannotator routine --help`. If they are off, the capability action turns them on when the person asks",
-}
 
 /**
  * The action the Inbox no longer has, and what a call to it answers: an older
@@ -501,10 +488,11 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
  * Actions with no line in the agent tool's description: the name in `action`
  * and its field's description say what they do, and a field description does
  * not count toward the 2,048 (the owner: do not grow the main description).
- * `capability` and `routine` too: with the Board, the Checklist and Routines
- * on, their lines would pass Claude Code's 2,048 and cut off the `--help` line.
+ * `routine` too (the owner, 2026-11-24): with the Board, the Checklist and
+ * Routines on, its line would pass Claude Code's 2,048 and cut off the
+ * `--help` line; `plannotator routine --help` says the rest.
  */
-export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls', 'capability', 'routine']
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls', 'routine']
 
 /**
  * Before saying something was never discussed (approved 2026-11-15): the MCP search tool's description and --help's
@@ -1153,7 +1141,7 @@ export function inboxToolCall(
   if (!tool) {
     if (inboxInputUnread(input as Record<string, unknown>, tools)) return { error: inboxUnreadInputText(input, tools) }
     return {
-      error: `Invalid plannotator_inbox call: action must be one of ${tools.map((candidate) => candidate.name).join(', ')}${typeof action === 'string' && (INBOX_TOOL_ACTIONS as readonly string[]).includes(action) ? ` (${tools.some((candidate) => candidate.name === 'capability') && INBOX_ACTION_OFF[action] ? INBOX_ACTION_OFF[action] : `this Plannotator Inbox has no ${action}; update Plannotator for it`})` : ''}.`,
+      error: `Invalid plannotator_inbox call: action must be one of ${tools.map((candidate) => candidate.name).join(', ')}${typeof action === 'string' && (INBOX_TOOL_ACTIONS as readonly string[]).includes(action) ? ` (this Plannotator Inbox has no ${action}; update Plannotator for it)` : ''}.`,
     }
   }
   const own = propertiesOf(tool)
