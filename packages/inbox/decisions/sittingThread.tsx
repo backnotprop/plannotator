@@ -3,7 +3,7 @@
  * held, so each card draws its message with the thread's own card. And the prototype window a card's "Try prototype"
  * opens over the dialog: the thread's `PrototypeWindow`, its pick going to the same draft.
  */
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { useInboxQueryClient } from '../data/client';
 import { putThread, readThread, useHeldThread } from '../data/queries/thread';
@@ -13,27 +13,35 @@ import { PrototypeWindow, openingOption, type PrototypeOption } from '../compone
 import { questionPrototypePages } from '../prototypes';
 import { choiceLetters } from '../optionSets';
 import { emptyAnswerFor } from '../thread/helpers';
+import { readWithRetries } from './readRetry';
 
-/** How long the one read of a thread not held may take. */
+/** How long one read of a thread not held may take. */
 const READ_MS = 15_000;
+/** A read that fails or runs out goes again this many times, a little later each time, before the card says so. */
+export const SITTING_READ_TRIES = 3;
+const RETRY_MS = 1_500;
 
-export function useSittingThread(threadId: string | null): HeldThread | null {
+export interface SittingThread {
+  held: HeldThread | null;
+  /** Every try failed: the card says the question could not be read, with Try again. */
+  failed: boolean;
+  retry: () => void;
+}
+
+export function useSittingThread(threadId: string | null): SittingThread {
   const client = useInboxQueryClient();
   const held = useHeldThread(threadId, true);
   const missing = threadId !== null && held === null;
+  const [failed, setFailed] = useState(false);
+  /** Bumped by Try again: the tries start over. */
+  const [round, setRound] = useState(0);
   useEffect(() => {
     if (!missing || !threadId) return;
-    let gone = false;
-    void readThread(threadId, READ_MS)
-      .then((model) => {
-        if (!gone) putThread(client, threadId, model);
-      })
-      .catch(() => {});
-    return () => {
-      gone = true;
-    };
-  }, [missing, threadId, client]);
-  return held;
+    setFailed(false);
+    return readWithRetries(() => readThread(threadId, READ_MS), { onRead: (model) => putThread(client, threadId, model), onFailed: () => setFailed(true) }, { tries: SITTING_READ_TRIES, waitMs: RETRY_MS });
+  }, [missing, threadId, client, round]);
+  const retry = useCallback(() => setRound((n) => n + 1), []);
+  return { held, failed: failed && missing, retry };
 }
 
 /** The question's prototypes in the thread's full window, over the dialog; a Pick there answers the card's draft. */

@@ -71,6 +71,9 @@ export interface DecisionCardProps {
   decision: InboxDecision;
   /** The thread's copy of the decision's message, read from the thread: null until it is there (the card waits). */
   body: CardBody | null;
+  /** The thread could not be read (every try failed): the card says so, with Try again, never "Reading…" forever. */
+  readFailed?: boolean;
+  onReadAgain?: () => void;
   /** The banner over the card when the agent replaced the question on screen. */
   banner?: ReactNode;
   /** The pick just made (the stamp): the card shows it while it leaves. */
@@ -209,6 +212,13 @@ export function DecisionCard(props: DecisionCardProps) {
                   onOpenOptionSet={props.onOptionSet}
                   onTryPrototype={author.kind === 'agent' ? props.onTryPrototype : undefined}
                 />
+              </div>
+            ) : props.readFailed ? (
+              <div className="ib-dm-loading" role="alert" data-decision-question-failed="">
+                Couldn&apos;t read the question.{' '}
+                <button type="button" className="ib-dm-lnk" onClick={props.onReadAgain}>
+                  Try again
+                </button>
               </div>
             ) : (
               <div className="ib-dm-loading" data-decision-question-loading="">
