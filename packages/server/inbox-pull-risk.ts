@@ -7,11 +7,13 @@
  *
  *   inbox/pull-risk.json   { v: 1, judgments: { [pull key]: { head, base, rules, level, why, where? } } }
  *
- * - A high judgment may name its places in the diff (`where`, context notes,
- *   approval "inbox-context-notes"): checked against the diff that was judged
- *   when it is made, kept beside it, and shown on the PR's diff. Kept only when
- *   the diff judged is the one the PR's diff draws (the forge's one document):
- *   a per-file read, a clone's diff or a too-large one draws none of them.
+ * - A high or medium judgment may name its places in the diff (`where`, context
+ *   notes, approval "inbox-context-notes"; the risk bars, "review-risk-bars"):
+ *   checked against the diff that was judged when it is made, kept beside it,
+ *   and shown on the PR's diff. Kept only when the diff judged is the one the
+ *   PR's diff draws (the forge's one document): a per-file read, a clone's diff
+ *   or a too-large one draws none of them. The answer gives each judgment its
+ *   `head`, so a window never draws its places on another head's diff.
  *
  * - Runs only while Code review is on and rules exist, and only from the owner's
  *   window's list read (the routes in inbox.ts guard those). Open and draft PRs only.
@@ -435,7 +437,8 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     let partial: boolean;
     let heldBack: string | null;
     // Whether the diff judged is the one the PR's diff on screen draws (the forge's one document, within its size):
-    // only then are a high judgment's places kept, so "See the N places" counts places the diff can show.
+    // only then are a high or medium judgment's places kept, so "See the N places" and the risk bars point only at
+    // places the diff can show.
     let onScreen: boolean;
     try {
       const diff = await read(stopping.signal);
@@ -472,7 +475,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       }
     };
     let result = await ask(patch);
-    // A high judgment's places are checked against the diff it read, held only for that.
+    // A judgment's places are checked against the diff it read, held only for that.
     let judgment = "text" in result ? parseRiskAnswer(result.text, { rules: current.rules, patch }) : null;
     // The whole diff is held only for its run.
     patch = null;
@@ -535,7 +538,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
           const one = all.get(pull.key);
           if (!inboxPullIsOpen(pull)) continue;
           if (one && one.head === pull.head_sha && one.base === pull.base && one.rules === hash) {
-            judgments[pull.key] = { level: one.level, why: one.why, ...(one.where ? { where: one.where } : {}) };
+            judgments[pull.key] = { level: one.level, why: one.why, ...(one.where ? { where: one.where } : {}), head: one.head };
             continue;
           }
           const failure = failures.get(pull.key);
@@ -555,9 +558,12 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     assess(pulls, read = {}) {
       const repos = new Set(read.covered ?? []);
       if (read.board) {
-        const keys = new Set(pulls.map((pull) => pull.key));
-        listed = [...listed.filter((pull) => !keys.has(pull.key) && !repos.has(inboxPullRepoKey(pull.host, pull.repo))), ...pulls];
-        for (const repo of repos) covered.add(repo);
+        const named = new Set([...repos, ...pulls.map((pull) => inboxPullRepoKey(pull.host, pull.repo))]);
+        listed = [...listed.filter((pull) => !named.has(inboxPullRepoKey(pull.host, pull.repo))), ...pulls];
+        for (const repo of named) {
+          if (repos.has(repo)) covered.add(repo);
+          else covered.delete(repo);
+        }
       } else {
         listed = pulls;
         covered = repos;

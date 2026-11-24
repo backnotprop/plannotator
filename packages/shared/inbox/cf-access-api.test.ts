@@ -9,10 +9,10 @@ interface Stand {
   calls: string[];
   fetch: CfFetch;
   dnsExisting?: { id: string; type: string; content: string }[];
-  appsExisting?: { id: string; name: string; domain: string; aud: string }[];
+  appsExisting?: { id: string; name: string; domain: string; aud: string; self_hosted_domains?: string[]; destinations?: { type?: string; uri: string }[] }[];
 }
 
-function standIn(options: Partial<Pick<Stand, "dnsExisting" | "appsExisting">> & { failAt?: string; team?: string | null } = {}): Stand {
+function standIn(options: Partial<Pick<Stand, "dnsExisting" | "appsExisting">> & { failAt?: string; team?: string | null; sessionHost?: string } = {}): Stand {
   const calls: string[] = [];
   const ok = (result: unknown) => new Response(JSON.stringify({ success: true, result }), { headers: { "Content-Type": "application/json" } });
   const fetch: CfFetch = async (url, init) => {
@@ -34,7 +34,7 @@ function standIn(options: Partial<Pick<Stand, "dnsExisting" | "appsExisting">> &
       const ingress = JSON.parse(String(init.body)).config.ingress;
       expect(ingress[0].originRequest.httpHostHeader).toBe(ingress[0].hostname);
       expect(ingress[0].service).toBe("http://127.0.0.1:41234");
-      const sibling = `${ingress[0].hostname.split(".")[0]}-s.example.test`;
+      const sibling = options.sessionHost ?? `${ingress[0].hostname.split(".")[0]}-s.example.test`;
       expect(ingress[1]).toEqual({ hostname: sibling, service: "http://127.0.0.1:41234", originRequest: { httpHostHeader: sibling } });
       expect(ingress.at(-1)).toEqual({ service: "http_status:404" });
       return ok({});
@@ -44,7 +44,10 @@ function standIn(options: Partial<Pick<Stand, "dnsExisting" | "appsExisting">> &
       const body = JSON.parse(String(init.body));
       expect(body.policies).toEqual([{ name: "owner only", decision: "allow", precedence: 1, include: [{ email: { email: "me@example.com" } }] }]);
       expect(body.allowed_idps).toEqual(["idp-1"]);
-      expect(body.self_hosted_domains).toEqual([body.domain, `${body.domain.split(".")[0]}-s.example.test`]);
+      expect(body.destinations).toEqual([
+        { type: "public", uri: body.domain },
+        { type: "public", uri: options.sessionHost ?? `${body.domain.split(".")[0]}-s.example.test` },
+      ]);
       return ok({ id: "app-1", aud: "aud0123456789abcdef" });
     }
     if (key === `GET /zones/${ZONE}/dns_records`) return ok(options.dnsExisting ?? []);
@@ -81,13 +84,45 @@ describe("setup against a stand-in Cloudflare API", () => {
   test("a failure before DNS leaves no DNS record behind", async () => {
     const stand = standIn({ failAt: `POST /accounts/${ACCOUNT}/access/apps` });
     await expect(runCfSetup(api(stand), { email: "me@example.com", port: 41234 })).rejects.toThrow("denied");
-    expect(stand.calls.some((c) => c.includes("dns_records"))).toBe(false);
+    expect(stand.calls.some((c) => !c.startsWith("GET ") && c.includes("dns_records"))).toBe(false);
+  });
+
+  test("uses an explicit sessions name for the ingress, Access app and DNS record", async () => {
+    const stand = standIn({ sessionHost: "reviews.example.test" });
+    const result = await runCfSetup(api(stand), {
+      email: "me@example.com",
+      port: 41234,
+      hostname: "inbox.example.test",
+      sessionHostname: " Reviews.Example.Test. ",
+    });
+    expect(result).toMatchObject({ host: "inbox.example.test", sessionHost: "reviews.example.test", dnsRecord: "dns-inbox", sessionDnsRecord: "dns-reviews" });
+  });
+
+  test.each([
+    ["inbox.example.test", "different"],
+    ["reviews.other.test", "under example.test"],
+    ["deep.reviews.example.test", "one level"],
+  ])("rejects the sessions name %s before writing anything", async (sessionHostname, message) => {
+    const stand = standIn();
+    await expect(runCfSetup(api(stand), { email: "me@example.com", port: 41234, hostname: "inbox.example.test", sessionHostname })).rejects.toThrow(message);
+    expect(stand.calls.every((call) => call.startsWith("GET "))).toBe(true);
+  });
+
+  test.each([
+    ["legacy", { self_hosted_domains: ["other.example.test", "reviews.example.test"] }],
+    ["current", { destinations: [{ uri: "other.example.test", type: "public" }, { uri: "reviews.example.test" }] }],
+  ])("does not reuse another Inbox's Access app with %s domains", async (_format, domains) => {
+    const stand = standIn({
+      appsExisting: [{ id: "other", name: CF_APP_NAME, domain: "other.example.test", aud: "x", ...domains }],
+    });
+    await expect(runCfSetup(api(stand), { email: "me@example.com", port: 41234, hostname: "inbox.example.test", sessionHostname: "reviews.example.test" })).rejects.toThrow("already covers");
+    expect(stand.calls.every((call) => call.startsWith("GET "))).toBe(true);
   });
 
   test("refuses to take over a hostname that already has a record or another Access app", async () => {
     const taken = standIn({ dnsExisting: [{ id: "x", type: "A", content: "192.0.2.1" }] });
     await expect(runCfSetup(api(taken), { email: "me@example.com", port: 41234, hostname: "www.example.test" })).rejects.toThrow("already has a DNS record");
-    expect(taken.calls.some((c) => c.startsWith("POST /zones") || c.startsWith("PUT /zones"))).toBe(false);
+    expect(taken.calls.every((c) => c.startsWith("GET "))).toBe(true);
     const appTaken = standIn({ appsExisting: [{ id: "a", name: "Their app", domain: "www.example.test", aud: "x" }] });
     await expect(runCfSetup(api(appTaken), { email: "me@example.com", port: 41234, hostname: "www.example.test" })).rejects.toThrow("Their app");
     expect(CF_APP_NAME).toBe("Plannotator");

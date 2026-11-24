@@ -26,9 +26,15 @@ import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
 import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
+import { sendWithFiles } from "./inbox-outbox-files";
+import { OUTBOX_FILE_IDLE_MS, OutboxFileLane, type OutboxFileUpload } from "./inbox-outbox-file-lane";
+import { INBOX_SENT_FROM_HEADER } from "@plannotator/core/inbox-types";
 import type { InboxPeerTransport } from "./inbox-transport";
 import { farArchivedPage, type FarArchived } from "./inbox-archived-merged";
 import { readShowArchived, type InboxShowArchived } from "./inbox-show-archived";
+import { readSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
+import { readFarArtifactPins } from "./inbox-artifacts-merged";
+import type { InboxArtifactPin } from "@plannotator/core/inbox-artifact-pins";
 
 /** How long the Archived group waits for a linked machine's page before it shows the one that machine last gave. */
 export const FAR_ARCHIVED_WAIT_MS = 2_000;
@@ -49,11 +55,15 @@ export interface PeerLinkTimings {
   requestMs: number;
   /** One outbox try. */
   sendMs: number;
+  /** A held answer's file with no byte moving (inbox-outbox-files.ts). */
+  fileIdleMs: number;
+  /** A held answer's file whose try failed: its first pause before the next (doubled each time, up to `backoffMaxMs`). */
+  fileRetryMinMs: number;
   /** How long `deliveries` frames gather before one read of the list: each read is the whole list. */
   deliveriesMs: number;
 }
 
-export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000, deliveriesMs: 5_000 };
+export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000, fileIdleMs: OUTBOX_FILE_IDLE_MS, fileRetryMinMs: 1_000, deliveriesMs: 5_000 };
 
 /** A record from the other machine's event stream, as the window's stream passes it on. */
 export interface PeerRecord {
@@ -69,7 +79,7 @@ export interface PeerRecord {
  * thread's tag): this Inbox asks for each (`<event>=1` on its stream), reads that machine's list again when one comes,
  * and tells its own windows the same event (approval "inbox-linked-marks"). A new mark adds its event here.
  */
-export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags", "show-archived"] as const;
+export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags", "show-archived", "grid-seen", "artifact-pins", "reactions"] as const;
 export type PeerRereadEvent = (typeof PEER_REREAD_EVENTS)[number];
 const isRereadEvent = (event: string): event is PeerRereadEvent => (PEER_REREAD_EVENTS as readonly string[]).includes(event);
 
@@ -93,6 +103,23 @@ export interface PeerList {
   session_titles: Record<string, string>;
   /** Its "Show archived" switch (inbox-show-archived.ts); null from an Inbox before it. */
   show_archived: InboxShowArchived | null;
+  /** Its saved reaction emoji and their revision (inbox-reactions-shared.ts); null from an Inbox before it. */
+  reactions: SharedReactions | null;
+  /** The artifacts pinned there (its list's `artifact_pins`, mark `artifact-pins`), in its own order; none from an older Inbox. */
+  artifact_pins: InboxArtifactPin[];
+  /**
+   * How far its clock runs ahead of this one's (ms, whole minutes; 0 within two minutes), from its list's `now` as it
+   * arrived: Grid measures that machine's quiet time against its own clock. 0 from an Inbox before `now`.
+   */
+  clock_ms: number;
+}
+
+/** A linked machine's clock against this one's, from its list's `now` when that list arrived: whole minutes, 0 within two. */
+export function peerClockMs(listNow: unknown, arrived: number): number {
+  const at = typeof listNow === "string" ? Date.parse(listNow) : NaN;
+  if (!Number.isFinite(at)) return 0;
+  const ahead = at - arrived;
+  return Math.abs(ahead) < 2 * 60_000 ? 0 : Math.round(ahead / 60_000) * 60_000;
 }
 
 /**
@@ -146,6 +173,8 @@ export interface PeerLinkOptions {
   onDeliveries?: (change: { sessions: boolean; agents: boolean; labels: boolean }) => void;
   /** That machine removed this one (401 device_revoked): the owner of the link cleans up. */
   onRevoked: () => void;
+  /** Grid is on here (experimental): only then does this Inbox ask that machine for Grid's fields and looks. */
+  gridOn?: () => boolean;
   timings?: Partial<PeerLinkTimings>;
 }
 
@@ -217,6 +246,8 @@ export class PeerLink {
   private wake: (() => void) | null = null;
   private listing: Promise<void> | null = null;
   private listAgain = false;
+  /** The stream is ended on purpose to ask again for what this Inbox wants (Grid turned on or off): dial at once, still online. */
+  private redial = false;
   private cardsWanted = false;
   private cardsReading: Promise<void> | null = null;
   private cardsAgain = false;
@@ -228,10 +259,23 @@ export class PeerLink {
   private deliveriesLabels = false;
   private flushDelay = 0;
   private readonly t: PeerLinkTimings;
+  /** Held answers' files, in their own lane (inbox-outbox-file-lane.ts): nothing in the write queue waits on one. */
+  private readonly files: OutboxFileLane;
+  private filesTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly options: PeerLinkOptions) {
     this.id = options.link.id;
     this.t = { ...PEER_LINK_TIMINGS, ...options.timings };
+    this.files = new OutboxFileLane({
+      outbox: options.outbox,
+      machine: options.link.id,
+      machineName: () => this.options.link.name,
+      upload: (file) => this.uploadFile(file),
+      idleMs: this.t.fileIdleMs,
+      onChange: () => this.flush(),
+      retryMinMs: this.t.fileRetryMinMs,
+      retryMaxMs: this.t.backoffMaxMs,
+    });
   }
 
   private get token() {
@@ -262,6 +306,8 @@ export class PeerLink {
     this.wake?.();
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = null;
+    if (this.filesTimer) clearTimeout(this.filesTimer);
+    this.filesTimer = null;
     if (this.deliveriesTimer) clearTimeout(this.deliveriesTimer);
     this.deliveriesTimer = null;
   }
@@ -288,6 +334,17 @@ export class PeerLink {
     this.wake?.();
   }
 
+  /**
+   * Grid was turned on or off here: its list is read again with or without Grid's fields, and its stream asks again
+   * with or without `grid-seen` (a quiet redial: the line stays online).
+   */
+  gridChanged(): void {
+    void this.refreshList();
+    if (!this.stream) return;
+    this.redial = true;
+    this.stream.abort();
+  }
+
   // ── The line: health, then the event stream from the cursor; redial with backoff. ──
 
   private async loop() {
@@ -300,6 +357,10 @@ export class PeerLink {
         this.setState("revoked", "This machine was removed on the other Inbox.");
         this.options.onRevoked();
         break;
+      }
+      if (ended === "redial") {
+        backoff = this.t.backoffMinMs;
+        continue;
       }
       if (ended === "online-ended") backoff = this.t.backoffMinMs;
       else if (ended !== "needs_update") this.setState("offline", ended);
@@ -369,7 +430,9 @@ export class PeerLink {
     let response: Response;
     try {
       // The reread events and `deliveries=1`: none writes a record, so the stream tells this machine when to read the list again.
-      const asks = [...PEER_REREAD_EVENTS, "deliveries"].map((event) => `${event}=1`).join("&");
+      // `grid-seen` only while Grid is on here: off, nothing of Grid is asked for.
+      const gridOn = this.options.gridOn?.() === true;
+      const asks = [...PEER_REREAD_EVENTS.filter((event) => event !== "grid-seen" || gridOn), "deliveries"].map((event) => `${event}=1`).join("&");
       response = await this.options.transport.events(headers, this.cursor === null ? `?${asks}` : `?cursor=${this.cursor}&${asks}`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;
@@ -412,6 +475,8 @@ export class PeerLink {
             wasOnline = true;
             this.setState("online");
             void this.refreshList().then(() => this.refreshCards());
+            // A file that failed while the line was down goes now, not after its pause.
+            this.files.lineBack();
             this.flush();
           } else if (parsed.event === "record" && parsed.id !== null) {
             const seq = Number(parsed.id);
@@ -447,6 +512,10 @@ export class PeerLink {
       if (this.stream === abort) this.stream = null;
     }
     if (silent) return "no heartbeat for 20 s";
+    if (this.redial) {
+      this.redial = false;
+      if (wasOnline && this.running) return "redial";
+    }
     return wasOnline ? (this.running ? (this.setState("offline", "the connection closed"), "online-ended") : "stopped") : "the event stream ended";
   }
 
@@ -461,7 +530,8 @@ export class PeerLink {
       do {
         this.listAgain = false;
         try {
-          const response = await this.options.transport.request("threads", "", { method: "GET", headers: this.auth(), signal: AbortSignal.timeout(this.t.requestMs) });
+          // `grid=1` only while Grid is on here: that machine adds Grid's fields to its rows only then.
+          const response = await this.options.transport.request("threads", this.options.gridOn?.() === true ? "?grid=1" : "", { method: "GET", headers: this.auth(), signal: AbortSignal.timeout(this.t.requestMs) });
           if (!response.ok) continue;
           this.acceptList((await response.json()) as Json);
         } catch {
@@ -499,6 +569,9 @@ export class PeerLink {
       session_labels: inboxPeerSessionNames(list.session_labels),
       session_titles: inboxPeerSessionNames(list.session_titles),
       show_archived: list.show_archived === undefined ? null : readShowArchived(list.show_archived),
+      reactions: readSharedReactions(list.reactions),
+      artifact_pins: readFarArtifactPins(list.artifact_pins),
+      clock_ms: peerClockMs(list.now, Date.now()),
     };
     this.options.onChange();
     return true;
@@ -614,14 +687,29 @@ export class PeerLink {
     return response;
   }
 
-  /** One outbox try: the entry's route and body under its own key (rule 1). */
-  private send = async (entry: OutboxEntry): Promise<OutboxAnswer> => {
+  /** One outbox try: the entry's route and body under its own key (rule 1), a held answer's with its files' ids there. */
+  private send = (entry: OutboxEntry): Promise<OutboxAnswer> =>
+    sendWithFiles(entry, { post: (body) => this.post(entry, body), forgot: () => this.options.outbox.filesForgotten(entry.key) });
+
+  /** A held answer's file to that machine's `uploads` route, its key in the query as that door takes a file (and as a window's upload there sends one). */
+  // Streamed: `fetch` pulls the body as the socket takes it (inbox-outbox-file-wire.test.ts), so the lane's idle limit
+  // measures the line. Its Content-Length declared, so that door refuses one too large before a byte is read.
+  private uploadFile: OutboxFileUpload = (file) =>
+    this.options.transport.request("uploads", `?${new URLSearchParams({ name: file.name, idempotency_key: file.key })}`, {
+      method: "POST",
+      headers: this.auth({ "Content-Type": "application/octet-stream", "Content-Length": String(file.size) }),
+      body: file.body,
+      signal: file.signal,
+    });
+
+
+  private post = async (entry: OutboxEntry, sendBody: Record<string, unknown>): Promise<OutboxAnswer> => {
     try {
       const response = await this.options.transport.request(entry.route, "", {
         method: "POST",
         // A press in the person's window here: the other machine's door hands that on (inbox-devices.ts).
-        headers: this.auth({ "Content-Type": "application/json", ...(entry.window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}) }),
-        body: JSON.stringify(entry.body),
+        headers: this.auth({ "Content-Type": "application/json", ...(entry.window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}), ...(entry.sent_from ? { [INBOX_SENT_FROM_HEADER]: entry.sent_from } : {}) }),
+        body: JSON.stringify(sendBody),
         signal: AbortSignal.timeout(this.t.sendMs),
       });
       const text = await response.text();
@@ -640,6 +728,18 @@ export class PeerLink {
   /** Send what waits for this machine (rule 15). A 5xx is tried again after a pause; anything else waits for the next hello. */
   flush(): void {
     if (!this.running || this.state !== "online") return;
+    // Files go in their own lane; a file whose try failed waits out its own pause there (a run before it ends passes
+    // it by), and the lane runs again when the soonest pause ends.
+    void this.files.run().then((result) => {
+      if (result === "revoked") return this.stream?.abort();
+      const wait = this.files.nextTryIn();
+      if (wait === null) return;
+      if (this.filesTimer) clearTimeout(this.filesTimer);
+      this.filesTimer = setTimeout(() => {
+        this.filesTimer = null;
+        this.flush();
+      }, wait);
+    });
     void this.options.outbox.drain(this.id, this.send).then((result) => {
       if (result === "server_error") {
         this.flushDelay = Math.min(Math.max(this.flushDelay * 2, 1000), this.t.backoffMaxMs);

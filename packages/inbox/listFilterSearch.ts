@@ -1,30 +1,27 @@
 /**
- * The search at the top of the list's filter menu (components/ListFilter.tsx): the rule that narrows the menu's rows.
+ * The find fields of the list's filter menu (components/ListFilter.tsx, listFilterSections.tsx): the rule that narrows
+ * one long section's rows.
  *
- * - The field shows only when a section of the menu has more than `FILTER_SEARCH_AT` rows. With short lists the menu
- *   is as it always was: no field.
+ * - A section (Agent, Tag, Project) gets its own field only when it has more than `FILTER_SEARCH_AT` rows. A section
+ *   of eight rows or fewer is as it always was: no field, no cap.
  * - A query keeps the rows whose words contain it, ignoring case and accents, and marks where (`hit`, drawn bold).
  *   "Accents" are the Latin, Greek and Cyrillic diacritics, Arabic harakat, Hebrew points and emoji variation
  *   selectors; a mark that makes another letter (Japanese voicing marks, Indic vowel signs, Thai marks) is kept, so
  *   か never matches が. Dotless ı and final ς match i and σ.
- * - A ticked row always stays, so it can be unticked, after the matches of its section.
- * - A section with nothing left goes. Sections with a match come first, in their usual order, then the sections that
- *   only hold ticked rows: when anything matches, the menu's first row is a match, so "type, Enter" acts on a row the
- *   person typed. That row may itself be ticked, and Enter then unticks it like any other; a row kept only because it
- *   is ticked is never first while something matches, and with nothing matching nothing is highlighted
- *   (ListFilter.tsx).
+ * - Typing narrows only that section. Its pinned rows (ticked when the field last changed) stay above its scroll
+ *   whatever is typed, so a ticked row can always be unticked; the rest keep the rows that match.
  */
 
-/** A section longer than this shows the field. */
+/** A section longer than this gets its own field and a capped, scrolling list. */
 export const FILTER_SEARCH_AT = 8;
 
-export const filterSearchShown = (sizes: readonly number[]): boolean => sizes.some((size) => size > FILTER_SEARCH_AT);
+export const sectionIsLong = (size: number): boolean => size > FILTER_SEARCH_AT;
 
 /** The marks matching ignores: Latin/Greek/Cyrillic diacritics, Arabic harakat, Hebrew points, variation selectors. */
 const IGNORED_MARKS = /[\u0300-\u036F\u0483-\u0489\u0591-\u05C7\u064B-\u065F\u0670\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE00-\uFE0F\uFE20-\uFE2F]/gu;
 
-/** Text as matching sees it: lower case, the ignored marks gone, ı as i, ς as σ. */
-const fold = (text: string) =>
+/** Text as matching sees it: lower case, the ignored marks gone, ı as i, ς as σ. The list's title filter reads it too. */
+export const fold = (text: string) =>
   text.normalize('NFD').toLowerCase().normalize('NFD').replace(IGNORED_MARKS, '').replace(/ı/g, 'i').replace(/ς/g, 'σ');
 
 /** The Japanese voicing marks (dakuten, handakuten): each makes another letter of the one before it (か, が). */
@@ -138,41 +135,35 @@ export function labelStart(label: string, hit: readonly [number, number] | null)
 
 export interface FilterSearchRow<R> {
   row: R;
-  /** The match in the row's label; null: kept because it is ticked, or no query. */
+  /** The match in the row's label; null: no query, or a pinned row the query does not match. */
   hit: readonly [number, number] | null;
 }
 
-export interface FilterSearchResult<S, R> {
-  sections: { section: S; rows: FilterSearchRow<R>[] }[];
-  /** Rows that match the query (ticked rows kept without a match do not count); every row with no query. */
+export interface SectionFind<R> {
+  /** The rows kept above the section's scroll: those ticked when its field last changed (or the menu opened). */
+  pinned: FilterSearchRow<R>[];
+  /** The rest, narrowed by the query, in their order. */
+  rows: FilterSearchRow<R>[];
+  /** Rows of the section that match the query, pinned ones included; every row with no query. */
   matches: number;
   /** A query is typed (blank does not count). */
   searching: boolean;
 }
 
-/** The menu's sections narrowed by `query`. */
-export function searchFilterSections<S extends { rows: readonly R[] }, R extends { label: string; on: boolean }>(
-  sections: readonly S[],
-  query: string,
-): FilterSearchResult<S, R> {
-  if (query.trim() === '') {
-    const all = sections.filter((s) => s.rows.length > 0).map((section) => ({ section, rows: section.rows.map((row) => ({ row, hit: null })) }));
-    return { sections: all, matches: all.reduce((n, s) => n + s.rows.length, 0), searching: false };
-  }
-  const withHits: FilterSearchResult<S, R>['sections'] = [];
-  const keptOnly: FilterSearchResult<S, R>['sections'] = [];
+/**
+ * One long section narrowed by its own field's query. Pinned rows stay whatever the query, so a ticked row can always
+ * be unticked; the rest keep only the rows whose words hold the query. Nothing else in the menu is read.
+ */
+export function findInSection<R extends { key: string; label: string }>(rows: readonly R[], query: string, pinnedKeys: ReadonlySet<string>): SectionFind<R> {
+  const searching = query.trim() !== '';
+  const pinned: FilterSearchRow<R>[] = [];
+  const rest: FilterSearchRow<R>[] = [];
   let matches = 0;
-  for (const section of sections) {
-    const hits: FilterSearchRow<R>[] = [];
-    const kept: FilterSearchRow<R>[] = [];
-    for (const row of section.rows) {
-      const hit = searchHit(row.label, query);
-      if (hit) hits.push({ row, hit });
-      else if (row.on) kept.push({ row, hit: null });
-    }
-    matches += hits.length;
-    if (hits.length > 0) withHits.push({ section, rows: [...hits, ...kept] });
-    else if (kept.length > 0) keptOnly.push({ section, rows: kept });
+  for (const row of rows) {
+    const hit = searching ? searchHit(row.label, query) : null;
+    if (!searching || hit) matches += 1;
+    if (pinnedKeys.has(row.key)) pinned.push({ row, hit });
+    else if (!searching || hit) rest.push({ row, hit });
   }
-  return { sections: [...withHits, ...keptOnly], matches, searching: true };
+  return { pinned, rows: rest, matches, searching };
 }

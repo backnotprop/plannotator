@@ -31,6 +31,7 @@
 @import "./themes/cursor-hc.css";
 @import "./themes/cursor-midnight.css";
 @import "./themes/colorblind.css";
+@import "./themes/tritanopia.css";
 @import "./themes/everforest.css";
 @import "./themes/everforest-hard.css";
 @import "./themes/everforest-soft.css";
@@ -39,6 +40,7 @@
 @import "./themes/github.css";
 @import "./themes/one-dark-pro.css";
 @import "./themes/night-owl.css";
+@import "./themes/nightfox.css";
 @import "./themes/ayu-dark.css";
 @import "./themes/poimandres.css";
 @import "./themes/material.css";

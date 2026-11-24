@@ -16,7 +16,8 @@ import { formatCount } from '../format';
 import type { AgentMarkPicks } from '../agents/AgentMark';
 import { agentFaceChains, useAgentFaceChainsRev } from '../agents/agentFaces';
 import { useInboxAgents } from '../agentsList';
-import { useSessionLabels } from '../sessionLabels';
+import { useSessionLabels, type SessionLabels } from '../sessionLabels';
+import { usePictureWorld } from '../pictureWorld';
 import { machineTakes, type MachinesModel } from '../machines';
 import { GroupBand } from '../components/GroupBand';
 import type { ListSort } from '../listView';
@@ -41,9 +42,13 @@ export interface AgentsListProps {
   shows?: number;
   /** The rows drawn, in order, whenever they change (Select all picks only these). */
   onDrawn?: (ids: readonly string[]) => void;
+  /** Agents (their ids) folded by the caller, never kept: the view choice's picture folds its demo agents (viewChoiceFolds.ts). */
+  folded?: ReadonlySet<string>;
 }
 
 const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
+const NO_LABELS: SessionLabels = {};
+const NO_CHAINS: ReturnType<typeof agentFaceChains> = new Map();
 
 /** The rows an agent shows: none folded; open, the first few (and the open thread past them), or all after "N more". */
 function shownRows(rows: readonly AgentRow[], open: boolean, more: boolean, selected: string | null): readonly AgentRow[] {
@@ -76,9 +81,12 @@ function keepSessions(layout: AgentsLayout, kept: Map<string, readonly string[]>
 const timesOf = (layout: AgentsLayout | null) =>
   new Map((layout ? [...[...layout.live, ...layout.ended].flatMap((b) => b.rows), ...layout.none] : []).map(({ row }) => [row.thread_id, row.last_agent_at ?? row.last_at]));
 
-export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThreadId, phone, remember, renderRow, shows = 0, onDrawn }: AgentsListProps) {
+export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThreadId, phone, remember, renderRow, shows = 0, onDrawn, folded }: AgentsListProps) {
   const groups = useInboxAgents();
-  const labels = useSessionLabels();
+  // In a picture (pictureWorld.ts, the view choice's demo): its own agents, no name or face chain the person gave.
+  const world = usePictureWorld();
+  const givenLabels = useSessionLabels();
+  const labels = world ? NO_LABELS : givenLabels;
   const chainsRev = useAgentFaceChainsRev();
   const folds = useAgentFolds(remember);
   const [more, setMore] = useState<ReadonlySet<string>>(() => new Set());
@@ -88,12 +96,12 @@ export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThr
   const epoch = sort?.epoch;
   const keep = sort?.keep ?? null;
   const layout = useMemo(
-    () => keepSessions(agentsLayout({ sections, groups, machines, labels, chains: agentFaceChains() }, epoch === undefined ? null : places.current, { epoch: epoch ?? 0, keep }), sessions.current),
+    () => keepSessions(agentsLayout({ sections, groups, machines, labels, chains: world ? NO_CHAINS : agentFaceChains() }, epoch === undefined ? null : places.current, { epoch: epoch ?? 0, keep }), sessions.current),
     // `chainsRev`: a kept face's chain changed (agentFaceChains), read again.
-    [sections, groups, machines, labels, epoch, keep, chainsRev],
+    [sections, groups, machines, labels, epoch, keep, chainsRev, world],
   );
   const foldKey = (agent: ViewAgent) => agentFoldKey(agent, machines.self);
-  const openOf = (block: AgentBlock) => folds.open(foldKey(block.agent), block.open, waitsSince(block.rows));
+  const openOf = (block: AgentBlock) => !folded?.has(block.agent.id) && folds.open(foldKey(block.agent), block.open, waitsSince(block.rows));
   const endedOpen = folds.open(ENDED_BAND, true);
   const noneOpen = folds.open(NONE_BAND, false);
 

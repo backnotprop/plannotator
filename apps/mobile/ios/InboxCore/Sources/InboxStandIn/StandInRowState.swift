@@ -43,6 +43,34 @@ struct StandInState {
   var byteReads = 0
   /// Files that change after each byte read, as a log an agent appends to does, this many times more.
   var churn: [String: Int] = [:]
+  /// A file that changes right after the computer next says how a thread's files stand: the agent edits it after
+  /// the phone last asked.
+  var changeAfterRead: (id: String, bytes: Data?)?
+  /// The person's comments (`annotations.jsonl`): every record ever saved, by annotation id.
+  var annotations: [String: InboxAnnotationRecord] = [:]
+  /// How long a 👍 waits before it goes to the agent (`INBOX_SET_ASIDE_DELAY_MS`, 10 s).
+  var ackWindow: TimeInterval = 10
+  /// Replies taken back, by id (they left their thread), and replies an agent already has.
+  var takenBack: [MessageID: InboxMessageWire] = [:]
+  var agentHas: Set<MessageID> = []
+  /// How many Take back answers are still to be lost on the way back (`loseTakeBackAnswers`).
+  var lostTakeBacks = 0
+  /// Drawings kept (`inbox/markups/<sha256>.png`), by file name.
+  var markups: [String: Data] = [:]
+  /// Files the phone sent up and no Send named yet (StandInCompose.swift), the live sessions when set, the threads
+  /// New message made, and the refusal every upload meets when set.
+  var uploads: [String: StandInUpload] = [:]
+  var liveSessions: [InboxComposeProject]?
+  var started: [ThreadID] = []
+  var refusesUploads: (code: String, words: String, field: String)?
+  /// Every upload's first answer, by its idempotency key, kept forever as the door's command log keeps it: the same
+  /// key answers that upload again even once it is spent or swept.
+  var uploadKeys: [String: InboxUpload] = [:]
+  /// New messages written, by their Send's key (the store's `personThreadByKey`).
+  var startedByKey: [String: ThreadID] = [:]
+  var failsNextCompose = false
+  /// Saves of a comment answered `422 annotation_not_allowed`, by attachment id (a file that takes none).
+  var refusesComments: Set<String> = []
 }
 
 extension StandInDoor {
@@ -67,19 +95,22 @@ extension StandInDoor {
   }
   public func draft(_ id: ThreadID) -> InboxReplyDraft? { state.drafts[id] }
 
-  /// A file on a message: in the message's record, and its bytes on the computer.
-  public func addFile(thread id: ThreadID, name: String, kind: InboxAttachmentKind, bytes: Data, mediaType: String? = nil) -> InboxAttachment {
+  /// A file on a message (the thread's newest from an agent, when none is named): in the message's record, and its
+  /// bytes on the computer.
+  public func addFile(thread id: ThreadID, message: MessageID? = nil, name: String, kind: InboxAttachmentKind, bytes: Data, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil) -> InboxAttachment {
     counter += 1
     let attachment = InboxAttachment(
-      id: "att_STANDIN\(counter)", path: "/work/\(name)", name: name, kind: kind, sentSha256: Self.sha(bytes), size: Int64(bytes.count), sentAt: StandInData.iso(Date()),
-      sentMtime: StandInData.iso(Date()), mediaType: mediaType)
-    guard let t = threads.firstIndex(where: { $0.threadId == id }), let m = threads[t].messages.lastIndex(where: { $0.author.kind == .agent }) else { return attachment }
+      id: "att_STANDIN\(counter)", path: "\(threads.first { $0.threadId == id }?.project.root ?? "/work")/\(name)", name: name, kind: kind, sentSha256: Self.sha(bytes), size: Int64(bytes.count), sentAt: StandInData.iso(Date()),
+      sentMtime: StandInData.iso(Date()), mediaType: mediaType, width: width, height: height, durationMs: durationMs)
+    guard let t = threads.firstIndex(where: { $0.threadId == id }), let m = threads[t].messages.lastIndex(where: { candidate in message.map { $0 == candidate.id } ?? (candidate.author.kind == .agent) }) else { return attachment }
     threads[t].messages[m].attachments = (threads[t].messages[m].attachments ?? []) + [attachment]
     state.files[attachment.id] = StandInFile(record: attachment, message: threads[t].messages[m].id, thread: id, sent: bytes, current: bytes)
     return attachment
   }
   /// The file changes on the computer after it was sent (nil: it is deleted).
   public func changeFile(_ id: String, to bytes: Data?) { state.files[id]?.current = bytes }
+  /// The file changes on the computer right after the next answer about the thread's files.
+  public func changeFileAfterNextRead(_ id: String, to bytes: Data?) { state.changeAfterRead = (id, bytes) }
   /// The file changes after each of the next `times` byte reads.
   public func keepChanging(_ id: String, times: Int) { state.churn[id] = times }
   public func setPartCap(_ bytes: Int) { state.partCap = bytes }
@@ -144,12 +175,16 @@ extension StandInDoor {
       let id = ThreadID(parts[1])
       guard threads.contains(where: { $0.threadId == id }) else { return refuse(404, "thread_not_found", "No thread \(id.rawValue).") }
       let states = state.files.values.filter { $0.thread == id }.sorted { $0.record.id < $1.record.id }.map(attachmentState)
-      return encode(200, DoorThreadAttachmentsAnswer(serverSession: session, attachments: states, inlineImages: []))
+      if let change = state.changeAfterRead {
+        state.changeAfterRead = nil
+        state.files[change.id]?.current = change.bytes
+      }
+      return encode(200, DoorThreadAttachmentsAnswer(serverSession: session, attachments: states, inlineImages: [], annotations: options.omitsComments ? nil : pendingComments(id)))
     }
     if parts.count == 3, parts[0] == "attachments", ["image", "video", "audio", "download"].contains(parts[2]) {
       return bytes(call, file: parts[1], ranged: parts[2] != "image")
     }
-    return nil
+    return getWriting(parts)
   }
 
   func attachmentState(_ file: StandInFile) -> InboxAttachmentState {
@@ -158,7 +193,7 @@ extension StandInDoor {
     return InboxAttachmentState(
       messageId: file.message, current: current, changedSinceSent: current.map { $0.sha256 != r.sentSha256 } ?? false,
       unavailable: file.current == nil ? InboxAttachmentStateUnavailable(code: .attachmentMissing, message: "\(r.name) is no longer on the computer.") : nil,
-      id: r.id, path: r.path, name: r.name, kind: r.kind, sentSha256: r.sentSha256, size: r.size, sentAt: r.sentAt, sentMtime: r.sentMtime, mediaType: r.mediaType)
+      id: r.id, path: r.path, name: r.name, kind: r.kind, sentSha256: r.sentSha256, size: r.size, sentAt: r.sentAt, sentMtime: r.sentMtime, mediaType: r.mediaType, width: r.width, height: r.height, durationMs: r.durationMs)
   }
 
   /// The byte routes: the version asked for, whole, or the part a Range names (at most `partCap`), as
@@ -214,7 +249,10 @@ extension StandInDoor {
       }
       return json(200, ["pins": .array(state.pins.map { .string($0.rawValue) })])
     }
+    if parts == ["annotations"] { return saveComment(fields) }
     guard parts.count == 3 else { return nil }
+    if let written = postWriting(parts, fields) { return written }
+    if parts[0] == "annotations", parts[2] == "remove" { return removeComment(parts[1]) }
     let id = ThreadID(parts[1])
     if parts[0] == "messages", parts[2] == "resolve" {
       // The thread's root message carries the thread's id.

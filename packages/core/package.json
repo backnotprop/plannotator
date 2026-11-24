@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.32",
+  "version": "0.25.33",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -64,6 +64,8 @@
     "./inbox-hermes": "./inbox-hermes.ts",
     "./inbox-project-labels": "./inbox-project-labels.ts",
     "./inbox-questions": "./inbox-questions.ts",
+    "./inbox-decisions": "./inbox-decisions.ts",
+    "./inbox-reask": "./inbox-reask.ts",
     "./inbox-file-question-twin": "./inbox-file-question-twin.ts",
     "./inbox-choice-twins": "./inbox-choice-twins.ts",
     "./inbox-actions": "./inbox-actions.ts",
@@ -92,22 +94,19 @@
     "./shape": "./shape.ts",
     "./plans": "./plans.ts",
     "./space-share": "./space-share.ts",
-    "./shape-scene": "./shape-scene.ts",
-    "./shape-animate": "./shape-animate.ts",
-    "./shape-skill": "./shape-skill.ts",
     "./create-routine-skill": "./create-routine-skill.ts",
     "./inbox-skills-compose": "./inbox-skills-compose.ts",
     "./skill-references-render": "./skill-references-render.ts",
     "./inbox-pull-handoff": "./inbox-pull-handoff.ts",
     "./picture-it-skill": "./picture-it-skill.ts",
     "./picture-it-page": "./picture-it-page.ts",
-    "./shape-kit.mjs": "./shape-kit.mjs",
     "./inbox-reply-draft": "./inbox-reply-draft.ts",
     "./inbox-review": "./inbox-review.ts",
     "./inbox-context-notes": "./inbox-context-notes.ts",
     "./inbox-system-setup": "./inbox-system-setup.ts",
     "./inbox-system": "./inbox-system.ts",
     "./diagram-anchor": "./diagram-anchor.ts",
+    "./html-block-anchor": "./html-block-anchor.ts",
     "./image-region": "./image-region.ts",
     "./open-in-apps": "./open-in-apps.ts",
     "./project": "./project.ts",
@@ -128,8 +127,7 @@
   },
   "files": [
     "**/*.ts",
-    "!**/*.test.ts",
-    "shape-kit.mjs"
+    "!**/*.test.ts"
   ],
   "scripts": {
     "prepack": "bun run --cwd ../.. build:viewer-pin"

@@ -59,6 +59,23 @@ export function arrowQuotesWhole(messages: readonly InboxMessageWire[], id: stri
   return at >= 0 && messages.slice(at + 1).some((m) => m.author.kind === 'agent');
 }
 
+/**
+ * What ↩ on a message does to the reply box: the quote it leaves (undefined: the box's quote stays as it is) and the
+ * agent session it aims the reply at (null: none). `words`: the words selected in that message, if any; `quoted`:
+ * whether the box quotes a message now. With words, those words; else the whole message when an agent wrote after it
+ * (`arrowQuotesWhole`); else a plain Reply, and a quote in the box is dropped. The phone keeps this rule too
+ * (apps/mobile/contract/vectors/quote.json).
+ */
+export function arrowReply(
+  messages: readonly InboxMessageWire[],
+  message: InboxMessageWire,
+  words: string | null,
+  quoted: boolean,
+): { quote: InboxReplyQuote | null | undefined; aim: string | null } {
+  const quote = words ? { of: message.id, words } : arrowQuotesWhole(messages, message.id) ? { of: message.id } : quoted ? null : undefined;
+  return { quote, aim: message.author.kind === 'agent' ? (message.author.session ?? null) : null };
+}
+
 /** The quote the reply carries to the Inbox, with the quoted message's time as this window shows it. */
 export function quoteToSend(quote: InboxReplyQuote | null, messages: readonly InboxMessageWire[], time: (iso: string) => string): { of: string; words?: string; time?: string } | undefined {
   if (!quote) return undefined;

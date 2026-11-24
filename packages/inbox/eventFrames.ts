@@ -4,8 +4,10 @@ import { inboxUrl, rememberLocal, rememberMachine } from './inboxUrl';
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { parseRestartAgents } from './restartAgents';
 import { readHello, type RestartHello } from './sessionAdopt';
-import { scheduledFrame } from './scheduled/store';
+import { scheduledFrame, scheduledMachineFrame } from './scheduled/store';
 import { readRunStateFrame, runEvents } from './data/runEvents';
+import { shipEvents } from './data/shipEvents';
+import { gridHeard } from './grid/gridOn';
 
 
 export interface MachineRecordFrame {
@@ -21,7 +23,7 @@ export interface InboxEventWindow {
   origin: string;
 }
 
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'runs', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'runs', 'ships', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'machine', 'machines', 'cards', 'outbox', 'grid-seen', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -56,9 +58,8 @@ export interface InboxEventHandlers {
   onShowArchived?: (value: unknown) => void;
   onAgentFaces?: (data: unknown) => void;
   onReactions?: (reactions: unknown, rev: unknown) => void;
-  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean } }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean } }) => void;
   onTailscale?: (tailscale: TailscaleSettings) => void;
-  onShapes?: (ids: string[]) => void;
   onMachine?: (frame: MachineRecordFrame) => void;
   onMachines?: (machines: MachineView[]) => void;
   onOutbox?: (entry: OutboxView) => void;
@@ -72,6 +73,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'hello':
       handlers.onConnect?.(readHello(frame.data) ?? undefined);
+      scheduledFrame('connect');
       return;
     case 'reach':
       try {
@@ -118,6 +120,10 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'priority':
       handlers.onPriority?.();
       return;
+    // Grid's looks changed (a phone's, another window's, a linked computer's): the list's `grid_seen` is read again.
+    case 'grid-seen':
+      gridHeard('grid-seen');
+      return;
     case 'artifact-pins':
       handlers.onArtifactPins?.();
       return;
@@ -144,11 +150,17 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       if (change) runEvents.emit(change);
       return;
     }
+    case 'ships':
+      // A ship here changed: the Reviews rows read the ships again (data/ships.ts).
+      shipEvents.emit();
+      return;
     case 'thread-pulls':
       try {
         const data = JSON.parse(frame.data) as { thread_ids?: unknown };
         const ids = Array.isArray(data.thread_ids) ? data.thread_ids.filter((id): id is string => typeof id === 'string') : [];
         if (ids.length > 0) handlers.onThreadPulls?.(ids);
+        // Their checks or review changed: Grid, while it shows, reads the list's PR summaries again (grid/gridOn.ts).
+        if (ids.length > 0) gridHeard('thread-pulls');
       } catch {
       }
       return;
@@ -194,7 +206,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown } };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown } };
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
           ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
@@ -203,7 +215,6 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.mark_read_warning?.on === 'boolean' ? { mark_read_warning: { on: data.mark_read_warning.on } } : {}),
           ...(typeof data.split_view?.on === 'boolean' ? { split_view: { on: data.split_view.on } } : {}),
           ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
-          ...(typeof data.shape?.on === 'boolean' ? { shape: { on: data.shape.on } } : {}),
           ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),
           ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
           ...(typeof data.scheduled_threads?.on === 'boolean' ? { scheduled_threads: { on: data.scheduled_threads.on } } : {}),
@@ -220,13 +231,6 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       } catch {
       }
       return;
-    case 'shapes':
-      try {
-        const data = JSON.parse(frame.data) as { ids?: unknown };
-        if (Array.isArray(data.ids)) handlers.onShapes?.(data.ids.filter((id): id is string => typeof id === 'string'));
-      } catch {
-      }
-      return;
     case 'machine':
       try {
         const data = JSON.parse(frame.data) as Partial<MachineRecordFrame>;
@@ -235,6 +239,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           if (machineKind === 'steps' || machineKind === 'thread_pull') return;
           rememberMachine(idsIn(data.record), data.machine);
           handlers.onMachine?.({ machine: data.machine, seq: data.seq, live: data.live === true, record: (data.record as InboxEvent | undefined) ?? null });
+          scheduledMachineFrame((data.record as InboxEvent | undefined) ?? null);
         }
       } catch {
       }

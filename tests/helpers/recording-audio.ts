@@ -14,7 +14,6 @@ export function recordingAudioContext(record: AudioRecord) {
     setValueAtTime(value: number) {
       onSet?.(value);
     },
-    linearRampToValueAtTime() {},
     exponentialRampToValueAtTime() {},
   });
   return class RecordingAudioContext {

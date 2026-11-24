@@ -80,6 +80,18 @@ actor Gate {
   private(set) var answers: [(path: String, status: Int)] = []
 
   private var losing: (match: @Sendable (DoorCall) -> Bool, arrives: Bool)?
+  private var unreached: (match: @Sendable (DoorCall) -> Bool, times: Int)?
+  private(set) var unreachedCalls = 0
+
+  /// The next `times` calls that match cannot reach the computer at all (they never leave the phone).
+  func cannotConnect(times: Int = 1, _ match: @escaping @Sendable (DoorCall) -> Bool) { unreached = (match, times) }
+
+  func unreaches(_ call: DoorCall) -> Bool {
+    guard let current = unreached, current.match(call) else { return false }
+    unreached = current.times > 1 ? (current.match, current.times - 1) : nil
+    unreachedCalls += 1
+    return true
+  }
 
   /// Stop the answer to the next call that matches.
   func stop(_ match: @escaping @Sendable (DoorCall) -> Bool) { self.match = match }
@@ -100,22 +112,28 @@ actor Gate {
     await withCheckedContinuation { arrivals.append($0) }
   }
 
-  /// Let the stopped answer go.
-  func open() {
+  private var loseAfterOpen = false
+
+  /// Let the stopped answer go; `thenLose`: the connection breaks before the answer reaches the phone.
+  func open(thenLose: Bool = false) {
+    loseAfterOpen = thenLose
     match = nil
     for waiter in stopped { waiter.resume() }
     stopped = []
   }
 
-  func pass(_ call: DoorCall, _ answer: DoorAnswerBytes) async {
+  /// False when the stopped answer was lost on its way back (`open(thenLose:)`).
+  func pass(_ call: DoorCall, _ answer: DoorAnswerBytes) async -> Bool {
     answers.append((call.path, answer.status))
-    guard let match, match(call) else { return }
+    guard let match, match(call) else { return true }
     self.match = nil
     await withCheckedContinuation { waiter in
       stopped.append(waiter)
       for arrival in arrivals { arrival.resume() }
       arrivals = []
     }
+    defer { loseAfterOpen = false }
+    return !loseAfterOpen
   }
 }
 
@@ -123,11 +141,12 @@ struct GatedTransport: DoorTransport {
   let inner: StandInTransport
   let gate: Gate
   func send(_ call: DoorCall) async throws -> DoorAnswerBytes {
+    if await gate.unreaches(call) { throw URLError(.cannotConnectToHost) }
     let lost = await gate.loses(call)
     if lost == false { throw URLError(.networkConnectionLost) }
     let answer = try await inner.send(call)
     if lost == true { throw URLError(.networkConnectionLost) }
-    await gate.pass(call, answer)
+    guard await gate.pass(call, answer) else { throw URLError(.networkConnectionLost) }
     return answer
   }
   func events(_ call: DoorCall) async throws -> AsyncThrowingStream<Data, Error>? { try await inner.events(call) }
@@ -137,4 +156,61 @@ func body(_ call: DoorCall) -> JSONValue { (try? JSONDecoder().decode(JSONValue.
 
 extension StandInDoor {
   func posts(_ suffix: String) -> [DoorCall] { calls.filter { $0.method == .post && $0.path.hasSuffix(suffix) } }
+}
+
+/// Two ways to one stand-in computer, as a phone away from home has: a direct one (the Wi-Fi or the tailnet) that is
+/// down until `direct` is set, and the relay, which takes no uploads (`413 relay_upload_unavailable` for a drawing)
+/// and answers more slowly than the direct way once that one is up. Counts the drawings the relay was asked to carry.
+final class Ways: @unchecked Sendable {
+  private let lock = NSLock()
+  private var up = false
+  private var relayFaster = false
+  /// The relay answers first even with the direct way up (the direct way is the slower one).
+  var relayFirst: Bool {
+    get { lock.withLock { relayFaster } }
+    set { lock.withLock { relayFaster = newValue } }
+  }
+  private var refusedDrawings = 0
+  var direct: Bool {
+    get { lock.withLock { up } }
+    set { lock.withLock { up = newValue } }
+  }
+  var drawingsOnRelay: Int { lock.withLock { refusedDrawings } }
+  fileprivate func refusedOne() { lock.withLock { refusedDrawings += 1 } }
+}
+
+struct DirectWay: DoorTransport {
+  let inner: StandInTransport
+  let ways: Ways
+  func send(_ call: DoorCall) async throws -> DoorAnswerBytes {
+    guard ways.direct else { throw URLError(.cannotConnectToHost) }
+    if ways.relayFirst { try? await Task.sleep(for: .milliseconds(400)) }
+    return try await inner.send(call)
+  }
+  func events(_ call: DoorCall) async throws -> AsyncThrowingStream<Data, Error>? { ways.direct ? try await inner.events(call) : nil }
+}
+
+struct RelayWay: DoorTransport {
+  let inner: StandInTransport
+  let ways: Ways
+  func send(_ call: DoorCall) async throws -> DoorAnswerBytes {
+    if ways.direct, !ways.relayFirst { try? await Task.sleep(for: .milliseconds(400)) }
+    if call.method == .post, call.path.hasSuffix("markups") {
+      ways.refusedOne()
+      let error = DoorError(error: "Files and drawings are sent over the Wi-Fi or the tailnet, not the relay.", code: "relay_upload_unavailable")
+      return DoorAnswerBytes(status: 413, body: try JSONEncoder().encode(error))
+    }
+    return try await inner.send(call)
+  }
+  func events(_ call: DoorCall) async throws -> AsyncThrowingStream<Data, Error>? { try await inner.events(call) }
+}
+
+@MainActor
+func twoWaySession(door: StandInDoor, ways: Ways, copy: LocalCopy = LocalCopy(folder: nil), bytes: AttachmentCache? = nil, retryEvery: Duration = .seconds(15)) async -> InboxSession {
+  let issued = await door.issueToken()
+  let computer = PairedComputer(id: issued.device.rawValue, name: "Work Mac", token: issued.token, secret: "s", addresses: [])
+  return InboxSession(computer: computer, app: testApp, copy: copy, retryEvery: retryEvery, bytes: bytes) { _ in
+    let inner = StandInTransport(door: door)
+    return [DirectWay(inner: inner, ways: ways), RelayWay(inner: inner, ways: ways)]
+  }
 }

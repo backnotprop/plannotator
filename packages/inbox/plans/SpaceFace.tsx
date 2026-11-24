@@ -28,6 +28,7 @@ import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/compon
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { renderDiagram } from '@plannotator/ui/utils/diagram-render';
 import { PlanContentRules, acceptPlanDiagramSvg, isMovingDataImage, mermaidMayLoad, planFaceSrcdoc, resolvePlanImage, resolvePlanLink } from './planContent';
+import { stillDiagramMarkup } from './diagramStill';
 import { faceParts, type FaceParts } from './spacesModel';
 import { useFaceText } from './store';
 import { CARD_FACE_WIDTH, arrive } from '@plannotator/ui/components/frame';
@@ -230,15 +231,6 @@ function useThemeKey(): string {
   return `${colorTheme}:${resolvedMode}`;
 }
 
-/** A CSS value with every `var(--x)` of the window's own put in (a drawn diagram leaves the page as a picture). */
-function withVariables(css: string, root: CSSStyleDeclaration): string {
-  let out = css;
-  for (let round = 0; round < 4 && out.includes('var('); round++) {
-    out = out.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g, (_, name: string, fallback: string | undefined) => root.getPropertyValue(name).trim() || fallback?.trim() || 'currentColor');
-  }
-  return out;
-}
-
 /**
  * A diagram drawn by the plan page's renderer, as a still picture (null: it does not draw, or is refused). Mermaid
  * draws in the live page, so a source that could load something (`mermaidMayLoad`, the plan page's rule) is never
@@ -251,15 +243,7 @@ async function drawDiagram(kind: 'mermaid' | 'graphviz', source: string, themeKe
   const [colorTheme, mode] = themeKey.split(':');
   const result = await renderDiagram(kind, `ib-face-${Math.random().toString(36).slice(2, 10)}`, source, { colorTheme: colorTheme ?? 'plannotator', mode: mode === 'light' ? 'light' : 'dark' }, { accept: acceptPlanDiagramSvg });
   if (!result.ok) return null;
-  const svg = result.svgNode;
-  const box = svg.viewBox?.baseVal;
-  const width = box && box.width > 0 ? box.width : Number.parseFloat(svg.getAttribute('width') ?? '') || 600;
-  const height = box && box.height > 0 ? box.height : Number.parseFloat(svg.getAttribute('height') ?? '') || 400;
-  svg.setAttribute('width', String(width));
-  svg.setAttribute('height', String(height));
-  svg.style.maxWidth = '';
-  if (!svg.getAttribute('xmlns')) svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  const markup = withVariables(new XMLSerializer().serializeToString(svg), getComputedStyle(document.documentElement));
+  const markup = stillDiagramMarkup(result.svgNode, getComputedStyle(document.documentElement));
   return loadPicture(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`);
 }
 

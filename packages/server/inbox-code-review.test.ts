@@ -388,14 +388,14 @@ describe("what an agent's tool carries", () => {
     expect(strip(on)).toBe(never);
   });
 
-  // Claude Code cuts a tool description at 2,048 characters: the Board, steps and Code review all on, both builders.
+  // Claude Code cuts a tool description at 2,048 characters: the Board, steps, Routines and Code review all on, both builders.
   test("the description stays under 2,048 characters with every capability on, and Code review leaves it unchanged", async () => {
     const w = await world();
-    await w.post("/api/inbox/settings", { board: { on: true }, steps: { on: true } });
+    await w.post("/api/inbox/settings", { board: { on: true }, steps: { on: true }, ...(process.platform === "win32" ? {} : { scheduled_threads: { on: true } }) });
     const before = parseInboxToolList(await rawList(w.base));
     await w.setCodeReview(true);
     const served = parseInboxToolList(await rawList(w.base));
-    expect(served.some((tool) => tool.name === "card")).toBe(true);
+    expect(served.map((tool) => tool.name)).toEqual(expect.arrayContaining(["card", "steps", ...(process.platform === "win32" ? [] : ["routine"])]));
     for (const build of [inboxAgentTool, modAgentTool]) {
       const tool = build(served)!;
       expect(tool.description.length).toBeLessThan(2_048);

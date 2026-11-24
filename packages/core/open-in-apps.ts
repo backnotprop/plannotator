@@ -50,10 +50,16 @@ export interface OpenInApp {
    * How it opens a file at a line. `mac`: the app's URL scheme, `<scheme>://file/<path>:<line>`
    * through `open -a`. `macArgs: 'line-flag'`: `open -na <app> --args --line <n> <path>`, which
    * hands the arguments to the app's own launcher (it forwards them to a running instance).
+   * `macDefaultLine`: also use that launcher at this line if no line was selected.
    * `cli`: `--goto <path>:<line>`, `<path>:<line>`, or `--line n <path>` on its Windows and
    * Linux binary. Absent: the file opens at its top.
    */
-  line?: { mac?: string; macArgs?: 'line-flag'; cli?: 'goto' | 'suffix' | 'line-flag' };
+  line?: {
+    mac?: string;
+    macArgs?: 'line-flag';
+    macDefaultLine?: number;
+    cli?: 'goto' | 'suffix' | 'line-flag';
+  };
 }
 
 /**
@@ -179,6 +185,7 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     kind: 'editor',
     icon: 'android-studio',
     mac: { appName: 'Android Studio' },
+    line: { macArgs: 'line-flag', macDefaultLine: 1 },
   },
   // IntelliJ IDEA and PyCharm were two editions until 2025.3 / 2025.1: the older
   // bundles ("IntelliJ IDEA Ultimate" in JetBrains' 2024.3-2025.2 docs, the
@@ -323,7 +330,7 @@ export function openInMacOpened(app: OpenInApp, target: string, line?: number): 
 
 /**
  * The argv for macOS `open` that opens `target` in the bundle `appName`.
- *  - an app with `line.macArgs` and a line: `-na <app> --args --line <n> <target>`
+ *  - an app with `line.macArgs` and a selected or default line: `-na <app> --args --line <n> <target>`
  *    (JetBrains' documented `open -na "<App>.app" --args …`; `-n` makes `open` start
  *    the app's launcher even when the app runs, and the launcher hands the file
  *    and line to the running instance);
@@ -331,8 +338,9 @@ export function openInMacOpened(app: OpenInApp, target: string, line?: number): 
  * No shell is involved; `target` is the server's validated absolute path.
  */
 export function openInMacArgv(app: OpenInApp, appName: string, target: string, line?: number): string[] {
-  if (line && app.kind === 'editor' && app.line?.macArgs === 'line-flag') {
-    return ['-na', appName, '--args', '--line', String(line), target];
+  const launcherLine = line ?? app.line?.macDefaultLine;
+  if (launcherLine && app.kind === 'editor' && app.line?.macArgs === 'line-flag') {
+    return ['-na', appName, '--args', '--line', String(launcherLine), target];
   }
   return ['-a', appName, openInMacOpened(app, target, line)];
 }
