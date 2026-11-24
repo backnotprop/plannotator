@@ -26,6 +26,8 @@ import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
 import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
+import { sendWithFiles } from "./inbox-outbox-files";
+import { OUTBOX_FILE_IDLE_MS, OutboxFileLane, type OutboxFileUpload } from "./inbox-outbox-file-lane";
 import { INBOX_SENT_FROM_HEADER } from "@plannotator/core/inbox-types";
 import type { InboxPeerTransport } from "./inbox-transport";
 import { farArchivedPage, type FarArchived } from "./inbox-archived-merged";
@@ -53,11 +55,15 @@ export interface PeerLinkTimings {
   requestMs: number;
   /** One outbox try. */
   sendMs: number;
+  /** A held answer's file with no byte moving (inbox-outbox-files.ts). */
+  fileIdleMs: number;
+  /** A held answer's file whose try failed: its first pause before the next (doubled each time, up to `backoffMaxMs`). */
+  fileRetryMinMs: number;
   /** How long `deliveries` frames gather before one read of the list: each read is the whole list. */
   deliveriesMs: number;
 }
 
-export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000, deliveriesMs: 5_000 };
+export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000, fileIdleMs: OUTBOX_FILE_IDLE_MS, fileRetryMinMs: 1_000, deliveriesMs: 5_000 };
 
 /** A record from the other machine's event stream, as the window's stream passes it on. */
 export interface PeerRecord {
@@ -253,10 +259,23 @@ export class PeerLink {
   private deliveriesLabels = false;
   private flushDelay = 0;
   private readonly t: PeerLinkTimings;
+  /** Held answers' files, in their own lane (inbox-outbox-file-lane.ts): nothing in the write queue waits on one. */
+  private readonly files: OutboxFileLane;
+  private filesTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly options: PeerLinkOptions) {
     this.id = options.link.id;
     this.t = { ...PEER_LINK_TIMINGS, ...options.timings };
+    this.files = new OutboxFileLane({
+      outbox: options.outbox,
+      machine: options.link.id,
+      machineName: () => this.options.link.name,
+      upload: (file) => this.uploadFile(file),
+      idleMs: this.t.fileIdleMs,
+      onChange: () => this.flush(),
+      retryMinMs: this.t.fileRetryMinMs,
+      retryMaxMs: this.t.backoffMaxMs,
+    });
   }
 
   private get token() {
@@ -287,6 +306,8 @@ export class PeerLink {
     this.wake?.();
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = null;
+    if (this.filesTimer) clearTimeout(this.filesTimer);
+    this.filesTimer = null;
     if (this.deliveriesTimer) clearTimeout(this.deliveriesTimer);
     this.deliveriesTimer = null;
   }
@@ -454,6 +475,8 @@ export class PeerLink {
             wasOnline = true;
             this.setState("online");
             void this.refreshList().then(() => this.refreshCards());
+            // A file that failed while the line was down goes now, not after its pause.
+            this.files.lineBack();
             this.flush();
           } else if (parsed.event === "record" && parsed.id !== null) {
             const seq = Number(parsed.id);
@@ -664,14 +687,29 @@ export class PeerLink {
     return response;
   }
 
-  /** One outbox try: the entry's route and body under its own key (rule 1). */
-  private send = async (entry: OutboxEntry): Promise<OutboxAnswer> => {
+  /** One outbox try: the entry's route and body under its own key (rule 1), a held answer's with its files' ids there. */
+  private send = (entry: OutboxEntry): Promise<OutboxAnswer> =>
+    sendWithFiles(entry, { post: (body) => this.post(entry, body), forgot: () => this.options.outbox.filesForgotten(entry.key) });
+
+  /** A held answer's file to that machine's `uploads` route, its key in the query as that door takes a file (and as a window's upload there sends one). */
+  // Streamed: `fetch` pulls the body as the socket takes it (inbox-outbox-file-wire.test.ts), so the lane's idle limit
+  // measures the line. Its Content-Length declared, so that door refuses one too large before a byte is read.
+  private uploadFile: OutboxFileUpload = (file) =>
+    this.options.transport.request("uploads", `?${new URLSearchParams({ name: file.name, idempotency_key: file.key })}`, {
+      method: "POST",
+      headers: this.auth({ "Content-Type": "application/octet-stream", "Content-Length": String(file.size) }),
+      body: file.body,
+      signal: file.signal,
+    });
+
+
+  private post = async (entry: OutboxEntry, sendBody: Record<string, unknown>): Promise<OutboxAnswer> => {
     try {
       const response = await this.options.transport.request(entry.route, "", {
         method: "POST",
         // A press in the person's window here: the other machine's door hands that on (inbox-devices.ts).
         headers: this.auth({ "Content-Type": "application/json", ...(entry.window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}), ...(entry.sent_from ? { [INBOX_SENT_FROM_HEADER]: entry.sent_from } : {}) }),
-        body: JSON.stringify(entry.body),
+        body: JSON.stringify(sendBody),
         signal: AbortSignal.timeout(this.t.sendMs),
       });
       const text = await response.text();
@@ -690,6 +728,18 @@ export class PeerLink {
   /** Send what waits for this machine (rule 15). A 5xx is tried again after a pause; anything else waits for the next hello. */
   flush(): void {
     if (!this.running || this.state !== "online") return;
+    // Files go in their own lane; a file whose try failed waits out its own pause there (a run before it ends passes
+    // it by), and the lane runs again when the soonest pause ends.
+    void this.files.run().then((result) => {
+      if (result === "revoked") return this.stream?.abort();
+      const wait = this.files.nextTryIn();
+      if (wait === null) return;
+      if (this.filesTimer) clearTimeout(this.filesTimer);
+      this.filesTimer = setTimeout(() => {
+        this.filesTimer = null;
+        this.flush();
+      }, wait);
+    });
     void this.options.outbox.drain(this.id, this.send).then((result) => {
       if (result === "server_error") {
         this.flushDelay = Math.min(Math.max(this.flushDelay * 2, 1000), this.t.backoffMaxMs);
