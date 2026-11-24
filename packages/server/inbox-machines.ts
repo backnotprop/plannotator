@@ -44,6 +44,7 @@ import { inboxFarReaderName, inboxMachineRecordName } from "./inbox-sent-from-re
 import { createMachineAgentFind } from "./inbox-machine-agent-find";
 import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
+import type { OutboxFile } from "./inbox-outbox-files";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
@@ -1508,7 +1509,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
      * that machine is not linked. `own`: the write it undoes (`follows`), when it stops being worth sending (`send_by`), and
      * whether its refusal is a notice the window shows (`notify`).
      */
-    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string; notify?: boolean } = {}): Promise<OutboxEntry | null> | null => {
+    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string; notify?: boolean; files?: readonly OutboxFile[] } = {}): Promise<OutboxEntry | null> | null => {
       const peer = peers.get(machine);
       if (!peer) return null;
       // Marked as this Inbox's own (`auto`): the window never lists it as the person's waiting write.
