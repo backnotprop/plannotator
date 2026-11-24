@@ -264,7 +264,16 @@ test('a thread opened and closed, and a reload, keep the field and its words', a
   await expect.poll(async () => sorted(await listOrder(page))).toEqual(sorted([ids.trash, ids.search, ids.history]));
   await page.reload();
   await expect(field(page)).toHaveValue('page');
+  // The thread opened is read now, so the reload sorts it into Quiet, folded: two rows drawn, Quiet counts the third.
+  await expect.poll(async () => sorted(await listOrder(page))).toEqual(sorted([ids.trash, ids.history]));
+  const quiet = page.locator('.ib-lbody [data-section-id="quiet"] .ib-band');
+  await expect(quiet).toHaveAttribute('aria-expanded', 'false');
+  await expect(quiet.locator('.ib-n')).toHaveText(/^1(\D|$)/);
+  // Unfolded, the third match is there (and stays unfolded for the tests after this one).
+  await quiet.click();
+  await expect(quiet).toHaveAttribute('aria-expanded', 'true');
   await expect.poll(async () => sorted(await listOrder(page))).toEqual(sorted([ids.trash, ids.search, ids.history]));
+  await expect(page.locator(`.ib-lbody [data-section-id="quiet"] [data-thread-id="${ids.search}"]`)).toBeVisible();
   expect(world.errors).toEqual([]);
 });
 
