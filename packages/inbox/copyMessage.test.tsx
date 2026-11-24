@@ -429,8 +429,8 @@ test.skipIf(!hasDom)("each open message's ⋯ sits after Reply; Copy message cop
   expect(button.hasAttribute('data-phone')).toBe(false);
   await press(button);
   await until(() => !!messageMenu(), 'the message menu');
-  // The approved items, in order, Copy thread after a separator.
-  expect(labels(messageMenu())).toEqual(['Copy message', 'Copy link to message', 'Copy thread']);
+  // The approved items, in order: an agent's message leads with New thread from this message; Copy thread after a separator.
+  expect(labels(messageMenu())).toEqual(['New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
   expect(messageMenu()!.querySelector('[role="separator"]')).not.toBeNull();
   expect(button.hasAttribute('data-open')).toBe(true);
   await choose(item(messageMenu(), 'message'));
@@ -529,12 +529,14 @@ test.skipIf(!hasDom)('the keyboard: ⋯ opens with the arrows, the arrows walk t
   await key('ArrowDown');
   await until(() => !!messageMenu(), 'the menu from the keyboard');
   const highlighted = () => items(messageMenu()).findIndex((el) => el.hasAttribute('data-highlighted'));
-  await until(() => highlighted() === 0, 'Copy message highlighted');
+  await until(() => highlighted() === 0, 'New thread from this message highlighted');
+  // The separators are skipped.
   await key('ArrowDown');
-  await until(() => highlighted() === 1, 'Copy link to message highlighted');
-  // The separator is skipped.
+  await until(() => highlighted() === 1, 'Copy message highlighted');
   await key('ArrowDown');
-  await until(() => highlighted() === 2, 'Copy thread highlighted');
+  await until(() => highlighted() === 2, 'Copy link to message highlighted');
+  await key('ArrowDown');
+  await until(() => highlighted() === 3, 'Copy thread highlighted');
   await key('Escape');
   await until(() => !messageMenu(), 'the menu to close on Escape');
   await until(() => document.activeElement === button, 'focus back on ⋯');
@@ -552,7 +554,7 @@ test.skipIf(!hasDom)('a right-click on the head line opens the same menu; Escape
   await until(() => !!document.querySelector('[data-message-menu][data-context]'), 'the context menu');
   // Ours, not the browser's.
   expect(event!.defaultPrevented).toBe(true);
-  expect(labels(document.querySelector('[data-message-menu][data-context]'))).toEqual(['Copy message', 'Copy link to message', 'Copy thread']);
+  expect(labels(document.querySelector('[data-message-menu][data-context]'))).toEqual(['New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
   expect(more(M4)!.hasAttribute('data-open')).toBe(true);
   await key('Escape');
   await until(() => !messageMenu(), 'the context menu to close');

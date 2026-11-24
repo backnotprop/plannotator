@@ -22,6 +22,7 @@ import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
 import { TAKE_BACK_LABEL } from '../takeBack';
 import { PaneMenuItems } from '../panes/PaneMenu';
+import { askNewThreadFromMessage, NEW_THREAD_FROM_MESSAGE_LABEL, newThreadFromMessageOffered, newThreadFromMessageSending } from '../thread/newThreadFromMessage';
 
 /**
  * Copy a message, copy a thread (design record "inbox-copy-message", option
@@ -42,6 +43,8 @@ export interface CopyMenuHost {
   onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;
   /** A phone: ⋯ always shown, the menu a sheet from the bottom edge, no right-click. */
   phone: boolean;
+  /** Read the thread again (after New thread from this message's reply). */
+  onChanged?: () => Promise<void> | void;
 }
 
 /** The message as the toast and the menu's name say it: "Claude Code, 7:34 PM" (`short`: a long agent name cut, for the toast). */
@@ -86,13 +89,22 @@ function usePortal<T extends HTMLElement>() {
  * One open message's menu: its ⋯ (handed to `head` to place after Reply) and,
  * off a phone, a right-click on the head line `head` draws.
  */
-export function MessageMenu(props: { phone: boolean; newest: { readonly current: CopyMenuHost }; message: InboxMessageWire; head: (more: ReactElement) => ReactElement; takeBackOf?: () => (() => void) | null }) {
+export function MessageMenu(props: {
+  phone: boolean;
+  newest: { readonly current: CopyMenuHost };
+  message: InboxMessageWire;
+  head: (more: ReactElement) => ReactElement;
+  takeBackOf?: () => (() => void) | null;
+  /** The message can be replied to (Reply's own rule): an agent's message then offers New thread from this message. */
+  live?: boolean;
+}) {
   const { message, phone, newest } = props;
   const copies = useCopies(() => newest.current);
   const { ref: more, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const onTakeBack = open || contextOpen ? (props.takeBackOf?.() ?? null) : null;
+  const newThread = !!props.live && newThreadFromMessageOffered(message);
   const arm = useMessageArm();
   const named = who(message);
   // Shift+F10 or the context-menu key on the message's head (approval "inbox-keyboard-keys-2026-11-07", item 6): its
@@ -140,6 +152,16 @@ export function MessageMenu(props: { phone: boolean; newest: { readonly current:
           <Menu.Item className="ib-pmi" label={TAKE_BACK_LABEL} onClick={onTakeBack} data-take-back-item="">
             <Icon name="reply" size={15} />
             {TAKE_BACK_LABEL}
+          </Menu.Item>
+          <Menu.Separator className="ib-pm-sep" />
+        </>
+      )}
+      {/* Take back's place: an act on this message leads (Take back is the person's, this an agent's). */}
+      {newThread && (
+        <>
+          <Menu.Item className="ib-pmi" label={NEW_THREAD_FROM_MESSAGE_LABEL} disabled={newThreadFromMessageSending(message.id)} onClick={() => void askNewThreadFromMessage(message, newest.current)} data-new-thread-item="">
+            <Icon name="moveOut" size={15} />
+            {NEW_THREAD_FROM_MESSAGE_LABEL}
           </Menu.Item>
           <Menu.Separator className="ib-pm-sep" />
         </>

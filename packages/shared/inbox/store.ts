@@ -133,6 +133,7 @@ import { createInboxHandover, type InboxHandover } from "./handover";
 import { inboxTakeBackRefusal, type InboxHolder } from "./take-back";
 import { inboxWakeQuote } from "./wake-quote";
 import { laterActed, personActOfAnnotation, personActOfMessage, personActOfMessageLine, personActOfQuestion } from "./acted";
+import { isNewThreadFromMessageAsk } from "@plannotator/core/inbox-reply-quote";
 import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
 import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
@@ -453,6 +454,11 @@ export interface InboxReplyInput {
    * Absent (an older window, or no quote): nothing changes.
    */
   quote?: unknown;
+  /**
+   * New thread from this message: the words file no `#tag` (they quote the agent's message, not the person), and no
+   * "still open" line goes under them (the ask carries those questions on to a new thread).
+   */
+  author_only?: boolean;
   /**
    * The person's verdict on the review this reply answers (code review in the
    * Inbox: Approve or Send feedback in the review's header). Only on a reply
@@ -5441,7 +5447,11 @@ export class InboxStore {
     // posted a plain update after it, and the words go to the update), never
     // another session's.
     const asker = message.author.kind === "agent" && message.author.session ? message.author : null;
-    const stillOpen = asker
+    // New thread from this message asks the agent to carry its questions on and withdraw them here: no "still open,
+    // don't re-ask it" line under those words.
+    const stillOpen = input.author_only === true
+      ? []
+      : asker
       ? this.threadMessages(message.thread_id)
           .filter(
             (m) =>
@@ -5535,7 +5545,7 @@ export class InboxStore {
     }
     this.endSnooze(message.thread_id);
     // The person's words as typed: never the picks, the action items or the feedback the Send adds.
-    this.tagThreadCards(reply.thread_id, words);
+    if (input.author_only !== true && !isNewThreadFromMessageAsk(words)) this.tagThreadCards(reply.thread_id, words);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
   }
 
@@ -8865,7 +8875,7 @@ export class InboxStore {
   /** A person's message's tag keys, kept by message and thread (`personTagsByMessage`). */
   private indexPersonTags(record: InboxMessage): void {
     const had = this.personTagsByMessage.get(record.id);
-    const keys = typeof record.body === "string" && /#[\p{L}\p{N}]/u.test(record.body) ? [...new Set(inboxHashtags(personWords(record.body)).map((tag) => tag.key))].filter(Boolean) : [];
+    const keys = typeof record.body === "string" && /#[\p{L}\p{N}]/u.test(record.body) && !isNewThreadFromMessageAsk(personWords(record.body)) ? [...new Set(inboxHashtags(personWords(record.body)).map((tag) => tag.key))].filter(Boolean) : [];
     if (keys.length === 0) {
       if (!had) return;
       this.personTagsByMessage.delete(record.id);
@@ -9630,6 +9640,8 @@ export class InboxStore {
       for (let i = messages.length - 1; i >= 0; i--) {
         const message = messages[i]!;
         if (message.author.kind !== "person") continue;
+        // New thread from this message quotes the agent's words: a #tag there is not the person's.
+        if (isNewThreadFromMessageAsk(personWords(message.body))) continue;
         const found = inboxTaggedInitiative(personWords(message.body), live);
         if (!found) continue;
         const seq = this.messageSeq.get(message.id) ?? 0;
