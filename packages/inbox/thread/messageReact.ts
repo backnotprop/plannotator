@@ -56,6 +56,8 @@ export const FACE_OPEN_MS = 100;
 /** The grace after the pointer leaves the face or the strip, so moving from one to the other keeps it open. */
 export const FACE_CLOSE_MS = 140;
 
+/** No face opens (thread/facePress.ts): '*' while a press selects text; a message's id once one is let go over its face. */
+let hushed: string | null = null;
 let openTimer: ReturnType<typeof setTimeout> | null = null;
 let closeTimer: ReturnType<typeof setTimeout> | null = null;
 const clearTimers = () => {
@@ -70,6 +72,7 @@ const clearTimers = () => {
  */
 export const faceHover = {
   enter(at: FaceStripAt) {
+    if (hushed === '*' || at.messageId === hushed) return;
     if (closeTimer) clearTimeout(closeTimer);
     closeTimer = null;
     const open = faceStrip.get();
@@ -82,6 +85,7 @@ export const faceHover = {
     }, FACE_OPEN_MS);
   },
   leave() {
+    if (hushed !== '*') hushed = null;
     if (openTimer) clearTimeout(openTimer);
     openTimer = null;
     if (!faceStrip.get() || closeTimer) return;
@@ -99,6 +103,13 @@ export const faceHover = {
     clearTimers();
     skillPreview.set(null);
     faceStrip.set(null);
+  },
+  /**
+   * No face opens: '*' while a press selects text; a message's id after a text drag let go over its face, until the
+   * pointer leaves it; null, as before (thread/facePress.ts).
+   */
+  hush(which: '*' | string | null) {
+    hushed = which;
   },
 };
 

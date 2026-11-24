@@ -234,6 +234,7 @@ packages/inbox/reactionLanding.test.ts
 packages/inbox/reactionTray.test.tsx
 packages/inbox/replyHoldTray.test.tsx
 packages/inbox/reactEveryMessage.test.tsx
+packages/inbox/reactFaceSelect.test.tsx
 packages/inbox/actionChecklist.test.tsx
 packages/inbox/keyboardKeys.test.tsx
 packages/inbox/keyGuardsPageQueries.test.tsx

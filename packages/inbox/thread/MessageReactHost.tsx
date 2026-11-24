@@ -21,6 +21,7 @@ import { flyReaction, ReactionTray, reactedNow, sameReaction } from '../componen
 import { faceHover, faceStrip, hasSkill, useFaceStrip, type MessageReactApi } from './messageReact';
 import { FaceStrip } from './ReactStrip';
 import { questionWaits } from './footAck';
+import { followTextPresses } from './facePress';
 import { SkillPreviewCard } from './SkillPreviewCard';
 import { sendSkillReaction, type SkillReactionHost } from './skillReaction';
 
@@ -134,7 +135,14 @@ export function MessageReactHost({ body, api, copy, phone, takeBackOf }: { body:
       open(article, e.clientX, e.clientY, false);
     };
     el.addEventListener('contextmenu', onContextMenu);
-    if (!phone || !holdOpensSheet) return () => el.removeEventListener('contextmenu', onContextMenu);
+    // A drag selects the words past the faces, as with none there (thread/facePress.ts). A phone draws no face.
+    const unfollow = phone ? () => {} : followTextPresses(el);
+    if (!phone || !holdOpensSheet) {
+      return () => {
+        unfollow();
+        el.removeEventListener('contextmenu', onContextMenu);
+      };
+    }
     // A phone, `PHONE_HOLD.opensSheet`: a still hold on a message opens its sheet (Reply's hold time); a finger that
     // moves is a scroll.
     let hold: { x: number; y: number; timer: ReturnType<typeof setTimeout> } | null = null;

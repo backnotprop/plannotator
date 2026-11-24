@@ -260,6 +260,7 @@
   --ib-fs-20: max(11px, calc(20px * var(--ib-type) / 14));
   --ib-fs-22: max(11px, calc(22px * var(--ib-type) / 14));
   --ib-fs-24: max(11px, calc(24px * var(--ib-type) / 14));
+  --ib-fs-28: max(11px, calc(28px * var(--ib-type) / 14));
   --ib-fs-29: max(11px, calc(29px * var(--ib-type) / 14));
   --ib-fs-30: max(11px, calc(30px * var(--ib-type) / 14));
   --ib-fs-32: max(11px, calc(32px * var(--ib-type) / 14));
@@ -12800,6 +12801,8 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
   .pn-inbox .ib-message:hover .ib-rface, .pn-inbox .ib-message:has(:focus-visible) .ib-rface { opacity: 1; pointer-events: auto; }
 }
 .ib-rface-slot:has(.ib-rstrip) .ib-rface { opacity: 0 !important; }
+/* While a press selects text (thread/facePress.ts) the faces let the pointer through to the words under them. */
+.pn-inbox [data-react-pressing] .ib-rface, .pn-inbox [data-react-pressing] .ib-rstrip { pointer-events: none !important; }
 .pn-inbox .ib-rstrip { position: absolute; right: 0; top: 50%; translate: 0 -50%; display: flex; gap: 2px; padding: 3px; border-radius: 14px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow); pointer-events: auto; transform-origin: right center; animation: ib-rstrip-in 160ms cubic-bezier(0.23, 1, 0.32, 1) both; }
 @keyframes ib-rstrip-in { from { opacity: 0; transform: scale(0.9); } }
 .pn-inbox .ib-rstrip-c { position: relative; display: grid; place-items: center; width: 36px; height: 34px; padding: 0; border-radius: 10px; color: var(--muted-foreground); cursor: pointer; }
@@ -12820,7 +12823,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-emrow-skill { margin-top: 3px; font: 550 var(--ib-fs-11, 11px)/1.2 var(--font-mono, ui-monospace, monospace); color: var(--primary); }
 .ib-pm-pos[data-phone] .ib-emrow { justify-content: space-between; padding: 4px 4px 8px; }
 .ib-pm-pos[data-phone] .ib-emrow-c { height: 60px; justify-content: flex-start; padding-top: 6px; }
-.ib-pm-pos[data-phone] .ib-emrow .ib-react-e { font-size: 28px; }
+.ib-pm-pos[data-phone] .ib-emrow .ib-react-e { font-size: var(--ib-fs-28, 28px); }
 .ib-pm-pos[data-phone] .ib-emrow-e > .ib-ic { width: 28px; height: 28px; }
 /* While a question waits only the skill emoji are there: they sit at the start, each its own size, not spread out. */
 .ib-emrow[data-skills-only], .ib-pm-pos[data-phone] .ib-emrow[data-skills-only] { justify-content: flex-start; }
