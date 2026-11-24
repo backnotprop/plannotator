@@ -141,7 +141,9 @@ describe("a file a message names, on a linked machine's thread, two real Inboxes
           expect(view).toMatchObject({ text: content, version: version === "sent" ? attachment.sent_sha256 : "current" });
           let context = "";
           diagramFileAsk(view, (_question, source) => { context = source ?? ""; })!("Where are retries handled?", { kind: "selection", detail: "panel queue" });
-          expect(context).toContain(`SHA-256: ${sha}`);
+          expect(version === "sent" ? view.version : view.attachment.current?.sha256).toBe(sha);
+          expect(context).toContain(`Version: ${view.version}`);
+          expect(context).not.toContain("SHA-256:");
           expect(context).toContain(`Attachment: ${attachment.id}`);
           const ask = diagramFileAsk(view, undefined, send)!;
           expect(ask.destination).toBe("thread");
@@ -151,7 +153,8 @@ describe("a file a message names, on a linked machine's thread, two real Inboxes
           expect(reply.author.kind).toBe("person");
           expect(reply.body).toContain(`Where are retries handled in ${version}?`);
           expect(reply.body).toContain("panel: Queue (queue)");
-          expect(reply.body).toContain(`SHA-256: ${sha}`);
+          expect(reply.body).toContain(`Version: ${view.version}`);
+          expect(reply.body).not.toContain("SHA-256:");
           expect(reply.body).toContain(`Attachment: ${attachment.id}`);
           expect(reply.body).not.toContain("full diagram text");
           expect((await getJson(there, `/api/inbox/threads/${thread}/draft`)).draft.body).toBe(draft);
@@ -176,7 +179,8 @@ describe("a file a message names, on a linked machine's thread, two real Inboxes
         expect(question.body).toContain("Do you see my diagram?");
         expect(question.body).toContain(`Message: ${personFile.message_id}`);
         expect(question.body).toContain(`Attachment: ${personFile.id}`);
-        expect(question.body).toContain(`SHA-256: ${personFile.sent_sha256}`);
+        expect(question.body).toContain(`Version: ${personFile.sent_sha256}`);
+        expect(question.body).not.toContain("SHA-256:");
         const anchor = { v: 1, family: "plannotator-diagram", kind: "node", id: "queue", label: "Queue", sourceLine: null, point: { kind: "panel", x: 0.34, y: 0.7 } };
         const save = await windowPost(here, `${remote}/annotations`, { idempotency_key: crypto.randomUUID(), attachment_id: attachment.id, version: attachment.sent_sha256,
           annotation: { id: crypto.randomUUID(), type: "COMMENT", text: "Show the retry path", originalText: "Queue", blockId: "block-0", startOffset: 0, endOffset: 0, createdA: Date.now(), diagramAnchor: anchor },
