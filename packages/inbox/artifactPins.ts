@@ -37,16 +37,35 @@ function publish(pins: readonly InboxArtifactPin[]): void {
   for (const listener of listeners) listener();
 }
 
-/** Read the pins from the server (the first draw, and `event: artifact-pins`). A failed read keeps what is shown. */
+/**
+ * The pins an answer carries, picked by shape; null for an answer that is not a list of pins (an older Inbox's or a
+ * proxy's body, `{}`). An entry that does not read as a pin is passed over.
+ */
+function pinsOf(answer: unknown): InboxArtifactPin[] | null {
+  const pins = answer && typeof answer === 'object' ? (answer as { pins?: unknown }).pins : undefined;
+  if (!Array.isArray(pins)) return null;
+  return pins.filter((pin): pin is InboxArtifactPin => {
+    const p = pin as Partial<InboxArtifactPin> | null;
+    return !!p && typeof p === 'object' && typeof p.key === 'string' && typeof p.thread_id === 'string' && typeof p.pinned_at === 'string' && (p.machine === undefined || typeof p.machine === 'string');
+  });
+}
+
+/**
+ * Read the pins from the server (the first draw, and `event: artifact-pins`). A read that fails or answers something
+ * else keeps what is shown (none known yet: no pins), and never throws: a file opens whatever the pins read does.
+ */
 export function readArtifactPins(): Promise<void> {
   const at = changes;
+  const keep = () => {
+    if (snapshot.pins === null && at === changes) publish([]);
+  };
   const read = inboxApi.artifactPins().then(
     (answer) => {
-      if (at === changes) publish(answer.pins);
+      const pins = pinsOf(answer);
+      if (pins === null) keep();
+      else if (at === changes) publish(pins);
     },
-    () => {
-      if (snapshot.pins === null && at === changes) publish([]);
-    },
+    keep,
   );
   reading = read.finally(() => {
     if (reading === read) reading = null;
@@ -120,7 +139,9 @@ export async function setArtifactPinned(threadId: string, key: string, pinned: b
   publish(pinned ? [...before.filter((p) => p.key !== key), pin] : before.filter((p) => p.key !== key));
   try {
     const answer = await inboxApi.setArtifactPinned(threadId, key, pinned);
-    if (at === changes) publish(withMachinePins(home, answer.pins));
+    // An answer that is not a list of pins: the press was taken, so what it shows stays.
+    const pins = pinsOf(answer);
+    if (pins !== null && at === changes) publish(withMachinePins(home, pins));
     return true;
   } catch (cause) {
     if (at === changes) publish(before);

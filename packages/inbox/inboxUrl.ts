@@ -112,8 +112,10 @@ type ArtifactIds = { key: string; thread_id: string; machine?: string; message_i
  * their thread, message, project and file are that machine's, so a tile opens there and a pin goes there.
  */
 export function rememberArtifactMachines<T extends { pins?: readonly ArtifactIds[]; artifacts?: readonly ArtifactIds[] }>(model: T): T {
-  for (const entry of [...(model.pins ?? []), ...(model.artifacts ?? [])]) {
-    if (!entry?.machine) continue;
+  // An answer of another shape (an older Inbox's, a proxy's) names no machine: the reader decides what it means.
+  const list = (value: unknown): readonly ArtifactIds[] => (Array.isArray(value) ? value : []);
+  for (const entry of [...list(model?.pins), ...list(model?.artifacts)]) {
+    if (!entry || typeof entry.machine !== 'string' || !entry.machine || typeof entry.key !== 'string' || typeof entry.thread_id !== 'string') continue;
     const file = entry.key.startsWith('guide:') ? '' : entry.key;
     rememberMachine([entry.thread_id, entry.message_id ?? '', entry.project?.id ?? '', entry.attachment?.id ?? '', file], entry.machine);
   }
