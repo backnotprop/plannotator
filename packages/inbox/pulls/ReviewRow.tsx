@@ -256,8 +256,9 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
         </span>
         {markWords && <span className="ib-sr">{markWords}, </span>}
         <Title text={title} />
+        {ship && look === 'stuck' && <ShipWords ship={ship} now={now} />}
         <span className="ib-rvr-end">
-          {ship && look && <ShipWords ship={ship} now={now} />}
+          {ship && look && look !== 'stuck' && <ShipWords ship={ship} now={now} />}
           {high && <RiskMark judgment={judged} />}
           {!selected && !twoLine && level && !high && <span className="ib-sr">, {quietRisk ? `${riskLevelWord[quietRisk.level]} risk` : COULD_NOT_RANK}</span>}
           {failing && (
@@ -399,8 +400,9 @@ function LayerRow({ layer, place, selected, phone, now, judgments, riskFailed, m
         </span>
         <span className="ib-sr">{prStateWords(layer.state, layer.platform)}, </span>
         <Title text={layer.title} />
+        {ship && look === 'stuck' && <ShipWords ship={ship} now={now} />}
         <span className="ib-rvr-end">
-          {ship && look && <ShipWords ship={ship} now={now} />}
+          {ship && look && look !== 'stuck' && <ShipWords ship={ship} now={now} />}
           {high && <RiskMark judgment={judged} />}
           {!selected && !twoLine && (quietRisk || riskFailure) && <span className="ib-sr">, {quietRisk ? `${riskLevelWord[quietRisk.level]} risk` : COULD_NOT_RANK}</span>}
           {failing && (

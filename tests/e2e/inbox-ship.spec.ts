@@ -250,7 +250,11 @@ async function open(browser: Browser, options: { width: number; height: number; 
   return { context, page };
 }
 
-/** "Mac mini" linked: the merged list and the machines read name it, and its forwarded routes answer as its Inbox would. */
+/**
+ * "Mac mini" linked: the merged list and the machines read name it, and its forwarded routes answer as its Inbox would.
+ * Every list read names the machines, the whole one and each later one answered as a change (`delta`, #2593), as a
+ * linked Inbox's do: a read that left them out would unlink Mac mini in the window.
+ */
 async function linkMini(page: Page) {
   await page.route(
     (u) => u.pathname === '/api/inbox/threads',
@@ -258,7 +262,7 @@ async function linkMini(page: Page) {
       if (route.request().method() !== 'GET') return route.fallback();
       const response = await route.fetch();
       const json = (await response.json()) as Record<string, unknown>;
-      return route.fulfill({ response, json: json && 'sections' in json ? { ...json, self: SELF, machines: MACHINES } : json });
+      return route.fulfill({ response, json: json && ('sections' in json || 'delta' in json) ? { ...json, self: SELF, machines: MACHINES } : json });
     },
   );
   await page.route((u) => u.pathname === '/api/inbox/machines', (route) => route.fulfill({ json: { self: SELF, machines: MACHINES } }));
@@ -342,6 +346,10 @@ test('desktop: Ship from the row menu with the review agent, ship mode, stuck, t
     await reread(page);
     await expect(receipt).toHaveAttribute('data-ship', 'stuck');
     await expect(receipt.locator('[data-ship-words]')).toContainText('Stuck: e2e-checkout failing');
+    // The title keeps the room it has on a row that does not ship; the stuck words give way, whole in their tooltip.
+    expect((await receipt.locator('.ib-rvr-t').boundingBox())!.width).toBeGreaterThanOrEqual(titleBefore.width - 0.5);
+    await expect(receipt.locator('[data-ship-words]')).toHaveAttribute('title', /Stuck: e2e-checkout failing/);
+    expect(await receipt.locator('.ib-rvr-t').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     await shot(page, '04-stuck.png');
 
     // 5. The ship log, from the row's menu; Stop.
@@ -368,6 +376,10 @@ test('desktop: Ship from the row menu with the review agent, ship mode, stuck, t
     await expect(receipt).toHaveAttribute('data-ship', 'merged');
     await expect(receipt.locator('[data-ship-words]')).toContainText('Merged');
     await expect(receipt.locator('.ib-shp')).toHaveCount(0);
+    // Escape above gave the row the list's keyboard focus ring; a person reading the list has none. Ship draws no
+    // ring or outline of its own on the row.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(await receipt.evaluate((row) => [getComputedStyle(row).outlineStyle, getComputedStyle(row, '::before').boxShadow])).toEqual(['none', 'none']);
     await shot(page, '06-merged.png');
   } finally {
     await context.close();
@@ -381,6 +393,18 @@ test('phone: rows in ship mode', async ({ browser }) => {
     await expect(page.locator('[data-reviews-row="thr_receipt"]')).toHaveAttribute('data-ship', 'shipping');
     await expect(page.locator('[data-reviews-row="thr_retry"]')).toHaveAttribute('data-ship', 'stuck');
     await expect(page.locator('[data-reviews-row="thr_export"]')).not.toHaveAttribute('data-ship', /.+/);
+    // A ship this new fills its row from the left once (the launch); the picture is of the rows once filled.
+    await expect.poll(() => page.evaluate(() => document.getAnimations().some((a) => (a as CSSAnimation).animationName?.startsWith('ib-shp-fill') && a.playState === 'running'))).toBe(false);
+    // The water covers each row edge to edge, its time too.
+    for (const id of ['thr_receipt', 'thr_retry']) {
+      const edges = await page.locator(`[data-reviews-row="${id}"]`).evaluate((row) => {
+        const box = row.getBoundingClientRect();
+        const water = row.querySelector('.ib-shp-rev')!.getBoundingClientRect();
+        const age = row.querySelector('.ib-rvr-age')!.getBoundingClientRect();
+        return { left: Math.round(water.left - box.left), right: Math.round(box.right - water.right), ageInside: age.right <= water.right };
+      });
+      expect(edges).toEqual({ left: 0, right: 0, ageInside: true });
+    }
     await shot(page, '07-phone.png');
   } finally {
     await context.close();

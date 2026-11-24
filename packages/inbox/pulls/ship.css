@@ -58,7 +58,13 @@
 .ib-prrow[data-ship="stuck"] :is(.ib-shp-pool, .ib-shp-pool > span, .ib-shp-glide, .ib-shp-sail, .ib-shp-rock) { animation-play-state: paused; }
 .ib-prrow[data-ship="stuck"] .ib-shp-sail { color: var(--ib-sand-ink); }
 .ib-shp-word { flex: none; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; }
-.ib-prrow[data-ship="stuck"] .ib-shp-word { overflow: hidden; text-overflow: ellipsis; max-width: 22em; color: var(--ib-sand-ink); }
+/* Stuck words sit between the title and the row's end and take only the room the title leaves: the title keeps what
+   it has on a row that does not ship, and the words give way first, cut with "…". Their own 8px before the end stands
+   in for the line's gap, so a row with no room left gives the title all of it. A long unbroken title (split in its
+   middle) has no width of its own to keep, so it takes the room and the words show only in full elsewhere. */
+.ib-prrow[data-ship="stuck"] .ib-shp-word { flex: 1 1 0%; min-width: 0; margin-right: -10px; padding-right: 8px; overflow: hidden; text-overflow: ellipsis; text-align: right; color: var(--ib-sand-ink); }
+.ib-prrow[data-ship="stuck"]:has(.ib-rvr-t[data-reviews-title-split]) .ib-shp-word { flex-grow: 0; }
+.ib-prrow[data-ship="stuck"] .ib-rvr-end { margin-left: 0; }
 /* Merged: the words take the end of the row, where the agent and the age were. */
 .ib-prrow[data-ship="merged"] .ib-rvr-end { position: relative; }
 .ib-prrow[data-ship="merged"] .ib-rvr-end > :is(.ib-rvr-agent, .ib-rvr-age) { visibility: hidden; }

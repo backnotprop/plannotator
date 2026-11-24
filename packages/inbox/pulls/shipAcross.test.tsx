@@ -27,6 +27,7 @@ const { shipPull, shipOptions } = (hasDom ? await import('./shipStart') : {}) as
 const { resetShipsForTests } = (hasDom ? await import('../data/ships') : {}) as typeof import('../data/ships');
 const { resetMachineLaunchesForTests } = (hasDom ? await import('../compose/useMachineLaunches') : {}) as typeof import('../compose/useMachineLaunches');
 const { resetMachineRoutes, setSelfMachine } = (hasDom ? await import('../inboxUrl') : {}) as typeof import('../inboxUrl');
+const { inboxApi, resetListReads } = (hasDom ? await import('../api') : {}) as typeof import('../api');
 
 const SELF = 'ibx_01M62DTW6WCYD3ZH6Z17MFMA8G';
 const MINI = 'ibx_01M62DTW6WCYD3ZH6Z17MFMA9H';
@@ -134,6 +135,7 @@ afterEach(() => {
   resetMachineRoutes();
   resetShipsForTests();
   resetMachineLaunchesForTests();
+  resetListReads();
 });
 
 function frame(children: ReactNode) {
@@ -209,6 +211,53 @@ test.skipIf(!hasDom)("the row menu's Ship submenu shows the linked computer's ag
   expect(far.getAttribute('data-ship-machine')).toBe(MINI);
   await press(far);
   expect(shipped.map((o) => [o.machine, o.to])).toEqual([[MINI, { host: 'claude-code', session: 'ses_triage' }]]);
+});
+
+test.skipIf(!hasDom)("the window's list reads, whole and then as a change, keep the linked computer that takes ships in Ship's list", async () => {
+  // Each list read names the machines: the whole one, and each later one answered as a change (`delta`, #2593).
+  // Mac mini is linked on both; on a third read it is not any more.
+  const machinesNow = [
+    [{ id: SELF, self: true, name: 'MacBook', state: 'online' }, { id: MINI, self: false, name: 'Mac mini', state: 'online', list_cursor: 1, marks: ['artifact-pins', 'ships'] }],
+    [{ id: SELF, self: true, name: 'MacBook', state: 'online' }, { id: MINI, self: false, name: 'Mac mini', state: 'online', list_cursor: 1, marks: ['artifact-pins', 'ships'] }],
+    [{ id: SELF, self: true, name: 'MacBook', state: 'online' }],
+  ];
+  let reads = 0;
+  stub({
+    'GET /api/inbox/threads': (call: Call) => {
+      const since = new URL(call.url, 'http://x').searchParams.get('since');
+      const machines = machinesNow[Math.min(reads, machinesNow.length - 1)];
+      const version = `v${++reads}`;
+      const rest = { list_version: version, projects: [], self: SELF, machines };
+      return since ? { ...rest, delta: { since, rows: [], sections: [], lists: {} } } : { ...rest, sections: [] };
+    },
+    'GET /api/inbox/sessions': HERE,
+    'GET /api/inbox/machines': { self: SELF, machines: [{ id: SELF, self: true, name: 'MacBook', state: 'online' }, { id: MINI, self: false, name: 'Mac mini', state: 'online', launch: false, marks: ['ships'] }] },
+    [`GET /api/inbox/m/${MINI}/sessions`]: THERE,
+  });
+  await act(() => inboxApi.list());
+  await act(() => inboxApi.list());
+  expect(calls.filter((c) => c.url.startsWith('/api/inbox/threads')).map((c) => new URL(c.url, 'http://x').searchParams.get('since'))).toEqual(['', 'v1']);
+  const handlers: ShipHandlers = { ships: new Map(), repoProjects: { [`github.com/${REPO}`]: ['prj_fern'] }, projectsOf: (m) => (m ? { [`github.com/${REPO}`]: ['prj_mini'] } : { [`github.com/${REPO}`]: ['prj_fern'] }), onShip: () => {}, onLog: () => {}, onStop: () => {} };
+  frame(
+    <ReviewsMenu className="ib-lbody" rows={[ROW]} links={{}} phone={false} onTarget={() => {}} onHide={() => {}} ship={handlers}>
+      <div data-reviews-row={THREAD} data-reviews-item={THREAD}>
+        row
+      </div>
+    </ReviewsMenu>,
+  );
+  await act(async () => {
+    $(`[data-reviews-item="${THREAD}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 200, clientY: 200 }));
+  });
+  await until(() => !!$('[data-ship]'), 'Ship in the menu');
+  await act(async () => {
+    $('[data-ship]')!.focus();
+    $('[data-ship]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  });
+  await until(() => !!$('[data-ship-group="Mac mini"] [data-ship-agent]'), "Mac mini's agents after a read answered as a change");
+  expect($('[data-ship-group="Mac mini"] [data-ship-agent]')!.getAttribute('data-ship-machine')).toBe(MINI);
+  // Unlinked since: the next read, a change too, takes its agents out of Ship.
+  await act(() => inboxApi.list());
+  await until(() => !$('[data-ship-group="Mac mini"]'), 'Mac mini gone once unlinked');
 });
 
 test.skipIf(!hasDom)("a linked computer's agent ships in a new thread on its computer, tied to the PR and recorded there", async () => {
