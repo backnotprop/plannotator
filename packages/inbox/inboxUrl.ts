@@ -135,6 +135,23 @@ export function rememberSearchMachines<T extends { groups: Partial<Record<string
   return model;
 }
 
+type ArtifactIds = { key: string; thread_id: string; machine?: string; message_id?: string; project?: { id: string }; attachment?: { id: string } | null };
+
+/**
+ * The merged artifact pins' and Wall's entries of another machine (`machine`, inbox-artifacts-merged.ts in the server):
+ * their thread, message, project and file are that machine's, so a tile opens there and a pin goes there.
+ */
+export function rememberArtifactMachines<T extends { pins?: readonly ArtifactIds[]; artifacts?: readonly ArtifactIds[] }>(model: T): T {
+  // An answer of another shape (an older Inbox's, a proxy's) names no machine: the reader decides what it means.
+  const list = (value: unknown): readonly ArtifactIds[] => (Array.isArray(value) ? value : []);
+  for (const entry of [...list(model?.pins), ...list(model?.artifacts)]) {
+    if (!entry || typeof entry.machine !== 'string' || !entry.machine || typeof entry.key !== 'string' || typeof entry.thread_id !== 'string') continue;
+    const file = entry.key.startsWith('guide:') ? '' : entry.key;
+    rememberMachine([entry.thread_id, entry.message_id ?? '', entry.project?.id ?? '', entry.attachment?.id ?? '', file], entry.machine);
+  }
+  return model;
+}
+
 /** Ids this Inbox's own answers named: theirs for good (an earlier claim by another machine is dropped). */
 export function rememberLocal(ids: Iterable<string>): void {
   for (const id of ids) {

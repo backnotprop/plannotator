@@ -72,6 +72,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'hello':
       handlers.onConnect?.(readHello(frame.data) ?? undefined);
+      scheduledFrame('connect');
       return;
     case 'reach':
       try {

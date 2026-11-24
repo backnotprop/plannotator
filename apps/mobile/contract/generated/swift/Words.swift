@@ -61,6 +61,8 @@ public enum Words {
   public static let deliveryStoppedReply = "Stopped: goes in when you type in that session"
   /// delivery.turn_ended: packages/core/inbox-delivery-line.ts TURN_ENDED_TEXT
   public static let deliveryTurnEnded = "went in when its turn ended"
+  /// delivery.into_running_turn: packages/core/inbox-delivery-line.ts INTO_RUNNING_TURN_TEXT
+  public static let deliveryIntoRunningTurn = "went into its running turn"
   /// delivery.auto_after: packages/core/inbox-delivery-line.ts autoAfterText(minutes)
   public static func deliveryAutoAfter(minutes: Int) -> String { "went into its turn by itself after \(minutes) min" }
   /// delivery.sent_queued: packages/core/inbox-delivery-line.ts sentRowLine(name, true)
