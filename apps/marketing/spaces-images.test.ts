@@ -26,7 +26,12 @@ const pictures = [...page.matchAll(/<img\b[^>]*\bsrc="(\/assets\/spaces\/img\/[^
 // Pictures retaken when the made-up space became Field notes. The files keep
 // their names, so a browser holding the old picture (the old name) would show
 // it beside the new text; a new version in the address makes it fetch again.
-const RETAKEN = ['whole', 'clone', 'clone-c', 'prt2', 'pr-c'].flatMap((name) => [`${name}-l.png`, `${name}-d.png`]);
+// Each name maps to the lowest version its address may ask for: `whole` was
+// retaken again later, so it needs a version past the first retake's.
+const RETAKEN = Object.entries({ whole: 3, clone: 2, 'clone-c': 2, prt2: 2, 'pr-c': 2 }).flatMap(([name, version]) => [
+  { file: `${name}-l.png`, version },
+  { file: `${name}-d.png`, version },
+]);
 
 describe('the Spaces page app pictures', () => {
   test('the page has app pictures to check', () => {
@@ -42,10 +47,10 @@ describe('the Spaces page app pictures', () => {
   }
 
   test('every retaken picture is asked for at a new address, so no browser reuses the old one', () => {
-    for (const file of RETAKEN) {
+    for (const { file, version } of RETAKEN) {
       const uses = pictures.filter((picture) => picture.src.endsWith(`/${file}`));
       expect(uses.length, file).toBeGreaterThan(0);
-      for (const use of uses) expect(use.version, file).toBeGreaterThanOrEqual(2);
+      for (const use of uses) expect(use.version, file).toBeGreaterThanOrEqual(version);
     }
   });
 });
