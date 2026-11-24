@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from '@plannotator/review-editor';
 import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
-import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
+import { onCaughtRenderError, RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
 import '@plannotator/review-editor/styles';
 import '@plannotator/review-editor/tree-styles';
 
@@ -11,7 +11,7 @@ if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
 
-const root = ReactDOM.createRoot(rootElement);
+const root = ReactDOM.createRoot(rootElement, { onCaughtError: onCaughtRenderError });
 root.render(
   <React.StrictMode>
     {/* Worker-pool syntax highlighting — tokenization off the main thread
