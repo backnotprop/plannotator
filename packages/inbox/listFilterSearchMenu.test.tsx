@@ -29,7 +29,7 @@ import type { ThreadTagsHost } from './threadTags';
 
 const hasDom = typeof document !== 'undefined';
 const { ListFilterButton } = (hasDom ? await import('./components/ListFilter') : {}) as typeof import('./components/ListFilter');
-const { holdScroll } = (hasDom ? await import('./components/ListFilterSections') : {}) as typeof import('./components/ListFilterSections');
+const { holdScroll, bringUp } = (hasDom ? await import('./components/ListFilterSections') : {}) as typeof import('./components/ListFilterSections');
 const { ThreadTagsContext } = await import('./threadTags');
 const { NO_LIST_FILTER, resetListFilterForTests } = await import('./listFilter');
 const { TITLE_FILTER_LABEL } = await import('./listTitleFilter');
@@ -200,7 +200,8 @@ const words = (el: Element | null) => [...(el?.querySelectorAll('.ib-pmi') ?? []
 /** The rows drawn, in order, by their words. */
 const rowWords = () => words(menu());
 const pinned = (section: string) => words(group(section).querySelector('[data-list-filter-pins]'));
-const scrolling = (section: string) => words(group(section).querySelector('[data-list-filter-scroll]'));
+/** The section's rows under its ticked ones, inside its capped scroll. */
+const scrolling = (section: string) => words(group(section).querySelector('[data-list-filter-rows]'));
 const groups = () => [...menu()!.querySelectorAll('.ib-pm-glabel')].map((n) => n.textContent);
 const highlighted = () => menu()!.querySelector('.ib-pmi[data-highlighted]')?.querySelector('.ib-pmi-l')?.textContent ?? null;
 const focusedRow = () => (document.activeElement as HTMLElement | null)?.querySelector?.('.ib-pmi-l')?.textContent ?? null;
@@ -255,6 +256,8 @@ describe.skipIf(!hasDom)('a long section', () => {
     expect(g.querySelector('.ib-pm-glabel')!.nextElementSibling!.contains(input)).toBe(true);
     expect(scrolling('projects')).toEqual(LONG.slice(0, 9));
     expect(input.getAttribute('aria-controls')).toBe(g.querySelector('[data-list-filter-scroll]')!.id);
+    // A search field to a screen reader, not a plain text box among menu rows.
+    expect(input.getAttribute('role')).toBe('searchbox');
     // Nothing above the first row but the sheet's hidden title.
     expect(menu()!.querySelector('.ib-pmi')!.hasAttribute('data-list-filter-title')).toBe(true);
     expect(menu()!.querySelector('input') === input).toBe(true);
@@ -349,6 +352,21 @@ describe.skipIf(!hasDom)('a long section', () => {
     expect(item.getAttribute('aria-label')).toBe(`${NAME} 1`);
   });
 
+  test('forty ticked tags stay inside the capped scroll, so the section never grows past its cap', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => `tag-${String(i).padStart(2, '0')}`);
+    const ticked = many.slice(0, 40).map((_, i) => `tag_${i}`);
+    render(['api', 'web'], { ...NO_LIST_FILTER, tags: ticked }, many);
+    await press(funnel());
+    const scroll = group('tags').querySelector('[data-list-filter-scroll]')!;
+    const pins = group('tags').querySelector('[data-list-filter-pins]')!;
+    expect(pinned('tags')).toEqual(many.slice(0, 40));
+    // Every row of the section, ticked ones first, is inside the one capped scroll; nothing of it outside.
+    expect(scroll.contains(pins)).toBe(true);
+    expect(words(scroll)).toEqual(many);
+    expect(words(group('tags'))).toEqual(many);
+    expect(scroll.firstElementChild === pins).toBe(true);
+  });
+
   test('200 tags: only Tag gets a field; typing finds the few, a ticked one pinned above them', async () => {
     const many = Array.from({ length: 200 }, (_, i) => `tag-${String(i).padStart(3, '0')}`);
     many[17] = 'Billing ✨';
@@ -412,11 +430,41 @@ describe.skipIf(!hasDom)('keys', () => {
     render(LONG);
     await press(funnel());
     await type('projects', 'bil');
-    for (const name of ['r', ' ', 'Home', 'End', 'Enter']) {
+    for (const name of ['r', ' ', 'Home', 'End']) {
       expect(await key(name)).toBe(true);
       expect(document.activeElement === field('projects')).toBe(true);
     }
     expect(picks).toEqual(NO_LIST_FILTER);
+    expect(menu()).not.toBeNull();
+  });
+
+  test('Enter in a field ticks or unticks its first match; focus and the words stay', async () => {
+    render(LONG);
+    await press(funnel());
+    await type('projects', 'bil');
+    expect(await key('Enter')).toBe(false);
+    expect(picks.projects).toEqual(['prj_billing']);
+    expect(field('projects')!.value).toBe('bil');
+    expect(document.activeElement === field('projects')).toBe(true);
+    expect(menu()).not.toBeNull();
+    // Ticked here, it stays where it was: Enter again unticks it.
+    await key('Enter');
+    expect(picks.projects).toEqual([]);
+    expect(document.activeElement === field('projects')).toBe(true);
+  });
+
+  test('Enter: a matching ticked row is the first match; with no words or no match it does nothing', async () => {
+    render(LONG, { ...NO_LIST_FILTER, projects: ['prj_rebill'] });
+    await press(funnel());
+    await focusOn(field('projects')!);
+    await key('Enter');
+    expect(picks.projects).toEqual(['prj_rebill']);
+    await type('projects', 'zzz');
+    await key('Enter');
+    expect(picks.projects).toEqual(['prj_rebill']);
+    await type('projects', 'bil');
+    await key('Enter');
+    expect(picks.projects).toEqual([]);
     expect(menu()).not.toBeNull();
   });
 
@@ -573,5 +621,91 @@ describe.skipIf(!hasDom)('the scroll held as rows run out', () => {
     expect(spacer.style.height).toBe('200px');
     expect(menuEl.style.maxHeight).toBe('');
     expect(menuEl.scrollTop).toBe(500);
+  });
+});
+
+describe.skipIf(!hasDom)("a phone's field brought to the sheet's top", () => {
+  /** A sheet whose section sits 200 px below its top at scroll 0, a field in it, and a visual viewport 800 px tall. */
+  function sheet() {
+    const menuEl = document.createElement('div');
+    menuEl.setAttribute('data-list-filter-menu', '');
+    const groupEl = document.createElement('div');
+    groupEl.setAttribute('data-list-filter-long', 'projects');
+    const box = document.createElement('div');
+    box.setAttribute('data-list-filter-find-box', '');
+    const input = document.createElement('input');
+    const row = document.createElement('div');
+    box.append(input);
+    groupEl.append(box, row);
+    menuEl.append(groupEl);
+    document.body.append(menuEl);
+    let top = 0;
+    Object.defineProperty(menuEl, 'scrollTop', { get: () => top, set: (v: number) => (top = v), configurable: true });
+    menuEl.getBoundingClientRect = () => ({ top: 100 }) as DOMRect;
+    groupEl.getBoundingClientRect = () => ({ top: 300 - top }) as DOMRect;
+    const viewport = Object.assign(new EventTarget(), { height: 800 });
+    const resize = async (height: number) => {
+      viewport.height = height;
+      viewport.dispatchEvent(new Event('resize'));
+      await wait(200);
+    };
+    return { menuEl, input, row, viewport, resize, scroll: () => top, scrollTo: (v: number) => (top = v), done: () => menuEl.remove() };
+  }
+
+  test('on focus, and as the keyboard rises (in steps too), the section comes to the top; again on the next rise', async () => {
+    const s = sheet();
+    bringUp(s.input, s.viewport);
+    expect(s.scroll()).toBe(200);
+    s.scrollTo(0);
+    await act(async () => {
+      for (const height of [700, 600, 450]) {
+        s.viewport.height = height;
+        s.viewport.dispatchEvent(new Event('resize'));
+      }
+    });
+    await wait(200);
+    expect(s.scroll()).toBe(200);
+    // Down, then up again: lifted again.
+    await s.resize(800);
+    s.scrollTo(0);
+    await s.resize(450);
+    expect(s.scroll()).toBe(200);
+    s.done();
+  });
+
+  test('a suggestion bar coming or going is not the keyboard: the sheet stays where it is', async () => {
+    const s = sheet();
+    bringUp(s.input, s.viewport);
+    await s.resize(450);
+    s.scrollTo(260);
+    await s.resize(410);
+    expect(s.scroll()).toBe(260);
+    await s.resize(450);
+    expect(s.scroll()).toBe(260);
+    s.done();
+  });
+
+  test('once the person scrolls the sheet it is theirs: the keyboard rising does not snap it back', async () => {
+    const s = sheet();
+    bringUp(s.input, s.viewport);
+    s.row.dispatchEvent(new Event('touchstart', { bubbles: true }));
+    s.scrollTo(320);
+    await s.resize(450);
+    expect(s.scroll()).toBe(320);
+    s.done();
+  });
+
+  test('a touch on the field itself is not the person scrolling; after blur nothing moves it', async () => {
+    const s = sheet();
+    bringUp(s.input, s.viewport);
+    s.input.dispatchEvent(new Event('touchstart', { bubbles: true }));
+    s.scrollTo(0);
+    await s.resize(450);
+    expect(s.scroll()).toBe(200);
+    s.input.dispatchEvent(new FocusEvent('blur'));
+    s.scrollTo(0);
+    await s.resize(300);
+    expect(s.scroll()).toBe(0);
+    s.done();
   });
 });

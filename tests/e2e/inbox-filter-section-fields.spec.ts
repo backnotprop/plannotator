@@ -6,7 +6,7 @@
  *  - eleven projects: Project gets its own field under its heading ("Find a project") and a list of about seven rows
  *    that scrolls inside the menu; nothing at the menu's top;
  *  - the wheel over that list scrolls it, and at its ends goes on to scroll the menu (no trap), both ways;
- *  - ticked projects sit above the scroll; typing narrows Project only, the match bold, the field never moving;
+ *  - ticked projects come first inside the capped scroll; typing narrows Project only, the match bold, the field never moving;
  *    ↓ from the field goes to its first row, ↑ back; Escape empties the field, then closes the menu;
  *  - nothing matching: "No projects match “zzz”" in that section, the ticked rows kept;
  *  - a phone, 390 wide: the same field in the sheet, 16 px text, the list shorter, the sheet not moving as rows go.
@@ -180,7 +180,7 @@ test('the wheel over the inner list scrolls it, and at its ends goes on to the m
   expect(world.errors).toEqual([]);
 });
 
-test('ticked projects sit above the scroll; typing narrows Project only, bold, and the field never moves', async () => {
+test('ticked projects come first in the capped scroll; typing narrows Project only, bold, and the field never moves', async () => {
   const { page } = world;
   for (const name of ['billing-svc', 'web-app']) await projects(page).locator('.ib-pmi').filter({ hasText: new RegExp(`^${name}`) }).first().click();
   await expect(page.locator('[data-list-filter-count]')).toHaveText('2');
@@ -189,7 +189,7 @@ test('ticked projects sit above the scroll; typing narrows Project only, bold, a
   await field(page).click();
   const before = await top(page);
   await page.keyboard.type('bil');
-  await expect.poll(() => words(page, '[data-list-filter-long="projects"] [data-list-filter-scroll] .ib-pmi')).toEqual(BIL);
+  await expect.poll(() => words(page, '[data-list-filter-long="projects"] [data-list-filter-rows] .ib-pmi')).toEqual(BIL);
   expect(await words(page, '[data-list-filter-long="projects"] [data-list-filter-pins] .ib-pmi')).toEqual(['billing-svc', 'web-app']);
   await expect(projects(page).locator('[data-list-filter-scroll] .ib-lflt-hit').first()).toHaveText('bil');
   expect(await words(page, '[data-list-filter-group="agents"] .ib-pmi')).toEqual(agentsBefore);
@@ -218,7 +218,7 @@ test('nothing matching: the line in Project only, its ticked rows kept; Escape e
   await page.keyboard.press('Escape');
   await expect(menu(page)).toBeVisible();
   await expect(field(page)).toHaveValue('');
-  await expect(inner(page).locator('.ib-pmi')).toHaveCount(ALL.length - 2);
+  await expect(inner(page).locator('[data-list-filter-rows] .ib-pmi')).toHaveCount(ALL.length - 2);
   await page.keyboard.press('Escape');
   await expect(menu(page)).toHaveCount(0);
   await expect(funnel(page)).toBeFocused();
@@ -241,7 +241,7 @@ test('a phone, 390 wide: the field in the sheet at 16 px, a shorter list, the sh
   const was = await sheet();
   const fieldWas = await top(page);
   await page.keyboard.type('bil');
-  await expect.poll(() => words(page, '[data-list-filter-long="projects"] [data-list-filter-scroll] .ib-pmi')).toEqual(BIL);
+  await expect.poll(() => words(page, '[data-list-filter-long="projects"] [data-list-filter-rows] .ib-pmi')).toEqual(BIL);
   const now = await sheet();
   expect(Math.abs(now.y - was.y)).toBeLessThanOrEqual(1);
   expect(Math.abs(now.height - was.height)).toBeLessThanOrEqual(1);

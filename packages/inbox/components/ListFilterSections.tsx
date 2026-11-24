@@ -5,21 +5,24 @@
  *
  * - A long section (Agent, Tag or Project with more than eight rows, listFilterSearch.ts) gets its own field under its
  *   heading ("Find an agent", "Find a tag", "Find a project") and a list of about seven rows that scrolls inside the
- *   menu. The rows ticked when the menu opened, or when its field last changed, sit above that scroll; a row ticked
- *   meanwhile stays where it is, so nothing moves under the pointer or the keyboard. Typing narrows that section only,
+ *   menu. The rows ticked when the menu opened, or when its field last changed, come first in that scroll (inside its
+ *   cap, so forty ticked tags never stretch the section); a row ticked meanwhile stays where it is, so nothing moves
+ *   under the pointer or the keyboard. Typing narrows that section only,
  *   the match bold; nothing matching says so in that section ("No projects match “zzz”"). An × empties the field.
  * - A section of eight rows or fewer is the plain menu's: no field, no cap. Nothing sits at the menu's top.
  * - Keys: the field is a stop in the menu's ↑ ↓ order, between its heading and its first row. ↓ from the field goes to
  *   the first row under it, ↑ from that row back to the field; at the inner list's ends the arrows go on to the next
  *   section, and wrap at the menu's ends as the plain menu does. In the field, letters, Space, Home and End are the
- *   field's (no type-ahead); Escape empties it first, then closes the menu; Escape on a row of a section with words
+ *   field's (no type-ahead); Enter ticks or unticks the section's first match, focus and words staying (as the one
+ *   field this replaced did); Escape empties it first, then closes the menu; Escape on a row of a section with words
  *   typed empties them and goes back to the field. During IME composition every key is the IME's. On the plain rows
  *   the menu's first-letter type-ahead works as always.
  * - While a field has focus the pointer only hovers rows (Base UI's hover would take focus from the field), and a
  *   click on a row gives focus back to the field, so typing goes on.
  * - Typing never moves the field: the menu keeps its scroll, a desktop menu growing shorter from its foot when its
  *   rows run out, a phone's sheet keeping its height (a spacer at its foot). On a phone the field's section comes to the
- *   sheet's top when the field takes focus and again as the keyboard settles.
+ *   sheet's top when the field takes focus and again as the keyboard rises, never once the person scrolls the sheet.
+ * - Each field is a searchbox (role, name, aria-controls on its list), as Base UI's Menu.Input is.
  * - A screen reader hears the count of the section typed in ("3 matches") once typing pauses (saidAfterPause.ts).
  *
  * Only drawn while the menu is open: its state (the words, the pins) starts afresh with each open.
@@ -28,7 +31,7 @@ import { Fragment, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
-import { findInSection, labelStart, type FilterSearchRow } from '../listFilterSearch';
+import { findInSection, labelStart, type FilterSearchRow, type SectionFind } from '../listFilterSearch';
 import { matchCount, useSaidAfterPause } from './saidAfterPause';
 
 /** One row of the menu: a pick, or (`opens`, its Base UI label) a row that opens something (Custom range…, Title…). */
@@ -106,6 +109,9 @@ function drawRow({ row, hit }: FilterSearchRow<FilterRow>) {
 
 const plain = (row: FilterRow): FilterSearchRow<FilterRow> => ({ row, hit: null });
 
+/** The section's first row matching its words, in the order drawn (a matching ticked row first); none with no words. */
+const firstMatch = (f: SectionFind<FilterRow>): FilterSearchRow<FilterRow> | undefined => (f.searching ? (f.pinned.find((p) => p.hit) ?? f.rows[0]) : undefined);
+
 /** The places ↑ ↓ stop at, in the menu's order: its rows and its sections' fields. */
 const STOPS = '[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], input[data-list-filter-find]';
 const isRow = (el: Element | null): el is HTMLElement => !!el && /^menuitem/.test(el.getAttribute('role') ?? '');
@@ -161,8 +167,22 @@ export function holdScroll(menu: HTMLElement, scrollTop: number, spacer: HTMLEle
   menu.scrollTop = scrollTop;
 }
 
-/** A phone: the field's section at the sheet's top, now and as the keyboard rises and the sheet sits on it. */
-function bringUp(input: HTMLInputElement) {
+/** How much shorter the visual viewport must get to be the keyboard rising, not its suggestion bar changing. */
+const KEYBOARD_RISE_PX = 120;
+/** How long after the viewport's last step the keyboard counts as up (its steps come a frame or so apart). */
+const KEYBOARD_SETTLE_MS = 120;
+
+/** What `bringUp` reads of `window.visualViewport`. */
+type ViewportLike = Pick<EventTarget, 'addEventListener' | 'removeEventListener'> & { readonly height: number };
+
+/**
+ * A phone: the field's section at the sheet's top when the field takes focus, and again as the keyboard rises (the
+ * visual viewport getting at least `KEYBOARD_RISE_PX` shorter than at focus; once, after its last step) and the sheet
+ * comes to sit on it. Nothing else moves it: a suggestion bar coming or going is not the keyboard rising, and once
+ * the person scrolls the sheet themselves (a touch, a pen or the wheel anywhere but the field) it is theirs until the
+ * field next takes focus.
+ */
+export function bringUp(input: HTMLInputElement, viewport: ViewportLike | null = typeof window !== 'undefined' ? window.visualViewport : null) {
   const menu = input.closest<HTMLElement>('[data-list-filter-menu]');
   const group = input.closest<HTMLElement>('[data-list-filter-long]');
   if (!menu || !group) return;
@@ -171,13 +191,70 @@ function bringUp(input: HTMLInputElement) {
     menu.scrollTop += group.getBoundingClientRect().top - menu.getBoundingClientRect().top - pad;
   };
   lift();
-  if (typeof ResizeObserver === 'undefined') return;
-  const sheet = new ResizeObserver(lift);
-  sheet.observe(menu);
-  input.addEventListener('blur', () => sheet.disconnect(), { once: true });
+  if (!viewport) return;
+  const atFocus = viewport.height;
+  let theirs = false;
+  /** The keyboard is up (the viewport `KEYBOARD_RISE_PX` or more shorter than at focus). */
+  let up = false;
+  /** The keyboard is still rising: the lift waits for its last step. */
+  let rising: ReturnType<typeof setTimeout> | undefined;
+  const onResize = () => {
+    if (atFocus - viewport.height < KEYBOARD_RISE_PX) {
+      // Down again (or never up): the next rise lifts again.
+      up = false;
+      clearTimeout(rising);
+      rising = undefined;
+      return;
+    }
+    // Already up and settled: a suggestion bar coming or going, never a lift.
+    if (up && rising === undefined) return;
+    up = true;
+    clearTimeout(rising);
+    // Once the keyboard has stopped rising and the sheet sits on it (phone.ts trackKeyboard sets that in a frame).
+    rising = setTimeout(() => {
+      rising = undefined;
+      if (!theirs && input.isConnected) lift();
+    }, KEYBOARD_SETTLE_MS);
+  };
+  // The field's own box (the field, its ×) is not the sheet.
+  const box = input.closest('[data-list-filter-find-box]') ?? input;
+  const own = (event: Event) => {
+    if (!(event.target instanceof Node && box.contains(event.target))) theirs = true;
+  };
+  const moves = ['touchstart', 'pointerdown', 'wheel'] as const;
+  viewport.addEventListener('resize', onResize);
+  for (const name of moves) menu.addEventListener(name, own, { capture: true, passive: true });
+  input.addEventListener(
+    'blur',
+    () => {
+      viewport.removeEventListener('resize', onResize);
+      clearTimeout(rising);
+      for (const name of moves) menu.removeEventListener(name, own, { capture: true });
+    },
+    { once: true },
+  );
 }
 
-function FindField({ section, words, value, controls, phone, onChange, onTyping }: { section: string; words: string; value: string; controls: string; phone: boolean; onChange: (text: string) => void; onTyping: (on: boolean) => void }) {
+function FindField({
+  section,
+  words,
+  value,
+  controls,
+  phone,
+  onChange,
+  onTyping,
+  onEnter,
+}: {
+  section: string;
+  words: string;
+  value: string;
+  controls: string;
+  phone: boolean;
+  onChange: (text: string) => void;
+  onTyping: (on: boolean) => void;
+  /** Enter: tick or untick the section's first match, if there is one. */
+  onEnter: () => void;
+}) {
   const input = useRef<HTMLInputElement>(null);
   return (
     <div className="ib-lflt-find" data-list-filter-find-box="">
@@ -209,8 +286,15 @@ function FindField({ section, words, value, controls, phone, onChange, onTyping 
           } else if (event.key === 'Escape') {
             event.preventDefault();
             onChange('');
+          } else if (event.key === 'Enter') {
+            // As the one field this replaced did: the first match ticks or unticks; focus and the words stay.
+            event.preventDefault();
+            onEnter();
           }
         }}
+        // A search field, as Base UI's Menu.Input is (role searchbox, aria-controls on its list), so a screen reader in
+        // a menu knows it is for typing. Menu.Input itself needs Menu.FilterProvider, one field over the whole menu.
+        role="searchbox"
         aria-label={words}
         placeholder={words}
         aria-controls={controls}
@@ -333,15 +417,25 @@ export function FilterMenuRows({
                 }}
               >
                 <Menu.GroupLabel className="ib-pm-glabel">{section.title}</Menu.GroupLabel>
-                <FindField section={section.id} words={section.find.words} value={query} controls={listId} phone={phone} onChange={(text) => setQuery(section.id, text)} onTyping={onTyping} />
-                {f.pinned.length > 0 && (
-                  <div className="ib-lflt-pins" data-list-filter-pins="">
-                    {f.pinned.map(drawRow)}
-                  </div>
-                )}
-                {f.pinned.length > 0 && (f.rows.length > 0 || f.matches === 0) && <div className="ib-pm-sep" aria-hidden="true" />}
+                <FindField
+                  section={section.id}
+                  words={section.find.words}
+                  value={query}
+                  controls={listId}
+                  phone={phone}
+                  onChange={(text) => setQuery(section.id, text)}
+                  onTyping={onTyping}
+                  onEnter={() => firstMatch(f)?.row.onToggle()}
+                />
+                {/* The ticked rows first, inside the same capped scroll, so a section never grows past its cap. */}
                 <div id={listId} className="ib-lflt-scroll" data-list-filter-scroll="">
-                  {f.rows.map(drawRow)}
+                  {f.pinned.length > 0 && (
+                    <div className="ib-lflt-pins" data-list-filter-pins="">
+                      {f.pinned.map(drawRow)}
+                    </div>
+                  )}
+                  {f.pinned.length > 0 && (f.rows.length > 0 || f.matches === 0) && <div className="ib-pm-sep" aria-hidden="true" />}
+                  <div data-list-filter-rows="">{f.rows.map(drawRow)}</div>
                 </div>
                 {f.searching && f.matches === 0 && (
                   <div className="ib-lflt-none" data-list-filter-none="">
