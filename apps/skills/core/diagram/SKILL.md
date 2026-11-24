@@ -187,7 +187,7 @@ Iterate until exit `0`:
 - **Overlap or panels too close:** separate coordinates in `panels` mode, or adjust `groups` so each group encloses only its own members without partial overlaps.
 - **Inner `graph` collision or extent error:** adjust `[col, row]` spacing in `graph.at`, reduce panel/label width, or split self-loops into a panel with a return lane.
 
-Once rendering exits `0`, check that the result actually communicates what the reader needs—diagnostics verify geometry, not clarity. Inspect the rendered `.svg` (or `renderDiagram(spec).description`) to confirm it directly answers the request, labels and embedded images are readable without crowding or ambiguity, and nothing essential is missing or obscured.
+**Visual check (exit `0` checks geometry, not communication):** After a clean render, look at the actual rendered picture at its intended reading size (rasterize the `.svg` to PNG if your image viewer needs raster input). Ask whether the main spatial and semantic relationships read at a glance without reading every label—checking focal hierarchy, overall proportions and dead whitespace, panel alignment, tangled line crossings (the renderer checks line-against-panel crossings, not line-against-line crossings), and whether labels and embedded images stay legible—then do a deliberate polish pass if anything feels flat, cramped, or unclear. If your environment cannot view images, inspect the measured canvas `width`/`height` and panel bounds above alongside `renderDiagram(spec).description` to catch lopsided proportions, misaligned placements, or missing structure.
 
 ## 5. Revise from pinned feedback
 
