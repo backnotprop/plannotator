@@ -9,7 +9,8 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadAttachments, readInboxUpload, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { inboxAgentFetchAction, inboxAgentFetchFields } from "./inbox-agent-files";
-import { INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
+import { INBOX_AGENT_FETCH_FILE, INBOX_AGENT_SEND_RECEIPT } from "@plannotator/shared/inbox/agent-pairing";
+import { readSendReceipt, sendReceiptInput, type SendReceiptAnswer, type SendReceiptInput, type SendReceiptSender } from "./inbox-send-receipt";
 import { bytesOfBase64, createInboxAgentPieces, inboxAgentPieceAction } from "./inbox-agent-pieces";
 import { inboxAgentRouteAction } from "./inbox-agent-routes";
 import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents } from "./inbox-cloud-agents";
@@ -38,6 +39,9 @@ export interface InboxAgentDoorContext {
   agents: InboxCloudAgents;
   devices: () => InboxAgentDoorDevices | null;
   mcp: InboxMcpContext;
+  receiptSource?: () => string | null;
+  keepReceiptSource?: () => void;
+  receiptOnMachine?: (input: SendReceiptInput, sender: SendReceiptSender) => Promise<SendReceiptAnswer>;
   /** The Inbox's own handler for the window routes the agent's commands use (inbox-agent-routes.ts). */
   route?: (req: Request) => Promise<Response>;
 }
@@ -241,9 +245,11 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
   const whoami = (agent: InboxCloudAgent): ToolResult => {
     const home = agents.homeName(agent);
     const projects = projectNames();
+    context.keepReceiptSource?.();
+    const source = context.receiptSource?.();
     return okComplete(
       `You are ${agent.name}, a cloud agent paired with this Inbox. You can read, search and write in every thread of every project here. A new thread goes in ${home} unless you pass "project" with another project's name.${projects.length > 0 ? ` Projects: ${projects.join(", ")}.` : ""} The Inbox answered, so your setup works.`,
-      { name: agent.name, project: home, projects },
+      { name: agent.name, project: home, projects, ...(source ? { source } : {}) },
     );
   };
   /**
@@ -296,6 +302,17 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
   const call = async (agent: InboxCloudAgent, tool: string, args: Record<string, unknown>, commandId: string | null): Promise<ToolResult> => {
     const identity = IDENTITY_FIELDS.find((field) => field in args);
     if (identity) throw new DoorRefusal("identity_forced", `${identity}: not taken here. The Inbox names a cloud agent from its pairing.`);
+    if (tool === INBOX_AGENT_SEND_RECEIPT) {
+      const input = sendReceiptInput.safeParse(args);
+      if (!input.success) throw new DoorRefusal("validation_error", "Receipt lookup requires source, project_id and idempotency_key.");
+      const { source, idempotency_key } = input.data;
+      const ask = { ...input.data, idempotency_key: `${agent.session}:${idempotency_key}` };
+      const sender = { session: agent.session, host: inboxCloudHostOf(agent.preset) };
+      const result = context.receiptSource?.() === source
+        ? readSendReceipt(store, ask, sender, null)
+        : await context.receiptOnMachine?.(ask, sender) ?? { status: "unavailable", source };
+      return okComplete(result.status === "found" ? "Found the original send." : result.status === "not_found" ? "No committed send found." : "The destination Inbox is unavailable.", result);
+    }
     if (tool === WHOAMI) {
       const extra = Object.keys(args)[0];
       if (extra) throw new DoorRefusal("validation_error", `${extra}: whoami takes no fields.`);
@@ -357,15 +374,15 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
   const serve = async (devices: InboxAgentDoorDevices, device: InboxDevice, request: { tool?: unknown; arguments?: unknown } | null, commandId: string | null): Promise<Response> => {
     const agent = agents.byDevice(device.id);
     if (device.revoked_at !== null || !agent) return refuse(401, "device_revoked", "This cloud agent was removed from the Inbox. Pair it again.");
-    devices.touch(device.id);
     if (!request || typeof request !== "object" || Array.isArray(request)) return refuse(422, "validation_error", "body: expected { tool, arguments }.");
     const tool = request.tool;
     if (typeof tool !== "string" || tool === "") return json({ result: fail("validation_error", "tool: the name of an Inbox action, such as read_thread.") });
+    if (tool !== INBOX_AGENT_SEND_RECEIPT) devices.touch(device.id);
     const args = request.arguments ?? {};
     if (typeof args !== "object" || Array.isArray(args) || args === null) return json({ result: fail("validation_error", "arguments: a JSON object.") });
     try {
       const result = await call(agent, tool, args as Record<string, unknown>, commandId);
-      if (!result.isError) agents.seen(device.id);
+      if (!result.isError && tool !== INBOX_AGENT_SEND_RECEIPT) agents.seen(device.id);
       return json({ result });
     } catch (error) {
       if (error instanceof DoorRefusal || error instanceof InboxError) return json({ result: fail(error.code, error.message) });

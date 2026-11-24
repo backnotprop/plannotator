@@ -403,6 +403,7 @@ import { inboxRequestSentFrom } from "./inbox-sent-from";
 import { doorHealth } from "./inbox-door-version";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { agentFileDoorAnswer, agentReadDoorAnswer } from "./inbox-far-read";
+import { peerSendReceipt } from "./inbox-send-receipt";
 import { agentSearchDoorAnswer, agentThreadsDoorAnswer } from "./inbox-far-find";
 import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
@@ -5100,7 +5101,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   // `route`: the window routes a paired agent's `inbox rows`, `projects`, `icon` and `export-decisions` use, answered by
   // this listener's own handler as the same commands on this computer are (inbox-agent-routes.ts).
-  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext, route: (req) => handle(req, "local") });
+  const agentDoor = createInboxAgentDoor({
+    store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext, route: (req) => handle(req, "local"),
+    receiptSource: () => machines?.selfId ?? null,
+    keepReceiptSource: () => machines?.keepSelfId(),
+    receiptOnMachine: async (input, sender) => machines?.readSendReceipt(input, sender) ?? { status: "unavailable", source: input.source },
+  });
   const cloudWake = createInboxCloudWake({
     store: farHosts.store,
     agents: cloudAgents,
@@ -8819,6 +8825,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // A linked machine's agents read this Inbox's threads and their files (inbox-far-read.ts).
       // Each message's place is worded from the reading computer's side: who it is comes from its token (inbox-sent-from-reader.ts).
       agentRead: { read: (url, device) => agentReadDoorAnswer(mcpContext, url, machines?.readerNameOfDevice(device.id, device.name) ?? ""), file: (url) => agentFileDoorAnswer(store, url) },
+      agentSendReceipt: (url, sender) => peerSendReceipt(store, machines.selfId, sender, url),
       // ...and search and list them (inbox-far-find.ts): a project named by its git remote (unknown while git has not said).
       agentFind: {
         search: (url) => agentSearchDoorAnswer({ store, searchIndex: search.index, remoteOf: (root, waitMs) => farRemoteOf(repos, root, waitMs) }, url),

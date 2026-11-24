@@ -10,6 +10,7 @@ import type { InboxCloudAgentView } from "@plannotator/core/inbox-cloud";
 import type { InboxListRow } from "@plannotator/core/inbox-types";
 import { decodeInboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import { sha256Hex } from "@plannotator/shared/inbox/devices";
+import { InboxStore } from "@plannotator/shared/inbox/store";
 import { runInboxCallCommand } from "../../apps/hook/server/inbox-call-command";
 import { cloudAgentsPath } from "./inbox-cloud-agents";
 import { INBOX_AGENT_ATTACHMENTS_MAX_BYTES } from "./inbox-agent-door";
@@ -52,6 +53,64 @@ describe("the agent door", () => {
     expect(readFileSync(cloudAgentsPath(w.dataDir), "utf8")).not.toContain(KEY);
     // Its old messages stay.
     expect((await w.thread(threadId)).messages.map((m) => m.body)).toContain("Found the flaky test. Fix it now?");
+  });
+
+  test("a paired sender keeps its identity and receives an exact question answer after restart", async () => {
+    const w = await world();
+    const { agent, pairing, hook } = await w.pair();
+    const other = await w.pair("grok-bot", "Other sender");
+    const attempt = "offline-receipt";
+    const sent = await w.door(pairing.token, "send_message", {
+      project_path: w.project, idempotency_key: attempt,
+      body: ":::question\nWhich draft?\n\n- [ ] First draft\n- [ ] Second draft\n:::",
+    });
+    expect(sent.error).toBeNull();
+    const { project, thread_id: threadId, message_id: messageId } = sent.result!.structuredContent!;
+    const before = (await w.thread(threadId)).messages[0]!;
+    const question = before.questions![0]!;
+    const sender = { host: "cloud-grok", machine: null, session: agent.session };
+    expect(before.author).toMatchObject({ kind: "agent", host: sender.host, session: sender.session });
+    const identity = await w.door(pairing.token, "whoami");
+    const lookup = { source: identity.result!.structuredContent!.source, project_id: project.id, idempotency_key: attempt };
+    expect(lookup.source).toBe((await w.call("/api/inbox/health")).json.inbox_id);
+    await w.restart();
+    expect((await w.call("/api/inbox/health")).json.inbox_id).toBe(lookup.source);
+
+    // Check the stored receipt as well as the paired lookup.
+    const store = InboxStore.open(w.dataDir);
+    const receipt = store.agentSendReceipt(project.id, `${agent.session}:${attempt}`, sender);
+    expect(receipt).toEqual({ project_id: project.id, thread_id: threadId, message_id: messageId, questions: [{ key: question.key }] });
+    expect(store.agentSendReceipt(project.id, `${agent.session}:${attempt}`, { ...sender, session: other.agent.session })).toBeNull();
+    const beforeLookup = filesUnder(join(w.dataDir, "inbox"));
+    const recovered = await w.door(pairing.token, "lookup_send_receipt", lookup);
+    expect(recovered.error).toBeNull();
+    expect(recovered.result!.structuredContent).toEqual({ status: "found", source: lookup.source, ...receipt });
+    expect((await w.door(other.pairing.token, "lookup_send_receipt", lookup)).result!.structuredContent).toEqual({ status: "not_found", source: lookup.source });
+    expect((await w.door(pairing.token, "lookup_send_receipt", { ...lookup, idempotency_key: "unused" })).result!.structuredContent).toEqual({ status: "not_found", source: lookup.source });
+    expect((await w.door(pairing.token, "lookup_send_receipt", { ...lookup, agent_session: other.agent.session })).error).toStartWith("identity_forced:");
+    expect(filesUnder(join(w.dataDir, "inbox"))).toEqual(beforeLookup);
+    const override = await w.door(other.pairing.token, "read_thread", { thread_id: threadId, agent_session: agent.session });
+    expect(override.error).toStartWith("identity_forced:");
+
+    const pick = await w.call(`/api/inbox/messages/${messageId}/picks`, {
+      questions: [{ key: question.key, revision: question.revision, answer: { v: 1, key: question.key, kind: "single", prompt: question.prompt, selected: ["Second draft"] } }],
+    });
+    expect(pick.status).toBe(200);
+    const replied = await w.call(`/api/inbox/messages/${messageId}/reply`, {
+      idempotency_key: "offline-answer",
+      questions: [{ key: question.key, revision: question.revision + 1 }],
+    });
+    expect(replied.status).toBe(200);
+    await until(() => hook.seen.length === 1);
+    expect(other.hook.seen).toHaveLength(0);
+    const read = await w.door(pairing.token, "read_thread", { thread_id: threadId, format: "full" });
+    expect(read.error).toBeNull();
+    const messages = read.result!.structuredContent!.thread.messages;
+    const answer = messages.find((message: { reply_to?: string }) => message.reply_to === messageId);
+    expect(answer.author.kind).toBe("person");
+    expect(messages.find((message: { id: string }) => message.id === messageId).questions).toContainEqual(expect.objectContaining({
+      key: question.key, sent_reply_id: answer.id, answer: expect.objectContaining({ selected: ["Second draft"] }),
+    }));
   });
 
   test("Hermes or OpenClaw on a server pairs like Other: it posts under its own kind, and a webhook that answers 202 counts as woken", async () => {

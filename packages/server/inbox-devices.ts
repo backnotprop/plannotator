@@ -419,6 +419,7 @@ const DOOR_OWN_ROUTES = [
   { method: "GET", route: "accounts", grant: "machine" },
   // A linked machine's agent reads this Inbox's threads and fetches the files they list (inbox-far-read.ts, mark `agent-read`).
   { method: "GET", route: "agent-read", grant: "machine", needs: "machines" },
+  { method: "GET", route: "agent-send-receipt", grant: "machine", needs: "machines" },
   { method: "GET", route: "agent-file", grant: "machine", needs: "machines" },
   // Its agent's search and thread list of this Inbox's threads (inbox-far-find.ts, mark `agent-search`).
   { method: "GET", route: "agent-search", grant: "machine", needs: "machines" },
@@ -661,6 +662,7 @@ export interface InboxDevicesContext {
   /** A linked machine's agents' reads of this Inbox's threads and their files (inbox-far-read.ts). */
   agentRead?: { read: (url: URL, device: InboxDevice) => Response; file: (url: URL) => Promise<Response> };
   /** A linked machine's agents' search and thread list of this Inbox's threads (inbox-far-find.ts). */
+  agentSendReceipt?: (url: URL, senderMachine: string) => Response;
   agentFind?: { search: (url: URL) => Promise<Response>; threads: (url: URL) => Response | Promise<Response> };
   /** Tag an agent on another computer (inbox-far-tags.ts, inbox-far-wakes.ts): each write named by the machine whose token sent it. */
   farTags?: {
@@ -1247,6 +1249,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
     "GET accounts": (req, url, device) => toWindow(req, device, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal),
     // read_thread's read of one of this Inbox's threads, and a file it lists: reads only, as a guest's.
     "GET agent-read": async (_req, url, device) => context.agentRead?.read(url, device) ?? routeNotFound(device),
+    "GET agent-send-receipt": async (_req, url, device) => {
+      const sender = context.machines?.()?.machineOfDevice?.(device.id)?.machine;
+      return sender ? context.agentSendReceipt?.(url, sender) ?? routeNotFound(device) : routeNotFound(device);
+    },
     "GET agent-file": async (_req, url, device) => (context.agentRead ? await context.agentRead.file(url) : routeNotFound(device)),
     // Its agent's search and thread list here: reads only, as a guest's.
     "GET agent-search": async (_req, url, device) => (context.agentFind ? await context.agentFind.search(url) : routeNotFound(device)),
@@ -1269,7 +1275,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
   /** One request from a known, live device: its own revoke, or an allowlisted route handed to the window. */
   const serve = async (req: Request, url: URL, route: string, device: InboxDevice): Promise<Response> => {
     const at = now().toISOString();
-    devices.touch(device.id, at);
+    if (route !== "agent-send-receipt") devices.touch(device.id, at);
     // The app names itself (section 14); the header is never handed to the window. Below the floor: 426, but it
     // still reads `health` (where it learns the floor) and can remove itself.
     const app = parseAppHeader(req.headers.get(APP_HEADER));

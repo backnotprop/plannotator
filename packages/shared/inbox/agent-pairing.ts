@@ -2,7 +2,8 @@ import { INBOX_TOOL_ACTIONS } from "./connection";
 
 /** A file of a message, by its bytes: the door answers one piece; `plannotator inbox call` saves the whole file. */
 export const INBOX_AGENT_FETCH_FILE = "fetch_file";
-export const INBOX_AGENT_CALL_ACTIONS = ["whoami", ...INBOX_TOOL_ACTIONS, INBOX_AGENT_FETCH_FILE] as const;
+export const INBOX_AGENT_SEND_RECEIPT = "lookup_send_receipt";
+export const INBOX_AGENT_CALL_ACTIONS = ["whoami", ...INBOX_TOOL_ACTIONS, INBOX_AGENT_FETCH_FILE, INBOX_AGENT_SEND_RECEIPT] as const;
 export const INBOX_AGENT_UPLOAD_PIECE = "upload_piece";
 export const INBOX_AGENT_UPLOAD_FINISH = "upload_finish";
 /** One of the window routes `plannotator inbox rows`, `projects`, `icon` and `export-decisions` use (inbox-agent-routes.ts). */

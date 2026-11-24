@@ -23,6 +23,7 @@ import { sameInboxSend, type InboxSendCall } from "@plannotator/shared/inbox/sen
 import type { OutboxEntry } from "./inbox-outbox";
 import type { PeerLink } from "./inbox-peer-link";
 import { FAR_AGENT_REPLY_ROUTE, TAG_ACROSS_MARK } from "./inbox-far-tags";
+import { farSendStoredKey } from "./inbox-send-receipt";
 import { farReplyRefusal } from "./inbox-mcp-far-read";
 
 /** How long send_message waits for the other computer's answer while it is online. */
@@ -169,7 +170,7 @@ export async function farAgentReply(
     for (const [i, attachment] of read.entries()) uploads.push(await deps.upload(place.machine, files[i]!.name ?? attachment.name, deps.blobOf(attachment)));
   }
   const { agent_session: _session, agent_name: _name, agent_host: _host, project_path: _path, ...rest } = input;
-  const args: Record<string, unknown> = { ...rest, body: pictures.body, reply_to: replyTo, idempotency_key: `far:${scoped(session, key)}`, ...(uploads.length > 0 ? { attachments: uploads } : {}) };
+  const args: Record<string, unknown> = { ...rest, body: pictures.body, reply_to: replyTo, idempotency_key: farSendStoredKey(session, key), ...(uploads.length > 0 ? { attachments: uploads } : {}) };
   if (args.branch !== undefined) args.branch = branchHere(args.branch, here);
   const held = deps.holdWrite(
     place.machine,

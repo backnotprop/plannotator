@@ -32,6 +32,7 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
+import { decodeInboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { InboxLinks } from "./inbox-links";
 import { heldWords } from "../inbox/api";
@@ -254,6 +255,47 @@ describe("linked machines, on three real Inboxes", () => {
     expect(own.code).toBe(1);
     expect(own.err).toContain("own link code");
   }, 60_000);
+
+  test("paired send receipt lookup works in both directions without a new write", async () => {
+    for (const [from, to] of [[A, B], [B, A]] as const) {
+      await waitFor("receipt destination is online", async () => (await stateOf(from, to)) === "online");
+      const response = await windowPost(from, "/api/inbox/cloud-agents", { preset: "grok-bot", name: `Receipt fixture ${from.name}` });
+      expect(response.status).toBe(200);
+      const { pairing } = await response.json() as { pairing: string };
+      const token = decodeInboxAgentPairing(pairing)?.token;
+      expect(token).toBeDefined();
+      const call = async (tool: string, args: Json) => {
+        const result = await fetch(`${base(from)}/api/inbox/agent/call`, {
+          method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ tool, arguments: args }),
+        });
+        expect(result.status).toBe(200);
+        const wire = (await result.json() as Json).result;
+        expect(wire.isError ?? false).toBe(false);
+        return wire.structuredContent;
+      };
+      const owner = await agentOn(to);
+      try {
+        const thread = await owner.send("A thread for the receipt test.");
+        const sent = await call("send_message", {
+          reply_to: thread.message_id, idempotency_key: "fixture-attempt",
+          body: ":::question-text\nWhich draft?\n:::",
+        });
+        expect(sent.message_id).toBeDefined();
+        expect(sent.machine.id).toBe(to.id);
+        const ask = { source: to.id, project_id: sent.project.id, idempotency_key: "fixture-attempt" };
+        const store = () => InboxStore.open(to.w.dataDir);
+        const cursor = store().cursor();
+        const expected = { ...ask, status: "found", thread_id: thread.thread_id, message_id: sent.message_id, questions: [{ key: sent.questions[0].key }] };
+        const { idempotency_key: _key, ...receipt } = expected;
+        expect(await call("lookup_send_receipt", ask)).toEqual(receipt);
+        expect(await call("lookup_send_receipt", ask)).toEqual(receipt);
+        expect(await call("lookup_send_receipt", { ...ask, idempotency_key: "unused" })).toEqual({ status: "not_found", source: to.id });
+        expect(await call("lookup_send_receipt", { ...ask, source: C.id })).toEqual({ status: "unavailable", source: C.id });
+        expect(store().cursor()).toBe(cursor);
+      } finally { await owner.client.close(); }
+    }
+  }, 30_000);
 
   test("2. an agent on B asks; the person answers from A; B's agent reads the answer", async () => {
     const agent = await agentOn(B);

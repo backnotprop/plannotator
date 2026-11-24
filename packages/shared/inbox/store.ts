@@ -5404,6 +5404,20 @@ export class InboxStore {
     return null;
   }
 
+  /** Exact receipt on the owning Inbox. The caller must supply its resolved project and verified sender. */
+  agentSendReceipt(projectId: string, key: string, sender: { session: string; host: string | null; machine: string | null }) {
+    if (!sender.session.trim()) return null;
+    const message = this.agentMessageByKey(projectId, key);
+    if (!message || message.author.kind !== "agent" || message.author.session !== sender.session
+      || (message.author.host ?? null) !== sender.host || (message.author.machine ?? null) !== sender.machine) return null;
+    return {
+      project_id: message.project_id,
+      thread_id: message.thread_id,
+      message_id: message.id,
+      questions: this.questionsOf(message.id).filter((question) => question.kind !== "action").map(({ key }) => ({ key })),
+    };
+  }
+
   /** The person's reply to this message written under this idempotency key, for a replayed Send. */
   replyByKey(messageId: string, key: string): InboxMessage | null {
     if (!this.messages.has(messageId) || !key) return null;

@@ -584,6 +584,31 @@ describe("InboxStore invariants", () => {
     );
   });
 
+  test("recovers exact send IDs after reopening without writing or crossing sender or project", () => {
+    const dir = dataDir();
+    const store = InboxStore.open(dir);
+    const project = store.ensureProject({ name: "repo", root: "/work/repo" });
+    const other = store.ensureProject({ name: "other", root: "/work/other" });
+    const sender = { session: "ses_x", host: "manager", machine: null };
+    const body = ":::question-text\nWhich draft?\n:::\n\n:::question-text\nWhich title?\n:::";
+    const { message } = store.sendMessage({ project_id: project.id, author: { kind: "agent", name: null, ...sender }, body, idempotency_key: "attempt" });
+    const reopened = InboxStore.open(dir);
+    const cursor = reopened.cursor();
+    const questions = (message.questions ?? []).map(({ key }) => ({ key }));
+    expect(questions).toHaveLength(2);
+    const expected = { project_id: project.id, thread_id: message.thread_id, message_id: message.id, questions };
+    expect(reopened.agentSendReceipt(project.id, "attempt", sender)).toEqual(expected);
+    expect(reopened.agentSendReceipt(project.id, " attempt ", sender)).toEqual(expected);
+    expect(reopened.agentSendReceipt(project.id, "absent", sender)).toBeNull();
+    expect(reopened.agentSendReceipt(other.id, "attempt", sender)).toBeNull();
+    expect(reopened.agentSendReceipt(project.id, "attempt", { ...sender, session: "ses_y" })).toBeNull();
+    expect(reopened.agentSendReceipt(project.id, "attempt", { ...sender, session: "" })).toBeNull();
+    expect(reopened.agentSendReceipt(project.id, "attempt", { ...sender, host: "elsewhere" })).toBeNull();
+    expect(reopened.agentSendReceipt(project.id, "attempt", { ...sender, machine: "another-machine" })).toBeNull();
+    expect(reopened.cursor()).toBe(cursor);
+    expect(reopened.thread(message.thread_id)!.messages).toHaveLength(1);
+  });
+
   test("idempotency keys: replaying a send or a Send writes nothing", () => {
     fc.assert(
       fc.property(bodyArb, fc.integer({ min: 2, max: 5 }), (body, times) => {

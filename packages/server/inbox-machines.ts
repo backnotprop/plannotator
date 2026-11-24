@@ -58,6 +58,7 @@ import { inboxCapabilitySwitchesOf, type InboxCapabilitySwitches } from "@planno
 import { createFarCapabilities } from "./inbox-capabilities-machines";
 import { CAPABILITY_NOTE_FIELD, CAPABILITY_NOTE_MARK } from "./inbox-capability-note";
 import type { SharedReactions } from "./inbox-reactions-shared";
+import { SEND_RECEIPT_ROUTE, sendReceiptAnswer, type SendReceiptAnswer, type SendReceiptInput, type SendReceiptSender } from "./inbox-send-receipt";
 import { FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE } from "./inbox-far-tags";
 
 /** A far tag's door routes (inbox-far-tags.ts): this Inbox sends them itself; the forward never does. */
@@ -1459,6 +1460,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
 
   return {
     selfId: links.selfId,
+    keepSelfId: () => links.keepSelf(),
     /** Whether any link exists (the tailnet door then publishes at start even with Phones off). */
     hasLinks: () => links.list().length > 0,
     /** A linked machine's name, or null when it is not linked. */
@@ -1529,6 +1531,27 @@ export function createInboxMachines(context: InboxMachinesContext) {
     cancelHeld: (key: string): OutboxEntry | null => outbox.cancel(key),
     /** A linked machine's rows as its list last said, or null while this Inbox holds no list of it. */
     listedRows: (machine: string): readonly InboxListRow[] | null => peers.get(machine)?.list?.rows ?? null,
+    /** Look up a committed send on its named destination, without scheduling a write. */
+    readSendReceipt: async (input: SendReceiptInput, sender: SendReceiptSender): Promise<SendReceiptAnswer> => {
+      const unavailable = { status: "unavailable", source: input.source } as const;
+      const peer = peers.get(input.source);
+      if (!peer || peer.state !== "online") return unavailable;
+      try {
+        const response = await peer.request(SEND_RECEIPT_ROUTE, `?${new URLSearchParams({ ...input, ...sender })}`, {
+          method: "GET", headers: {}, signal: AbortSignal.timeout(5000), timeoutMs: 5000,
+        });
+        if (!response.ok) {
+          void response.body?.cancel().catch(() => {});
+          return unavailable;
+        }
+        const raw = await readCapped(response, 64 * 1024);
+        const answer = sendReceiptAnswer.safeParse(raw === null ? null : JSON.parse(raw));
+        if (!answer.success || answer.data.source !== input.source || (answer.data.status === "found" && answer.data.project_id !== input.project_id)) return unavailable;
+        return answer.data;
+      } catch {
+        return unavailable;
+      }
+    },
     readThread: agentRead.readThread,
     /** A linked machine's file of a thread its agents read, streamed (a Combine copies the other computer's files in). */
     fetchFile: agentRead.fetchFile,
