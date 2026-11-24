@@ -35,6 +35,8 @@ export interface CommentAskAIContext {
   /** Agent-facing identity of the selected element(s), for a pinpoint on a
    *  raw-HTML or live-app surface. Rides with the question; not displayed. */
   detail?: string;
+  /** Bounded human-readable identity for a diagram question posted to its thread. */
+  diagramScope?: string;
   /** 1-based source lines of a markdown text selection (see
    *  `AIQuestion.scope.lineStart`). Rides with the question; not displayed. */
   lineStart?: number;

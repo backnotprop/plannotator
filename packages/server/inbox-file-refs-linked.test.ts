@@ -7,6 +7,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { diagramReplyTarget, diagramThreadReply } from "../inbox/ask/diagramThreadReply";
 import { diagramFileAsk } from "../inbox/ask/sideSource";
 import type { AttachmentView } from "../inbox/api";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -106,7 +107,7 @@ describe("a file a message names, on a linked machine's thread, two real Inboxes
       [B, A],
     ] as const;
 
-  test("a diagram is read and annotated on its owning machine in both directions", async () => {
+  test("a diagram is read, annotated and questioned on its owning machine in both directions", async () => {
     for (const [here, there] of both()) {
       const source = JSON.stringify({ title: `Delivery on ${there.name}`, columns: [{ id: "queue", title: "Queue" }] });
       writeFileSync(join(there.w.project, "delivery.diagram.json"), source);
@@ -122,6 +123,15 @@ describe("a file a message names, on a linked machine's thread, two real Inboxes
         const attachment = listing.attachments[0];
         expect(attachment.kind).toBe("plannotator-diagram");
         const remote = `/api/inbox/m/${there.id}`;
+        const draft = "Ordinary reply still in progress";
+        expect((await windowPost(there, `/api/inbox/threads/${thread}/draft`, { body: draft, base: null })).status).toBe(200);
+        const send = diagramThreadReply(async (id, input) => {
+          const read = await (await windowGet(here, `${remote}/threads/${thread}`)).json();
+          const response = await windowPost(here, `${remote}/messages/${id}/reply`, { ...input, seen_through_seq: read.cursor });
+          const result = await response.json();
+          expect(response.status, JSON.stringify(result)).toBe(200);
+          return result;
+        }, held => expect(held).toBe(false));
         const revised = JSON.stringify({ title: `Revised on ${there.name}`, columns: [{ id: "queue", title: "Checkout queue" }] });
         writeFileSync(join(there.w.project, "delivery.diagram.json"), revised);
         for (const [version, content] of [["sent", source], ["current", revised]] as const) {
@@ -133,7 +143,40 @@ describe("a file a message names, on a linked machine's thread, two real Inboxes
           diagramFileAsk(view, (_question, source) => { context = source ?? ""; })!("Where are retries handled?", { kind: "selection", detail: "panel queue" });
           expect(context).toContain(`SHA-256: ${sha}`);
           expect(context).toContain(`Attachment: ${attachment.id}`);
+          const ask = diagramFileAsk(view, undefined, send)!;
+          expect(ask.destination).toBe("thread");
+          expect(await ask(`Where are retries handled in ${version}?`, { kind: "selection", diagramScope: "Asset: delivery\npanel: Queue (queue)", detail: "full diagram text" })).toBe(true);
+          const ownerRead = await client.callTool({ name: "read_thread", arguments: { thread_id: thread, format: "full" } });
+          const reply = (ownerRead.structuredContent as Json).thread.messages.at(-1);
+          expect(reply.author.kind).toBe("person");
+          expect(reply.body).toContain(`Where are retries handled in ${version}?`);
+          expect(reply.body).toContain("panel: Queue (queue)");
+          expect(reply.body).toContain(`SHA-256: ${sha}`);
+          expect(reply.body).toContain(`Attachment: ${attachment.id}`);
+          expect(reply.body).not.toContain("full diagram text");
+          expect((await getJson(there, `/api/inbox/threads/${thread}/draft`)).draft.body).toBe(draft);
         }
+        // A person can attach a diagram to their own reply. Questions still reach the thread's agent.
+        const { serverSession } = await getJson(there, "/api/inbox/health");
+        const upload = await fetch(`${base(there)}/api/inbox/uploads?name=mine.diagram.json&serverSession=${serverSession}`, { method: "POST", body: source });
+        expect(upload.status).toBe(200);
+        const { upload: file } = await upload.json();
+        const attached = await windowPost(there, `/api/inbox/messages/${attachment.message_id}/reply`, { idempotency_key: crypto.randomUUID(), words: "My diagram", uploads: [file.upload_id] });
+        expect(attached.status).toBe(200);
+        const personFile = (await getJson(there, `/api/inbox/threads/${thread}/attachments`)).attachments.find((item: Json) => item.name === "mine.diagram.json");
+        const personView = await (await windowGet(here, `${remote}/attachments/${personFile.id}/view?version=sent`)).json() as AttachmentView;
+        const personThread = await (await windowGet(here, `${remote}/threads/${thread}`)).json();
+        const target = diagramReplyTarget(personThread.thread, personFile.message_id);
+        expect(target).toBe(attachment.message_id);
+        expect(personFile.message_id).not.toBe(target);
+        await diagramFileAsk(personView, undefined, (_id, question, source) => send(target!, question, source))!(
+          "Do you see my diagram?", { kind: "selection", diagramScope: "panel: Queue (queue)" });
+        const readMine = await client.callTool({ name: "read_thread", arguments: { thread_id: thread, format: "full" } });
+        const question = (readMine.structuredContent as Json).thread.messages.at(-1);
+        expect(question.body).toContain("Do you see my diagram?");
+        expect(question.body).toContain(`Message: ${personFile.message_id}`);
+        expect(question.body).toContain(`Attachment: ${personFile.id}`);
+        expect(question.body).toContain(`SHA-256: ${personFile.sent_sha256}`);
         const anchor = { v: 1, family: "plannotator-diagram", kind: "node", id: "queue", label: "Queue", sourceLine: null, point: { kind: "panel", x: 0.34, y: 0.7 } };
         const save = await windowPost(here, `${remote}/annotations`, { idempotency_key: crypto.randomUUID(), attachment_id: attachment.id, version: attachment.sent_sha256,
           annotation: { id: crypto.randomUUID(), type: "COMMENT", text: "Show the retry path", originalText: "Queue", blockId: "block-0", startOffset: 0, endOffset: 0, createdA: Date.now(), diagramAnchor: anchor },

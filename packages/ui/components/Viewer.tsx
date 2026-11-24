@@ -2124,7 +2124,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   onEditAnnotation={selectionCommentsOn ? onEditAnnotation : undefined}
                   onRestoreReport={onRestoreReport} onOpenFile={onOpenDiagramFile}
                   onHostDraft={hostComposes ? onHostDraft : undefined}
-                  onAskAI={selectionCommentsOn ? (onAskDiagramAI ?? onAskAI) : undefined} sourcePath={linkedDocInfo?.filepath ?? sourceInfo} />
+                  onAskAI={onAskDiagramAI ?? (selectionCommentsOn ? onAskAI : undefined)} sourcePath={linkedDocInfo?.filepath ?? sourceInfo} />
               </Suspense>
             </LazyBlockBoundary>
           ) : group.block.type === 'code' && isMermaidLanguage(group.block.language) ? (

@@ -111,6 +111,27 @@ describe.if(typeof document !== 'undefined')('native diagram review', () => {
     expect(host.querySelector('[role=dialog]')?.getAttribute('aria-label')).toBe('Request');
   });
 
+  test('the thread destination is explicit and a rejected or failed delivery preserves the question', async () => {
+    const asks: NativeDiagramAskContext[] = [];
+    await show({ askDestination: 'thread', onAskAI: async ctx => {
+      asks.push(ctx);
+      if (asks.length === 1) return false;
+      if (asks.length === 2) throw new Error('offline');
+    } });
+    await click('Ask AI');
+    expect(host.querySelector('[role=dialog]')?.textContent).toContain('Replies appear in this thread.');
+    const question = 'Can the owner confirm this route?';
+    await type(question);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await click('Send question to thread');
+      expect(host.querySelector('[role=alert]')?.textContent).toContain('Try again');
+      expect(host.querySelector('textarea')?.value).toBe(question);
+    }
+    await click('Send question to thread');
+    expect(host.querySelector('textarea')).toBeNull();
+    expect(asks.map(ctx => ctx.question)).toEqual([question, question, question]);
+  });
+
   test('an unavailable provider leaves the authored link usable; an invalid edit reports the existing pin unresolved', async () => {
     const previous = getRefCardTransport();
     const url = 'https://github.com/example/project/pull/42';

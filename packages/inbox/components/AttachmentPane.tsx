@@ -1,8 +1,6 @@
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
-import type { SelectionActionContext } from '@plannotator/ui/utils/selectionActions';
-import { diagramFileAsk, fileSideSource } from '../ask/sideSource';
-import { useSideButton } from '../ask/sideButton';
+import { useFileQuestions } from '../ask/useFileQuestions';
 import {
   formatInboxVideoTime,
   inboxAttachmentKindLabel,
@@ -1438,12 +1436,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     // Once per ask (its seq), and again when the text it waits for is drawn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questionFocus?.seq, questionFocusKey, view, scrollViewport]);
-  // Side: the words, and where they came from (the file, its version, the line and heading; ask/sideSource.ts).
-  const sideButton = useSideButton();
-  const sideFrom = props.onSide
-    ? (text: string, context: SelectionActionContext) =>
-        props.onSide!(text, fileSideSource(attachment, props.version, { selected: text, blockId: context.blockId, blocks: isHtml ? [] : blocks, annotations }))
-    : undefined;
+  const { sideFrom, sideButton, diagramQuestion } = useFileQuestions(attachment, props.version, view, isHtml ? [] : blocks, annotations, props.onSide);
   // A Markdown file with 2 or more headings has Contents (contents.ts). On a desktop, Side by side and Full screen
   // alike: ui's contents rail in the page's right gutter. Where the rail yields (its own rule: a gutter under 68 px,
   // a pane under 480 px), when it is hidden, and on a phone: a Contents button over the file (ContentsPanel.tsx).
@@ -2807,7 +2800,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 imageBaseDir={imageBaseDir}
                 resolveLocalLink={kind === 'markdown' ? resolveFileLink : undefined}
                 onOpenDiagramFile={props.onOpenDiagramFile}
-                onAskDiagramAI={diagramFileAsk(view, props.onSide)}
+                onAskDiagramAI={diagramQuestion}
                 onEditAnnotation={edit}
                 questionDecisionLines={false}
                 {...fileQuestionProps}

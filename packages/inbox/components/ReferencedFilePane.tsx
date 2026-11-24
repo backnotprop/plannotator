@@ -8,6 +8,8 @@
  * (`inboxApi.attachReferencedFile`), saves the comment there, and the attachment opens in its place: from then on it is
  * commented, counted and sent like any attachment. A file the message already carries opens as that attachment.
  */
+import { useDiagramQuestionRoutes } from '../ask/DiagramThreadScope';
+import { diagramAsk } from '../ask/sideSource';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { NativeDiagramFileReference } from '@plannotator/ui/components/diagram/nativeDiagramDrawing';
@@ -253,7 +255,7 @@ export function ReferencedFilePane({
             </div>
           )}
           {found && found.contents !== undefined && (kind === 'markdown' || kind === 'text' || kind === 'plannotator-diagram') && (
-            <RefDocument key={key} text={found.contents} name={name} kind={kind} scope={scope} folder={folder} onOpenLink={openFromDoc} onOpenDiagramFile={ref => onOpen({ messageId: fileRef.messageId, path: ref.path, from: 'root', line: ref.start, lineEnd: ref.end })} onComment={writes ? save : undefined} />
+            <RefDocument key={key} text={found.contents} name={name} origin={found} kind={kind} scope={scope} folder={folder} onOpenLink={openFromDoc} onOpenDiagramFile={ref => onOpen({ messageId: fileRef.messageId, path: ref.path, from: 'root', line: ref.start, lineEnd: ref.end })} onComment={writes ? save : undefined} />
           )}
           {found && found.contents !== undefined && (kind === 'code' || kind === 'mermaid' || kind === 'graphviz') && (
             <div className="ib-codeview" data-code-view="">
@@ -341,6 +343,7 @@ export function ReferencedFilePane({
 /** A referenced document: its pictures and links from its own folder; a selection comments (`onComment`) when it may. */
 function RefDocument({
   text,
+  origin,
   name,
   kind,
   scope,
@@ -352,6 +355,7 @@ function RefDocument({
   text: string;
   name: string;
   kind: 'markdown' | 'text' | 'plannotator-diagram';
+  origin: Extract<ReferencedFileView, { found: true }>;
   scope: ReferencedFileScope;
   folder: string;
   onOpenLink: (href: string) => void;
@@ -360,6 +364,7 @@ function RefDocument({
 }) {
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const viewer = useRef<ViewerHandle>(null);
+  const { side, reply } = useDiagramQuestionRoutes(scope.message);
   const blocks = useMemo(() => attachmentBlocks(kind, text, name), [kind, text, name]);
   const resolveImage = useCallback<ImageResolver>(
     (src) => {
@@ -385,6 +390,11 @@ function RefDocument({
             selectedAnnotationId={null}
             resolveLocalLink={resolveLocalLink}
             onOpenDiagramFile={onOpenDiagramFile}
+            onAskDiagramAI={diagramAsk(scope.message, () => [
+              `Diagram file: ${origin.path}`, `Message: ${scope.message}`,
+              origin.pull ? `Version: ${origin.pull.label} (${origin.pull.url})` : 'Version: referenced checkout',
+              origin.attachment_id && `Attachment: ${origin.attachment_id}`,
+            ].filter(Boolean).join('\n'), side, reply)}
             questionDecisionLines={false}
             stickyActions={false}
             disableCodePathValidation

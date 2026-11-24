@@ -8,6 +8,7 @@ import { annotationOf, inboxViewKind } from '../attachments';
 import { latestDiagramFor, type Artifact } from '../artifacts';
 import { useInboxFileSource } from '../fileSource';
 import type { AttachmentView } from '../api';
+import { useDiagramQuestionRoutes } from '../ask/DiagramThreadScope';
 import { diagramFileAsk } from '../ask/sideSource';
 
 const NativeDiagramBlock = lazy(async () => ({ default: (await import('@plannotator/ui/components/diagram/NativeDiagramBlock')).NativeDiagramBlock }));
@@ -36,6 +37,7 @@ export function InlineDiagrams({ files, artifacts = [], onOpenLatest, ...props }
 
 function InlineDiagram({ attachment, records, readOnly, onOpenFile, onSide, onSaved, openLatest }: InlineDiagramProps & { attachment: InboxAttachmentState; openLatest?: () => void }) {
   const source = useInboxFileSource();
+  const { reply } = useDiagramQuestionRoutes(attachment.message_id);
   const version = 'sent';
   const [view, setView] = useState<AttachmentView | null>(null);
   const [error, setError] = useState('');
@@ -66,7 +68,7 @@ function InlineDiagram({ attachment, records, readOnly, onOpenFile, onSide, onSa
           const prior = annotations.find((a) => a.id === id);
           return prior ? save({ ...prior, ...changes }) : false;
         }}
-        onOpenLatest={openLatest} onOpenFile={onOpenFile} onAskAI={diagramFileAsk(view, onSide)} sourcePath={attachment.path}
+        onOpenLatest={openLatest} onOpenFile={onOpenFile} onAskAI={diagramFileAsk(view, onSide, reply)} sourcePath={attachment.path}
         embedded />
     </Suspense>
     {error && <p role="alert">{error}</p>}

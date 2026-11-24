@@ -37,6 +37,8 @@ export interface NativeDiagramReviewProps {
   onSelectPart?: (anchor: NativeDiagramAnchor | null) => void;
   onResolutionChange?: (resolution: ReadonlyMap<string, boolean>) => void;
   onAskAI?: (context: NativeDiagramAskContext) => SubmitResult;
+  /** Where the host delivers a question and its reply. */
+  askDestination?: 'side' | 'thread';
   onOpenFile?: (ref: NativeDiagramFileReference) => void;
   inline?: boolean;
   className?: string;
@@ -108,7 +110,7 @@ function Loader(props: NativeDiagramReviewProps) {
 }
 
 function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestComment, onCreateComment, onEditComment, onSelectComment, selectedCommentId,
-  selectedPart, onSelectPart, onAskAI, onOpenFile, inline }: NativeDiagramReviewProps & { drawing: Drawing; parts: ReadonlyMap<string, DiagramPart> }) {
+  selectedPart, onSelectPart, onAskAI, askDestination = 'side', onOpenFile, inline }: NativeDiagramReviewProps & { drawing: Drawing; parts: ReadonlyMap<string, DiagramPart> }) {
   const { diagram, svg, title, assetId } = drawing;
   const container = useRef<HTMLDivElement>(null);
   const canvas = useRef<DiagramCanvasHandle | null>(null);
@@ -297,7 +299,8 @@ function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestCommen
         </>}
       </FloatingCard>}
       {asking && onAskAI && <AskDrawer title={title} part={activePart ?? undefined} onClose={endAsk}>
-        <TextEditor ask initial={drafts.current.get(askKey) ?? ''} label="Question about the diagram" onCancel={endAsk}
+        {askDestination === 'thread' && <p className="ndr-ask-hint">Replies appear in this thread.</p>}
+        <TextEditor ask={askDestination} initial={drafts.current.get(askKey) ?? ''} label="Question about the diagram" onCancel={endAsk}
           onChange={value => drafts.current.set(askKey, value)} onDone={() => { drafts.current.delete(askKey); endAsk(); }}
           onSubmit={question => onAskAI({ question, title, assetId, description: diagram.description, part: activePart ?? undefined })} />
       </AskDrawer>}

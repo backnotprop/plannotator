@@ -13,7 +13,7 @@ import { machineOf } from '../inboxUrl';
 import { machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from '../machines';
 import { MAIN_PANE, type PaneId } from '../panes/model';
 import type { PaneOnScreen } from '../panes/onScreen';
-import { PaneScopeContext } from '../panes/scope';
+import { DiagramThreadScope } from '../ask/DiagramThreadScope';
 import { priorityAction } from '../priority';
 import { threadLink } from '../rowMenu';
 import { focusBoardTitle } from '../shape/boardFocus';
@@ -86,11 +86,11 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
     reportScreen();
   });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
-  // The address's board, in this pane while it shows that thread: only one the window draws (none with Shape off, or
-  // while a review draws its own). On a phone it is a screen of its own, as the Artifacts view is: back is the thread.
+  const side = threadId === route.thread && !machineOf(threadId) && !phone ? host.ask.side : undefined;
+  // The address's board belongs to this pane. On a phone, Back from the board returns to its thread.
   const boardNode = route.shape && host.board && thread && thread.thread_id === route.thread ? host.board(true, stack.thread) || null : null;
   return (
-    <PaneScopeContext.Provider value={scope}>
+    <DiagramThreadScope scope={scope} thread={thread} side={side} showToast={host.showToast} afterWrite={host.afterWrite}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
           and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
       {threadId && !ready && ((!phone && !stack.thread) || awayWait) && (
@@ -213,7 +213,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : show())} />;
           })()}
           board={boardNode}
-          onSide={host.ask.side}
+          onSide={side}
           onSideWords={host.ask.sideWords}
           replyWords={host.askReply?.threadId === thread.thread_id ? host.askReply.words : null}
           onReplyWordsTaken={() => host.setAskReply(null)}
@@ -295,6 +295,6 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           }}
         />
       )}
-    </PaneScopeContext.Provider>
+    </DiagramThreadScope>
   );
 }

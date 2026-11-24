@@ -29,7 +29,8 @@ import { PictureRetry } from './PictureRetry';
 import { useBodyLinks } from './useBodyLinks';
 import { useFileRefs } from './useFileRefs';
 import { useQuestionCards } from './useQuestionCards';
-import { messageSideSource } from '../../ask/sideSource';
+import { useDiagramQuestionRoutes } from '../../ask/DiagramThreadScope';
+import { diagramAsk, messageSideSource } from '../../ask/sideSource';
 import { useBodyComments } from './useBodyComments';
 import { useCommentPictures } from '../../commentPictures';
 
@@ -66,6 +67,7 @@ export function MessageBody({
 }: MessageBodyProps) {
   const { skills, pullDetails, actionsSent, replyParts, ownReply, replyFileList, shown, noteBlocks, noteAtLine, notesRef, restShown, feedbackShown, blocks, restBlocks, feedbackBlocks } = useBodyText({ message, sentActions, sentAnswers, replyFiles, projectRoot, contextNotes });
   const refRepo = useRefRepo(repo);
+  const { side: diagramSide, reply: diagramReply } = useDiagramQuestionRoutes(message.id);
   // The body's pictures are drawn whole in a box; a very long one shows its top with "Show all"
   // (images.ts fitMessageImage, inbox.css). A click on a picture still opens it in the viewer.
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -166,9 +168,8 @@ export function MessageBody({
         textDeletions={comments !== undefined && message.author.kind === 'agent'}
         questionTextComments={comments !== undefined}
         suggestComment={comments?.suggest}
-        onAskDiagramAI={comments?.onSide && ((question, context) => comments.onSide!(question, [
-          messageSideSource(message, { selected: context.text ?? '', blockId: '', blocks, annotations: commentList }), context.detail,
-        ].filter(Boolean).join('\n')))}
+        onAskDiagramAI={diagramAsk(message.id, context => messageSideSource(message,
+          { selected: context.text ?? '', blockId: '', blocks, annotations: commentList }), comments?.onSide ?? diagramSide, diagramReply)}
         onOpenDiagramFile={refsOn ? (ref) => openFileRefRef.current?.({ from: 'root', path: ref.path, line: ref.start, lineEnd: ref.end }) : undefined}
         onSide={comments?.onSide ? side : undefined}
         sideButton={sideButton}

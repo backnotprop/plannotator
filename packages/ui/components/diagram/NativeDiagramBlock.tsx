@@ -24,7 +24,7 @@ interface NativeDiagramBlockProps {
   onSelectAnnotation?: (id: string | null) => void;
   onAddAnnotation?: (annotation: Annotation) => void | boolean | Promise<void | boolean>;
   onEditAnnotation?: (id: string, updates: Partial<Annotation>) => void | boolean | Promise<void | boolean>;
-  onAskAI?: CommentAskAIHandler;
+  onAskAI?: CommentAskAIHandler & { destination?: 'thread' };
   onOpenFile?: (ref: NativeDiagramFileReference) => void;
   /** Supplied by an Inbox message when a newer edition has been sent. */
   onOpenLatest?: () => void;
@@ -62,6 +62,10 @@ export function NativeDiagramBlock({
     const answer = await onAskAI(context.question, {
       kind: 'selection', label: context.part ? `Diagram ${context.part.kind}` : 'Diagram',
       text: context.part?.title ?? context.title, sourcePath,
+      diagramScope: [`Diagram: ${context.title.slice(0, 160)}`, context.assetId && `Asset: ${context.assetId.slice(0, 160)}`,
+        context.part && `${context.part.kind}: ${context.part.title.slice(0, 160)} (${context.part.id.slice(0, 160)})`,
+        context.part?.from && context.part.to && `Connection: ${context.part.from.slice(0, 160)} → ${context.part.to.slice(0, 160)}`,
+      ].filter(Boolean).join('\n'),
       detail: [context.title, context.assetId && `Asset: ${context.assetId}`, context.part && JSON.stringify({
         kind: context.part.kind, id: context.part.id, title: context.part.title, from: context.part.from, to: context.part.to,
         refs: context.part.refs.slice(0, 12),
@@ -77,7 +81,7 @@ export function NativeDiagramBlock({
     source: block.content, comments, onCreateComment: create, onRequestComment: request,
     onEditComment: onEditAnnotation && ((id: string, text: string) => onEditAnnotation(id, { text })),
     selectedCommentId: selectedAnnotationId, onSelectComment: onSelectAnnotation,
-    selectedPart: part, onSelectPart: setPart, onAskAI: ask,
+    selectedPart: part, onSelectPart: setPart, onAskAI: ask, askDestination: onAskAI?.destination,
     onOpenFile: onOpenFile && ((ref: NativeDiagramFileReference) => { setExpanded(false); onOpenFile(ref); }),
     onResolutionChange: resolved,
   };

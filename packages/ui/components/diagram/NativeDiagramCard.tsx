@@ -139,7 +139,7 @@ export function CloseButton({ label, onClick }: { label: string; onClick: () => 
 }
 
 export function TextEditor({ initial, label, ask, original, onSubmit, onDone, onCancel, onChange }: {
-  initial: string; label: string; ask?: boolean; original?: string;
+  initial: string; label: string; ask?: 'side' | 'thread'; original?: string;
   onSubmit: (body: string) => SubmitResult; onDone: () => void; onCancel: () => void; onChange?: (body: string) => void;
 }) {
   const [text, setText] = useState(initial);
@@ -169,7 +169,7 @@ export function TextEditor({ initial, label, ask, original, onSubmit, onDone, on
       if (mounted.current) setBusy(false);
     }
   }
-  return <form className="ndr-editor" aria-busy={busy} onSubmit={e => { e.preventDefault(); void submit(); }}>
+  return <form className="ndr-editor" data-ask-destination={ask} aria-busy={busy} onSubmit={e => { e.preventDefault(); void submit(); }}>
     <textarea ref={input} rows={2} aria-label={label} value={text} readOnly={busy}
       placeholder={ask ? 'Ask a question…' : 'Add a comment…'} onChange={e => { setText(e.target.value); onChange?.(e.target.value); }}
       onKeyDown={e => {
@@ -179,8 +179,8 @@ export function TextEditor({ initial, label, ask, original, onSubmit, onDone, on
     {error && <div className="ndr-error" role="alert">{error}</div>}
     <div className="ndr-editor-actions">
       {!ask && <Button size="xs" variant="ghost" onClick={onCancel} type="button">Cancel</Button>}
-      <Button size={ask ? 'icon' : 'xs'} disabled={busy || !text.trim() || (text.trim() === original)} type="submit" aria-label={ask ? 'Send question' : undefined}>
-        {ask ? <ArrowUp /> : original !== undefined ? 'Save' : 'Add comment'}
+      <Button size={ask === 'side' ? 'icon' : 'xs'} disabled={busy || !text.trim() || (text.trim() === original)} type="submit" aria-label={ask === 'side' ? 'Send question' : undefined}>
+        {ask === 'thread' ? 'Send question to thread' : ask === 'side' ? <ArrowUp /> : original !== undefined ? 'Save' : 'Add comment'}
       </Button>
     </div>
   </form>;

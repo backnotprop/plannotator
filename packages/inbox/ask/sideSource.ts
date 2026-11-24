@@ -10,7 +10,8 @@
  */
 import { inboxAgentName } from '@plannotator/core/inbox-types';
 import type { AttachmentView } from '../api';
-import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
+import type { DiagramThreadReply } from './diagramThreadReply';
+import type { CommentAskAIContext, CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import type { Annotation, Block } from '@plannotator/ui/types';
 
 /** A time as the person reads it in the thread: "Nov 8, 11:55 AM". */
@@ -78,13 +79,24 @@ export function fileSideSource(
   return `[Quoted from ${file.name} (${file.named_path ?? file.path}, attached to this thread; ${which})${line}${under}.${commentsOn(where.annotations, where.selected).join('')}]`;
 }
 
+type Side = (words: string, source?: string) => void;
+type DiagramAsk = CommentAskAIHandler & { destination?: 'thread' };
+
+/** Keep a private Side private. When that host is absent the drawer labels its explicit thread send. */
+export function diagramAsk(messageId: string, provenance: (context: CommentAskAIContext) => string, onSide?: Side, reply?: DiagramThreadReply): DiagramAsk | undefined {
+  if (onSide) return (question, context) => onSide(question, [provenance(context), context.detail].filter(Boolean).join('\n'));
+  if (!reply) return undefined;
+  const send: CommentAskAIHandler = (question, context) => reply(messageId, question,
+    [provenance(context), context.diagramScope].filter(Boolean).join('\n'));
+  return Object.assign(send, { destination: 'thread' as const });
+}
+
 /** The exact attachment bytes under review accompany a question, including on a linked machine. */
-export function diagramFileAsk(view: AttachmentView, onSide?: (words: string, source?: string) => void): CommentAskAIHandler | undefined {
-  if (!onSide) return undefined;
+export function diagramFileAsk(view: AttachmentView, onSide?: Side, reply?: DiagramThreadReply): DiagramAsk | undefined {
   const file = view.attachment;
   const sha = view.version === 'current' ? file.current?.sha256 : view.version;
-  return (question, context) => onSide(question, [
+  return diagramAsk(file.message_id, () => [
     `Diagram file: ${file.path}`, `Attachment: ${file.id}`, `Message: ${file.message_id}`,
-    `Version: ${view.version}`, sha && `SHA-256: ${sha}`, context.detail,
-  ].filter(Boolean).join('\n'));
+    `Version: ${view.version}`, sha && `SHA-256: ${sha}`,
+  ].filter(Boolean).join('\n'), onSide, reply);
 }
