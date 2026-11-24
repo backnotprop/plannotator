@@ -11,8 +11,16 @@
  * list." and the comment was gone. Then the person reloads: the page reopens on the merged PR (no stack holds it), its
  * diff and its kept comment there, the header still saying merged.
  *
+ * A teammate's PR, which leaves every list of the person's once merged: a PR merged while the search still lists it
+ * open says merged from the diff's own read of it; the open page of one merged elsewhere stays, asks the server for it
+ * (`GET /api/inbox/pulls/pull`, read from the forge by number) and says merged; a reload with only a kept draft
+ * comment reopens it with the draft and the reader still taking comments. Then GitHub stops answering: a reload, and
+ * a restart of the Inbox while still offline, reopen the page with one line saying GitHub didn't answer; back online,
+ * the next focus asks again and the line goes.
+ *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/review-stays-open (CI keeps .local/proof/ as "inbox-window-proof-N"):
- * 1440 light and dark, a phone at 390, and the page after the reload, light and dark.
+ * 1440 light and dark, a phone at 390, and the page after the reload, light and dark; then teammate-merged,
+ * draft-only-reloaded, forge-unreachable and forge-unreachable-restarted, 1440 light.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-review-stays-open.spec.ts`.
@@ -24,7 +32,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 import { clearSidebarPeek } from './sidebar-peek';
 
 const repo = resolve(__dirname, '../..');
@@ -39,16 +47,25 @@ const PATCH = `diff --git a/${FILE} b/${FILE}\n--- a/${FILE}\n+++ b/${FILE}\n@@ 
 /** The window reads the list again on focus once 20 s have passed since its last read (usePulls `PULLS_FOCUS_MS`). */
 const FOCUS_READ_MS = 21_000;
 
-const pr = (state: 'OPEN' | 'MERGED') => ({
-  number: 412,
-  title: 'Retry failed charges on a new schedule',
-  url: `https://github.com/${REPO}/pull/412`,
+type Who = { number: number; title: string; author: string; head: string };
+/** The person's own PR. */
+const MINE: Who = { number: 412, title: 'Retry failed charges on a new schedule', author: 'ada', head: 'ada/retry-schedule' };
+/** Teammates' PRs the person was asked to review: once merged, no search of theirs lists them any more. */
+const THEIRS: Who = { number: 880, title: 'Show invoice totals in the customer’s currency', author: 'tomas', head: 'tomas/invoice-currency' };
+/** Merged on the forge while GitHub's search still lists it open (the search lags a merge). */
+const LAGGING: Who = { number: 881, title: 'Round refunds to the cent', author: 'jun', head: 'jun/refund-rounding' };
+const keyOf = (who: Who) => `github.com/${REPO}#${who.number}`;
+
+const pr = (state: 'OPEN' | 'MERGED', who: Who = MINE) => ({
+  number: who.number,
+  title: who.title,
+  url: `https://github.com/${REPO}/pull/${who.number}`,
   state,
   isDraft: false,
   updatedAt: new Date(Date.now() - 600_000).toISOString(),
   mergedAt: state === 'MERGED' ? new Date().toISOString() : null,
   baseRefName: 'main',
-  headRefName: 'ada/retry-schedule',
+  headRefName: who.head,
   headRefOid: HEAD,
   additions: 2,
   deletions: 1,
@@ -56,27 +73,68 @@ const pr = (state: 'OPEN' | 'MERGED') => ({
   reviewDecision: 'REVIEW_REQUIRED',
   repository: { nameWithOwner: REPO },
   headRepository: { nameWithOwner: REPO },
-  author: { login: 'ada', avatarUrl: 'http://127.0.0.1:9/ada.png' },
+  author: { login: who.author, avatarUrl: `http://127.0.0.1:9/${who.author}.png` },
   reviewRequests: { nodes: [] },
   latestReviews: { nodes: [] },
   commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
 });
 
 let forge = '';
-/** What the person's searches answer: their PR open (authored), or merged (the merged search's). */
+let mineState: 'OPEN' | 'MERGED' = 'OPEN';
+/** The teammates' PRs the person's "review requested" search answers (open ones). */
+let requested: Who[] = [];
+function writeLists(): void {
+  const authored = mineState === 'OPEN' ? [pr('OPEN')] : [];
+  const merged = mineState === 'MERGED' ? [pr('MERGED')] : [];
+  writeFileSync(join(forge, 'pulls.json'), JSON.stringify({ data: { viewer: { login: 'ada' }, requested: { nodes: requested.map((who) => pr('OPEN', who)) }, authored: { nodes: authored }, merged: { nodes: merged } } }));
+}
+/**
+ * One PR as the forge's REST API has it now: what a read of the PR itself takes (readForgePull's jq) and what the
+ * diff's head read takes (its sha, body and state). The fake prints it whatever jq it is asked.
+ */
+function forgeHas(who: Who, state: 'open' | 'merged'): void {
+  const at = new Date().toISOString();
+  const rest = {
+    sha: HEAD,
+    body: null,
+    state: state === 'open' ? 'open' : 'closed',
+    merged: state === 'merged',
+    merged_at: state === 'merged' ? at : null,
+    draft: false,
+    number: who.number,
+    html_url: `https://github.com/${REPO}/pull/${who.number}`,
+    title: who.title,
+    user: { login: who.author },
+    base: { ref: 'main' },
+    head: { ref: who.head, sha: HEAD, repo: { full_name: REPO } },
+    additions: 2,
+    deletions: 1,
+    changed_files: 1,
+    updated_at: at,
+    requested_reviewers: who === MINE ? [] : ['ada'],
+  };
+  writeFileSync(join(forge, `pr-${who.number}.json`), JSON.stringify(rest));
+}
+/** What the person's searches answer: their PR open (authored), or merged (the merged search's); the forge agrees. */
 function listAs(state: 'OPEN' | 'MERGED'): void {
-  const authored = state === 'OPEN' ? [pr('OPEN')] : [];
-  const merged = state === 'MERGED' ? [pr('MERGED')] : [];
-  writeFileSync(join(forge, 'pulls.json'), JSON.stringify({ data: { viewer: { login: 'ada' }, requested: { nodes: [] }, authored: { nodes: authored }, merged: { nodes: merged } } }));
+  mineState = state;
+  writeLists();
+  forgeHas(MINE, state === 'OPEN' ? 'open' : 'merged');
+}
+/** The forge stops answering (offline, down): every gh call fails as gh does with no network, its sign-in check too. */
+function forgeDown(down: boolean): void {
+  writeFileSync(join(forge, 'down'), down ? '1' : '0');
 }
 
 function writeForge(): void {
   mkdirSync(forge, { recursive: true });
+  forgeDown(false);
   listAs('OPEN');
   writeFileSync(join(forge, 'pull.patch'), PATCH);
   const gh = [
     '#!/bin/sh',
     `dir='${forge}'`,
+    'if [ "$(cat "$dir/down")" = 1 ]; then echo "error connecting to api.github.com" >&2; echo "check your internet connection or https://githubstatus.com" >&2; exit 1; fi',
     'if [ "$1" = auth ] && [ "$2" = status ]; then',
     '  echo \'{"hosts":{"github.com":[{"login":"ada","active":true,"state":"success","tokenSource":"keyring"}]}}\'',
     '  exit 0',
@@ -87,7 +145,8 @@ function writeForge(): void {
     '  echo \'{"data":null}\'; exit 1',
     'fi',
     'case "$*" in *"/contents/"*) echo "gh: Not Found (HTTP 404)" >&2; exit 1;; esac',
-    `if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then case "$6" in *tojson*) echo '{"sha":"${HEAD}","body":null}';; *) echo ${HEAD};; esac; exit 0; fi`,
+    // `repos/<owner>/<repo>/pulls/<n>` with a jq: the PR as the forge has it now (its last part names it).
+    `if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then case "$6" in *tojson*) cat "$dir/pr-\${4##*/}.json";; *) echo ${HEAD};; esac; exit 0; fi`,
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then cat "$dir/pull.patch"; exit 0; fi',
     'exit 1',
     '',
@@ -102,6 +161,17 @@ let url = '';
 let agent: SimAgent;
 let context: BrowserContext;
 let page: Page;
+let env: Record<string, string> = {};
+let dataDir = '';
+
+function startInbox(): string {
+  const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
+  expect(started.status, started.stderr).toBe(0);
+  rememberInboxOf(dataDir);
+  const at = started.stdout.trim();
+  expect(new URL(at).port).not.toBe('59812');
+  return at;
+}
 
 test.describe.configure({ mode: 'serial' });
 test.use({ actionTimeout: 20_000 });
@@ -111,7 +181,7 @@ test.beforeAll(async ({ browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-review-stays-open-e2e-');
   const home = join(root, 'home');
-  const dataDir = join(root, 'data');
+  dataDir = join(root, 'data');
   mkdirSync(home, { recursive: true });
   markTourDecided(dataDir);
   forge = join(root, 'forge');
@@ -119,7 +189,7 @@ test.beforeAll(async ({ browser }) => {
   const project = scratchProject(join(root, 'src'), 'billing-svc');
   spawnSync('git', ['remote', 'add', 'origin', `https://github.com/${REPO}.git`], { cwd: project, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
-  const env: Record<string, string> = {
+  env = {
     PATH: `${forge}:${process.env.PATH ?? ''}`,
     HOME: home,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
@@ -134,12 +204,8 @@ test.beforeAll(async ({ browser }) => {
     CODEX_HOME: join(root, 'codex'),
     XDG_CONFIG_HOME: join(root, 'xdg'),
   };
-  const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
-  expect(started.status, started.stderr).toBe(0);
-  rememberInboxOf(dataDir);
-  url = started.stdout.trim();
-  expect(new URL(url).port).not.toBe('59812');
-  context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' });
+  url = startInbox();
+  context =await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' });
   page = await context.newPage();
   const on = await page.request.post(`${url}api/inbox/settings`, { data: { code_review: { on: true } } });
   expect(on.status()).toBe(200);
@@ -224,4 +290,121 @@ test('a merged PR’s diff stays open with the comment being written, and its he
   await shot('reloaded', 1440, 900, 'light');
   await shot('reloaded', 1440, 900, 'dark');
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+});
+
+const review = () => page.locator('[data-pull-review]');
+const markOf = () => review().locator('[data-pull-review-title] .ib-refmark');
+const fileShell = () => review().locator(`[data-guide-file-shell="${FILE}"]`);
+const gone = () => page.getByText('This pull request is no longer in the list.');
+const unread = () => review().locator('[data-pull-review-unread]');
+
+async function openPull(who: Who): Promise<void> {
+  const key = encodeURIComponent(keyOf(who));
+  await page.goto(`${url}#pulls&stack=${key}&layer=${key}&scope=layer`);
+  await clearSidebarPeek(page);
+}
+
+/** The server reads the forge again now (as the Reviews page's own refresh would): the PRs it lists, by key. */
+async function serverLists(): Promise<Map<string, string>> {
+  const served = (await (await page.request.get(`${url}api/inbox/pulls?refresh=1`)).json()) as { pulls: { key: string; state: string }[] };
+  return new Map(served.pulls.map((p) => [p.key, p.state]));
+}
+
+/** Focus the window until `check` holds (a focus reads again at most every 20 s, a background read may have just run). */
+async function focusUntil<T>(check: () => Promise<T>, want: T): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+        return check();
+      },
+      { timeout: 90_000, intervals: [5_000] },
+    )
+    .toBe(want);
+}
+
+test('a teammate’s PR: merged as the diff reads it, then gone from every list, its page and its draft comment stay through a reload', async () => {
+  // Two teammates' PRs asked of the person. #881 is merged already, but GitHub's search still lists it open.
+  requested = [THEIRS, LAGGING];
+  writeLists();
+  forgeHas(THEIRS, 'open');
+  forgeHas(LAGGING, 'merged');
+  const listed = await serverLists();
+  expect(listed.get(keyOf(LAGGING))).toBe('open');
+  expect(listed.get(keyOf(THEIRS))).toBe('open');
+
+  // #881's page: the list says open, the diff's own read of the PR says merged, and the header says so.
+  await openPull(LAGGING);
+  await expect(fileShell()).toBeVisible({ timeout: 30_000 });
+  await expect(markOf()).toHaveAttribute('data-ref-state', 'merged');
+
+  // #880's page, open: a comment on a changed line, kept with the review (not posted).
+  await openPull(THEIRS);
+  await expect(fileShell()).toBeVisible({ timeout: 30_000 });
+  await expect(markOf()).toHaveAttribute('data-ref-state', 'open');
+  await fileShell().locator('[data-line-type="change-addition"][data-column-number]').first().click({ position: { x: 4, y: 4 } });
+  const composer = page.getByPlaceholder('Leave feedback...');
+  await expect(composer).toBeFocused();
+  await composer.fill('Which rate does this take for a refund issued later?');
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+  await expect(review().locator('.ib-vcomments')).toContainText('1');
+  const rail = await review().locator('.ib-rrail').innerText();
+
+  // Its author merges it: no search of the person's lists it any more. The page asks the server for it
+  // (GET /api/inbox/pulls/pull), which reads it from the forge by number, merged.
+  const asked = page.waitForResponse((r) => r.url().includes('/api/inbox/pulls/pull?') && r.url().includes(String(THEIRS.number)), { timeout: 150_000 });
+  requested = [LAGGING];
+  writeLists();
+  forgeHas(THEIRS, 'merged');
+  await page.waitForTimeout(FOCUS_READ_MS);
+  expect((await serverLists()).has(keyOf(THEIRS))).toBe(false);
+  await focusUntil(() => markOf().getAttribute('data-ref-state'), 'merged');
+  const answer = (await (await asked).json()) as { pull: { state: string } | null; unreadable?: boolean };
+  expect(answer.pull?.state).toBe('merged');
+  expect(answer.unreadable).toBeUndefined();
+  await expect(gone()).toHaveCount(0);
+  await expect(fileShell()).toBeVisible();
+  expect(await review().locator('.ib-rrail').innerText()).toBe(rail);
+  await expect(review().locator('.ib-vcomments')).toContainText('1');
+  await shot('teammate-merged', 1440, 900, 'light');
+
+  // A reload: no list names it, and its only comment is the kept draft. The page reopens on it, merged, the draft
+  // there and the reader still taking comments (a line's number opens a composer), only Post gone.
+  await page.reload();
+  await expect(fileShell()).toBeVisible({ timeout: 30_000 });
+  await expect(markOf()).toHaveAttribute('data-ref-state', 'merged');
+  await expect(gone()).toHaveCount(0);
+  await expect(review().locator('.ib-vcomments')).toContainText('1');
+  await shot('draft-only-reloaded', 1440, 900, 'light');
+  await fileShell().locator('[data-line-type="change-addition"][data-column-number]').first().click({ position: { x: 4, y: 4 } });
+  await expect(page.getByPlaceholder('Leave feedback...')).toBeVisible();
+  await page.keyboard.press('Escape');
+});
+
+test('GitHub not answering: the page stays as last read with one line, through a reload and a restart while offline', async () => {
+  // Offline: every gh call fails. Past the server's 20 s hold of its last read of the PR, a reload asks again.
+  forgeDown(true);
+  await page.waitForTimeout(FOCUS_READ_MS);
+  await page.reload();
+  await expect(review().locator('[data-pull-review-title]')).toBeVisible({ timeout: 30_000 });
+  await expect(unread()).toHaveCount(1, { timeout: 30_000 });
+  await expect(unread()).toContainText('GitHub');
+  await expect(gone()).toHaveCount(0);
+  await expect(fileShell()).toBeVisible();
+  await shot('forge-unreachable', 1440, 900, 'light');
+
+  // The Inbox restarts while still offline (its first sign-in check fails, with no good one on record): the PRs it
+  // kept since they left the list are still there, so the page reopens on #880 with the same line.
+  await stopScratchInbox(dataDir);
+  url = startInbox();
+  await openPull(THEIRS);
+  await expect(review().locator('[data-pull-review-title]')).toBeVisible({ timeout: 30_000 });
+  await expect(unread()).toHaveCount(1, { timeout: 30_000 });
+  await expect(gone()).toHaveCount(0);
+  await shot('forge-unreachable-restarted', 1440, 900, 'light');
+
+  // Back online: the next focus asks again, and the line goes.
+  forgeDown(false);
+  await focusUntil(() => unread().count(), 0);
+  await expect(markOf()).toHaveAttribute('data-ref-state', 'merged');
 });
