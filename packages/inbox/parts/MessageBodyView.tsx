@@ -49,6 +49,8 @@ export function drawMessageBody(d: MessageBodyData) {
   const isAgent = message.author.kind === 'agent';
   const questions = message.questions ?? [];
   const at = (key: string) => questions.findIndex((q) => q.key === key);
+  // A skill emoji's reply is drawn as its head line alone ("You 😵‍💫 /bro"): its words and skills block are not shown.
+  if (message.skill_reaction) return null;
   return (
     <>
       {message.review_anchor && <ReviewAnchorLine anchor={message.review_anchor} resolved={!!message.review_resolved} />}

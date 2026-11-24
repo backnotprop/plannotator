@@ -3,8 +3,7 @@
  *  - a single open PR opening the stack page, or a stack of several opening the launchpad;
  *  - an action missing from the one row of buttons, or going anywhere but its own place: the PR's diff (this layer, the
  *    one primary), Guided review and Picture it (the New review box filled in with this PR while no live thread is
- *    about it; one reply in the live thread otherwise), Start a thread (only while no thread is about the PR), the
- *    Shape board (only while Shape is on and the thread has one);
+ *    about it; one reply in the live thread otherwise), Start a thread (only while no thread is about the PR);
  *  - a line for what was made missing, or opening anything but its own place: the Picture page beside its thread, the
  *    guide's message, the thread; the agent's words while one is on its way, and when it stopped without one;
  *  - a thread that only named the PR (the Reviews page's rule) taken for its review thread;
@@ -26,7 +25,6 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxPullStacks, inboxReviewRows, type InboxMessageWire, type InboxPull, type InboxPullLink, type InboxPullsAnswer, type InboxReviewThread, type InboxThread } from '@plannotator/core/inbox-types';
-import type { InboxShapeSummary } from '../api';
 import type { PullsPageProps } from './PullsPage';
 import { pullsStateOf } from './reviewsTestState';
 import { REVIEW_ROW_AUTO_STOPPED } from './reviewsModel';
@@ -94,21 +92,6 @@ function answer(links: Record<string, InboxPullLink> = {}): InboxPullsAnswer {
     cards: {},
   };
 }
-
-const board: InboxShapeSummary = {
-  id: 'shp_1',
-  title: 'RTL, drawn',
-  project: { name: 'web-app', root: '/home/dana/web-app' },
-  thread: 'thr_review',
-  state: 'active',
-  updated: '2026-11-03T09:20:00.000Z',
-  latest: 2,
-  seen: 2,
-  changed: false,
-  drawing: false,
-  waiting: 0,
-  session: null,
-};
 
 const liveSession = (session: string) => ({ session, host: 'claude-code', started_at: '2026-11-03T08:00:00.000Z', last_seen_at: '2026-11-03T09:29:00.000Z', busy: false, idle_since: null, last_thread: null });
 
@@ -185,7 +168,6 @@ function page(stackId: string, model: InboxPullsAnswer, extra: Partial<PullsPage
     onNewReview: (pick, opener, ask) => went.push(`new review ${pick.id} ${pick.thread ? 'in review' : 'none'} ${opener.getAttribute('data-launch-go')}${ask ? ` ${ask}` : ''}`),
     onOpenGuide: (thread, message) => went.push(`guide ${thread} ${message}`),
     onOpenPicture: (thread, attachment, message) => went.push(`picture ${thread} ${attachment} ${message}`),
-    onOpenShape: (shape) => went.push(`shape ${shape.id}`),
     ...extra,
   };
   return (
@@ -307,11 +289,11 @@ test.skipIf(!hasDom)('no thread yet: one row, Open the diff the one primary; Gui
   expect(!!$('[data-pull-thread-start]')).toBe(true);
 });
 
-test.skipIf(!hasDom)('a live thread with a guide and a Picture page: each line opens its own place, Start a thread leaves the row, the Shape board joins it', async () => {
+test.skipIf(!hasDom)('a live thread with a guide and a Picture page: each line opens its own place, Start a thread leaves the row', async () => {
   threadMessages = [...threadMessages, pictureMessage];
-  mount(single.key, answer({ [single.key]: pictureLink }), { shapes: new Map([[live.thread_id, board]]) });
+  mount(single.key, answer({ [single.key]: pictureLink }));
   await settle();
-  expect(row()).toEqual(['diff', 'guide', 'picture', 'shape']);
+  expect(row()).toEqual(['diff', 'guide', 'picture']);
   expect(lines()).toEqual(['picture', 'guide', 'thread']);
   expect(line('picture')).toContain('Late notes are offered');
   expect(line('guide')).toContain('The RTL fix');
@@ -319,8 +301,7 @@ test.skipIf(!hasDom)('a live thread with a guide and a Picture page: each line o
   await click('[data-launch-line="picture"]');
   await click('[data-launch-line="guide"]');
   await click('[data-launch-line="thread"]');
-  await click('[data-launch-go="shape"]');
-  expect(went).toEqual(['picture thr_review att_page msg_page', 'guide thr_review msg_guide', 'thread thr_review', 'shape shp_1']);
+  expect(went).toEqual(['picture thr_review att_page msg_page', 'guide thr_review msg_guide', 'thread thr_review']);
 });
 
 test.skipIf(!hasDom)('a live thread: Picture it and Guided review each ask once in that thread, the PR is told, and the lines say the agent is making them', async () => {
@@ -383,12 +364,6 @@ test.skipIf(!hasDom)('the facts say "by you" on your own PR and "Draft" on a dra
   expect(facts()).toContain('by tomas');
   expect(facts()).not.toContain('by you');
   expect(facts()).not.toContain('Draft');
-});
-
-test.skipIf(!hasDom)('Shape on with no board for the thread: no Shape board button', async () => {
-  mount(single.key, answer({ [single.key]: live }), { shapes: new Map() });
-  await settle();
-  expect(row()).toEqual(['diff', 'guide', 'picture']);
 });
 
 test.skipIf(!hasDom)("the details sit in the page under its own heading: no head of their own, no Close", async () => {

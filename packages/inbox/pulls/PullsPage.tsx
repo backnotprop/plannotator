@@ -15,7 +15,7 @@
  *   into the review thread. No merge button.
  * - A single open PR opens its launchpad instead (PullLaunchpad.tsx, approval
  *   "pr-launchpad"): one row of buttons (Open the diff, Guided review, Picture
- *   it, Start a thread; its Shape board while Shape is on), a line for each
+ *   it, Start a thread), a line for each
  *   thing made for it, then its details. Starting a review is this view's: the New review box, filled in
  *   with the PR. A Reviews row about one open PR opens it, also once an agent
  *   reviewed that PR (`reviewRowLaunchpad`, the owner's answer, 2026-11-09).
@@ -37,7 +37,7 @@ export { pullsPageAddress } from './localRoute';
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack, type InboxReviewRow } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import { InboxApiError, inboxApi, type InboxShapeSummary, type ProjectFolder } from '../api';
+import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import { Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { RowAgentTiles } from '../components/RowAgents';
@@ -66,6 +66,7 @@ import {
 } from './model';
 import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
 import { ReviewsList, ReviewsMenu, reviewLinksOf } from './ReviewsList';
+import { PageShipLog, ShipsContext, useShipping } from './useShipping';
 import { selectedLayerOf } from './selectedLayer';
 import { reviewRowLaunchpad, reviewRowProjects, reviewRowsIn } from './reviewsModel';
 import { forgeName } from './labels';
@@ -153,9 +154,6 @@ export interface PullsPageProps {
   /** The launchpad's Guided review: that message's guide in its thread. Absent: the thread. */
   onOpenGuide?: (threadId: string, messageId: string) => void;
   onOpenPicture?: (threadId: string, attachmentId: string | null, messageId: string) => void;
-  /** Shape boards by thread (`useInboxShapes` `byThread`); absent or null while Shape is off: the launchpad has no Shape board button. */
-  shapes?: ReadonlyMap<string, InboxShapeSummary> | null;
-  onOpenShape?: (shape: InboxShapeSummary) => void;
   /** System's button and drawing; absent while System does not show. */
   system?: PullsSystem | null;
   /**
@@ -228,6 +226,7 @@ export function PullsPage(given: PullsPageProps) {
     });
   }, [system?.open]);
   const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
+  const shipping = useShipping(answer, phone, props.onToast);
 
   const list = (
     <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-pulls-list="">
@@ -280,6 +279,7 @@ export function PullsPage(given: PullsPageProps) {
         links={model && answer ? reviewLinksOf(model, answer) : NO_LINKS}
         phone={phone}
         onTarget={setMenuRow}
+        ship={shipping.handlers}
         onHide={(pulls) => {
           // The PR open beside the list leaves with its row.
           if (open && pulls.some((pull) => open.stack.layers.some((layer) => layer.key === pull.key))) props.onOpenStack(null);
@@ -332,6 +332,7 @@ export function PullsPage(given: PullsPageProps) {
             onOpenLayer={(row, layer) => props.onReview(row.stacks[0]!.id, layer.key, 'layer')}
             onNew={props.onNew}
             menuRow={menuRow}
+            ships={shipping.ships}
             onShowAgain={(hidden) => void showWithToast([hidden.key], [hiddenLabel(hidden)], props.onToast)}
             onShowRepo={(repo) => void showRepoWithToast(repo, props.onToast)}
             onOpenThread={props.onOpenThread}
@@ -340,6 +341,7 @@ export function PullsPage(given: PullsPageProps) {
           />
         )}
       </ReviewsMenu>
+      {shipping.log}
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge onCollapse={props.threadId ? props.onHide : undefined} />}
       {rulesOpen && risk.answer && (
@@ -388,7 +390,11 @@ export function PullsPage(given: PullsPageProps) {
     />
   ) : null;
   if (phone && open && model) {
-    return <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone onClose={() => props.onOpenStack(null)} />;
+    return (
+      <ShipsContext.Provider value={shipping.handlers}>
+        <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone onClose={() => props.onOpenStack(null)} />
+      </ShipsContext.Provider>
+    );
   }
   if (phone && localPane) return localPane;
   if (phone && drawing) return drawing;
@@ -397,7 +403,9 @@ export function PullsPage(given: PullsPageProps) {
       {list}
       {!phone &&
         (open && model ? (
-          <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone={false} onClose={() => props.onOpenStack(null)} />
+          <ShipsContext.Provider value={shipping.handlers}>
+            <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone={false} onClose={() => props.onOpenStack(null)} />
+          </ShipsContext.Provider>
         ) : localPane ? (
           localPane
         ) : drawing ? (
@@ -644,14 +652,13 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         start={canStart ? { onStart: (opener) => newReview(opener), onPictureIt: (opener) => newReview(opener, 'picture_it') } : null}
         startThread={canStartPullThread(start, link, projects) ? () => setDrafting(true) : null}
         untiedThread={link ? null : untiedPullThread(start.key)}
-        shapes={props.shapes ?? null}
         risk={riskLines}
+        ship={<PageShipLog pullKey={start.key} />}
         onClose={props.onClose}
         onDiff={() => props.onReview(stack.id, start.key, 'layer')}
         onThread={props.onOpenThread}
         onGuide={(thread, message) => (props.onOpenGuide ? props.onOpenGuide(thread, message) : props.onOpenThread(thread))}
         onPicture={(thread, page) => (props.onOpenPicture ? props.onOpenPicture(thread, page.attachment_id, page.message_id) : props.onOpenThread(thread))}
-        onShape={(shape) => props.onOpenShape?.(shape)}
         onAsked={props.state.reload}
         onHide={hide}
         foot={link?.last && !ended ? <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} /> : null}

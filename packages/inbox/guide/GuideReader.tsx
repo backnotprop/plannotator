@@ -103,7 +103,7 @@ export interface GuideDiffComments {
   ) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
-  /** Choices before the comment box (Comment · Ask · Show me). Absent: the comment box opens at once. */
+  /** Choices before the comment box (Comment · Ask). Absent: the comment box opens at once. */
   selectionActions?: DiffSelectionActions;
 }
 
