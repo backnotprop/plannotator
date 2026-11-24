@@ -3,7 +3,7 @@
  * - `ReactFace`: each agent message's face at the end of the text's first line. Drawn always and shown by CSS alone
  *   (hover or focus inside the message, `inbox.css` `.ib-rface`), so a message adds no listener that measures and no
  *   layout read; React's own delegated handlers tell the one shared host which face the pointer reached.
- * - `FaceStrip`: what the face opens into the moment the pointer is on it: 👍, the person's saved emoji, then the face
+ * - `FaceStrip`: what the face opens into once the pointer rests on it (`faceHover`): 👍, the person's saved emoji, then the face
  *   again, which opens the full tray. Drawn by the host into the face's own slot (a portal, no positioning).
  * - `MenuEmojiRow`: the same emoji as the first row of the message's menu; on a phone a skill emoji has its name under it.
  * - `SkillMark`: the small "/" at a skill emoji's lower right.
@@ -13,7 +13,7 @@ import { Menu } from '@base-ui/react/menu';
 import type { InboxMessageWire, InboxReaction } from '@plannotator/core/inbox-types';
 import { useSavedReactions } from '../reactions';
 import { machineOf } from '../inboxUrl';
-import { faceStrip, hasSkill, skillPreview, skillSaid, skillTip, type MessageReactApi } from './messageReact';
+import { faceHover, hasSkill, skillPreview, skillSaid, skillTip, type MessageReactApi } from './messageReact';
 
 const LOOKS_GOOD = 'Looks good';
 
@@ -64,9 +64,27 @@ export function previewHandlers(
   };
 }
 
-/** Each agent message's face: hidden at rest, shown by CSS on hover; the pointer on it opens it (no click needed). */
-export function ReactFace({ messageId }: { messageId: string }) {
-  const open = (slot: HTMLElement | null) => slot && faceStrip.set({ messageId, slot });
+/**
+ * The emoji a message offers now: 👍 and every saved one; only the skill ones while a question or action item in the
+ * thread waits (`plain` false: a skill emoji is a reply, a plain one would read as "go").
+ */
+export const offeredCells = (saved: readonly InboxReaction[], plain: boolean): (InboxReaction | null)[] => (plain ? [null, ...saved] : saved.filter(hasSkill));
+
+/**
+ * Each agent message's face: hidden at rest, shown by CSS on hover; the pointer resting on it opens it (no click
+ * needed). `plain` false (a question waits): drawn only when a saved emoji carries a skill.
+ */
+export function ReactFace({ messageId, plain }: { messageId: string; plain: boolean }) {
+  return plain ? <FaceButton messageId={messageId} /> : <SkillsOnlyFace messageId={messageId} />;
+}
+
+function SkillsOnlyFace({ messageId }: { messageId: string }) {
+  const saved = useSavedReactions();
+  return saved.some(hasSkill) ? <FaceButton messageId={messageId} /> : null;
+}
+
+function FaceButton({ messageId }: { messageId: string }) {
+  const at = (slot: HTMLElement | null) => (slot ? { messageId, slot } : null);
   return (
     <span className="ib-rface-slot" data-react-face-slot={messageId}>
       <button
@@ -75,8 +93,15 @@ export function ReactFace({ messageId }: { messageId: string }) {
         tabIndex={-1}
         aria-hidden="true"
         data-react-face={messageId}
-        onPointerEnter={(e) => e.pointerType === 'mouse' && open(e.currentTarget.parentElement)}
-        onClick={(e) => open(e.currentTarget.parentElement)}
+        onPointerEnter={(e) => {
+          const where = e.pointerType === 'mouse' ? at(e.currentTarget.parentElement) : null;
+          if (where) faceHover.enter(where);
+        }}
+        onPointerLeave={(e) => e.pointerType === 'mouse' && faceHover.leave()}
+        onClick={(e) => {
+          const where = at(e.currentTarget.parentElement);
+          if (where) faceHover.openNow(where);
+        }}
       >
         <FaceIcon />
       </button>
@@ -84,18 +109,14 @@ export function ReactFace({ messageId }: { messageId: string }) {
   );
 }
 
-/** The face opened: the person's emoji, then the face that opens the full tray. Leaving it closes it. */
+/** The face opened: the person's emoji, then the face that opens the full tray. The pointer on neither closes it. */
 export function FaceStrip({ message, api }: { message: InboxMessageWire; api: MessageReactApi }) {
   const saved = useSavedReactions();
   const ref = useRef<HTMLDivElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agent = api.agentOf(message);
-  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
-  const close = () => {
-    skillPreview.set(null);
-    faceStrip.set(null);
-  };
-  const cells: (InboxReaction | null)[] = [null, ...saved];
+  const close = () => faceHover.close();
+  const plain = api.plain();
+  const cells = offeredCells(saved, plain);
   return (
     <div
       ref={ref}
@@ -103,11 +124,8 @@ export function FaceStrip({ message, api }: { message: InboxMessageWire; api: Me
       role="toolbar"
       aria-label={`React to ${agent}'s message`}
       data-react-strip={message.id}
-      onPointerEnter={() => timer.current && clearTimeout(timer.current)}
-      onPointerLeave={(e) => {
-        if (e.pointerType !== 'mouse') return;
-        timer.current = setTimeout(close, 140);
-      }}
+      onPointerEnter={(e) => e.pointerType === 'mouse' && faceHover.enter({ messageId: message.id, slot: e.currentTarget.parentElement! })}
+      onPointerLeave={(e) => e.pointerType === 'mouse' && faceHover.leave()}
     >
       {cells.map((reaction, i) => {
         const { tip, said } = cellWords(reaction);
@@ -131,31 +149,37 @@ export function FaceStrip({ message, api }: { message: InboxMessageWire; api: Me
           </button>
         );
       })}
-      <button
-        type="button"
-        className="ib-rstrip-c ib-rstrip-face"
-        aria-label="All reactions"
-        data-react-all=""
-        onPointerEnter={() => skillPreview.set(null)}
-        onClick={() => {
-          close();
-          api.openTray(message);
-        }}
-      >
-        <FaceIcon />
-      </button>
+      {plain && (
+        <button
+          type="button"
+          className="ib-rstrip-c ib-rstrip-face"
+          aria-label="All reactions"
+          data-react-all=""
+          onPointerEnter={() => skillPreview.set(null)}
+          onClick={() => {
+            close();
+            api.openTray(message);
+          }}
+        >
+          <FaceIcon />
+        </button>
+      )}
     </div>
   );
 }
 
-/** The menu's first row: the same emoji, ending in the face. Arrow keys move along it (Base UI's menu items). */
+/**
+ * The menu's first row: the same emoji, ending in the face. Arrow keys move along it (Base UI's menu items). While a
+ * question waits: the skill emoji alone (the menu draws no row when none has a skill).
+ */
 export function MenuEmojiRow({ message, api, phone }: { message: InboxMessageWire; api: MessageReactApi; phone: boolean }) {
   const saved = useSavedReactions();
   const ref = useRef<HTMLDivElement>(null);
   const agent = api.agentOf(message);
   const container = () => ref.current?.closest('.ib-pm') ?? ref.current;
   useEffect(() => () => skillPreview.set(null), []);
-  const cells: (InboxReaction | null)[] = [null, ...saved];
+  const plain = api.plain();
+  const cells = offeredCells(saved, plain);
   return (
     <div ref={ref} className="ib-emrow" role="group" aria-label="Reactions" data-menu-reactions="">
       {cells.map((reaction) => {
@@ -179,11 +203,13 @@ export function MenuEmojiRow({ message, api, phone }: { message: InboxMessageWir
           </Menu.Item>
         );
       })}
-      <Menu.Item className="ib-emrow-c" label="All reactions" aria-label="All reactions" data-menu-reaction="all" onClick={() => api.openTray(message)}>
-        <span className="ib-emrow-e">
-          <FaceIcon size={20} />
-        </span>
-      </Menu.Item>
+      {plain && (
+        <Menu.Item className="ib-emrow-c" label="All reactions" aria-label="All reactions" data-menu-reaction="all" onClick={() => api.openTray(message)}>
+          <span className="ib-emrow-e">
+            <FaceIcon size={20} />
+          </span>
+        </Menu.Item>
+      )}
     </div>
   );
 }

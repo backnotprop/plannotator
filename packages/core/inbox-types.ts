@@ -1148,9 +1148,10 @@ export interface InboxAck {
   read_seq: number | null;
   /**
    * A reaction on its own (approval "inbox-reactions-every-message"): on an agent message that is not the thread's
-   * latest, or that the person wrote after, or while a question or action item in the thread waits. It made no Mark
-   * read (`read_seq` null, `made_read` false), Move back never withdraws it, and it is always sent when its Undo
-   * window ends (never `not_sent`). Absent on a 👍 that stands on its Mark read.
+   * latest, or that the person wrote after (none while a question or action item in the thread waits). It made no
+   * Mark read (`read_seq` null, `made_read` false), Move back never withdraws it, and it is sent when its Undo window
+   * ends, unless the agent asked a question inside it (`not_sent: "wrote_again"`). Absent on a 👍 that stands on its
+   * Mark read.
    */
   standalone?: boolean;
   /** This ack made that Mark read (the thread was not read before), so its Undo undoes the read too. */

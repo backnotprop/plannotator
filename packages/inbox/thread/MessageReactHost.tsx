@@ -7,7 +7,8 @@
  * - the message menu a right-click anywhere on a message opens (and a hold on a phone): the same items as its ⋯, the
  *   emoji first. A right-click on selected text, a link, a picture or a field keeps the browser's own menu;
  * - the skill emoji's card.
- * Its listeners are three on the thread's body (right-click, and a phone's hold), not one per message.
+ * Its listeners are on the thread's body (right-click, and a phone's hold when `PHONE_HOLD.opensSheet`), not one per
+ * message, and, only while the face is open, the presses, scrolls and Escape that close it.
  */
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
@@ -17,8 +18,9 @@ import { MessageMenuItems, type CopyMenuHost } from '../components/CopyMenus';
 import { copyAuthor } from '../copyMarkdown';
 import { whenTime } from '../format';
 import { flyReaction, ReactionTray, reactedNow, sameReaction } from '../components/ReactionTray';
-import { faceStrip, hasSkill, skillPreview, useFaceStrip, type MessageReactApi } from './messageReact';
+import { faceHover, faceStrip, hasSkill, useFaceStrip, type MessageReactApi } from './messageReact';
 import { FaceStrip } from './ReactStrip';
+import { questionWaits } from './footAck';
 import { SkillPreviewCard } from './SkillPreviewCard';
 import { sendSkillReaction, type SkillReactionHost } from './skillReaction';
 
@@ -46,6 +48,7 @@ export function useMessageReactApi(source: MessageReactSource): MessageReactApi 
         const s = newest.current;
         return !!s.onAck && m.author.kind === 'agent' && s.thread.resolved_at === null && s.liveOf(m) && m.ack?.settled_seq == null;
       },
+      plain: () => !questionWaits(newest.current.thread.messages),
       agentOf: (m) => newest.current.agentOf(m),
       live: (m) => newest.current.liveOf(m),
       ack: (m, on, reaction, was) => newest.current.onAck?.(m.id, on, newest.current.agentOf(m), reaction, was),
@@ -55,10 +58,12 @@ export function useMessageReactApi(source: MessageReactSource): MessageReactApi 
         const s = newest.current;
         const agent = s.agentOf(m);
         if (hasSkill(reaction)) {
-          void sendSkillReaction(m, reaction, agent, s);
+          void sendSkillReaction(m, reaction, agent, s, s.thread);
           return;
         }
         const current = m.ack?.reaction ?? null;
+        // A plain emoji while a question waits is never offered (the store refuses it too); taking one back still is.
+        if (questionWaits(s.thread.messages) && !(m.ack && sameReaction(current, reaction))) return;
         // A second press of the emoji it already has takes it back, as the tray's does.
         if (m.ack && sameReaction(current, reaction)) {
           s.onAck?.(m.id, false, agent, current);
@@ -72,6 +77,13 @@ export function useMessageReactApi(source: MessageReactSource): MessageReactApi 
   }, []);
 }
 
+/**
+ * A phone's hold on a message. Two behaviours, one switch, the owner to pick:
+ * - true: a still hold of `HOLD_MS` opens the message's sheet (and keeps the browser from selecting text then);
+ * - false: the hold is left to the browser (long-press selects text, partial copy works) and the sheet is the ⋯'s.
+ * False for now: it takes nothing away that people have today. (An object so a test can try both, then restore.)
+ */
+export const PHONE_HOLD = { opensSheet: false };
 const HOLD_MS = 450;
 const NOT_OURS = 'a[href], input, textarea, select, [contenteditable="true"], img, video, button, [role="button"], [role="menuitem"], .ib-pm, [data-reaction-tray], .ib-rstrip';
 
@@ -92,7 +104,7 @@ export function MessageReactHost({ body, api, copy, phone, takeBackOf }: { body:
   const heldAt = useRef(0);
   const find = (id: string | undefined) => (id ? (copy.current.thread.messages.find((m) => m.id === id) ?? null) : null);
   api.trayAsk.current = (message) => {
-    faceStrip.set(null);
+    faceHover.close();
     trayAnchor.current = body.current?.querySelector<HTMLElement>(`[data-react-face-slot="${CSS.escape(message.id)}"]`) ?? null;
     if (trayAnchor.current) setTray((t) => ({ id: message.id, n: (t?.n ?? 0) + 1 }));
   };
@@ -101,15 +113,16 @@ export function MessageReactHost({ body, api, copy, phone, takeBackOf }: { body:
     const el = body.current;
     if (!el) return;
     setPortal(el.closest<HTMLElement>('.pn-inbox'));
+    const holdOpensSheet = PHONE_HOLD.opensSheet;
     const open = (article: HTMLElement, x: number, y: number, sheet: boolean) => {
       const id = article.getAttribute('data-message-article') ?? '';
-      faceStrip.set(null);
+      faceHover.close();
       setMenu({ id, x, y, sheet });
     };
     const onContextMenu = (e: MouseEvent) => {
       if (phone) {
         // The platform's own long-press menu, right after our hold opened the sheet, is not a second menu.
-        if (Date.now() - heldAt.current < 900) e.preventDefault();
+        if (holdOpensSheet && Date.now() - heldAt.current < 900) e.preventDefault();
         return;
       }
       const article = messageAt(e.target);
@@ -121,8 +134,9 @@ export function MessageReactHost({ body, api, copy, phone, takeBackOf }: { body:
       open(article, e.clientX, e.clientY, false);
     };
     el.addEventListener('contextmenu', onContextMenu);
-    if (!phone) return () => el.removeEventListener('contextmenu', onContextMenu);
-    // A phone: a still hold on a message opens its sheet (Reply's hold time); a finger that moves is a scroll.
+    if (!phone || !holdOpensSheet) return () => el.removeEventListener('contextmenu', onContextMenu);
+    // A phone, `PHONE_HOLD.opensSheet`: a still hold on a message opens its sheet (Reply's hold time); a finger that
+    // moves is a scroll.
     let hold: { x: number; y: number; timer: ReturnType<typeof setTimeout> } | null = null;
     const stop = () => {
       if (hold) clearTimeout(hold.timer);
@@ -168,10 +182,34 @@ export function MessageReactHost({ body, api, copy, phone, takeBackOf }: { body:
     };
   }, [body, phone]);
 
+  // The opened face closes on a press outside it, a scroll, or Escape (and when the pointer is on neither the face nor
+  // it: `faceHover`). Listening only while it is open.
+  const stripOpen = !!strip;
+  useEffect(() => {
+    if (!stripOpen) return;
+    const outside = (e: Event) => {
+      const slot = faceStrip.get()?.slot;
+      if (!slot || !(e.target instanceof Node) || !slot.contains(e.target)) faceHover.close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      faceHover.close();
+    };
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('scroll', outside, true);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('pointerdown', outside, true);
+      document.removeEventListener('scroll', outside, true);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [stripOpen]);
+  useEffect(() => () => faceHover.close(), []);
+
   // A new thread closes whatever was open for the last one.
   useEffect(() => {
-    faceStrip.set(null);
-    skillPreview.set(null);
+    faceHover.close();
     setMenu(null);
     setTray(null);
   }, [thread.thread_id]);
@@ -194,7 +232,7 @@ export function MessageReactHost({ body, api, copy, phone, takeBackOf }: { body:
   return (
     <>
       {stripMessage && api.offered(stripMessage) && createPortal(<FaceStrip message={stripMessage} api={api} />, strip!.slot)}
-      {trayMessage && api.offered(trayMessage) && (
+      {trayMessage && api.offered(trayMessage) && api.plain() && (
         <ReactionTray
           key={trayMessage.id}
           messageId={trayMessage.id}

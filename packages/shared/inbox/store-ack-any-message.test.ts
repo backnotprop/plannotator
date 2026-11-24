@@ -73,16 +73,35 @@ describe("a reaction on any agent message", () => {
     expect(settled!.ack!.note_id).toBeTruthy();
   });
 
-  test("the latest message with a question open takes one on its own: the question stays open, nothing is marked read", () => {
-    const { store, clock, first } = setup(QUESTION);
+  test("while a question in the thread waits, no message takes one and the agent is sent nothing (as before)", () => {
+    const { store, clock, first, later } = setup();
+    const asking = later(QUESTION);
+    for (const id of [first.id, asking.id]) expect(refused(() => store.ackMessage(id, true, { emoji: "👍", label: "Looks good" }))).toBe("question_open");
+    expect(store.message(first.id)!.ack ?? null).toBeNull();
+    expect(store.message(asking.id)!.ack ?? null).toBeNull();
+    clock.now += WINDOW;
+    expect(store.settleAcks(WINDOW)).toEqual([]);
+    expect(store.pendingReplies("ses_a")).toEqual([]);
+  });
+
+  test("a reaction on its own is not sent when the agent asks a question inside its window", () => {
+    const { store, clock, first, later } = setup();
+    later("Tagged quill-docs 0.4.");
     store.ackMessage(first.id, true);
-    expect(store.message(first.id)!.ack).toMatchObject({ standalone: true, read_seq: null, made_read: false });
-    expect(store.questionsOf(first.id).map((q) => q.set_aside_at ?? null)).toEqual([null]);
-    expect(store.message(first.id)!.person_read_seq ?? null).toBeNull();
+    expect(store.message(first.id)!.ack).toMatchObject({ standalone: true });
+    later(QUESTION);
     clock.now += WINDOW;
     const [settled] = store.settleAcks(WINDOW);
-    expect(settled!.ack!.note_id).toBeTruthy();
-    // Delivered: it stands, as any reaction once delivered.
+    expect(settled!.ack).toMatchObject({ not_sent: "wrote_again", note_id: null });
+    expect(store.pendingReplies("ses_a")).toEqual([]);
+  });
+
+  test("a reaction on its own stands once delivered", () => {
+    const { store, clock, first, later } = setup();
+    later("Tagged quill-docs 0.4.");
+    store.ackMessage(first.id, true);
+    clock.now += WINDOW;
+    const [settled] = store.settleAcks(WINDOW);
     store.recordDelivery(settled!.ack!.note_id!, { host: "claude-code", session: "ses_a" });
     expect(refused(() => store.ackMessage(first.id, false))).toBe("ack_sent");
   });

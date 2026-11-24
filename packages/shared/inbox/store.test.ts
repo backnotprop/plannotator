@@ -1550,8 +1550,8 @@ class ThreadStateModel {
         if (message.author !== "agent") return "refused:ack_not_allowed";
         if (thread.resolved) return "refused:thread_resolved";
         // Any agent message takes one (approval "inbox-reactions-every-message"). It marks the thread read only on
-        // the latest agent message, with no person's message after it (the Inbox's own notes aside) and nothing
-        // waiting; anywhere else it stands on its own: no Mark read, and Move back leaves it.
+        // the latest agent message, with no person's message after it (the Inbox's own notes aside); anywhere else it
+        // stands on its own: no Mark read, and Move back leaves it. None while a question waits, as always.
         const latest = [...thread.messages].reverse().find((m) => m.author === "agent");
         const repliedAfter = thread.messages.some((m) => m.tick > message.tick && m.author === "person" && m.note === null);
         const waiting = thread.messages
@@ -1561,8 +1561,9 @@ class ThreadStateModel {
             const s = this.recordState(q);
             return s === "open" || s === "picked";
           });
+        if (waiting) return "refused:question_open";
         if (message.ack) return "ok";
-        if (latest !== message || repliedAfter || waiting) {
+        if (latest !== message || repliedAfter) {
           message.ack = { readTick: null, made: false, standalone: true };
           return "ok";
         }

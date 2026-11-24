@@ -7,16 +7,20 @@
  *   `skill_reaction`, never an ack; that reply draws as one line.
  * DOM (happy-dom): `DOM_TESTS=1 bun test packages/inbox/reactEveryMessage.test.tsx --isolate`.
  */
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, jest, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAuthor, InboxMessageWire, InboxProject, InboxReaction, InboxThread } from '@plannotator/core/inbox-types';
+import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
+import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxReaction, InboxThread } from '@plannotator/core/inbox-types';
 import { resetSkillCatalogCache, resetSkillCatalogTransport, setSkillCatalogTransport } from '@plannotator/ui/utils/skillCatalog';
 import { resetSavedReactionsForTests } from './reactions';
 import { rememberLocal, rememberMachine } from './inboxUrl';
+import { FACE_CLOSE_MS, FACE_OPEN_MS } from './thread/messageReact';
+import { skillPreviewText } from './data/skillPreview';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+const { PHONE_HOLD } = (hasDom ? await import('./thread/MessageReactHost') : { PHONE_HOLD: { opensSheet: false } }) as typeof import('./thread/MessageReactHost');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'fern-api-abcdef', name: 'fern-api', root: '/work/fern-api', created_at: '2026-11-24T09:00:00.000Z' };
 const CLAUDE: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
@@ -94,7 +98,7 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-async function render(t: InboxThread) {
+async function render(t: InboxThread, extra: { phone?: boolean } = {}) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -112,6 +116,7 @@ async function render(t: InboxThread) {
         onOpenFile={() => {}}
         onOpenGuide={() => {}}
         onAck={(id, on, _agent, reaction) => acks.push({ id, on, reaction })}
+        phone={extra.phone ?? false}
       />,
     );
   });
@@ -122,9 +127,14 @@ const face = (id: string) => document.querySelector<HTMLButtonElement>(`[data-re
 const article = (id: string) => document.querySelector<HTMLElement>(`[data-message-article="${id}"]`)!;
 const menu = () => document.querySelector<HTMLElement>('[data-message-menu][data-context]');
 
+const pointer = (el: Element, type: 'over' | 'enter' | 'out' | 'leave') =>
+  el.dispatchEvent(new PointerEvent(`pointer${type}`, { bubbles: type === 'over' || type === 'out', pointerType: 'mouse' }));
+
 async function hoverFace(id: string) {
-  await act(async () => void face(id)!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })));
-  await act(async () => void face(id)!.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' })));
+  await act(async () => void pointer(face(id)!, 'over'));
+  await act(async () => void pointer(face(id)!, 'enter'));
+  // The pointer rests on it past the intent delay.
+  await act(async () => void (await new Promise((resolve) => setTimeout(resolve, FACE_OPEN_MS + 20))));
   await settle();
 }
 
@@ -214,6 +224,19 @@ test.skipIf(!hasDom)('a skill emoji sends a reply with a typed /bro reply’s wo
   expect(sent.body.skill_reaction).toEqual({ emoji: '😵‍💫', skill: 'bro' });
   expect(String(sent.body.feedback)).toStartWith('**Skills referenced** (the person is asking you to invoke these skills when acting on this reply):');
   expect(String(sent.body.feedback)).toContain('`bro`');
+  // An earlier message (the agent wrote M4 after it): the reply quotes it, so the agent knows what "/bro" is about.
+  expect((sent.body.quote as { of: string }).of).toBe(M3);
+});
+
+test.skipIf(!hasDom)('a skill emoji on the newest agent message quotes nothing, as a plain reply', async () => {
+  await render(sample());
+  await rightClick(article(M4).querySelector('.ib-msg')!);
+  await until(() => !!menu(), 'the message menu');
+  await act(async () => (menu()!.querySelector('[data-menu-reaction="😵‍💫"]') as HTMLElement).click());
+  await until(() => posts.some((p) => p.path.endsWith('/reply')), 'the reply');
+  const sent = posts.find((p) => p.path.endsWith('/reply'))!;
+  expect(sent.path).toContain(M4);
+  expect(sent.body.quote).toBeUndefined();
 });
 
 test.skipIf(!hasDom)('on a linked machine’s thread, a skill this computer lacks is read from that machine and its text travels in the reply', async () => {
@@ -254,4 +277,167 @@ test.skipIf(!hasDom)('a skill reaction’s reply draws as one line: You, the emo
   expect(row.querySelector('[data-skill-reaction="bro"]')?.textContent).toBe('😵‍💫/bro');
   expect(row.textContent).not.toContain('Skills referenced');
   expect(face(reply.id)).toBeNull();
+});
+
+const strip = (id: string) => document.querySelector<HTMLElement>(`[data-react-strip="${id}"]`);
+const M5 = 'msg_01M8A00000000000000000005';
+const ASK = 'Which retry cap?\n\n:::question\nKeep the cap at 3?\n\n- [ ] Yes\n- [ ] No\n:::';
+
+/** An agent message with its question open, as the thread read serves it. */
+function asking(): InboxMessageWire {
+  const questions = parseInboxQuestionBlocks(ASK).map(
+    (q) =>
+      ({
+        key: q.key, position: q.position, kind: q.kind, prompt: q.prompt, context: q.parsed.context, choices: q.parsed.choices,
+        recommendation: q.parsed.recommendation, suggested_text: q.parsed.suggested_text, stopped: q.stopped, holds_up: q.holds_up,
+        asked_by_agent_id: CLAUDE.session, orphaned: false, state: 'open', answer: null, revision: 1, sent_revision: 0, picked_by: null,
+        picked_at: null, sent_reply_id: null, message_id: M5, superseded_by: null,
+      }) as unknown as InboxQuestion,
+  );
+  return message(M5, CLAUDE, ASK, 5, { questions } as Partial<InboxMessageWire>);
+}
+
+test.skipIf(!hasDom)('the opened face: a flick across it opens nothing; it stays open from face to strip and closes off both, on a press outside, a scroll and Escape', async () => {
+  await render(sample());
+  jest.useFakeTimers();
+  try {
+    const f = face(M3)!;
+    // A flick: on and off inside the intent delay.
+    act(() => void pointer(f, 'over'));
+    act(() => void jest.advanceTimersByTime(FACE_OPEN_MS - 40));
+    act(() => void pointer(f, 'out'));
+    act(() => void jest.advanceTimersByTime(FACE_OPEN_MS * 3));
+    expect(strip(M3)).toBeNull();
+    // Resting on it opens it.
+    act(() => void pointer(f, 'over'));
+    act(() => void jest.advanceTimersByTime(FACE_OPEN_MS));
+    expect(strip(M3)).not.toBeNull();
+    // From the face onto the strip inside the grace: it stays open.
+    act(() => void f.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: strip(M3)!.querySelector('button') })));
+    act(() => void jest.advanceTimersByTime(FACE_CLOSE_MS * 3));
+    expect(strip(M3)).not.toBeNull();
+    // Off both: closed after the grace.
+    act(() => void pointer(strip(M3)!.querySelector('button')!, 'out'));
+    act(() => void jest.advanceTimersByTime(FACE_CLOSE_MS));
+    expect(strip(M3)).toBeNull();
+
+    const open = () => {
+      act(() => void pointer(f, 'over'));
+      act(() => void jest.advanceTimersByTime(FACE_OPEN_MS));
+      expect(strip(M3)).not.toBeNull();
+    };
+    open();
+    // A press inside it keeps it; one outside closes it.
+    act(() => void strip(M3)!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse' })));
+    expect(strip(M3)).not.toBeNull();
+    act(() => void article(M1).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse' })));
+    expect(strip(M3)).toBeNull();
+    act(() => void pointer(f, 'out'));
+    open();
+    act(() => void article(M4).parentElement!.dispatchEvent(new Event('scroll')));
+    expect(strip(M3)).toBeNull();
+    act(() => void pointer(f, 'out'));
+    open();
+    act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(strip(M3)).toBeNull();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test.skipIf(!hasDom)('while a question waits: the face and the menu offer only skill emoji, and a plain one is never sent', async () => {
+  await render(sample([asking()]));
+  // The foot's 👍 is hidden, as it always was.
+  expect(document.querySelector('.ib-pfoot [data-ack]')).toBeNull();
+  await hoverFace(M3);
+  await until(() => !!strip(M3), 'the face opened');
+  const cells = [...strip(M3)!.querySelectorAll<HTMLButtonElement>('button')];
+  expect(cells.map((c) => c.querySelector('.ib-react-e')?.textContent ?? 'face')).toEqual(['😵‍💫']);
+  await rightClick(article(M4).querySelector('.ib-msg')!);
+  await until(() => !!menu(), 'the message menu');
+  expect([...menu()!.querySelectorAll('[data-menu-reaction]')].map((el) => el.getAttribute('data-menu-reaction'))).toEqual(['😵‍💫']);
+  // The rest of the menu is all there.
+  expect([...menu()!.querySelectorAll('[role="menuitem"].ib-pmi')].map((el) => el.textContent?.trim())).toEqual(['Reply', 'New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
+  await act(async () => (menu()!.querySelector('[data-menu-reaction="😵‍💫"]') as HTMLElement).click());
+  await until(() => posts.some((p) => p.path.endsWith('/reply')), 'the reply');
+  expect(acks).toEqual([]);
+});
+
+test.skipIf(!hasDom)('while a question waits and no saved emoji has a skill: no face, and no emoji row in the menu', async () => {
+  resetSavedReactionsForTests([{ emoji: '🎉', label: 'Ship it' }]);
+  await render(sample([asking()]));
+  expect(face(M3)).toBeNull();
+  expect(face(M4)).toBeNull();
+  await rightClick(article(M4).querySelector('.ib-msg')!);
+  await until(() => !!menu(), 'the message menu');
+  expect(menu()!.querySelector('[data-menu-reactions]')).toBeNull();
+  expect(acks).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a phone, as it ships (`PHONE_HOLD.opensSheet` false): a hold is the browser’s (text selection works); no sheet opens', async () => {
+  expect(PHONE_HOLD.opensSheet).toBe(false);
+  await render(sample(), { phone: true });
+  const text = article(M3).querySelector('.ib-msg')!;
+  jest.useFakeTimers();
+  try {
+    act(() => void text.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', clientX: 40, clientY: 40 })));
+    act(() => void jest.advanceTimersByTime(900));
+  } finally {
+    jest.useRealTimers();
+  }
+  await settle();
+  expect(menu()).toBeNull();
+  const select = new Event('selectstart', { bubbles: true, cancelable: true });
+  text.dispatchEvent(select);
+  expect(select.defaultPrevented).toBe(false);
+  const press = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+  text.dispatchEvent(press);
+  expect(press.defaultPrevented).toBe(false);
+});
+
+test.skipIf(!hasDom)('a phone with `PHONE_HOLD.opensSheet` on: a still hold opens the message’s sheet', async () => {
+  PHONE_HOLD.opensSheet = true;
+  try {
+    await render(sample(), { phone: true });
+    const text = article(M3).querySelector('.ib-msg')!;
+    jest.useFakeTimers();
+    try {
+      act(() => void text.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', clientX: 40, clientY: 40 })));
+      act(() => void jest.advanceTimersByTime(500));
+    } finally {
+      jest.useRealTimers();
+    }
+    await until(() => !!document.querySelector(`[data-message-menu="${M3}"]`), 'the sheet');
+  } finally {
+    PHONE_HOLD.opensSheet = false;
+  }
+});
+
+test.skipIf(!hasDom)('a skill that needs a reviewed thread is sent as words in a thread with no review, as a typed reply sends it', async () => {
+  resetSavedReactionsForTests([{ emoji: '🔁', skill: 'review-recheck' }]);
+  resetSkillCatalogCache();
+  setSkillCatalogTransport(async () => [{ name: 'review-recheck', root: 'plannotator', description: 'Check the fixes', humanOnly: false }]);
+  await render(sample());
+  await rightClick(article(M4).querySelector('.ib-msg')!);
+  await until(() => !!menu(), 'the message menu');
+  await act(async () => (menu()!.querySelector('[data-menu-reaction="🔁"]') as HTMLElement).click());
+  await until(() => posts.some((p) => p.path.endsWith('/reply')), 'the reply');
+  const sent = posts.find((p) => p.path.endsWith('/reply'))!;
+  expect(sent.body.words).toBe('/review-recheck');
+  expect(sent.body.feedback).toBeUndefined();
+});
+
+test.skipIf(!hasDom)('a skill emoji’s card on a linked machine’s thread reads a skill this computer lacks from that machine', async () => {
+  const far = 'ibx_01M8A00000000000000000FAR2';
+  const local = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path === `/api/inbox/m/${far}/skills`) return Response.json({ skills: [{ name: 'test-it', root: 'claude', description: 'Run it and show me', humanOnly: true }] });
+    if (path.startsWith(`/api/inbox/m/${far}/skills/content`)) return Response.json({ skill: { name: 'test-it', content: 'Run the change for real before you say it works.', dir: '/home/far/.claude/skills/test-it', path: '/home/far/.claude/skills/test-it/SKILL.md' } });
+    return local(input, init);
+  }) as typeof fetch;
+  const read = await skillPreviewText('test-it', far);
+  expect(read).toMatchObject({ description: 'Run it and show me', missing: false });
+  expect(read.excerpt).toContain('Run the change for real');
+  expect((await skillPreviewText('test-it-nowhere', far)).missing).toBe(true);
 });

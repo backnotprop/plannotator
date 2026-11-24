@@ -23,7 +23,8 @@ import { TAKE_BACK_LABEL } from '../takeBack';
 import { PaneMenuItems } from '../panes/PaneMenu';
 import { askNewThreadFromMessage, NEW_THREAD_FROM_MESSAGE_LABEL, newThreadFromMessageOffered, newThreadFromMessageSending } from '../thread/newThreadFromMessage';
 import type { MessageReactApi } from '../thread/messageReact';
-import { MenuEmojiRow } from '../thread/ReactStrip';
+import { MenuEmojiRow, offeredCells } from '../thread/ReactStrip';
+import { useSavedReactions } from '../reactions';
 
 /**
  * Copy a message, copy a thread (design record "inbox-copy-message", option
@@ -82,7 +83,8 @@ function useCopies(host: () => CopyMenuHost) {
 export function MessageMenuItems({ message, newest, takeBack, live, phone }: { message: InboxMessageWire; newest: { readonly current: CopyMenuHost }; takeBack: (() => void) | null; live: boolean; phone: boolean }) {
   const copies = useCopies(() => newest.current);
   const react = newest.current.react;
-  const reacts = !!react && live && react.offered(message);
+  const saved = useSavedReactions();
+  const reacts = !!react && live && react.offered(message) && offeredCells(saved, react.plain()).length > 0;
   const replies = !!react && live && message.author.kind === 'agent';
   const newThread = live && newThreadFromMessageOffered(message);
   return (

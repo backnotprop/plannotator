@@ -10,6 +10,11 @@ import type { InboxMessageWire, InboxReaction } from '@plannotator/core/inbox-ty
 export interface MessageReactApi {
   /** The message takes a reaction here: an agent's message, live, whose reaction was not sent yet. */
   offered: (message: InboxMessageWire) => boolean;
+  /**
+   * Plain emoji (👍 and the saved ones without a skill) are offered too: not while a question or action item in the
+   * thread waits on the person (the foot's 👍 and the store's `question_open`, as always). Skill emoji still are.
+   */
+  plain: () => boolean;
   /** React: null is 👍 Looks good; a saved emoji with a skill sends a reply with that skill. `from`: where the press was. */
   react: (message: InboxMessageWire, reaction: InboxReaction | null, from: Element | null) => void;
   /** Open the full tray (the face at the end of the emoji), anchored on the message's face. */
@@ -45,6 +50,57 @@ function store<T>(initial: T) {
 export type FaceStripAt = { messageId: string; slot: HTMLElement };
 export const faceStrip = store<FaceStripAt | null>(null);
 export const useFaceStrip = () => useSyncExternalStore(faceStrip.subscribe, faceStrip.get, () => null);
+
+/** The pointer rests on a face this long before it opens (a flick across it opens nothing). */
+export const FACE_OPEN_MS = 100;
+/** The grace after the pointer leaves the face or the strip, so moving from one to the other keeps it open. */
+export const FACE_CLOSE_MS = 140;
+
+let openTimer: ReturnType<typeof setTimeout> | null = null;
+let closeTimer: ReturnType<typeof setTimeout> | null = null;
+const clearTimers = () => {
+  if (openTimer) clearTimeout(openTimer);
+  if (closeTimer) clearTimeout(closeTimer);
+  openTimer = closeTimer = null;
+};
+
+/**
+ * The face's hover: open after `FACE_OPEN_MS` on it, cancelled if the pointer leaves first; once open, close when
+ * the pointer is on neither the face nor the strip for `FACE_CLOSE_MS`. Timers only: nothing measured.
+ */
+export const faceHover = {
+  enter(at: FaceStripAt) {
+    if (closeTimer) clearTimeout(closeTimer);
+    closeTimer = null;
+    const open = faceStrip.get();
+    if (open && open.messageId === at.messageId) return;
+    if (openTimer) clearTimeout(openTimer);
+    openTimer = setTimeout(() => {
+      openTimer = null;
+      skillPreview.set(null);
+      faceStrip.set(at);
+    }, FACE_OPEN_MS);
+  },
+  leave() {
+    if (openTimer) clearTimeout(openTimer);
+    openTimer = null;
+    if (!faceStrip.get() || closeTimer) return;
+    closeTimer = setTimeout(() => {
+      closeTimer = null;
+      faceHover.close();
+    }, FACE_CLOSE_MS);
+  },
+  /** A click, or the keyboard: open now. */
+  openNow(at: FaceStripAt) {
+    clearTimers();
+    faceStrip.set(at);
+  },
+  close() {
+    clearTimers();
+    skillPreview.set(null);
+    faceStrip.set(null);
+  },
+};
 
 /** A skill emoji under the pointer (or keyboard focus): its card opens beside `anchor`, to the left first. */
 export type SkillPreviewAt = { reaction: InboxReaction & { skill: string }; agent: string; anchor: Element; machine?: string | null };

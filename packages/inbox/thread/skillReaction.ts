@@ -6,10 +6,13 @@
  * thread to draw the reply as one line ("You 😵‍💫 /bro"); the agent reads nothing new.
  */
 import { INBOX_REPLY_SKILL_AUDIENCE } from '@plannotator/core/skill-reference-block';
-import type { InboxMessageWire, InboxReaction } from '@plannotator/core/inbox-types';
+import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
+import type { InboxMessageWire, InboxReaction, InboxThread } from '@plannotator/core/inbox-types';
 import { postSkillReaction } from '../data/actions/skillReaction';
 import { machineSkillSources } from '../data/machineSkills';
+import { whenTime } from '../format';
 import { machineOf } from '../inboxUrl';
+import { arrowQuotesWhole, quoteToSend } from '../replyQuote';
 import { inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { errorToast } from '../toastError';
 import type { InboxToastModel } from '../components/Toast';
@@ -30,20 +33,35 @@ export interface SkillReactionHost {
  * does not have is read from that machine, where the agent runs, and its text travels in the feedback all the same.
  * `known` is false when neither has it now: the reply goes as the words alone.
  */
-export async function skillReactionWords(skill: string, machine: string | null = null): Promise<{ words: string; feedback: string; known: boolean }> {
+export async function skillReactionWords(skill: string, machine: string | null = null, reviewed = false): Promise<{ words: string; feedback: string; known: boolean }> {
   const words = `/${skill}`;
-  let block = await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE, undefined, inboxSkillFilter(true));
-  if (block === '' && machine) block = await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE, machineSkillSources(machine), inboxSkillFilter(true));
-  return { words, feedback: withSkillsBlock('', block), known: block !== '' };
+  // The thread's own rule, as its reply box's: a skill that needs a reviewed thread counts only once a review happened.
+  const read = async (filter: ReturnType<typeof inboxSkillFilter>) => {
+    const here = await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE, undefined, filter);
+    return here === '' && machine ? inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE, machineSkillSources(machine), filter) : here;
+  };
+  const block = await read(inboxSkillFilter(reviewed));
+  // Not counted here yet (it needs a review first) is not gone: no "isn't on this computer" for it.
+  const known = block !== '' || (!reviewed && (await read(inboxSkillFilter(true))) !== '');
+  return { words, feedback: withSkillsBlock('', block), known };
 }
 
-export async function sendSkillReaction(message: InboxMessageWire, reaction: InboxReaction & { skill: string }, agent: string, host: SkillReactionHost): Promise<boolean> {
+/**
+ * The quote a skill reaction carries: ↩'s own rule (`arrowQuotesWhole`), so on a message an agent wrote after, the
+ * agent reads which message "/bro" is about (the reply quote's existing lead); on the newest, none, as a plain reply.
+ */
+export function skillReactionQuote(messages: readonly InboxMessageWire[], message: InboxMessageWire): { of: string; time?: string } | undefined {
+  return arrowQuotesWhole(messages, message.id) ? quoteToSend({ of: message.id }, messages, whenTime) : undefined;
+}
+
+export async function sendSkillReaction(message: InboxMessageWire, reaction: InboxReaction & { skill: string }, agent: string, host: SkillReactionHost, thread: InboxThread): Promise<boolean> {
   const key = `${message.id}/${reaction.emoji}`;
   if (sending.has(key)) return false;
   sending.add(key);
   try {
-    const { words, feedback, known } = await skillReactionWords(reaction.skill, machineOf(message.id));
-    await postSkillReaction(message.id, { words, feedback, emoji: reaction.emoji, skill: reaction.skill });
+    const { words, feedback, known } = await skillReactionWords(reaction.skill, machineOf(message.id), inboxThreadHadReview(thread.messages));
+    const quote = skillReactionQuote(thread.messages, message);
+    await postSkillReaction(message.id, { words, feedback, emoji: reaction.emoji, skill: reaction.skill, ...(quote ? { quote } : {}) });
     if (!known) host.onToast?.({ icon: 'warn', lead: `/${reaction.skill} isn't on this computer any more.`, detail: 'Sent as words.' });
     host.announce?.(`Sent /${reaction.skill} to ${agent}.`);
   } catch (cause) {

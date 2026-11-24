@@ -437,6 +437,11 @@ export interface PlannotatorConfig {
   /** How many times `inboxReactions` was saved: windows take a list only when it is newer than the last they took. */
   inboxReactionsRev?: number;
   /**
+   * This Inbox has synced `inboxReactions` with a linked machine before: until then a linked machine's set is merged
+   * with this one instead of the newer replacing the older (server/inbox-reactions-shared.ts).
+   */
+  inboxReactionsSynced?: boolean;
+  /**
    * How the Inbox list's rows look: the names of the row options that are on
    * (core `INBOX_ROWS_OPTIONS`), every other one off. Unset: none written yet
    * (a window adopts its browser's old cookies once). Written by the Inbox's ⋮

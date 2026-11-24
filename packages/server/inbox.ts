@@ -388,7 +388,7 @@ import { agentSearchDoorAnswer, agentThreadsDoorAnswer } from "./inbox-far-find"
 import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
-import { nextSharedReactionsRev, sharedReactionsNewer, type SharedReactions } from "./inbox-reactions-shared";
+import { nextSharedReactionsRev, settleSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
 import { mergePullBoards } from "./inbox-machine-pulls";
 import { doorRefusesBare, replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
@@ -2957,10 +2957,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * answer and `event: reactions` carries it, so a window takes a list only
    * when it is newer than the last it took.
    */
-  const reactionsState = (): { reactions: InboxReaction[]; rev: number } => {
+  const reactionsState = (): SharedReactions => {
     const config = loadConfig();
     const rev = config.inboxReactionsRev;
-    return { reactions: parseInboxSavedReactions(config.inboxReactions) ?? [], rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+    return {
+      reactions: parseInboxSavedReactions(config.inboxReactions) ?? [],
+      rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0,
+      ...(config.inboxReactionsSynced === true ? { synced: true } : {}),
+    };
   };
   const reactionsWire = (state: { reactions: InboxReaction[]; rev: number }) => ({ reactions: state.reactions, reactions_rev: state.rev });
 
@@ -2995,8 +2999,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // One set on every linked machine (inbox-reactions-shared.ts): past the newest revision any of them holds.
     return writeReactions(list, nextSharedReactionsRev(before.rev, machines?.reactionsCopies() ?? []));
   };
-  const writeReactions = (list: InboxReaction[], rev: number): { reactions: InboxReaction[]; rev: number } => {
-    saveConfig({ inboxReactions: list, inboxReactionsRev: rev });
+  const writeReactions = (list: InboxReaction[], rev: number, synced = false): { reactions: InboxReaction[]; rev: number } => {
+    saveConfig({ inboxReactions: list, inboxReactionsRev: rev, ...(synced ? { inboxReactionsSynced: true } : {}) });
     const saved = reactionsState();
     if (saved.rev !== rev || JSON.stringify(saved.reactions) !== JSON.stringify(list)) {
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
@@ -3004,9 +3008,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     for (const listener of reactionsListeners) listener(list, rev);
     return saved;
   };
-  /** A linked machine's saved emoji, read in its list: taken when newer, and every window here hears them. */
+  /**
+   * A linked machine's saved emoji, read in its list: taken when newer, or merged with this set the first time
+   * (inbox-reactions-shared.ts `settleSharedReactions`); every window here hears a change.
+   */
   const adoptReactions = (far: SharedReactions): void => {
-    if (sharedReactionsNewer(far, reactionsState())) writeReactions(far.reactions, far.rev);
+    const held = reactionsState();
+    const next = settleSharedReactions(held, far);
+    if (next) writeReactions(next.reactions, next.rev, true);
+    else if (!held.synced) saveConfig({ inboxReactionsSynced: true });
   };
 
   /**

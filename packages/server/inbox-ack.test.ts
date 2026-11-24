@@ -141,14 +141,13 @@ describe("POST /api/inbox/messages/:id/ack", () => {
     expect((await windowMessage(server, threadId, messageId)).ack).toMatchObject({ label: "Looks good" });
   });
 
-  test("any agent message takes one (a question open, an older message, a reply after it: on its own, no Mark read); refused on a person's message, an archived thread, the guards", async () => {
-    // Approval "inbox-reactions-every-message": no question, reply or newer-message gate; it stands on its own.
+  test("any agent message takes one (an older message, a reply after it: on its own, no Mark read); refused while a question waits, on a person's message, an archived thread, the guards", async () => {
+    // Approval "inbox-reactions-every-message": no reply or newer-message gate; it stands on its own. A question that
+    // waits still refuses it, as before, so "Take it as a go" never reaches an agent whose question is open.
     const asking = await setup(QUESTION);
     const open = await ack(asking.server, asking.messageId);
-    expect(open.status).toBe(200);
-    const openBody = (await open.json()) as { message: InboxMessageWire; thread: InboxListRow };
-    expect(openBody.message.ack).toMatchObject({ standalone: true, made_read: false, read_seq: null });
-    expect(openBody.thread.read_at ?? null).toBeNull();
+    expect(open.status).toBe(409);
+    expect(((await open.json()) as { code: string }).code).toBe("question_open");
 
     const { server, threadId, messageId, send } = await setup();
     const later = await send("One more update.", messageId);

@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { InboxReaction } from "@plannotator/core/inbox-types";
-import { nextSharedReactionsRev, readSharedReactions, SHARED_REACTIONS_REV_MAX, sharedReactionsNewer, type SharedReactions } from "./inbox-reactions-shared";
+import { mergeSharedReactions, nextSharedReactionsRev, readSharedReactions, settleSharedReactions, SHARED_REACTIONS_REV_MAX, sharedReactionsNewer, type SharedReactions } from "./inbox-reactions-shared";
 
 const bro: InboxReaction = { emoji: "😵‍💫", skill: "bro" };
 const ship: InboxReaction = { emoji: "🎉", label: "Ship it" };
@@ -53,5 +53,92 @@ describe("saved reactions across linked machines", () => {
     expect(readSharedReactions({ reactions: [bro], rev: -1 })).toBeNull();
     expect(readSharedReactions({ reactions: [bro], rev: SHARED_REACTIONS_REV_MAX + 1 })).toBeNull();
     expect(readSharedReactions({ reactions: "🎉", rev: 3 })).toBeNull();
+    expect(readSharedReactions({ reactions: [bro], rev: 3, synced: true })).toEqual({ reactions: [bro], rev: 3, synced: true });
+  });
+});
+
+/** One Inbox as inbox.ts runs it: a save here, and a linked machine's set read (`adoptReactions`). */
+function inbox(reactions: InboxReaction[], rev: number, synced = false) {
+  let copy: SharedReactions = { reactions, rev, ...(synced ? { synced: true } : {}) };
+  return {
+    get: () => copy,
+    save: (list: InboxReaction[], far: SharedReactions[] = []) => (copy = { ...copy, reactions: list, rev: nextSharedReactionsRev(copy.rev, far) }),
+    read: (far: SharedReactions) => {
+      const next = settleSharedReactions(copy, far);
+      copy = { ...(next ?? copy), synced: true };
+    },
+  };
+}
+
+/** Both read each other until nothing changes; returns how many rounds it took. */
+function sync(a: ReturnType<typeof inbox>, b: ReturnType<typeof inbox>): number {
+  for (let round = 1; round <= 6; round++) {
+    const [fromA, fromB] = [a.get(), b.get()];
+    a.read(fromB);
+    b.read(fromA);
+    if (JSON.stringify(a.get()) === JSON.stringify(fromA) && JSON.stringify(b.get()) === JSON.stringify(fromB)) return round;
+  }
+  throw new Error("the two never settled");
+}
+
+describe("the first sync merges the two sets; after that, newest wins", () => {
+  const rocket: InboxReaction = { emoji: "🚀" };
+  const eyes: InboxReaction = { emoji: "👀", label: "Looking" };
+
+  test("a fresh computer's saves before linking (a higher revision) wipe nothing: the two sets are merged", () => {
+    const desk = inbox([ship, eyes], 3);
+    const laptop = inbox([], 0);
+    for (let i = 0; i < 6; i++) laptop.save(i % 2 ? [rocket] : [rocket, { emoji: "🧪" }]);
+    expect(laptop.get().rev).toBeGreaterThan(desk.get().rev);
+    sync(desk, laptop);
+    expect(desk.get().reactions).toEqual(laptop.get().reactions);
+    expect(desk.get().reactions.map((r) => r.emoji)).toEqual(["🎉", "👀", "🚀"]);
+    expect(desk.get().reactions[0]).toEqual(ship);
+  });
+
+  test("a fresh computer that saved and then emptied its tray wipes nothing", () => {
+    const desk = inbox([ship, bro], 1);
+    const laptop = inbox([], 0);
+    laptop.save([rocket]);
+    laptop.save([]);
+    sync(desk, laptop);
+    expect(desk.get().reactions).toEqual([ship, bro]);
+    expect(laptop.get().reactions).toEqual([ship, bro]);
+  });
+
+  test("a skill is kept where either set has one", () => {
+    const desk = inbox([{ emoji: "😵‍💫", label: "Bro" }, ship], 2);
+    const laptop = inbox([bro], 1);
+    sync(desk, laptop);
+    expect(laptop.get().reactions).toEqual([{ emoji: "😵‍💫", label: "Bro", skill: "bro" }, ship]);
+    expect(desk.get().reactions).toEqual(laptop.get().reactions);
+    expect(mergeSharedReactions([bro], [{ emoji: "😵‍💫", label: "Bro" }, ship])).toEqual(mergeSharedReactions([{ emoji: "😵‍💫", label: "Bro" }, ship], [bro]));
+  });
+
+  test("on a pair that synced already, removing every emoji on one removes them on both", () => {
+    const desk = inbox([ship, bro], 1);
+    const laptop = inbox([rocket], 1);
+    sync(desk, laptop);
+    expect(desk.get().synced && laptop.get().synced).toBe(true);
+    desk.save([], [laptop.get()]);
+    sync(desk, laptop);
+    expect(desk.get().reactions).toEqual([]);
+    expect(laptop.get().reactions).toEqual([]);
+    // And one removed emoji stays removed.
+    laptop.save([ship], [desk.get()]);
+    sync(desk, laptop);
+    desk.save([], [laptop.get()]);
+    sync(desk, laptop);
+    expect(laptop.get().reactions).toEqual([]);
+  });
+
+  test("a third, fresh computer linked to a synced pair is merged in, and the pair takes the merge", () => {
+    const desk = inbox([ship], 4, true);
+    const laptop = inbox([ship], 4, true);
+    const phone = inbox([rocket], 9);
+    sync(desk, phone);
+    sync(desk, laptop);
+    expect(laptop.get().reactions.map((r) => r.emoji).sort()).toEqual(["🎉", "🚀"].sort());
+    expect(phone.get().reactions).toEqual(desk.get().reactions);
   });
 });
