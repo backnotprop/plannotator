@@ -339,7 +339,7 @@ export function PullsPage(given: PullsPageProps) {
             onShowRepo={(repo) => void showRepoWithToast(repo, props.onToast)}
             onOpenThread={props.onOpenThread}
             project={props.project}
-            localGroup={(fold) => <OnThisComputer project={props.project} projectNames={props.projectNames} openKey={localOpenKey(localOpen)} phone={phone} readAgain={answer} fold={fold} onOpen={(work) => openLocal({ project: work.project_id, branch: work.kind === 'branch' ? work.branch : null }, phone)} />}
+            localGroup={(fold) => <OnThisComputer project={props.project} projectNames={props.projectNames} openKey={localOpenKey(localOpen)} phone={phone} readAgain={answer} fold={fold} onOpen={(what) => openLocal(what, phone)} />}
           />
         )}
       </ReviewsMenu>
@@ -386,7 +386,8 @@ export function PullsPage(given: PullsPageProps) {
       phone={phone}
       stacked={!!props.stacked}
       onClose={closeLocal}
-      onReview={props.onReviewLocal ? (opener) => props.onReviewLocal!(localOpen.branch ? { branch: { name: localOpen.branch, projectId: localOpen.project } } : { project: localOpen.project }, opener) : undefined}
+      // A folder's whole work is no project's uncommitted changes nor a branch's diff: New review has no such work, so no button.
+      onReview={props.onReviewLocal && !localOpen.folder ? (opener) => props.onReviewLocal!(localOpen.branch ? { branch: { name: localOpen.branch, projectId: localOpen.project } } : { project: localOpen.project }, opener) : undefined}
     />
   ) : null;
   if (phone && open && model) {
