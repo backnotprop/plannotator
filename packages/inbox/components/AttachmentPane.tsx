@@ -96,7 +96,7 @@ import { useShortcutScope } from '../panes/scope';
 import { inboxFileViewerShortcuts } from '../shortcuts/fileViewer.shortcuts';
 import { ShortcutHint, withShortcut } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
-import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
+import { inOverlay, isComposingKey, isEditableTarget, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { escapeRung, type EscapeRung } from '../escapeLadder';
 import { Tip } from './Tip';
 import { CopyFileButton } from './CopyFileButton';
@@ -337,15 +337,6 @@ interface FileMemory {
 
 const NO_ANNOTATIONS: Annotation[] = [];
 const noop = () => {};
-/** Focus that shows its ring (the keyboard's), not a finger's press. Where `:focus-visible` is unknown, counted as shown. */
-const focusVisible = (el: Element) => {
-  try {
-    return el.matches(':focus-visible');
-  } catch {
-    return true;
-  }
-};
-
 const recordKey = (path: string, version: string) => (version === 'current' ? path : `${path}#${version.slice(0, 12)}`);
 
 /**
@@ -2587,7 +2578,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 }}
                 // Keyboard focus holds it shown; a finger's press does not (a tapped button may keep focus), and
                 // leaving lets it fade again only after keyboard focus held it (hold(false) wakes only then).
-                onFocus={(e) => (focusVisible(e.currentTarget) ? sizeIcon.hold(true) : sizeIcon.wake())}
+                onFocus={(e) => (keyboardFocused(e.currentTarget) ? sizeIcon.hold(true) : sizeIcon.wake())}
                 onBlur={() => sizeIcon.hold(false)}
                 aria-label={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
                 title={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
