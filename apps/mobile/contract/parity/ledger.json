@@ -2384,7 +2384,7 @@
     },
     {
       "id": "window-178",
-      "title": "Capabilities section: switches for the Board, the Checklist, Code review (with Chapter diagrams), Shape; \"Experimental\" group: Decision mode, Bro mode, Float reply drafts; Routines switch",
+      "title": "Capabilities section: switches for the Board, the Checklist, Code review (with Chapter diagrams), Shape; \"Experimental\" group: Decision mode, Grid, Bro mode, Float reply drafts; Routines switch",
       "surface": [],
       "flows": [],
       "mobile": "later",
@@ -16752,7 +16752,7 @@
     },
     {
       "id": "other-settings-10",
-      "title": "Capabilities (`capabilities`): Board; Checklist; Routines; Code review; Chapter diagrams; System (hidden unless turned on in config); Shape. **Experimental**: Decision mode, Bro mode, Float reply drafts",
+      "title": "Capabilities (`capabilities`): Board; Checklist; Routines; Code review; Chapter diagrams; System (hidden unless turned on in config); Shape. **Experimental**: Decision mode, Grid, Bro mode, Float reply drafts",
       "surface": [
         "settings:capabilities"
       ],

@@ -3975,28 +3975,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   const experimentalState = () => ({
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
+    // Grid (approval "inbox-agent-grid"): the window's page of work in flight, drawn from what the window already reads.
+    grid: { on: resolveExperimental(loadConfig(), "grid"), env: parseExperimentalEnv("grid") ?? null },
   });
 
-  /** Save `experimental: { decision_mode }`. `validateOnly`: check and write nothing. */
+  /** Save `experimental: { decision_mode?, grid? }` (one switch or both). `validateOnly`: check and write nothing. */
   const saveExperimental = (input: unknown, validateOnly = false) => {
-    if (
-      !input ||
-      typeof input !== "object" ||
-      Array.isArray(input) ||
-      typeof (input as { decision_mode?: unknown }).decision_mode !== "boolean" ||
-      Object.keys(input).some((key) => key !== "decision_mode")
-    ) {
-      throw new InboxError("validation_error", "experimental: { decision_mode: boolean }.", { field: "experimental" });
+    const switches = { decision_mode: ["decision-mode", "decisionMode", "decision mode"], grid: ["grid", "grid", "Grid"] } as const;
+    const named = input && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
+    if (named.length === 0 || named.some(([key, value]) => !Object.hasOwn(switches, key) || typeof value !== "boolean")) {
+      throw new InboxError("validation_error", "experimental: { decision_mode?: boolean, grid?: boolean }.", { field: "experimental" });
     }
-    const on = (input as { decision_mode: boolean }).decision_mode;
-    // The env var decides (like PLANNOTATOR_INBOX_TAILSCALE): saving to config.json would change nothing.
-    const env = parseExperimentalEnv("decision-mode");
-    if (env !== undefined) {
-      throw new InboxError("experimental_env_decides", `PLANNOTATOR_EXPERIMENTAL is set in this Inbox's environment, so decision mode stays ${env ? "on" : "off"}.`, { field: "experimental" });
+    const change: { decisionMode?: boolean; grid?: boolean } = {};
+    for (const [key, on] of named as [keyof typeof switches, boolean][]) {
+      const [feature, configKey, words] = switches[key];
+      // The env var decides (like PLANNOTATOR_INBOX_TAILSCALE): saving to config.json would change nothing.
+      const env = parseExperimentalEnv(feature);
+      if (env !== undefined) {
+        throw new InboxError("experimental_env_decides", `PLANNOTATOR_EXPERIMENTAL is set in this Inbox's environment, so ${words} stays ${env ? "on" : "off"}.`, { field: "experimental" });
+      }
+      change[configKey] = on;
     }
     if (validateOnly) return experimentalState();
-    saveConfig({ experimental: { decisionMode: on } });
-    if (loadConfig().experimental?.decisionMode !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    saveConfig({ experimental: change });
+    const saved = loadConfig().experimental as Record<string, unknown> | undefined;
+    if (Object.entries(change).some(([key, on]) => saved?.[key] !== on)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     return experimentalState();
   };
 
