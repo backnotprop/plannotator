@@ -1703,6 +1703,9 @@
         },
         "session": {
           "type": "string"
+        },
+        "machine": {
+          "type": "string"
         }
       },
       "required": [
@@ -2451,6 +2454,12 @@
                   "type": "null"
                 }
               ]
+            },
+            "machine": {
+              "type": "string"
+            },
+            "machine_name": {
+              "type": "string"
             }
           },
           "required": [
@@ -7200,6 +7209,9 @@
         },
         "handed_away": {
           "type": "boolean"
+        },
+        "machine": {
+          "type": "string"
         }
       },
       "required": [

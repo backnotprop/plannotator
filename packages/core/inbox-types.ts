@@ -317,6 +317,13 @@ export type InboxAuthor =
       session: string | null;
       /** A display name the agent gave itself. */
       name: string | null;
+      /**
+       * A session on another linked computer that wrote here (tagged into this thread from there): that computer's
+       * Inbox id (`ibx_…`) and the name this computer knew it by when the message was written. Absent for this
+       * computer's own sessions.
+       */
+      machine?: string;
+      machine_name?: string;
     };
 
 /** The hosts whose names the Inbox knows, keyed by `author.host`. */
@@ -1056,6 +1063,11 @@ export interface InboxTag {
    * every other tag.
    */
   handed_away?: boolean;
+  /**
+   * A session on another linked computer (inbox-far-tags.ts): that computer's Inbox id. This computer pushes the
+   * wake there, and takes that session's answer from there only. Absent for this computer's own sessions.
+   */
+  machine?: string;
 }
 
 /** How many sessions one reply may tag: any number (through 0.28.61, at most 8, for no stated reason). Kept so an importer still builds. */
@@ -1219,6 +1231,8 @@ export interface InboxAddressee {
   /** The connection's host, e.g. `claude-code`. */
   host: string;
   session: string;
+  /** A session on another linked computer (a hand-off to it): that computer's Inbox id. Absent for this computer's. */
+  machine?: string;
 }
 
 /**
@@ -3714,7 +3728,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * `ships` (approval "inbox-ship-mode"): its ships are read, started and stopped through its door (`ships`, `ships/log`,
  * `ships/stop`), so a linked machine's Reviews draws them and offers its agents in Ship's list.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

@@ -423,6 +423,12 @@ const DOOR_OWN_ROUTES = [
   // Its agent's search and thread list of this Inbox's threads (inbox-far-find.ts, mark `agent-search`).
   { method: "GET", route: "agent-search", grant: "machine", needs: "machines" },
   { method: "GET", route: "agent-threads", grant: "machine", needs: "machines" },
+  // Tag an agent on another computer (inbox-far-tags.ts, mark `tag-across`): this Inbox's agents for that computer's
+  // `@` list, a wake that computer hands one of them, one of its sessions' answer in a thread here, and its delivery.
+  { method: "GET", route: "taggable-agents", grant: "machine", needs: "machines" },
+  { method: "POST", route: "far-wake", grant: "machine", needs: "machines" },
+  { method: "POST", route: "agent-reply", grant: "machine", needs: "machines" },
+  { method: "POST", route: "far-delivered", grant: "machine", needs: "machines" },
   { method: "POST", route: "link-back", grant: "machine", needs: "machines" },
   { method: "POST", route: "unlink", grant: "machine", needs: "machines" },
   { method: "GET", route: "update", grant: "machine", needs: "machine_update" },
@@ -656,6 +662,13 @@ export interface InboxDevicesContext {
   agentRead?: { read: (url: URL, device: InboxDevice) => Response; file: (url: URL) => Promise<Response> };
   /** A linked machine's agents' search and thread list of this Inbox's threads (inbox-far-find.ts). */
   agentFind?: { search: (url: URL) => Promise<Response>; threads: (url: URL) => Response | Promise<Response> };
+  /** Tag an agent on another computer (inbox-far-tags.ts, inbox-far-wakes.ts): each write named by the machine whose token sent it. */
+  farTags?: {
+    agents: () => Response;
+    wake: (machine: string, body: Record<string, unknown>) => unknown;
+    reply: (machine: string, body: Record<string, unknown>) => Promise<unknown>;
+    delivered: (machine: string, body: Record<string, unknown>) => unknown;
+  };
   /** A linked machine's Update (inbox-updates.ts). */
   machineUpdate?: { read: () => unknown; start: () => Promise<{ outcome: string }> };
   /** Tests: the door's look-again clock (`INBOX_DOOR_REPUBLISH`). Default: unref'd timers. */
@@ -685,6 +698,8 @@ export interface InboxDoorMachines {
   unlinkedBy: (deviceId: string) => Response;
   /** A machine is linked: publish the tailnet door at start even with Phones off. */
   hasLinks: () => boolean;
+  /** The linked machine a door device belongs to, or null. */
+  machineOfDevice?: (deviceId: string) => { machine: string; name: string } | null;
 }
 
 /** The platform a linked Inbox pairs as. */
@@ -1213,6 +1228,19 @@ export function createInboxDevices(context: InboxDevicesContext) {
   /** Whether this Inbox answers an own route that needs something: linked machines, or Update from another machine. */
   const hasOwn = (needs: DoorOwnNeeds): boolean => (needs === "machines" ? (context.machines?.() ?? null) !== null : context.machineUpdate !== undefined);
 
+  /** A far tag's write from a linked machine (inbox-far-tags.ts): the machine its token belongs to, and its answer or refusal. */
+  const farTagWrite = async (device: InboxDevice, body: () => Promise<Record<string, unknown>>, run: (machine: string, body: Record<string, unknown>) => unknown): Promise<Response> => {
+    const machine = context.machines?.()?.machineOfDevice?.(device.id)?.machine ?? null;
+    if (!machine) return routeNotFound(device);
+    try {
+      return json(await run(machine, await body()));
+    } catch (error) {
+      if (error instanceof InboxError && (error.code === "message_not_found" || error.code === "thread_not_found")) return json({ error: error.message, code: error.code }, 404);
+      if (error instanceof InboxError && error.code === "not_your_session") return json({ error: error.message, code: error.code }, 403);
+      return caught(error);
+    }
+  };
+
   /** A linked machine's own routes (`DOOR_OWN_ROUTES`), each answered only when `hasOwn` says so. */
   const machineOwn: Record<MachineOwnName, (req: Request, url: URL, device: InboxDevice) => Promise<Response>> = {
     // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
@@ -1223,6 +1251,11 @@ export function createInboxDevices(context: InboxDevicesContext) {
     // Its agent's search and thread list here: reads only, as a guest's.
     "GET agent-search": async (_req, url, device) => (context.agentFind ? await context.agentFind.search(url) : routeNotFound(device)),
     "GET agent-threads": async (_req, url, device) => (context.agentFind ? await context.agentFind.threads(url) : routeNotFound(device)),
+    // Tag an agent on another computer (inbox-far-tags.ts): who the machine asking is comes from its token only.
+    "GET taggable-agents": async (_req, _url, device) => (context.farTags ? context.farTags.agents() : routeNotFound(device)),
+    "POST far-wake": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.wake) : routeNotFound(device)),
+    "POST agent-reply": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.reply) : routeNotFound(device)),
+    "POST far-delivered": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.delivered) : routeNotFound(device)),
     "POST link-back": async (req, _url, device) => context.machines?.()?.linkBack(device.id, await context.readBody(req)) ?? routeNotFound(device),
     "POST unlink": async (_req, _url, device) => context.machines?.()?.unlinkedBy(device.id) ?? routeNotFound(device),
     // The body is never read, so a machine cannot name a version or a place to download from.

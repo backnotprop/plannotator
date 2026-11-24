@@ -58,6 +58,10 @@ import { inboxCapabilitySwitchesOf, type InboxCapabilitySwitches } from "@planno
 import { createFarCapabilities } from "./inbox-capabilities-machines";
 import { CAPABILITY_NOTE_FIELD, CAPABILITY_NOTE_MARK } from "./inbox-capability-note";
 import type { SharedReactions } from "./inbox-reactions-shared";
+import { FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE } from "./inbox-far-tags";
+
+/** A far tag's door routes (inbox-far-tags.ts): this Inbox sends them itself; the forward never does. */
+const FAR_TAG_OWN_ROUTES = new Set([FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE, FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE]);
 
 /** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
 const FAR_ARCHIVED_LIMIT_MAX = 200;
@@ -362,8 +366,11 @@ export interface OutboxView {
 /** At most this much of a held write's words rides its view. */
 const OUTBOX_WORDS_SHOWN = 2_000;
 
-const wordsOf = (body: Record<string, unknown>): string | null => {
-  const words = typeof body.words === "string" ? body.words : typeof body.body === "string" ? body.body : null;
+const wordsOf = (entry: OutboxEntry): string | null => {
+  const { body } = entry;
+  // An agent's answer in a thread there (inbox-mcp-far-reply.ts) holds send_message's arguments: its words are theirs.
+  const args = entry.route === FAR_AGENT_REPLY_ROUTE && body.args && typeof body.args === "object" ? (body.args as Record<string, unknown>) : null;
+  const words = args ? (typeof args.body === "string" ? args.body : null) : typeof body.words === "string" ? body.words : typeof body.body === "string" ? body.body : null;
   if (words === null) return null;
   return words.length > OUTBOX_WORDS_SHOWN ? `${words.slice(0, OUTBOX_WORDS_SHOWN)}…` : words;
 };
@@ -379,7 +386,7 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
   answer: entry.answer,
   notice: entry.notice,
   dismissed: entry.dismissed,
-  words: wordsOf(entry.body),
+  words: wordsOf(entry),
   thread: entry.thread ?? null,
   machine_name: entry.machine_name ?? null,
 });
@@ -585,8 +592,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
   };
 
   outbox.onChange(({ entry }) => {
-    // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it.
-    if (entry.auto) return;
+    // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it,
+    // except the notice of one the person is told about when it does not land (`notify`).
+    if (entry.auto && !(entry.notify && entry.notice !== null)) return;
     emit({ event: "outbox", data: outboxView(entry) });
     machinesChanged();
   });
@@ -883,7 +891,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check, and
     // would hold a write such as a switch on disk. Nothing under `accounts/` either: a linked machine's switch is its own step.
     // `update` has its own route (`/api/inbox/machines/:id/update`), never a held forward.
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts" || safeDecode(route) === "update") {
+    // A far tag's own writes (inbox-far-tags.ts) are this Inbox's, never a window's.
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts" || safeDecode(route) === "update" || FAR_TAG_OWN_ROUTES.has(safeDecode(route))) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
@@ -1496,9 +1505,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
      * A write this Inbox makes itself on a linked machine's thread (a Combine's archive there, and its Undo;
      * inbox-combine-far.ts): held in the outbox as the window's writes are, so one queue and one key per write, sent
      * now while that machine is online and when it is back otherwise. Waits up to `waitMs` for its answer. Null when
-     * that machine is not linked. `own`: the write it undoes (`follows`), and when it stops being worth sending (`send_by`).
+     * that machine is not linked. `own`: the write it undoes (`follows`), when it stops being worth sending (`send_by`), and
+     * whether its refusal is a notice the window shows (`notify`).
      */
-    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string } = {}): Promise<OutboxEntry | null> | null => {
+    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string; notify?: boolean } = {}): Promise<OutboxEntry | null> | null => {
       const peer = peers.get(machine);
       if (!peer) return null;
       // Marked as this Inbox's own (`auto`): the window never lists it as the person's waiting write.
@@ -1507,8 +1517,14 @@ export function createInboxMachines(context: InboxMachinesContext) {
       else peer.poke();
       return outbox.waitSettled(entry.key, peer.state === "online" ? waitMs : 0);
     },
+    /** Every linked machine's line (a far tag's `@` list, inbox-far-tags.ts). */
+    peerLinks: (): PeerLink[] => [...peers.values()],
     /** A held write of this Inbox's own, by its key: how it stands (null: never held). */
     heldWrite: (key: string): OutboxEntry | null => outbox.get(key),
+    /** A held write's notice, dismissed: the one who made it was told already (inbox-mcp-far-reply.ts). */
+    dismissHeld: (key: string): void => {
+      outbox.dismiss(key);
+    },
     /** Take back a held write of this Inbox's own that never left (rule 10: one that left stays), or one past its `send_by`. */
     cancelHeld: (key: string): OutboxEntry | null => outbox.cancel(key),
     /** A linked machine's rows as its list last said, or null while this Inbox holds no list of it. */

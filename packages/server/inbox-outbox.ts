@@ -123,6 +123,11 @@ export interface OutboxEntry {
    * is on its way right now). So nothing of it lands after its maker said it did not.
    */
   send_by?: string;
+  /**
+   * This Inbox's own write the person is told about when it does not land (an agent's answer in another computer's
+   * thread, held while that computer was away; inbox-mcp-far-reply.ts): its refusal is a notice, as a window's write's.
+   */
+  notify?: true;
 }
 
 /** Whether a settled entry may have been applied there: delivered (and not skipped there by its guard), given up after 5xx, or taken back after it left. */
@@ -303,6 +308,11 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // Show in Rex for an agent on another machine (inbox-rex-far.ts): a press that moves Rex's app now; held for later it
   // would move it when nobody asked.
   "POST rex/show": "now",
+  // Tag an agent on another computer (inbox-far-tags.ts), each sent by the Inbox itself, never the person and never
+  // through the forward: a wake kept once per reply and session, an answer written under its idempotency key, a delivery.
+  "POST far-wake": "set",
+  "POST agent-reply": "append",
+  "POST far-delivered": "set",
   // A routine on a linked computer (mark `routines`), from a press in a window here. A create carries its
   // `idempotency_key`, which that computer keeps on the routine (one key, one routine); an edit, a turn, a delete
   // and a restore put a state; a Stop names the run it was pressed for (`run`), so a late one never ends a later run.
@@ -449,7 +459,7 @@ export class InboxOutbox {
 
   /** Every entry the person has not been told about yet, or not dismissed: refusals and losses (rules 3, 4). */
   notices(): OutboxEntry[] {
-    return [...this.entries.values()].filter((e) => e.notice !== null && !e.dismissed && !e.auto).sort((a, b) => (a.notice!.at < b.notice!.at ? -1 : 1));
+    return [...this.entries.values()].filter((e) => e.notice !== null && !e.dismissed && (!e.auto || e.notify)).sort((a, b) => (a.notice!.at < b.notice!.at ? -1 : 1));
   }
 
   dismiss(key: string): OutboxEntry | null {
@@ -472,7 +482,7 @@ export class InboxOutbox {
     window = false,
     sentFrom: InboxSentFromPlace | null = null,
     auto = false,
-    own: { follows?: string; send_by?: string } = {},
+    own: { follows?: string; send_by?: string; notify?: boolean } = {},
   ): { entry: OutboxEntry; fresh: boolean } {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
@@ -510,6 +520,7 @@ export class InboxOutbox {
       ...(auto ? { auto: true as const } : {}),
       ...(auto && own.follows ? { follows: own.follows } : {}),
       ...(auto && own.send_by ? { send_by: own.send_by } : {}),
+      ...(auto && own.notify ? { notify: true as const } : {}),
     });
     return { entry, fresh: true };
   }

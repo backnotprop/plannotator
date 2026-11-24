@@ -23053,6 +23053,90 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-get-taggable-agents",
+      "title": "door:GET taggable-agents",
+      "surface": [
+        "door:GET taggable-agents"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-agent-reply",
+      "title": "door:POST agent-reply",
+      "surface": [
+        "door:POST agent-reply"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-far-delivered",
+      "title": "door:POST far-delivered",
+      "surface": [
+        "door:POST far-delivered"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-far-wake",
+      "title": "door:POST far-wake",
+      "surface": [
+        "door:POST far-wake"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxaddressee-machine",
+      "title": "field:InboxAddressee.machine",
+      "surface": [
+        "field:InboxAddressee.machine"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxtag-machine",
+      "title": "field:InboxTag.machine",
+      "surface": [
+        "field:InboxTag.machine"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
