@@ -1521,6 +1521,16 @@ elif [ "$codex_available" -eq 1 ]; then
     CODEX_HOOKS="$CODEX_DIR/hooks.json"
     PLANNOTATOR_BIN="${INSTALL_DIR}/plannotator"
     codex_hook_configured=0
+    # The PostToolUse hook next to the Stop hook: a reply from the Inbox goes into a running Codex turn after its next
+    # tool call (the Codex app too). Its shell gate starts the binary only while a reply waits. The same string as
+    # codexHookCommand() in packages/shared/codex-hook-command.ts (scripts/install.test.ts holds them equal); none
+    # for a binary path the gate's quotes cannot carry.
+    CODEX_POST_TOOL_HOOK=""
+    case "$PLANNOTATOR_BIN" in
+        *[\'\"\$\`\\]*) ;;
+        *) CODEX_POST_TOOL_HOOK="/bin/sh -c '[ -n \"\${PLANNOTATOR_DATA_DIR:-}\" ] && exec \"${PLANNOTATOR_BIN}\" codex-hook; for f in \"\$HOME\"/.plannotator/inbox/codex-hook/*.json \"\${XDG_DATA_HOME:-/nonexistent}\"/plannotator/inbox/codex-hook/*.json; do [ -e \"\$f\" ] && exec \"${PLANNOTATOR_BIN}\" codex-hook; done; exit 0'" ;;
+    esac
+    CODEX_POST_TOOL_HOOK_JSON=$(printf '%s' "$CODEX_POST_TOOL_HOOK" | sed 's/"/\\"/g')
 
     mkdir -p "$CODEX_DIR"
 
@@ -1593,6 +1603,21 @@ CODEX_CONFIG_EOF
     }
 
     if [ ! -f "$CODEX_HOOKS" ]; then
+        codex_post_tool_entry=""
+        if [ -n "$CODEX_POST_TOOL_HOOK" ]; then
+            codex_post_tool_entry=",
+    \"PostToolUse\": [
+      {
+        \"hooks\": [
+          {
+            \"type\": \"command\",
+            \"command\": \"${CODEX_POST_TOOL_HOOK_JSON}\",
+            \"timeout\": 10
+          }
+        ]
+      }
+    ]"
+        fi
         cat > "$CODEX_HOOKS" << CODEX_HOOKS_EOF
 {
   "hooks": {
@@ -1606,17 +1631,17 @@ CODEX_CONFIG_EOF
           }
         ]
       }
-    ]
+    ]${codex_post_tool_entry}
   }
 }
 CODEX_HOOKS_EOF
         echo "Created Codex hooks at ${CODEX_HOOKS}"
         codex_hook_configured=1
     elif command -v node >/dev/null 2>&1; then
-        if codex_merge_result=$(node - "$CODEX_HOOKS" "$PLANNOTATOR_BIN" <<'NODE'
+        if codex_merge_result=$(node - "$CODEX_HOOKS" "$PLANNOTATOR_BIN" "$CODEX_POST_TOOL_HOOK" <<'NODE'
 const fs = require("fs");
 const path = require("path");
-const [hooksPath, command] = process.argv.slice(2);
+const [hooksPath, command, postToolCommand] = process.argv.slice(2);
 const config = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
 config.hooks ||= {};
 const stopHooks = Array.isArray(config.hooks.Stop) ? config.hooks.Stop : [];
@@ -1655,7 +1680,32 @@ if (!updated && !foundCustomPlannotatorHook) {
   });
 }
 config.hooks.Stop = stopHooks;
-if (updated || !foundCustomPlannotatorHook) {
+// The PostToolUse hook (a reply from the Inbox into a running turn), kept with the Stop hook: updated in place when
+// it is there (any path), added as its own group otherwise, never touching another hook. Only beside a Stop hook
+// this installer manages.
+let postToolChanged = false;
+if (postToolCommand && (updated || !foundCustomPlannotatorHook)) {
+  const postTool = Array.isArray(config.hooks.PostToolUse) ? config.hooks.PostToolUse : [];
+  const isOurs = (value) => typeof value === "string" && value.startsWith("/bin/sh -c '") && value.includes("/plannotator/inbox/codex-hook/*.json") && value.includes('" codex-hook;');
+  let found = false;
+  for (const entry of postTool) {
+    for (const hook of Array.isArray(entry?.hooks) ? entry.hooks : []) {
+      if (hook?.type !== "command" || !isOurs(hook.command)) continue;
+      found = true;
+      if (hook.command !== postToolCommand || hook.timeout !== 10) {
+        hook.command = postToolCommand;
+        hook.timeout = 10;
+        postToolChanged = true;
+      }
+    }
+  }
+  if (!found) {
+    postTool.push({ hooks: [{ type: "command", command: postToolCommand, timeout: 10 }] });
+    postToolChanged = true;
+  }
+  config.hooks.PostToolUse = postTool;
+}
+if (updated || !foundCustomPlannotatorHook || postToolChanged) {
   fs.writeFileSync(hooksPath, JSON.stringify(config, null, 2) + "\n");
 }
 process.stdout.write(updated ? "updated" : foundCustomPlannotatorHook ? "custom" : "added");

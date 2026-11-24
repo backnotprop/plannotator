@@ -18,8 +18,10 @@
  * (`InboxStore.pendingRepliesFor`) is handed to
  * `codex queue --thread=<id> --message=<the wake text>` exactly once:
  *
- *  - an idle thread starts the turn within about a second, a busy one gets it
- *    as its next turn when the current one ends (never mid-turn), and a
+ *  - a busy thread gets it in its running turn when it can (inbox-codex-steer.ts:
+ *    `turn/steer` over Codex's control socket, or held for Plannotator's
+ *    PostToolUse hook), else as its next turn when the current one ends; an
+ *    idle thread starts the turn within about a second, and a
  *    thread whose Codex is closed runs it when it is resumed (or headless,
  *    within a minute, while Codex's background server still holds it);
  *  - every call adds an item to Codex's queue, so each item is claimed once,
@@ -63,9 +65,9 @@
  *
  * A sweep is one pass over the person's messages (bucketed by recipient), and
  * runs only when it can find something: a store line, a retry coming due, a
- * thread coming back, and once at start. No Send now
- * and no going in by itself after five minutes: Codex never takes a message
- * mid-turn.
+ * thread coming back, once at start, and every 2 s while the hook holds a
+ * reply. No Send now and no going in by itself after five minutes: a reply
+ * that can go into the running turn goes at once.
  */
 
 import { INBOX_ROWS_ASK_CLOSE, INBOX_ROWS_ASK_OPEN } from "@plannotator/core/inbox-types";
@@ -78,6 +80,9 @@ import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN, INBOX_DECISION_ASK
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentHomeAllowed, codexHome, type AgentEnvironment } from "./inbox-agents";
 import type { LaunchDelivery } from "./inbox-launch-host";
+import { codexHookedAt, holdForCodexHook, releaseCodexHookHold } from "@plannotator/shared/inbox/codex-hook-mailbox";
+import { CODEX_HOOK_CLAIM_GRACE_MS, CODEX_HOOK_HOLD_MAX_MS, CODEX_HOOK_LOOK_MS, createCodexSteerRoute, type CodexSteerRoute } from "./inbox-codex-steer";
+import { codexSteerAllowed } from "./inbox-codex-steer-guard";
 import { createT3Claims, INBOX_T3_READ_BACK_AFTER_MS, type T3Local, type T3Route, tryThroughT3 } from "./inbox-t3-local";
 
 /** The ChatGPT desktop app's own Codex CLI (macOS), used when no `codex` is on PATH. */
@@ -386,6 +391,8 @@ export function createInboxCodexWake(options: {
   log?: (line: string) => void;
   /** Each reply that went into a T3 thread, and each that starts to wait on T3 (the debug log's `t3_route` line). */
   route?: (route: T3Route) => void;
+  /** Steering into a running turn (inbox-codex-steer.ts). Default: the socket and the hook under this environment's Codex home. */
+  steer?: CodexSteerRoute;
 }): InboxCodexWake {
   const { store, environment } = options;
   const now = options.now ?? Date.now;
@@ -393,6 +400,24 @@ export function createInboxCodexWake(options: {
   const dir = join(store.dir, QUEUE_DIR);
   const deadDir = join(dir, DEAD_DIR);
   const stopping = new AbortController();
+  const steer =
+    options.steer ??
+    createCodexSteerRoute({ codexHomeDir: () => codexHome(environment), allowed: () => codexSteerAllowed(environment), likelyFolders: codexRolloutDayFolders, now });
+  /**
+   * Replies held for the Codex hook while their thread is in a turn (inbox-codex-steer.ts), by claim key: since when,
+   * and when a claim the hook made was first seen without its `hooked.json`. Not claimed meanwhile (the hook claims).
+   */
+  const held = new Map<string, { since: number; claimSeen: number | null }>();
+  let lookTimer: ReturnType<typeof setTimeout> | null = null;
+  /** While anything is held: look again soon (the hook took it, or the turn ended). */
+  const scheduleLook = () => {
+    if (lookTimer || held.size === 0 || stopping.signal.aborted) return;
+    lookTimer = setTimeout(() => {
+      lookTimer = null;
+      void sweep();
+    }, CODEX_HOOK_LOOK_MS);
+    (lookTimer as { unref?: () => void }).unref?.();
+  };
 
   // ── The CLI ──
   let cliAnswer: { cli: InboxCodexCli | null; at: number } | null = null;
@@ -491,6 +516,8 @@ export function createInboxCodexWake(options: {
       const itemId = name.slice(0, dot);
       const session = name.slice(dot + 1);
       if (!isCodexThreadId(session)) continue;
+      // The hook's claim: it went into a turn. The first sweep records it (`hookStep`).
+      if (existsSync(join(dir, name, "hooked.json"))) continue;
       claimed.add(name);
       try {
         const record = JSON.parse(readFileSync(join(dir, name, "queued.json"), "utf8")) as { at?: unknown; timed_out?: unknown; uncertain?: unknown };
@@ -511,13 +538,48 @@ export function createInboxCodexWake(options: {
     queued.get(session)?.delete(itemId);
     rmSync(claimDir(itemId, session), { recursive: true, force: true });
   };
-  const delivered = (itemId: string, session: string) => {
+  /** `steered`: it went into the running turn (the socket's `turn/steer`, the hook, a launched thread's steer). */
+  const delivered = (itemId: string, session: string, steered = false) => {
     try {
-      store.recordDelivery(itemId, { host: INBOX_CODEX_HOST, session });
+      store.recordDelivery(itemId, { host: INBOX_CODEX_HOST, session, ...(steered ? { steered: true } : {}) });
     } catch {
       // Gone, or no longer this session's.
     }
+    held.delete(`${itemId}.${session}`);
+    releaseCodexHookHold(store.dir, session, itemId);
     dropClaim(itemId, session);
+  };
+
+  /**
+   * An item the hook may hold or have taken, before anything claims it: `done` when there is nothing more to do now
+   * (the hook took it and it is recorded, it is still held, or the hook's claim is being finished), `go` to send it the
+   * usual way (`hold: false` once a hold ended, so the same turn's end does not hold it again).
+   */
+  const hookStep = async (id: string, session: string): Promise<{ next: "done" } | { next: "go"; hold: boolean }> => {
+    const key = `${id}.${session}`;
+    if (codexHookedAt(store.dir, id, session) !== null) {
+      delivered(id, session, true);
+      return { next: "done" };
+    }
+    const hold = held.get(key);
+    if (!hold) return { next: "go", hold: true };
+    if (existsSync(claimDir(id, session))) {
+      // The hook claimed it and is writing `hooked.json`; a claim left without one is a hook that died between the two.
+      hold.claimSeen ??= now();
+      if (now() - hold.claimSeen < CODEX_HOOK_CLAIM_GRACE_MS) return { next: "done" };
+      held.delete(key);
+      releaseCodexHookHold(store.dir, session, id);
+      claimed.add(key);
+      uncertain.add(key);
+      writeFileSync(join(claimDir(id, session), "queued.json"), `${JSON.stringify({ at: hold.since, uncertain: true })}\n`);
+      log(`the Codex hook claimed ${id} for ${session} and did not finish; it is not sent again: the agent sees it when it reads the thread.`);
+      return { next: "done" };
+    }
+    if (now() - hold.since < CODEX_HOOK_HOLD_MAX_MS && (await steer.holdsForHook(session))) return { next: "done" };
+    // The turn ended with no tool call after the reply: it goes as the next turn.
+    held.delete(key);
+    releaseCodexHookHold(store.dir, session, id);
+    return { next: "go", hold: false };
   };
 
   /** Whether the item goes to `session` through a wake: its owner's message woke, it is addressed to it, or a waking tag. */
@@ -545,7 +607,8 @@ export function createInboxCodexWake(options: {
   };
 
   /** `path`: a Codex CLI that queues, or null when none was found (then only a launched session's host can take it). */
-  const queueOne = async (path: string | null, item: InboxMessage, session: string): Promise<void> => {
+  /** `mayHold`: it may wait for the Codex hook (false once a hold ended at the turn's end). */
+  const queueOne = async (path: string | null, item: InboxMessage, session: string, mayHold = true): Promise<void> => {
     const id = store.deliveryIdOf(item, session);
     const key = `${id}.${session}`;
     const retry = retryAt.get(key);
@@ -555,6 +618,12 @@ export function createInboxCodexWake(options: {
       mkdirSync(dir, { recursive: true });
       mkdirSync(claimDir(id, session));
     } catch {
+      if (!claimed.has(key) && !inFlight.has(key) && existsSync(claimDir(id, session))) {
+        // Not this Inbox's claim: the Codex hook took it a moment ago (`hookStep` records it once it says so).
+        held.set(key, { since: now(), claimSeen: now() });
+        scheduleLook();
+        return;
+      }
       // Claimed already (another sweep, or before a restart).
       claimed.add(key);
       return;
@@ -567,10 +636,10 @@ export function createInboxCodexWake(options: {
     inFlight.set(key, flight);
     // A launched session: its host puts it in as a turn now (delivered), or leaves it to `codex queue`.
     const own = options.deliver ? await options.deliver(session, text).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) })) : "queue";
-    if (own === "delivered") {
+    if (own === "delivered" || own === "steered") {
       inFlight.delete(key);
       retryAt.delete(key);
-      delivered(id, session);
+      delivered(id, session, own === "steered");
       return;
     }
     if (own === "hold") {
@@ -604,6 +673,37 @@ export function createInboxCodexWake(options: {
       dropClaim(id, session);
       return;
     }
+    // Into the running turn, when one runs (inbox-codex-steer.ts): the control socket's `turn/steer` at once, else
+    // held for the Codex hook (after the turn's next tool call). Anything else goes as the next turn, as before.
+    const socket = await steer.socket(session, text).catch((error: unknown) => ({ kind: "no" as const, why: String(error), idle: false }));
+    if (socket.kind === "steered") {
+      inFlight.delete(key);
+      retryAt.delete(key);
+      unproven.delete(session);
+      delivered(id, session, true);
+      return;
+    }
+    if (socket.kind === "uncertain") {
+      // Written and no answer: it may be in the turn. Kept claimed and uncertain, never sent again (as a timed-out queue).
+      inFlight.delete(key);
+      retryAt.delete(key);
+      log(`turn/steer did not answer for ${item.id} (thread ${session}): ${socket.why}; it is not sent again: the agent sees it when it reads the thread.`);
+      if (!claimed.has(key)) return;
+      uncertain.add(key);
+      writeFileSync(join(claimDir(id, session), "queued.json"), `${JSON.stringify({ at, timed_out: true })}\n`);
+      return;
+    }
+    if (mayHold && !socket.idle && (await steer.holdsForHook(session).catch(() => false)) && claimed.has(key)) {
+      // Unclaimed again for the hook to claim; still handed to Codex (its line: it takes this at its next step).
+      inFlight.delete(key);
+      claimed.delete(key);
+      rmSync(claimDir(id, session), { recursive: true, force: true });
+      holdForCodexHook(store.dir, session, id, text, now());
+      held.set(key, { since: now(), claimSeen: null });
+      scheduleLook();
+      return;
+    }
+    releaseCodexHookHold(store.dir, session, id);
     // `--name=value`: a value that starts with "-" would be read as a flag.
     const run = await environment.run([path, "queue", `--thread=${session}`, `--message=${text}`], { timeoutMs: options.queueTimeoutMs ?? INBOX_CODEX_QUEUE_TIMEOUT_MS, signal: stopping.signal });
     inFlight.delete(key);
@@ -809,6 +909,12 @@ export function createInboxCodexWake(options: {
       dropClaim(key.slice(0, dot), key.slice(dot + 1));
     }
     for (const key of [...retryAt.keys()]) if (!pendingKeys.has(key)) retryAt.delete(key);
+    // A held reply that no longer waits (taken back, read, deleted): the hook must not take it.
+    for (const key of [...held.keys()]) {
+      if (pendingKeys.has(key)) continue;
+      held.delete(key);
+      releaseCodexHookHold(store.dir, sessionOfKey(key), itemOfKey(key));
+    }
     for (const key of [...t3Saved]) if (!pendingKeys.has(key)) t3Saved.delete(key);
     for (const key of t3Claims.keys()) if (!pendingKeys.has(key)) t3Claims.drop(itemOfKey(key), sessionOfKey(key));
     // A thread T3 Code runs goes into its T3 thread: T3 runs a turn it did not start out of sight.
@@ -827,6 +933,22 @@ export function createInboxCodexWake(options: {
       }
       work = work.filter((one) => !t3Owned.has(one.session));
     }
+    // What the Codex hook holds or took, before anything claims it (inbox-codex-steer.ts).
+    const mayHold = new Map<string, boolean>();
+    const unhooked: typeof work = [];
+    for (const one of work) {
+      if (stopping.signal.aborted) return;
+      if (options.launched?.(one.session) === true) {
+        unhooked.push(one);
+        continue;
+      }
+      const id = store.deliveryIdOf(one.item, one.session);
+      const step = await hookStep(id, one.session);
+      if (step.next === "done") continue;
+      mayHold.set(`${id}.${one.session}`, step.hold);
+      unhooked.push(one);
+    }
+    work = unhooked;
     if (work.length > 0) {
       // A launched session's host needs no CLI that queues; without one, only those items can go.
       const found = await cli();
@@ -834,11 +956,12 @@ export function createInboxCodexWake(options: {
       if (sendable.length > 0) {
         for (const { item, session } of sendable) {
           if (stopping.signal.aborted) return;
-          await queueOne(found?.path ?? null, item, session);
+          await queueOne(found?.path ?? null, item, session, mayHold.get(`${store.deliveryIdOf(item, session)}.${session}`) ?? true);
         }
       }
     }
     scheduleRetry();
+    scheduleLook();
   };
   const sweep = (): Promise<void> => {
     if (stopping.signal.aborted) return Promise.resolve();
@@ -928,6 +1051,7 @@ export function createInboxCodexWake(options: {
     stop: () => {
       stopping.abort();
       if (retryTimer) clearTimeout(retryTimer);
+      if (lookTimer) clearTimeout(lookTimer);
       unsubscribe();
     },
   };

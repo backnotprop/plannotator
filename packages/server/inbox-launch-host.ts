@@ -44,9 +44,10 @@ export interface LaunchHostResult {
  * launch of this Inbox owns), it could not (`failed`: tried again later, as a failed `codex queue` is), or it may
  * have gone (`uncertain`: sent and never answered; kept claimed and never sent again, as a `codex queue` that ran
  * out of time is). `hold` (the engine's answer, never a host's): not now, and not the wake's own way either; the
- * item waits in the Inbox (a deleted launch's session, a reply the person's Stop held).
+ * item waits in the Inbox (a deleted launch's session, a reply the person's Stop held). `steered`: delivered into the
+ * turn that was running (Codex's `turn/steer`); recorded at once, and its line says so.
  */
-export type LaunchDelivery = "delivered" | "queue" | "hold" | { failed: string } | { uncertain: string };
+export type LaunchDelivery = "delivered" | "steered" | "queue" | "hold" | { failed: string } | { uncertain: string };
 
 /**
  * The folder the person's files sent to an agent sit in (a message's `attachments`). A launched session reads them

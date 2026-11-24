@@ -227,6 +227,18 @@ describe("Codex through the launch engine, against the fake codex", () => {
     expect(resumed.params.config.model_reasoning_effort).toBe("high");
   }, 30_000);
 
+  test("a reply while a turn runs goes into that turn with turn/steer, not a second turn/start, and its delivery says so", async () => {
+    const t = setup();
+    const root = await t.send("A SLOW job.");
+    await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");
+    const starts = t.fake.rpc("turn/start").length;
+    const reply = t.store.sendReply(root.id, { words: "Into this turn.", idempotency_key: "reply-steer" }).reply!;
+    const delivered = await until("delivered", () => t.store.message(reply.id)!.delivery);
+    expect(delivered.into_turn).toBe(true);
+    expect(t.fake.rpc("turn/steer").filter((call) => JSON.stringify(call.params.input).includes("Into this turn."))).toHaveLength(1);
+    expect(t.fake.rpc("turn/start")).toHaveLength(starts);
+  }, 20_000);
+
   test("Codex that refuses a second turn gets the reply steered into the running one", async () => {
     const t = setup({ state: { refuseSecondTurn: true } });
     const root = await t.send("A SLOW job.");

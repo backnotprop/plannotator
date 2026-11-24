@@ -331,6 +331,15 @@ if (process.argv[2] === "t3-hook" && process.argv.length === 3 && !isAgentSdkEnt
   process.exit(0);
 }
 
+// Plannotator's Codex `PostToolUse` hook (`codex-hook`, internal: the installer writes it into the Codex hooks.json,
+// and its shell gate starts this binary only while a reply waits for a Codex turn). Before any startup work, and it
+// never fails a tool call: no output when nothing is taken (apps/hook/server/codex-hook.ts).
+if (process.argv[2] === "codex-hook" && process.argv.length === 3) {
+  const { codexHookMain } = await import("./codex-hook");
+  await codexHookMain().catch(() => undefined);
+  process.exit(0);
+}
+
 // Check for subcommand
 // "Ask this session" pull-bridge secret: take it out of process.env before
 // ANYTHING spawns (git/gh/sem before the server starts, the auto-update
