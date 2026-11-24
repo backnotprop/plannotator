@@ -90,6 +90,16 @@ export function modalOpen(doc: Document | null = typeof document === 'undefined'
   return false;
 }
 
+/**
+ * Decision mode shows in the pane of `threadId` (its bar is drawn there; approval "inbox-decision-mode-one-send"). The
+ * window's keys that act on that thread or move away from it (E, Shift+E, Z, J, K) stand down meanwhile, as they did
+ * under the old decision mode's dialog: what they would act on is hidden behind it.
+ */
+export function threadDeciding(threadId: string | null | undefined, doc: Document | null = typeof document === 'undefined' ? null : document): boolean {
+  if (!threadId || !doc) return false;
+  return doc.querySelector(`section.ib-pane[data-thread-id="${CSS.escape(threadId)}"] [data-decide-head]`) !== null;
+}
+
 /** The key came from inside a dialog or a popover layer (a composer, the image annotator): it is theirs. A body's raw HTML is no layer. */
 export function inOverlay(target: Element | null): boolean {
   if (target?.closest(STRANGERS_MARKUP)) return false;

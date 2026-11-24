@@ -111,7 +111,7 @@ import { SearchHost, type SearchLanding } from './components/SearchHost';
 import { onOpenSearchKey } from './search/searchShortcut';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from './shortcuts/thread.shortcuts';
-import { bareKeyAllowed, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, keyboardFocused, keyTarget, modalOpen, singleKeysLive } from './shortcuts/guards';
+import { bareKeyAllowed, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, keyboardFocused, keyTarget, modalOpen, singleKeysLive, threadDeciding } from './shortcuts/guards';
 import { appKeyAllowed as appKeyAllowedOn, archiveTarget, newPageKeys, refreshAction, refreshKey, refreshKind } from './keyboard/appKeys';
 import { inboxAppShortcuts } from './shortcuts/app.shortcuts';
 import { ShortcutMap } from './components/ShortcutMap';
@@ -3231,7 +3231,7 @@ function Inbox() {
   // modifier (so the reply box keeps its own ⌘Z).
   // An open file (its viewer, the stepping bar, the guard row) and a guided
   // review own the keyboard: E and Z stand down there, and while the sound
-  // dialog is up.
+  // dialog is up, and while decision mode shows in the open thread (guards.ts `threadDeciding`).
   const keysRef = useRef({ markRead, toast, thread, soundDialog, agentNoteOpen: false, feedbackOpen: false });
   keysRef.current = { markRead, toast, thread, soundDialog, agentNoteOpen: typeof agentNote === 'object', feedbackOpen };
   /**
@@ -3240,7 +3240,7 @@ function Inbox() {
    */
   const threadKeyAction = (event: KeyboardEvent, key: 'e' | 'z' | 'archive'): (() => void) | null => {
     if (event.defaultPrevented || isRepeatKey(event) || isComposingKey(event) || !singleKeysLive()) return null;
-    if (keysRef.current.soundDialog === 'open' || keysRef.current.agentNoteOpen || keysRef.current.feedbackOpen || routeRef.current.guide) return null;
+    if (keysRef.current.soundDialog === 'open' || keysRef.current.agentNoteOpen || keysRef.current.feedbackOpen || routeRef.current.guide || threadDeciding(routeRef.current.thread)) return null;
     const target = event.target instanceof HTMLElement ? event.target : null;
     if (target) {
       if (isEditableTarget(target)) return null;
@@ -3283,7 +3283,7 @@ function Inbox() {
     when: (event: KeyboardEvent) => {
       if (!bareKeyAllowed(event)) return false;
       const now = routeRef.current;
-      if (now.page !== 'inbox' || now.file || now.guide || now.artifacts) return false;
+      if (now.page !== 'inbox' || now.file || now.guide || now.artifacts || threadDeciding(now.thread)) return false;
       const target = keyTarget(event);
       if (!now.thread) return !!target?.closest('.ib-main .ib-lbody') && target.matches(LIST_STOPS);
       return !target || target === document.body || !!target.closest('section.ib-pane, .ib-main .ib-lbody');

@@ -945,6 +945,26 @@ test("J6: Decide mode: the thread's keys rest while it shows, a pick is a draft,
   await expect(page.locator('section.ib-pane textarea[aria-label^="Reply to"]')).toHaveCount(0);
   await expect(page.locator('[data-open-questions-list]')).toHaveCount(0);
   expect(hash()).toBe(before);
+  // Nor do the window's keys that act on the thread behind it or move away, as under the old Decide dialog: E is not
+  // Mark read, Shift+E not Archive, Z, J and K do nothing.
+  const unread = () => row(decidedIn).evaluate((el) => el.classList.contains('ib-u'));
+  const wasUnread = await unread();
+  await press('e', 'Shift+E', 'z', 'j', 'k');
+  expect(await unread(), 'the thread behind Decide was not marked read').toBe(wasUnread);
+  await expect(row(decidedIn)).toBeVisible();
+  await expect(decide()).toBeVisible();
+  expect(hash()).toBe(before);
+  // `?` and `/` still work; Escape in them closes only them.
+  await press('Shift+?');
+  await expect(map()).toBeVisible();
+  await press('Escape');
+  await expect(map()).toHaveCount(0);
+  await press('/');
+  await expect(searchInput()).toBeFocused();
+  await press('Escape');
+  await expect(page.locator('dialog[data-search-palette]')).toBeHidden();
+  await expect(decide()).toBeVisible();
+  expect(hash()).toBe(before);
   await tabTo(page.locator('section.ib-pane [data-message-article] input[data-question-control]').first());
   await press('Space');
   await expect(page.locator('section.ib-pane [data-message-article] input[data-question-control]').first()).toBeChecked();

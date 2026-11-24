@@ -122,6 +122,7 @@ import {
   INBOX_TOOL_HOSTS,
   cookieHostState,
   inboxChapterDiagramsOn,
+  inboxDecisionModeEnvOff,
   inboxDecisionModeOn,
   loadConfig,
   saveCookieHost,
@@ -3390,6 +3391,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       throw new InboxError("validation_error", "decision_mode: { on: boolean }.", { field: "decision_mode" });
     }
     const on = (input as { on: boolean }).on;
+    // PLANNOTATOR_EXPERIMENTAL=-decision-mode decides (as it did while experimental): saving on would change nothing.
+    if (on && inboxDecisionModeEnvOff()) {
+      throw new InboxError("experimental_env_decides", "PLANNOTATOR_EXPERIMENTAL is set in this Inbox's environment, so decision mode stays off.", { field: "decision_mode" });
+    }
     if (validateOnly) return { on: decisionModeOn() };
     const was = decisionModeOn();
     saveConfig({ inboxDecisionMode: on });
@@ -4037,17 +4042,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     saveConfig({ inboxReveals: revealStampNotNow(loadConfig().inboxReveals, new Date().toISOString()) });
   };
   const experimentalState = () => ({
+    // For an Inbox window from before Decision mode left Experimental, which reads `experimental.decision_mode.on`:
+    // the real state (the new place is `decision_mode`). Remove after one release.
+    decision_mode: { on: decisionModeOn(), env: inboxDecisionModeEnvOff() ? false : null },
     // Grid (approval "inbox-agent-grid"): the window's page of work in flight, drawn from what the window already reads.
     grid: { on: gridOn(), env: parseExperimentalEnv("grid") ?? null },
   });
 
-  /** Save `experimental: { grid }`. `validateOnly`: check and write nothing. */
+  /**
+   * Save `experimental: { grid }`. `validateOnly`: check and write nothing. An older window's Decision mode switch
+   * (`experimental: { decision_mode }`) saves the new setting, as `decision_mode: { on }` does. Remove after one release.
+   */
   const saveExperimental = (input: unknown, validateOnly = false) => {
     const switches = { grid: ["grid", "grid", "Grid"] } as const;
-    const named = input && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
-    if (named.length === 0 || named.some(([key, value]) => !Object.hasOwn(switches, key) || typeof value !== "boolean")) {
+    const all = input && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
+    const legacy = all.find(([key]) => key === "decision_mode");
+    const named = all.filter(([key]) => key !== "decision_mode");
+    if (all.length === 0 || (legacy && typeof legacy[1] !== "boolean") || named.some(([key, value]) => !Object.hasOwn(switches, key) || typeof value !== "boolean")) {
       throw new InboxError("validation_error", "experimental: { grid: boolean }.", { field: "experimental" });
     }
+    if (legacy) saveDecisionMode({ on: legacy[1] }, true);
     const change: { grid?: boolean } = {};
     for (const [key, on] of named as [keyof typeof switches, boolean][]) {
       const [feature, configKey, words] = switches[key];
@@ -4059,6 +4073,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       change[configKey] = on;
     }
     if (validateOnly) return experimentalState();
+    if (legacy) saveDecisionMode({ on: legacy[1] });
+    if (named.length === 0) return experimentalState();
     const gridWas = gridOn();
     saveConfig({ experimental: change });
     const saved = loadConfig().experimental as Record<string, unknown> | undefined;

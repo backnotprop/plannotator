@@ -31,6 +31,7 @@ import {
   resolveExperimental,
   parseExperimentalEnv,
   EXPERIMENTAL_FEATURES,
+  inboxDecisionModeEnvOff,
   inboxDecisionModeOn,
   agentToolHostOf,
   agentToolSaveFailed,
@@ -1358,6 +1359,17 @@ describe("experimental features", () => {
     // A hand-edited value that is not a boolean decides nothing: the next reading does.
     expect(inboxDecisionModeOn({ inboxDecisionMode: "maybe" as unknown as boolean, experimental: { decisionMode: false } })).toBe(false);
     expect(inboxDecisionModeOn({ experimental: [] as unknown as { decisionMode?: boolean } })).toBe(true);
+  });
+
+  test("PLANNOTATOR_EXPERIMENTAL=-decision-mode, the documented way to force it off, still turns it off; any other mention is ignored", () => {
+    expect(inboxDecisionModeOn({}, { PLANNOTATOR_EXPERIMENTAL: "-decision-mode" })).toBe(false);
+    expect(inboxDecisionModeOn({ inboxDecisionMode: true }, { PLANNOTATOR_EXPERIMENTAL: "grid, -Decision-Mode " })).toBe(false);
+    expect(inboxDecisionModeEnvOff({ PLANNOTATOR_EXPERIMENTAL: "grid,-decision-mode" })).toBe(true);
+    // The plain name, or no mention: the config decides, without error.
+    expect(inboxDecisionModeOn({ inboxDecisionMode: false }, { PLANNOTATOR_EXPERIMENTAL: "decision-mode" })).toBe(false);
+    expect(inboxDecisionModeOn({}, { PLANNOTATOR_EXPERIMENTAL: "decision-mode" })).toBe(true);
+    expect(inboxDecisionModeOn({}, { PLANNOTATOR_EXPERIMENTAL: "grid" })).toBe(true);
+    expect(inboxDecisionModeOn({}, {})).toBe(true);
   });
 
   test("saving one flag keeps the other experimental keys", () => {

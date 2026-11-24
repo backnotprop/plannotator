@@ -3,7 +3,10 @@
  * a time, its own cards and draft, ONE Send at the end. What regresses if these fail: decision mode sends on its own
  * (a pick, Next, Later, an action item's Done or leaving posts a reply), leaving loses the person's place or their
  * answers, Later does not move a message to the end, the Send is not the thread's own (not one reply per agent
- * session, or without the person's words), or the switch off still offers the way in.
+ * session, or without the person's words), or the switch off still offers the way in. Also: the Send step's words box
+ * saving over a draft the reply box kept (its words or files), a Send that did not go ending the sitting, the thread
+ * not given back where it was scrolled, Escape closing the whole thread, another thread and back reopening decision
+ * mode by itself, and "Resume · 0 of N left" when everything is answered.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -12,8 +15,9 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import { parseInboxActionBlocks } from '@plannotator/core/inbox-actions';
-import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxReplyDraft, InboxThread } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
+import { threadDeciding } from './shortcuts/guards';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -120,6 +124,12 @@ let savedFetch: typeof fetch;
 let served: InboxMessageWire[] = [];
 /** Every write the window made, in order: "picks <message>", "action <message> staged", "reply <message> <words>". */
 let writes: string[] = [];
+/** The thread's reply draft as the Inbox holds it, and every save of it the window posted. */
+let draft: InboxReplyDraft | null = null;
+let draftSaves: Record<string, unknown>[] = [];
+/** The Inbox refuses every reply (a Send that does not go). */
+let replyFails = false;
+const UPLOAD = { upload_id: 'upl_notes', name: 'notes.txt', size: 12, kind: 'text', sha256: 'a'.repeat(64), created_at: '2026-11-24T09:00:00.000Z' } as const;
 
 function serve() {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -148,6 +158,14 @@ function serve() {
       return Response.json({ questions: marked });
     }
     const reply = path.match(/\/messages\/([^/]+)\/reply$/);
+    if (reply && init?.method === 'POST' && replyFails) return Response.json({ error: 'The Inbox could not write the reply.', code: 'write_failed' }, { status: 500 });
+    if (/\/threads\/[^/]+\/draft$/.test(path)) {
+      if (init?.method === 'POST') {
+        draftSaves.push(body);
+        draft = { v: 1, thread_id: mid(1), body: String(body.body ?? ''), created_at: '2026-11-24T09:30:00.000Z', updated_at: `2026-11-24T09:31:${String(draftSaves.length).padStart(2, '0')}.000Z`, files: draft?.files ?? [] };
+      }
+      return Response.json({ draft });
+    }
     if (reply && init?.method === 'POST') {
       writes.push(`reply ${decodeURIComponent(reply[1]!)} ${String(body.words ?? '')}`.trim());
       return Response.json({ message_id: decodeURIComponent(reply[1]!), questions: [], reply: { id: `${T}_r${writes.length}` }, replayed: false });
@@ -164,6 +182,9 @@ beforeEach(() => {
   T = `msg_dm${threadSeq}`;
   savedFetch = globalThis.fetch;
   writes = [];
+  draft = null;
+  draftSaves = [];
+  replyFails = false;
   serve();
 });
 
@@ -177,9 +198,19 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
 });
 
+/** The pane moves to another thread ('b', one message of its own) and back ('a'), as a list press or J does. */
+let showThread: ((which: 'a' | 'b') => void) | null = null;
+function otherThread(): InboxThread {
+  const message = { ...agent(9, CLAUDE, `Elsewhere.\n\n${block('Rename the repo?')}`), thread_id: mid(9), reply_to: null, subject: 'Elsewhere' } as InboxMessageWire;
+  return { thread_id: mid(9), project: PROJECT, subject: 'Elsewhere', thread_name: null, resolved_at: null, messages: [message] };
+}
+
 function Live({ decisionMode }: { decisionMode: boolean }) {
   const [messages, setMessages] = React.useState(served);
-  const thread: InboxThread = { thread_id: mid(1), project: PROJECT, subject: 'Checkout redesign', thread_name: null, resolved_at: null, messages };
+  const [which, setWhich] = React.useState<'a' | 'b'>('a');
+  showThread = setWhich;
+  const other = React.useMemo(otherThread, []);
+  const thread: InboxThread = which === 'b' ? other : { thread_id: mid(1), project: PROJECT, subject: 'Checkout redesign', thread_name: null, resolved_at: null, messages };
   return (
     <ThreadPane
       thread={thread}
@@ -195,7 +226,8 @@ function Live({ decisionMode }: { decisionMode: boolean }) {
           }),
         )
       }
-      onChanged={async () => {}}
+      // A read of the thread again: what the stub Inbox holds now (an action item's mark lands this way).
+      onChanged={async () => setMessages(served)}
       onClose={() => {}}
       file={null}
       onOpenFile={() => {}}
@@ -382,4 +414,137 @@ test.skipIf(!hasDom)('with the switch off there is no way in', async () => {
   await render(false);
   await openList();
   expect(wayIn()).toBeNull();
+});
+
+/** Words typed in a textarea, as a key does. */
+async function typeInto(field: HTMLTextAreaElement, text: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, text);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+}
+const wait = (ms: number) => act(async () => void (await new Promise((resolve) => setTimeout(resolve, ms))));
+async function answerAll() {
+  for (const id of [mid(2), mid(1), mid(3)]) {
+    await pickFirst(id);
+    const done = $(`[data-message-article="${id}"] [data-action-done]`);
+    if (done) await press(done);
+    await press($('[data-decide-next]')!);
+  }
+  await until(() => writes.filter((w) => w.startsWith('picks')).length === 4 && writes.some((w) => w.startsWith('action')), 'every answer saved');
+}
+
+test.skipIf(!hasDom)('the Send step shows the draft the reply box kept when it closed, and a change there keeps its words and files', async () => {
+  draft = { v: 1, thread_id: mid(1), body: 'Kept words from before.', created_at: '2026-11-24T09:30:00.000Z', updated_at: '2026-11-24T09:30:00.000Z', files: [UPLOAD] };
+  await render();
+  // The draft came back in the box; Cancel (the box's ×) closes it and keeps the draft, words and file.
+  await until(() => !!$('[data-reply-close]'), 'the draft back in the box');
+  await press($('[data-reply-close]')!);
+  await until(() => !$('[data-reply-close]'), 'the box closed');
+  await decide();
+  await press($('[data-decide-step="send"]')!);
+  expect(current()).toBe('send');
+  const words = () => $<HTMLTextAreaElement>('[data-decide-words]')!;
+  // The words the Send would carry are the words it shows.
+  await until(() => words().value === 'Kept words from before.', 'the kept words on the Send step');
+  const before = draftSaves.length;
+  await typeInto(words(), 'Kept words from before. And these.');
+  await wait(700);
+  await until(() => draftSaves.length > before, 'the draft saved');
+  const saved = draftSaves.at(-1)!;
+  expect(saved.body).toBe('Kept words from before. And these.');
+  // The kept file stays in the draft.
+  expect((saved.files_remove as string[] | undefined) ?? []).not.toContain(UPLOAD.upload_id);
+  expect(writes.filter((w) => w.startsWith('reply'))).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a Send that did not go keeps the sitting: it stays on the Send step with the thread\'s error', async () => {
+  await render();
+  await decide();
+  await answerAll();
+  expect(current()).toBe('send');
+  replyFails = true;
+  await press($('[data-decide-send-button]')!);
+  await until(() => !!$('[data-decide-foot] .ib-error'), 'the error shown');
+  expect($('[data-decide-head]')).not.toBeNull();
+  expect(current()).toBe('send');
+  // Leaving now still offers Resume: the sitting was kept.
+  await press($('[data-decide-leave]')!);
+  await openList();
+  expect(wayIn()!.textContent).toBe('Resume · all answered, not sent yet');
+});
+
+test.skipIf(!hasDom)('every message answered and nothing sent: the way in says so, and opens on the Send step', async () => {
+  await render();
+  await decide();
+  await answerAll();
+  await press($('[data-decide-step]')!);
+  expect(current()).toBe(mid(2));
+  await press($('[data-decide-leave]')!);
+  await openList();
+  expect(wayIn()!.textContent).toBe('Resume · all answered, not sent yet');
+  await press(wayIn()!);
+  await until(() => !!$('[data-decide-head]'), 'decision mode again');
+  expect(current()).toBe('send');
+});
+
+test.skipIf(!hasDom)('leaving gives the thread back where it was scrolled', async () => {
+  await render();
+  const body = $('.ib-pbody')!;
+  body.scrollTop = 140;
+  expect(body.scrollTop).toBe(140);
+  await decide();
+  expect(body.scrollTop).toBe(0);
+  await press($('[data-decide-next]')!);
+  await press($('[data-decide-leave]')!);
+  expect($('[data-decide-head]')).toBeNull();
+  expect(body.scrollTop).toBe(140);
+});
+
+test.skipIf(!hasDom)('Escape puts decision mode away, back to the thread, and the window\'s Escape sees it used; the next one is the window\'s', async () => {
+  await render();
+  await decide();
+  const seen: boolean[] = [];
+  const windowEscape = (event: KeyboardEvent) => event.key === 'Escape' && seen.push(event.defaultPrevented);
+  window.addEventListener('keydown', windowEscape);
+  // Escape in a field (the Send step's words) is the field's.
+  await press($('[data-decide-step="send"]')!);
+  await act(async () => void $('[data-decide-words]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  const afterField = !!$('[data-decide-head]');
+  await act(async () => void $('[data-decide-send-heading]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  await settle();
+  const afterEscape = !!$('[data-decide-head]');
+  const used = seen.at(-1);
+  // Back in the thread: the next Escape is not decision mode's (the window closes the thread then).
+  await act(async () => void document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  const next = seen.at(-1);
+  window.removeEventListener('keydown', windowEscape);
+  expect({ afterField, afterEscape, used, next }).toEqual({ afterField: true, afterEscape: false, used: true, next: false });
+  expect(writes.filter((w) => w.startsWith('reply'))).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the window\'s thread keys know when decision mode shows in a thread (threadDeciding)', async () => {
+  await render();
+  expect(threadDeciding(mid(1))).toBe(false);
+  await decide();
+  expect(threadDeciding(mid(1))).toBe(true);
+  expect(threadDeciding(mid(9))).toBe(false);
+  await press($('[data-decide-leave]')!);
+  expect(threadDeciding(mid(1))).toBe(false);
+});
+
+test.skipIf(!hasDom)('another thread in the pane and back: the thread shows with its Resume row, not decision mode by itself', async () => {
+  await render();
+  await decide();
+  await pickFirst(mid(2));
+  act(() => showThread!('b'));
+  await settle();
+  expect($('[data-decide-head]')).toBeNull();
+  act(() => showThread!('a'));
+  await settle();
+  expect($('[data-decide-head]')).toBeNull();
+  expect(shown().length).toBe(3);
+  await openList();
+  expect(wayIn()!.textContent).toMatch(/^Resume · /);
 });

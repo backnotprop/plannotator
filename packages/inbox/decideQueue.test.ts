@@ -2,7 +2,8 @@
  * Decision mode's queue, pure (decisions/queue.ts; approval "inbox-decision-mode-one-send"). What regresses if these
  * fail: messages come in the wrong order (Stopped and Holds up first, then the thread's order), Later does not move a
  * message to the end before Send, a message that arrives or leaves mid-sitting loses the person's place, an answer in
- * the draft or an action item marked in it does not count, or the way in says the wrong thing.
+ * the draft or an action item marked in it does not count, a permission prompt (whose card answers at once) or a
+ * question about to be asked again lands in it, or the way in says the wrong thing.
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
@@ -46,6 +47,24 @@ describe('the queue', () => {
     // A message whose only decision is answered in the draft stays in the queue.
     expect(decideQueue([m('m9', [q('z', { state: 'picked', answer })])], live)).toEqual(['m9']);
   });
+
+  test("a launched session's permission prompt is never in it: its card answers at once, so it stays in the thread", () => {
+    const prompt = { ...m('p1', [q('allow')]), author: { kind: 'agent', host: 'claude-code', session: 'perm:ses_a', name: null } } as InboxMessageWire;
+    expect(decideQueue([m('m1', [q('a')]), prompt, m('m2', [q('b')])], live)).toEqual(['m1', 'm2']);
+  });
+
+  test('the open questions a waiting Re-ask note lists are left out, until the session it went to writes again', () => {
+    const note = { ...m('n1', [], [], 'person'), reply_to: 'm1', reask: ['m1/a'] } as InboxMessageWire;
+    const asked = m('m1', [q('a'), q('b')]);
+    const alone = m('m2', [q('c')]);
+    // m1/a is about to be asked again: m1 holds one decision (b); m2 none but its own.
+    expect(decideQueue([asked, alone, note], live)).toEqual(['m1', 'm2']);
+    const onlyReasked = m('m1', [q('a')]);
+    expect(decideQueue([onlyReasked, note], live)).toEqual([]);
+    // The session wrote since the note: it no longer waits, and the question is back.
+    const wrote = { ...m('m3', []), created_at: '2026-11-24T11:00:00.000Z' } as InboxMessageWire;
+    expect(decideQueue([onlyReasked, note, wrote], live)).toEqual(['m1']);
+  });
 });
 
 describe('moving through a sitting', () => {
@@ -84,5 +103,7 @@ describe('the way in', () => {
     expect(decideEntryLabel(8, 7)).toBe('Decide 8 one at a time');
     expect(decideEntryLabel(8, 7, { left: 2, messages: 4 })).toBe('Resume · 2 of 4 messages left');
     expect(decideEntryLabel(1, 1, { left: 1, messages: 1 })).toBe('Resume · 1 of 1 message left');
+    // Every message answered and nothing sent: never "0 of 3 left".
+    expect(decideEntryLabel(4, 4, { left: 0, messages: 3 })).toBe('Resume · all answered, not sent yet');
   });
 });

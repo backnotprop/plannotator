@@ -2521,11 +2521,22 @@ export function resolveExperimental(
 }
 
 /**
- * Whether the Inbox's Decision mode is on: config.json `inboxDecisionMode` when it is a boolean; else the old
- * experimental switch (`experimental.decisionMode`), so a choice made there is kept (false stays off, true stays on);
- * else on.
+ * Whether PLANNOTATOR_EXPERIMENTAL turns Decision mode off: its documented "minus" form (`-decision-mode`, any case,
+ * anywhere in the comma list) still does, now that the feature left Experimental. Any other mention of it (the plain
+ * `decision-mode`) is ignored, without error: it is on by default.
  */
-export function inboxDecisionModeOn(config: PlannotatorConfig): boolean {
+export function inboxDecisionModeEnvOff(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.PLANNOTATOR_EXPERIMENTAL;
+  return !!raw && raw.split(",").some((part) => part.trim().toLowerCase() === "-decision-mode");
+}
+
+/**
+ * Whether the Inbox's Decision mode is on: off when PLANNOTATOR_EXPERIMENTAL says `-decision-mode`; else config.json
+ * `inboxDecisionMode` when it is a boolean; else the old experimental switch (`experimental.decisionMode`), so a
+ * choice made there is kept (false stays off, true stays on); else on.
+ */
+export function inboxDecisionModeOn(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (inboxDecisionModeEnvOff(env)) return false;
   const saved = parseConfigBoolean(config.inboxDecisionMode);
   if (saved !== undefined) return saved;
   const old = config.experimental;

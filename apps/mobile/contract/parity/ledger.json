@@ -4407,7 +4407,7 @@
       "surface": [],
       "flows": [],
       "mobile": "later",
-      "why": "L-off: decision mode is experimental",
+      "why": "L-off: marked while decision mode was experimental and off; it is now on by default (Settings → Capabilities turns it off), with this row as its way in",
       "reason": "L-off",
       "source": "SCOPE 6. Open questions list, Skip, Re-ask; M:L274",
       "ios": {
@@ -6642,7 +6642,7 @@
       "surface": [],
       "flows": [],
       "mobile": "later",
-      "why": "L-off: decision mode is experimental",
+      "why": "L-off: marked while decision mode was experimental and off; that one-card dialog (Undo, All, Close, the chips) is gone: decision mode is now on by default and shows one agent message at a time in the thread pane, with one Send at the end",
       "reason": "L-off",
       "source": "SCOPE 19. Decision mode (experimental, off by default); M:L271, M:L274, M:L275, M:L279, M:L281",
       "ios": {
@@ -15280,7 +15280,7 @@
       "surface": [],
       "flows": [],
       "mobile": "later",
-      "why": "L-off: experimental and off; the door refuses it",
+      "why": "L-off: marked while decision mode was experimental and off; it is now on by default and reads the thread the window has (its own route is gone, so the door has nothing to refuse); the chips and the 5 s Hold are gone",
       "reason": "L-off",
       "source": "SCOPE 1. Question cards and other blocks, as the person meets them; G/inbox-messages.md 271 to 281",
       "ios": {

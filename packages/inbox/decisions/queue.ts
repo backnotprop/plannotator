@@ -10,6 +10,8 @@
 import type { InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import { inboxActionInDraft, readInboxQuestionKind } from '@plannotator/core/inbox-types';
 import { inboxQuestionWaitsOnPerson, inboxUrgencyOf } from '@plannotator/core/inbox-questions';
+import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
+import { isReaskNote } from '@plannotator/core/inbox-reask';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
 import { formatCount } from '../format';
 
@@ -27,10 +29,32 @@ const isAction = (q: InboxQuestion) => readInboxQuestionKind(q.kind) === 'action
 /** A message's questions and action items (the window keeps action items in `actions`, the server in `questions`). */
 const decisionsOf = (m: InboxMessageWire) => [...(m.questions ?? []), ...(m.actions ?? [])];
 
-export function decideTally(message: InboxMessageWire, pending: PendingAnswers = new Map()): DecideTally {
+/**
+ * The questions (`<message id>/<key>`) a Re-ask note lists while it still waits: the session it went to (its `to`,
+ * else the session of the message it answers) has not written in the thread since. The agent is about to ask them
+ * again, so decision mode leaves those still open out, as its projection did (the store's `reaskListedIn`).
+ */
+export function decideReasked(messages: readonly InboxMessageWire[]): ReadonlySet<string> {
+  const listed = new Set<string>();
+  if (!messages.some(isReaskNote)) return listed;
+  const byId = new Map(messages.map((m) => [m.id, m]));
+  messages.forEach((note, index) => {
+    if (!isReaskNote(note)) return;
+    const asked = note.reply_to ? byId.get(note.reply_to) : undefined;
+    const by = note.to ?? (asked?.author.kind === 'agent' && asked.author.session ? { host: asked.author.host ?? '', session: asked.author.session } : null);
+    if (!by) return;
+    const wrote = messages.slice(index + 1).some((m) => m.author.kind === 'agent' && m.author.session === by.session && (m.author.host ?? '') === (by.host ?? ''));
+    if (!wrote) for (const id of note.reask ?? []) listed.add(id);
+  });
+  return listed;
+}
+
+export function decideTally(message: InboxMessageWire, pending: PendingAnswers = new Map(), reasked: ReadonlySet<string> = new Set()): DecideTally {
   let total = 0;
   let answered = 0;
   for (const q of decisionsOf(message)) {
+    const id = `${message.id}/${q.key}`;
+    if (q.state === 'open' && reasked.has(id)) continue;
     if (isAction(q)) {
       if (q.state === 'open' && inboxQuestionWaitsOnPerson(q)) total += 1;
       else if (inboxActionInDraft(q)) {
@@ -41,18 +65,24 @@ export function decideTally(message: InboxMessageWire, pending: PendingAnswers =
     }
     if (!inboxQuestionWaitsOnPerson(q)) continue;
     total += 1;
-    const id = `${message.id}/${q.key}`;
     const answer = pending.has(id) ? pending.get(id) : q.answer;
     if (answer && !isQuestionAnswerEmpty(answer)) answered += 1;
   }
   return { total, answered };
 }
 
+/**
+ * A launched session's permission prompt: never in decision mode. Its card answers at once (Allow, Deny), so it stays
+ * in the thread, where it is drawn as its own card.
+ */
+const isPermissionPrompt = (m: InboxMessageWire) => m.author.kind === 'agent' && isInboxPermissionSession(m.author.session);
+
 /** The messages that hold a decision now, in queue order: Stopped, then Holds up, then the thread's order. */
 export function decideQueue(messages: readonly InboxMessageWire[], live: (m: InboxMessageWire) => boolean, pending?: PendingAnswers): string[] {
+  const reasked = decideReasked(messages);
   const held = messages
     .map((m, at) => ({ m, at }))
-    .filter(({ m }) => m.author.kind === 'agent' && live(m) && decideTally(m, pending).total > 0)
+    .filter(({ m }) => m.author.kind === 'agent' && !isPermissionPrompt(m) && live(m) && decideTally(m, pending, reasked).total > 0)
     .map(({ m, at }) => ({ id: m.id, at, urgency: Math.min(2, ...decisionsOf(m).filter((q) => inboxQuestionWaitsOnPerson(q) || inboxActionInDraft(q)).map((q) => inboxUrgencyOf(q))) }));
   return held.sort((a, b) => a.urgency - b.urgency || a.at - b.at).map((x) => x.id);
 }
@@ -118,9 +148,11 @@ export const DECIDE_ENTRY_MIN = 2;
 /**
  * The way in's words, the first row of the thread's open questions: "Decide these 5" when the queue holds exactly
  * the questions the list shows, "Decide 5 one at a time" when action items wait too; once the person left before
- * Send, "Resume · 2 of 4 messages left" (`left` of `messages` not fully answered).
+ * Send, "Resume · 2 of 4 messages left" (`left` of `messages` not fully answered), or, every message answered and
+ * nothing sent, "Resume · all answered, not sent yet".
  */
 export function decideEntryLabel(count: number, listed: number, resume: { left: number; messages: number } | null = null): string {
+  if (resume && resume.left === 0) return 'Resume · all answered, not sent yet';
   if (resume) return `Resume · ${formatCount(resume.left)} of ${formatCount(resume.messages)} ${resume.messages === 1 ? 'message' : 'messages'} left`;
   return count === listed ? `Decide these ${formatCount(count)}` : `Decide ${formatCount(count)} one at a time`;
 }

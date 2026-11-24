@@ -4,15 +4,18 @@
  * (Thread.tsx draws it with every card feature); this only frames it.
  *
  * Nothing here sends on its own: Send is the thread's own Send, pressed by the person, one reply per agent session.
- * No keyboard shortcut of its own (Tab, Enter and Space only).
+ * No keyboard shortcut of its own (Tab, Enter and Space only). Escape, the thread's way out, puts decision mode away
+ * first, as the old decision mode's Escape closed only it; the next Escape closes the thread.
  */
-import { useLayoutEffect, useRef, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { agentName, plural, whenTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { ReplyActions, ReplyAnswers, type ActionRow, type DraftAnswer } from '../components/ReplyAnswers';
 import type { JumpTarget } from '../components/ReplacedQuestion';
 import { useReplyHasWords, useReplyText, type ReplyText } from '../replyText';
+import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
+import { selectionToolbarShowing } from '../selectionToolbar';
 import { laterOffered, stepIndex } from './queue';
 import type { Decide } from './useDecide';
 
@@ -32,8 +35,12 @@ export interface DecideFrameProps {
   /** The thread's reply box words, and its change (saved as the thread's draft). */
   words: ReplyText;
   onWords: (text: string) => void;
-  /** The thread's own Send. */
-  send: () => void;
+  /** The thread's own Send (it tells `dm.sent()` when its replies went). */
+  send: () => Promise<void>;
+  /** The thread's Send is on its way. */
+  sending: boolean;
+  /** The thread's own error line (a Send that did not go says why there), or null. */
+  error: ReactNode;
 }
 
 const where = (p: DecideFrameProps) => `${p.subject}${p.machine ? ` · On ${p.machine}` : ''}`;
@@ -56,12 +63,37 @@ function leaveFrom(el: HTMLElement | null, dm: Decide) {
   requestAnimationFrame(() => (pane?.querySelector<HTMLElement>('[data-open-questions]') ?? pane?.querySelector<HTMLElement>('.ib-pbody'))?.focus({ preventScroll: true }));
 }
 
+/**
+ * Escape puts decision mode away, back to the thread (nothing sent, Resume offered), unless something on the page used
+ * it first (a field, a menu, a dialog, the prototype window, a selection's toolbar). On the document, so it runs before
+ * the window's Escape, which then sees the key used and leaves the thread open.
+ */
+function useEscapeLeaves(ref: RefObject<HTMLElement | null>, dm: Decide) {
+  const latest = useRef(dm);
+  latest.current = dm;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || isComposingKey(event) || modalOpen() || selectionToolbarShowing()) return;
+      const from = keyTarget(event);
+      if (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"], [aria-expanded="true"], [data-chat-window]'))) return;
+      const pane = ref.current?.closest('section');
+      // A key in another pane is that pane's.
+      if (from && from !== document.body && from.closest('section.ib-pane') && !pane?.contains(from)) return;
+      event.preventDefault();
+      leaveFrom(ref.current, latest.current);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [ref]);
+}
+
 export function DecideHead(p: DecideFrameProps) {
   const { dm, phone } = p;
   const sitting = dm.sitting!;
   const at = stepIndex(sitting);
   const atSend = dm.current === null;
   const ref = useRef<HTMLDivElement>(null);
+  useEscapeLeaves(ref, dm);
   // Each step starts at its top, with focus on what it shows (the message, or Send's heading).
   useLayoutEffect(() => {
     p.body.current?.scrollTo({ top: 0 });
@@ -143,7 +175,11 @@ export function DecideHead(p: DecideFrameProps) {
   );
 }
 
-/** The words box on the Send step: the thread's reply words (its draft), so leaving keeps them in the thread. */
+/**
+ * The words box on the Send step: the thread's reply words (its draft), so leaving keeps them in the thread. The
+ * thread opens its kept draft into the box as the Send step shows (as Edit draft does), so these are the words the
+ * Send carries, and a change keeps the draft's files.
+ */
 function DecideWords({ words, onWords }: { words: ReplyText; onWords: (text: string) => void }) {
   const text = useReplyText(words);
   return (
@@ -227,6 +263,7 @@ export function DecideFoot(p: DecideFrameProps) {
     : `${t?.answered ?? 0} of ${t?.total ?? 0} answered · all go together at Send`;
   return (
     <div className="ib-pfoot dm-foot" data-decide-foot="">
+      {p.error}
       <div className="dm-acts">
         {at > 0 && (
           <button type="button" className="ib-btn ib-ghost dm-back" onClick={dm.back} aria-label="Back" data-decide-back="">
@@ -249,12 +286,9 @@ export function DecideFoot(p: DecideFrameProps) {
           <button
             type="button"
             className="ib-btn ib-pri dm-next"
-            disabled={nothing}
+            disabled={nothing || p.sending}
             data-decide-send-button=""
-            onClick={() => {
-              dm.finish();
-              p.send();
-            }}
+            onClick={() => void dm.sendAll(p.send)}
           >
             <Icon name="send" size={15} /> Send
           </button>

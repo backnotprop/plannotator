@@ -6,8 +6,9 @@
  * Every test runs under its own temp data dir.
  *
  * What regresses: decision mode off for someone who never turned it off; an old experimental "off" lost; a switch
- * another window does not hear; the old experimental place still taking saves; a pick that raced a Send reopening
- * what went.
+ * another window does not hear; an older window (which reads and saves `experimental.decision_mode`) crashing or
+ * unable to switch it; `PLANNOTATOR_EXPERIMENTAL=-decision-mode` no longer forcing it off; a pick that raced a Send
+ * reopening what went.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -101,7 +102,8 @@ describe("the switch", () => {
     const { server } = await setup();
     const settings = await read(server);
     expect(settings.decision_mode).toEqual({ on: true });
-    expect(settings.experimental).toEqual({ grid: { on: false, env: null } });
+    // An older window reads `experimental.decision_mode.on`: it is kept there too, the real state.
+    expect(settings.experimental).toEqual({ decision_mode: { on: true, env: null }, grid: { on: false, env: null } });
     const stream = await windowCapabilities(server);
     expect((await post(server, "/api/inbox/settings", { steps: { on: true } })).status).toBe(200);
     await stream.next(1);
@@ -145,16 +147,32 @@ describe("the switch", () => {
     expect(saved()).toMatchObject({ inboxDecisionMode: true, experimental: { decisionMode: false, otherFlag: true }, inboxTextSize: 13 });
   });
 
-  test("refuses a bad body, the old experimental place, another site and a stale session, and writes nothing", async () => {
+  test("an older window's switch still works: it reads `experimental.decision_mode` and its save of `{ experimental: { decision_mode } }` sets the new key", async () => {
+    const { server, saved } = await setup();
+    const stream = await windowCapabilities(server);
+    const off = await post(server, "/api/inbox/settings", { experimental: { decision_mode: false } });
+    expect(off.status).toBe(200);
+    expect(((await off.json()) as Settings).experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: false, env: null } });
+    expect(saved().inboxDecisionMode).toBe(false);
+    expect((await read(server)).decision_mode).toEqual({ on: false });
+    await stream.next(1);
+    expect(stream.frames[0]!.decision_mode).toEqual({ on: false });
+    // With Grid's switch in the same body: both save.
+    expect((await post(server, "/api/inbox/settings", { experimental: { decision_mode: true, grid: true } })).status).toBe(200);
+    expect(saved()).toMatchObject({ inboxDecisionMode: true, experimental: { grid: true } });
+    expect((await read(server)).experimental).toEqual({ decision_mode: { on: true, env: null }, grid: { on: true, env: null } });
+    // Not a boolean: refused, nothing written.
+    expect((await post(server, "/api/inbox/settings", { experimental: { decision_mode: "off" } })).status).toBe(422);
+    expect(saved().inboxDecisionMode).toBe(true);
+    await stream.stop();
+  });
+
+  test("refuses a bad body, another site and a stale session, and writes nothing", async () => {
     const { server, dataDir } = await setup({ inboxDecisionMode: false });
     const before = readFileSync(join(dataDir, "config.json"), "utf8");
     for (const bad of [true, { on: "yes" }, { on: true, other: 1 }, {}, []]) {
       expect((await post(server, "/api/inbox/settings", { decision_mode: bad })).status).toBe(422);
     }
-    // Decision mode left Experimental: the old body is refused like any unknown key.
-    const old = await post(server, "/api/inbox/settings", { experimental: { decision_mode: true } });
-    expect(old.status).toBe(422);
-    expect(((await old.json()) as { code: string }).code).toBe("validation_error");
     // Nothing else in a refused request is saved either.
     expect((await post(server, "/api/inbox/settings", { decision_mode: { on: "yes" }, text_size: 12 })).status).toBe(422);
     const cross = await post(server, "/api/inbox/settings", { decision_mode: { on: true } }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" });
@@ -169,20 +187,28 @@ describe("the switch", () => {
     expect((await read(server)).decision_mode).toEqual({ on: false });
   });
 
-  test("PLANNOTATOR_EXPERIMENTAL no longer names it", async () => {
-    const { server } = await setup();
+  test("PLANNOTATOR_EXPERIMENTAL=-decision-mode still forces it off; the plain name is ignored", async () => {
+    const { server, saved } = await setup();
     process.env.PLANNOTATOR_EXPERIMENTAL = "-decision-mode";
-    expect((await read(server)).decision_mode).toEqual({ on: true });
-    // So it never locks the switch.
-    expect((await post(server, "/api/inbox/settings", { decision_mode: { on: false } })).status).toBe(200);
     expect((await read(server)).decision_mode).toEqual({ on: false });
+    expect((await read(server)).experimental?.decision_mode).toEqual({ on: false, env: false });
+    // Turning it on would change nothing: refused, nothing written. Off saves (it is what the person sees).
+    const on = await post(server, "/api/inbox/settings", { decision_mode: { on: true } });
+    expect(on.status).toBe(409);
+    expect(((await on.json()) as { code: string }).code).toBe("experimental_env_decides");
+    expect(saved().inboxDecisionMode).toBeUndefined();
+    expect((await post(server, "/api/inbox/settings", { decision_mode: { on: false } })).status).toBe(200);
+    process.env.PLANNOTATOR_EXPERIMENTAL = "decision-mode";
+    expect((await read(server)).decision_mode).toEqual({ on: false });
+    expect((await post(server, "/api/inbox/settings", { decision_mode: { on: true } })).status).toBe(200);
+    expect((await read(server)).decision_mode).toEqual({ on: true });
   });
 
   test("Grid's switch (approval \"inbox-agent-grid\") saves on its own, off by default, and leaves decision mode", async () => {
     const { server, saved } = await setup({ inboxDecisionMode: false });
     const on = await post(server, "/api/inbox/settings", { experimental: { grid: true } });
     expect(on.status).toBe(200);
-    expect(((await on.json()) as Settings).experimental).toEqual({ grid: { on: true, env: null } });
+    expect(((await on.json()) as Settings).experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: true, env: null } });
     expect(saved()).toMatchObject({ inboxDecisionMode: false, experimental: { grid: true } });
     process.env.PLANNOTATOR_EXPERIMENTAL = "-grid";
     expect((await post(server, "/api/inbox/settings", { experimental: { grid: true } })).status).toBe(409);

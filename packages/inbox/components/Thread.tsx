@@ -329,8 +329,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   // Picks saved at once; shown before the server answers, then from the server.
   const [pending, setPending] = useState<ReadonlyMap<string, QuestionAnswer | null>>(new Map());
-  // Decision mode (approval "inbox-decision-mode-one-send"): this thread's messages one at a time, its own cards and Send.
-  const dm = useDecide({ on: decisionMode, threadId: thread.thread_id, messages: thread.messages, live: liveMessage, pending });
   // The question whose prototypes are open in the full window (PrototypeWindow.tsx).
   const [proto, setProto] = useState<{ messageId: string; key: string } | null>(null);
   const onPickSavesNow = useRef(onPickSaves);
@@ -1191,6 +1189,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [routeFor, setRouteFor] = useState<'reply' | 'reask'>('reply');
   const reaskRef = useRef<HTMLButtonElement>(null);
   const routeForRef = useRef(routeFor);
+  const dm = useDecide({ on: decisionMode, threadId: thread.thread_id, messages: thread.messages, live: liveMessage, pending, body: bodyRef, kept: !box.open && (keptWords !== '' || draftPastes > 0 || replyDraft.conflict !== null), openKept: () => openBehind(), stopped: guard || route.open || rcptOpen });
   routeForRef.current = routeFor;
   useEffect(() => {
     if (!asking) return;
@@ -2921,6 +2920,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
    * was in flight keeps it open), the box empties, and its words' draft is done with.
    */
   const finishSent = (carriedUploads: readonly string[], carriedWords: boolean, sendThread: string = threadRef.current.thread_id) => {
+    dm.sent();
     unconfirmed.delete(sendThread);
     if (carriedWords) replyDraft.sent(sendThread);
     else replyDraft.release(sendThread);
@@ -4557,7 +4557,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         : null,
     [reuseOffered, resolved, allFiles, box.open, reuseHeld],
   );
-  const dmFrame: DecideFrameProps = { dm, messages: thread.messages, subject: thread.subject ?? thread.thread_name ?? 'Thread', machine: machine?.name ?? null, phone, body: bodyRef, answers: draftAnswers, actions: draftActions, words: replyText, onWords: changeReply, send: () => void latestSend.current() };
+  const dmFrame: DecideFrameProps = { dm, messages: thread.messages, subject: thread.subject ?? thread.thread_name ?? 'Thread', machine: machine?.name ?? null, phone, body: bodyRef, answers: draftAnswers, actions: draftActions, words: replyText, onWords: changeReply, send: () => latestSend.current(), sending, error: lineError && errorLine };
   return (
     <CommentPictures thread={thread.thread_id} records={records}>
     <ReuseContext.Provider value={reuseApi}>

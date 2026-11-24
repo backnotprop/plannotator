@@ -195,6 +195,13 @@ test('on by default: the switch in Settings → Capabilities, the way in from th
   await expect(page.locator('[data-settings-experimental] [data-settings-decision-mode]')).toHaveCount(0);
   await row.scrollIntoViewIfNeeded();
   await shot(page, '01-settings-on');
+  // The row itself, close up.
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+    await page.waitForTimeout(300);
+    await row.screenshot({ path: join(proofDir, `01b-settings-row-${scheme}.png`) });
+  }
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 
   // Off: the open questions have no Decide row.
   await sw.click();
@@ -247,6 +254,8 @@ test('one message at a time with the thread\'s own cards; Later moves it to the 
   await pane(page).locator('[data-decide-later]').click();
   expect(await steps(page).evaluateAll((els) => els.map((el) => el.getAttribute('data-decide-step')))).toEqual([ids.stopped, ids.action, ids.picture, 'send']);
   await expect(currentStep(page)).toHaveAttribute('data-decide-step', ids.action);
+  await expect(pane(page).locator(`[data-decide-step="${ids.picture}"]`)).toContainText('later');
+  await shot(page, '05b-later');
 
   // The action item: Done waits in the draft.
   await shown(page).locator('[data-action-done]').click();
@@ -265,6 +274,16 @@ test('one message at a time with the thread\'s own cards; Later moves it to the 
   if (!(await page.locator('[data-open-questions-list]').isVisible())) await pane(page).locator('[data-open-questions]').click();
   await expect(page.locator('[data-thread-decide]')).toHaveText('Resume · 1 of 3 messages left');
   await shot(page, '08-resume');
+  await page.locator('[data-thread-decide]').click();
+  await expect(currentStep(page)).toHaveAttribute('data-decide-step', ids.action);
+  // Escape puts decision mode away to the thread (the thread stays open); the way back in still reads Resume.
+  await shown(page).getByRole('radio', { name: /^Yes, a draft/ }).focus();
+  await page.keyboard.press('Escape');
+  await expect(pane(page).locator('[data-decide-head]')).toHaveCount(0);
+  await expect(pane(page).locator('.ib-phead')).toBeVisible();
+  expect(page.url()).toContain(`thread=${ids.thread}`);
+  if (!(await page.locator('[data-open-questions-list]').isVisible())) await pane(page).locator('[data-open-questions]').click();
+  await expect(page.locator('[data-thread-decide]')).toHaveText('Resume · 1 of 3 messages left');
   await page.locator('[data-thread-decide]').click();
   await expect(currentStep(page)).toHaveAttribute('data-decide-step', ids.action);
   await pane(page).locator('[data-decide-next]').click();
@@ -315,16 +334,17 @@ test('the Send step: every answer, a row back to its message, the person\'s word
   expect(world.errors).toEqual([]);
 });
 
-test('a phone (WebKit, iPhone 15): the head, one message, the foot\'s 44 px buttons, the Send step', async () => {
+test('a phone (WebKit, iPhone 15): the way in, a message, answered, Later, the big question, the Send step, Resume, the thread after Send', async () => {
   const { claude, codex } = world;
   const refunds = await claude.send(
     { project_path: world.billing, thread: 'refund-emails', subject: 'Refund emails for partial refunds and the JPY rounding rule', body: q('Send the partial-refund email?', ['Yes, send it', 'No, not yet'], ['Stopped: the email job waits on this.']) },
     { wakes: true },
   );
-  await codex.send({ project_path: world.billing, reply_to: refunds.message_id, body: q('Round half-even or half-up for JPY refunds?', ['Half-even — matches Stripe', 'Half-up — what finance does today']) }, { wakes: true });
+  const big = await codex.send({ project_path: world.billing, reply_to: refunds.message_id, body: `The receipt with the new rounding, as a customer sees it.\n\n${q('Round half-even or half-up for JPY refunds?', ['Half-even — matches Stripe', 'Half-up — what finance does today'], ['![Receipt](design/drawer-b.png)'])}` }, { wakes: true });
   const own = await webkit.launch({ args: [] });
   try {
-    // A context per scheme (WebKit repaints a scheme switched mid-page only in part). Dark looks; light answers and sends.
+    // A context per scheme (WebKit repaints a scheme switched mid-page only in part). Both answer (drafts) and leave;
+    // light then comes back through Resume and sends.
     for (const scheme of ['dark', 'light'] as const) {
       const context = await own.newContext({ ...devices['iPhone 15'], colorScheme: scheme, reducedMotion: 'reduce' });
       const page = await context.newPage();
@@ -332,9 +352,12 @@ test('a phone (WebKit, iPhone 15): the head, one message, the foot\'s 44 px butt
         await page.waitForTimeout(300);
         await page.screenshot({ path: join(proofDir, `phone-${name}-${scheme}.png`) });
       };
+      const openList = async () => {
+        if (!(await page.locator('[data-open-questions-list]').isVisible())) await pane(page).locator('[data-open-questions]').tap();
+      };
       await page.goto(world.url);
       await page.goto(`${world.url}#thread=${refunds.thread_id}`);
-      await pane(page).locator('[data-open-questions]').tap();
+      await openList();
       await expect(page.locator('[data-thread-decide]')).toHaveText('Decide these 2');
       await snap('01-way-in');
       await page.locator('[data-thread-decide]').tap();
@@ -345,21 +368,38 @@ test('a phone (WebKit, iPhone 15): the head, one message, the foot\'s 44 px butt
         if (b) expect(b.height).toBeGreaterThanOrEqual(44);
       }
       await snap('02-message');
-      if (scheme === 'light') await shown(page).getByRole('radio', { name: /^Yes, send it/ }).tap();
+      // A pick is the thread's draft: the second scheme's window finds the first one's picks already there.
+      const pick = async (name: RegExp) => {
+        const radio = shown(page).getByRole('radio', { name });
+        if (!(await radio.isChecked())) await radio.tap();
+        await expect(radio).toBeChecked();
+      };
+      await pick(/^Yes, send it/);
+      await snap('03-answered');
+      // Later: Codex's message (the big one, with its picture) comes now, Claude Code's goes last.
+      await pane(page).locator('[data-decide-later]').tap();
+      await expect(shown(page)).toHaveAttribute('data-message-article', big.message_id);
+      await expect(shown(page).locator('img').first()).toBeVisible();
+      await snap('04-later-big-question');
+      await pick(/^Half-even/);
       await pane(page).locator('[data-decide-next]').tap();
-      await expect(pane(page).locator('[data-decide-count]')).toHaveText('2 of 2');
-      if (scheme === 'light') await shown(page).getByRole('radio', { name: /^Half-even/ }).tap();
-      await snap('03-message-two');
+      await expect(shown(page)).toHaveAttribute('data-message-article', refunds.message_id);
       await pane(page).locator('[data-decide-next]').tap();
       await expect(pane(page).locator('[data-decide-send]')).toBeVisible();
-      await snap('04-send-step');
+      await snap('05-send-step');
+      // Leave before Send: nothing goes, and the way back in says everything is answered and opens on Send.
+      await pane(page).locator('[data-decide-leave]').tap();
+      expect(await personReplies(refunds.thread_id)).toEqual([]);
+      await openList();
+      await expect(page.locator('[data-thread-decide]')).toHaveText('Resume · all answered, not sent yet');
+      await snap('06-resume');
       if (scheme === 'light') {
+        await page.locator('[data-thread-decide]').tap();
+        await expect(pane(page).locator('[data-decide-send]')).toBeVisible();
         await pane(page).locator('[data-decide-send-button]').tap();
         await expect.poll(async () => (await personReplies(refunds.thread_id)).length, { timeout: 20_000 }).toBe(2);
-        await snap('05-sent');
-      } else {
-        await pane(page).locator('[data-decide-leave]').tap();
-        expect(await personReplies(refunds.thread_id)).toEqual([]);
+        await expect(pane(page).locator('[data-decide-head]')).toHaveCount(0);
+        await snap('07-sent');
       }
       await context.close();
     }
