@@ -18,9 +18,9 @@
  * (`InboxStore.pendingRepliesFor`) is handed to
  * `codex queue --thread=<id> --message=<the wake text>` exactly once:
  *
- *  - a busy thread gets it in its running turn when it can (inbox-codex-steer.ts:
- *    `turn/steer` over Codex's control socket, or held for Plannotator's
- *    PostToolUse hook), else as its next turn when the current one ends; an
+ *  - a busy thread gets it as its next turn when the current one ends (with the
+ *    experimental `codex-steer` switch on, in its running turn when it can:
+ *    inbox-codex-steer.ts, held for Plannotator's PostToolUse hook); an
  *    idle thread starts the turn within about a second, and a
  *    thread whose Codex is closed runs it when it is resumed (or headless,
  *    within a minute, while Codex's background server still holds it);
@@ -728,8 +728,10 @@ export function createInboxCodexWake(options: {
     const flight = { at, session, itemId: id, taken: false };
     inFlight.set(key, flight);
     // A launched session: where its rollout stands before its host may steer the text in (looked for there after).
+    // Off (the experimental switch): nothing is read, and the host takes it as it always did.
+    const steering = steer.steering();
     const launchedHere = options.launched?.(session) === true;
-    const before = launchedHere ? await sightStart(session, true) : null;
+    const before = steering && launchedHere ? await sightStart(session, true) : null;
     // A launched session: its host puts it in as a turn now (delivered), or leaves it to `codex queue`.
     const own = options.deliver ? await options.deliver(session, text).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) })) : "queue";
     if (own === "delivered") {
@@ -778,8 +780,8 @@ export function createInboxCodexWake(options: {
     }
     // Into the running turn, when one runs (inbox-codex-steer.ts): the control socket's `turn/steer` at once (off by
     // default), else held for the Codex hook (after the turn's next tool call). Anything else goes as the next turn, as
-    // before; so does a reply a turn already ended without (`nextTurnOnly`).
-    const intoTurn = mayHold && !nextTurnOnly.has(key);
+    // before; so does a reply a turn already ended without (`nextTurnOnly`). Only with the experimental switch on.
+    const intoTurn = steering && mayHold && !nextTurnOnly.has(key);
     const socketBefore = intoTurn ? await sightStart(session) : null;
     const socket = intoTurn ? await steer.socket(session, text).catch((error: unknown) => ({ kind: "no" as const, why: String(error), idle: false })) : { kind: "no" as const, why: "next turn", idle: false };
     if (socket.kind === "steered") {

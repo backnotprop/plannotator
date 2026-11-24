@@ -149,7 +149,8 @@ describe("the installer's Codex hooks", () => {
   })();
   const nodePath = spawnSync("/bin/sh", ["-c", "command -v node"], { encoding: "utf8" }).stdout.trim();
 
-  function install(root: string, bin: string, options: { node?: boolean } = {}) {
+  /** `steer`: PLANNOTATOR_EXPERIMENTAL for the run (default "codex-steer", the switch on); null: not set. */
+  function install(root: string, bin: string, options: { node?: boolean; steer?: string | null } = {}) {
     const codexDir = join(root, "codex");
     const dataDir = join(root, "data");
     const script = `set -e\nPLANNOTATOR_BIN=${JSON.stringify(bin)}\n_config_dir=${JSON.stringify(dataDir)}\nCODEX_DIR=${JSON.stringify(codexDir)}\nCODEX_HOOKS="$CODEX_DIR/hooks.json"\ncodex_hook_configured=0\n${step}\n`;
@@ -157,7 +158,7 @@ describe("the installer's Codex hooks", () => {
     const tools = join(root, "tools");
     if (!existsSync(tools)) {
       mkdirSync(tools);
-      for (const tool of ["sed", "mkdir", "cat", "mktemp", "awk", "mv", "grep"]) {
+      for (const tool of ["sed", "mkdir", "cat", "mktemp", "awk", "mv", "grep", "tr", "rm"]) {
         const found = spawnSync("/bin/sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim();
         if (found) symlinkSync(found, join(tools, tool));
       }
@@ -169,7 +170,8 @@ describe("the installer's Codex hooks", () => {
       if (nodePath) symlinkSync(nodePath, join(withNode, "node"));
     }
     const PATH = options.node === false ? tools : `${withNode}:${tools}`;
-    const run = spawnSync("/bin/bash", ["-c", script], { encoding: "utf8", env: { PATH, HOME: root } });
+    const steer = options.steer === undefined ? "codex-steer" : options.steer;
+    const run = spawnSync("/bin/bash", ["-c", script], { encoding: "utf8", env: { PATH, HOME: root, ...(steer === null ? {} : { PLANNOTATOR_EXPERIMENTAL: steer }) } });
     return { run, file: join(codexDir, "hooks.json"), note: join(dataDir, CODEX_HOOK_INSTALLED_FILE) };
   }
   const postTool = (file: string) => (JSON.parse(readFileSync(file, "utf8")).hooks.PostToolUse ?? []) as { hooks: { command: string; timeout: number }[] }[];
@@ -222,6 +224,51 @@ describe("the installer's Codex hooks", () => {
     writeFileSync(file, before);
     install(root, join(root, "bin", "plannotator"));
     expect(readFileSync(file, "utf8")).toBe(before);
+  });
+
+  test("the switch off (the default): a new hooks.json has the Stop hook only, nothing said, nothing noted", () => {
+    const root = mkdtempSync(join(tmpdir(), "plannotator-codex-install-"));
+    const bin = join(root, "bin", "plannotator");
+    const { run, file, note } = install(root, bin, { node: false, steer: null });
+    expect(run.status).toBe(0);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ hooks: { Stop: [{ hooks: [{ type: "command", command: bin, timeout: 345600 }] }] } });
+    expect(run.stdout).not.toContain("Hooks");
+    expect(run.stdout).not.toContain("PostToolUse");
+    expect(existsSync(note)).toBe(false);
+  });
+
+  test("the switch: config.json turns it on, PLANNOTATOR_EXPERIMENTAL decides over it; off again takes only ours out", () => {
+    if (!nodePath) return;
+    const root = mkdtempSync(join(tmpdir(), "plannotator-codex-install-"));
+    const bin = join(root, "bin", "plannotator");
+    const file = join(root, "codex", "hooks.json");
+    mkdirSync(join(root, "codex"), { recursive: true });
+    mkdirSync(join(root, "data"), { recursive: true });
+    const theirs = { hooks: [{ type: "command", command: "/usr/local/bin/lint-after", timeout: 5 }] };
+    writeFileSync(file, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: bin, timeout: 345600 }] }], PostToolUse: [theirs] } }));
+    // Off by default: their hook only, and nothing said.
+    const off = install(root, bin, { steer: null });
+    expect(postTool(file)).toEqual([theirs as never]);
+    expect(off.run.stdout).not.toContain("PostToolUse");
+    // config.json on, the variable silent: ours added beside theirs.
+    writeFileSync(join(root, "data", "config.json"), JSON.stringify({ experimental: { decisionMode: false, codexSteer: true } }));
+    const on = install(root, bin, { steer: null });
+    expect(postTool(file)).toEqual([theirs, { hooks: [{ type: "command", command: codexHookCommand(bin, file)!, timeout: 10 }] } as never]);
+    expect(existsSync(on.note)).toBe(true);
+    // The variable turns it off over config.json (the last mention wins): ours out, theirs kept, the note gone.
+    const out = install(root, bin, { steer: "Codex-Steer, -codex-steer" });
+    expect(out.run.status).toBe(0);
+    expect(postTool(file)).toEqual([theirs as never]);
+    expect(out.run.stdout).toContain("took Plannotator's PostToolUse hook out");
+    expect(existsSync(out.note)).toBe(false);
+    // On again by the variable alone (config.json off): added again, not read as the person's removal.
+    writeFileSync(join(root, "data", "config.json"), JSON.stringify({ experimental: { codexSteer: false } }));
+    install(root, bin, { steer: " codex-steer " });
+    expect(postTool(file)).toHaveLength(2);
+    // Off with ours the only PostToolUse hook: the key goes, the Stop hook stays.
+    writeFileSync(file, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: bin, timeout: 345600 }] }], PostToolUse: [{ hooks: [{ type: "command", command: codexHookCommand(bin, file)!, timeout: 10 }] }] } }));
+    install(root, bin, { steer: null });
+    expect(JSON.parse(readFileSync(file, "utf8")).hooks).toEqual({ Stop: [{ hooks: [{ type: "command", command: bin, timeout: 345600 }] }] });
   });
 
   test("no node to merge an existing file: unchanged, and the lines to add by hand name both hooks", () => {

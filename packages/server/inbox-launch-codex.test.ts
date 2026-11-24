@@ -36,7 +36,8 @@ async function until<T>(what: string, check: () => T | null | undefined | false 
 
 const CONFIG = ['sandbox_mode = "workspace-write"', "", "[mcp_servers.plannotator-inbox]", 'command = "plannotator"', 'args = ["inbox", "mcp"]', ""].join("\n");
 
-function setup(options: { state?: FakeCodexLaunchState; config?: string | null; withCodex?: boolean } = {}) {
+/** `steer`: the experimental `codex-steer` switch on in the sandbox's config.json (off by default). */
+function setup(options: { state?: FakeCodexLaunchState; config?: string | null; withCodex?: boolean; steer?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-codex-")));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -45,7 +46,7 @@ function setup(options: { state?: FakeCodexLaunchState; config?: string | null; 
   const codexHome = join(home, ".codex");
   for (const dir of [home, dataDir, folder, codexHome]) mkdirSync(dir, { recursive: true });
   if (options.config !== null) writeFileSync(join(codexHome, "config.toml"), options.config ?? CONFIG);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true }, ...(options.steer ? { experimental: { codexSteer: true } } : {}) }));
   const before = process.env.PLANNOTATOR_DATA_DIR;
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   cleanup.push(() => {
@@ -237,8 +238,21 @@ describe("Codex through the launch engine, against the fake codex", () => {
     return { file, add, shows: (text: string) => add({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text }] } }) };
   };
 
-  test("a reply while a turn runs goes into that turn with turn/steer, not a second turn/start; Delivered once the rollout shows it", async () => {
+  test("steering off (the default): a reply while a turn runs is a second turn/start, Delivered at once, never steered", async () => {
     const t = setup();
+    const root = await t.send("A SLOW job.");
+    await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");
+    const starts = t.fake.rpc("turn/start").length;
+    const reply = t.store.sendReply(root.id, { words: "After this turn.", idempotency_key: "reply-off" }).reply!;
+    await until("delivered", () => t.store.message(reply.id)!.delivery);
+    expect(t.store.message(reply.id)!.delivery!.into_turn).toBeUndefined();
+    expect(t.fake.rpc("turn/start").filter((call) => JSON.stringify(call.params.input).includes("After this turn."))).toHaveLength(1);
+    expect(t.fake.rpc("turn/start").length).toBe(starts + 1);
+    expect(t.fake.rpc("turn/steer")).toHaveLength(0);
+  }, 20_000);
+
+  test("a reply while a turn runs goes into that turn with turn/steer, not a second turn/start; Delivered once the rollout shows it", async () => {
+    const t = setup({ steer: true });
     const root = await t.send("A SLOW job.");
     const thread = await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
     await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");
@@ -259,7 +273,7 @@ describe("Codex through the launch engine, against the fake codex", () => {
   }, 20_000);
 
   test("steered, then the turn is stopped before the model read it: never Delivered, and it goes in when the session runs again, once", async () => {
-    const t = setup();
+    const t = setup({ steer: true });
     const root = await t.send("A SLOW job.");
     const thread = await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
     await until("working", async () => (await t.launch.runOf(root.id))?.state === "working");

@@ -377,11 +377,19 @@ enables, and an unrevised denied plan is re-served on every Stop of the turn.
 
 ### Codex PostToolUse hook and steering: a reply into a running turn
 
-The owner (2026-11-24): "I think what we typically want is a way to like inject it as like steering." A person's
-reply to a Codex thread that is in a turn goes into that turn; everything this cannot do still goes as the next turn
-through `codex queue`, so no reply goes worse than before. One switch, `INBOX_CODEX_BUSY_REPLY`
-(`packages/server/inbox-codex-steer.ts`): `"steer"` (the owner's pick, option a) or `"next_turn"` (as before). The
-code: `inbox-codex-steer.ts` (routes and policy), `inbox-codex-control.ts` (the socket client),
+**Experimental, off by default.** The owner, asked how a reply to a busy Codex should go: "Yeah, I don't know. Q's
+working fine for the most part." So `codex queue` stays the delivery, and steering waits behind the `codex-steer`
+experimental switch (`PLANNOTATOR_EXPERIMENTAL=codex-steer`, else config.json `{ "experimental": { "codexSteer": true } }`;
+`resolveExperimental`, read on every use by `codexBusyReply()` in `packages/server/inbox-codex-steer.ts`; no Settings
+switch yet). Off guarantees: the wake reads no rollout, holds nothing, steers nothing and queues as before; a launched
+thread's host runs the same `turn/start` (then `turn/steer` only when Codex refuses a second turn) as before; the
+installer writes no PostToolUse hook and takes out one it wrote before ("Codex: took Plannotator's PostToolUse hook out
+of <hooks.json> (the experimental codex-steer switch is off)."). No agent-facing text changes either way. Tests:
+"the experimental codex-steer switch" in `inbox-codex-steer.test.ts`, "steering off" in `inbox-launch-codex.test.ts`,
+"the switch" in `codex-hook-command.test.ts`.
+
+With it on, a person's reply to a Codex thread that is in a turn goes into that turn; everything this cannot do still
+goes as the next turn through `codex queue`, so no reply goes worse than before. The code: `inbox-codex-steer.ts` (routes and policy), `inbox-codex-control.ts` (the socket client),
 `packages/shared/inbox/codex-hook-mailbox.ts` (the hook's mailbox and claim), `packages/shared/codex-hook-command.ts`
 (the hook's command), `apps/hook/server/codex-hook.ts` (the hook), `packages/server/inbox-codex-sight.ts` (the proof it
 arrived). Proof: `packages/server/inbox-codex-steer.test.ts` (fake socket, fake `codex`, scratch rollout and
@@ -435,7 +443,8 @@ removal), the launch cases in `packages/server/inbox-launch-codex.test.ts`, and 
   `$XDG_DATA_HOME/plannotator/inbox/codex-hook/`, or when PLANNOTATOR_DATA_DIR is set; otherwise one `sh`, a `dd` and
   a few globs per tool call, no output (no effect in Codex). `plannotator codex-hook` is not a listed subcommand; it
   answers before any startup work and never fails a tool call.
-- **Install.** `scripts/install.sh` writes it beside the Stop hook, in the same `hooks.json`, under the same rules
+- **Install.** With the switch on (the installer reads it as `resolveExperimental` does), `scripts/install.sh`
+  writes it beside the Stop hook, in the same `hooks.json`, under the same rules
   (`--skip-codex` and `skipInstall.codex` skip both; a custom Plannotator Stop hook it leaves alone means it adds no
   PostToolUse hook either): its own `PostToolUse` group, no matcher, `timeout: 10`, updated in place on a reinstall
   (its position kept, so the trust of other hooks holds), never touching another hook. `plannotator update` runs the

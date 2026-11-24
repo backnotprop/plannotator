@@ -21,7 +21,7 @@ import { runCodexHook } from "../../apps/hook/server/codex-hook";
 import { createFakeAgents } from "../../tests/helpers/fake-agents";
 import { startFakeCodexControl, type FakeCodexControl, type FakeCodexControlState } from "../../tests/helpers/fake-codex-control";
 import { createAgentEnvironmentFor } from "./inbox-agents";
-import { CODEX_HOOK_CLAIM_GRACE_MS, createCodexSteerRoute, INBOX_CODEX_STEER_SOCKET } from "./inbox-codex-steer";
+import { CODEX_HOOK_CLAIM_GRACE_MS, codexBusyReply, createCodexSteerRoute, INBOX_CODEX_STEER_SOCKET } from "./inbox-codex-steer";
 import { codexQueueMessage, createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { InboxOutbox } from "./inbox-outbox";
 import { MACHINE_PLATFORM } from "./inbox-devices";
@@ -48,13 +48,25 @@ async function until<T>(what: string, check: () => T | Promise<T>, ms = 5_000): 
 
 const commandOf = (item: InboxMessage): InboxReplyCommand => ({ type: "reply", id: item.id, thread_id: item.thread_id, reply_to: item.reply_to ?? null, subject: null, body: item.body, url: "http://127.0.0.1/#thread" });
 
-function world(options: { socket?: FakeCodexControlState; rollout?: "running" | "idle" | null; hook?: boolean; reviewed?: boolean; requestMs?: number } = {}) {
+/**
+ * `switch`: the experimental `codex-steer` switch as config.json says it (absent: the policy is "steer", as the switch
+ * on). The data dir is the world's own (PLANNOTATOR_DATA_DIR, restored after).
+ */
+function world(options: { socket?: FakeCodexControlState; rollout?: "running" | "idle" | null; hook?: boolean; reviewed?: boolean; requestMs?: number; switch?: "on" | "off" | "unset" } = {}) {
   const agents = createFakeAgents("plannotator-codex-steer-");
   cleanup.push(() => agents.remove());
   agents.install("codex");
   const codexHome = agents.env.CODEX_HOME!;
   mkdirSync(codexHome, { recursive: true });
   const dataDir = join(agents.root, "data");
+  mkdirSync(dataDir, { recursive: true });
+  const dataBefore = process.env.PLANNOTATOR_DATA_DIR;
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  cleanup.push(() => {
+    if (dataBefore === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+    else process.env.PLANNOTATOR_DATA_DIR = dataBefore;
+  });
+  if (options.switch === "on" || options.switch === "off") writeFileSync(join(dataDir, "config.json"), JSON.stringify({ experimental: { codexSteer: options.switch === "on" } }));
   const store = InboxStore.open(join(dataDir, "inbox"));
   const project = store.ensureProject({ name: "ledger", root: "/work/ledger" });
   const environment = createAgentEnvironmentFor({ platform: "linux", homeDir: agents.home, env: agents.env });
@@ -109,7 +121,8 @@ function world(options: { socket?: FakeCodexControlState; rollout?: "running" | 
   const start = (how: { socket?: boolean } = {}) => {
     // The route under this scratch Codex home; the socket route is on only where a test turns it on.
     const socket = how.socket ?? !!options.socket;
-    const steer = createCodexSteerRoute({ codexHomeDir: () => codexHome, inboxDir: () => store.dir, allowed: () => true, likelyFolders: () => [], now, socket, ...(options.requestMs ? { requestMs: options.requestMs } : {}) });
+    const policy = options.switch ? {} : { policy: "steer" as const };
+    const steer = createCodexSteerRoute({ codexHomeDir: () => codexHome, inboxDir: () => store.dir, allowed: () => true, likelyFolders: () => [], now, socket, ...policy, ...(options.requestMs ? { requestMs: options.requestMs } : {}) });
     const wake = createInboxCodexWake({ store, environment, commandOf, extraClis: [], log: () => {}, steer, now });
     wakes.push(wake);
     return wake;
@@ -125,6 +138,39 @@ function world(options: { socket?: FakeCodexControlState; rollout?: "running" | 
   const handed = (id: string) => store.handover.handedTo(THREAD).includes(id);
   return { store, project, rollout, subRollout, hooksFile, clock, control: () => control!, turn, append, shows, aborted, modelStep, quiet, reviewed, start, ask, reply, queues, held, hookRun, contextOf, handed };
 }
+
+describe("the experimental codex-steer switch: off by default, and off is the queue as before", () => {
+  for (const state of ["unset", "off"] as const) {
+    test(`switch ${state}: a busy Codex with the hook reviewed and a socket gets codex queue, nothing held, nothing steered`, async () => {
+      const w = world({ switch: state, rollout: "running", hook: true, socket: { loaded: [THREAD], running: { [THREAD]: "t7" } } });
+      const wake = w.start({ socket: true });
+      const reply = w.reply(w.ask(), "Just queue it.");
+      await wake.sweep();
+      await until("queued", () => w.queues().length === 1);
+      expect(w.held()).toHaveLength(0);
+      expect(w.control().calls).toHaveLength(0);
+      // The hook, if Codex runs it anyway, finds nothing to take.
+      expect(w.hookRun()).toBe("");
+      await wake.sweep();
+      expect(w.queues()).toHaveLength(1);
+      expect(w.store.message(reply.id)!.delivery?.into_turn).toBeUndefined();
+    });
+  }
+
+  test("switch on in config.json: held for the hook; PLANNOTATOR_EXPERIMENTAL decides over config.json", async () => {
+    const w = world({ switch: "on", rollout: "running", hook: true });
+    const wake = w.start();
+    w.reply(w.ask(), "Into the turn.");
+    await wake.sweep();
+    await until("held", () => w.held().length === 1);
+    expect(w.queues()).toHaveLength(0);
+    expect(codexBusyReply({})).toBe("steer");
+    expect(codexBusyReply({ PLANNOTATOR_EXPERIMENTAL: "-codex-steer" })).toBe("next_turn");
+    writeFileSync(join(process.env.PLANNOTATOR_DATA_DIR!, "config.json"), "{}");
+    expect(codexBusyReply({})).toBe("next_turn");
+    expect(codexBusyReply({ PLANNOTATOR_EXPERIMENTAL: "x, Codex-Steer" })).toBe("steer");
+  });
+});
 
 describe("the Codex hook: a reply goes into the running turn after its next tool call", () => {
   test("held, taken by the hook, handed (not Delivered) until the rollout shows it, then delivered into the turn once", async () => {

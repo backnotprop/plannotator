@@ -11,7 +11,9 @@
  * - Start: `initialize`, `account/read` (no login: the start fails with how to sign in), `thread/start { cwd }`,
  *   `thread/name/set`. No first turn: the engine moves the root to the thread, and the Codex wake hands it over.
  * - Turns: the Codex wake asks the engine's `deliver` before `codex queue` (inbox-codex-wake.ts); this host puts the
- *   wake text into the thread: `turn/steer` into the turn while one runs (on purpose: current Codex would steer a
+ *   wake text in as `turn/start`. Codex runs a turn started during another one after it; when it refuses one, the
+ *   text goes into the running turn with `turn/steer`. With the experimental `codex-steer` switch on
+ *   (inbox-codex-steer.ts): `turn/steer` into the turn while one runs (on purpose: current Codex would steer a
  *   second `turn/start` too, an older one may refuse it), else `turn/start`, a new turn (`deliver`).
  * - Stop: `turn/interrupt` only while a turn runs (5 s at most), then stdin closes (SIGTERM after 5 s).
  * - The Inbox tools: the person's own `plannotator-inbox` MCP entry in Codex's config (the way any Codex session
@@ -41,7 +43,7 @@ import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache, type LaunchChoiceLists } from
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { createCodexPermissions, CODEX_APPROVALS } from "./inbox-launch-codex-permission";
 import { createInboxCodexAccount } from "./inbox-codex-account";
-import { CODEX_TURN_MOVED, INBOX_CODEX_BUSY_REPLY } from "./inbox-codex-steer";
+import { CODEX_TURN_MOVED, codexBusyReply } from "./inbox-codex-steer";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, launchTurnErrorNote, writeLaunchNote, type LaunchAvailability, type LaunchDelivery, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
 
@@ -756,7 +758,8 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
     },
 
     /**
-     * The wake's text into the thread. While a turn runs: `turn/steer` into it (`steered`), on purpose, so it never
+     * The wake's text into the thread. Switch off: as before (see the module comment). On, while a turn runs:
+     * `turn/steer` into it (`steered`), on purpose, so it never
      * depends on what this Codex does with a second `turn/start` (current Codex steers it, `start_or_steer_turn`;
      * an older one may refuse it). When that turn ended between our look and the steer, or none runs: `turn/start`
      * (`delivered`, a new turn). A turn Codex will not steer (a review, a compaction) is tried again later. A restart
@@ -771,6 +774,30 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
       if (!p?.ready) return { failed: "Codex is not running" };
       if (signal.aborted) return { failed: "stopped" };
       const input = [{ type: "text", text, text_elements: [] }];
+      // The experimental `codex-steer` switch off (the default): exactly as before it (a new turn; into the running
+      // one only when Codex refuses a second turn), delivered at once.
+      if (codexBusyReply() !== "steer") {
+        try {
+          const started = await request(p, "turn/start", { threadId: thread, input });
+          const id = started.turn?.id;
+          if (typeof id === "string" && !p.turn && started.turn?.status === "inProgress" && started.turn?.startedAt !== null) p.turn = { id, since: Date.now() };
+          threads?.onChange();
+          return "delivered";
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (error instanceof RpcError && error.timedOut) return { uncertain: message };
+          if (p.turn && !p.exited && !signal.aborted) {
+            try {
+              await request(p, "turn/steer", { threadId: thread, expectedTurnId: p.turn.id, input });
+              return "delivered";
+            } catch (steer) {
+              if (steer instanceof RpcError && steer.timedOut) return { uncertain: steer.message };
+              return { failed: `${message}; turn/steer: ${steer instanceof Error ? steer.message : String(steer)}` };
+            }
+          }
+          return { failed: message };
+        }
+      }
       const steer = async (turnId: string): Promise<LaunchDelivery | null> => {
         try {
           await request(p, "turn/steer", { threadId: thread, expectedTurnId: turnId, input });
@@ -783,7 +810,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
           return { failed: `turn/steer: ${message}` };
         }
       };
-      if (p.turn && INBOX_CODEX_BUSY_REPLY === "steer") {
+      if (p.turn) {
         const steered = await steer(p.turn.id);
         if (steered) return steered;
       }

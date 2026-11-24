@@ -23,26 +23,33 @@
  * Either way a steer is only handed on: the wake says Delivered once the thread's rollout shows the text, and sends it
  * as the next turn when the turn ended without it (inbox-codex-sight.ts).
  *
- * `INBOX_CODEX_BUSY_REPLY` is the one switch for what a reply to a busy Codex does.
+ * EXPERIMENTAL, OFF by default (the owner, 2026-11-24: "Q's working fine for the most part"): `codexBusyReply()`
+ * reads the `codex-steer` experimental switch (PLANNOTATOR_EXPERIMENTAL, else config.json `experimental.codexSteer`).
+ * Off, delivery is exactly as before this module: no rollout is read, nothing is held, a launched thread's host takes
+ * the text as it did, and the installer writes no PostToolUse hook.
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { isCodexHookCommand } from "@plannotator/shared/codex-hook-command";
+import { loadConfig, resolveExperimental } from "@plannotator/shared/config";
 import { codexHookRanAt } from "@plannotator/shared/inbox/codex-hook-mailbox";
 import { CodexControlError, codexControlSocketPath, openCodexControl, type CodexControl } from "./inbox-codex-control";
 
 /**
- * What a reply to a Codex thread that is in a turn does (the owner's pick, 2026-11-24, option a):
+ * What a reply to a Codex thread that is in a turn does, read on every use so a change applies at once:
  *
- *  - `"steer"`: it goes into the running turn (the hook after the next tool call, or `turn/steer`), else as the next turn.
- *  - `"next_turn"`: it waits for the turn to end and goes as the next turn (`codex queue`), as before 2026-11-24.
+ *  - `"next_turn"` (the default): it waits for the turn to end and goes as the next turn (`codex queue`), as always.
+ *  - `"steer"` (the `codex-steer` experimental switch on): it goes into the running turn (the hook after the next
+ *    tool call, or `turn/steer`), else as the next turn.
  *
  * Option b (wait, with Send now to steer on demand, as Claude Code) needs the Codex connection to report `busy` and
  * `send_now` and the wake to act on `deliver_now_at`; option c needs a control to queue one reply. Neither exists yet.
  */
-export const INBOX_CODEX_BUSY_REPLY: "steer" | "next_turn" = "steer";
+export function codexBusyReply(env: NodeJS.ProcessEnv = process.env): "steer" | "next_turn" {
+  return resolveExperimental(loadConfig(), "codex-steer", env) ? "steer" : "next_turn";
+}
 
 /** Whether route 1 (the control socket) is tried. Off: see the module comment. */
 export const INBOX_CODEX_STEER_SOCKET = false;
@@ -275,6 +282,8 @@ export interface CodexSteerRoute {
    * it was not found a moment ago (before a steer: a thread's first turn writes its rollout).
    */
   rollout(thread: string, fresh?: boolean): Promise<string | null>;
+  /** The experimental switch is on (`codexBusyReply` is "steer"): off, the wake delivers exactly as before. */
+  steering(): boolean;
 }
 
 /**
@@ -288,13 +297,15 @@ export function createCodexSteerRoute(options: {
   allowed: () => boolean;
   likelyFolders: (thread: string) => string[];
   now?: () => number;
-  policy?: "steer" | "next_turn";
+  /** Default `codexBusyReply` (the experimental switch, read on every use). */
+  policy?: "steer" | "next_turn" | (() => "steer" | "next_turn");
   /** Route 1 on (default INBOX_CODEX_STEER_SOCKET). */
   socket?: boolean;
   requestMs?: number;
 }): CodexSteerRoute {
   const now = options.now ?? Date.now;
-  const policy = options.policy ?? INBOX_CODEX_BUSY_REPLY;
+  const chosen = options.policy ?? (() => codexBusyReply());
+  const policyOf = typeof chosen === "function" ? chosen : () => chosen;
   const socketOn = options.socket ?? INBOX_CODEX_STEER_SOCKET;
   const rolloutPaths = new Map<string, string>();
   const rolloutMisses = new Map<string, number>();
@@ -336,17 +347,18 @@ export function createCodexSteerRoute(options: {
   };
   return {
     async socket(thread, text) {
-      if (!socketOn || policy !== "steer" || !options.allowed()) return { kind: "no", why: "off", idle: false };
+      if (!socketOn || policyOf() !== "steer" || !options.allowed()) return { kind: "no", why: "off", idle: false };
       const socketPath = codexControlSocketPath(options.codexHomeDir());
       if (!existsSync(socketPath)) return { kind: "no", why: "Codex's control socket is not there", idle: false };
       return steerOverCodexSocket({ socketPath, thread, text, ...(options.requestMs ? { requestMs: options.requestMs } : {}) });
     },
     async holdsForHook(thread) {
-      if (policy !== "steer" || !options.allowed() || !hooksFile().installed || !hookRan()) return false;
+      if (policyOf() !== "steer" || !options.allowed() || !hooksFile().installed || !hookRan()) return false;
       const path = await rollout(thread);
       return path !== null && (await codexRolloutTurn(path, now())) === "running";
     },
-    hookAwaitsReview: () => policy === "steer" && options.allowed() && hooksFile().installed && !hookRan(),
+    hookAwaitsReview: () => policyOf() === "steer" && options.allowed() && hooksFile().installed && !hookRan(),
     rollout,
+    steering: () => policyOf() === "steer",
   };
 }

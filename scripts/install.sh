@@ -1521,13 +1521,34 @@ elif [ "$codex_available" -eq 1 ]; then
     CODEX_HOOKS="$CODEX_DIR/hooks.json"
     PLANNOTATOR_BIN="${INSTALL_DIR}/plannotator"
     codex_hook_configured=0
-    # The PostToolUse hook next to the Stop hook: a reply from the Inbox goes into a running Codex turn after its next
-    # tool call (the Codex app too). Its shell gate starts the binary only while a reply waits for that thread, and
-    # exits 0 when the binary is gone. The same string as codexHookCommand() in
-    # packages/shared/codex-hook-command.ts (packages/shared/codex-hook-command.test.ts holds them equal); none for a
-    # binary path the gate's quotes cannot carry.
+    # The PostToolUse hook next to the Stop hook, only with the experimental `codex-steer` switch on (off by default):
+    # a reply from the Inbox goes into a running Codex turn after its next tool call (the Codex app too). Its shell
+    # gate starts the binary only while a reply waits for that thread, and exits 0 when the binary is gone. The same
+    # string as codexHookCommand() in packages/shared/codex-hook-command.ts (packages/shared/codex-hook-command.test.ts
+    # holds them equal); none for a binary path the gate's quotes cannot carry.
     CODEX_POST_TOOL_HOOK=""
-    case "$PLANNOTATOR_BIN$CODEX_HOOKS" in
+    # The switch read as resolveExperimental() reads it (packages/shared/config.ts): PLANNOTATOR_EXPERIMENTAL (a comma
+    # list, the last mention wins, `-codex-steer` turns it off), else config.json `experimental.codexSteer`. Off: no
+    # PostToolUse hook is written, and one this installer wrote before is taken out.
+    codex_steer_on=0
+    if [ -f "$_config_dir/config.json" ] && grep -q '"codexSteer"[[:space:]]*:[[:space:]]*true' "$_config_dir/config.json" 2>/dev/null; then
+        codex_steer_on=1
+    fi
+    if [ -n "${PLANNOTATOR_EXPERIMENTAL:-}" ]; then
+        _codex_exp_ifs=$IFS
+        IFS=,
+        set -f
+        for _codex_exp in $(printf '%s' "$PLANNOTATOR_EXPERIMENTAL" | tr '[:upper:]' '[:lower:]' | tr -d ' \t'); do
+            case "$_codex_exp" in
+                codex-steer) codex_steer_on=1 ;;
+                -codex-steer) codex_steer_on=0 ;;
+            esac
+        done
+        set +f
+        IFS=$_codex_exp_ifs
+    fi
+    case "$codex_steer_on:$PLANNOTATOR_BIN$CODEX_HOOKS" in
+        0:*) ;;
         *[\'\"\$\`\\]*) ;;
         *) CODEX_POST_TOOL_HOOK="/bin/sh -c 'B=\"${PLANNOTATOR_BIN}\"; H=\"${CODEX_HOOKS}\"; [ -x \"\$B\" ] || exit 0; [ -n \"\${PLANNOTATOR_DATA_DIR:-}\" ] && exec \"\$B\" codex-hook; for d in \"\$HOME/.plannotator/inbox\" \"\${XDG_DATA_HOME:-/nonexistent}/plannotator/inbox\"; do [ -d \"\$d\" ] || continue; m=\"\$d/codex-hook-ran\"; [ -e \"\$m\" ] && [ ! \"\$H\" -nt \"\$m\" ] || true 2>/dev/null >\"\$m\"; for f in \"\$d\"/codex-hook/*.json; do [ -e \"\$f\" ] || break; p=\$(dd bs=512 count=1 2>/dev/null); t=\${p#*session_id???}; t=\${t%%[!0-9a-f-]*}; export PLANNOTATOR_CODEX_HOOK_HEAD=\"\$p\"; [ \${#t} -eq 36 ] || exec \"\$B\" codex-hook; for g in \"\$d/codex-hook/\$t\".*.json; do [ -e \"\$g\" ] && exec \"\$B\" codex-hook; done; exit 0; done; done; exit 0'" ;;
     esac
@@ -1537,7 +1558,8 @@ elif [ "$codex_available" -eq 1 ]; then
     CODEX_POST_TOOL_NOTE="$_config_dir/codex-hook-installed"
     codex_post_tool_noted=0
     [ -e "$CODEX_POST_TOOL_NOTE" ] && codex_post_tool_noted=1
-    # added | updated | kept | removed (the person took it out: left out) | none (no hook written)
+    # added | updated | kept | removed (the person took it out: left out) | dropped (the switch off: ours taken out) |
+    # none (no hook written)
     codex_post_tool_state="none"
 
     mkdir -p "$CODEX_DIR"
@@ -1649,10 +1671,10 @@ CODEX_HOOKS_EOF
         echo "Created Codex hooks at ${CODEX_HOOKS}"
         codex_hook_configured=1
     elif command -v node >/dev/null 2>&1; then
-        if codex_merge_result=$(node - "$CODEX_HOOKS" "$PLANNOTATOR_BIN" "$CODEX_POST_TOOL_HOOK" "$codex_post_tool_noted" <<'NODE'
+        if codex_merge_result=$(node - "$CODEX_HOOKS" "$PLANNOTATOR_BIN" "$CODEX_POST_TOOL_HOOK" "$codex_post_tool_noted" "$codex_steer_on" <<'NODE'
 const fs = require("fs");
 const path = require("path");
-const [hooksPath, command, postToolCommand, postToolNoted] = process.argv.slice(2);
+const [hooksPath, command, postToolCommand, postToolNoted, steerOn] = process.argv.slice(2);
 const config = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
 config.hooks ||= {};
 const stopHooks = Array.isArray(config.hooks.Stop) ? config.hooks.Stop : [];
@@ -1697,12 +1719,32 @@ config.hooks.Stop = stopHooks;
 // The same recognition as parseCodexHookCommand() in packages/shared/codex-hook-command.ts.
 let postToolChanged = false;
 let postTool = "none";
+const isOurs = (value) =>
+  typeof value === "string" &&
+  ((value.startsWith("/bin/sh -c 'B=\"") && value.includes('exec "$B" codex-hook')) ||
+    (value.startsWith("/bin/sh -c '") && value.includes("/plannotator/inbox/codex-hook/*.json") && value.includes('" codex-hook;')));
+if (steerOn !== "1" && Array.isArray(config.hooks.PostToolUse)) {
+  // The experimental switch off: ours taken out (a group left empty with it), every other hook kept as it is.
+  const kept = [];
+  for (const entry of config.hooks.PostToolUse) {
+    const hooks = Array.isArray(entry?.hooks) ? entry.hooks : null;
+    if (!hooks) {
+      kept.push(entry);
+      continue;
+    }
+    const left = hooks.filter((hook) => !(hook?.type === "command" && isOurs(hook.command)));
+    if (left.length === hooks.length) kept.push(entry);
+    else {
+      postToolChanged = true;
+      postTool = "dropped";
+      if (left.length > 0) kept.push({ ...entry, hooks: left });
+    }
+  }
+  if (kept.length > 0) config.hooks.PostToolUse = kept;
+  else delete config.hooks.PostToolUse;
+}
 if (postToolCommand && (updated || !foundCustomPlannotatorHook)) {
   const entries = Array.isArray(config.hooks.PostToolUse) ? config.hooks.PostToolUse : [];
-  const isOurs = (value) =>
-    typeof value === "string" &&
-    ((value.startsWith("/bin/sh -c 'B=\"") && value.includes('exec "$B" codex-hook')) ||
-      (value.startsWith("/bin/sh -c '") && value.includes("/plannotator/inbox/codex-hook/*.json") && value.includes('" codex-hook;')));
   let found = false;
   for (const entry of entries) {
     for (const hook of Array.isArray(entry?.hooks) ? entry.hooks : []) {
@@ -1781,6 +1823,10 @@ NODE
             ;;
         removed)
             echo "Codex: Plannotator's PostToolUse hook was removed from ${CODEX_HOOKS}; left out (an Inbox reply to a busy Codex goes as its next turn)."
+            ;;
+        dropped)
+            rm -f "$CODEX_POST_TOOL_NOTE" 2>/dev/null || true
+            echo "Codex: took Plannotator's PostToolUse hook out of ${CODEX_HOOKS} (the experimental codex-steer switch is off)."
             ;;
     esac
 
