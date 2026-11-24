@@ -6,6 +6,7 @@
 import { fetchSkillCatalog, normalizeSkillContent } from '@plannotator/ui/utils/skillCatalog';
 import { inboxApi } from '../api';
 import { builtinSkillContent } from '../skills';
+import { machineSkillSources } from './machineSkills';
 
 export interface SkillPreviewText {
   description: string;
@@ -29,15 +30,24 @@ export function skillExcerpt(content: string): string {
   return text.length > 220 ? `${text.slice(0, 217).trimEnd()}…` : text;
 }
 
-export function skillPreviewText(name: string): Promise<SkillPreviewText> {
-  const had = known.get(name);
+/** `machine`: a linked machine's thread, whose own skills are read when this computer lacks the skill (machineSkills.ts). */
+export function skillPreviewText(name: string, machine: string | null = null): Promise<SkillPreviewText> {
+  const key = `${machine ?? ''}|${name}`;
+  const had = known.get(key);
   if (had) return had;
   const read = (async (): Promise<SkillPreviewText> => {
-    const entry = (await fetchSkillCatalog().catch(() => [])).find((e) => e.name === name);
+    let entry = (await fetchSkillCatalog().catch(() => [])).find((e) => e.name === name);
+    let content: string | undefined;
+    const far = !entry && !!machine;
+    if (far) {
+      const there = machineSkillSources(machine!);
+      entry = (await there.catalog().catch(() => [])).find((e) => e.name === name);
+      if (entry && entry.root !== 'plannotator') content = (await there.content(name))?.content;
+    }
     if (!entry) return { description: '', excerpt: '', builtin: false, missing: true };
     const builtin = entry.root === 'plannotator';
-    let content = builtinSkillContent(entry)?.content;
-    if (!content && !builtin) {
+    content ??= builtinSkillContent(entry)?.content;
+    if (!content && !builtin && !far) {
       try {
         content = normalizeSkillContent((await inboxApi.skillContent(name)).skill)?.content;
       } catch {
@@ -46,8 +56,8 @@ export function skillPreviewText(name: string): Promise<SkillPreviewText> {
     }
     return { description: entry.description ?? '', excerpt: content ? skillExcerpt(content) : '', builtin, missing: false };
   })();
-  known.set(name, read);
+  known.set(key, read);
   // A failed or missing read is tried again next time.
-  void read.then((text) => text.missing && known.delete(name));
+  void read.then((text) => text.missing && known.delete(key));
   return read;
 }

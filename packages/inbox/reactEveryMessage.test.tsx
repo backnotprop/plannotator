@@ -13,6 +13,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxReaction, InboxThread } from '@plannotator/core/inbox-types';
 import { resetSkillCatalogCache, resetSkillCatalogTransport, setSkillCatalogTransport } from '@plannotator/ui/utils/skillCatalog';
 import { resetSavedReactionsForTests } from './reactions';
+import { rememberLocal, rememberMachine } from './inboxUrl';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -159,6 +160,15 @@ test.skipIf(!hasDom)('the pointer on an earlier message’s face opens it into t
   expect(acks).toEqual([{ id: M3, on: true, reaction: { emoji: '🎉', label: 'Ship it' } }]);
 });
 
+test.skipIf(!hasDom)('the face at the end of the opened face opens the full tray at the first press', async () => {
+  await render(sample());
+  await hoverFace(M3);
+  await until(() => !!document.querySelector(`[data-react-strip="${M3}"]`), 'the face opened');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-react-all]')!.click());
+  await until(() => !!document.querySelector('[data-reaction-tray]'), 'the full tray');
+  expect(document.querySelector(`[data-react-strip="${M3}"]`)).toBeNull();
+});
+
 test.skipIf(!hasDom)('a right-click in a message’s body opens the one menu, emoji first; a link keeps the browser’s menu', async () => {
   await render(sample());
   const event = await rightClick(article(M3).querySelector('.ib-msg p, .ib-msg')!);
@@ -204,6 +214,34 @@ test.skipIf(!hasDom)('a skill emoji sends a reply with a typed /bro reply’s wo
   expect(sent.body.skill_reaction).toEqual({ emoji: '😵‍💫', skill: 'bro' });
   expect(String(sent.body.feedback)).toStartWith('**Skills referenced** (the person is asking you to invoke these skills when acting on this reply):');
   expect(String(sent.body.feedback)).toContain('`bro`');
+});
+
+test.skipIf(!hasDom)('on a linked machine’s thread, a skill this computer lacks is read from that machine and its text travels in the reply', async () => {
+  const far = 'ibx_01M8A00000000000000000FAR1';
+  const t = sample();
+  rememberMachine([t.thread_id, ...t.messages.map((m) => m.id)], far);
+  resetSavedReactionsForTests([{ emoji: '🧪', label: 'Test it', skill: 'test-it' }]);
+  const local = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path === `/api/inbox/m/${far}/skills`) return Response.json({ skills: [{ name: 'test-it', root: 'claude', description: 'Run it and show me', humanOnly: true }] });
+    if (path.startsWith(`/api/inbox/m/${far}/skills/content`)) return Response.json({ skill: { name: 'test-it', content: 'Run the change for real before you say it works.', dir: '/home/far/.claude/skills/test-it', path: '/home/far/.claude/skills/test-it/SKILL.md' } });
+    return local(input, init);
+  }) as typeof fetch;
+  try {
+    await render(t);
+    await rightClick(article(M3).querySelector('.ib-msg')!);
+    await until(() => !!menu(), 'the message menu');
+    await act(async () => (menu()!.querySelector('[data-menu-reaction="🧪"]') as HTMLElement).click());
+    await until(() => posts.some((p) => p.path.endsWith('/reply')), 'the reply');
+    const sent = posts.find((p) => p.path.endsWith('/reply'))!;
+    expect(sent.path).toBe(`/api/inbox/m/${far}/messages/${M3}/reply`);
+    expect(sent.body.words).toBe('/test-it');
+    expect(String(sent.body.feedback)).toContain('--- BEGIN SKILL INSTRUCTIONS: test-it ---');
+    expect(String(sent.body.feedback)).toContain('Run the change for real before you say it works.');
+  } finally {
+    rememberLocal([t.thread_id, ...t.messages.map((m) => m.id)]);
+  }
 });
 
 test.skipIf(!hasDom)('a skill reaction’s reply draws as one line: You, the emoji and /bro, with no words under it', async () => {

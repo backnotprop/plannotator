@@ -388,6 +388,7 @@ import { agentSearchDoorAnswer, agentThreadsDoorAnswer } from "./inbox-far-find"
 import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
+import { nextSharedReactionsRev, sharedReactionsNewer, type SharedReactions } from "./inbox-reactions-shared";
 import { mergePullBoards } from "./inbox-machine-pulls";
 import { doorRefusesBare, replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
@@ -2991,7 +2992,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (validateOnly) return before;
     // Nothing to change (a name for an emoji another window took out): no write, no event.
     if (JSON.stringify(before.reactions) === JSON.stringify(list)) return before;
-    const rev = before.rev + 1;
+    // One set on every linked machine (inbox-reactions-shared.ts): past the newest revision any of them holds.
+    return writeReactions(list, nextSharedReactionsRev(before.rev, machines?.reactionsCopies() ?? []));
+  };
+  const writeReactions = (list: InboxReaction[], rev: number): { reactions: InboxReaction[]; rev: number } => {
     saveConfig({ inboxReactions: list, inboxReactionsRev: rev });
     const saved = reactionsState();
     if (saved.rev !== rev || JSON.stringify(saved.reactions) !== JSON.stringify(list)) {
@@ -2999,6 +3003,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     for (const listener of reactionsListeners) listener(list, rev);
     return saved;
+  };
+  /** A linked machine's saved emoji, read in its list: taken when newer, and every window here hears them. */
+  const adoptReactions = (far: SharedReactions): void => {
+    if (sharedReactionsNewer(far, reactionsState())) writeReactions(far.reactions, far.rev);
   };
 
   /**
@@ -4313,9 +4321,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // once. Windows, and a linked machine that asks (`agent-faces=1`: a face writes no record, inbox-peer-link.ts).
         const onAgentFaces = (wire: InboxAgentFacesWire) => send(`event: agent-faces\ndata: ${JSON.stringify(wire)}\n\n`);
         if (windowId || url.searchParams.get("agent-faces") === "1") agentFaceListeners.add(onAgentFaces);
-        // The tray's saved emoji changed (any window's, a phone's too): every window takes the list at once. Windows only.
+        // The tray's saved emoji changed (any window's, a phone's, a linked machine's): every window takes the list at once.
+        // Windows, and a linked machine that asks (`reactions=1`: it reads this list and takes the newer set).
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
-        if (windowId) reactionsListeners.add(onReactions);
+        if (windowId || url.searchParams.get("reactions") === "1") reactionsListeners.add(onReactions);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
         const onCapabilities = (changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam") => {
           const floats = floatDraftsOn();
@@ -6130,7 +6139,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Where this computer's agents live and what their panes say, as Rex says now, in every window; Show in Rex by where the window is.
         const agents = withRexPlaces(listed, phone ? null : thisComputersWindow(req, via) ? "here" : "away");
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts).
-        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state() } : {}) };
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), reactions: reactionsState() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
@@ -8522,6 +8531,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           showArchived.adopt(value);
         } catch {
           // config.json could not be written: this machine keeps its own switch until the next read.
+        }
+      },
+      reactionsSaid: (value) => {
+        try {
+          adoptReactions(value);
+        } catch {
+          // config.json could not be written: this machine keeps its own emoji until the next read.
         }
       },
       sentFrom: sentFromOf,

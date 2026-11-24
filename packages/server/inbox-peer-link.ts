@@ -30,6 +30,7 @@ import { INBOX_SENT_FROM_HEADER } from "@plannotator/core/inbox-types";
 import type { InboxPeerTransport } from "./inbox-transport";
 import { farArchivedPage, type FarArchived } from "./inbox-archived-merged";
 import { readShowArchived, type InboxShowArchived } from "./inbox-show-archived";
+import { readSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
 
 /** How long the Archived group waits for a linked machine's page before it shows the one that machine last gave. */
 export const FAR_ARCHIVED_WAIT_MS = 2_000;
@@ -70,7 +71,7 @@ export interface PeerRecord {
  * thread's tag): this Inbox asks for each (`<event>=1` on its stream), reads that machine's list again when one comes,
  * and tells its own windows the same event (approval "inbox-linked-marks"). A new mark adds its event here.
  */
-export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags", "show-archived"] as const;
+export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags", "show-archived", "reactions"] as const;
 export type PeerRereadEvent = (typeof PEER_REREAD_EVENTS)[number];
 const isRereadEvent = (event: string): event is PeerRereadEvent => (PEER_REREAD_EVENTS as readonly string[]).includes(event);
 
@@ -94,6 +95,8 @@ export interface PeerList {
   session_titles: Record<string, string>;
   /** Its "Show archived" switch (inbox-show-archived.ts); null from an Inbox before it. */
   show_archived: InboxShowArchived | null;
+  /** Its saved reaction emoji and their revision (inbox-reactions-shared.ts); null from an Inbox before it. */
+  reactions: SharedReactions | null;
 }
 
 /**
@@ -500,6 +503,7 @@ export class PeerLink {
       session_labels: inboxPeerSessionNames(list.session_labels),
       session_titles: inboxPeerSessionNames(list.session_titles),
       show_archived: list.show_archived === undefined ? null : readShowArchived(list.show_archived),
+      reactions: readSharedReactions(list.reactions),
     };
     this.options.onChange();
     return true;

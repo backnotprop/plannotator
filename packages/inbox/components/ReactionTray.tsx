@@ -410,7 +410,8 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
     if (!open) clear();
   };
   // A hold elsewhere (Reply, on a phone) opens the tray as a hold on the 👍 does: the release does not close it.
-  const seenRequest = useRef(openRequest);
+  // A message's face (`anchor`) mounts the tray with its first request: that one opens it too.
+  const seenRequest = useRef(anchor ? 0 : openRequest);
   useEffect(() => {
     if (openRequest === seenRequest.current) return;
     seenRequest.current = openRequest;
@@ -547,7 +548,8 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
             </Menu.Trigger>
           )}
           <Menu.Portal container={portal ?? undefined}>
-            <Menu.Positioner className="ib-react-pos" anchor={at} side="top" align={anchor ? 'end' : 'start'} sideOffset={anchor ? 6 : 10} alignOffset={-6} collisionPadding={12}>
+            {/* A message's face: the tray opens in the face's place, centered on the text's first line, over the text and never over the head row's time, Reply or ⋯. */}
+            <Menu.Positioner className="ib-react-pos" anchor={at} side={anchor ? 'bottom' : 'top'} align={anchor ? 'end' : 'start'} sideOffset={anchor ? ({ anchor: a, positioner: p }) => 6 - (a.height + p.height) / 2 : 10} alignOffset={-6} collisionPadding={12}>
               <Menu.Popup
                 ref={popRef}
                 className="ib-react-pop"
@@ -575,7 +577,7 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
                   </Menu.Item>
                   {saved.map((r, i) => {
                     const name = hasSkill(r) ? skillSaid(r) : r.label || capFirst(emojiName(r.emoji));
-                    const card = previewHandlers(r, agent, () => popRef.current);
+                    const card = previewHandlers(r, agent, () => popRef.current, messageId);
                     return (
                       <Menu.Item
                         key={`saved-${r.emoji}`}
@@ -809,10 +811,12 @@ function TrayRow({ highlight, fresh, onPick, onPress }: { highlight: number | nu
             onClick={() => onPick(i)}
           >
             <span className="ib-react-e">{r.emoji}</span>
+            {hasSkill(r) && <SkillMark />}
           </button>
         ) : (
           <span key={`${i}-${r.emoji}`} className="ib-react-cell" data-fresh={i === fresh ? '' : undefined} data-highlighted={i === highlight ? '' : undefined}>
             <span className="ib-react-e">{r.emoji}</span>
+            {hasSkill(r) && <SkillMark />}
           </span>
         ),
       )}

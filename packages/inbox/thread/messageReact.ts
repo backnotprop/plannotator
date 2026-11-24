@@ -47,7 +47,7 @@ export const faceStrip = store<FaceStripAt | null>(null);
 export const useFaceStrip = () => useSyncExternalStore(faceStrip.subscribe, faceStrip.get, () => null);
 
 /** A skill emoji under the pointer (or keyboard focus): its card opens beside `anchor`, to the left first. */
-export type SkillPreviewAt = { reaction: InboxReaction & { skill: string }; agent: string; anchor: Element };
+export type SkillPreviewAt = { reaction: InboxReaction & { skill: string }; agent: string; anchor: Element; machine?: string | null };
 export const skillPreview = store<SkillPreviewAt | null>(null);
 export const useSkillPreview = () => useSyncExternalStore(skillPreview.subscribe, skillPreview.get, () => null);
 

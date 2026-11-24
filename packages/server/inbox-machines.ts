@@ -52,6 +52,7 @@ import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 import type { FarArchived } from "./inbox-archived-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
+import type { SharedReactions } from "./inbox-reactions-shared";
 
 /** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
 const FAR_ARCHIVED_LIMIT_MAX = 200;
@@ -135,6 +136,8 @@ export interface InboxMachinesContext {
   ownVersions?: () => { current: string; latest: string | null };
   /** A linked machine's list was read: this Inbox takes its "Show archived" switch when that one is newer. */
   showArchivedSaid?: (value: InboxShowArchived) => void;
+  /** A linked machine's list was read: this Inbox takes its saved reaction emoji when that set is newer. */
+  reactionsSaid?: (value: SharedReactions) => void;
   /** Where the person wrote a write this Inbox forwards, told from the request (inbox-sent-from.ts). */
   sentFrom?: (req: Request, via: "local" | "tailnet") => InboxSentFrom | null;
   /** Tests: the links' clocks. */
@@ -573,6 +576,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onRecord: (record) => emit({ event: "machine", data: record }),
       onChange: () => {
         if (peer.list?.show_archived) context.showArchivedSaid?.(peer.list.show_archived);
+        if (peer.list?.reactions) context.reactionsSaid?.(peer.list.reactions);
         machinesChanged();
       },
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
@@ -1312,6 +1316,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   };
   /** Each linked machine's "Show archived" switch as its list last said: a save here goes past the newest. */
   const showArchivedCopies = (): InboxShowArchived[] => [...peers.values()].flatMap((peer) => (peer.list?.show_archived ? [peer.list.show_archived] : []));
+  /** Each linked machine's saved reaction emoji as its list last said: a save here goes past the newest. */
+  const reactionsCopies = (): SharedReactions[] => [...peers.values()].flatMap((peer) => (peer.list?.reactions ? [peer.list.reactions] : []));
   /** A linked machine's card, as its Board last said: the lane marks and a link's site icon are read here for it. */
   const farCard = (id: string): InboxCardWire | null => {
     for (const peer of peers.values()) {
@@ -1365,6 +1371,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     cardLists,
     archivedPages,
     showArchivedCopies,
+    reactionsCopies,
     /** Each linked machine's PR board (mark `pulls`), for the merged board (inbox-machine-pulls.ts). */
     pullLists: (refresh: boolean) => {
       const snapshot = machinePulls.start(refresh);

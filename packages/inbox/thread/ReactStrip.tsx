@@ -12,6 +12,7 @@ import { useEffect, useRef, type FocusEvent, type PointerEvent as ReactPointerEv
 import { Menu } from '@base-ui/react/menu';
 import type { InboxMessageWire, InboxReaction } from '@plannotator/core/inbox-types';
 import { useSavedReactions } from '../reactions';
+import { machineOf } from '../inboxUrl';
 import { faceStrip, hasSkill, skillPreview, skillSaid, skillTip, type MessageReactApi } from './messageReact';
 
 const LOOKS_GOOD = 'Looks good';
@@ -46,11 +47,13 @@ export function previewHandlers(
   reaction: InboxReaction | null,
   agent: string,
   container: () => Element | null,
+  /** The message it reacts to: a linked machine's thread reads a skill this computer lacks from that machine. */
+  messageId?: string,
 ): { onPointerEnter: (e: ReactPointerEvent) => void; onPointerLeave?: () => void; onFocus?: (e: FocusEvent) => void; onBlur?: () => void } {
   if (!hasSkill(reaction)) return { onPointerEnter: () => skillPreview.set(null) };
   const show = () => {
     const anchor = container();
-    if (anchor) skillPreview.set({ reaction, agent, anchor });
+    if (anchor) skillPreview.set({ reaction, agent, anchor, machine: machineOf(messageId) });
   };
   const hide = () => skillPreview.get()?.reaction === reaction && skillPreview.set(null);
   return {
@@ -117,7 +120,7 @@ export function FaceStrip({ message, api }: { message: InboxMessageWire; api: Me
             data-tip={hasSkill(reaction) ? undefined : tip}
             data-skill={hasSkill(reaction) ? reaction.skill : undefined}
             aria-label={said}
-            {...previewHandlers(reaction, agent, () => ref.current)}
+            {...previewHandlers(reaction, agent, () => ref.current, message.id)}
             onClick={(e) => {
               close();
               api.react(message, reaction, e.currentTarget.querySelector('.ib-react-e'));
@@ -154,30 +157,30 @@ export function MenuEmojiRow({ message, api, phone }: { message: InboxMessageWir
   useEffect(() => () => skillPreview.set(null), []);
   const cells: (InboxReaction | null)[] = [null, ...saved];
   return (
-    <div ref={ref} className="ib-mrow" role="group" aria-label="Reactions" data-menu-reactions="">
+    <div ref={ref} className="ib-emrow" role="group" aria-label="Reactions" data-menu-reactions="">
       {cells.map((reaction) => {
         const { tip, said } = cellWords(reaction);
         return (
           <Menu.Item
             key={reaction?.emoji ?? 'looks-good'}
-            className="ib-mrow-c"
+            className="ib-emrow-c"
             label={said}
             aria-label={said}
             title={!phone && !hasSkill(reaction) ? tip : undefined}
             data-menu-reaction={reaction?.emoji ?? '👍'}
-            {...previewHandlers(reaction, agent, container)}
+            {...previewHandlers(reaction, agent, container, message.id)}
             onClick={(e) => api.react(message, reaction, e.currentTarget.querySelector('.ib-react-e'))}
           >
-            <span className="ib-mrow-e">
+            <span className="ib-emrow-e">
               <span className="ib-react-e">{reaction?.emoji ?? '👍'}</span>
               {hasSkill(reaction) && <SkillMark />}
             </span>
-            {phone && hasSkill(reaction) && <span className="ib-mrow-skill">/{reaction.skill}</span>}
+            {phone && hasSkill(reaction) && <span className="ib-emrow-skill">/{reaction.skill}</span>}
           </Menu.Item>
         );
       })}
-      <Menu.Item className="ib-mrow-c" label="All reactions" aria-label="All reactions" data-menu-reaction="all" onClick={() => api.openTray(message)}>
-        <span className="ib-mrow-e">
+      <Menu.Item className="ib-emrow-c" label="All reactions" aria-label="All reactions" data-menu-reaction="all" onClick={() => api.openTray(message)}>
+        <span className="ib-emrow-e">
           <FaceIcon size={20} />
         </span>
       </Menu.Item>

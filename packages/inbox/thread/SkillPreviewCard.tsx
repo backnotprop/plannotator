@@ -12,16 +12,17 @@ import { useSkillPreview } from './messageReact';
 export function SkillPreviewCard({ container }: { container: HTMLElement | null }) {
   const at = useSkillPreview();
   const skill = at?.reaction.skill ?? null;
-  const [text, setText] = useState<{ skill: string; text: SkillPreviewText } | null>(null);
+  const machine = at?.machine ?? null;
+  const [text, setText] = useState<{ skill: string; machine: string | null; text: SkillPreviewText } | null>(null);
   useEffect(() => {
     if (!skill) return;
     let live = true;
-    void skillPreviewText(skill).then((read) => live && setText({ skill, text: read }));
+    void skillPreviewText(skill, machine).then((read) => live && setText({ skill, machine, text: read }));
     return () => {
       live = false;
     };
-  }, [skill]);
-  const shown = text && text.skill === skill ? text.text : null;
+  }, [skill, machine]);
+  const shown = text && text.skill === skill && text.machine === machine ? text.text : null;
   const open = !!at && at.anchor.isConnected;
   return (
     <Popover.Root open={open} modal={false}>
