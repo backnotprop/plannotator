@@ -143,11 +143,11 @@ function build(s:DiagramSpec,pack:Fonts,extended:ReadonlySet<Weight>) {
     });
     for(const [i,p] of panels.entries()) for(const b of panels.slice(i+1)) {
         const d=separation(p,b);
-        if(d<t.min_gap) c.problems.push(d<0?`'${p.id}' and '${b.id}' overlap. Move one panel.`:`'${p.id}' and '${b.id}' are ${n(d)} px apart.`);
+        if(d<t.min_gap) c.report(d<0?`'${p.id}' and '${b.id}' overlap. Move one panel.`:`'${p.id}' and '${b.id}' are ${n(d)} px apart.`);
     }
     for(const [i,g] of groups.entries()) {
-        for(const p of panels) if(!g.members.includes(p.id) && separation(g,p)<0) c.problems.push(`group '${g.label}' overlaps '${p.id}'`);
-        for(const b of groups.slice(i+1)) if(separation(g,b)<0 && !contains(g,b) && !contains(b,g)) c.problems.push(`groups '${g.label}' and '${b.label}' overlap`);
+        for(const p of panels) if(!g.members.includes(p.id) && separation(g,p)<0) c.report(`group '${g.label}' overlaps '${p.id}'`);
+        for(const b of groups.slice(i+1)) if(separation(g,b)<0 && !contains(g,b) && !contains(b,g)) c.report(`groups '${g.label}' and '${b.label}' overlap`);
     }
     const links=route(c,s,panels,groups);
     const bounds=extent([...panels,...groups,...links.map(l=>l.bounds),...links.flatMap(l=>l.labelBox?[l.labelBox]:[])]);
@@ -177,7 +177,7 @@ function build(s:DiagramSpec,pack:Fonts,extended:ReadonlySet<Weight>) {
         const b=l.labelBox;c.rect(b.x,b.y,b.w,b.h,t.paper,t.line,.8,9);c.centered(l.label,b.x+b.w/2,b.y+9,t.small,"medium");
     }
     c.parts.push("</g>");
-    if(c.minText<t.min_text) c.problems.push(`smallest text is ${c.minText} px. The theme minimum is ${t.min_text} px.`);
+    if(c.minText<t.min_text) c.report(`smallest text is ${c.minText} px. The theme minimum is ${t.min_text} px.`);
     const description=describe(s,panels);
     const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img"><title>${escape(s.title)}</title><desc>${escape(description)}</desc><rect width="${width}" height="${height}" fill="${t.paper}"/>${c.parts.join("")}</svg>\n`;
     const box=(b:Box)=>({x:b.x+dx,y:b.y+dy,w:b.w,h:b.h});
@@ -206,7 +206,7 @@ function build(s:DiagramSpec,pack:Fonts,extended:ReadonlySet<Weight>) {
             labelBox:link.labelBox && box(link.labelBox),
             points:link.samples.concat([link.tip]).map(([x,y]):Point=>[x+dx,y+dy])});
     }
-    return {svg,width,height,parts,minText:Number.isFinite(c.minText)?c.minText:null,description,problems:c.problems,
+    return {svg,width,height,parts,minText:Number.isFinite(c.minText)?c.minText:null,description,problems:c.getProblems(),
         panels:panels.map(p=>({id:p.id,title:p.panel.title,x:p.x+dx,y:p.y+dy,w:p.w,h:p.h})),
         links:links.map(l=>({from:l.a.id,to:l.b.id,label:l.label,kind:l.kind,start:l.start,end:l.end}))};
 }

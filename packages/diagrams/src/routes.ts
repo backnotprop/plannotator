@@ -118,11 +118,11 @@ export function route(c:Painter,s:DiagramSpec,panels:Placed[],groups:Group[]) {
         if (l.vx===undefined && l.vy===undefined) {
             const vx=l.tip[0]-l.p[0],vy=l.tip[1]-l.p[1];
             if (vx*dirs[l.start][0]+vy*dirs[l.start][1]<1 || -vx*dirs[l.end][0]-vy*dirs[l.end][1]<1)
-                c.problems.push(name+" has a port facing away. Use auto sides or a return lane.");
+                c.report(name+" has a port facing away. Use auto sides or a return lane.");
         }
         if (!l.cross) for (const p of panels) {
             if (p!==l.a && p!==l.b && separation(l.bounds,p)<=0 && l.samples.some(pt=>pointInside(pt,p,-2)))
-                c.problems.push(`${name} crosses '${p.id}'. Move the panel or use a return lane.`);
+                c.report(`${name} crosses '${p.id}'. Move the panel or use a return lane.`);
         }
         if (!l.label) continue;
         const w=c.width(l.label,c.t.small,"medium")+14;
@@ -136,7 +136,7 @@ export function route(c:Painter,s:DiagramSpec,panels:Placed[],groups:Group[]) {
             const covered=obstacles.filter(o=>separation(o.box,boxes[0])<0).map(o=>o.name);
             for (const other of lines) if (hitsLine(boxes[0],other)) covered.push(lineName(other));
             for (const part of covered)
-                c.problems.push(`the label '${l.label}' on ${name} sits on ${part}. Widen the gap or move the line.`);
+                c.report(`the label '${l.label}' on ${name} sits on ${part}. Widen the gap or move the line.`);
         }
         obstacles.push({box:l.labelBox,name:"the label '"+l.label+"'"});
     }

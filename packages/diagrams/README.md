@@ -29,7 +29,7 @@ Each entry in `parts` includes its kind, ID, title, references and bounds in the
 
 ## Input limits
 
-A diagram supports up to 512 addressable parts in total. Each panel, named section, group and top-level link counts once, including parts whose IDs the renderer supplies. Up to 128 top-level and mini-graph links combined can carry a nonempty label.
+A diagram supports up to 512 addressable parts in total. Each panel, named section, group and top-level link counts once, including parts whose IDs the renderer supplies. Up to 128 top-level and mini-graph links combined can carry a nonempty label. Across all mini-graphs, each node and each link counts toward a separate total of 512. The renderer returns the first 100 layout problems and adds a reminder to render again when more remain.
 
 Each mini-graph grid can measure up to 8,192 pixels on each axis, including node labels, padding and any extra width its panel or column gives it. Node coordinates are relative, so the spacing between nodes determines the grid extent. A limit error names the part, label or graph field that exceeds the limit.
 
