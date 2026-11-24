@@ -1,184 +1,166 @@
 // Canonical authoring instructions for Inbox and installed agents. Regenerate SKILL.md with bun run gen:diagram-skill.
 export const DIAGRAM_SKILL = {
   name: "diagram",
-  description: "Create or revise structured architecture and workflow diagrams (.diagram.json) rendered to SVG with @plannotator/diagrams, including clickable parts, source references, and pinned-feedback revisions.",
+  description: "Design, create, or revise structured diagrams (.diagram.json) rendered to SVG with @plannotator/diagrams—choosing layouts, visual hierarchy, embedded media, clickable parts, source references, and pinned-feedback revisions.",
   body: `# Diagram
 
-Create or revise a structured diagram as a \`.diagram.json\` specification and render it to SVG with \`@plannotator/diagrams\`. The renderer handles typography, panel sizing, arrow routing, and layout checks—reporting overlaps, line crossings, ports facing away, and label collisions so you can fix them before handing the drawing back.
+Design and author a structured diagram as a \`.diagram.json\` specification and render it to SVG with \`@plannotator/diagrams\`. The renderer measures typography, sizes panels, routes connectors, and checks geometry—reporting overlaps, crossings, ports facing away, and label collisions so you can refine the drawing until it renders cleanly.
 
-## 1. Plan before drawing
+## 1. Design the diagram before writing JSON
 
-- Start with the reader's question and pick the smallest diagram that answers it.
-- When documenting an existing codebase or repository, read the actual code, config, or docs first and use real component names, project-relative file paths, and 1-based line numbers—never invent paths or symbols. When drawing a conceptual or proposed system from a user's brief with no repo files, omit file \`refs\` (or include only real \`link\` URLs).
-- Show one main path plus any key branch, failure, or retry path relevant to the question. Keep labels short; move details into \`sub\`, \`footer\`, addressable \`sections\`, and \`refs\` instead of packing prose into boxes.
+Start from the reader's question, not a fixed template:
+
+- **Identify the core visual relationship:** Is the subject a pipeline, a feedback loop, a hub-and-spoke ecosystem, a layered architecture, a side-by-side comparison, a state machine, a spatial topology, or an annotated UI walkthrough? Let the subject dictate the structure—do not force every diagram into a left-to-right sequence, a fixed number of stages, or a mandatory error branch.
+- **Choose viewpoint and emphasis:** Pick one clear level of abstraction that answers the question. Use panel \`tone\`, \`status\`, \`step\` badges, \`groups\`, \`note\`, or \`tag\` deliberately to establish visual hierarchy rather than treating every box identically.
+- **Keep boxes scannable:** Put short titles and scannable labels on the canvas; move nuance into \`sub\`, \`footer\`, structured \`card\` rows, addressable \`sections\`, and \`refs\`.
+- **Ground evidence when files exist:** When documenting an existing codebase or repository, read real source, config, or doc files first and cite real symbols, project-relative paths, and 1-based line numbers—never invent them. When illustrating a conceptual or proposed system from a user's brief with no repo files, omit file \`refs\` (or link only real URLs).
 
 ## 2. Create or locate the \`.diagram.json\` file
 
+A top-level \`"id"\` identifies one logical diagram across its revisions. Never copy a literal example ID across unrelated drawings.
+
 - **New diagram with Plannotator CLI:**
   \`\`\`bash
-  plannotator diagram new checkout-flow
+  plannotator diagram new my-diagram
   # or an explicit path ending in .diagram.json:
-  plannotator diagram new docs/checkout-flow.diagram.json
+  plannotator diagram new docs/my-diagram.diagram.json
   \`\`\`
-  This writes a starter file with a generated UUID top-level \`id\` and prints the absolute path. Pass a plain name (letters, digits, spaces, \`.\`, \`_\`, \`-\`) to store it in the project's Plannotator diagram folder, or pass an explicit \`*.diagram.json\` path when a specific location was requested.
-  Never run \`plannotator diagram new\` on an existing diagram—it fails if the file exists, and replacing the top-level \`id\` breaks revision history.
+  Writes a starter file with a freshly generated UUID top-level \`id\` and prints its absolute path. Pass a plain name (letters, digits, spaces, \`.\`, \`_\`, \`-\`) to store it in the project's Plannotator diagram folder, or pass an explicit \`*.diagram.json\` path when a specific location was requested. Keep the generated UUID as the diagram's \`"id"\`. Never run \`plannotator diagram new\` on an existing diagram—it fails if the file exists, and replacing \`"id"\` breaks revision history.
 - **New diagram standalone (no Plannotator CLI, or an older Plannotator without \`diagram\`):**
-  Create a UTF-8 file such as \`checkout-flow.diagram.json\` in the requested or working directory with a unique top-level \`"id"\` (a UUID or stable slug).
+  Create a UTF-8 \`*.diagram.json\` file in the requested or working directory and generate a fresh UUID for its top-level \`"id"\` (for example with \`crypto.randomUUID()\`).
 - **Revising an existing diagram:**
-  Edit the existing \`.diagram.json\` file in place.
+  Edit the existing \`.diagram.json\` file in place and keep its top-level \`"id"\` unchanged.
 
-## 3. Write the \`.diagram.json\` specification
+## 3. Renderer vocabulary and capabilities
 
-Start from this complete, valid example and adapt it to the system you are documenting:
+Validation is strict: **unknown keys anywhere throw a \`TypeError\`** naming the exact JSON path. Use exact field names: \`sub\` (not \`description\`), \`status\` (not \`state\`), \`tone\` (not \`color\`), and \`columns\`/\`ring\`/\`panels\` + \`links\` (not \`nodes\`/\`edges\`).
 
-\`\`\`json
-{
-  "id": "checkout-fulfillment",
-  "title": "Checkout Fulfillment",
-  "subtitle": "Asynchronous order processing with retry and dead-letter replay",
-  "steps": [[1, "Accept"], [2, "Queue"], [3, "Fulfill"]],
-  "gap": 100,
-  "row_gap": 44,
-  "columns": [
-    {
-      "id": "checkout",
-      "title": "Checkout API",
-      "sub": "Validates cart and returns 202",
-      "step": 1,
-      "tone": "accent",
-      "tiles": ["Validate cart", "Reserve stock"],
-      "refs": [
-        { "kind": "file", "title": "Checkout route", "path": "src/api/checkout.ts", "start": 18, "end": 54 }
-      ]
-    },
-    {
-      "id": "queue",
-      "title": "Job Queue",
-      "sub": "Durable transactional outbox",
-      "step": 2,
-      "sections": [
-        {
-          "id": "retry-policy",
-          "title": "Retry policy",
-          "content": {
-            "card": {
-              "title": "Backoff",
-              "rows": [["Attempts", "5"], ["Timeout", "30 s"]]
-            }
-          },
-          "refs": [
-            { "kind": "file", "title": "Worker config", "path": "src/queue/config.ts", "start": 4, "end": 19 }
-          ]
-        }
-      ]
-    },
-    [
-      {
-        "id": "fulfill",
-        "title": "Fulfillment Worker",
-        "sub": "Charges card and creates shipment",
-        "step": 3,
-        "footer": "SLO: p99 < 2s"
-      },
-      {
-        "id": "deadletter",
-        "title": "Dead-Letter Queue",
-        "sub": "Holds failed jobs for replay",
-        "status": "planned",
-        "tone": "neutral"
-      }
-    ]
-  ],
-  "groups": [
-    {
-      "id": "async-backend",
-      "label": "Async processing",
-      "sub": "Isolated from HTTP latency",
-      "members": ["queue", "fulfill", "deadletter"]
-    }
-  ],
-  "links": [
-    { "id": "enqueue", "from": "checkout", "to": "queue", "label": "Enqueue job" },
-    { "id": "dispatch", "from": "queue", "to": "fulfill", "label": "Dispatch" },
-    { "id": "exhausted", "from": "fulfill", "to": "deadletter", "kind": "planned", "label": "After 5 retries", "start": "bottom", "end": "top" },
-    { "id": "replay", "from": "deadletter", "to": "queue", "kind": "planned", "label": "Replay", "lane": "bottom" }
-  ]
+### Layouts (choose exactly one)
+
+Pick the layout that best fits the topology of your subject:
+
+- **\`columns\`** — Left-to-right columns of single panels or vertical stacks (\`Panel | Panel[]\`). Best for pipelines, layered architectures, comparisons, or branching flows.
+  - Controls: \`gap\` (column spacing, default \`72\`), \`row_gap\` (vertical stack spacing, default \`28\`), \`valign\` (\`"top" | "center" | "bottom"\`, default \`"center"\`).
+  - Shape: \`{ "columns": [panelA, [panelB1, panelB2], panelC] }\`
+- **\`ring\`** — Two or more panels arranged around an ellipse, with optional **\`center\`** (\`Panel[]\`) stacked inside the ring. Best for cycles, feedback loops, lifecycles, ecosystems, or hub-and-spoke topologies.
+  - Controls: \`start_angle\` (degrees for \`ring[0]\`, default \`-90\` = top), \`gap\`, \`row_gap\`.
+  - Shape: \`{ "ring": [panelA, panelB, panelC], "center": [hubPanel], "start_angle": -90 }\`
+- **\`panels\`** — Free 2D placement (\`Panel[]\`, ≥1 panel) where **every** panel sets numeric \`x\` and \`y\`. Best for spatial maps, grids, asymmetric compositions, or non-standard layouts. (\`x\` and \`y\` are forbidden in \`columns\` and \`ring\`.)
+  - Shape: \`{ "panels": [{ "id": "a", "title": "A", "x": 0, "y": 0 }, { "id": "b", "title": "B", "x": 320, "y": 140 }] }\`
+
+### Top-level framing and metadata
+
+- Required: \`title\` (string) and one layout (\`columns\`, \`ring\`, or \`panels\`).
+- Recommended: \`id\` (nonempty UUID/string for revision tracking).
+- Optional chrome:
+  - \`subtitle\` — secondary line under the title.
+  - \`tag\` — pill badge rendered before the title.
+  - \`note\` — top-right callout box: \`{ "title": "...", "lines": ["..."] }\` (auto-wrapped).
+  - \`steps\` + \`steps_label\` — numbered legend strip: \`[[1, "Phase one"], [2, "Phase two"]]\` (label defaults to \`"Steps"\`).
+  - \`legend\` — boolean (default \`true\`); automatically displays only statuses and link kinds actually used in the diagram.
+  - \`statuses\` — central status override map \`{ "<panel-or-tile-name-or-id>": "<status>" }\` (every key must match an existing panel or tile).
+  - \`groups\`, \`links\`, \`theme\`.
+
+### Panels and composable sections
+
+Every panel has \`title\` (required) and supports:
+- Identity & framing: unique \`id\` (strongly recommended), \`sub\` (header subtitle and interactive hover summary), \`step\` (positive integer circle badge), \`footer\` (bottom strip; supports \`\\n\` and bold \`Key: value\` prefixes), \`width\` (positive minimum width in px), \`refs\`.
+- Visual emphasis:
+  - \`tone\`: \`"default"\`, \`"neutral"\`, \`"accent"\`, \`"dark"\`, custom key in \`theme.tones\`, or any 6-digit hex \`"#rrggbb"\` (header text contrast adjusts automatically).
+  - \`status\`: \`"live"\` (default), \`"building"\`, \`"trial"\`, \`"planned"\`, \`"retiring"\`, or custom key in \`theme.statuses\`.
+- Body content: shorthand \`tiles\` (with optional \`cols\` default ≤3 and \`label\`, both valid only when \`tiles\` is set) and/or an ordered \`sections\` array mixing any of these section forms:
+  - **Text:** \`"Short note"\` or \`{ "text": "Short note" }\` (auto-wrapped).
+  - **Tile grid:** \`["Item A", { "label": "Item B", "sub": "Detail", "status": "trial" }]\` or \`{ "tiles": [...], "cols": 2, "label": "Heading" }\`.
+  - **Key-value card:** \`{ "card": { "title": "Spec", "intro": "Optional lead-in", "rows": [["Key", "Value"]] } }\`.
+  - **Side-by-side row:** \`{ "row": [section1, section2] }\` — place any sections horizontally (e.g. a card beside a mini-graph, or two visuals side by side).
+  - **Mini node graph:** \`{ "graph": { "nodes": { "a": "Start", "b": "End" }, "at": { "a": [0, 0], "b": [1, 0] }, "links": [["a", "b", "optional label"]] } }\` — compact sub-diagram on a relative grid (\`col × 132\`, \`row × 58\`; no self-loops inside \`graph\`).
+  - **Embedded image:** \`{ "image": { "src": "data:image/png;base64,...", "alt": "Description", "width": 480, "height": 300 } }\` — PNG or JPEG base64 data URL (see image helper below).
+  - **Addressable section wrapper:** \`{ "id": "unique-id", "title": "Readable title", "refs": [...], "content": <any section> }\` — wraps any section so readers can click it, inspect \`refs\`, and pin comments directly to it. Section \`id\`s must be unique across the whole diagram.
+
+### Boundaries (\`groups\`)
+
+Group related panels inside a dashed boundary:
+\`{ "id": "boundary-id", "label": "Boundary name", "members": ["panel-a", "panel-b"], "sub": "Optional summary", "refs": [...] }\`
+Full nesting (one group wholly inside another) is supported; partially overlapping groups or enclosing non-member panels is reported as a layout problem.
+
+### Connections and routing (\`links\`)
+
+Minimal link: \`{ "id": "edge-id", "from": "panel-a", "to": "panel-b", "label": "Optional label" }\`
+
+- **Explicit \`id\`:** Give every link an explicit \`id\`—especially parallel links between the same two panels, so reordering them never swaps pinned comments.
+- **\`kind\`:** \`"flow"\` (solid, default), \`"planned"\` (dotted), or a custom key registered in \`theme.link_labels\`.
+- **Ports (\`start\`, \`end\`):** \`"left" | "right" | "top" | "bottom" | "auto"\`. Defaults: \`columns\` uses \`right\` → \`left\`; \`ring\` and \`panels\` use \`"auto"\` (nearest facing side); setting \`lane\` defaults both ends to that side (\`top\` or \`bottom\`) and auto-stacks non-overlapping lanes.
+- **Waypoints (mutually exclusive—set at most one per link):** \`lane\` (\`"top" | "bottom"\`), \`via_x\` (number, orthogonal vertical channel), or \`via_y\` (number, orthogonal horizontal channel). Self-loops (\`from === to\`) auto-route via a top lane.
+- **\`cross_ok\`:** Boolean (default \`false\`); suppresses the panel-crossing diagnostic only when a crossing is intentional.
+- **\`refs\`:** Optional file or web link references attached to the connection.
+
+### References (\`refs\`)
+
+Allowed on panels, addressable sections, groups, and links:
+- **File reference:** \`{ "kind": "file", "title": "Label", "path": "src/example.ts", "start": 10, "end": 28, "url": "https://..." }\` — \`path\` must be project-relative (no leading \`/\` or \`..\`); \`start\` and \`end\` are 1-based integers with \`end >= start\` (omit both for the whole file); \`url\` is optional \`http://\`/\`https://\`.
+- **Web link reference:** \`{ "kind": "link", "title": "Label", "url": "https://..." }\` — \`http://\` or \`https://\` only.
+
+### Theme and styling knobs (\`theme\`)
+
+**Default rule:** Leave \`theme.paper\`, \`theme.ink\`, and default palette colors unset unless the user asks for a fixed custom palette—omitting them lets Plannotator adapt the drawing automatically to light, dark, and custom host themes.
+
+When custom styling or domain semantics are needed, every color must be 6-digit hex (\`#rrggbb\`):
+- **Custom semantic registries** (merged with built-ins):
+  - \`theme.tones\`: \`{ "highlight": "#D8ECFF" }\`
+  - \`theme.statuses\`: \`{ "blocked": { "label": "Blocked", "stroke": "#B42318", "fill": "#FEF0EE", "dash": "dashed" } }\` (\`dash\` is \`"dotted" | "dashed" | null\`)
+  - \`theme.link_labels\`: \`{ "async": "Asynchronous event" }\`
+- **Surface, text, and chrome colors:** \`paper\`, \`ink\`, \`muted\`, \`faint\`, \`line\`, \`panel_fill\`, \`panel_stroke\`, \`tile_fill\`, \`tile_stroke\`, \`header_text\`, \`header_sub\`, \`header_text_on_dark\`, \`header_sub_on_dark\`, \`group_fill\`, \`group_stroke\`, \`note_fill\`, \`note_stroke\`, \`tag_color\`, \`badge_fill\` (\`#rrggbb | null\`), \`badge_text\` (\`#rrggbb | null\`), \`graph_fill\`, \`graph_grid\`, \`graph_line\`.
+- **Geometry & typography measurements** (nonnegative numbers):
+  - 3D bevels: \`lid\` (default \`9\`), \`depth\` (default \`4\`) — set both to \`0\` for flat panels and tiles.
+  - Spacing & sizing: \`pad\` (\`12\`), \`tile_gap\` (\`8\`), \`section_gap\` (\`12\`), \`tile_h\` (\`30\`), \`line_h\` (\`14.5\`), \`header_h\` (\`36\`), \`header_h_sub\` (\`50\`), \`panel_min_w\` (\`200\`), \`tile_max_w\` (\`230\`), \`radius\` (\`6\`), \`col_gap\` (\`72\`), \`row_gap\` (\`28\`), \`min_gap\` (\`16\`), \`margin\` (\`40\`).
+  - Font sizes: \`title\` (\`26\`), \`subtitle\` (\`13.5\`), \`legend\` (\`12\`), \`panel_title\` (\`14.5\`), \`panel_sub\` (\`11\`), \`tile\` (\`12\`), \`tile_sub\` (\`10.5\`), \`body\` (\`11\`), \`small\` (\`10.5\`), \`min_text\` (\`10\`).
+
+### Embedding local PNG or JPEG images
+
+Encode local PNG/JPEG assets in a short script rather than pasting base64 by hand, and wrap \`{ image }\` inside an addressable section's \`content\` so the visual is clickable, commentable, and can hold \`refs\`. \`width\` and \`height\` are **SVG display pixels** inside the panel (\`preserveAspectRatio="xMidYMid meet"\`), not raw image pixels—choose \`width\` for **legibility** (a compact icon needs far less room than a full desktop UI screenshot, where ~480 px wide keeps interface text readable) and scale \`height\` to match the source aspect ratio to avoid letterboxing. Upsert by section \`id\` so re-running to refresh an asset preserves the ID and unrelated sections:
+
+\`\`\`js
+import { readFileSync } from "node:fs";
+
+function upsertImageSection(panel, { id, title, filePath, alt, width, height, refs }) {
+  const mime = /\\.jpe?g$/i.test(filePath) ? "image/jpeg" : "image/png";
+  const src = \`data:\${mime};base64,\${readFileSync(filePath).toString("base64")}\`;
+  const entry = {
+    id,
+    title,
+    ...(refs?.length ? { refs } : {}),
+    content: { image: { src, alt, width, height } }
+  };
+  const sections = (panel.sections ??= []);
+  const idx = sections.findIndex(s => typeof s === "object" && s !== null && s.id === id);
+  if (idx >= 0) sections[idx] = entry;
+  else sections.push(entry);
 }
 \`\`\`
 
-### Schema reference and common pitfalls
+### Input limits
 
-Validation is strict—**unknown keys anywhere throw an error** naming the JSON path. Use exact field names: \`sub\` (not \`description\`), \`status\` (not \`state\`), \`tone\` (not \`color\`), and \`columns\`/\`ring\`/\`panels\` + \`links\` (not \`nodes\`/\`edges\`).
+- At most **512 addressable parts** total (panels + named sections + groups + top-level links).
+- At most **512 mini-graph nodes and links combined** across the drawing.
+- At most **128 nonempty link labels** combined across top-level links and mini-graph links.
+- Each mini-graph grid may measure at most **8,192 px** per axis (including labels, padding, and any extra width allocated by a sibling panel or row).
 
-- **Top-level fields:** \`title\` (required), \`id\` (required for revision tracking), \`subtitle\`, \`tag\`, \`note: { title, lines?: string[] }\`, \`steps: [[1, "Label"], ...]\`, \`steps_label\`, \`legend\` (boolean, default \`true\`), \`gap\`, \`row_gap\`, \`valign\` (\`"top" | "center" | "bottom"\`), \`statuses\` (map of panel/tile name or id to status), \`groups\`, \`links\`, \`theme\`.
-- **Choose exactly one layout:**
-  - \`columns\`: array of panels or vertical panel stacks (\`Panel | Panel[]\`). Best for left-to-right pipelines and branches.
-  - \`ring\`: array of ≥2 panels in a loop, plus optional \`center: Panel[]\` and \`start_angle\` (degrees, default \`-90\`). Best for cycles or hub-and-spoke topologies.
-  - \`panels\`: array of ≥1 panels where **every** panel sets numeric \`x\` and \`y\`. (\`x\` and \`y\` are forbidden in \`columns\` and \`ring\`.)
-- **Panels:** \`title\` (required), unique \`id\` (strongly recommended), \`sub\`, \`status\` (\`"live"\` default, \`"building"\`, \`"trial"\`, \`"planned"\`, \`"retiring"\`), \`step\` (positive integer), \`tone\` (\`"default"\`, \`"neutral"\`, \`"accent"\`, \`"dark"\`, or \`#rrggbb\`), \`width\`, \`footer\` (supports \`\\n\` and \`Key: value\`), \`tiles\` (array of \`"Label"\` or \`{ label, sub?, status? }\`), \`cols\` and \`label\` (only valid when \`tiles\` is set), \`sections\`, \`refs\`.
-- **Sections inside \`panel.sections\`:**
-  - Plain text: \`"string"\` or \`{ "text": "..." }\`
-  - Tiles: \`["A", "B"]\` or \`{ "tiles": [...], "cols": 2, "label": "..." }\`
-  - Key-value card: \`{ "card": { "title": "...", "intro": "...", "rows": [["Key", "Value"]] } }\`
-  - Side-by-side row: \`{ "row": [section1, section2] }\`
-  - Mini node graph: \`{ "graph": { "nodes": { "a": "A", "b": "B" }, "at": { "a": [0, 0], "b": [1, 0] }, "links": [["a", "b", "label?"]] } }\` (no self-loops inside \`graph\`)
-  - Embedded image: \`{ "image": { "src": "data:image/png;base64,...", "alt": "...", "width": 120, "height": 80 } }\` (PNG or JPEG base64 data URL)
-  - **Addressable section** (clickable, commentable, and able to hold \`refs\`): \`{ "id": "...", "title": "...", "refs": [...], "content": <section> }\`. Section \`id\`s must be unique across the whole diagram.
-- **Groups:** \`{ "id": "...", "label": "...", "members": ["panel-id", ...], "sub": "...", "refs": [...] }\`. Groups may nest completely inside another group, but must not overlap non-member panels or partially overlap another group.
-- **Links:** \`{ "id": "...", "from": "<panel-id>", "to": "<panel-id>", "label": "...", "kind": "flow" | "planned", "start": "left|right|top|bottom|auto", "end": "...", "lane": "top" | "bottom", "via_x": N, "via_y": N, "cross_ok": true, "refs": [...] }\`.
-  - Give every link an explicit \`id\`—especially parallel links between the same two panels (without authored \`id\`s, reordering parallel links swaps pinned comments).
-  - Use at most **one** of \`lane\`, \`via_x\`, or \`via_y\` per link.
-  - In \`columns\`, ports default to \`right\` → \`left\`. Set \`start\`/\`end\` (or \`"auto"\`) for links within the same column, and \`lane: "top"\` or \`"bottom"\` for backward or skip-column links. Self-loops (\`from === to\`) route via a top lane automatically.
-- **References (\`refs\`)** (allowed on panels, addressable sections, groups, and links):
-  - File ref: \`{ "kind": "file", "title": "...", "path": "src/foo.ts", "start": 10, "end": 25, "url": "https://..." }\` — \`path\` must be project-relative (no leading \`/\` or \`..\`); \`start\` and \`end\` are 1-based integers with \`end >= start\` (omit both for the whole file); \`url\` is optional \`http://\`/\`https://\`.
-  - Web link ref: \`{ "kind": "link", "title": "...", "url": "https://..." }\` — \`http://\` or \`https://\` only.
-- **Theme and colors:** Leave \`theme.paper\`, \`theme.ink\`, and default palette colors unset unless fixed colors were explicitly requested—omitting them lets Plannotator adapt the drawing automatically to the reader's light, dark, and custom themes. Any custom color (including \`tone\`) must be a 6-digit hex string (\`#rrggbb\`).
-
-### Recipe: embedding a local PNG or JPEG
-
-Generate the base64 data URL from disk in a short script rather than pasting base64 by hand, and wrap \`{ "image": ... }\` inside an addressable section's \`content\` so the image is clickable, commentable, and can carry \`refs\`. \`width\` and \`height\` are **display dimensions in SVG pixels** inside the panel (rendered with \`preserveAspectRatio="xMidYMid meet"\`), not raw image pixels. Choose \`width\` for **legibility**—a compact badge or icon needs far less room than a full desktop UI screenshot (for example, a 1440×900 interface often needs ~480 px wide so text stays readable)—and scale \`height\` to match the source aspect ratio to avoid letterboxing. Update any matching section \`id\` in place so re-running to refresh a screenshot preserves the ID and unrelated sections:
-
-\`\`\`js
-import { readFileSync, writeFileSync } from "node:fs";
-
-// Use data:image/jpeg;base64, for .jpg/.jpeg files
-const src = "data:image/png;base64," + readFileSync("docs/checkout-screen.png").toString("base64");
-
-const spec = JSON.parse(readFileSync("checkout-flow.diagram.json", "utf8"));
-const sections = (spec.columns[0].sections ??= []);
-const entry = {
-  id: "checkout-screen",
-  title: "Checkout screen",
-  refs: [{ kind: "file", title: "Checkout UI", path: "src/ui/Checkout.tsx", start: 1, end: 40 }],
-  content: {
-    // SVG display size chosen for legibility, matching source aspect ratio (e.g. 1440x900 -> 480x300)
-    image: { src, alt: "Checkout screen", width: 480, height: 300 }
-  }
-};
-const idx = sections.findIndex(s => typeof s === "object" && s !== null && s.id === entry.id);
-if (idx >= 0) sections[idx] = entry;
-else sections.push(entry);
-writeFileSync("checkout-flow.diagram.json", JSON.stringify(spec, null, 2) + "\\n");
-\`\`\`
-
-Then render and verify with \`plannotator diagram render\` or \`plannotator-diagrams render\` (Section 4).
-
-## 4. Render and fix layout problems
+## 4. Render, inspect, and repair
 
 Render the \`.diagram.json\` to a separate \`.svg\` file and check the exit code:
 
 - **With Plannotator CLI:**
   \`\`\`bash
-  plannotator diagram render checkout-flow.diagram.json -o checkout-flow.svg
+  plannotator diagram render my-diagram.diagram.json -o my-diagram.svg
   \`\`\`
 - **Standalone (\`@plannotator/diagrams\` npm package):**
-  Use this when Plannotator is not installed, or when an older Plannotator binary does not yet have the \`diagram\` subcommand:
+  Use this when Plannotator is not installed or when an older Plannotator install does not yet have the \`diagram\` subcommand:
   \`\`\`bash
-  plannotator-diagrams render checkout-flow.diagram.json -o checkout-flow.svg
+  plannotator-diagrams render my-diagram.diagram.json -o my-diagram.svg
   # or when installed locally in a project:
-  npm exec -- plannotator-diagrams render checkout-flow.diagram.json -o checkout-flow.svg
+  npm exec -- plannotator-diagrams render my-diagram.diagram.json -o my-diagram.svg
   \`\`\`
-  If \`plannotator-diagrams\` is not already available, install it locally without modifying project dependencies (either from npm once published, or from a supplied preview tarball):
+  If \`plannotator-diagrams\` is not already available, install it locally without changing project dependencies—either from npm once published, or from a supplied preview tarball:
   \`\`\`bash
   npm install --no-save @plannotator/diagrams
   # or with a supplied preview tarball:
@@ -186,38 +168,34 @@ Render the \`.diagram.json\` to a separate \`.svg\` file and check the exit code
   \`\`\`
   (Programmatic ESM API in Node, browsers, or workers: \`import { renderDiagram } from "@plannotator/diagrams"\` → \`const { svg, width, height, parts, description, problems } = await renderDiagram(spec)\`.)
 
-Arguments must be in the exact order \`render <input> -o <output>\` (or \`--output\`), and the output file must not be the same file as the input. Exit behavior distinguishes three outcomes:
+Arguments must be in the exact order \`render <input> -o <output>\` (or \`--output\`), and the output path must differ from the input path. Three outcomes exist:
 - **Exit \`0\`:** valid spec, zero layout problems, SVG written.
-- **Exit \`1\` with layout diagnostics:** valid spec, **the SVG was written** so you can inspect it, and each layout problem was printed to stderr.
-- **Exit \`1\` with invalid JSON, schema error, or bad arguments:** fails before rendering; **no new SVG is written**, and the error is printed to stderr.
+- **Exit \`1\` with layout diagnostics:** valid spec, **the SVG was written** for inspection, and each layout problem was printed to stderr.
+- **Exit \`1\` with invalid JSON, schema/limit error, or bad arguments:** fails before rendering; **no new SVG is written**, and the error is printed to stderr.
 
-Loop until the render exits \`0\`:
-- **Port facing away:** set \`"start"\` and \`"end"\` (e.g. \`"bottom"\` / \`"top"\` or \`"auto"\`) or add \`"lane": "top"\` / \`"bottom"\`.
-- **Line crosses a panel:** move the panel to another column or stack, route with \`"lane": "top"\` / \`"bottom"\`, or use \`via_x\` / \`via_y\`.
-- **Label sits on a panel, group title, or another line:** increase top-level \`gap\` or \`row_gap\`, shorten the label, or move the link to a \`lane\`.
-- **Overlap or panels too close:** separate panels in \`panels\` mode, or adjust \`groups\` so each group's members form a clean rectangle without trapping non-members.
-- **Inner \`graph\` collision:** increase \`[col, row]\` spacing in \`graph.at\`, or split self-loops into a panel with a return lane.
+Iterate until exit \`0\`:
+- **Port facing away:** set \`"start"\` / \`"end"\` explicitly (e.g. \`"bottom"\` / \`"top"\` or \`"auto"\`) or add \`"lane": "top" | "bottom"\`.
+- **Line crosses a panel:** rearrange columns/stacks, route via \`"lane": "top" | "bottom"\`, or specify \`via_x\` / \`via_y\`.
+- **Label sits on a panel, group title, or another line:** increase \`gap\` or \`row_gap\`, shorten the label, or move the link to a \`lane\`.
+- **Overlap or panels too close:** separate coordinates in \`panels\` mode, or adjust \`groups\` so each group encloses only its own members without partial overlaps.
+- **Inner \`graph\` collision or extent error:** adjust \`[col, row]\` spacing in \`graph.at\`, reduce panel/label width, or split self-loops into a panel with a return lane.
 
 ## 5. Revise from pinned feedback
 
-Review feedback identifies specific parts by kind, title, and id, such as:
-- \`Diagram panel Fulfillment Worker (fulfill)\`
-- \`Diagram section Retry policy (retry-policy)\`
-- \`Diagram group Async processing (async-backend)\`
-- \`Diagram link Replay (replay)\`
+Review feedback identifies parts by kind, title, and id (for example, \`Diagram panel API (api)\`, \`Diagram section Preview (preview)\`, \`Diagram group Storage (storage)\`, \`Diagram link Sync (sync)\`).
 
 When revising:
 1. Edit the existing \`.diagram.json\` in place.
-2. **Preserve the top-level \`id\` and every unchanged part's \`id\`**—including when renaming a \`title\` or \`label\`, moving a panel across columns, or reordering parallel links. Stable IDs keep pinned comments anchored to the right part and group revisions into one diagram in Inbox.
-3. Never reuse a deleted part's \`id\` for a different concept.
-4. Re-render until exit \`0\` before sending the update.
+2. **Preserve the top-level \`"id"\` and every unchanged part's \`"id"\`**—even when renaming titles/labels, moving panels across columns or layouts, or reordering parallel links. Stable IDs keep pinned comments anchored and group revisions into one logical diagram.
+3. Never reuse a deleted part's \`"id"\` for a different concept.
+4. Re-render until exit \`0\` before handing back the revision.
 
 ## 6. Hand the result back
 
-Interactive source navigation (\`refs\`), hover summaries, and pinned comments live in the editable \`.diagram.json\` when opened in Plannotator. The rendered \`.svg\` is a static image without clickable file anchors—keep and share the \`.diagram.json\` alongside any standalone \`.svg\`.
+Interactive source navigation (\`refs\`), hover summaries, and pinned comments live in the editable \`.diagram.json\` when opened in Plannotator. The rendered \`.svg\` is a static image without clickable file anchors—always keep and share the \`.diagram.json\` alongside any standalone \`.svg\`.
 
-- **Plannotator Inbox thread:** Reply to the triggering message with \`reply_to\` set to its message ID and pass the \`.diagram.json\` path in \`attachments\`. Inbox renders it inline with pan/zoom, clickable \`refs\`, pinned comments, and Ask AI, and groups revisions by its top-level \`id\`.
+- **Plannotator Inbox thread:** Reply to the triggering message with \`reply_to\` set to its message ID and include the \`.diagram.json\` path in \`attachments\`. Inbox renders it inline with pan/zoom, clickable \`refs\`, pinned comments, and Ask AI, and groups revisions by its top-level \`"id"\`.
 - **Plannotator Markdown plan or document:** Link the \`.diagram.json\` file for a live diagram, or paste a \`\`\`\` \`\`\`plannotator-diagram \`\`\`\` fenced code block containing the JSON for a frozen snapshot.
-- **Local interactive review (Plannotator CLI):** Run \`plannotator annotate checkout-flow.diagram.json\` to open the review UI and collect the reader's pinned feedback.
-- **Standalone / outside Plannotator:** Return the paths to both the \`.diagram.json\` source and the rendered \`.svg\` (or embed the SVG where requested), along with a brief note explaining what the diagram shows and any intentional simplifications. Note to the reader that clickable \`refs\` are stored in the \`.diagram.json\` for Plannotator rather than inside the static \`.svg\`.`,
+- **Local interactive review (Plannotator CLI):** Run \`plannotator annotate my-diagram.diagram.json\` to open the review UI and collect the reader's pinned comments.
+- **Standalone / outside Plannotator:** Return paths to both the \`.diagram.json\` source and the rendered \`.svg\` (or embed the SVG where requested), along with a concise summary of what the diagram shows and any intentional simplifications. Note to the reader that clickable \`refs\` live in the \`.diagram.json\` for Plannotator rather than inside the static \`.svg\`.`,
 };
