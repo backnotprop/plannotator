@@ -5073,7 +5073,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 draw={drawMessageHead}
               />
               <div className="ib-msg" data-revealed={revealed ? '' : undefined}>
-                {!phone && reactApi.offered(message) && <ReactFace messageId={message.id} plain={reactApi.plain()} />}
                 {fileCount > 0 && (
                   <div className="ib-hatts" id={bandId} role="region" aria-label="Attachments in this message" hidden={!filesOpen} onKeyDown={closeHeaderOnEscape(message.id)} data-header-band={message.id}>
                     {filesOpen && (
@@ -5292,6 +5291,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     onMoved={onChanged}
                   />
                 )}
+                {!phone && reactApi.offered(message) && <ReactFace messageId={message.id} plain={reactApi.plain()} />}
               </div>
               </ArmScope>
             </article>,

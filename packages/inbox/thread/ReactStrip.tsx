@@ -72,7 +72,8 @@ export const offeredCells = (saved: readonly InboxReaction[], plain: boolean): (
 
 /**
  * Each agent message's face: hidden at rest, shown by CSS on hover; the pointer resting on it opens it (no click
- * needed). `plain` false (a question waits): drawn only when a saved emoji carries a skill.
+ * needed). `plain` false (a question waits): drawn only when a saved emoji carries a skill. The message draws it last,
+ * so its opened strip comes after the message's words in reading order; CSS places it at the end of the first line.
  */
 export function ReactFace({ messageId, plain }: { messageId: string; plain: boolean }) {
   return plain ? <FaceButton messageId={messageId} /> : <SkillsOnlyFace messageId={messageId} />;
