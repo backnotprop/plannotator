@@ -384,9 +384,10 @@ function FilterMenu({
   const popup = useRef<HTMLDivElement>(null);
   // Base UI puts focus on the popup's first tabbable element as it opens. After a click or a tap no row is tabbable
   // yet, so that was a long section's field (its line drawn as focused, the pointer's hover off, a phone's keyboard
-  // rising): the popup itself takes focus instead, as in a menu with no field. A keyboard open is Base UI's as always
-  // (its first row). `initialFocus` is Base UI's own (MenuPopup passes it on) but not in its types.
-  const initialFocus = { initialFocus: (type: string) => (type === 'keyboard' ? true : (popup.current ?? true)) };
+  // rising): the popup itself takes focus instead, as in a menu with no field. Any other open (Enter, Space, ↓, which
+  // Base UI may report as '') is Base UI's as always: its highlighted first row.
+  const POINTER_OPENS = ['mouse', 'touch', 'pen'];
+  const initialFocus = { initialFocus: (type: string) => (POINTER_OPENS.includes(type) ? (popup.current ?? true) : true) };
 
   return (
     <Menu.Root handle={handle} open={open} onOpenChange={onOpenChange} modal={phone} highlightItemOnHover={!typing}>
@@ -395,6 +396,8 @@ function FilterMenu({
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined} data-list-filter-fields={fields}>
           <Menu.Popup
             ref={popup}
+            // `initialFocus` is absent from Base UI 1.9.0's public types (MenuPopup still passes it on); if an upgrade
+            // drops it, tests/e2e/inbox-filter-section-fields.spec.ts fails (a click open focusing a field).
             {...initialFocus}
             className="ib-pm ib-pc-menu ib-lflt-menu"
             aria-label="Filter"

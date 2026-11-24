@@ -250,6 +250,16 @@ test('nothing matching: the line in Project only, its ticked rows kept; Escape e
   await page.keyboard.press('Escape');
   await expect(menu(page)).toHaveCount(0);
   await expect(funnel(page)).toBeFocused();
+  // Opened from the keyboard (↓, then Enter), focus is on the first row, not on the menu or a field.
+  for (const name of ['ArrowDown', 'Enter']) {
+    await page.keyboard.press(name);
+    await expect(menu(page)).toBeVisible();
+    await page.waitForTimeout(200);
+    await expect(menu(page).locator('.ib-pmi').first()).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(menu(page)).toHaveCount(0);
+    await expect(funnel(page)).toBeFocused();
+  }
   expect(world.errors).toEqual([]);
 });
 

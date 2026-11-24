@@ -507,6 +507,26 @@ describe.skipIf(!hasDom)('keys', () => {
     expect(menu()).not.toBeNull();
   });
 
+  test('opened from the keyboard (↓ or Enter on the funnel), focus is on the first row, not the menu or a field', async () => {
+    for (const name of ['ArrowDown', 'Enter']) {
+      render(LONG, NO_LIST_FILTER, TAGS);
+      await act(async () => {
+        funnel().focus();
+        funnel().dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+        if (name === 'Enter') funnel().click();
+      });
+      await settle();
+      // Base UI's opening focus lands a frame on.
+      await wait(60);
+      expect(menu()).not.toBeNull();
+      expect(document.activeElement === menu()!.querySelector('.ib-pmi')).toBe(true);
+      await key('Escape');
+      act(() => root!.unmount());
+      root = null;
+      host!.remove();
+    }
+  });
+
   test('on a long menu the plain rows keep the type-ahead', async () => {
     render(LONG);
     await keyOpen();
