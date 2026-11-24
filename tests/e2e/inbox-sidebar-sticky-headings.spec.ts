@@ -166,7 +166,7 @@ for (const [device, phone] of [['computer', false], ['phone', true]] as const) {
       return {
         position: getComputedStyle(row).position,
         ground: ground.backgroundColor,
-        side: getComputedStyle(document.querySelector(`${selector} .ib-side`)!).backgroundColor,
+        side: getComputedStyle(document.querySelector(`${selector}.ib-side, ${selector} .ib-side`)!).backgroundColor,
         line: ground.boxShadow,
         quietLine: getComputedStyle(quiet, '::before').boxShadow,
         // Computer names scroll with the rows: only section headings stick.
@@ -288,7 +288,7 @@ test('computer: the scrollbar strip is clear of the resize edge: pressing and dr
   const { page } = world;
   const scope = await open(false);
   const strip = await page.evaluate((selector) => {
-    const side = document.querySelector<HTMLElement>(`${selector} .ib-side`)!.getBoundingClientRect();
+    const side = document.querySelector<HTMLElement>(`${selector}.ib-side, ${selector} .ib-side`)!.getBoundingClientRect();
     const scroll = document.querySelector<HTMLElement>(`${selector} .ib-sidescroll`)!;
     const box = scroll.getBoundingClientRect();
     // The sidebar's own edge: the hit zone nearest its right side.
@@ -317,7 +317,7 @@ test('computer: the scrollbar strip is clear of the resize edge: pressing and dr
   await page.mouse.move(strip.x + 30, strip.y + 80, { steps: 8 });
   await page.mouse.up();
   await expect(page.locator(`${scope} .ib-sidescroll`)).toBeVisible();
-  const width = await page.evaluate((selector) => document.querySelector<HTMLElement>(`${selector} .ib-side`)!.getBoundingClientRect().width, scope);
+  const width = await page.evaluate((selector) => document.querySelector<HTMLElement>(`${selector}.ib-side, ${selector} .ib-side`)!.getBoundingClientRect().width, scope);
   expect(width).toBe(strip.width);
 });
 
@@ -337,7 +337,7 @@ for (const [device, phone] of [['computer', false], ['phone', true]] as const) {
       const look = await page.evaluate((selector) => {
         const row = document.querySelector(`${selector} .ib-sidescroll .ib-secrow:has([data-sidebar-section="pinned"])`)!;
         const ground = getComputedStyle(row, '::before');
-        return { ground: ground.backgroundColor, side: getComputedStyle(document.querySelector(`${selector} .ib-side`)!).backgroundColor, line: ground.boxShadow, dark: matchMedia('(prefers-color-scheme: dark)').matches };
+        return { ground: ground.backgroundColor, side: getComputedStyle(document.querySelector(`${selector}.ib-side, ${selector} .ib-side`)!).backgroundColor, line: ground.boxShadow, dark: matchMedia('(prefers-color-scheme: dark)').matches };
       }, scope);
       expect(look.dark).toBe(true);
       expect(look.ground).toBe(look.side);
