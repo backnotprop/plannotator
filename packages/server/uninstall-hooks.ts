@@ -1,8 +1,10 @@
 import { basename, isAbsolute } from "node:path";
 import { simpleShellCommandWords } from "@plannotator/shared/plannotator-tool";
 import { parseT3HookCommand } from "@plannotator/shared/t3-hook-command";
+import { parseCodexHookCommand } from "@plannotator/shared/codex-hook-command";
 
-type HookSuffix = "" | "improve-context" | "t3-hook";
+/** `codex-hook`: the Codex PostToolUse hook, a `/bin/sh -c` gate around the binary (packages/shared/codex-hook-command.ts). */
+type HookSuffix = "" | "improve-context" | "t3-hook" | "codex-hook";
 export type ManagedHookSpec = { readonly event: string; readonly matcher?: string; readonly suffix: HookSuffix };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -63,6 +65,10 @@ export function isManagedHook(
   if (suffix === "t3-hook") {
     const parsed = parseT3HookCommand(hook.command);
     return parsed !== undefined && isPlannotatorExecutable(parsed.executable, binaryPaths, platform, false);
+  }
+  if (suffix === "codex-hook") {
+    const parsed = parseCodexHookCommand(hook.command);
+    return parsed !== undefined && isPlannotatorExecutable(parsed.executable, binaryPaths, platform, allowRelocatedBinary);
   }
   if (isBinaryPathCommand(hook.command, binaryPaths, suffix ? ` ${suffix}` : "", platform)) return true;
   const parsed = commandParts(hook.command);
@@ -160,6 +166,9 @@ export function remainingHookReferences(
     if (binaryPaths.some((path) => sameCommand(trimmed.slice(0, path.length), path, platform) && /^(?:\s|$)/.test(trimmed.slice(path.length)))) return true;
     const gated = parseT3HookCommand(command)?.executable;
     if (gated && isPlannotatorExecutable(gated, binaryPaths, platform, allowRelocatedBinary)) return true;
+    // The Codex PostToolUse gate runs the binary inside `/bin/sh -c '…'`, where no segment shows it.
+    const codexGated = parseCodexHookCommand(command)?.executable;
+    if (codexGated && isPlannotatorExecutable(codexGated, binaryPaths, platform, allowRelocatedBinary)) return true;
     return commandSegments(command).some((segment) => {
       const executable = commandParts(withoutAssignments(segment))?.executable;
       return executable !== undefined && isPlannotatorExecutable(executable, binaryPaths, platform, allowRelocatedBinary);

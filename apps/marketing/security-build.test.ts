@@ -284,6 +284,21 @@ describe("the first screen's third card as built", () => {
     expect(names.length).toBeGreaterThan(1);
     expect(names[0]).toBe(name![2]);
   });
+
+  test('where its last line may wrap, the line always holds two lines, so the card keeps one height while the name cycles', async () => {
+    const html = await readFile(join(outputRoot, 'workspaces/index.html'), 'utf8');
+    const sheets = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+\.css)"/g)].map((m) => m[1]);
+    const css = (await Promise.all(sheets.map((file) => readFile(join(outputRoot, file), 'utf8')))).join('\n');
+    const lineHeight = /\.sheet\{[^}]*\bline-height:(\d+)px/.exec(css);
+    expect(lineHeight).not.toBeNull();
+    const wrapping = [...css.matchAll(/\.sheet\.mock \.q\{([^}]*)\}/g)]
+      .map((m) => m[1])
+      .filter((body) => /white-space:normal/.test(body));
+    expect(wrapping.length).toBeGreaterThan(0);
+    for (const body of wrapping) {
+      expect(body).toContain(`min-height:${2 * Number(lineHeight![1])}px`);
+    }
+  });
 });
 
 describe('the Spaces pricing page as built', () => {
