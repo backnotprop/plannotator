@@ -703,8 +703,12 @@ export interface PlannotatorConfig {
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
     waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; view_choice?: string; personal_agents?: string; priority?: string; routines?: string };
-    /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
-    code_review?: { shownAt?: string; key?: string };
+    /**
+     * Code review's one-time offer (approval "inbox-code-review-offer"), decided as the tab icon's: `dueAt` for someone
+     * who used an earlier Inbox, `freshAt` for a fresh install (never due), both written at the first release start that
+     * shows it (packages/server/inbox-code-review-offer.ts); then claimed once, as the Board's.
+     */
+    code_review?: { dueAt?: string; freshAt?: string; shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
     agent_rules?: { shownAt?: string; key?: string };
