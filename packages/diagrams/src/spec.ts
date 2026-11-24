@@ -130,7 +130,8 @@ export function prepare(s:DiagramSpec) {
     if(s.center && !s.ring) fail("center","requires a ring");
     const settings=Object.fromEntries(Object.entries(s.theme??{}).filter(([,v])=>v!==undefined));
     const t:Theme={...defaults,...settings,tones:{...defaults.tones,...s.theme?.tones},
-        statuses:{...defaults.statuses,...s.theme?.statuses}};
+        statuses:{...defaults.statuses,...s.theme?.statuses},
+        link_labels:{...defaults.link_labels,...s.theme?.link_labels}};
     const sectionIds=new Set<string>();
     const ids=new Set<string>(), found=new Set<string>();
     const overrides=new Map(Object.entries(s.statuses??{}));

@@ -3,7 +3,7 @@ import { renderFile } from "./render.js";
 
 const [command, ...args] = process.argv.slice(2);
 const usage = "Usage: plannotator-diagrams render <input.diagram.json> -o <output.svg>";
-if (command === "--help" || command === "-h" || (command === "render" && args[0] === "--help")) {
+if (command === "--help" || command === "-h" || (command === "render" && ["--help", "-h"].includes(args[0]))) {
   console.log(usage);
 } else {
   try {

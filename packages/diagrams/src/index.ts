@@ -4,9 +4,9 @@ import {describe} from "./describe.js";
 import {extent,separation} from "./model.js";
 import type {Box, DiagramPart, Point, DiagramSpec, Fonts, Group, Panel, Placed, Weight} from "./model.js";
 import {cap, escape, ExtraFontRequired, n, Painter} from "./paint.js";
-import {arrow, route} from "./routes.js";
+import {arrow, arrowVertices, route} from "./routes.js";
 import {prepare} from "./spec.js";
-export type {DiagramSpec, DiagramImage, DiagramPart, DiagramReference, Panel, Section, Connection, Theme} from "./model.js";
+export type {DiagramSpec, DiagramImage, DiagramPart, DiagramReference, Box, Point, Side, Panel, Section, Connection, Theme} from "./model.js";
 
 function layout(c:Painter,s:DiagramSpec,input:ReturnType<typeof prepare>):Placed[] {
     const t=c.t,gap=s.gap??t.col_gap,rowGap=s.row_gap??t.row_gap;
@@ -114,6 +114,21 @@ function header(c:Painter,s:DiagramSpec,contentWidth:number) {
 function contains(a:Box,b:Box) {
     return a.x<=b.x && a.y<=b.y && a.x+a.w>=b.x+b.w && a.y+a.h>=b.y+b.h;
 }
+/** Blank titles and labels in legacy drawings still need a selectable part. */
+function reviewIds(raw: string[], kind: string): Map<string,string> {
+    const reserved=new Set(raw);
+    const result=new Map<string,string>();
+    let ordinal=0;
+    for (const value of raw) {
+        let id=value;
+        if (!id.trim()) {
+            do { id=kind+"#"+(++ordinal); } while (reserved.has(id));
+            reserved.add(id);
+        }
+        result.set(value,id);
+    }
+    return result;
+}
 function build(s:DiagramSpec,pack:Fonts,extended:ReadonlySet<Weight>) {
     const input=prepare(s),t=input.t,c=new Painter(t,pack,extended),panels=layout(c,s,input);
     if ((s.steps?.length || panels.some(p=>p.panel.step!==undefined)) && t.badge_fill &&
@@ -166,9 +181,11 @@ function build(s:DiagramSpec,pack:Fonts,extended:ReadonlySet<Weight>) {
     const description=describe(s,panels);
     const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img"><title>${escape(s.title)}</title><desc>${escape(description)}</desc><rect width="${width}" height="${height}" fill="${t.paper}"/>${c.parts.join("")}</svg>\n`;
     const box=(b:Box)=>({x:b.x+dx,y:b.y+dy,w:b.w,h:b.h});
+    const panelIds=reviewIds(panels.map(p=>p.id),"panel");
+    const groupIds=reviewIds(groups.map(g=>g.id??g.label),"group");
     const parts:DiagramPart[]=[
-        ...groups.map(g=>({kind:"group" as const,id:g.id??g.label,title:g.label,summary:g.sub,refs:g.refs??[],...box(g)})),
-        ...panels.map(p=>({kind:"panel" as const,id:p.id,title:p.panel.title,summary:p.panel.sub,refs:p.panel.refs??[],...box(p)})),
+        ...groups.map(g=>({kind:"group" as const,id:groupIds.get(g.id??g.label)!,title:g.label,summary:g.sub,refs:g.refs?.map(ref=>({...ref}))??[],...box(g)})),
+        ...panels.map(p=>({kind:"panel" as const,id:panelIds.get(p.id)!,title:p.panel.title,summary:p.panel.sub,refs:p.panel.refs?.map(ref=>({...ref}))??[],...box(p)})),
         ...c.sections.map(section=>({...section,...box(section)})),
     ];
     const used=new Set(s.links?.flatMap(link=>link.id === undefined ? [] : [link.id]));
@@ -182,8 +199,10 @@ function build(s:DiagramSpec,pack:Fonts,extended:ReadonlySet<Weight>) {
             do { id=pair+"#"+(++ordinal); } while (used.has(id));
             occurrences.set(pair,ordinal);
         }
+        const hitBoxes=[link.bounds,...arrowVertices(link.tip,link.direction).map(([x,y])=>({x,y,w:0,h:0}))];
+        if (link.labelBox) hitBoxes.push(link.labelBox);
         parts.push({kind:"link",id,title:link.label || link.a.panel.title+" → "+link.b.panel.title,
-            refs:authored.refs??[],from:link.a.id,to:link.b.id,...box(link.labelBox ? extent([link.bounds,link.labelBox]) : link.bounds),
+            refs:authored.refs?.map(ref=>({...ref}))??[],from:panelIds.get(link.a.id)!,to:panelIds.get(link.b.id)!,...box(extent(hitBoxes)),
             labelBox:link.labelBox && box(link.labelBox),
             points:link.samples.concat([link.tip]).map(([x,y]):Point=>[x+dx,y+dy])});
     }
@@ -198,8 +217,10 @@ const loadFace={
     regular:()=>import("./regular-face.js"), medium:()=>import("./medium-face.js"),
     semibold:()=>import("./semibold-face.js"), bold:()=>import("./bold-face.js")
 };
+export type DiagramRenderResult = ReturnType<typeof build>;
+
 /** Render the measured diagram, loading additional Inter outlines only when needed. */
-export async function renderDiagram(spec: DiagramSpec) {
+export async function renderDiagram(spec: DiagramSpec): Promise<DiagramRenderResult> {
     for (;;) {
         try {
             return build(spec, availableFonts, extendedWeights);
