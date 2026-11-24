@@ -251,3 +251,45 @@ test.skipIf(!hasDom)('the box opened before a slow draft read answers, untouched
   typeOn(el, ' And today.');
   await until(() => drafts.get(ONE)?.body === 'Words saved yesterday. And today.', 'both saved', 1000);
 });
+
+/** A thread opened holding a saved draft: the box is back with its words, without focus, its caret at their start (as a browser draws it). */
+async function openRestored(words: string): Promise<{ el: HTMLElement; text: HTMLTextAreaElement }> {
+  saveElsewhere(ONE, words);
+  const el = await open();
+  await until(() => box(el)?.value === words, 'the draft back in the box');
+  const text = box(el)!;
+  expect(document.activeElement === text).toBe(false);
+  text.setSelectionRange(0, 0);
+  return { el, text };
+}
+const caretAtEnd = (text: HTMLTextAreaElement) => document.activeElement === text && text.selectionStart === text.value.length && text.selectionEnd === text.value.length;
+
+test.skipIf(!hasDom)("a restored draft: the message's Reply arrow puts focus in the box, the caret after the words", async () => {
+  const { el, text } = await openRestored('Keep the totals column.');
+  const arrow = el.querySelector<HTMLButtonElement>(`[data-message-article="${ONE}"] button[aria-label="Reply"]`);
+  expect(!!arrow).toBe(true);
+  await act(async () => {
+    arrow!.focus();
+    arrow!.click();
+  });
+  // At once, before a frame: a key typed right after the click goes into the box, never to a thread shortcut.
+  expect(caretAtEnd(text)).toBe(true);
+  await settle(2);
+  expect(caretAtEnd(text)).toBe(true);
+});
+
+test.skipIf(!hasDom)('a restored draft: R puts focus in the box, the caret after the words', async () => {
+  const { text } = await openRestored('Keep the totals column.');
+  await act(async () => {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', code: 'KeyR', bubbles: true, cancelable: true }));
+  });
+  expect(caretAtEnd(text)).toBe(true);
+  await settle(2);
+  expect(caretAtEnd(text)).toBe(true);
+});
+
+test.skipIf(!hasDom)('a restored draft focused by a key (Tab): the caret lands after the words, never in front of them', async () => {
+  const { text } = await openRestored('Keep the totals column.');
+  await act(async () => text.focus());
+  expect(caretAtEnd(text)).toBe(true);
+});

@@ -208,6 +208,7 @@ import { SkipChip } from '../parts/SkipChip';
 import { namedTagOptions, useThreadSessions } from '../thread/useThreadSessions';
 import { measureOpenPlaces } from '../thread/openPlaces';
 import { takeMergedFiles as takeMergedFilesInto, takeOffered, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
+import { caretToEndOnFirstFocus, focusReplyEnd as focusReplyEndOf } from '../thread/replyCaret';
 import { readFeedbackTexts } from '../data/queries/feedbackTexts';
 import { ReplyTextField } from '../parts/ReplyTextField';
 import { ReviewContextLine } from '../thread/ReviewContextLine';
@@ -2007,7 +2008,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // From a file in full screen, back beside the thread first, even with the box open (the composer opens it behind the file).
     // A file full screen is all a narrow window shows, so this leaves it: an unsaved comment on it waits as its draft.
     if (file && shownFull) (phone || fileStacked ? () => fileToThread(writeReplyFromFile) : writeReplyFromFile)();
-    else if (box.open) textRef.current?.focus();
+    else if (box.open) focusReplyEnd();
     else openBox();
   };
   /** The file O opens: its tile shows the O keycap. */
@@ -2764,18 +2765,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       else requestAnimationFrame(() => textRef.current?.focus());
     } else openBox();
   };
-  const focusReplyEnd = () =>
-    requestAnimationFrame(() => {
-      const text = textRef.current;
-      if (!text) return;
-      text.focus();
-      text.setSelectionRange(text.value.length, text.value.length);
-      text.scrollTop = text.scrollHeight;
-      // The words scroll in the box's capped region (approval "inbox-reply-box", D1), not in the field: their end, and
-      // the caret there, are brought to the region's bottom.
-      const region = text.closest<HTMLElement>('[data-reply-scroll]');
-      if (region) region.scrollTop += text.getBoundingClientRect().bottom - region.getBoundingClientRect().bottom;
-    });
+  const focusReplyEnd = () => focusReplyEndOf(textRef);
   /**
    * From full screen to the thread, on the device's own route: beside the thread where there is room (as
    * Write the reply goes), else the file closes (a phone's or a stacked window's Back to the thread). A
@@ -3983,10 +3973,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const { quote: arrowQuote, aim: session } = arrowReply(thread.messages, message, words, !!quoteRef.current);
     if (arrowQuote !== undefined) setQuote(arrowQuote);
     if (words) window.getSelection()?.removeAllRanges();
-    if (!pillActive || !session) {
-      openBox();
-      return;
-    }
+    // The box open already: focus goes to it, the caret after its words (never left on the arrow, where keys are shortcuts).
+    if (!pillActive || !session) return boxRef.current.open ? focusReplyEnd() : openBox();
     aimReply([session]);
     setRcptOpen(false);
     if (boxRef.current.open) {
@@ -5414,6 +5402,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               {...boxDrop.handlers}
               // A press beside the text (the row of chips under it) puts the caret in the reply.
               onMouseDown={(event) => focusReplyFromBox(event, textRef.current)}
+              // A box put back holding words has its caret at their start: its first focus by a key lands after them.
+              onFocus={(event) => caretToEndOnFirstFocus(event.target, textRef.current)}
               // A paste that carries files (a screenshot, a copied image) attaches them; text pastes as text.
               onPaste={(event) => {
                 if (replyFiles.paste(event)) setError(null);
