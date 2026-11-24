@@ -4,7 +4,7 @@ import { INBOX_SYSTEM_SWITCH_SHOWN, INBOX_TEXT_SIZES } from '@plannotator/core/i
 import type { InboxSound } from '../sound';
 import { SoundRow, Switch } from './SoundRow';
 import { LinkedCapabilities } from './LinkedCapabilities';
-import { CAPABILITY_LINES } from './capabilityLines';
+import { capabilityLine } from './capabilityLines';
 import { type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
@@ -618,7 +618,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-board-label">
                     Board
                   </span>
-                  <span className="ib-desc">{CAPABILITY_LINES.board}</span>
+                  <span className="ib-desc">{capabilityLine('board')}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={board.on} labelledBy="ib-board-label" onClick={() => onToggleBoard(!board.on)} />
@@ -631,7 +631,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-steps-label">
                     Checklist
                   </span>
-                  <span className="ib-desc">{CAPABILITY_LINES.steps}</span>
+                  <span className="ib-desc">{capabilityLine('steps')}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={steps.on} labelledBy="ib-steps-label" onClick={() => onToggleSteps(!steps.on)} />
@@ -645,7 +645,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-code-review-label">
                     Code review
                   </span>
-                  <span className="ib-desc">{CAPABILITY_LINES.code_review}</span>
+                  <span className="ib-desc">{capabilityLine('code_review')}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={codeReview.on} labelledBy="ib-code-review-label" onClick={() => onToggleCodeReview(!codeReview.on)} />
@@ -658,7 +658,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-chapter-diagrams-label">
                     Chapter diagrams
                   </span>
-                  <span className="ib-desc">{CAPABILITY_LINES.chapter_diagrams}</span>
+                  <span className="ib-desc">{capabilityLine('chapter_diagrams')}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={chapterDiagrams.on} labelledBy="ib-chapter-diagrams-label" onClick={() => onToggleChapterDiagrams(!chapterDiagrams.on)} />
@@ -672,7 +672,7 @@ function CapabilitiesSection({
                     <span className="ib-l" id="ib-system-label">
                       System
                     </span>
-                    <span className="ib-desc">{CAPABILITY_LINES.system}</span>
+                    <span className="ib-desc">{capabilityLine('system')}</span>
                   </span>
                   <span className="ib-ctl">
                     <Switch on={system.on} labelledBy="ib-system-label" onClick={() => onToggleSystem(!system.on)} />
@@ -749,7 +749,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-bro-label">
                     Bro mode
                   </span>
-                  <span className="ib-desc">{CAPABILITY_LINES.bro}</span>
+                  <span className="ib-desc">{capabilityLine('bro')}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={bro.on} labelledBy="ib-bro-label" onClick={() => onToggleBro(!bro.on)} />
@@ -762,7 +762,7 @@ function CapabilitiesSection({
                   <span className="ib-l" id="ib-float-drafts-label">
                     Float reply drafts
                   </span>
-                  <span className="ib-desc">{CAPABILITY_LINES.float_drafts}</span>
+                  <span className="ib-desc">{capabilityLine('float_drafts')}</span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={floatDrafts.on} labelledBy="ib-float-drafts-label" onClick={() => onToggleFloatDrafts(!floatDrafts.on)} />

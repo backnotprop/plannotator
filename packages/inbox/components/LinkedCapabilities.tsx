@@ -2,7 +2,8 @@
  * Settings → Capabilities on a linked computer (docs/agent-guides/inbox-machines.md, "Capabilities on a linked
  * computer"): under this computer's switches, one group per linked computer whose list takes them (mark
  * `capabilities`), headed by its name, with the same switches by the same names and the same line under each
- * (capabilityLines.tsx; a switch with no line there shows its name alone), read and turned there through this
+ * (capabilityLines.tsx, said of that computer: "on Studio", never "this computer"; a switch with no line there shows
+ * its name alone), read and turned there through this
  * Inbox's forward (`/api/inbox/m/<machine>/capabilities`). System and Chapter diagrams follow this computer's rule:
  * Chapter diagrams only while Code review is on there, System only while it is on there. A computer that is away shows
  * what it last gave this Inbox (kept there, so a reload keeps the group), said to be away; a switch turned while it is
@@ -10,7 +11,7 @@
  * takes or refuses it (the Inbox reads that from its outbox). An older Plannotator there has no group.
  */
 import { useEffect, useState, type ReactNode } from 'react';
-import { CAPABILITY_LINES } from './capabilityLines';
+import { capabilityLine, type CapabilityLineOf } from './capabilityLines';
 import { INBOX_CAPABILITY_SWITCHES, inboxCapabilitySwitchesOf, type InboxCapabilitySwitches, type InboxCapabilitySwitchKey } from '@plannotator/core/inbox-types';
 import { apiGet, apiPost, heldWords, InboxHeldError, type MachineView } from '../api';
 import { inboxUrl } from '../inboxUrl';
@@ -44,18 +45,18 @@ export interface LinkedSwitchRowModel {
   key: InboxCapabilitySwitchKey;
   name: string;
   on: boolean;
-  /** The line under its name, as this computer's row has it (capabilityLines.tsx); null: its name alone. */
+  /** The line under its name, as this computer's row has it but said of that computer (capabilityLines.tsx); null: its name alone. */
   line: ReactNode;
 }
 
 /** The switches a computer's group shows, in Settings' order, by its own rules. */
-export function linkedSwitchRows(switches: InboxCapabilitySwitches, lines: Partial<Record<InboxCapabilitySwitchKey, ReactNode>> = CAPABILITY_LINES): LinkedSwitchRowModel[] {
+export function linkedSwitchRows(switches: InboxCapabilitySwitches, computer: string, lineOf: CapabilityLineOf = capabilityLine): LinkedSwitchRowModel[] {
   return INBOX_CAPABILITY_SWITCHES.flatMap(({ key, name }) => {
     const value = switches[key];
     if (!value) return [];
     if (key === 'chapter_diagrams' && switches.code_review?.on !== true) return [];
     if (key === 'system' && (value.on !== true || switches.code_review?.on !== true)) return [];
-    return [{ key, name, on: value.on, line: lines[key] ?? null }];
+    return [{ key, name, on: value.on, line: lineOf(key, computer) ?? null }];
   });
 }
 
@@ -98,7 +99,7 @@ function MachineSwitches({ machine }: { machine: MachineView }) {
     };
   }, [machine.id, machine.state, reads]);
   if (!far) return null;
-  const rows = linkedSwitchRows(far.switches);
+  const rows = linkedSwitchRows(far.switches, machine.name);
   if (rows.length === 0) return null;
   const turn = (key: InboxCapabilitySwitchKey, on: boolean) => {
     setLine(null);

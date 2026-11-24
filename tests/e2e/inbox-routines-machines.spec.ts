@@ -151,11 +151,10 @@ test("1. Settings → Capabilities: Studio's switches under Laptop's, and Routin
   await expect(group.locator('h2')).toHaveText('Studio', { timeout: 20_000 });
   const routines = group.locator('[data-settings-linked-switch="scheduled_threads"] [role="switch"]');
   await expect(routines).toHaveAttribute('aria-checked', 'false');
-  // Each of Studio's switches has the line Laptop's own row has under its name (Laptop's Routines may add a line of its own).
+  // Each of Studio's switches has the line Laptop's own row has under its name, said of Studio.
   await expect(group.locator('[data-settings-linked-switch="board"] .ib-desc')).toHaveText((await page.locator('[data-settings-board] .ib-desc').textContent())!);
-  const routinesLine = (await group.locator('[data-settings-linked-switch="scheduled_threads"] .ib-desc').textContent())!;
-  expect(routinesLine.length).toBeGreaterThan(0);
-  expect((await page.locator('[data-settings-scheduled] .ib-desc').textContent())!.startsWith(routinesLine)).toBe(true);
+  await expect(group.locator('[data-settings-linked-switch="scheduled_threads"] .ib-desc')).toHaveText('Runs saved prompts on a schedule, on Studio, while its Inbox is running.');
+  await expect(group).not.toContainText('this computer');
   await routines.click();
   await expect(routines).toHaveAttribute('aria-checked', 'true');
   await expect.poll(async () => (await read<{ scheduled_threads?: { on: boolean } }>(studio, '/api/inbox/settings')).scheduled_threads?.on).toBe(true);
