@@ -743,7 +743,7 @@ export function InboxList(props: InboxListProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   // Filter by typing (TitleFilter.tsx): the rows narrowed by the typed words, the menu's picks already applied (App).
   // Typing redraws this list, never the window; the field sits under the header, "No threads match" in the body.
-  const { sections, archived, field: titleField, empty: titleEmpty } = useTitleFilterList(props.sections, props.archived, props.listFilter !== undefined);
+  const { sections, archived, field: titleField, empty: titleEmpty } = useTitleFilterList(props.sections, props.archived, props.listFilter !== undefined, props.listFilter?.place ?? '', showArchived ? archivedRows.length : 0);
   const pick = useListPicks({ sections: sections, isOpen: (id) => (asList && id !== 'snoozed') || ((!asAgents || id === 'snoozed') && groups.state(id).open), drawn: asAgents ? agentRows : null, body: bodyRef, bulk: props.bulk, phone: props.phone === true, narrow: props.narrow === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null, archived: archivedRows });
   // ↑ ↓ Home End move focus between the rows (listKeys.ts), only while a row or the Quiet band has it.
   const listKey = (move: ListMove) => ({
@@ -1192,7 +1192,7 @@ export function InboxList(props: InboxListProps) {
           </HoldViewOnBar>
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {/* So is a list whose rows are all archived, waiting for the list to settle without them (Archive all). */}
-          {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && (titleEmpty ?? props.empty)}
+          {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && (titleEmpty === undefined ? props.empty : titleEmpty)}
           {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. Recent activity's times (`sort.by`). */}
           <ListRows timeBy={props.sort?.by}>
           {flat && flat.rows.length > 0 && (

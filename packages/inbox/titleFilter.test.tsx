@@ -91,11 +91,18 @@ const LIST = sections({
   new: [row('history', 'Page history: restore a version', 'web', 'opencode', 'new', 'mch_other'), row('webhook', 'Webhook signature check', 'api', 'codex', 'new')],
 });
 
+interface Look {
+  /** The list's rows (LIST unless a test needs others). */
+  list?: InboxListSection[];
+  /** Which list this is (App: the sidebar's view). */
+  place?: string;
+}
+
 /** App.tsx's wiring: the picks from this browser, the sections filtered, the rows before the filter for the menu. */
-function Harness() {
+function Harness({ list = LIST, place = 'inbox' }: Look) {
   const [picks, setPicks] = useListFilter();
   const applied = appliedFilter(picks, false, false, false);
-  const shown = filterListSections(LIST, applied, Date.now());
+  const shown = filterListSections(list, applied, Date.now());
   const none = pickCount(applied) > 0 && shown.every((s) => s.threads.length === 0);
   return (
     <InboxList
@@ -111,32 +118,37 @@ function Harness() {
       onShowNew={() => {}}
       onOpen={() => {}}
       empty={none ? <ListFilterEmpty onClear={() => setPicks(clearedFrom(picks, false))} /> : null}
-      listFilter={{ rows: LIST.flatMap((s) => s.threads), scoped: false, names: new Map(), filter: picks, onChange: setPicks }}
+      listFilter={{ rows: list.flatMap((s) => s.threads), scoped: false, names: new Map(), filter: picks, onChange: setPicks, place }}
     />
   );
 }
 
-function render(): HTMLElement {
+function render(look: Look = {}): HTMLElement {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.append(host);
   root = createRoot(host);
-  act(() => {
-    root!.render(
-      <SidebarProvider>
-        <Harness />
-      </SidebarProvider>,
-    );
-  });
+  show(look);
   return host;
 }
 
+/** The same list drawn with other props (App: another sidebar view, the list itself kept). */
+function show(look: Look) {
+  act(() => {
+    root!.render(
+      <SidebarProvider>
+        <Harness {...look} />
+      </SidebarProvider>,
+    );
+  });
+}
+
 /** The list drawn again from scratch (a thread opened over it on a phone and closed, or another view and back). */
-function redraw(): HTMLElement {
+function redraw(look: Look = {}): HTMLElement {
   act(() => root?.unmount());
   host?.remove();
   for (const node of document.body.querySelectorAll('[data-base-ui-portal], [role="presentation"]')) node.remove();
-  return render();
+  return render(look);
 }
 
 async function settle() {
@@ -313,6 +325,64 @@ describe.skipIf(!hasDom)('Filter by typing', () => {
     await click($('[data-title-filter-close]')!);
     await act(async () => void (await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))));
     expect(body.scrollTop).toBe(120);
+  });
+
+  test('closed in another list (another sidebar view), the scroll stays where it is; no other list\'s scroll is put back', async () => {
+    const el = render({ place: 'inbox' });
+    const body = el.querySelector<HTMLElement>('.ib-lbody')!;
+    body.scrollTop = 120;
+    await openField();
+    await typeKeys(field()!, 'page');
+    // Another view: the field and its words stay, the list is the same element, scrolled by the person.
+    show({ place: 'project web' });
+    await settle();
+    expect(field()!.value).toBe('page');
+    body.scrollTop = 40;
+    await click($('[data-title-filter-close]')!);
+    await act(async () => void (await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))));
+    expect(body.scrollTop).toBe(40);
+  });
+
+  test("a reload keeps the list's scroll from when the field opened: closing puts it back, in that list only", async () => {
+    let el = render({ place: 'inbox' });
+    el.querySelector<HTMLElement>('.ib-lbody')!.scrollTop = 120;
+    await openField();
+    await typeKeys(field()!, 'page');
+    act(() => root?.unmount());
+    host?.remove();
+    resetTitleFilterForStateOnly();
+    el = render({ place: 'inbox' });
+    await settle();
+    const body = el.querySelector<HTMLElement>('.ib-lbody')!;
+    body.scrollTop = 0;
+    await click($('[data-title-filter-close]')!);
+    expect(body.scrollTop).toBe(120);
+  });
+
+  test('"No threads match" only when nothing at all matches: a match in the folded Snoozed band draws no such words', async () => {
+    const list = sections({ ...Object.fromEntries(LIST.map((s) => [s.id, s.threads])), snoozed: [row('later', 'Billing export later', 'api', 'codex', 'snoozed' as InboxListRow['section'])] });
+    const el = render({ list });
+    await openField();
+    await typeKeys(field()!, 'billing');
+    expect(bandCounts(el)).toEqual(['snoozed 1']);
+    expect(el.querySelector('.ib-lbody [data-title-filter-none]') === null).toBe(true);
+    await typeKeys(field()!, 'billing nothing');
+    expect(el.querySelector('.ib-lbody [data-title-filter-none]')!.textContent).toBe(TITLE_FILTER_NONE);
+  });
+
+  test('a screen reader hears how many threads match once typing pauses, in the field\'s polite status; nothing shows', async () => {
+    render();
+    await openField();
+    const status = () => $('[data-title-filter] [role="status"]');
+    expect(status()!.classList.contains('ib-sr')).toBe(true);
+    await typeKeys(field()!, 'page');
+    // Not on every key: only after the pause.
+    expect(status()!.textContent).toBe('');
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 450))));
+    expect(status()!.textContent).toBe('3 matches');
+    await typeKeys(field()!, 'pagex');
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 450))));
+    expect(status()!.textContent).toBe(TITLE_FILTER_NONE);
   });
 
   test("the row flies to the field and the field folds away; with reduced motion neither, and nothing is left behind", async () => {

@@ -16,7 +16,10 @@
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { fold } from './listFilterSearch';
 
-/** The menu row that opens the field. Not settled yet: the owner picks between "Type…", "Input…", "Title…", "Find…". */
+/**
+ * The menu row that opens the field: "Title…", as on the approved page (approval "inbox-filter-by-typing"), unless the
+ * owner picks another of "Type…", "Input…", "Find…". The one place it is written.
+ */
 export const TITLE_FILTER_LABEL = 'Title…';
 /** The field's placeholder and accessible name. */
 export const TITLE_FILTER_PLACEHOLDER = 'Filter by title';

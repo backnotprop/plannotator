@@ -5,21 +5,25 @@
  *  - the funnel's menu has one new row first, alone above Not seen (the search mark, no count);
  *  - its click closes the menu and a field eases in under the header, focused, "Filter by title", the header itself
  *    unchanged (the funnel alone, no badge);
- *  - typing narrows the list by title on every key, no Enter: three of six threads hold "page", band counts follow;
+ *  - typing narrows the list by title on every key, no Enter: three of six threads hold "page", band counts follow; a
+ *    row that stops matching shrinks and fades where it was (a hidden copy, never a row), with reduced motion at once;
  *  - with a project picked in the menu, the words narrow what the pick left;
  *  - nothing matching reads "No threads match" where the list would be;
  *  - opening a thread and closing it, and a reload, keep the field and its words;
- *  - Escape empties it, takes it away, gives back every row and focus to the funnel;
- *  - a phone, 390 wide: the same row in the sheet, the field under the header, typing narrows.
+ *  - Escape empties it, folds it away while the whole list comes back in the same motion, gives back every row and
+ *    focus to the funnel;
+ *  - a phone, 390 wide: the same row in the sheet flies up to become the field under the header, typing narrows.
  *
  * What this catches: the row missing or not first; a field that does not open, take focus, or ease in; typing that
- * needs Enter or does not narrow; the words replacing the menu's picks; no words when nothing matches; the field lost
- * when a thread opens or the page reloads; Escape that leaves the field, the words, a narrowed list or focus nowhere; a
- * phone that draws any of it differently.
+ * needs Enter or does not narrow; a leaving row that is not animated, is taken for a row, or animates with reduced
+ * motion; the words replacing the menu's picks; no words when nothing matches; the field lost when a thread opens or
+ * the page reloads; Escape that leaves the field, the words, a narrowed list or focus nowhere, or a list that comes
+ * back with no motion; a phone that draws any of it differently or skips the row's flight.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/filter-typing (CI keeps .local/proof/ as the shard's "inbox-window-proof"
- * artifact): 01-menu-row, 02-field-open, 03-typing, 04-no-match, 05-closed, 06-phone-menu, 07-phone-field-open,
- * 08-phone-typing. Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
+ * artifact): 01-menu-row, 02-field-open, 03a-row-leaving (held 40 ms into the exit), 03-typing, 04-no-match,
+ * 05a-closing (held 90 ms into the close), 05-closed, 06-phone-menu, 06a-phone-travel (held 100 ms into the flight),
+ * 07-phone-field-open, 08-phone-typing. Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
 import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
@@ -153,9 +157,38 @@ test('the row closes the menu; the field eases in under the header, focused; the
   expect(world.errors).toEqual([]);
 });
 
+/**
+ * Types `text` into the field as one key does (the input event), and reports in that same task, before any paint, the
+ * copies of rows leaving (titleFilterRows.ts) and what else animates in the list; `pauseAt` holds every animation at
+ * that time (ms) for a still, `release` lets them finish.
+ */
+async function typeAndCatch(page: Page, text: string, pauseAt: number | null = null) {
+  return field(page).evaluate(
+    (input: HTMLInputElement, { text, pauseAt }) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      const ghosts = [...document.querySelectorAll<HTMLElement>('.ib-lbody [data-tflt-ghost]')];
+      if (pauseAt !== null) for (const a of document.getAnimations()) (a.pause(), (a.currentTime = pauseAt));
+      return {
+        ghosts: ghosts.length,
+        hidden: ghosts.every((g) => g.getAttribute('aria-hidden') === 'true' && g.inert && !g.querySelector('[data-thread-id]')),
+        moving: document.querySelector('.ib-lbody')!.getAnimations({ subtree: true }).length,
+      };
+    },
+    { text, pauseAt },
+  );
+}
+const release = (page: Page) => page.evaluate(() => document.getAnimations().forEach((a) => a.finish()));
+
 test('typing narrows the list on every key, no Enter; band counts follow', async () => {
   const { page, ids } = world;
-  await page.keyboard.type('p');
+  // "p": the two rows that stop matching shrink and fade where they were (a copy each, never taken for a row).
+  const caught = await typeAndCatch(page, 'p', 40);
+  expect(caught.ghosts).toBeGreaterThanOrEqual(2);
+  expect(caught.hidden).toBe(true);
+  await shot(page, '03a-row-leaving.png');
+  await release(page);
+  await expect(page.locator('.ib-lbody [data-tflt-ghost]')).toHaveCount(0);
   await expect.poll(async () => sorted(await listOrder(page))).toEqual(sorted([ids.trash, ids.invoice, ids.search, ids.history]));
   await page.keyboard.type('age');
   await expect.poll(async () => sorted(await listOrder(page))).toEqual(sorted([ids.trash, ids.search, ids.history]));
@@ -191,7 +224,11 @@ test("with a project picked, the words narrow what the pick left; the pick stays
 
 test('nothing matching: "No threads match" where the list would be', async () => {
   const { page } = world;
-  await field(page).fill('quarterly roadmap');
+  // Reduced motion: the rows go at once, nothing plays.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const still = await typeAndCatch(page, 'quarterly roadmap');
+  expect(still).toEqual({ ghosts: 0, hidden: true, moving: 0 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect(page.locator('.ib-lbody [data-title-filter-none]')).toHaveText(TITLE_FILTER_NONE);
   await expect(page.locator('.ib-lbody [data-thread-id]')).toHaveCount(0);
   await expect(page.locator('.ib-lbody [data-title-filter-none] button')).toHaveCount(0);
@@ -219,7 +256,19 @@ test('a thread opened and closed, and a reload, keep the field and its words', a
 test('Escape empties the field, takes it away, gives back every row and focus to the funnel', async () => {
   const { page, ids } = world;
   await field(page).focus();
-  await page.keyboard.press('Escape');
+  // In the key's own task: the field's copy folds away with its words while the whole list comes back (the rows still
+  // drawn glide to their places, the others fade in), held halfway for a still.
+  const closing = await field(page).evaluate((input) => {
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    const caught = { copies: document.querySelectorAll('.ib-tflt[aria-hidden="true"]').length, moving: document.querySelector('.ib-lbody')!.getAnimations({ subtree: true }).length };
+    for (const a of document.getAnimations()) (a.pause(), (a.currentTime = 90));
+    return caught;
+  });
+  expect(closing.copies).toBe(1);
+  expect(closing.moving).toBeGreaterThan(0);
+  await pointerAway(page);
+  await shot(page, '05a-closing.png');
+  await release(page);
   await expect(field(page)).toHaveCount(0);
   await expect(page.locator('[data-title-filter]')).toHaveCount(0);
   await expect.poll(async () => sorted(await listOrder(page))).toEqual(sorted(Object.values(ids)));
@@ -244,7 +293,17 @@ test('a phone, 390 wide: the row in the sheet, the field under the header, typin
   await funnel(page).click();
   await expect(titleRow(page)).toBeVisible();
   await shot(page, '06-phone-menu.png');
-  await titleRow(page).click();
+  // The row flies up from the sheet and becomes the field, as on a wide window; held halfway for a still.
+  const flying = await titleRow(page).evaluate((row: HTMLElement) => {
+    row.click();
+    const ghosts = document.querySelectorAll('.ib-tflt-ghost').length;
+    for (const a of document.getAnimations()) (a.pause(), (a.currentTime = 100));
+    return ghosts;
+  });
+  expect(flying).toBe(1);
+  await shot(page, '06a-phone-travel.png');
+  await release(page);
+  await expect(page.locator('.ib-tflt-ghost')).toHaveCount(0);
   await expect(page.locator('[data-list-filter-menu]')).toHaveCount(0);
   await expect(field(page)).toBeVisible();
   await expect(field(page)).toBeFocused();

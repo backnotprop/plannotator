@@ -51,6 +51,7 @@ import { filterSearchShown, labelStart, searchFilterSections, type FilterSearchR
 import { TITLE_FILTER_LABEL, filterRowsByTitle } from '../listTitleFilter';
 import { openTitleFilter, useTitleFilterTextWhen } from '../listTitleFilterStore';
 import { noteTravelFrom } from './titleFilterMotion';
+import { matchCount, useSaidAfterPause } from './saidAfterPause';
 export { useTitleFilterList } from './TitleFilter';
 import {
   NO_LIST_FILTER,
@@ -92,7 +93,12 @@ export interface ListFilterSource {
   names: ReadonlyMap<string, string>;
   filter: ListFilter;
   onChange: (next: ListFilter) => void;
+  /** Which list this is (the sidebar's view): Filter by typing's close puts back the scroll of this list only. */
+  place?: string;
 }
+
+/** The same source, field by field: App hands a new object on every draw of the window. */
+const sameSource = (a: ListFilterSource, b: ListFilterSource) => a.rows === b.rows && a.scoped === b.scoped && a.names === b.names && a.filter === b.filter && a.onChange === b.onChange && a.place === b.place;
 
 function usePortal(anchor: RefObject<HTMLElement | null>) {
   const [portal, setPortal] = useState<HTMLElement | null>(null);
@@ -108,7 +114,7 @@ const FIND_WORDS = 'Search filters';
  * Base UI hides its clear button from screen readers; `aria-hidden={false}` puts it back. */
 const CLEAR_WORDS = 'Clear search';
 const nothingMatches = (query: string) => `Nothing matches “${query}”`;
-const matchWords = (n: number, query: string) => (n === 0 ? nothingMatches(query) : n === 1 ? '1 match' : `${formatCount(n)} matches`);
+const matchWords = (n: number, query: string) => (n === 0 ? nothingMatches(query) : matchCount(n));
 
 /** A row's label with the search's match drawn bold, from `labelStart` ("…" for what it drops). */
 function lit(label: string, hit: readonly [number, number] | null) {
@@ -167,8 +173,9 @@ export function rangeWords(range: { from: string; to: string }): string {
 }
 
 /**
- * Memoized: typing in Filter by typing's field redraws the list but hands this the same `source`, so the menu's counts
- * are not worked out again on every key. While the menu is open they count what the typed words leave.
+ * Memoized on the source's fields (`sameSource`): typing in Filter by typing's field redraws the list, and a draw of
+ * the window that changes none of them hands an equal source, so the menu's counts are not worked out again. While the
+ * menu is open they count what the typed words leave.
  */
 export const ListFilterButton = memo(function ListFilterButton({ source, phone }: { source: ListFilterSource; phone: boolean }) {
   const { rows, scoped, names, onChange } = source;
@@ -196,13 +203,13 @@ export const ListFilterButton = memo(function ListFilterButton({ source, phone }
   const fieldOf = () => trigger.current?.closest('.ib-listcol')?.querySelector<HTMLInputElement>('[data-title-filter-input]') ?? null;
   const openField = () => {
     toField.current = true;
-    // The row flies to the field's place (titleFilterMotion.ts); on a phone's sheet the field only eases in.
-    const row = phone ? null : (portal ?? document).querySelector<HTMLElement>('[data-list-filter-menu] [data-list-filter-title]');
+    // The row flies to the field's place (titleFilterMotion.ts), from the menu or from a phone's sheet.
+    const row = (portal ?? document).querySelector<HTMLElement>('[data-list-filter-menu] [data-list-filter-title]');
     noteTravelFrom(row);
     if (row) row.style.visibility = 'hidden';
     setOpen(false);
     const list = trigger.current?.closest('.ib-listcol')?.querySelector<HTMLElement>('.ib-lbody');
-    flushSync(() => openTitleFilter(list?.scrollTop ?? 0));
+    flushSync(() => openTitleFilter(list?.scrollTop ?? 0, source.place ?? ''));
     fieldOf()?.focus({ preventScroll: true });
   };
   const finalFocus = useCallback(() => {
@@ -394,13 +401,10 @@ export const ListFilterButton = memo(function ListFilterButton({ source, phone }
       <RangePanel key={rangeOpen ? 'open' : 'shut'} open={rangeOpen} onOpenChange={setRangeOpen} anchor={trigger} portal={portal} phone={phone} start={custom} onApply={(range) => set({ updated: range })} />
     </>
   );
-});
+}, (a, b) => a.phone === b.phone && sameSource(a.source, b.source));
 
 /** The keys that pick a row from the field while nothing matches (Home and End only move the caret then). */
 const STEP_KEYS = new Set(['ArrowDown', 'ArrowUp']);
-
-/** How long the match count waits for typing to pause before a screen reader hears it. */
-const STATUS_WAIT_MS = 400;
 
 /**
  * The menu itself. The search's query lives here, so typing redraws only the menu: the rows and their counts are worked
@@ -435,16 +439,7 @@ function FilterMenu({
   const found = searchFilterSections<FilterSection, FilterRow>(sections, searchable ? query : '');
   const typed = query.trim();
   // The count a screen reader hears, once typing pauses (not on every key).
-  const words = found.searching ? matchWords(found.matches, typed) : '';
-  const [said, setSaid] = useState('');
-  useEffect(() => {
-    if (words === '') {
-      setSaid('');
-      return;
-    }
-    const wait = setTimeout(() => setSaid(words), STATUS_WAIT_MS);
-    return () => clearTimeout(wait);
-  }, [words]);
+  const said = useSaidAfterPause(found.searching ? matchWords(found.matches, typed) : '');
 
   // While nothing matches, the rows still drawn (kept because they are ticked, and Clear filters) take new keys, so Base
   // UI sees new rows and drops a highlight left on one from the query before (it clears a highlight on a change only when
