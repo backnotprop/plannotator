@@ -714,7 +714,7 @@ function handoffActive(message: InboxMessage): boolean {
 /** The most ids one send may supersede. */
 export const INBOX_SUPERSEDES_MAX = 100;
 
-// `<name>-<6 hex of the root>`: in project-key.ts, so the Shape store files under the same keys without loading this store.
+// `<name>-<6 hex of the root>`: in project-key.ts, which other modules read without loading this store.
 export { inboxProjectKey };
 
 /**
