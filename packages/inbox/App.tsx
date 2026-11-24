@@ -162,7 +162,7 @@ import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
 import { useLaunchTipClaim } from './data/actions/launchTip';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
-import { NativeDiagramEnabled } from '@plannotator/ui/components/diagram/nativeDiagramEnabled';
+import { NativeDiagramProvider } from '@plannotator/ui/components/diagram/NativeDiagramProvider';
 import { capabilityListener } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeListLookOptions } from './listLook';
@@ -5700,7 +5700,7 @@ function Inbox() {
   );
 
   return (
-    <NativeDiagramEnabled.Provider value={route.page === 'plans' || settings?.diagrams?.on === true}>
+    <NativeDiagramProvider enabled={route.page === 'plans' || settings?.diagrams?.on === true}>
     <InitiativeTagsContext.Provider value={initiativeTags}>
     <LiveInitiativesContext.Provider value={liveTags}>
     <ThreadTagsContext.Provider value={threadTagsHost}>
@@ -6454,7 +6454,7 @@ function Inbox() {
     </ThreadTagsContext.Provider>
     </LiveInitiativesContext.Provider>
     </InitiativeTagsContext.Provider>
-    </NativeDiagramEnabled.Provider>
+    </NativeDiagramProvider>
   );
 }
 

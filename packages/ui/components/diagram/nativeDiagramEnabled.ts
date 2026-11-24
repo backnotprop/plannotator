@@ -1,4 +1,7 @@
-import { createContext } from 'react';
+import { createContext, type ComponentProps, type ComponentType } from 'react';
+import type { NativeDiagramBlock } from './NativeDiagramBlock';
 
-/** Hosts can keep native diagram fences as JSON until their review capability is enabled. */
-export const NativeDiagramEnabled = createContext(true);
+export type NativeDiagramRenderer = ComponentType<ComponentProps<typeof NativeDiagramBlock>>;
+
+/** Importing Viewer alone leaves the native renderer out of the host's bundle. */
+export const NativeDiagramBlockContext = createContext<NativeDiagramRenderer | null>(null);

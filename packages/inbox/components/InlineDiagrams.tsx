@@ -1,6 +1,6 @@
-import { lazy, Suspense, useContext, useEffect, useState } from 'react';
+import { Suspense, useContext, useEffect, useState } from 'react';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
-import { NativeDiagramEnabled } from '@plannotator/ui/components/diagram/nativeDiagramEnabled';
+import { NativeDiagramBlockContext, type NativeDiagramRenderer } from '@plannotator/ui/components/diagram/nativeDiagramEnabled';
 import type { NativeDiagramFileReference } from '@plannotator/ui/components/diagram/nativeDiagramDrawing';
 import type { Annotation } from '@plannotator/ui/types';
 import { diagramDocumentBlocks } from '@plannotator/ui/utils/parser';
@@ -10,8 +10,6 @@ import { useInboxFileSource } from '../fileSource';
 import type { AttachmentView } from '../api';
 import { useDiagramQuestionRoutes } from '../ask/DiagramThreadScope';
 import { diagramFileAsk } from '../ask/sideSource';
-
-const NativeDiagramBlock = lazy(async () => ({ default: (await import('@plannotator/ui/components/diagram/NativeDiagramBlock')).NativeDiagramBlock }));
 
 interface InlineDiagramProps {
   records: readonly InboxAnnotationRecord[];
@@ -26,16 +24,16 @@ export function InlineDiagrams({ files, artifacts = [], onOpenLatest, ...props }
   artifacts?: readonly Artifact[];
   onOpenLatest?: (attachment: InboxAttachmentState) => void;
 }) {
-  const enabled = useContext(NativeDiagramEnabled);
-  if (!enabled) return null;
+  const NativeDiagramBlock = useContext(NativeDiagramBlockContext);
+  if (!NativeDiagramBlock) return null;
   return <>{files.filter((a) => inboxViewKind(a.kind, a.name) === 'plannotator-diagram').map((attachment) => {
     const latest = latestDiagramFor(artifacts, attachment);
-    return <InlineDiagram key={`${attachment.id}:${attachment.sent_sha256}`} attachment={attachment}
+    return <InlineDiagram key={`${attachment.id}:${attachment.sent_sha256}`} attachment={attachment} renderBlock={NativeDiagramBlock}
       openLatest={latest && onOpenLatest ? () => onOpenLatest(latest) : undefined} {...props} />;
   })}</>;
 }
 
-function InlineDiagram({ attachment, records, readOnly, onOpenFile, onSide, onSaved, openLatest }: InlineDiagramProps & { attachment: InboxAttachmentState; openLatest?: () => void }) {
+function InlineDiagram({ renderBlock: NativeDiagramBlock, attachment, records, readOnly, onOpenFile, onSide, onSaved, openLatest }: InlineDiagramProps & { renderBlock: NativeDiagramRenderer; attachment: InboxAttachmentState; openLatest?: () => void }) {
   const source = useInboxFileSource();
   const { reply } = useDiagramQuestionRoutes(attachment.message_id);
   const version = 'sent';

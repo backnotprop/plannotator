@@ -41,7 +41,6 @@ import { FloatingQuickLabelPicker } from './FloatingQuickLabelPicker';
  * while its engine loads (`DiagramPending`), inside the same boxes, so the
  * source fence paints once and the two waits read as one.
  */
-const NativeDiagramBlock = lazy(async () => ({ default: (await import('./diagram/NativeDiagramBlock')).NativeDiagramBlock }));
 const MermaidBlock = lazy(async () => ({ default: (await import('./MermaidBlock')).MermaidBlock }));
 const GraphvizBlock = lazy(async () => ({ default: (await import('./GraphvizBlock')).GraphvizBlock }));
 /** ```html and ```svg fences drawn, for a host that opts in (`htmlEmbeds`); loaded only then. */
@@ -84,7 +83,7 @@ import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/ancho
 import { DiagramBlockPending } from './diagram/DiagramPending';
 import type { DiagramReopenRequest } from './diagram/reopen';
 import { LazyBlockBoundary } from './LazyBlockBoundary';
-import { NativeDiagramEnabled } from './diagram/nativeDiagramEnabled';
+import { NativeDiagramBlockContext } from './diagram/nativeDiagramEnabled';
 import type { NativeDiagramFileReference } from './diagram/nativeDiagramDrawing';
 import { isGraphvizLanguage, isMermaidLanguage, isNativeDiagramLanguage } from './diagramLanguages';
 import { isHtmlEmbedLanguage, isSvgFenceLanguage } from './html-embed/languages';
@@ -1001,7 +1000,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // (the selection toolbar, comment-only, and its composer); everything else
   // of authoring stays off. Without it this is exactly `!authoringOff`.
   const textCommentsOnly = answerOnly && textComments && !readOnly;
-  const nativeDiagrams = React.useContext(NativeDiagramEnabled);
+  const NativeDiagramBlock = React.useContext(NativeDiagramBlockContext);
   const selectionCommentsOn = !authoringOff || textCommentsOnly;
   const hostComposes = onHostDraft !== undefined && !authoringOff;
   const viewerAnnotationHeader = authoringOff ? undefined : annotationHeader;
@@ -1945,12 +1944,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     // `!= null`, not `!== undefined`: a nullish anchor is no anchor at all —
     // the highlighter restores such a row by text, so it must not be counted
     // here as a diagram comment nothing could resolve.
-    const nativeBlocks = new Set(blocks.filter((b) => nativeDiagrams && b.type === 'code' && isNativeDiagramLanguage(b.language)).map((b) => b.id));
+    const nativeBlocks = new Set(blocks.filter((b) => NativeDiagramBlock && b.type === 'code' && isNativeDiagramLanguage(b.language)).map((b) => b.id));
     const ids = annotations.filter((ann) => ann.diagramAnchor != null && (
       ann.diagramAnchor.family === 'plannotator-diagram' ? !nativeBlocks.has(ann.blockId) : diagramBlockKey === ''
     )).map((ann) => ann.id);
     if (ids.length > 0) onRestoreReport({ attempted: ids, unanchored: ids });
-  }, [annotations, blocks, diagramBlockKey, nativeDiagrams, onRestoreReport]);
+  }, [annotations, blocks, diagramBlockKey, NativeDiagramBlock, onRestoreReport]);
 
   // The host's `belowTitle` slot (see the prop). Absent → the block list is
   // returned as is, so the DOM is the one without the prop. The wrapper's
@@ -2115,7 +2114,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 <SvgFenceBlock block={group.block} />
               </Suspense>
             </LazyBlockBoundary>
-          ) : group.block.type === 'code' && nativeDiagrams && isNativeDiagramLanguage(group.block.language) ? (
+          ) : group.block.type === 'code' && NativeDiagramBlock && isNativeDiagramLanguage(group.block.language) ? (
             <LazyBlockBoundary key={group.block.id} fallback={embedFallback(group.block)}>
               <Suspense fallback={<CodeBlock block={group.block} isHovered={false} />}>
                 <NativeDiagramBlock block={group.block} annotations={annotations}

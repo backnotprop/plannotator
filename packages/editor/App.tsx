@@ -55,6 +55,7 @@ import { ExportModal } from '@plannotator/ui/components/ExportModal';
 import { ImportModal } from '@plannotator/ui/components/ImportModal';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Annotation, AnnotationType, Block, EditorMode, type CodeAnnotation, type DocumentRenderAs, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '@plannotator/ui/types';
+import { NativeDiagramProvider } from '@plannotator/ui/components/diagram/NativeDiagramProvider';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
@@ -7553,6 +7554,7 @@ const App: React.FC = () => {
 
   return (
     <ThemeProvider defaultTheme="dark" manageFavicon>
+      <NativeDiagramProvider>
       <TooltipProvider disableHoverableContent>
       <div
         ref={refCardRootRef}
@@ -8569,6 +8571,7 @@ const App: React.FC = () => {
         />
       </div>
       </TooltipProvider>
+      </NativeDiagramProvider>
     </ThemeProvider>
   );
 };

@@ -41,6 +41,7 @@ const FORBIDDEN: ReadonlyArray<readonly [string, string]> = [
 
 let entryClosure = '';
 let offEntry = '';
+let emittedModules: string[] = [];
 
 beforeAll(async () => {
   const { build } = await import('vite');
@@ -63,6 +64,7 @@ beforeAll(async () => {
   })) as unknown as { output: ReadonlyArray<Record<string, unknown>> };
 
   const outputs = (Array.isArray(result) ? result[0] : result).output;
+  emittedModules = outputs.flatMap(output => Object.keys((output['modules'] ?? {}) as object));
   const chunks = new Map<string, { code: string; imports: readonly string[] }>();
   for (const output of outputs) {
     if (output['type'] !== 'chunk') continue;
@@ -108,6 +110,12 @@ describe('document-read closure of the Viewer entry', () => {
     for (const [marker] of FORBIDDEN) {
       expect(offEntry).toContain(marker);
     }
+  });
+
+  test('leaves native review and its font geometry out of a host that only imports Viewer', () => {
+    expect(emittedModules.some(id => id.endsWith('/components/Viewer.tsx'))).toBe(true);
+    expect(emittedModules.filter(id => id.includes('/packages/diagrams/') ||
+      id.includes('/@plannotator/diagrams/') || id.endsWith('/NativeDiagramBlock.tsx'))).toEqual([]);
   });
 
   test('keeps the diagram fence pending state in the entry chunk', () => {
