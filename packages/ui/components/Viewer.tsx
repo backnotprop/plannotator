@@ -218,6 +218,8 @@ export interface ViewerProps {
   /** A host with a diagram-specific question action, such as an Inbox thread's Side. */
   onAskDiagramAI?: CommentAskAIHandler;
   /** Opens a diagram's repository-relative source reference in this document's host. */
+  expandedDiagramEdition?: React.ReactNode;
+  renderExpandedDiagramFile?: (ref: NativeDiagramFileReference, close: () => void) => React.ReactNode;
   onOpenDiagramFile?: (ref: NativeDiagramFileReference) => void;
   /**
    * Opt-in host capability: decide what a link to a local path does
@@ -251,7 +253,7 @@ export interface ViewerProps {
   imageRegionComments?: boolean;
   /** Delete and edit from the lightbox's drawer of region comments (with
    *  `imageRegionComments`). Absent: the drawer's cards are read-only. */
-  onDeleteAnnotation?: (id: string) => void;
+  onDeleteAnnotation?: (id: string) => void | boolean | Promise<void | boolean>;
   onEditAnnotation?: (id: string, updates: Partial<Annotation>) => void;
   /** Directory the active document lives in — used by the code-path validator
    *  so out-of-tree relative references (e.g. `../foo.ts` in a linked doc)
@@ -931,7 +933,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   maxWidth,
   onOpenLinkedDoc,
   onOpenCodeFile,
-  onOpenDiagramFile, onAskDiagramAI,
+  onOpenDiagramFile, renderExpandedDiagramFile, expandedDiagramEdition, onAskDiagramAI,
   resolveLocalLink,
   linkedDocInfo,
   imageBaseDir,
@@ -2121,7 +2123,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   selectedAnnotationId={selectedAnnotationId} onSelectAnnotation={onSelectAnnotation}
                   onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
                   onEditAnnotation={selectionCommentsOn ? onEditAnnotation : undefined}
-                  onRestoreReport={onRestoreReport} onOpenFile={onOpenDiagramFile}
+                  onDeleteAnnotation={selectionCommentsOn ? onDeleteAnnotation : undefined}
+                  onRestoreReport={onRestoreReport} onOpenFile={onOpenDiagramFile} renderExpandedFile={renderExpandedDiagramFile} latestEdition={expandedDiagramEdition}
                   onHostDraft={hostComposes ? onHostDraft : undefined}
                   onAskAI={onAskDiagramAI ?? (selectionCommentsOn ? onAskAI : undefined)} sourcePath={linkedDocInfo?.filepath ?? sourceInfo} />
               </Suspense>

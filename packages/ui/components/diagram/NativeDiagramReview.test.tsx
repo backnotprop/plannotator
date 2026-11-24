@@ -109,6 +109,24 @@ describe.if(typeof document !== 'undefined')('native diagram review', () => {
     expect(edited).toBe('annotationNew label');
   });
 
+  test('a rejected or failed delete keeps the saved note available to retry', async () => {
+    const ids: string[] = [];
+    await show({ comments: [{ id: 'saved', anchor, text: 'Keep this note' }], onEditComment: () => {},
+      onDeleteComment: async id => {
+        ids.push(id);
+        if (ids.length === 1) return false;
+        throw new Error('offline');
+      } });
+    await click('Comment 1 on Client');
+    await click('Delete');
+    expect(host.querySelector('[role=alert]')?.textContent).toContain('Try again');
+    expect(host.querySelector('[role=dialog]')?.textContent).toContain('Keep this note');
+    await click('Delete');
+    expect(ids).toEqual(['saved', 'saved']);
+    expect(button('Edit').disabled).toBe(false);
+    expect(button('Comment 1 on Client')).toBeDefined();
+  });
+
   test('repaints the image when a scoped palette changes and retains the camera, pin, and editor', async () => {
     const revoke = spyOn(URL, 'revokeObjectURL');
     try {

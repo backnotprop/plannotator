@@ -985,7 +985,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Read again when a message's files change; a real read that did not change them says so (App's filesSignal).
   const filesRevision = useRef(thread);
   if (!sameThreadFiles(filesRevision.current, thread)) filesRevision.current = thread;
-  const { model: files, load: reloadFiles, saveRecord, dropRecord } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged, filesSignal);
+  const { model: files, load: reloadFiles, saveRecord, dropRecord, removeComment } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged, filesSignal);
   const attachments: InboxAttachmentState[] = useMemo(() => files?.attachments ?? [], [files]);
   // The images the messages' text shows, captured as files (approval "inbox-image-viewer"): opened, stepped and commented like attachments.
   const inlineImages: InboxAttachmentState[] = useMemo(() => files?.inline_images ?? [], [files]);
@@ -1488,8 +1488,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   const removeRecord = async (record: InboxAnnotationRecord) => {
     try {
-      await inboxApi.removeAnnotation(record.id);
-      dropRecord(record.id);
+      await removeComment(record.id);
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : 'The comment was not removed.');
     }
@@ -4510,7 +4509,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     quoteWordsAtPress.current = { id: messageId, words: selectedWordsIn(article) };
   };
   const tryPrototype = (messageId: string, key: string) => setProto({ messageId, key });
-  const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf, setPageStart, openFileRef };
+  const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, deleteMessageComment: removeComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf, setPageStart, openFileRef };
   const acts = useRef(newest);
   acts.current = newest;
   const copyHost: CopyMenuHost = {
@@ -5174,7 +5173,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 )}
                 {(message.attachments?.length ?? 0) > 0 && (
                   <InlineDiagrams files={attachments.filter((a) => a.message_id === message.id)} records={fileRecords}
-                    readOnly={fileReadOnly(message)} onSaved={saveRecord} artifacts={artifactList} onOpenLatest={openFromMessage}
+                    readOnly={fileReadOnly(message)} onSaved={saveRecord} onRemoved={dropRecord} artifacts={artifactList} onOpenLatest={openFromMessage}
                     onOpenFile={onOpenNamedFile && fileRefsHere ? (ref) => openFileRef(message.id, { from: 'root', path: ref.path, line: ref.start, lineEnd: ref.end }) : undefined}
                     onSide={onSide} />
                 )}
@@ -5819,7 +5818,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         attachment={openAttachment}
         onOpenDiagramFile={onOpenNamedFile && fileRefsHere ? (ref) => openFileRef(openAttachment.message_id, { from: 'root', path: ref.path, line: ref.start, lineEnd: ref.end }) : undefined}
         pin={{ threadId: thread.thread_id, key: openArtifactKey(artifactList, openAttachment.id) }}
-        onOpenLatestDiagram={latestDiagram ? () => openFromMessage(latestDiagram, currentView) : undefined}
+        latestDiagram={latestDiagram} onOpenLatestDiagram={latestDiagram ? () => openFromMessage(latestDiagram, currentView) : undefined}
         attachments={allFiles}
         // The files' annotations only: a guided-review comment is on the guide's diff, not on a file.
         records={fileRecords}

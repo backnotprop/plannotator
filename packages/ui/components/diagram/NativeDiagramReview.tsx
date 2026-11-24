@@ -6,7 +6,7 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS } from '../RefHoverCard';
 import { DiagramCanvas, type DiagramCanvasHandle } from './DiagramCanvas';
-import { AskDrawer, CloseButton, FloatingCard, RefActions, ReferenceDetails, TextEditor, type SubmitResult } from './NativeDiagramCard';
+import { AskDrawer, CloseButton, FloatingCard, SavedNote, RefActions, ReferenceDetails, TextEditor, type SubmitResult } from './NativeDiagramCard';
 import {
   anchorOnPart, partKey, placeCommentPins, reviewSvg, screenRect,
   type NativeDiagramAnchor, type NativeDiagramComment, type NativeDiagramDrawing, type NativeDiagramFileReference,
@@ -30,6 +30,7 @@ export interface NativeDiagramReviewProps {
   /** The host owns the writing surface (for example, a native phone composer). */
   onRequestComment?: (anchor: NativeDiagramAnchor) => void;
   onCreateComment?: (anchor: NativeDiagramAnchor, text: string) => SubmitResult;
+  onDeleteComment?: (id: string) => SubmitResult;
   onEditComment?: (id: string, text: string) => SubmitResult;
   onSelectComment?: (id: string | null) => void;
   selectedCommentId?: string | null;
@@ -58,6 +59,7 @@ type Card = {
   pinned: boolean;
   keyboard?: boolean;
   commentId?: string;
+  referenceIndex?: number;
 };
 const NO_COMMENTS: readonly NativeDiagramComment[] = [];
 const noop = () => {};
@@ -191,7 +193,7 @@ function Loader(props: NativeDiagramReviewProps) {
   </section>;
 }
 
-function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestComment, onCreateComment, onEditComment, onSelectComment, selectedCommentId,
+function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestComment, onCreateComment, onEditComment, onDeleteComment, onSelectComment, selectedCommentId,
   selectedPart, onSelectPart, onAskAI, askDestination = 'side', onOpenFile, onOpenLatest, inline }: NativeDiagramReviewProps & { drawing: Drawing; parts: ReadonlyMap<string, DiagramPart> }) {
   const { diagram, svg, title, assetId } = drawing;
   const container = useRef<HTMLDivElement>(null);
@@ -268,6 +270,11 @@ function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestCommen
     setCard({ anchor, mode: 'references', pinned: true, keyboard });
     onSelectComment?.(null);
     onSelectPart?.(anchor);
+  }
+  function cancelComment() {
+    if (!card) return;
+    drafts.current.delete(JSON.stringify(['comment', card.anchor.kind, card.anchor.id, card.commentId]));
+    setCard({ ...card, mode: card.commentId ? 'note' : 'references', pinned: true, keyboard: true });
   }
   function startComment() {
     if (!card) return;
@@ -366,28 +373,33 @@ function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestCommen
       {card && activePart && anchorRect && !asking && <FloatingCard key={partKey(activePart) + (card.commentId ?? '')}
         pinBounds={selectedPin ? pins.map(p => ({ left: p.x - 16, top: p.y - 16, width: 32, height: 32 })) : undefined}
         anchor={anchorRect} host={hostRef.current} mode={card.mode} heading={card.mode === 'references' ? activePart.title : `Comment on ${activePart.title}`}
-        pinned={card.pinned} keyboardOpen={!!card.keyboard} onClose={() => close()} onEnter={stopTimers} onLeave={leavePreview}>
+        pinned={card.pinned} keyboardOpen={!!card.keyboard} onClose={card.mode === 'write' ? cancelComment : () => close()} onEnter={stopTimers} onLeave={leavePreview}>
         {card.mode === 'write' ? <TextEditor key={card.commentId ?? 'new'} initial={drafts.current.get(commentKey) ?? selectedComment?.text ?? ''}
           onChange={value => drafts.current.set(commentKey, value)}
           label={`Comment on ${activePart.title}`} original={selectedComment?.text}
           onSubmit={text => selectedComment ? onEditComment!(selectedComment.id, text) : onCreateComment!(card.anchor, text)}
-          onCancel={() => { drafts.current.delete(commentKey); if (selectedComment) setCard({ ...card, mode: 'note' }); else close(); }}
+          onCancel={cancelComment}
           onDone={text => {
             focusSaved.current = { id: selectedComment?.id, previous: new Set(comments.map(c => c.id)), anchor: card.anchor, text };
             drafts.current.delete(commentKey); setNotice(`Comment saved on ${activePart.title}`); close(false);
           }} /> :
-        card.mode === 'note' && selectedComment ? <div className="ndr-saved">
-          <div className="ndr-note-heading">Comment {selectedComment.number ?? comments.indexOf(selectedComment) + 1}
-            {onEditComment && <button type="button" onClick={() => setCard({ ...card, mode: 'write' })}>Edit</button>}</div>
-          <p>{selectedComment.text}</p><CloseButton label="Close comment" onClick={() => close()} />
-        </div> : <>
+        card.mode === 'note' && selectedComment ? <SavedNote number={selectedComment.number ?? comments.indexOf(selectedComment) + 1} text={selectedComment.text}
+          onEdit={onEditComment && (() => setCard({ ...card, mode: 'write' }))}
+          onDelete={onDeleteComment && (() => onDeleteComment(selectedComment.id))}
+          onDeleted={() => {
+            drafts.current.delete(commentKey);
+            setNotice(`Comment deleted from ${activePart.title}`);
+            setCard({ anchor: card.anchor, mode: 'references', pinned: true, keyboard: true });
+            onSelectComment?.(null);
+          }} onClose={() => close()} /> : <>
           <div className="ndr-card-head">
             <div className="ndr-meta">{activePart.kind}{activePart.refs.length > 0 && ` · ${activePart.refs.length} reference${activePart.refs.length === 1 ? '' : 's'}`}</div>
             <strong>{activePart.title}</strong>
             {activePart.summary && <p className="ndr-summary">{activePart.summary}</p>}
             {activePart.from && activePart.to && <div className="ndr-ends">{activePart.from} → {activePart.to}</div>}
           </div>
-          <ReferenceDetails part={activePart} onOpenFile={onOpenFile} pin={pin} />
+          <ReferenceDetails part={activePart} onOpenFile={onOpenFile} pin={pin} index={card.referenceIndex ?? 0}
+            setIndex={index => setCard(prev => prev && { ...prev, referenceIndex: index })} />
           {card.pinned && <>
             <CloseButton label="Close references" onClick={() => close()} />
             <RefActions onComment={onCreateComment || onRequestComment ? startComment : undefined} onAsk={onAskAI ? ask : undefined} />
