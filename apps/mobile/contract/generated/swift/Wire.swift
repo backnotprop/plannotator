@@ -248,6 +248,99 @@ public struct ArchivedModelProjectsItem: Codable, Hashable, Sendable {
 }
 
 /// From `scripts/mobile/door-shapes.ts`.
+public struct DoorAckAnswer: Codable, Hashable, Sendable {
+  public var message: InboxMessageWire
+  public var thread: InboxListRow
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["message", "thread"]
+
+  public init(message: InboxMessageWire, thread: InboxListRow, unknownFields: [String: JSONValue] = [:]) {
+    self.message = message
+    self.thread = thread
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.message = try c.decode(InboxMessageWire.self, forKey: WireKey("message"))
+    self.thread = try c.decode(InboxListRow.self, forKey: WireKey("thread"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.message, forKey: WireKey("message"))
+    try c.encode(self.thread, forKey: WireKey("thread"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `scripts/mobile/door-shapes.ts`.
+public struct DoorAckBody: Codable, Hashable, Sendable {
+  public var idempotencyKey: String
+  public var ack: Bool?
+  public var reaction: DoorAckBodyReaction?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["idempotency_key", "ack", "reaction"]
+
+  public init(idempotencyKey: String, ack: Bool? = nil, reaction: DoorAckBodyReaction? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.idempotencyKey = idempotencyKey
+    self.ack = ack
+    self.reaction = reaction
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.idempotencyKey = try c.decode(String.self, forKey: WireKey("idempotency_key"))
+    self.ack = try c.decodeIfPresent(Bool.self, forKey: WireKey("ack"))
+    self.reaction = try c.decodeIfPresent(DoorAckBodyReaction.self, forKey: WireKey("reaction"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.idempotencyKey, forKey: WireKey("idempotency_key"))
+    try c.encodeIfPresent(self.ack, forKey: WireKey("ack"))
+    try c.encodeIfPresent(self.reaction, forKey: WireKey("reaction"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public struct DoorAckBodyReaction: Codable, Hashable, Sendable {
+  public var emoji: String
+  public var label: String?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["emoji", "label"]
+
+  public init(emoji: String, label: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.emoji = emoji
+    self.label = label
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.emoji = try c.decode(String.self, forKey: WireKey("emoji"))
+    self.label = try c.decodeIfPresent(String.self, forKey: WireKey("label"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.emoji, forKey: WireKey("emoji"))
+    try c.encodeIfPresent(self.label, forKey: WireKey("label"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `scripts/mobile/door-shapes.ts`.
 public struct DoorAnnotationAnswer: Codable, Hashable, Sendable {
   public var annotation: InboxAnnotationRecord
   /// Fields this app does not know: kept, and written back when encoded.
@@ -1656,6 +1749,238 @@ public struct DoorSnoozeBody: Codable, Hashable, Sendable {
     try c.encode(self.idempotencyKey, forKey: WireKey("idempotency_key"))
     try c.encode(self.until, forKey: WireKey("until"))
     try c.encodeIfPresent(self.at, forKey: WireKey("at"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `scripts/mobile/door-shapes.ts`.
+public struct DoorTaggableAnswer: Codable, Hashable, Sendable {
+  public var serverSession: String
+  public var owner: DoorTaggableAnswerOwner?
+  public var sessions: [DoorTaggableSession]
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["serverSession", "owner", "sessions"]
+
+  public init(serverSession: String, owner: DoorTaggableAnswerOwner? = nil, sessions: [DoorTaggableSession], unknownFields: [String: JSONValue] = [:]) {
+    self.serverSession = serverSession
+    self.owner = owner
+    self.sessions = sessions
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.serverSession = try c.decode(String.self, forKey: WireKey("serverSession"))
+    self.owner = try c.decodeIfPresent(DoorTaggableAnswerOwner.self, forKey: WireKey("owner"))
+    self.sessions = try c.decode([DoorTaggableSession].self, forKey: WireKey("sessions"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.serverSession, forKey: WireKey("serverSession"))
+    try c.encode(self.owner, forKey: WireKey("owner"))
+    try c.encode(self.sessions, forKey: WireKey("sessions"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public struct DoorTaggableAnswerOwner: Codable, Hashable, Sendable {
+  public var host: String?
+  public var session: String
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["host", "session"]
+
+  public init(host: String? = nil, session: String, unknownFields: [String: JSONValue] = [:]) {
+    self.host = host
+    self.session = session
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.host = try c.decodeIfPresent(String.self, forKey: WireKey("host"))
+    self.session = try c.decode(String.self, forKey: WireKey("session"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.host, forKey: WireKey("host"))
+    try c.encode(self.session, forKey: WireKey("session"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `scripts/mobile/door-shapes.ts`.
+public struct DoorTaggableSession: Codable, Hashable, Sendable {
+  public var session: String
+  public var host: String?
+  public var kind: DoorTaggableSessionKind
+  public var name: String?
+  public var label: String?
+  public var project: DoorTaggableSessionProject?
+  public var startedAt: String?
+  public var lastAt: String
+  public var busy: Bool?
+  public var idleSince: String?
+  public var taggable: Bool
+  public var owner: Bool
+  public var wroteThread: Bool
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["session", "host", "kind", "name", "label", "project", "started_at", "last_at", "busy", "idle_since", "taggable", "owner", "wrote_thread"]
+
+  public init(session: String, host: String? = nil, kind: DoorTaggableSessionKind, name: String? = nil, label: String? = nil, project: DoorTaggableSessionProject? = nil, startedAt: String? = nil, lastAt: String, busy: Bool? = nil, idleSince: String? = nil, taggable: Bool, owner: Bool, wroteThread: Bool, unknownFields: [String: JSONValue] = [:]) {
+    self.session = session
+    self.host = host
+    self.kind = kind
+    self.name = name
+    self.label = label
+    self.project = project
+    self.startedAt = startedAt
+    self.lastAt = lastAt
+    self.busy = busy
+    self.idleSince = idleSince
+    self.taggable = taggable
+    self.owner = owner
+    self.wroteThread = wroteThread
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.session = try c.decode(String.self, forKey: WireKey("session"))
+    self.host = try c.decodeIfPresent(String.self, forKey: WireKey("host"))
+    self.kind = try c.decode(DoorTaggableSessionKind.self, forKey: WireKey("kind"))
+    self.name = try c.decodeIfPresent(String.self, forKey: WireKey("name"))
+    self.label = try c.decodeIfPresent(String.self, forKey: WireKey("label"))
+    self.project = try c.decodeIfPresent(DoorTaggableSessionProject.self, forKey: WireKey("project"))
+    self.startedAt = try c.decodeIfPresent(String.self, forKey: WireKey("started_at"))
+    self.lastAt = try c.decode(String.self, forKey: WireKey("last_at"))
+    self.busy = try c.decodeIfPresent(Bool.self, forKey: WireKey("busy"))
+    self.idleSince = try c.decodeIfPresent(String.self, forKey: WireKey("idle_since"))
+    self.taggable = try c.decode(Bool.self, forKey: WireKey("taggable"))
+    self.owner = try c.decode(Bool.self, forKey: WireKey("owner"))
+    self.wroteThread = try c.decode(Bool.self, forKey: WireKey("wrote_thread"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.session, forKey: WireKey("session"))
+    try c.encode(self.host, forKey: WireKey("host"))
+    try c.encode(self.kind, forKey: WireKey("kind"))
+    try c.encode(self.name, forKey: WireKey("name"))
+    try c.encodeIfPresent(self.label, forKey: WireKey("label"))
+    try c.encode(self.project, forKey: WireKey("project"))
+    try c.encode(self.startedAt, forKey: WireKey("started_at"))
+    try c.encode(self.lastAt, forKey: WireKey("last_at"))
+    try c.encode(self.busy, forKey: WireKey("busy"))
+    try c.encode(self.idleSince, forKey: WireKey("idle_since"))
+    try c.encode(self.taggable, forKey: WireKey("taggable"))
+    try c.encode(self.owner, forKey: WireKey("owner"))
+    try c.encode(self.wroteThread, forKey: WireKey("wrote_thread"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public enum DoorTaggableSessionKind: Codable, Hashable, Sendable, RawRepresentable {
+  case live
+  case mcp
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [DoorTaggableSessionKind] = [.live, .mcp]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "live": self = .live
+    case "mcp": self = .mcp
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .live: return "live"
+    case .mcp: return "mcp"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+public struct DoorTaggableSessionProject: Codable, Hashable, Sendable {
+  public var id: String?
+  public var name: String
+  public var root: String?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["id", "name", "root"]
+
+  public init(id: String? = nil, name: String, root: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.id = id
+    self.name = name
+    self.root = root
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.id = try c.decodeIfPresent(String.self, forKey: WireKey("id"))
+    self.name = try c.decode(String.self, forKey: WireKey("name"))
+    self.root = try c.decodeIfPresent(String.self, forKey: WireKey("root"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.id, forKey: WireKey("id"))
+    try c.encode(self.name, forKey: WireKey("name"))
+    try c.encode(self.root, forKey: WireKey("root"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `scripts/mobile/door-shapes.ts`.
+public struct DoorTakeBackAnswer: Codable, Hashable, Sendable {
+  public var message: InboxMessageWire
+  public var draft: InboxReplyDraft?
+  public var compose: InboxDraft?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["message", "draft", "compose"]
+
+  public init(message: InboxMessageWire, draft: InboxReplyDraft? = nil, compose: InboxDraft? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.message = message
+    self.draft = draft
+    self.compose = compose
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.message = try c.decode(InboxMessageWire.self, forKey: WireKey("message"))
+    self.draft = try c.decodeIfPresent(InboxReplyDraft.self, forKey: WireKey("draft"))
+    self.compose = try c.decodeIfPresent(InboxDraft.self, forKey: WireKey("compose"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.message, forKey: WireKey("message"))
+    try c.encode(self.draft, forKey: WireKey("draft"))
+    try c.encode(self.compose, forKey: WireKey("compose"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
