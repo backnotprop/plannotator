@@ -16,11 +16,17 @@ function pngSize(file: string): { width: number; height: number } {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
-const pictures = [...page.matchAll(/<img\b[^>]*\bsrc="(\/assets\/spaces\/img\/[^"/]+\.png)"[^>]*>/g)].map(([tag, src]) => ({
+const pictures = [...page.matchAll(/<img\b[^>]*\bsrc="(\/assets\/spaces\/img\/[^"/?]+\.png)(\?[^"]*)?"[^>]*>/g)].map(([tag, src, query]) => ({
   src,
+  version: Number(new URLSearchParams(query ?? '').get('v') ?? 0),
   width: Number(/\bwidth="(\d+)"/.exec(tag)?.[1]),
   height: Number(/\bheight="(\d+)"/.exec(tag)?.[1]),
 }));
+
+// Pictures retaken when the made-up space became Field notes. The files keep
+// their names, so a browser holding the old picture (the old name) would show
+// it beside the new text; a new version in the address makes it fetch again.
+const RETAKEN = ['whole', 'clone', 'clone-c', 'prt2', 'pr-c'].flatMap((name) => [`${name}-l.png`, `${name}-d.png`]);
 
 describe('the Spaces page app pictures', () => {
   test('the page has app pictures to check', () => {
@@ -34,4 +40,12 @@ describe('the Spaces page app pictures', () => {
       expect(Math.abs(picture.height - height), `${picture.width}x${picture.height} for ${pixels.width}x${pixels.height}`).toBeLessThanOrEqual(1);
     });
   }
+
+  test('every retaken picture is asked for at a new address, so no browser reuses the old one', () => {
+    for (const file of RETAKEN) {
+      const uses = pictures.filter((picture) => picture.src.endsWith(`/${file}`));
+      expect(uses.length, file).toBeGreaterThan(0);
+      for (const use of uses) expect(use.version, file).toBeGreaterThanOrEqual(2);
+    }
+  });
 });
