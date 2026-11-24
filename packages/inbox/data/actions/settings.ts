@@ -62,8 +62,6 @@ export function useSettingsSaves(
 
   const toggleSystem = (next: boolean) => saveSetting((s) => ({ ...s, system: { on: next } }), () => inboxApi.saveSystem(next), (s, saved) => ({ ...s, system: saved.system ?? { on: next } }));
 
-  const toggleDiagrams = (next: boolean) =>
-    saveSetting((s) => ({ ...s, diagrams: { on: next } }), () => inboxApi.saveDiagrams(next), (s, saved) => ({ ...s, diagrams: saved.diagrams }), reloadSkillCatalog);
   const toggleChapterDiagrams = (next: boolean) =>
     saveSetting((s) => ({ ...s, chapter_diagrams: { on: next } }), () => inboxApi.saveChapterDiagrams(next), (s, saved) => ({ ...s, chapter_diagrams: saved.chapter_diagrams ?? { on: next } }));
 
@@ -114,7 +112,7 @@ export function useSettingsSaves(
     }
     await refreshList(true);
   };
-  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleDiagrams, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
 }
 
 /** App's settings take a saved thread panes switch through this (set where App runs `useSettingsSaves`). */

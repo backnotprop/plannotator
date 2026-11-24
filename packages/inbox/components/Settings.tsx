@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefO
 import { KeyboardSettings } from './KeyboardSettings';
 import { INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
-import { DiagramCapabilityRow } from '../parts/DiagramCapabilityRow';
 import { SoundRow, Switch } from './SoundRow';
 import { type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
@@ -106,7 +105,6 @@ export interface SettingsPageProps {
   /** System's projects with their drawing's state, listed under its switch while it is on; null until read. */
   systemProjects?: SystemProjectRow[] | null;
   /** Settings → Capabilities → Chapter diagrams, under Code review and shown only while it is on. Absent (or an Inbox without it): no row. */
-  onToggleDiagrams?: (next: boolean) => void;
   onToggleChapterDiagrams?: (next: boolean) => void;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
@@ -555,7 +553,6 @@ function CapabilitiesSection({
   system,
   onToggleSystem,
   systemProjects,
-  diagrams, onToggleDiagrams,
   chapterDiagrams,
   onToggleChapterDiagrams,
   bro,
@@ -585,9 +582,7 @@ function CapabilitiesSection({
   onToggleSystem?: (next: boolean) => void;
   systemProjects?: SystemProjectRow[] | null;
   /** Chapter diagrams: null unless Code review is on (the server sends it only then). */
-  diagrams?: { on: boolean };
   chapterDiagrams: { on: boolean } | null;
-  onToggleDiagrams?: (next: boolean) => void;
   onToggleChapterDiagrams?: (next: boolean) => void;
   /** Bro mode (approval "bro-mode"), null on an Inbox without it. */
   bro: { on: boolean } | null;
@@ -619,7 +614,7 @@ function CapabilitiesSection({
   const decisionRow = experimental && onToggleExperimental;
   return (
     <>
-      {(boardRow || stepsRow || scheduledRow || codeReviewRow || shapeRow || diagrams) && (
+      {(boardRow || stepsRow || scheduledRow || codeReviewRow || shapeRow) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
             {boardRow && (
@@ -637,7 +632,6 @@ function CapabilitiesSection({
                 </span>
               </div>
             )}
-            {diagrams && onToggleDiagrams && <DiagramCapabilityRow on={diagrams.on} onToggle={onToggleDiagrams} />}
             {stepsRow && (
               <div className="ib-prow" data-settings-steps="">
                 <span className="ib-txt">
@@ -1326,7 +1320,6 @@ export function SettingsPage(props: SettingsPageProps) {
               system={system}
               onToggleSystem={props.onToggleSystem}
               systemProjects={props.systemProjects}
-              diagrams={settings?.diagrams} onToggleDiagrams={props.onToggleDiagrams}
               chapterDiagrams={chapterDiagrams}
               onToggleChapterDiagrams={props.onToggleChapterDiagrams}
               bro={bro}

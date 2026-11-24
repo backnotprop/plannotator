@@ -8,7 +8,8 @@ const rows = async (response: Response) => ((await response.json()) as { skills:
 const none = () => [];
 
 test("the / list offers /picture-it with every switch off, as a built-in the window pastes", async () => {
-  expect(await rows(inboxSkillCatalog(false, none, false, false))).toEqual([
+  const all = await rows(inboxSkillCatalog(false, none, false, false));
+  expect(all.filter((s) => s.name === "picture-it")).toEqual([
     { name: "picture-it", root: INBOX_BUILTIN_SKILL_ROOT, description: PICTURE_IT_SKILL.description, humanOnly: true },
   ]);
 });
@@ -21,7 +22,7 @@ test("/picture-it is first among the built-ins, before the person's own skills",
 
 test("a skill of the person's own named picture-it wins over the built-in", async () => {
   const mine = await rows(inboxSkillCatalog(false, () => [{ name: "picture-it", root: "/x", description: "mine" }] as never, false, false));
-  expect(mine).toEqual([{ name: "picture-it", root: "/x", description: "mine" } as Row]);
+  expect(mine.filter((s) => s.name === "picture-it")).toEqual([{ name: "picture-it", root: "/x", description: "mine" } as Row]);
 });
 
 test("the page's file is named without a path only one system has, so Windows agents can save it too", () => {

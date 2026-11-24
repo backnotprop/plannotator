@@ -31,14 +31,13 @@ test('diagram discovery, inline and expanded comments, owner-scoped source and a
     const thread = sent.thread_id as string;
     await page.goto(`${url}#thread=${thread}`);
     await expect(page.getByText(file).first()).toBeVisible();
-    const inline = page.locator('[data-inline-diagram-attachment]');
-    await expect(inline).toHaveCount(0);
-    // A capability change is heard by the already-open thread.
     const settings = await page.evaluate(async () => {
-      const { serverSession } = await (await fetch('/api/inbox/health')).json();
-      return (await fetch('/api/inbox/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession, diagrams: { on: true } }) })).status;
+      const response = await fetch('/api/inbox/settings');
+      if (!response.ok) throw new Error('Could not read Inbox settings');
+      return response.json();
     });
-    expect(settings).toBe(200);
+    expect(settings).not.toHaveProperty('diagrams');
+    const inline = page.locator('[data-inline-diagram-attachment]');
     await expect(inline.getByRole('button', { name: 'panel Queue' })).toBeAttached();
     const queue = inline.getByRole('button', { name: 'panel Queue' });
     await queue.focus();
@@ -85,9 +84,14 @@ test('diagram discovery, inline and expanded comments, owner-scoped source and a
     expect(question.body).not.toContain('Show who handles retries.');
     await page.setViewportSize(desktop);
     await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
-    await page.locator('.ib-rbox textarea').fill('One diagram note.');
+    const field = page.locator('.ib-rbox textarea');
+    await field.pressSequentially('/diagram');
+    await page.locator('[data-skill-item="diagram"]').click();
+    await expect(field).toHaveValue('/diagram ');
+    await field.pressSequentially('Revise the drawing using my comment.');
     await page.locator('section.ib-pane').getByRole('button', { name: 'Send', exact: true }).click();
     const reply = await agent.nextReply(thread, 10, question.id as string);
+    expect(reply.body).toContain('BEGIN SKILL INSTRUCTIONS: diagram');
     expect(reply.body).toContain('Diagram panel Queue (queue)');
     expect(reply.body).toContain('Show who handles retries.');
   } finally {

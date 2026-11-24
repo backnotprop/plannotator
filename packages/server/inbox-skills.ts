@@ -48,7 +48,6 @@ interface InboxCatalogOptions {
   codeReview?: boolean;
   shape?: boolean;
   routines?: boolean;
-  diagramArtifacts?: boolean;
 }
 
 type DiscoverSkills = () => ReturnType<typeof listReferenceSkills>;
@@ -60,8 +59,8 @@ type DiscoverSkills = () => ReturnType<typeof listReferenceSkills>;
  * the window pastes their instructions into the reply that names one, and no
  * folder (the window carries their text, `@plannotator/core/inbox-review`).
  * A skill of the person's own with the same name wins: the built-in is left
- * out. Off, the catalog is exactly the discovered skills. `/shape` the same way while Shape is on, and
- * `/create-routine` while Routines are on. `/picture-it` always, and `/diagram` while diagram artifacts are on.
+ * out. `/shape` is offered while Shape is on, and
+ * `/create-routine` while Routines are on. `/picture-it` and `/diagram` are always available.
  */
 export function inboxSkillCatalog(options: InboxCatalogOptions, discovered?: DiscoverSkills): Response;
 /** Older callers pass the review, Shape and routines switches positionally. */
@@ -71,11 +70,11 @@ export function inboxSkillCatalog(options: InboxCatalogOptions | boolean, discov
   return Response.json({ skills: inboxSkillEntries(switches, discovered) });
 }
 
-function inboxSkillEntries({ codeReview, shape, routines, diagramArtifacts }: InboxCatalogOptions, discovered: DiscoverSkills): SkillCatalogEntry[] {
+function inboxSkillEntries({ codeReview, shape, routines }: InboxCatalogOptions, discovered: DiscoverSkills): SkillCatalogEntry[] {
   let skills: ReturnType<typeof listReferenceSkills>;
   try {
-    // The installer also offers the skill to local agents. Its copy should neither
-    // bypass the Inbox switch nor shadow the built-in on a remote device.
+    // Use the bundled instructions for Plannotator's installed copy so linked devices
+    // can compose the same reply. A person's own /diagram still takes precedence.
     skills = discovered().filter((skill) => skill.name !== DIAGRAM_SKILL.name || !existsSync(join(skill.dir, ".plannotator-installed")));
   } catch {
     skills = [];
@@ -83,7 +82,7 @@ function inboxSkillEntries({ codeReview, shape, routines, diagramArtifacts }: In
   const own = new Set(skills.map((skill) => skill.name));
   // Shape's `/shape` (approval "shape-living-board") while Shape is on, beside the review skills while Code review is.
   // `/create-routine` (packages/core/create-routine-skill.ts) while Routines are on.
-  const offered = [PICTURE_IT_SKILL, ...(diagramArtifacts ? [DIAGRAM_SKILL] : []), ...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(shape ? [SHAPE_SKILL] : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
+  const offered = [PICTURE_IT_SKILL, DIAGRAM_SKILL, ...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(shape ? [SHAPE_SKILL] : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
   const builtins = offered.filter((skill) => !own.has(skill.name)).map((skill) => ({
     name: skill.name,
     root: INBOX_BUILTIN_SKILL_ROOT as SkillCatalogEntry["root"],
@@ -98,7 +97,6 @@ export interface InboxSkillSwitches {
   shape: boolean;
   routines: boolean;
   diagrams: boolean;
-  diagramArtifacts?: boolean;
 }
 
 export function inboxSkillsBlockFor(
