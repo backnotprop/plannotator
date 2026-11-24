@@ -1427,7 +1427,9 @@ export interface InboxDelivery {
    * Written for an item the Inbox marked to go in by itself (approval
    * "inbox-busy-agent-reply"): true when it went into a running turn, false
    * when its session went idle after the mark (the session's own Ask question
-   * held the turn, so it went in when the turn ended). Absent otherwise.
+   * held the turn, so it went in when the turn ended). Also true, with no
+   * mark, when the Codex wake put it into the thread's running turn itself
+   * (`turn/steer`, inbox-codex-steer.ts). Absent otherwise.
    */
   into_turn?: boolean;
 }

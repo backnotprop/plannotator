@@ -4888,8 +4888,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A Codex thread the Inbox launched: its host puts the item in as a turn over the app-server it runs (the launch
     // engine is made below; the wake's first look runs after this function's synchronous part, when it exists).
     // Until it exists, a launched thread's item waits (never `codex queue`), and any other goes the queue's way.
-    deliver: (session, text) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text) : Promise.resolve(launchedCodex(session) ? ("hold" as const) : ("queue" as const))),
+    deliver: (session, text, intoTurn) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text, intoTurn === true) : Promise.resolve(launchedCodex(session) ? ("hold" as const) : ("queue" as const))),
     launched: (session) => launchedCodex(session),
+    turnRunning: (session) => (launchReady ? launch.turnRunning(INBOX_CODEX_HOST, session) : null),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
     // A Codex thread T3 Code runs: its items go into the T3 thread with T3's own `t3` command (inbox-t3-local.ts).
