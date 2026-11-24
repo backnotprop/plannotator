@@ -447,7 +447,7 @@ async function openDecide(thread: string): Promise<string> {
   await expect(decide()).toBeVisible();
   return thread;
 }
-const decide = () => page.locator('[data-decision-mode]');
+const decide = () => page.locator('section.ib-pane [data-decide-head]');
 const map = () => page.locator('[data-dialog="shortcut-map"]');
 const searchInput = () => page.locator('dialog[data-search-palette] input');
 const boardHeading = () => page.locator('.ib-bpage h1');
@@ -932,35 +932,32 @@ test('J5: jump with G, and come back', async () => {
   await backWalk(['board', 'settings', 'board', checkout]);
 });
 
-test('J6: Decide mode stays its own', async () => {
+test("J6: Decide mode: the thread's keys rest while it shows, a pick is a draft, and leaving by keys sends nothing", async () => {
   await load();
   const decidedIn = await openDecide(world.threads.stopped);
   const entries = await page.evaluate(() => history.length);
   const before = hash();
-  const unread = () => row(decidedIn).evaluate((el) => el.classList.contains('ib-u'));
-  const wasUnread = await unread();
-  await press('e', 'r', 'o', 'j', 'Shift+J', 'Shift+?', '/');
-  // E is Decide's, not Mark read on the thread behind it.
-  expect(await unread(), 'the thread behind Decide was not marked read').toBe(wasUnread);
+  // Focus is on the message on screen.
+  expect(await page.evaluate(() => document.activeElement?.closest('[data-message-article]') !== null), 'the message on screen has focus').toBe(true);
+  // The thread's own keys act on what decision mode hides: none of them does anything while it shows.
+  await press('r', 'Shift+J', 'Shift+K', 'n', 'o', 'q');
   await expect(decide()).toBeVisible();
-  await expect(map()).toHaveCount(0);
-  await expect(page.locator('dialog[data-search-palette]')).toBeHidden();
+  await expect(page.locator('section.ib-pane textarea[aria-label^="Reply to"]')).toHaveCount(0);
+  await expect(page.locator('[data-open-questions-list]')).toHaveCount(0);
   expect(hash()).toBe(before);
-  await tabTo(decide().getByRole('radio').first());
+  await tabTo(page.locator('section.ib-pane [data-message-article] input[data-question-control]').first());
   await press('Space');
-  // The answer stamps the card, then Decide moves to the next one and puts focus on its question: let it land
-  // before Escape, so the move does not take focus from where Escape puts it.
-  await expect(decide().locator('[data-decision-prompt]')).toBeFocused();
-  await press('Escape');
-  await expect(decide().locator('[data-decision-confirm]')).toBeVisible();
-  await press('Escape');
-  await expect(decide().locator('[data-decision-close]')).toBeFocused();
-  await press('Escape');
-  await tabTo(decide().locator('[data-decision-keep-draft]'));
+  await expect(page.locator('section.ib-pane [data-message-article] input[data-question-control]').first()).toBeChecked();
+  await tabTo(page.locator('[data-decide-leave]'), { back: true });
   await press('Enter');
-  await expect(decide()).toBeHidden();
-  await at('Decide closed', { focus: questionsButton(), address: addr(decidedIn), view: 'thread' });
+  await expect(decide()).toHaveCount(0);
+  await at('Decide left', { focus: questionsButton(), address: addr(decidedIn), view: 'thread' });
   expect(await page.evaluate(() => history.length), 'Decide adds no history: Back never reopens it').toBe(entries);
+  // Nothing went: the pick waits in the thread's draft, and the way back in reads Resume.
+  const thread = (await world.agents[0]!.readThread(decidedIn)) as unknown as { messages: { author: { kind: string } }[] };
+  expect(thread.messages.filter((m) => m.author.kind === 'person')).toEqual([]);
+  await press('Enter');
+  await expect(decideEntry()).toHaveText(/^Resume · /);
 });
 
 test('J7: the shortcut map, from anywhere', async () => {

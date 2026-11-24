@@ -579,8 +579,8 @@ export function inboxQuestionWaitsForList(q: Pick<InboxQuestion, "state" | "kind
 
 /**
  * The one rule for "this waits on the person and can be answered here"
- * (approval "inbox-decision-mode", brief §10): decision mode's queue and a
- * thread's open-questions list read it. It is the list's rule
+ * (approval "inbox-decision-mode", brief §10): a thread's open-questions list
+ * and decision mode's queue (packages/inbox/decisions/queue.ts) read it. It is the list's rule
  * (`inboxQuestionWaitsForList`) without the kinds this build does not know,
  * since no reader here may answer one. So the Decide count, the list and the
  * popover agree on every known kind.

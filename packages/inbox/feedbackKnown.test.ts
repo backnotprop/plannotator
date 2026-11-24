@@ -68,14 +68,14 @@ const MUST: [string, string][] = [
   ['custom instructions for the inbox reminder', 'prompts'],
   ['is there a tutorial', 'tour'],
   ['how does this work', 'tour'],
+  ['too many questions at once', 'decision-mode'],
+  ['let me answer the questions one at a time', 'decision-mode'],
   // Experimental settings.
   ['the agents are way too verbose', 'bro-mode'],
   ['agent messages are full of jargon', 'bro-mode'],
   ['can you explain things in plain english', 'bro-mode'],
   ['I lose my reply when I switch threads', 'float-drafts'],
   ['keep my unsent reply somewhere', 'float-drafts'],
-  ['too many questions at once', 'decision-mode'],
-  ['let me answer the questions one at a time', 'decision-mode'],
 ];
 
 const MUST_NOT = [
@@ -145,7 +145,7 @@ describe('known answers', () => {
 
   test('the settings read hides what this Inbox does not offer', () => {
     expect(hiddenKnownAnswers(null)).toEqual([]);
-    const all = { launch: { unsupported: false }, board: { on: true }, steps: { on: false }, bro: { on: false }, float_drafts: { on: false }, experimental: { decision_mode: { on: false } } };
+    const all = { launch: { unsupported: false }, board: { on: true }, steps: { on: false }, bro: { on: false }, float_drafts: { on: false }, decision_mode: { on: false } };
     expect(hiddenKnownAnswers(all)).toEqual([]);
     expect(hiddenKnownAnswers({ ...all, launch: { unsupported: true } })).toEqual(['start-agents']);
     expect(hiddenKnownAnswers({ launch: { unsupported: false } })).toEqual(['board', 'checklist', 'bro-mode', 'float-drafts', 'decision-mode']);

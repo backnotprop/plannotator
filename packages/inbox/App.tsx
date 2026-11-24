@@ -36,7 +36,6 @@ import { keepSavedQuestions } from './data/actions/picks';
 import { useSettingsSaves } from './data/actions/settings';
 import { useListShown } from './app/useListView';
 import { useListTags } from './app/useListTags';
-import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
 import { useSnoozeBack } from './app/useSnoozeBack';
 import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
@@ -46,9 +45,7 @@ import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import { inboxPullIsOpen, inboxPullStacks, type InboxDecision, type InboxHealth, type InboxListRow, type InboxListSection, type InboxQuestion, type InboxAgentRow, type InboxAgentsModel, type InboxPull, type InboxPullStack, type InboxTourChange, type InboxComposeLaunch, type InboxReaction, type InboxRestartAgents } from '@plannotator/core/inbox-types';
-import { DecisionMode } from './decisions/DecisionMode';
-import { DecisionPill } from './decisions/entry';
+import { inboxPullIsOpen, inboxPullStacks, type InboxHealth, type InboxListRow, type InboxListSection, type InboxQuestion, type InboxAgentRow, type InboxAgentsModel, type InboxPull, type InboxPullStack, type InboxTourChange, type InboxComposeLaunch, type InboxReaction, type InboxRestartAgents } from '@plannotator/core/inbox-types';
 import {
   InboxApiError,
   inboxApi,
@@ -72,7 +69,6 @@ import { newRecordBatch, noteOwnRecord, noteRecord } from './openThreadReads';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { createOwnSaves } from './ownSaves';
 import { createKeyedSignal } from './signal';
-import { keepSame } from './listSame';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
@@ -360,22 +356,6 @@ function Inbox() {
     void inboxApi.dismissOutbox(key).catch(() => {});
   }, []);
   /**
-   * Decision mode (experimental, approval "inbox-decision-mode"): the
-   * projection while the feature is on, and the sitting (open, or tucked
-   * into its pill behind a thread). Off, nothing of it renders. Thread only
-   * (owner, 2026-10-27): a sitting is one thread's decisions (`thread`), opened
-   * from that thread's open-questions list; there is no global way in.
-   */
-  const [decisions, setDecisions] = useState<InboxDecision[] | null>(null);
-  // `startNonce`: a new start while the sitting is open moves it to that card.
-  const [decide, setDecide] = useState<DecideSitting | null>(null);
-  /** What opened decision mode: focus goes back there when the sitting ends. */
-  const decideOpener = useRef<HTMLElement | null>(null);
-  const [decideLeft, setDecideLeft] = useState(0);
-  const [decidePaused, setDecidePaused] = useState(0);
-  const decisionModeOnRef = useRef(false);
-  const questionListeners = useRef(new Set<(question: InboxQuestion) => void>());
-  /**
    * Thread steps' changes (approval "inbox-thread-steps"): a `steps` record names its thread; presence moving
    * (`event: deliveries`), a reconnect and a catch-up name every thread. The open thread's steps read again.
    */
@@ -383,15 +363,15 @@ function Inbox() {
   /**
    * The questions the open thread is saving, whether one's record came meanwhile (`held`: those records), and the
    * reads they owe (`onPickSaves`): `read` everything, as for a record no one placed; `readHeld` what the held
-   * records owe, at once; `readOwn` what a run with no record held owes (the list, the decisions, the drafts).
+   * records owe, at once; `readOwn` what a run with no record held owes (the list and the drafts).
    */
   const pickSaves = useRef({
     saving: new Set<string>() as ReadonlySet<string>,
     owed: false,
     held: [] as InboxEvent[],
     /**
-     * Every save of this run kept each question's state (only the words typed in an answer changed): nothing the list,
-     * the decisions or the drafts show moved, so the run's end reads none of them (typedAnswers.ts).
+     * Every save of this run kept each question's state (only the words typed in an answer changed): nothing the list
+     * or the drafts show moved, so the run's end reads none of them (typedAnswers.ts).
      */
     textOnly: true,
     read: () => {},
@@ -400,20 +380,6 @@ function Inbox() {
   });
   /** What this window's own question saves brought back: their records are echoes, not news (ownSaves.ts). */
   const [ownSaves] = useState(createOwnSaves);
-  const subscribeQuestions = useCallback((listener: (question: InboxQuestion) => void) => {
-    questionListeners.current.add(listener);
-    return () => void questionListeners.current.delete(listener);
-  }, []);
-  const refreshDecisions = useCallback(async () => {
-    if (!decisionModeOnRef.current) return;
-    try {
-      const next = await inboxApi.decisions();
-      // A read that brought nothing new keeps the decisions drawn (listSame.ts `keepSame`): nothing is drawn again.
-      if (decisionModeOnRef.current) setDecisions((current) => keepSame(current, next.decisions));
-    } catch {
-      // Off on the server (another window turned it off): the next settings read says so.
-    }
-  }, []);
   /** The latest list read's sections, for the event stream's `deliveries` (which reads again only while a delivery can move). */
   const latestSectionsRef = useRef<ListModel['sections'] | null>(null);
   latestSectionsRef.current = latest?.sections ?? null;
@@ -635,8 +601,6 @@ function Inbox() {
   const searchOpener = useRef<HTMLElement | null>(null);
   /** The landing a search result asked for: the query's words to highlight in that message, a question's card to focus. */
   const searchLanding = useRef<SearchLanding | null>(null);
-  /** Decision mode's "Open the thread" (thread only): the question to land on, its prompt focused. */
-  const decideLanding = useRef<{ messageId: string; questionKey: string } | null>(null);
   /**
    * Compose (a new message to a connected agent): open with what it starts
    * from (a draft, a session), and the drafts not sent (the sidebar's Drafts
@@ -706,7 +670,6 @@ function Inbox() {
     // A click on a notification: the thread opens, and the list on screen catches up, even with a
     // thread open. The one exception to "the list holds still while a thread is open" (settle.ts):
     // the person was away, and the thread notified may not be on screen at all.
-    // Decision mode is thread only (owner, 2026-10-27): a Stopped notification opens its thread too, never the dialog.
     openThread: (threadId) => {
       writeRoute({ page: 'inbox', project: null, thread: threadId });
       void refreshList(true);
@@ -1042,9 +1005,8 @@ function Inbox() {
   const refreshSnoozes = useCallback(async () => {
     const next = await refreshList(false);
     if (next) flushNotifications(next);
-    void refreshDecisions();
     settleChanged(next, snoozeChangedRows);
-  }, [refreshList, flushNotifications, refreshDecisions, settleChanged]);
+  }, [refreshList, flushNotifications, settleChanged]);
   const refreshPriority = useCallback(async () => settleChanged(await refreshList(false), priorityChangedRows), [refreshList, settleChanged]);
 
   /** Each pane's thread reads and open (panes/paneReads.ts). Seen on sight: a look's `through` rises once the server took it. */
@@ -1436,7 +1398,7 @@ function Inbox() {
     /** The records since the last read: the open thread is read again only when they can change it (openThreadReads.ts). */
     let batch = newRecordBatch();
     /**
-     * `own`: the record only echoes this window's own question save (ownSaves.ts): it owes the list, the decisions and
+     * `own`: the record only echoes this window's own question save (ownSaves.ts): it owes the list and
      * the drafts, never the open thread or its files, which the pane drew from the save's answer. `now`: read at
      * once, the records still waiting their pause too (a run of saves that just ended: its reads were held already).
      */
@@ -1459,7 +1421,6 @@ function Inbox() {
         eventListTimer = null;
         const listRead = refreshList(false);
         void listRead.then((next) => next && flushNotifications(next));
-        void refreshDecisions();
         // Each thread on screen reads what these records owe it (panes/shownReads.ts).
         const threadRead = shownReads.afterRecords(records, listRead);
         // pn:record-refresh: the event heard → the list and the open thread read again and drawn.
@@ -1490,7 +1451,7 @@ function Inbox() {
       else void refreshList(false);
     };
     // A run of saves ended with their records held: one read for them all, at once. An echo of the window's own save
-    // reads what shows the pick besides the pane (the list, the decisions, the drafts); anything else, what it owes.
+    // reads what shows the pick besides the pane (the list, the drafts); anything else, what it owes.
     // `quiet`: the run only changed words typed in answers: its own echoes owe nothing, and only news is read.
     pickSaves.current.readHeld = (all, quiet = false) => {
       const held = quiet ? all.filter((event) => !ownEcho(event)) : all;
@@ -1607,7 +1568,6 @@ function Inbox() {
           // included (it sends the person to get their first question), and with the tab in the background,
           // notifications and the sound work as always, so nothing is ever passed over unseen.
           if (!(now.page === 'tour' && (now.step ?? 1) < TOUR_STEPS && tourPageInFront())) observeEvent(event);
-          if (event?.kind === 'question') for (const listener of questionListeners.current) listener(event.question);
           // The record of a question this window is saving: read once, when the last of them lands (onPickSaves).
           if (event?.kind === 'question' && pickSaves.current.saving.has(`${event.question.message_id}/${event.question.key}`)) {
             pickSaves.current.owed = true;
@@ -1745,7 +1705,6 @@ function Inbox() {
           staleThreads(queryClient);
           emitAskChange(null);
           void refreshList(false).then((next) => next && flushNotifications(next));
-          void refreshDecisions();
           void shownReads.all();
           void refreshDrafts();
           // A steps line meanwhile (a record, so replayed too, but read once here like the thread).
@@ -1833,7 +1792,7 @@ function Inbox() {
       if (machinesTimer) clearTimeout(machinesTimer);
       shownReads.stop();
     };
-  }, [refreshList, refreshSnoozes, refreshPriority, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow, queryClient, takeRecordList]);
+  }, [refreshList, refreshSnoozes, refreshPriority, refreshSettings, refreshThread, refreshDrafts, refreshCards, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow, queryClient, takeRecordList]);
 
   // The active pane opened a thread (panes/usePaneOpens.ts, scope.ts): record the look, and update its row in place.
   // While any thread is open the list holds still (settle.ts): the look
@@ -2370,7 +2329,6 @@ function Inbox() {
   /** The thread landed on the message `msg=` named: drop it from the hash, so a reload does not jump again. */
   const landed = () => {
     searchLanding.current = null;
-    decideLanding.current = null;
     if (routeRef.current.msg) writeRoute({ ...routeRef.current, msg: null }, { replace: true });
   };
 
@@ -2437,9 +2395,9 @@ function Inbox() {
     // what waits behind "N new".
     const held = pickSaves.current.held;
     pickSaves.current.held = [];
-    // Only words typed in answers changed in this run: no list, decisions or drafts read for it. The Drafts page shows
-    // the words, and decision mode's cards are read from the decisions, so both read as before.
-    const quiet = pickSaves.current.textOnly && !paneClosed && routeRef.current.page !== 'drafts' && !decisionModeOnRef.current;
+    // Only words typed in answers changed in this run: no list or drafts read for it. The Drafts page shows the words,
+    // so it reads as before.
+    const quiet = pickSaves.current.textOnly && !paneClosed && routeRef.current.page !== 'drafts';
     pickSaves.current.textOnly = true;
     if (!pickSaves.current.owed) {
       // The records of these saves are still to come: read now what they will owe, so they owe nothing then.
@@ -3288,7 +3246,7 @@ function Inbox() {
       if (isEditableTarget(target)) return null;
       if (target.closest('dialog, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], iframe, .ib-view, [data-step-guard]')) return null;
     }
-    // Under a dialog (Decide opens over the thread it came from) the letters are the dialog's. After the key's own checks: a page-wide query.
+    // Under a dialog the letters are the dialog's. After the key's own checks: a page-wide query.
     if (modalOpen()) return null;
     // Words selected in a message: its toolbar takes the letters (a comment starting with them).
     if (selectionToolbarShowing()) return null;
@@ -3636,7 +3594,7 @@ function Inbox() {
     };
   }, [whatsNewVersion, whatsNewRetry]);
 
-  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
+  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
@@ -3669,7 +3627,8 @@ function Inbox() {
       },
     },
   });
-  const { decisionModeOn, decideInThread, sittingDecisions, closeDecide } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList });
+  // Decision mode (approval "inbox-decision-mode-one-send"): on unless turned off in Settings → Capabilities.
+  const decisionModeOn = settings?.decision_mode?.on !== false;
   const snoozeBack = useSnoozeBack({ thread, route, listedOpenRow, looking, openThreadCovered, lookRef: paneReads.activeLook, trackLook, refreshList, snoozed: latest?.snoozed, refreshSnoozes, seen: inboxApi.seen });
   // The list's Archived group (approval "inbox-archived-group") and Settings → Archived's Unarchive.
   const archivedFilter = useCallback((rows: readonly InboxListRow[]) => filterShown([{ id: 'archived', label: 'Archived', threads: [...rows] }])[0]?.threads ?? rows, [filterShown]);
@@ -5055,7 +5014,7 @@ function Inbox() {
         onToggleExperimental={(next, feature) => void toggleExperimental(next, feature)}
         onToggleCookieHost={(next) => void toggleCookieHost(next)}
         landOnExperimental={route.experimental === true}
-        onToggleBoard={(next) => void toggleBoard(next)}
+        onToggleBoard={(next) => void toggleBoard(next)} onToggleDecisionMode={(next) => void toggleDecisionMode(next)}
         onToggleSteps={(next) => void toggleSteps(next)}
         onToggleScheduled={(next) => void toggleScheduled(next)}
         onToggleBro={(next) => void toggleBro(next)}
@@ -5524,7 +5483,7 @@ function Inbox() {
             boardEnabled, cards, backToCard, openThreadRow, rowOf: (id) => latestRows.get(id) ?? null, snoozeBack, refreshThread, refreshList, shown,
             markRead, markUnread, acknowledge, markAction, archive, pinnedIds, pinsOn, machines, setPin, setPriority, snoozeOn, snooze, unsnooze,
             setMachineUpdateOpen, threadAgentContext, replyFor, setReplyFor, draftSignals, filesSignals, ask, askReply, setAskReply,
-            patchQuestions, onPickSaves, afterWrite, rowPatches, decideInThread, searchLanding, decideLanding, landed,
+            patchQuestions, onPickSaves, afterWrite, rowPatches, decisionModeOn, searchLanding, landed,
             seenOnSight, panesOnScreen, setOpenThreadCovered, listTitle, setThreadFull, leaveFull, showToast,
             covered: !!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || feedbackOpen || compose !== null,
             fullSidebar: sidebarOpen && !sidebarHeld, inboxLink, holdSidebarIfTight, backFromFile,
@@ -6217,38 +6176,6 @@ function Inbox() {
           onClose={() => closeCompose()}
         />
       )}
-      {decisionModeOn && decide && (
-        <DecisionMode
-          open={!decide.tucked}
-          decisions={sittingDecisions}
-          scope={decide.title}
-          rows={latestRows}
-          start={decide.start}
-          startNonce={decide.startNonce}
-          phone={phone}
-          refresh={refreshDecisions}
-          subscribeQuestions={subscribeQuestions}
-          onLeft={setDecideLeft}
-          onPaused={setDecidePaused}
-          onTuck={(threadId, fileId, question) => {
-            setDecide((current) => (current ? { ...current, tucked: true } : current));
-            if (question && !fileId) {
-              // A card's "Open the thread" (approval "inbox-decide-thread-only"): the dialog closes into its pill and
-              // the thread (already behind it) lands on that question, its prompt focused. The same thread replaces
-              // the entry, as a search result's landing does, so Back never stops on the same thread twice.
-              decideLanding.current = { messageId: question.messageId, questionKey: question.key };
-              searchLanding.current = null;
-              const now = routeRef.current;
-              const same = now.page === 'inbox' && now.thread === threadId && !now.file && !now.guide;
-              writeRoute({ page: 'inbox', project: same ? now.project : null, thread: threadId, msg: question.messageId }, same ? { replace: true } : {});
-              return;
-            }
-            writeRoute({ page: 'inbox', project: null, thread: threadId, file: fileId ? { id: fileId, version: 'current', focus: null } : null });
-          }}
-          onClose={closeDecide}
-        />
-      )}
-      {decisionModeOn && decide?.tucked && <DecisionPill left={decideLeft} paused={decidePaused} thread={route.page === 'inbox' && route.thread === decide.thread ? null : decide.title} onResume={() => setDecide((current) => (current ? { ...current, tucked: false } : current))} />}
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>

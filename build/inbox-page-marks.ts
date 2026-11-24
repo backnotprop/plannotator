@@ -29,7 +29,6 @@ export const PAGE_MARKS: readonly PageMark[] = [
   { has: 'html:has(.pn-inbox)', mark: 'html[data-pn-inbox]' },
   { has: 'body:has(.pn-inbox)', mark: 'body[data-pn-inbox]' },
   { has: ':root[data-ib-keyboard-pin]:has(.pn-inbox)', mark: ':root[data-ib-keyboard-pin][data-pn-inbox]' },
-  { has: '.pn-inbox:has(.ib-dm-pill)', mark: '.pn-inbox[data-ib-dm-pill]' },
   { has: '.pn-inbox:has(.ib-imgcompose)', mark: '.pn-inbox[data-ib-imgcompose]' },
   { has: '.pn-inbox:has(.ib-rpick)', mark: '.pn-inbox[data-ib-rpick]' },
   // ui's theme.css and review-editor's comments.css. Holders: ui's `pageMarks` option (utils/pageMarks.ts).

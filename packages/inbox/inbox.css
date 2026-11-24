@@ -5356,7 +5356,7 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .ib-code-hover { border-radius: 4px; }
 .ib-code-hover:focus { outline: none; }
 .ib-code-hover:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-/* The code window (ui's CodeSnippetPreview) sits under the toast (41), decision mode's pill (42) and its own editor list
+/* The code window (ui's CodeSnippetPreview) sits under the toast (41) and its own editor list
    (a z-50 popup in the body). One opened from Ask AI's window (41) sits over that window. */
 .pn-inbox .code-snippet-preview-window { z-index: 40; }
 .pn-inbox [data-code-snippet-scrim] { z-index: 39; }
@@ -6539,7 +6539,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-reask[data-highlighted] { background: var(--ib-hover-s, var(--ib-hover)); }
 .ib-oq-reask:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .ib-oq-reask[data-disabled] { opacity: 0.55; }
-/* Decision mode's one way in (experimental, thread only): "Decide these N", the list's first row, quiet like Re-ask. */
+/* Decision mode's one way in (thread only): "Decide 8 one at a time" or "Resume · …", the list's first row, quiet like Re-ask. */
 .ib-oq-decide { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 8px; border-radius: var(--ib-lr-sm, 8px); font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); cursor: default; outline: none; user-select: none; flex: none; }
 .ib-oq-decide > svg { color: var(--muted-foreground); flex: none; }
 .ib-oq-decide > span { flex: 1 1 auto; min-width: 0; }
@@ -6818,210 +6818,70 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
   .ib-phead[data-subject-off] .ib-phsubj { visibility: hidden; }
 }
 
-/* ───────────── Decision mode (approval "inbox-decision-mode", Queue; experimental) ─────────────
-   One decision at a time in a large native <dialog>, the next peeking behind it, a strip of one chip
-   per agent session. Every colour comes from the theme tokens; under reduced motion nothing moves. */
-dialog.ib-dm { position: fixed; inset: var(--pn-window-controls-height, 0px) 0 0; margin: auto; width: min(1240px, calc(100vw - 48px)); height: calc(100vh - 48px - var(--pn-window-controls-height, 0px)); max-width: none; max-height: none; padding: 0; border: 0; border-radius: var(--ib-lr-xl, 12px); background: var(--ib-ground, var(--background)); color: var(--foreground); box-shadow: var(--ib-float-shadow); display: none; flex-direction: column; overflow: hidden; }
-dialog.ib-dm[open] { display: flex; }
-dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
-.ib-dm-head { display: flex; align-items: baseline; gap: 12px; padding: 18px 22px 6px; flex: none; }
-.ib-dm-head h1 { margin: 0; font-size: var(--ib-fs-18, 18px); font-weight: 650; }
-/* The thread the sitting is scoped to (thread only): its subject, cut to the head's room before the count is. */
-.ib-dm-scope { font-size: var(--ib-fs-14, 14px); font-weight: 550; color: var(--foreground); min-width: 0; flex: 0 100 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-dm-count { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-dm-headacts { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; }
-.pn-inbox .ib-dm-x { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; color: var(--muted-foreground); }
-.pn-inbox .ib-dm-x:hover { background: var(--muted); color: var(--foreground); }
-.pn-inbox .ib-dm-lnk { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border-radius: 8px; color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; }
-.pn-inbox .ib-dm-lnk:hover:not(:disabled) { background: var(--muted); }
-.pn-inbox .ib-dm-lnk:disabled { opacity: 0.45; }
-.pn-inbox .ib-dm-lnk[aria-pressed="true"], .pn-inbox .ib-dm-lnk[aria-expanded="true"] { background: color-mix(in oklab, var(--primary) 12%, transparent); color: var(--primary); }
-.pn-inbox .ib-dm-x:focus-visible, .pn-inbox .ib-dm-lnk:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-/* The strip: one chip per agent session, a dot per decision. */
-.ib-dm-strip { display: flex; gap: 8px; margin: 0; padding: 6px 22px 12px; list-style: none; overflow-x: auto; flex: none; scrollbar-width: none; }
-.ib-dm-chip { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 8px; border-radius: 999px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); white-space: nowrap; flex: none; }
-.ib-dm-chip[data-on] { background: color-mix(in oklab, var(--primary) 14%, var(--card)); }
-.ib-dm-chipname { max-width: 16em; overflow: hidden; text-overflow: ellipsis; }
-.ib-dm-dots { display: inline-flex; gap: 3px; }
-.ib-dm-dots i { width: 7px; height: 7px; border-radius: 50%; background: color-mix(in oklab, var(--muted-foreground) 45%, transparent); transition: background-color 200ms ease-out; }
-.ib-dm-dots i[data-state="done"] { background: var(--success, oklch(0.6 0.15 150)); }
-.ib-dm-dots i[data-state="current"] { background: var(--primary); }
-.ib-dm-dots i[data-state="later"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted-foreground); }
-.ib-dm-state { font-weight: 600; color: var(--muted-foreground); }
-.ib-dm-state.ib-dm-ok { color: var(--success, oklch(0.55 0.15 150)); }
-.ib-dm-hold-l { color: var(--muted-foreground); font-weight: 500; }
-.ib-dm-hold-l .ib-dm-lnk { min-height: 24px; padding: 0 6px; font-weight: 600; color: var(--primary); }
-.ib-dm-bad { color: var(--destructive); }
-.ib-dm-error { margin: 0 22px 8px; }
-/* The stage: the deck (the card, the peek behind it), the overview, or the end screen. */
-.ib-dm-stage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 4px 22px 22px; }
-.ib-dm-deck { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.ib-dm-peek { position: absolute; left: 24px; right: 24px; bottom: 36px; height: 40px; border-radius: 0 0 var(--ib-lr-lg, 10px) var(--ib-lr-lg, 10px); background: var(--card); box-shadow: var(--ib-pane-shadow, 0 1px 3px oklch(0 0 0 / 0.12)); translate: 0 9px; opacity: 0.8; }
-.ib-dm-card { position: relative; z-index: 1; flex: 1 1 auto; min-height: 0; display: flex; gap: 0; border-radius: var(--ib-lr-lg, 10px); background: var(--card); box-shadow: var(--ib-pane-shadow, 0 1px 3px oklch(0 0 0 / 0.12)); overflow: hidden; animation: ib-dm-rise 240ms cubic-bezier(0.2, 0.8, 0.2, 1); touch-action: pan-y; }
-@keyframes ib-dm-rise { from { opacity: 0; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }
-.ib-dm-card[data-stamped] { animation: ib-dm-leave 240ms ease-in 110ms forwards; }
-@keyframes ib-dm-leave { to { opacity: 0; translate: 0 -14px; } }
-/* A committed swipe leaves the way it was thrown (its inline translate), never by the stamp's rise. */
-.ib-dm-card[data-flung] { animation: none; pointer-events: none; }
-/* A card whose answer a reply already took (Previous reached it): read only. */
-.ib-dm-sentline { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; padding: 10px 12px; border-radius: var(--ib-lr-sm, 8px); background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
-.ib-dm-sentline b { color: var(--foreground); font-weight: 650; }
-.ib-dm-main { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 28px 40px 18px; display: flex; flex-direction: column; justify-content: safe center; gap: 12px; }
-.ib-dm-card:not([data-has-picture]) .ib-dm-main { max-width: 920px; margin: 0 auto; width: 100%; box-sizing: border-box; }
-.ib-dm-pics { flex: 0 0 48%; min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 20px; border-right: 1px solid var(--border); background: color-mix(in oklab, var(--muted) 55%, var(--card)); }
-.pn-inbox .ib-dm-hero { position: relative; flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; border-radius: var(--ib-lr-md, 9px); overflow: hidden; cursor: zoom-in; }
-.ib-dm-hero img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
-.ib-dm-zoom { position: absolute; right: 10px; bottom: 10px; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px; background: var(--card); box-shadow: var(--ib-float-shadow); font-size: var(--ib-fs-13, 13px); font-weight: 600; }
-.ib-dm-thumbs { display: flex; gap: 8px; flex: none; overflow-x: auto; }
-.pn-inbox .ib-dm-thumb { width: 72px; height: 54px; flex: none; border-radius: 7px; overflow: hidden; border: 1px solid var(--border); background: var(--card); }
-.ib-dm-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.ib-dm-who { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
-.ib-dm-who b { color: var(--foreground); font-weight: 600; }
-.ib-dm-subj { display: inline-block; max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-.ib-dm-prompt { margin: 0; font-size: var(--ib-fs-24, 24px); line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; outline: none; }
-.ib-dm-stakes, .ib-dm-stop, .ib-dm-hold { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: var(--ib-fs-15, 15px); line-height: 1.45; }
-.ib-dm-stakes svg, .ib-dm-stop svg, .ib-dm-hold svg { flex: none; margin-top: 2px; }
-.ib-dm-stop { color: var(--ib-badge-stop-fg-soft, var(--destructive)); }
-.ib-dm-hold { color: var(--muted-foreground); }
-.ib-dm-excerpt { margin: 0; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); line-height: 1.5; }
-.ib-dm-ctx { font-size: var(--ib-fs-15, 15px); max-height: 40vh; overflow-y: auto; }
-.ib-dm-ctx img { max-width: 100%; border-radius: 8px; cursor: zoom-in; }
-.ib-dm-refs { display: flex; flex-wrap: wrap; gap: 8px; }
-.pn-inbox .ib-dm-file, .pn-inbox .ib-dm-open { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 12px; border-radius: 8px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
-.pn-inbox .ib-dm-file { background: var(--muted); max-width: 100%; }
-.ib-dm-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pn-inbox .ib-dm-open:hover, .pn-inbox .ib-dm-file:hover { background: color-mix(in oklab, var(--muted) 80%, var(--foreground) 6%); }
-.ib-dm-answers { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; }
-.ib-dm-choices { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
-.ib-dm-choices.ib-dm-two { flex-direction: row; }
-.ib-dm-two .ib-dm-choice { flex: 1 1 0; min-height: 104px; align-items: flex-start; padding: 18px 20px; flex-wrap: wrap; }
-.ib-dm-two .ib-dm-chl { font-size: var(--ib-fs-18, 18px); }
-.ib-dm-two .ib-dm-dot { display: none; }
-.ib-dm-two .ib-dm-rec { flex-basis: 100%; order: 3; width: max-content; flex: none; }
-.ib-dm-choice { position: relative; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 10px 16px; border-radius: var(--ib-lr-md, 9px); border: 1px solid var(--border); background: var(--card); cursor: pointer; transition: border-color 120ms ease-out, background-color 120ms ease-out; }
-.ib-dm-choice:hover { border-color: color-mix(in oklab, var(--primary) 45%, var(--border)); }
-.ib-dm-choice[data-recommended] { border-color: color-mix(in oklab, var(--primary) 40%, var(--border)); }
-.ib-dm-two .ib-dm-choice[data-recommended] { background: color-mix(in oklab, var(--primary) 7%, var(--card)); }
-.ib-dm-choice[data-on] { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
-.ib-dm-choice input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
-.ib-dm-choice:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
-.ib-dm-dot, .ib-dm-box { flex: none; width: 18px; height: 18px; border: 2px solid var(--muted-foreground); border-radius: 50%; box-sizing: border-box; }
-.ib-dm-box { border-radius: 5px; }
-.ib-dm-choice[data-on] .ib-dm-dot { border-color: var(--primary); background: radial-gradient(circle, var(--primary) 0 4px, transparent 5px); }
-.ib-dm-choice[data-on] .ib-dm-box { border-color: var(--primary); background: var(--primary); }
-.ib-dm-ch { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
-.ib-dm-chl { font-size: var(--ib-fs-16, 16px); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
-.ib-dm-chd { font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); line-height: 1.4; }
-.ib-dm-rec { flex: none; padding: 2px 9px; border-radius: 999px; background: color-mix(in oklab, var(--primary) 13%, transparent); color: var(--primary); font-size: var(--ib-fs-13, 13px); font-weight: 600; }
-.pn-inbox .ib-dm-go { align-self: flex-start; height: 38px; padding: 0 18px; font-size: var(--ib-fs-14, 14px); }
-.ib-dm-text, .ib-dm-field, .ib-dm-action { display: flex; flex-direction: column; gap: 8px; }
-.ib-dm-suggest { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; background: var(--muted); font-size: var(--ib-fs-14, 14px); }
-.ib-dm-suggest span { flex: 1 1 auto; min-width: 0; }
-.ib-dm-flabel { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-.pn-inbox .ib-dm-ta { width: 100%; box-sizing: border-box; resize: vertical; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
-.pn-inbox .ib-dm-ta:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
-.ib-dm-field .ib-btn { align-self: flex-start; }
-.ib-dm-run { display: flex; align-items: center; gap: 8px; }
-.ib-dm-run code { flex: 1 1 auto; min-width: 0; padding: 8px 10px; border-radius: 7px; background: var(--muted); font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); overflow-wrap: anywhere; }
-.ib-dm-actbtns { display: flex; gap: 8px; }
-.ib-dm-why { margin: 0; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
-.ib-dm-swipehint { margin: 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-/* The agent contract lines (approval "inbox-decision-mode", "Agent contract lines"; contract-compare.html). */
-.ib-dm-stakes { font-weight: 600; }
-.ib-dm-stakes svg { color: color-mix(in oklab, var(--warning, oklch(0.75 0.15 80)) 60%, var(--foreground)); }
-.ib-badge.ib-b-oneway { border-color: transparent; background: color-mix(in oklab, var(--destructive) 10%, transparent); color: color-mix(in oklab, var(--destructive) 70%, var(--foreground)); }
-.ib-dm-confirm1 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-radius: var(--ib-lr-md, 9px); background: color-mix(in oklab, var(--destructive) 10%, var(--card)); font-size: var(--ib-fs-14, 14px); line-height: 1.45; }
-.ib-dm-confirm1 > span { flex: 1 1 260px; min-width: 0; }
-.pn-inbox .ib-btn.ib-dm-danger { background: var(--destructive); border-color: var(--destructive); color: var(--destructive-foreground, #fff); font-weight: 600; }
-.pn-inbox .ib-dm-confirm1 .ib-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-/* Picture choices: the thread card's own tiles (ui QuestionPictureTiles), at the dialog's size. */
-.ib-dm-tiles { min-width: 0; }
-.ib-dm-tiles [data-question-tiles] { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 10px; margin: 0; }
-.ib-dm-tiles [data-question-tile] { border-radius: var(--ib-lr-md, 9px); border: 1px solid var(--border); background: var(--card); }
-.ib-dm-tiles [data-question-tile]:hover { border-color: color-mix(in oklab, var(--primary) 45%, var(--border)); }
-.ib-dm-tiles [data-question-tile][data-question-tile-recommended] { border-color: color-mix(in oklab, var(--primary) 40%, var(--border)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 25%, transparent); }
-.ib-dm-tiles [data-question-tile][data-question-tile-checked] { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); background: color-mix(in oklab, var(--primary) 7%, var(--card)); }
-.ib-dm-tiles [data-question-tile-picture] { aspect-ratio: auto; height: 230px; padding: 8px; box-sizing: border-box; border-bottom-color: var(--border); background: color-mix(in oklab, var(--muted) 55%, var(--card)); }
-.ib-dm-tiles [data-question-tile-caption] { padding: 9px 11px 11px; gap: 8px; }
-.ib-dm-tiles [data-question-part="choice"] { display: flex; flex-direction: column; gap: 3px; font-size: var(--ib-fs-13, 13px); }
-.ib-dm-tiles [data-question-tile-label] { font-size: var(--ib-fs-14-5, 14.5px); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
-.ib-dm-tiles [data-question-tile-description] { font-size: var(--ib-fs-13, 13px); line-height: 1.4; }
-.ib-dm-tiles .ib-dm-rec { align-self: flex-start; margin-top: 4px; font-size: var(--ib-fs-12, 12px); }
-.pn-inbox .ib-dm-tiles [data-question-zoom] { right: 7px; top: 7px; width: 30px; height: 30px; border-radius: 8px; background: var(--card); box-shadow: var(--ib-float-shadow); }
-.ib-dm-more { display: flex; flex-wrap: wrap; gap: 4px; margin-left: -10px; }
-.ib-dm-more .ib-dm-lnk { color: var(--muted-foreground); }
-.ib-dm-nav { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding-top: 12px; flex: none; }
-.ib-dm-after { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-dm-banner { position: absolute; left: 50%; top: 14px; z-index: 3; translate: -50% 0; display: flex; align-items: center; gap: 8px; max-width: min(640px, calc(100% - 40px)); padding: 10px 14px; border-radius: var(--ib-lr-md, 9px); background: color-mix(in oklab, var(--warning, oklch(0.8 0.15 80)) 22%, var(--card)); font-size: var(--ib-fs-14, 14px); box-shadow: var(--ib-float-shadow); }
-.ib-dm-card:has(.ib-dm-banner) .ib-dm-main { padding-top: 66px; }
-.ib-dm-stamp { position: absolute; left: 50%; top: 42%; z-index: 4; translate: -50% -50%; display: inline-flex; align-items: center; gap: 8px; max-width: 80%; padding: 10px 18px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-16, 16px); font-weight: 650; box-shadow: var(--ib-float-shadow); animation: ib-dm-stamp 350ms cubic-bezier(0.2, 0.9, 0.3, 1.2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-@keyframes ib-dm-stamp { from { opacity: 0; scale: 0.85; } to { opacity: 1; scale: 1; } }
-.ib-dm-loading { margin: auto; color: var(--muted-foreground); }
-/* The overview ("All"): read only, no bulk accept; a row jumps to its card. */
-.ib-dm-all { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; align-content: start; }
-.ib-dm-allg { padding: 14px; border-radius: var(--ib-lr-lg, 10px); background: var(--card); box-shadow: var(--ib-pane-shadow, 0 1px 3px oklch(0 0 0 / 0.12)); }
-.ib-dm-allg h2 { display: flex; align-items: center; gap: 7px; margin: 0 0 8px; font-size: var(--ib-fs-14, 14px); font-weight: 650; }
-.ib-dm-allg h2 span { color: var(--muted-foreground); font-weight: 500; }
-.ib-dm-allg ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.pn-inbox .ib-dm-allrow { display: flex; gap: 10px; width: 100%; min-height: 36px; padding: 6px 8px; border-radius: 8px; text-align: left; align-items: center; font-size: var(--ib-fs-14, 14px); }
-.pn-inbox .ib-dm-allrow:hover { background: var(--muted); }
-.ib-dm-allrow[data-on] { background: color-mix(in oklab, var(--primary) 12%, transparent); }
-.ib-dm-allp { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-dm-alls { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The end screen. */
-.ib-dm-end { margin: auto; width: min(640px, 100%); display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 20px 0; overflow-y: auto; }
-.ib-dm-endmark { display: inline-flex; align-items: center; justify-content: center; width: 64px; height: 64px; border-radius: 50%; background: color-mix(in oklab, var(--success, oklch(0.6 0.15 150)) 18%, var(--card)); color: var(--success, oklch(0.55 0.15 150)); animation: ib-dm-stamp 350ms ease-out; }
-.ib-dm-end h2 { margin: 6px 0 0; font-size: var(--ib-fs-24, 24px); font-weight: 700; outline: none; }
-.ib-dm-end p { margin: 0; color: var(--muted-foreground); }
-.ib-dm-endlist { list-style: none; margin: 10px 0; padding: 6px; width: 100%; box-sizing: border-box; border-radius: var(--ib-lr-lg, 10px); background: var(--card); text-align: left; }
-.ib-dm-endlist li { display: flex; align-items: center; gap: 10px; padding: 10px; font-size: var(--ib-fs-14, 14px); }
-.ib-dm-endlist li + li { border-top: 1px solid var(--border); }
-.ib-dm-endlist li > span:nth-child(2) { flex: 1 1 auto; min-width: 0; }
-.ib-dm-endstate { color: var(--muted-foreground); font-weight: 600; }
-/* Closing with a session half answered. */
-.ib-dm-confirm { position: absolute; left: 50%; bottom: 28px; z-index: 5; translate: -50% 0; width: min(560px, calc(100% - 32px)); padding: 18px 20px; border-radius: var(--ib-lr-xl, 12px); background: var(--popover); box-shadow: var(--ib-float-shadow); }
-.ib-dm-confirm h2 { margin: 0; font-size: var(--ib-fs-16, 16px); font-weight: 650; }
-.ib-dm-confirm p { margin: 6px 0 14px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
-.ib-dm-confirm-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-/* The pill a tucked decision mode leaves above the open thread. */
-.pn-inbox .ib-dm-pill { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 42; translate: -50% 0; display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 6px 0 16px; border-radius: 999px; background: var(--popover); box-shadow: var(--ib-float-shadow); font-size: var(--ib-fs-14, 14px); max-width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)); }
-.ib-dm-pill b { font-weight: 650; }
-/* A row whose only shrinking part is the thread's subject: on a narrow screen the subject gives way, never the count or Resume. */
-.ib-dm-pill > span { display: flex; align-items: baseline; min-width: 0; white-space: pre; }
-.pn-inbox .ib-dm-pill > .ib-btn { flex: none; }
-/* The sitting's thread, while another is on screen: cut so the pill keeps its Resume in view. */
-.ib-dm-pill-thread { display: inline-block; flex: 0 1 auto; min-width: 0; max-width: min(28ch, 40vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-/* While the pill floats over a thread, the thread's last lines can still scroll clear of it. */
-.pn-inbox:has(.ib-dm-pill) section.ib-pane .ib-pbody { padding-bottom: 64px; }
-.pn-inbox .ib-dm-pill .ib-btn { height: 30px; border-radius: 999px; }
-@media (prefers-reduced-motion: reduce) {
-  .ib-dm-card, .ib-dm-card[data-stamped], .ib-dm-stamp, .ib-dm-endmark { animation: none; }
-  .ib-dm-dots i, .ib-dm-choice { transition: none; }
+/* ───────────── Decision mode (approval "inbox-decision-mode-one-send", 2026-11-24; decisions/DecideFrame.tsx) ─────────────
+   Inside the thread's own pane: one agent message at a time, drawn by the thread (every card feature), framed by a bar,
+   a row of steps (one per message, then Send) and a foot. Every colour is a theme token, light and dark. */
+.pn-inbox .ib-phead[hidden] { display: none !important; }
+.dm-head { gap: 10px; }
+.dm-title { flex: 1; min-width: 0; margin: 0; display: flex; align-items: baseline; gap: 8px; font-size: var(--ib-fs-14, 14px); font-weight: 600; white-space: nowrap; overflow: hidden; }
+.dm-title-s { font-weight: 400; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; }
+.dm-count { flex: none; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; padding-right: 4px; }
+/* The steps: a bar per message that fills as its decisions are answered, then Send. */
+.dm-steps { list-style: none; margin: 0; padding: 8px 30px 6px; display: flex; gap: 6px; flex: none; border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.dm-steps > li { flex: 1; min-width: 0; }
+.dm-steps > li:last-child { flex: 0 0 auto; min-width: 64px; }
+.pn-inbox .dm-step { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 4px 0; cursor: pointer; border-radius: 6px; }
+.dm-bar { position: relative; display: block; height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in oklch, var(--muted-foreground) 22%, transparent); }
+.dm-step[data-state="part"] .dm-bar { background: color-mix(in oklch, var(--primary) 22%, transparent); }
+.dm-fill { position: absolute; inset: 0 auto 0 0; background: var(--primary); }
+.dm-step[aria-current] .dm-bar { height: 6px; margin-block: -1px; }
+.dm-step-l { display: flex; align-items: center; gap: 5px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; }
+.dm-step[aria-current] .dm-step-l, .dm-step:hover .dm-step-l { color: var(--foreground); }
+.dm-step[aria-current] .dm-step-l { font-weight: 500; }
+.pn-inbox .dm-step:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.dm-step-mk { display: inline-flex; width: 14px; height: 14px; }
+.dm-step-mk :is(svg, img, .ib-mk) { width: 14px !important; height: 14px !important; }
+.dm-step-later { color: var(--muted-foreground); font-weight: 400; }
+.dm-step-send .dm-bar { background: color-mix(in oklch, var(--muted-foreground) 12%, transparent); }
+.dm-step-send[aria-current] .dm-bar { background: var(--foreground); }
+/* The body: the message on screen and nothing else of the thread's. */
+.ib-pbody[data-deciding] > :not(.ib-message, .dm-top) { display: none; }
+.ib-pbody[data-deciding] > .ib-message { border-top: 0; }
+.dm-note, .dm-phone-sub { margin: 0 0 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+/* The Send step: what goes, as the reply box lists it, the person's own words, one Send. */
+.dm-send { max-width: 680px; }
+.dm-send-h { font-size: var(--ib-fs-17, 17px); font-weight: 600; margin: 6px 0 4px; letter-spacing: -0.01em; outline: none; }
+.dm-send-p { margin: 0 0 14px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); line-height: 1.5; }
+.dm-send .ib-ranswers { margin: 0 0 12px; }
+.dm-send .ib-ranswers-l { max-height: none; overflow: visible; }
+.dm-open { display: flex; align-items: center; gap: 10px; margin: 4px 0 14px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.dm-open-l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dm-rbox { margin-top: 6px; }
+.pn-inbox .dm-words { display: block; width: 100%; box-sizing: border-box; border: 0; outline: 0; resize: none; background: transparent; font: inherit; font-size: var(--ib-fs-14, 14px); line-height: 1.55; padding: 14px 16px; color: var(--foreground); min-height: 72px; }
+.dm-words::placeholder { color: var(--muted-foreground); }
+/* The foot: Back, where this message stands, Later, Next (or Send). One row. */
+.dm-acts { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.dm-sp { flex: 1; }
+.dm-st { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pn-inbox .dm-acts .ib-btn { height: 34px; }
+.pn-inbox .dm-next, .pn-inbox .dm-back { display: inline-flex; align-items: center; gap: 4px; }
+/* Moving: the next or earlier message comes in from that side (140 ms); a step's bar fills (150 ms). Nothing under reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .ib-pbody[data-deciding="next"] > .ib-message { animation: dm-in-next 140ms ease-out; }
+  .ib-pbody[data-deciding="back"] > .ib-message { animation: dm-in-back 140ms ease-out; }
+  .dm-fill { transition: width 150ms ease-out; }
 }
-@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  /* Full screen down to the keyboard's top while it is up (`--ib-vvh`), so a note or an answer is never under it. */
-  dialog.ib-dm { width: 100vw; height: calc(var(--ib-vvh, 100dvh) - var(--pn-window-controls-height, 0px)); bottom: calc(100% - var(--ib-vvh, 100%)); border-radius: 0; }
-  .ib-dm-head { padding: max(14px, env(safe-area-inset-top)) 16px 4px; }
-  /* No room beside the count on a phone; the card names the thread under it. */
-  .ib-dm-scope { display: none; }
-  .pn-inbox .ib-dm-x { width: 44px; height: 44px; }
-  .ib-dm-strip { padding: 4px 16px 10px; }
-  .ib-dm-stage { padding: 0 8px max(8px, env(safe-area-inset-bottom)); }
-  .ib-dm-card { flex-direction: column; overflow-y: auto; }
-  .ib-dm-pics { flex: none; max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--border); padding: 12px; }
-  .ib-dm-main { padding: 18px 16px 14px; overflow: visible; }
-  .ib-dm-prompt { font-size: var(--ib-fs-22, 22px); }
-  .ib-dm-choices.ib-dm-two { flex-direction: column; }
-  /* Stacked, a choice is as tall as its words (a basis of 0 left a description outside its box). */
-  .ib-dm-two .ib-dm-choice { flex: none; min-height: 72px; }
-  .ib-dm-choice, .pn-inbox .ib-dm-lnk, .pn-inbox .ib-dm-file, .pn-inbox .ib-dm-open, .pn-inbox .ib-dm-go { min-height: 44px; }
-  .ib-dm-ctx { max-height: none; }
-  .ib-dm-peek { display: none; }
-  .ib-dm-all { grid-template-columns: 1fr; }
-  .ib-dm-tiles [data-question-tiles] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ib-dm-tiles [data-question-tile-picture] { height: 150px; }
-  .pn-inbox .ib-dm-tiles [data-question-zoom]::before { inset: -7px; }
-  .pn-inbox .ib-dm-confirm1 .ib-btn { min-height: 44px; }
+@keyframes dm-in-next { from { opacity: 0; translate: 6px 0; } }
+@keyframes dm-in-back { from { opacity: 0; translate: -6px 0; } }
+@media (max-width: 639px) {
+  .dm-steps { padding: 4px 16px; gap: 4px; }
+  .dm-steps > li:last-child { min-width: 28px; }
+  .pn-inbox .dm-foot { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+  .pn-inbox .dm-acts .ib-btn { height: 44px; padding: 0 16px; }
+  .pn-inbox .dm-acts .dm-next { flex: 1; justify-content: center; }
+  .pn-inbox .dm-acts .dm-back { width: 44px; justify-content: center; padding: 0; }
+  .dm-send-h { font-size: var(--ib-fs-16, 16px); }
+  .pn-inbox .dm-words { font-size: 16px; }
 }
 
 /* ───────────────── The onboarding tour (approval "inbox-onboarding-tour"; tour/) ─────────────────

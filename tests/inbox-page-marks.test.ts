@@ -91,7 +91,6 @@ describe('the window\'s sheets, rewritten', () => {
   test('the parts each mark stands for are drawn only by the components that hold it', () => {
     // A new place drawing one of these without its holder: the look keyed on it would not come in the window.
     const holders: Record<string, string[]> = {
-      'ib-dm-pill': ['packages/inbox/decisions/entry.tsx'],
       'ib-imgcompose': ['packages/inbox/components/ImageAttachmentView.tsx', 'packages/inbox/components/VideoAttachmentView.tsx'],
       'ib-fcomp': ['packages/inbox/components/FullScreenComposer.tsx'],
       'ib-rpick': ['packages/inbox/components/ReplyRecipient.tsx'],

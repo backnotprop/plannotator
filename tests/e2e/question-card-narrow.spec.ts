@@ -517,12 +517,11 @@ test('plan review: wide, narrow windows, 200% zoom and phones; a footer that fit
   }
 });
 
-test('the Inbox: a thread full width, beside a file, on a phone, and the Decide dialog', async ({ browser }) => {
+test('the Inbox: a thread full width, beside a file, on a phone, and Decision mode', async ({ browser }) => {
   const root = inboxScratch('plannotator-question-card-inbox-');
   const dataDir = join(root, 'data');
   mkdirSync(dataDir, { recursive: true });
-  // Decision mode is experimental: on in this Inbox's own config.
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify(E2E_LAUNCH_OFF));
   const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
   let agent: SimAgent | null = null;
   try {
@@ -588,16 +587,17 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
           await shot(page, `inbox-side-${width}-${value}`, `${pane} ${CARD} >> nth=0`);
         }
       }
-      // The Decide dialog: the thread's open questions, then "Decide these N".
+      // Decision mode (the thread's open questions, then its first row): the thread's own cards, one message at a time.
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto(`${url}#thread=${threadId}`);
       await page.locator(`${pane} [data-open-questions]`).click();
       await page.locator('[data-thread-decide]').click();
-      await expect(page.locator('[data-decision-mode]')).toBeVisible();
+      await expect(page.locator(`${pane} [data-decide-head]`)).toBeVisible();
       for (const width of [1440, 720]) {
         await page.setViewportSize({ width, height: 900 });
         await page.waitForTimeout(300);
-        check(await decideProblems(page), `Decide at ${width} px`).toEqual([]);
+        check(await footerProblems(page, { scope: pane }), `Decision mode at ${width} px`).toEqual([]);
+        check(await decideProblems(page), `Decision mode at ${width} px`).toEqual([]);
         await shot(page, `decide-${width}-${value}`);
       }
       await context.close();
@@ -613,9 +613,10 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
       await shot(p, `inbox-phone-390-long-${value}`, `${pane} ${CARD} >> nth=1`);
       await p.locator(`${pane} [data-open-questions]`).click();
       await p.locator('[data-thread-decide]').click();
-      await expect(p.locator('[data-decision-mode]')).toBeVisible();
+      await expect(p.locator(`${pane} [data-decide-head]`)).toBeVisible();
       await p.waitForTimeout(300);
-      check(await decideProblems(p), 'Decide on a phone').toEqual([]);
+      check(await footerProblems(p, { scope: pane, minTarget: 44 }), 'Decision mode on a phone').toEqual([]);
+      check(await decideProblems(p, 44), 'Decision mode on a phone').toEqual([]);
       await shot(p, `decide-phone-390-${value}`);
       await phone.close();
     }
@@ -625,9 +626,9 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
   }
 });
 
-/** The Decide card: its secondary actions keep their words on one line; a Recommended tag never squeezes its choice's words. */
-async function decideProblems(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+/** Decision mode's foot: Back, where the message stands, Later and Next on one row, each button's words on one line, and each at least `minTarget` px tall. */
+async function decideProblems(page: Page, minTarget = 0): Promise<string[]> {
+  return page.evaluate((minTarget) => {
     const out: string[] = [];
     /** The lines an element's visible words sit on: its text nodes' boxes (an icon is not a line). */
     const textLines = (el: Element): Set<number> => {
@@ -644,18 +645,15 @@ async function decideProblems(page: Page): Promise<string[]> {
       }
       return tops;
     };
-    for (const button of document.querySelectorAll<HTMLButtonElement>('[data-decision-mode] .ib-dm-more button')) {
-      if (button.getBoundingClientRect().width === 0) continue;
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>('[data-decide-foot] button')].filter((b) => b.getBoundingClientRect().width > 0);
+    if (buttons.length === 0) out.push('no buttons in the foot');
+    const middles = new Set(buttons.map((b) => Math.round(b.getBoundingClientRect().top + b.getBoundingClientRect().height / 2)));
+    if (middles.size > 1) out.push(`the foot's buttons sit on ${middles.size} rows`);
+    for (const button of buttons) {
       const lines = textLines(button);
       if (lines.size > 1) out.push(`"${button.textContent?.trim()}" wraps onto ${lines.size} lines`);
-    }
-    for (const rec of document.querySelectorAll<HTMLElement>('[data-decision-mode] .ib-dm-choice .ib-dm-rec')) {
-      const label = rec.parentElement!.querySelector<HTMLElement>('.ib-dm-chl');
-      if (!label) continue;
-      const lineHeight = parseFloat(getComputedStyle(label).lineHeight) || 20;
-      const tooNarrow = label.getBoundingClientRect().width < 120 && label.getBoundingClientRect().height > lineHeight * 2.5;
-      if (tooNarrow) out.push(`"${label.textContent?.trim()}" is squeezed beside its Recommended tag`);
+      if (button.getBoundingClientRect().height < minTarget) out.push(`"${button.textContent?.trim() || button.getAttribute('aria-label')}" is ${Math.round(button.getBoundingClientRect().height)} px tall`);
     }
     return out;
-  });
+  }, minTarget);
 }

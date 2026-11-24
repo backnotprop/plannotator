@@ -1,6 +1,6 @@
 /**
  * The Inbox window's page marks: attributes its parts hold on the page's root or on `.pn-inbox` while they are in
- * the page, in place of the `:has()` rules inbox.css keys on them (`html:has(.pn-inbox)`, `.pn-inbox:has(.ib-dm-pill)`,
+ * the page, in place of the `:has()` rules inbox.css keys on them (`html:has(.pn-inbox)`, `.pn-inbox:has(.ib-rpick)`,
  * …).
  *
  * Why: Chromium has to look again at a `:has()` anchored on `html`, `body` or `.pn-inbox` whenever anything under
@@ -30,8 +30,6 @@ export function markInboxPage(el: HTMLElement | null): (() => void) | undefined 
 /** A ref for an element a `.pn-inbox:has(…)` rule keys on: each `.pn-inbox` above it carries `name`. */
 const aboveInbox = (name: string) => (el: HTMLElement | null) => (el ? holdPageMarkAbove(el, '.pn-inbox', name) : undefined);
 
-/** `.ib-dm-pill`: `.pn-inbox:has(.ib-dm-pill)`. */
-export const markDecisionPill = aboveInbox('data-ib-dm-pill');
 /** `.ib-imgcompose`: `.pn-inbox:has(.ib-imgcompose)`. */
 export const markImageComposer = aboveInbox('data-ib-imgcompose');
 /** `.ib-rpick`: `.pn-inbox:has(.ib-rpick)`. */

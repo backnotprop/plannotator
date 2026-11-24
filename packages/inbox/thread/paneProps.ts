@@ -7,7 +7,6 @@ import type { InboxToastModel } from '../components/Toast';
 import type { ReviewView } from '../pulls/reviewsModel';
 import type { ReuseSource } from '../reuse';
 import type { ActionMark } from '../components/ActionChecklist';
-import type { OpenQuestionsDecide } from '../components/OpenQuestions';
 import type { StepsSubscribe } from '../steps/useThreadSteps';
 import type { Signal } from '../signal';
 import type { ThreadPullReview } from '../threadPulls/ThreadPulls';
@@ -93,13 +92,14 @@ export interface ThreadPaneProps {
   onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;
   linkOf?: (messageId?: string) => string;
   onInboxLink?: (href: string) => (() => void) | null;
-  landing?: { messageId: string; terms: readonly string[]; questionKey: string | null; focus?: 'prompt' } | null;
+  landing?: { messageId: string; terms: readonly string[]; questionKey: string | null } | null;
   onLanded?: () => void;
   artifacts?: boolean;
   onArtifacts?: (open: boolean) => void;
   links?: boolean;
   onLinks?: (on: boolean) => void;
-  decide?: OpenQuestionsDecide | null;
+  /** Decision mode is on (Settings → Capabilities): the open questions' first row opens it. */
+  decisionMode?: boolean;
   run?: InboxRun | null;
   attachCommand?: string | null;
   onRunChanged?: () => void;

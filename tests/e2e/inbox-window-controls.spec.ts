@@ -431,10 +431,11 @@ test('the tour bar and Decision mode, with the variables set: clear of the butto
   await setControls(page);
   await page.locator('section.ib-pane [data-open-questions]').click();
   await page.locator('[data-thread-decide]').click();
-  await page.locator('[data-decision-mode]').waitFor();
-  expect((await boxOf(page, '[data-decision-mode]')).top).toBeGreaterThanOrEqual(H);
+  // Decision mode is drawn in the thread pane: its head clears the buttons.
+  await page.locator('[data-decide-head]').waitFor();
+  expect((await boxOf(page, '[data-decide-head]')).top).toBeGreaterThanOrEqual(H);
   expect((await controlsThatDrag(page)).dragging).toEqual([]);
-  await page.keyboard.press('Escape');
+  await page.locator('[data-decide-leave]').click();
 
   // At a phone's width it fills what the buttons leave, and its foot stays in the window.
   await phone.goto(`${world.url}#thread=${world.questions}`);
@@ -442,11 +443,10 @@ test('the tour bar and Decision mode, with the variables set: clear of the butto
   await setControls(phone);
   await phone.locator('section.ib-pane [data-open-questions]').click();
   await phone.locator('[data-thread-decide]').click();
-  await phone.locator('[data-decision-mode]').waitFor();
-  const dialog = await boxOf(phone, '[data-decision-mode]');
-  expect(dialog.top).toBe(H);
-  expect(dialog.bottom).toBe(844);
-  await phone.keyboard.press('Escape');
+  await phone.locator('[data-decide-head]').waitFor();
+  expect((await boxOf(phone, '[data-decide-head]')).top).toBeGreaterThanOrEqual(H);
+  expect((await boxOf(phone, '[data-decide-foot]')).bottom).toBeLessThanOrEqual(844);
+  await phone.locator('[data-decide-leave]').click();
 });
 
 test('a phone-width window: the header holds the edge and the layer clears the height', async () => {

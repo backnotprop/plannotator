@@ -228,13 +228,10 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           links={route.artifacts === true && route.links === true}
           // Between the view's two sides: the same screen, so Back still returns to the thread.
           onLinks={(on) => writeRoute({ ...routeRef.current, links: on }, { replace: true })}
-          // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
-          // sitting is tucked into its pill (the pill's Resume is the way back to it).
-          decide={host.decideInThread(thread.thread_id)}
+          // Decision mode (Settings → Capabilities, on unless turned off): its way in is the open questions' first row.
+          decisionMode={host.decisionModeOn}
           landing={
-            route.msg && host.decideLanding.current?.messageId === route.msg
-              ? { messageId: route.msg, terms: [], questionKey: host.decideLanding.current.questionKey, focus: 'prompt' }
-              : route.msg
+            route.msg
               ? {
                   messageId: route.msg,
                   terms: host.searchLanding.current?.messageId === route.msg ? host.searchLanding.current.terms : [],

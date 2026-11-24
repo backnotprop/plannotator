@@ -109,8 +109,7 @@ test.beforeAll(async () => {
   const home = join(root, 'home');
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
-  // The dialog case needs Decision mode, which is off by default.
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify(E2E_LAUNCH_OFF));
   const env = {
     PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: join(root, 'claude'), CODEX_HOME: join(root, 'codex'), OPENCODE_CONFIG_DIR: join(root, 'opencode'),
@@ -653,11 +652,17 @@ test.describe('still a new tab', () => {
     await scene(browser, 'desktop', async ({ page, context }) => {
       await page.goto(threadUrl(world.T4));
       await expect(page.locator('section.ib-pane [data-open-questions]')).toBeVisible();
-      if (!(await page.locator('[data-open-questions-list]').isVisible())) await page.locator('section.ib-pane [data-open-questions]').click();
-      await page.locator('[data-thread-decide]').click();
-      const dialog = page.locator('[data-decision-mode]');
+      // A stand-in for a dialog with a message's links in it (no Inbox dialog draws one today): a full URL as ui draws
+      // it (target=_blank), and a hash-only link, which has no target, so the window opens its tab.
+      await page.evaluate(({ origin, T2 }) => {
+        const dialog = document.createElement('dialog');
+        dialog.setAttribute('data-links-dialog', '');
+        dialog.innerHTML = `<a href="${origin}/#thread=${T2}" target="_blank" rel="noopener">T2 from a dialog</a> <a href="#thread=${T2}">hash only from a dialog</a>`;
+        document.body.append(dialog);
+        dialog.showModal();
+      }, { origin: world.origin, T2: world.T2 });
+      const dialog = page.locator('dialog[data-links-dialog]');
       await expect(dialog).toBeVisible();
-      // A full URL (ui draws it with target=_blank), and a hash-only link, which has no target: the window opens its tab.
       for (const name of ['T2 from a dialog', 'hash only from a dialog']) {
         const link = dialog.getByRole('link', { name, exact: true });
         const [tab] = await Promise.all([context.waitForEvent('page', { timeout: 5_000 }), link.click()]);

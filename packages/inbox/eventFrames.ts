@@ -57,7 +57,7 @@ export interface InboxEventHandlers {
   onShowArchived?: (value: unknown) => void;
   onAgentFaces?: (data: unknown) => void;
   onReactions?: (reactions: unknown, rev: unknown) => void;
-  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean } }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; decision_mode?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean } }) => void;
   onTailscale?: (tailscale: TailscaleSettings) => void;
   onMachine?: (frame: MachineRecordFrame) => void;
   onMachines?: (machines: MachineView[]) => void;
@@ -201,9 +201,10 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown } };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; decision_mode?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown } };
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
+          ...(typeof data.decision_mode?.on === 'boolean' ? { decision_mode: { on: data.decision_mode.on } } : {}),
           ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
           ...(typeof data.bro?.on === 'boolean' ? { bro: { on: data.bro.on } } : {}),
           ...(typeof data.float_drafts?.on === 'boolean' ? { float_drafts: { on: data.float_drafts.on } } : {}),

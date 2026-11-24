@@ -2384,7 +2384,7 @@
     },
     {
       "id": "window-178",
-      "title": "Capabilities section: switches for the Board, the Checklist, Code review (with Chapter diagrams), Shape; \"Experimental\" group: Decision mode, Grid, Bro mode, Float reply drafts; Routines switch",
+      "title": "Capabilities section: switches for the Board, the Checklist, Decision mode, Code review (with Chapter diagrams), Shape; \"Experimental\" group: Grid, Bro mode, Float reply drafts; Routines switch",
       "surface": [],
       "flows": [],
       "mobile": "later",
@@ -4403,10 +4403,8 @@
     },
     {
       "id": "messages-067",
-      "title": "\"Decide these N\" (only with experimental Decision mode on and 2 or more decisions)",
-      "surface": [
-        "window:/api/inbox/decisions"
-      ],
+      "title": "\"Decide N one at a time\" in a thread's open questions (Decision mode, on unless turned off)",
+      "surface": [],
       "flows": [],
       "mobile": "later",
       "why": "L-off: decision mode is experimental",
@@ -6641,9 +6639,7 @@
     {
       "id": "messages-219",
       "title": "Decide a thread's questions one card at a time: head \"Decide · <subject> · 5 of 16\", Undo, All, Close, a chip per agent",
-      "surface": [
-        "window:/api/inbox/decisions"
-      ],
+      "surface": [],
       "flows": [],
       "mobile": "later",
       "why": "L-off: decision mode is experimental",
@@ -15281,9 +15277,7 @@
     {
       "id": "other-024",
       "title": "Decision mode (experimental, off): \"Decide these N\" opens one decision at a time, per-agent chips, a 5 s \"Sending · Hold\"",
-      "surface": [
-        "window:/api/inbox/decisions"
-      ],
+      "surface": [],
       "flows": [],
       "mobile": "later",
       "why": "L-off: experimental and off; the door refuses it",
@@ -22653,6 +22647,20 @@
       "title": "field:InboxSkillReaction.skill",
       "surface": [
         "field:InboxSkillReaction.skill"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-setting-decision-mode",
+      "title": "setting:decision_mode",
+      "surface": [
+        "setting:decision_mode"
       ],
       "flows": [],
       "mobile": "undecided",

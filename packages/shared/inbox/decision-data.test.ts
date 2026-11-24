@@ -7,7 +7,18 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DECISION_LINES_FILE, DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines, runInSlices, trendsOf, type DecisionRow } from "./decision-data";
+import { threadOpenActions, threadOpenQuestions } from "@plannotator/core/inbox-open-questions";
 import { InboxStore } from "./store";
+
+/** What each listed thread's open-questions list holds, less the open ones a waiting Re-ask note lists. */
+function openNow(store: InboxStore): number {
+  return store.listRows().reduce((n, row) => {
+    const messages = store.thread(row.thread_id)?.messages ?? [];
+    const listed = store.reaskListedIds(row.thread_id);
+    const items = [...threadOpenQuestions(messages).questions.map((q) => ({ id: q.id, q: q.question })), ...threadOpenActions(messages).map((a) => ({ id: a.id, q: a.action }))];
+    return n + items.filter(({ id, q }) => !(q.state === "open" && listed.has(id))).length;
+  }, 0);
+}
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -169,7 +180,7 @@ describe("what counts as what", () => {
     const w = world();
     const agrees = async (waiting: number) => {
       expect((await w.summary()).waiting).toBe(waiting);
-      expect(w.store.openDecisions().length).toBe(waiting);
+      expect(openNow(w.store)).toBe(waiting);
     };
     const asked = w.ask();
     await agrees(1);
@@ -188,13 +199,13 @@ describe("what counts as what", () => {
     w.store.sendMessage({ project_id: w.project.id, author: other, body: ":::question\nAnother session's?\n\n- [ ] A\n- [ ] B\n:::", reply_to: asked.id, idempotency_key: w.key() });
     w.store.sendReask(asked.id, { idempotency_key: w.key() });
     expect((await w.summary()).waiting).toBe(1);
-    expect(w.store.openDecisions().length).toBe(1);
+    expect(openNow(w.store)).toBe(1);
 
     // One the note lists, picked since, waits for its Send.
     const [first] = w.store.questionsOf(asked.id);
     w.store.savePicks(asked.id, [{ key: first!.key, revision: first!.revision, answer: { v: 1, key: first!.key, kind: "single", prompt: first!.prompt, selected: ["A"] } }]);
     expect((await w.summary()).waiting).toBe(2);
-    expect(w.store.openDecisions().length).toBe(2);
+    expect(openNow(w.store)).toBe(2);
   });
 
   test("a thread that came back: what the agent asked after the archive waits on the person as the Inbox says, and what the archive closed does not", async () => {

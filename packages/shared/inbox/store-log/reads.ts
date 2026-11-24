@@ -58,7 +58,6 @@ export function everyRead(store: InboxStore, options: EveryReadOptions): Record<
       sections: store.listSections(),
       // In no order (the server sorts them, inbox-compose.ts): compared by thread.
       unsent: byThread(store.unsentRows()),
-      decisions: store.openDecisions(),
     },
     threads,
     thread: Object.fromEntries(

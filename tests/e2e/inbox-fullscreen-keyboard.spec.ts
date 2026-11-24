@@ -15,7 +15,7 @@
  *   above the card, the toolbar stays on screen);
  * - an HTML page in full screen: its Reply;
  * - the reply's comments list (the sheet from the bottom edge): editing a comment;
- * - Decision mode's full-screen card: its note;
+ * - Decision mode's Send step: the box for the person's words;
  * - the Board's New card dialog, full screen on a phone: its notes and Add;
  * - the Feedback sheet: its message and Send.
  *
@@ -88,8 +88,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(home);
   mkdirSync(trap);
   mkdirSync(dataDir, { recursive: true });
-  // Decision mode (an experiment) and the Board (off by default) on, and the Board's first-visit dialog already seen, in this Inbox's own config.
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true }, inboxBoard: true, inboxBoardIntro: { shownAt: new Date().toISOString() } }));
+  // The Board (off by default) on, and the Board's first-visit dialog already seen, in this Inbox's own config (Decision mode is on by default).
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxBoard: true, inboxBoardIntro: { shownAt: new Date().toISOString() } }));
   // Nothing here may reach the real tailscale CLI.
   writeFileSync(join(trap, 'tailscale'), '#!/bin/sh\necho "inbox-fullscreen-keyboard: tailscale must not run" >&2\nexit 97\n');
   chmodSync(join(trap, 'tailscale'), 0o755);
@@ -211,7 +211,7 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
     }
 
     // First, while the thread's foot holds no comment or draft that could rearrange it.
-    test("Decision mode's card: its note stays above the keyboard", async () => {
+    test("Decision mode's Send step: the words box stays above the keyboard", async () => {
       const page = await open();
       await page.goto(`${world.url}#thread=${world.threadId}`);
       // The thread's open-questions list, then "Decide these 2" (the foot may still be settling its fit: try again).
@@ -221,15 +221,17 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
         await expect(decide).toBeVisible({ timeout: 2_000 });
       }).toPass({ timeout: 30_000 });
       await decide.click();
-      const dialog = page.locator('[data-decision-mode]');
-      await expect(dialog).toBeVisible();
-      await dialog.locator('[data-decision-note]').click();
-      const note = dialog.locator('textarea.ib-dm-ta');
-      await expect(note).toBeFocused();
+      const pane = page.locator('section.ib-pane');
+      await pane.locator('[data-decide-step="send"]').click();
+      const words = pane.locator('[data-decide-words]');
+      await words.click();
+      await expect(words).toBeFocused();
       await keyboardUp(page);
-      await note.evaluate((el) => el.scrollIntoView({ block: 'nearest' }));
-      await shot(page, tag, 'decision-note');
-      await clearOfKeyboard(page, { 'the note': note, 'the dialog': dialog });
+      await words.evaluate((el) => el.scrollIntoView({ block: 'nearest' }));
+      await shot(page, tag, 'decision-words');
+      await clearOfKeyboard(page, { 'the words box': words });
+      // Leave: nothing was typed, so the thread is as it was for the tests after this one.
+      await pane.locator('[data-decide-leave]').click();
     });
 
     test("an image in full screen: the composer's Comment and Reply sit on the keyboard, the image shrinks above, the toolbar stays", async () => {

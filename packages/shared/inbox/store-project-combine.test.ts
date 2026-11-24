@@ -315,12 +315,12 @@ describe("the group", () => {
     expect(code(() => store.createCard({ project_id: docs.id, by: agent(), title: "No", threads: [elsewhere.id] }))).toBe("card_other_project");
   });
 
-  test("threadsOf and the open decisions cover the group", () => {
+  test("threadsOf and the list's waiting rows cover the group", () => {
     const { store, docs, site } = open();
     const inB = say(store, site.id, "Which one?\n\n:::question\nPick one\n- [ ] Yes\n- [ ] No\n:::");
     store.combineProject(site.id, docs.id);
     expect(store.threadsOf(docs.id).map((t) => t.thread_id)).toEqual([inB.thread_id]);
-    expect(store.openDecisions({ projectId: docs.id }).map((d) => d.thread.id)).toEqual([inB.thread_id]);
+    expect(store.listRows({ projectId: docs.id }).filter((row) => row.questions.open > 0).map((row) => row.thread_id)).toEqual([inB.thread_id]);
   });
 
   test("the project menu's batches take the group's threads, and their Undo takes them back", () => {

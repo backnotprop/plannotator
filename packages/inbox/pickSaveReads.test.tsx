@@ -258,8 +258,8 @@ test.skipIf(!hasDom)('words typed in an answer already picked save once after th
   await until(() => (lastPicked as { answer?: { other?: string } } | null)?.answer?.other === words, 'the last words saved');
   await wait(SAVE_MS + 300);
   expect(field.value).toBe(words);
-  // The question stayed picked: nothing the list, the decisions or the drafts show moved, so nothing is read.
-  expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
+  // The question stayed picked: nothing the list or the drafts show moved, so nothing is read.
+  expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts')).toEqual([]);
 });
 
 test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing more, and a list read with nothing new draws nothing", async () => {
@@ -281,7 +281,7 @@ test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing 
   seq += 1;
   frame('record', { seq, kind: 'question', id: 'qst_own', thread_id: world.waiting, question: lastPicked });
   await wait(250);
-  expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
+  expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts')).toEqual([]);
   // Nothing changed since the last list read: it draws nothing.
   const drawn = commits;
   frame('pins', {});

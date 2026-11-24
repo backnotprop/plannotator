@@ -257,9 +257,8 @@ export const KNOWN_ANSWERS: readonly KnownAnswer[] = [
   },
   {
     id: 'decision-mode',
-    answer: 'Decision mode lets you answer agents one decision at a time',
-    experimental: true,
-    action: { kind: 'settings-experimental', label: 'Open Settings → Capabilities' },
+    answer: 'Decision mode lets you answer agents one message at a time',
+    action: { kind: 'settings-capabilities', label: 'Open Settings → Capabilities' },
     match: {
       phrases: ['decision mode', 'too many questions', 'one question at a time'],
       near: [
@@ -377,7 +376,7 @@ export function knownAnswerFor(text: string, hidden: readonly string[] = []): Kn
  * and a switch the Inbox does not report (an older Inbox). Nothing until settings load.
  */
 export function hiddenKnownAnswers(
-  settings: { launch?: { unsupported?: boolean }; board?: unknown; steps?: unknown; bro?: unknown; float_drafts?: unknown; experimental?: unknown } | null,
+  settings: { launch?: { unsupported?: boolean }; board?: unknown; steps?: unknown; bro?: unknown; float_drafts?: unknown; decision_mode?: unknown } | null,
 ): string[] {
   if (!settings) return [];
   const missing = (value: unknown, id: string) => (value ? [] : [id]);
@@ -387,6 +386,6 @@ export function hiddenKnownAnswers(
     ...missing(settings.steps, 'checklist'),
     ...missing(settings.bro, 'bro-mode'),
     ...missing(settings.float_drafts, 'float-drafts'),
-    ...missing(settings.experimental, 'decision-mode'),
+    ...missing(settings.decision_mode, 'decision-mode'),
   ];
 }

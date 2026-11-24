@@ -96,14 +96,7 @@
  * guide }`: the inline image's id under `before.png`, the attached copy's under
  * `before.png (attached)`).
  *
- * With `decisions` (decision mode, experimental; approval "inbox-decision-mode"):
- * config.json turns decision mode on, and each project gets only this seed in
- * place of the one above: Claude Code (`ses_da<i>`) asks two questions in one
- * message (a Stopped pick-one of three, recommended, then a two-way), and
- * Codex (`ses_db<i>`) asks one two-way question in the same thread (`reply_to`
- * a: decision mode is thread only, so the thread holds both agents). The
- * world is `{ project, root, decide: { a, b, sessionA, sessionB } }`. A `send`
- * line on stdin may carry `supersedes` (and `host`).
+ * A `send` line on stdin may carry `supersedes` (and `host`).
  *
  * With `first-run`, nothing is seeded (no project: the window opens on the
  * first-run screen) and the first line's `worlds` is empty. A stdin line
@@ -263,7 +256,6 @@ if (whatsNewMode) {
   process.env.PLANNOTATOR_UPDATE_API_URL = `http://127.0.0.1:${releaseApi.port}/releases/latest`;
 }
 const openInMode = extra === "open-in";
-const decisionsMode = extra === "decisions";
 /**
  * With a fourth argument `pulls`: Code review is on, and each world's `waiting` thread lists one open PR of its own
  * (`acme/web#<100 + i>`, the thread's own PR list), so its row offers Hide pull request. No forge is read: the test puts
@@ -275,11 +267,6 @@ if (pullsMode) {
   const file = join(dataDir, "config.json");
   const config = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>) : {};
   writeFileSync(file, JSON.stringify({ ...config, inboxCodeReview: true }));
-}
-// Decision mode is experimental and off by default: this mode turns it on in the scratch config.json.
-if (decisionsMode) {
-  mkdirSync(dataDir, { recursive: true });
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ experimental: { decisionMode: true } }));
 }
 // The Bro mode offer (approval "bro-mode"; its place in the line, approval "inbox-one-time-dialogs"): first use 3 days
 // ago, Snooze, the switches and the update-day dialogs behind the person, so only it can be next; heavy use (10 threads
@@ -485,45 +472,6 @@ for (let i = 0; i < (firstRunMode ? 0 : count); i++) {
   mkdirSync(root, { recursive: true });
   const project = store.ensureProject({ name: `billing-${i}`, root });
   const author = { kind: "agent" as const, host: "claude-code", session: `ses_a${i}`, name: "Claude Code" };
-  if (decisionsMode) {
-    const sessionA = `ses_da${i}`;
-    const sessionB = `ses_db${i}`;
-    const a = store.sendMessage({
-      project_id: project.id,
-      author: { ...author, session: sessionA },
-      body: [
-        "Two calls before the refund worker ships.",
-        "",
-        ":::question",
-        "Which way should the worker go on a Stripe 409?",
-        "",
-        "Stopped: the refund worker cannot ship without this.",
-        "",
-        "- [ ] Retry with the same key — Stripe charges once per key",
-        "- [ ] Fail to the dead-letter queue — today's behavior",
-        "- [ ] Retry with a new key — fastest, can refund twice",
-        "",
-        "Recommended: Retry with the same key",
-        ":::",
-        "",
-        ":::question",
-        "Page on-call after 5 tries?",
-        "",
-        "- [ ] Yes, page on-call",
-        "- [ ] No, a daily digest",
-        ":::",
-      ].join("\n"),
-    }).message;
-    const b = store.sendMessage({
-      project_id: project.id,
-      author: { kind: "agent", host: "codex", session: sessionB, name: "Codex" },
-      body: [":::question", "Ship the new flag off by default?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n"),
-      // In Claude Code's thread: decision mode is thread only, so one thread holds two agents' decisions.
-      reply_to: a.id,
-    }).message;
-    worlds.push({ project: project.id, root, decide: { a: a.id, b: b.id, sessionA, sessionB } } as unknown as World);
-    continue;
-  }
   const stopped = store.sendMessage({ project_id: project.id, author, body: STOPPED }).message;
   const waiting = store.sendMessage({ project_id: project.id, author: { ...author, session: `ses_b${i}` }, body: WAITING }).message;
   if (pullsMode) {

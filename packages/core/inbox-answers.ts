@@ -2,8 +2,7 @@
  * The answer a person's tap or typed words make for an agent's question, and
  * the body that saves it (`POST /api/inbox/messages/:id/picks`). Pure, with no
  * window code, so every client that answers a question builds the same answer:
- * the window's decision mode (packages/inbox/decisions/model.ts), its client
- * (packages/inbox/api.ts) and the phone's contract vectors
+ * the window's client (packages/inbox/api.ts) and the phone's contract vectors
  * (apps/mobile/contract, scripts/mobile/vectors.ts).
  */
 import { readInboxQuestionKind, type InboxQuestion } from './inbox-types';

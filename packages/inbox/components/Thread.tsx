@@ -214,11 +214,12 @@ import { ReviewContextLine } from '../thread/ReviewContextLine';
 import { replyWordsWithMentions, useMentionBoxOpener } from '../threadMentions';
 import { labelledAuthorName } from '../parts/AuthorName';
 import { MessageBody } from '../parts/MessageBody/MessageBody';
+import { DecideBody, DecideFoot, DecideHead, useDecide, type DecideFrameProps } from '../decisions/DecideFrame';
 
 export { AckPill, MessageBody };
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, onSide, onSideWords, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, onSide, onSideWords, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decisionMode = false, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -328,6 +329,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   // Picks saved at once; shown before the server answers, then from the server.
   const [pending, setPending] = useState<ReadonlyMap<string, QuestionAnswer | null>>(new Map());
+  // Decision mode (approval "inbox-decision-mode-one-send"): this thread's messages one at a time, its own cards and Send.
+  const dm = useDecide({ on: decisionMode, threadId: thread.thread_id, messages: thread.messages, live: liveMessage, pending });
   // The question whose prototypes are open in the full window (PrototypeWindow.tsx).
   const [proto, setProto] = useState<{ messageId: string; key: string } | null>(null);
   const onPickSavesNow = useRef(onPickSaves);
@@ -918,17 +921,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       const element = card ?? actionRow ?? article;
       stopHold();
       element.scrollIntoView?.({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
-      // The card's prompt is what names it (its aria-labelledby): focus it there when asked, else the card. An
-      // action row's prompt is its task, the row's toggle.
-      const promptId = target.focus === 'prompt' ? card?.getAttribute('aria-labelledby') : null;
-      const prompt = promptId
-        ? card!.querySelector<HTMLElement>(`#${CSS.escape(promptId)}`)
-        : target.focus === 'prompt' && actionRow
-          ? actionRow.querySelector<HTMLElement>('[data-action-toggle]')
-          : null;
-      const focused = prompt ?? element;
-      if (!focused.hasAttribute('tabindex')) focused.setAttribute('tabindex', '-1');
-      focused.focus({ preventScroll: true });
+      if (!element.hasAttribute('tabindex')) element.setAttribute('tabindex', '-1');
+      element.focus({ preventScroll: true });
       element.classList.remove('ib-q-target-out');
       element.classList.add('ib-q-target');
       setTimeout(() => {
@@ -2039,7 +2033,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   useShortcutScope({
     scope: inboxThreadShortcuts,
-    handlers: {
+    // Decision mode adds no keys, and the thread's keys rest while it shows (they act on what it hides).
+    handlers: dm.deciding ? {} : {
       nextMessage: { when: readKeyAllowed, handle: () => moveMessage(1) },
       previousMessage: { when: readKeyAllowed, handle: () => moveMessage(-1) },
       firstNew: { when: readKeyAllowed, handle: () => jumpNew() },
@@ -3850,10 +3845,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       onArchive={() => void resolve(true)}
     />
   ) : null;
-  // Shown whenever a question is listed (open, or answered in the draft) or an action item waits, or Re-ask or "Decide
-  // these" is offered (they live in the list, so never out of reach). Every question answered in the draft: the icon
-  // alone, "? ⌄" (approval "reply-bar-pairs": the draft counts those), so the list and its Unskip stay in reach.
-  const openQShown = openQuestionsShown(openQ.questions, reaskShown, openActions.length) || decide !== null;
+  // Shown whenever a question is listed (open or in the draft) or an action item waits, or Re-ask or Decide is offered
+  // (they live in the list). All in the draft: the icon alone, "? ⌄" (approval "reply-bar-pairs"), Unskip in reach.
+  const openQShown = openQuestionsShown(openQ.questions, reaskShown, openActions.length) || dm.entry !== null;
   const measureOpenQuestions = () => measureOpenPlaces(bodyRef.current, foldRef.current, openQ.questions, openActions);
 
   // The error after a failed Send (or Re-ask) sits ABOVE the button row it belongs to (approval
@@ -4563,6 +4557,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         : null,
     [reuseOffered, resolved, allFiles, box.open, reuseHeld],
   );
+  const dmFrame: DecideFrameProps = { dm, messages: thread.messages, subject: thread.subject ?? thread.thread_name ?? 'Thread', machine: machine?.name ?? null, phone, body: bodyRef, answers: draftAnswers, actions: draftActions, words: replyText, onWords: changeReply, send: () => void latestSend.current() };
   return (
     <CommentPictures thread={thread.thread_id} records={records}>
     <ReuseContext.Provider value={reuseApi}>
@@ -4586,7 +4581,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           </span>
         </div>
       )}
-      <div className="ib-phead" ref={headRef} data-artifacts-on={artifactsOn ? '' : undefined}>
+      {dm.deciding && <DecideHead {...dmFrame} />}
+      <div className="ib-phead" ref={headRef} hidden={dm.deciding} data-artifacts-on={artifactsOn ? '' : undefined}>
         {/* A phone leads with the way back to the list; the ⋯ menu (with Archive) sits at the right, where the close was. */}
         {phone && artifactsOn ? (
           // On a phone Artifacts is a screen of its own: its way back is to the thread (the browser's Back, so the swipe agrees).
@@ -4742,7 +4738,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       <div
         className={`ib-pbody${one ? '' : ' ib-folding'}`}
         ref={bodyRef}
-        hidden={artifactsOn}
+        hidden={artifactsOn} data-deciding={dm.deciding ? dm.move : undefined}
         // A named session wrote here (issue #2450): every head's name column is wider, so the rows still line up.
         data-session-labels={thread.messages.some((m) => m.author.kind === 'agent' && labelOf(sessionLabels, m.author.session)) ? '' : undefined}
       >
@@ -4877,8 +4873,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               </span>
           </div>
         )}
+        {dm.deciding && <DecideBody {...dmFrame} />}
         {thread.messages.flatMap((message, index) => {
           const before: React.ReactNode[] = [];
+          if (dm.deciding && message.id !== dm.current) return before;
           // The middle of a long read run: one fold ("Show 20 earlier · N hidden") in place of the part still hidden.
           // What is still hidden always starts at the run's first message, so no slice is needed here.
           const run = fold.hidden.findIndex((ids, i) => (fold.shown[i] ?? 0) < ids.length && ids[0] === message.id);
@@ -4887,7 +4885,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // "Back from snooze" takes that line's words when it sits there, and otherwise draws the same line itself.
           // With more than 20 new, the older new ones start behind a fold (planFolds): the line sits above that fold.
           const backHere = snoozeBackPlace.current?.above === message.id;
-          if (run < 0 && hiddenNow.has(message.id)) return before;
+          if (run < 0 && hiddenNow.has(message.id) && !dm.deciding) return before;
           if (isNew && index > 0 && thread.messages.findIndex((m) => fresh.has(m.id)) === index) {
             before.push(
               <div className="ib-newdiv" key="new-divider" data-new-divider="" data-snooze-back-line={backHere ? '' : undefined} role="separator" aria-label={backHere ? `${snoozeBackWords}: ${plural(fresh.size, 'new message')}` : `New since you looked: ${plural(fresh.size, 'message')}`}>
@@ -4902,7 +4900,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             );
           }
           if (run >= 0) before.push(foldBand(run));
-          if (hiddenNow.has(message.id)) return before;
+          if (hiddenNow.has(message.id) && !dm.deciding) return before;
           for (const move of threadMoves.byMessage.get(message.id) ?? []) before.push(moveLine(move, message));
           const isAgent = message.author.kind === 'agent';
           // A named session's message keeps its agent's name and adds the session's after it, quieter (issue #2450,
@@ -4955,7 +4953,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             before.push(<RunDivider key={message.id} message={message} messages={thread.messages} run={runLine} tail={tail} />);
             return before;
           }
-          const open = one || !fold.folded.has(message.id);
+          const open = one || dm.deciding || !fold.folded.has(message.id);
           if (!open) {
             const holdings = holdingsOf(message, {
               delivered: isDelivered(message, root),
@@ -5336,7 +5334,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           />
         </div>
       )}
-      <div className="ib-pfoot" hidden={artifactsOn} data-under={textUnder ? '' : undefined}>
+      <div className="ib-pfoot" hidden={artifactsOn || dm.deciding} data-under={textUnder ? '' : undefined}>
         {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
         <div role="status" id={noteId} data-asker-note="">
           {/* With the pill there, the open box's pill says who gets the reply (and that it ended): no note above it. */}
@@ -5685,7 +5683,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       ? { label: reaskItemLabel(reaskOpen), tooltip: reaskTooltip(reaskList), busy: reasking, onReask: () => void sendReask() }
                       : null
                   }
-                  decide={decide}
+                  decide={dm.entry}
                   triggerRef={reaskRef}
                   phone={phone}
                   measure={measureOpenQuestions}
@@ -5771,6 +5769,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         )}
         {lineError && !errorAbove && errorLine}
       </div>
+      {dm.deciding && <DecideFoot {...dmFrame} />}
     </section>
     {protoWindow}
     {openAttachment && (

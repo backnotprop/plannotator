@@ -1,6 +1,6 @@
 /**
  * The Inbox window's page marks (pageMarks.ts): the attributes its build keys inbox.css's anchored `:has()` rules on
- * (build/inbox-page-marks.ts). What regresses if these fail: a look keyed on a part (the room the decision pill takes,
+ * (build/inbox-page-marks.ts). What regresses if these fail: a look keyed on a part (the room the recipient list takes,
  * the page's own background) does not come with the part, or stays after it went; with the tour's layer and the
  * window both holding `data-pn-inbox`, the tour's end takes it from the window.
  *
@@ -9,10 +9,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { markInboxPage } from './pageMarks';
+import { markInboxPage, markRecipientList } from './pageMarks';
 
 const hasDom = typeof document !== 'undefined';
-const { DecisionPill } = (hasDom ? await import('./decisions/entry') : {}) as typeof import('./decisions/entry');
 
 let root: Root | null = null;
 afterEach(() => {
@@ -46,16 +45,15 @@ describe.skipIf(!hasDom)('the Inbox window\'s page marks', () => {
     expect(page()).toEqual([false, false]);
   });
 
-  test('the decision pill marks the .pn-inbox it is in, and the mark goes with it', () => {
+  test('a part marks the .pn-inbox it is in, and the mark goes with it', () => {
     const inbox = () => document.querySelector('.pn-inbox')!;
     draw(
       <div className="pn-inbox">
-        <DecisionPill left={3} onResume={() => {}} />
+        <div ref={markRecipientList} className="ib-rpick" />
       </div>,
     );
-    expect(document.querySelector('.ib-dm-pill')).not.toBeNull();
-    expect(inbox().hasAttribute('data-ib-dm-pill')).toBe(true);
+    expect(inbox().hasAttribute('data-ib-rpick')).toBe(true);
     draw(<div className="pn-inbox" />);
-    expect(inbox().hasAttribute('data-ib-dm-pill')).toBe(false);
+    expect(inbox().hasAttribute('data-ib-rpick')).toBe(false);
   });
 });

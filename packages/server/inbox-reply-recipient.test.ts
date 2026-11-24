@@ -15,7 +15,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxDecision, InboxReplyDraft, InboxThread } from "@plannotator/core/inbox-types";
+import type { InboxReplyDraft, InboxThread } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_POLL_PATH, INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -139,7 +139,7 @@ describe("an agent answering from another folder keeps its project", () => {
 });
 
 describe("the writer's repository rides on the window's reads", () => {
-  test("the first read after a restart already carries the writer's repo, on the thread and its decision; an agent's read never does", async () => {
+  test("the first read after a restart already carries the writer's repo, on the thread; an agent's read never does", async () => {
     const envBefore = { data: process.env.PLANNOTATOR_DATA_DIR, experimental: process.env.PLANNOTATOR_EXPERIMENTAL };
     try {
       const first = await setup();
@@ -167,11 +167,6 @@ describe("the writer's repository rides on the window's reads", () => {
       const read = await thread(server, started.thread_id);
       expect(read.messages.find((m) => m.id === fromThere.message_id)?.from_project?.repo).toEqual(writerRepo);
       expect(read.messages.find((m) => m.id === started.message_id)?.from_project).toBeUndefined();
-
-      const on = await fetch(`${base(server)}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: server.serverSession, experimental: { decision_mode: true } }) });
-      expect(on.status).toBe(200);
-      const decisions = ((await (await fetch(`${base(server)}/api/inbox/decisions`)).json()) as { decisions: InboxDecision[] }).decisions;
-      expect(decisions.find((d) => d.message.id === fromThere.message_id)?.message.repo).toEqual(writerRepo);
 
       const agentRead = await client.callTool({ name: "read_thread", arguments: { thread_id: started.thread_id, agent_session: "ses-a", format: "full" } });
       expect(JSON.stringify(agentRead)).not.toContain("backnotprop/plannotator");

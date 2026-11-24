@@ -1823,53 +1823,6 @@ export interface InboxQuestion extends InboxQuestionContract {
   attachment?: InboxQuestionAttachment | null;
 }
 
-/**
- * Decision mode (approval "inbox-decision-mode", experimental): one open or
- * picked question or action item, with what a card needs to be answered
- * without opening its thread. `GET /api/inbox/decisions` lists them; a
- * read-only projection over the store (no record of its own).
- */
-export interface InboxDecision {
-  /** `<message id>/<key>`. */
-  id: string;
-  /** The question as `GET /api/inbox/threads/:id` serves it (its `revision` is what a pick sends). */
-  question: InboxQuestion;
-  message: {
-    id: string;
-    created_at: string;
-    author: InboxAuthor;
-    /** The body's prose before its first block, cut to about 280 characters; null when there is none. */
-    excerpt: string | null;
-    repo?: InboxProjectRepo | null;
-  };
-  /**
-   * Pictures and files the decision can show, as references only (bytes come
-   * from the attachment and message-image routes): the message's captured
-   * images whose `ref` the question names (its context, its choices), and the
-   * message's attached files.
-   */
-  pictures: {
-    inline: { attachment_id: string; ref: string; name: string; media_type: string | null; width: number | null; height: number | null }[];
-    /** `paths` (additive): the file's real path, and the path it was named by when that was a link; a `Shows:` file is matched by them. */
-    attachments: { attachment_id: string; name: string; kind: string; size: number; media_type: string | null; paths?: string[] }[];
-  };
-  /** `project.repo` (additive, the window's read): its git origin, as on a thread; refs in the card link into it. */
-  thread: { id: string; subject: string | null; thread_name: string | null; project: { id: string; name: string; repo?: InboxProjectRepo | null }; section: InboxSectionId };
-  /**
-   * The agent session that asked: one reply per session per thread
-   * (`key`: `s:<host>\u0000<session>`, or `m:<message id>` for a message with
-   * no session, which is a reply of its own).
-   */
-  session: { key: string; host: string | null; session: string | null; name: string | null; wakes: boolean };
-}
-
-export interface InboxDecisionsModel {
-  serverSession: string;
-  cursor: number;
-  /** In queue order: each session's decisions together, a thread at a time, the most blocked session first, Stopped first. */
-  decisions: InboxDecision[];
-}
-
 /** Workspaces' `NotificationQuestionSummary`: a row's questions, summed. */
 export interface InboxQuestionSummary {
   /** Open questions and action items together: an action item counts like a question for every list rule. */

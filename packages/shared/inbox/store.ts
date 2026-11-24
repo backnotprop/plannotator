@@ -13,7 +13,6 @@
 
 import { appendFileSync, chmodSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { inboxDecisionExcerpt, orderInboxDecisions, type InboxDecisionCandidate } from "./decisions";
 import {
   checkInboxAnswer,
   composeInboxReaskBody,
@@ -28,7 +27,6 @@ import {
   inboxReplyStillOpenOf,
   inboxFileQuestionKey,
   inboxQuestionsInPlaceOrder,
-  inboxQuestionWaitsOnPerson,
   inboxRowWaits,
   isInboxQuestionSupersedable,
   parseInboxQuestionBlocks,
@@ -70,7 +68,6 @@ import {
   type InboxReplyViewing,
   type InboxSentFrom,
   type InboxAuthor,
-  type InboxDecision,
   type InboxGuideRef,
   type InboxLine,
   type InboxMessage,
@@ -2978,91 +2975,6 @@ export class InboxStore {
     return out;
   }
 
-  /**
-   * Decision mode's projection (approval "inbox-decision-mode", brief §10):
-   * every question and action item that waits on the person (core's
-   * `inboxQuestionWaitsOnPerson`) in a live agent message, across threads, in
-   * queue order. What a waiting Re-ask note lists is left out, since the
-   * agent is about to ask it again (per note, so a thread where one session
-   * was asked to re-ask still shows another session's questions); a thread
-   * whose every open question is listed (the list puts it in Sent) shows
-   * nothing. Read only; no record.
-   */
-  openDecisions(filter: { projectId?: string | null } = {}): InboxDecision[] {
-    const candidates: InboxDecisionCandidate[] = [];
-    for (const [threadId] of this.threadMembers) {
-      const root = this.messages.get(threadId);
-      if (!root || root.thread_id !== threadId) continue;
-      if (filter.projectId && !this.sameProject(root.project_id, filter.projectId)) continue;
-      const waiting: { message: InboxMessage; question: InboxQuestion }[] = [];
-      // What a waiting Re-ask note lists is about to be asked again: left out, per note (so per session).
-      const reasked = this.reaskListedIds(threadId);
-      for (const message of this.threadMessages(threadId)) {
-        if (message.author.kind !== "agent" || this.closedByArchive(message)) continue;
-        for (const question of this.questionsOf(message.id)) {
-          // A listed question the person picked since still waits for their Send (as the list's rule 2a reads it).
-          const reask = question.state === "open" && reasked.has(`${message.id}/${question.key}`);
-          if (inboxQuestionWaitsOnPerson(question) && !reask) waiting.push({ message, question });
-        }
-      }
-      if (waiting.length === 0) continue;
-      const row = this.listRow(threadId);
-      if (!row) continue;
-      for (const { message, question } of waiting) {
-        const author = message.author as Extract<InboxAuthor, { kind: "agent" }>;
-        const ownChoices = new Set(question.choices.flatMap((c) => (c.image ? [c.image.src] : [])));
-        const inBlock = (ref: string) =>
-          ownChoices.has(ref) ||
-          [question.context ?? "", ...question.choices.flatMap((c) => [c.label, c.description ?? ""])].some((text) => text.includes(ref));
-        // Another question's picture choices are that question's options, not this one's context: left out, unless
-        // this question shows the same picture too.
-        const otherChoices = new Set(
-          this.questionsOf(message.id)
-            .filter((other) => other.key !== question.key)
-            .flatMap((other) => other.choices.flatMap((c) => (c.image ? [c.image.src] : []))),
-        );
-        const images = (message.inline_images ?? [])
-          .filter((image) => !otherChoices.has(image.ref) || inBlock(image.ref))
-          .sort((a, b) => Number(inBlock(b.ref)) - Number(inBlock(a.ref)));
-        candidates.push({
-          seq: this.messageSeq.get(message.id) ?? 0,
-          decision: {
-            id: `${message.id}/${question.key}`,
-            question,
-            message: { id: message.id, created_at: message.created_at, author: message.author, excerpt: inboxDecisionExcerpt(message.body) },
-            pictures: {
-              inline: images.map((image) => ({
-                attachment_id: image.id,
-                ref: image.ref,
-                name: image.name,
-                media_type: image.media_type ?? null,
-                width: image.width ?? null,
-                height: image.height ?? null,
-              })),
-              attachments: (message.attachments ?? []).map((file) => ({
-                attachment_id: file.id,
-                name: file.name,
-                kind: file.kind,
-                size: file.size,
-                media_type: file.media_type ?? null,
-                paths: [file.path, ...(file.named_path ? [file.named_path] : [])],
-              })),
-            },
-            thread: { id: threadId, subject: row.subject, thread_name: row.thread_name, project: row.project, section: row.section },
-            session: {
-              key: author.session ? `s:${author.host ?? ""}\u0000${author.session}` : `m:${message.id}`,
-              host: author.host,
-              session: author.session,
-              name: author.name,
-              wakes: message.wakes === true,
-            },
-          },
-        });
-      }
-    }
-    return orderInboxDecisions(candidates);
-  }
-
   /** The list, placed in its sections; a project filter keeps the sections and drops other rows. */
   listSections(projectId?: string | null): InboxListSection[] {
     return inboxListSections(this.listRows({ projectId }));
@@ -5830,7 +5742,7 @@ export class InboxStore {
 
   /**
    * The questions of a thread a still-waiting Re-ask note lists: the agent is
-   * about to ask them again, so decision mode leaves those still open out (the
+   * about to ask them again, so what waits on the person leaves those still open out (the
    * rest of the thread, another session's questions included, stays).
    *
    * A note waits exactly as the list's rule 2a reads it: until the session it

@@ -84,9 +84,9 @@ export interface ThreadSlotHost {
   onPickSaves: (ids: ReadonlySet<string>, paneClosed: boolean | undefined, threadId: string | null) => void;
   afterWrite: () => Promise<void>;
   rowPatches: ReadonlyMap<string, { read_at?: unknown }>;
-  decideInThread: (threadId: string) => ThreadPaneProps['decide'];
+  /** Decision mode is on (Settings → Capabilities). */
+  decisionModeOn: boolean;
   searchLanding: RefObject<SearchLanding | null>;
-  decideLanding: RefObject<{ messageId: string; questionKey: string } | null>;
   landed: () => void;
   seenOnSight: (threadId: string, through: number) => void;
   /** A dialog, a guide or New message is over the window. */

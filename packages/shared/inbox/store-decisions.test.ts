@@ -1,9 +1,10 @@
 /**
- * Decision mode's projection in the store (approval "inbox-decision-mode",
- * brief §10): `openDecisions()` lists exactly what waits on the person, in
- * queue order, and it can never disagree with the list's sections or a
- * thread's open-questions list, because all three read core's one rule
- * (`inboxQuestionWaitsOnPerson`).
+ * What waits on the person, read three ways that must never disagree: the
+ * list's sections and counts, a thread's open-questions list (core's
+ * `threadOpenQuestions` / `threadOpenActions`, what the thread draws and
+ * decision mode walks), and core's one rule (`inboxQuestionWaitsOnPerson`).
+ * A waiting Re-ask note (`reaskListedIds`) takes what it lists out, per
+ * session and only while that session is there.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -12,8 +13,7 @@ import { join } from "node:path";
 import fc from "fast-check";
 import { inboxQuestionWaitsOnPerson } from "@plannotator/core/inbox-questions";
 import type { InboxAuthor, InboxListRow, InboxQuestion } from "@plannotator/core/inbox-types";
-import { threadOpenQuestions } from "../../inbox/openQuestions";
-import { inboxDecisionExcerpt, orderInboxDecisions } from "./decisions";
+import { threadOpenActions, threadOpenQuestions } from "../../inbox/openQuestions";
 import { InboxError } from "./schema";
 import { InboxStore } from "./store";
 
@@ -41,54 +41,49 @@ function open() {
 
 const yes = (q: InboxQuestion) => ({ v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [q.choices[0]?.label ?? "Yes"] });
 
-describe("openDecisions", () => {
-  test("orders sessions by how blocked they are, a thread at a time, Stopped first", () => {
-    const { store, project } = open();
-    const [a, b, c] = AGENTS;
-    store.sendMessage({ project_id: project.id, author: a!, body: `Plain.\n\n${block("A: rename the flag?")}` });
-    const bMsg = store.sendMessage({
-      project_id: project.id,
-      author: b!,
-      body: `${block("B: plain one?")}\n\n${block("B: retry on 409?", ["Stopped: the worker cannot ship without this."])}`,
-    }).message;
-    store.sendMessage({ project_id: project.id, author: c!, body: block("C: merge now?", ["Holds up: the release"]) });
-    const decisions = store.openDecisions();
-    expect(decisions.map((d) => d.question.prompt)).toEqual(["B: retry on 409?", "B: plain one?", "C: merge now?", "A: rename the flag?"]);
-    const first = decisions[0]!;
-    expect(first.id).toBe(`${bMsg.id}/${first.question.key}`);
-    expect(first.session).toEqual({ key: "s:codex\u0000ses_b", host: "codex", session: "ses_b", name: null, wakes: false });
-    expect(first.thread.section).toBe("stopped");
-    expect(first.question.revision).toBe(0);
-    expect(first.message.excerpt).toBeNull();
-    expect(decisions.at(-1)!.message.excerpt).toBe("Plain.");
+/**
+ * Every question and action item a listed thread's open-questions list holds, less the open ones a waiting Re-ask
+ * note lists (the agent is about to ask those again).
+ */
+function waiting(store: InboxStore): { id: string; threadId: string; question: InboxQuestion }[] {
+  return store.listRows().flatMap((row) => {
+    const messages = store.thread(row.thread_id)?.messages ?? [];
+    const listed = store.reaskListedIds(row.thread_id);
+    return [
+      ...threadOpenQuestions(messages).questions.map((q) => ({ id: q.id, threadId: row.thread_id, question: q.question })),
+      ...threadOpenActions(messages).map((a) => ({ id: a.id, threadId: row.thread_id, question: a.action })),
+    ].filter((item) => !(item.question.state === "open" && listed.has(item.id)));
   });
+}
+const prompts = (store: InboxStore) => waiting(store).map((item) => item.question.prompt).sort();
 
+describe("what waits on the person", () => {
   test("keeps a pick until it is sent; drops sent, replaced, set-aside, archived and re-asked questions", () => {
     const { store, project } = open();
     const [a, b] = AGENTS;
     const m1 = store.sendMessage({ project_id: project.id, author: a!, body: `${block("Q1?")}\n\n${block("Q2?")}` }).message;
     const m2 = store.sendMessage({ project_id: project.id, author: b!, body: block("Q3?") }).message;
-    expect(store.openDecisions()).toHaveLength(3);
+    expect(waiting(store)).toHaveLength(3);
     const [q1] = store.questionsOf(m1.id);
     store.savePicks(m1.id, [{ key: q1!.key, revision: q1!.revision, answer: yes(q1!) }]);
-    const picked = store.openDecisions().find((d) => d.question.key === q1!.key)!;
+    const picked = waiting(store).find((d) => d.question.key === q1!.key && d.id.startsWith(m1.id))!;
     expect(picked.question.state).toBe("picked");
     expect(picked.question.revision).toBe(1);
     store.sendReply(m1.id, { idempotency_key: "r1", questions: [{ key: q1!.key, revision: 1 }] });
-    expect(store.openDecisions().map((d) => d.question.prompt)).toEqual(["Q2?", "Q3?"]);
+    expect(prompts(store)).toEqual(["Q2?", "Q3?"]);
     // Replaced by the agent: the old one leaves, its replacement joins.
     store.sendMessage({ project_id: project.id, author: a!, reply_to: m1.id, body: block("Q2, again?"), supersedes: [m1.id] });
-    expect(store.openDecisions().map((d) => d.question.prompt).sort()).toEqual(["Q2, again?", "Q3?"]);
+    expect(prompts(store)).toEqual(["Q2, again?", "Q3?"]);
     // Mark read sets the thread's questions aside.
     store.markRead(m1.thread_id, true);
-    expect(store.openDecisions().map((d) => d.question.prompt)).toEqual(["Q3?"]);
+    expect(prompts(store)).toEqual(["Q3?"]);
     // A Re-ask note that waits takes the thread out (the list puts it in Sent).
     store.sendReask(m2.id, { idempotency_key: "k1" });
-    expect(store.openDecisions()).toEqual([]);
+    expect(waiting(store)).toEqual([]);
     const m3 = store.sendMessage({ project_id: project.id, author: b!, body: block("Q4?"), thread: "other" }).message;
-    expect(store.openDecisions().map((d) => d.question.prompt)).toEqual(["Q4?"]);
+    expect(prompts(store)).toEqual(["Q4?"]);
     store.resolveThread(m3.id, true);
-    expect(store.openDecisions()).toEqual([]);
+    expect(waiting(store)).toEqual([]);
   });
 
   test("a Re-ask note leaves out what it lists, per session and only while that session is there", () => {
@@ -97,18 +92,18 @@ describe("openDecisions", () => {
     // A asks through a connection that wakes its session (the only kind that can be told ended).
     const m1 = store.sendMessage({ project_id: project.id, author: a!, body: block("A asks?"), wakes: true }).message;
     const m2 = store.sendMessage({ project_id: project.id, author: b!, reply_to: m1.id, body: block("B asks?") }).message;
-    expect(store.openDecisions().map((d) => d.question.prompt)).toEqual(["A asks?", "B asks?"]);
+    expect(prompts(store)).toEqual(["A asks?", "B asks?"]);
     // The person asks A to ask again: A's question is about to be asked again, B's still waits here.
     store.sendReask(m1.id, { idempotency_key: "k1" });
     expect(store.listRow(m1.thread_id)!.reask_pending).toBe(false);
-    expect(store.openDecisions().map((d) => d.question.prompt)).toEqual(["B asks?"]);
+    expect(prompts(store)).toEqual(["B asks?"]);
     // Bounded: once A's session has ended (presence, with its grace), nobody will ask again, so its question is back.
     store.setDeliveryPresence({ connection: () => null, askerLive: (session) => session !== a!.session });
-    expect(store.openDecisions().map((d) => d.question.prompt).sort()).toEqual(["A asks?", "B asks?"]);
+    expect(prompts(store)).toEqual(["A asks?", "B asks?"]);
     store.setDeliveryPresence(null);
     // A writes again: its note no longer waits, and what it still has open comes back.
     store.sendMessage({ project_id: project.id, author: a!, reply_to: m2.id, body: "Looking at it." });
-    expect(store.openDecisions().map((d) => d.question.prompt).sort()).toEqual(["A asks?", "B asks?"]);
+    expect(prompts(store)).toEqual(["A asks?", "B asks?"]);
   });
 
   test("an MCP-only agent's Re-ask note waits until it writes again, whatever presence says", () => {
@@ -117,13 +112,13 @@ describe("openDecisions", () => {
     // No `wakes`: an agent that reads the Inbox through MCP. Its session is never told ended.
     const m1 = store.sendMessage({ project_id: project.id, author: a!, body: block("A asks?") }).message;
     store.sendReask(m1.id, { idempotency_key: "k1" });
-    expect(store.openDecisions()).toEqual([]);
+    expect(waiting(store)).toEqual([]);
     store.setDeliveryPresence({ connection: () => null, askerLive: () => false });
-    expect(store.openDecisions()).toEqual([]);
+    expect(waiting(store)).toEqual([]);
     store.setDeliveryPresence(null);
     // It writes again: the note no longer waits.
     store.sendMessage({ project_id: project.id, author: a!, reply_to: m1.id, body: "Back on it." });
-    expect(store.openDecisions().map((d) => d.question.prompt)).toEqual(["A asks?"]);
+    expect(prompts(store)).toEqual(["A asks?"]);
   });
 
   test("with unsentOnly (decision mode), a pick that raced a Send (same revision, read before it) never reopens the sent question", () => {
@@ -146,67 +141,25 @@ describe("openDecisions", () => {
       expect(store.questionsOf(m.id)[0]!.state).toBe("sent");
       expect(store.questionsOf(m.id)[0]!.answer?.selected).toEqual(["Yes"]);
     }
-    expect(store.openDecisions()).toHaveLength(0);
+    expect(waiting(store)).toHaveLength(0);
     // Without it (the thread, a phone) a sent question takes a pick again, as the thread-state model has it.
     store.savePicks(m.id, [{ key: q0.key, revision: picked.revision, answer: { ...yes(q0), selected: ["No"] } }]);
     expect(store.questionsOf(m.id)[0]!.state).toBe("picked");
   });
 
-  test("lists action items, and the message's files as references", () => {
+  test("an action item waits until it is marked done", () => {
     const { store, project } = open();
     const m = store.sendMessage({ project_id: project.id, author: AGENTS[0]!, body: `Before.\n\n${block("Approve the 2FA prompt", ["Where: https://example.com"], "action")}` }).message;
-    const [d] = store.openDecisions();
+    const [d] = waiting(store);
     expect(d!.question.kind).toBe("action");
-    expect(d!.message.id).toBe(m.id);
-    expect(d!.pictures).toEqual({ inline: [], attachments: [] });
+    expect(d!.id.startsWith(`${m.id}/`)).toBe(true);
     // Marked done: on its way (its Undo window), it waits on nobody.
     store.markAction(m.id, d!.question.key, { outcome: "done" });
-    expect(store.openDecisions()).toEqual([]);
-  });
-
-  test("a question's card shows only its own pictures: another question's picture choices are left out", () => {
-    const { store, project } = open();
-    const image = (ref: string, n: number) => ({ id: `att_${"0".repeat(25)}${n}`, path: `/work/billing/${ref}`, named_path: null, name: ref, kind: "image" as const, sent_sha256: "a".repeat(64), size: 1, sent_mtime: "2026-11-01T00:00:00.000Z", ref });
-    const body = [
-      "Marker styles. ![Today](today.png)",
-      "",
-      ":::question",
-      "Which marker?",
-      "",
-      "- [ ] A · Mark — ![Mark](mark.png) a mark",
-      "- [ ] B · Dot — ![Dot](dot.png) a dot",
-      ":::",
-      "",
-      ":::question",
-      "Which variant?",
-      "",
-      "- [ ] A · Strip — ![Strip](strip.png) the strip",
-      "- [ ] B · Mark again — ![Mark](mark.png) the mark, shared",
-      "- [ ] C · Bar — ![Bar](bar.png) a bar",
-      ":::",
-    ].join("\n");
-    store.sendMessage({
-      project_id: project.id,
-      author: AGENTS[0]!,
-      body,
-      inline_images: ["today.png", "mark.png", "dot.png", "strip.png", "bar.png"].map((ref, n) => image(ref, n)) as never,
-    });
-    const refs = (prompt: string) => store.openDecisions().find((d) => d.question.prompt === prompt)!.pictures.inline.map((p) => p.ref).sort();
-    // Its own choices' pictures and the message's other images; not Q1's Dot. Mark is Q2's own choice too, so it stays.
-    expect(refs("Which variant?")).toEqual(["bar.png", "mark.png", "strip.png", "today.png"]);
-    // Q1 never shows Q2's Strip or Bar.
-    expect(refs("Which marker?")).toEqual(["dot.png", "mark.png", "today.png"]);
-  });
-
-  test("the excerpt is the prose before the first block, one line, cut", () => {
-    expect(inboxDecisionExcerpt("Hello **there**.\n\n![shot](a.png) See [the plan](x.md).\n\n:::question\nQ?\n:::")).toBe("Hello **there**. See the plan.");
-    expect(inboxDecisionExcerpt(":::question\nQ?\n:::")).toBeNull();
-    expect(inboxDecisionExcerpt(`${"word ".repeat(200)}\n:::action\nDo\n:::`)!.length).toBeLessThanOrEqual(280);
-    expect(orderInboxDecisions([])).toEqual([]);
+    expect(waiting(store)).toEqual([]);
   });
 });
 
-// ─────────────────── The Decide count agrees with the list and the popover ───────────────────
+// ─────────────────── A thread's open questions agree with the list ───────────────────
 
 type Op =
   | { op: "send"; agent: number; kind: "plain" | "stopped" | "holds" | "action" | "multi"; into: number | null; named: boolean }
@@ -237,11 +190,10 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
   fc.record({ op: fc.constant("act" as const), at: fc.nat(40) }),
 );
 
-/** What the list says waits on the person: the rows it places in Stopped, Holding and Waiting, plus "Answered, not sent". */
 /**
- * What the list says waits, less what a waiting Re-ask note lists and is still
- * open: the agent is about to ask those again, so decision mode leaves them
- * out (per note, so per session; the list keeps counting them in its row).
+ * What the list says waits on the person (the rows it places in Stopped, Holding and Waiting, plus "Answered, not
+ * sent"), less what a waiting Re-ask note lists and is still open: the agent is about to ask those again (per note,
+ * so per session; the list keeps counting them in its row).
  */
 function listCount(store: InboxStore, rows: readonly InboxListRow[]): number {
   let n = 0;
@@ -285,8 +237,8 @@ function bodyOf(kind: Op & { op: "send" }, n: number): string {
   }
 }
 
-describe("the Decide count", () => {
-  test("equals what the list's sections and each thread's open-questions list say, after any history", () => {
+describe("the open questions count", () => {
+  test("equals what the list's sections say, after any history, and each is waiting by core's rule", () => {
     let seen = 0;
     let picked = 0;
     fc.assert(
@@ -351,22 +303,13 @@ describe("the Decide count", () => {
           } catch (error) {
             if (!(error instanceof InboxError)) throw error;
           }
-          const decisions = store.openDecisions();
-          seen += decisions.length;
-          picked += decisions.filter((d) => d.question.state === "picked").length;
-          const rows = store.listRows();
-          expect(decisions.length).toBe(listCount(store, rows));
-          // No decision twice, and each is a waiting question of a live agent message.
-          expect(new Set(decisions.map((d) => d.id)).size).toBe(decisions.length);
-          for (const d of decisions) expect(inboxQuestionWaitsOnPerson(d.question)).toBe(true);
-          // Per thread: its questions (not action items) are exactly what its "N open questions" list holds.
-          for (const row of rows) {
-            const thread = store.thread(row.thread_id)!;
-            const reasked = reaskedOpen(store, row.thread_id);
-            const popover = threadOpenQuestions(thread.messages).questions.map((q) => q.id).filter((id) => !reasked.has(id)).sort();
-            const mine = decisions.filter((d) => d.thread.id === row.thread_id && d.question.kind !== "action").map((d) => d.id).sort();
-            expect(mine).toEqual(popover);
-          }
+          const open = waiting(store);
+          seen += open.length;
+          picked += open.filter((d) => d.question.state === "picked").length;
+          expect(open.length).toBe(listCount(store, store.listRows()));
+          // Nothing twice, and each waits on the person by core's rule.
+          expect(new Set(open.map((d) => d.id)).size).toBe(open.length);
+          for (const d of open) expect(inboxQuestionWaitsOnPerson(d.question)).toBe(true);
         }
       }),
       { numRuns: 120 },

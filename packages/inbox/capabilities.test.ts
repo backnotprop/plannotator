@@ -79,4 +79,15 @@ describe('event: capabilities', () => {
     expect(settings.system).toEqual({ on: true });
     expect(hear(JSON.stringify({ board: { on: false }, system: { on: 'yes' } }), { ...OFF, system: { on: false } }).settings.system).toEqual({ on: false });
   });
+
+  test('decision mode turned off, then on, in another window: this window follows; a frame without it leaves it', () => {
+    const off = hear(JSON.stringify({ board: { on: false }, decision_mode: { on: false }, steps: { on: true } }), { ...OFF, decision_mode: { on: true } } as Held);
+    expect(off.reread).toBe(false);
+    expect((off.settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: false });
+    expect((hear(JSON.stringify({ decision_mode: { on: true } }), off.settings).settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: true });
+    // The server leaves it out while it is on and was not the change: the window keeps what it has.
+    expect((hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), off.settings).settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: false });
+    // A malformed value is not applied.
+    expect((hear(JSON.stringify({ board: { on: false }, decision_mode: { on: 'no' } }), off.settings).settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: false });
+  });
 });

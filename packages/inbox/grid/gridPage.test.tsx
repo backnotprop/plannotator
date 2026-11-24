@@ -214,7 +214,7 @@ test.skipIf(!hasDom)('on: the row under Inbox opens Grid, and the cookie keeps i
   let opened = 0;
   const cookie = cookieJar();
   function On() {
-    useGridOn({ experimental: { decision_mode: { on: false, env: null }, grid: { on: true, env: null } } }, noop);
+    useGridOn({ experimental: { grid: { on: true, env: null } } }, noop);
     return null;
   }
   const host = document.createElement('div');
@@ -273,7 +273,7 @@ test.skipIf(!hasDom)('many PR threads and a burst of list reads: no request of i
 
   let reads = 0;
   function On() {
-    useGridOn({ experimental: { decision_mode: { on: false, env: null }, grid: { on: true, env: null } } }, () => reads++);
+    useGridOn({ experimental: { grid: { on: true, env: null } } }, () => reads++);
     return null;
   }
   const other = createRoot(document.body.appendChild(document.createElement('div')));
@@ -298,7 +298,7 @@ test.skipIf(!hasDom)('many PR threads and a burst of list reads: no request of i
 
   // Grid off: a PR's checks changing, or a look, reads no list, and no read asks for Grid's fields.
   function Off() {
-    useGridOn({ experimental: { decision_mode: { on: false, env: null }, grid: { on: false, env: null } } }, () => reads++);
+    useGridOn({ experimental: { grid: { on: false, env: null } } }, () => reads++);
     return null;
   }
   const off = createRoot(document.body.appendChild(document.createElement('div')));

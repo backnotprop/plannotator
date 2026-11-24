@@ -40,7 +40,7 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
   markTourDecided(dataDir);
   const configPath = join(dataDir, 'config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
-  writeFileSync(configPath, JSON.stringify({ ...config, inboxBoard: true, inboxCodeReview: true, experimental: { decisionMode: true } }));
+  writeFileSync(configPath, JSON.stringify({ ...config, inboxBoard: true, inboxCodeReview: true }));
   const forge = fakeForge(join(root, 'forge'));
   const env: Record<string, string> = {
     PATH: `${forge.dir}:${process.env.PATH ?? ''}`,

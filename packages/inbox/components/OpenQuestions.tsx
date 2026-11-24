@@ -22,7 +22,6 @@ import {
 import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { Tip } from './Tip';
 import { pickWords } from './ReplacedQuestion';
-import { decideThreadLabel } from '../decisions/entry';
 import { drawOpenQuestionsForm, drawStepsFit, fitFootRow, footFitCandidates, footFitCandidatesWithSteps, laidOutChildren, openQuestionsFormText, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
 
 /** A row's Stopped or Holds up, as its name says it. */
@@ -43,14 +42,12 @@ export interface OpenQuestionsReask {
 }
 
 /**
- * Decision mode's one way in (experimental, approval "inbox-decision-mode",
- * thread only since the owner's 2026-10-27 call): "Decide these N", the
- * list's first row. The caller passes it only while decision mode is on and
- * two or more of this thread's decisions wait (`decideEntryShown`).
+ * Decision mode's one way in (approval "inbox-decision-mode-one-send"; thread only): the list's first row, "Decide 8
+ * one at a time", or "Resume · 2 of 4 messages left" once the person left before Send (decisions/queue.ts
+ * `decideEntryLabel`). The caller passes it only while decision mode is on and the thread has something to decide.
  */
 export interface OpenQuestionsDecide {
-  /** The thread's decisions in the queue (the projection's, for this thread). */
-  count: number;
+  label: string;
   onDecide: () => void;
 }
 
@@ -488,23 +485,22 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
                 <Menu.Separator className="ib-oq-sep" />
               </>
             )}
-            {/* Decision mode's way in: the same dialog, scoped to this thread. Not while choosing what to skip. */}
+            {/* Decision mode's way in: the thread's messages one at a time. Not while choosing what to skip. */}
             {decide && !selecting && (
               <>
                 <Menu.Item
                   className="ib-oq-decide"
                   data-thread-decide=""
-                  label={decideThreadLabel(decide.count, questions.length)}
-                  aria-haspopup="dialog"
+                  label={decide.label}
                   onClick={() => {
-                    // Focus goes into the dialog, not back to the button (the dialog puts it back when it closes).
+                    // Focus goes to decision mode, not back to the button.
                     picked.current = true;
                     close();
                     decide.onDecide();
                   }}
                 >
                   <Icon name="todo" size={15} />
-                  <span>{decideThreadLabel(decide.count, questions.length)}</span>
+                  <span>{decide.label}</span>
                   <Icon name="chevR" size={15} />
                 </Menu.Item>
                 <Menu.Separator className="ib-oq-sep" />
