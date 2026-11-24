@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { configStore, useConfigValue } from '../../config';
 import { AnalysisLayerToggle } from '../AnalysisLayerToggle';
 
-type Provider = 'jev' | 'clef' | 'custom';
 type AuthScheme = 'bearer' | 'api-key';
 type Failure = 'missing' | 'invalidUrl' | 'refused' | 'noCredit' | 'noAnswer';
 type Check =
@@ -51,19 +50,30 @@ interface PowerUpFormProps {
   onRemove: () => void;
 }
 
-const EMPTY_INPUTS: FormInputs = {
-  apiKey: '',
-  accountId: '',
-  apiToken: '',
-  customUrl: '',
-  customModel: '',
-  customAuth: 'bearer',
-};
+type CustomInputs = Pick<FormInputs, 'customUrl' | 'customModel' | 'customAuth'>;
+
+const EMPTY_CUSTOM: CustomInputs = { customUrl: '', customModel: '', customAuth: 'bearer' };
+
+const EMPTY_INPUTS: FormInputs = { apiKey: '', accountId: '', apiToken: '', ...EMPTY_CUSTOM };
 
 const ROUTE = '/api/sem-diff/opinion/settings';
 export const POWER_UP_CHANGED_EVENT = 'plannotator:power-up-changed';
-const PROVIDER_NAME: Record<Provider, string> = { jev: 'Jev', clef: 'Clef', custom: 'Custom' };
+export const POWER_UP_PROVIDER_NAMES = { jev: 'Jev', clef: 'Clef', openai: 'OpenAI Decisions', custom: 'Custom' } as const;
+export type PowerUpProvider = keyof typeof POWER_UP_PROVIDER_NAMES;
+type Provider = PowerUpProvider;
+const PROVIDER_NAME = POWER_UP_PROVIDER_NAMES;
+const PROVIDER_SETTINGS = {
+  jev: { title: 'Jev key', credential: 'a Jev key', label: 'TypeSafe API key', hint: 'Paste the key from your TypeSafe account', modelHint: 'Jev runs on your TypeSafe account.' },
+  clef: { title: 'Workers AI', credential: 'a Clef token', label: 'Workers AI token', hint: 'Your Cloudflare account ID and a Workers AI token', modelHint: 'Clef runs on your Cloudflare account.' },
+  openai: { title: 'OpenAI key', credential: 'an OpenAI API key', label: 'OpenAI API key', hint: 'Paste an OpenAI project API key', modelHint: 'OpenAI Decisions runs on your OpenAI API project.' },
+  custom: { title: 'Custom endpoint', credential: 'a custom endpoint key', label: 'Custom API key', hint: 'Endpoint URL, optional model, auth header, and API key', modelHint: 'Any endpoint implementing the systemone API.' },
+} satisfies Record<Provider, { title: string; credential: string; label: string; hint: string; modelHint: string }>;
 const KEY_MESSAGE_ID = 'power-up-key-message';
+
+/** Jev and Custom speak the systemone contract, so only they go to an endpoint the person chose. */
+function takesEndpoint(provider: Provider): boolean {
+  return provider === 'jev' || provider === 'custom';
+}
 
 function hostOf(rawUrl: string): string | null {
   const trimmed = rawUrl.trim();
@@ -82,7 +92,7 @@ function activeEndpointFor(
   endpoint: string | null,
   customUrl: string,
 ): string | null {
-  if (provider === 'clef') return null;
+  if (!takesEndpoint(provider)) return null;
   if (provider === 'custom') return hostOf(customUrl) ?? (savedProvider === 'custom' ? endpoint : null);
   return savedProvider === 'custom' ? null : endpoint;
 }
@@ -94,11 +104,12 @@ function activeModelFor(
   customModel: string,
 ): string | null {
   if (provider === 'custom') return customModel.trim() || null;
+  if (provider !== 'jev') return null;
   return savedProvider === 'custom' ? null : modelName;
 }
 
 function targetName(provider: Provider, endpoint: string | null): string {
-  if (provider !== 'clef' && endpoint) return endpoint;
+  if (takesEndpoint(provider) && endpoint) return endpoint;
   return PROVIDER_NAME[provider];
 }
 
@@ -108,24 +119,20 @@ function footerTarget(provider: Provider, endpoint: string | null): string {
 }
 
 function addKeyHint(provider: Provider, endpoint: string | null): string {
-  if (provider === 'clef') return 'Your Cloudflare account ID and a Workers AI token';
-  if (provider === 'custom') {
-    return endpoint ? `Key and auth for ${endpoint}` : 'Endpoint URL, optional model, auth header, and API key';
-  }
-  return endpoint ? `Paste the key for ${endpoint}` : 'Paste the key from your TypeSafe account';
+  if (!takesEndpoint(provider) || !endpoint) return PROVIDER_SETTINGS[provider].hint;
+  return provider === 'custom' ? `Key and auth for ${endpoint}` : `Paste the key for ${endpoint}`;
 }
 
 function missingKeyText(provider: Provider, endpoint: string | null): string {
-  if (provider === 'clef') return 'Add your account ID and token';
-  if (provider === 'custom' || endpoint) return 'Add your API key';
-  return 'Add your TypeSafe key';
+  if (provider === 'custom' || (provider === 'jev' && endpoint)) return 'Add your API key';
+  return `Add your ${PROVIDER_SETTINGS[provider].label}`;
 }
 
 function failureText(provider: Provider, failure: Failure, endpoint: string | null): string {
   const name = targetName(provider, endpoint);
   if (failure === 'missing') return missingKeyText(provider, endpoint);
   if (failure === 'invalidUrl') return 'Enter an http or https endpoint URL';
-  if (failure === 'refused') return provider === 'clef' ? 'Clef refused this token' : `${name} refused this key`;
+  if (failure === 'refused') return `${name} refused this ${provider === 'clef' ? 'token' : 'key'}`;
   if (failure === 'noCredit') return `No credit left on this ${name} account`;
   return `${name} did not answer. Try again in a moment.`;
 }
@@ -137,16 +144,13 @@ function customTargetSummary(endpoint: string | null, model: string | null): str
 }
 
 function nextKeyLabel(provider: Provider, endpoint: string | null): string {
-  if (provider === 'clef') return 'a Clef token';
-  if (endpoint) return `a key for ${endpoint}`;
-  return provider === 'custom' ? 'a custom endpoint key' : 'a Jev key';
+  if (takesEndpoint(provider) && endpoint) return `a key for ${endpoint}`;
+  return PROVIDER_SETTINGS[provider].credential;
 }
 
 function providerDefaultHint(provider: Provider, endpoint: string | null, model: string | null): string {
-  if (provider === 'clef') return 'Clef runs on your Cloudflare account.';
-  const fallback = provider === 'custom'
-    ? 'Any endpoint implementing the systemone API.'
-    : 'Jev is the faster one, about 0.2 s a file.';
+  const fallback = PROVIDER_SETTINGS[provider].modelHint;
+  if (!takesEndpoint(provider)) return fallback;
   return customTargetSummary(endpoint, model) ?? fallback;
 }
 
@@ -173,15 +177,15 @@ function areInputsEmpty(provider: Provider, inputs: FormInputs): boolean {
 }
 
 function areInputsComplete(provider: Provider, inputs: FormInputs): boolean {
-  if (provider === 'jev') return inputs.apiKey.trim() !== '';
   if (provider === 'clef') return inputs.accountId.trim() !== '' && inputs.apiToken.trim() !== '';
-  return inputs.customUrl.trim() !== '' && inputs.apiKey.trim() !== '';
+  if (provider === 'custom') return inputs.customUrl.trim() !== '' && inputs.apiKey.trim() !== '';
+  return inputs.apiKey.trim() !== '';
 }
 
 function missingFieldMessage(provider: Provider, endpoint: string | null, inputs: FormInputs): string {
-  if (provider === 'jev') return missingKeyText('jev', endpoint);
   if (provider === 'clef') return inputs.accountId.trim() ? 'Add your token' : 'Add your account ID';
-  return inputs.customUrl.trim() ? 'Add your API key' : 'Add an endpoint URL';
+  if (provider === 'custom') return inputs.customUrl.trim() ? 'Add your API key' : 'Add an endpoint URL';
+  return missingKeyText(provider, endpoint);
 }
 
 function fieldFailureMessage(
@@ -196,7 +200,7 @@ function fieldFailureMessage(
 }
 
 function buildSaveBody(provider: Provider, inputs: FormInputs): Record<string, string> {
-  if (provider === 'jev') return { provider, apiKey: inputs.apiKey };
+  if (provider === 'jev' || provider === 'openai') return { provider, apiKey: inputs.apiKey };
   if (provider === 'clef') return { provider, accountId: inputs.accountId, apiToken: inputs.apiToken };
   const model = inputs.customModel.trim();
   const body: Record<string, string> = {
@@ -210,9 +214,8 @@ function buildSaveBody(provider: Provider, inputs: FormInputs): Record<string, s
 }
 
 function rowTitle(provider: Provider, endpoint: string | null): string {
-  if (provider === 'clef') return 'Workers AI';
-  if (provider === 'custom') return 'Custom endpoint';
-  return endpoint ? 'API key' : 'Jev key';
+  if (provider === 'jev' && endpoint) return 'API key';
+  return PROVIDER_SETTINGS[provider].title;
 }
 
 function keyRowHint(
@@ -371,13 +374,13 @@ function EnvProviderRows({ endpoint, modelName }: { endpoint: string | null; mod
   );
 }
 
-function JevKeyFields({ form, checking, showRemove }: { form: PowerUpFormProps; checking: boolean; showRemove: boolean }) {
+function ApiKeyFields({ form, checking, showRemove }: { form: PowerUpFormProps; checking: boolean; showRemove: boolean }) {
   const flagged = isKeyFieldFlagged(form.failure, !form.inputs.apiKey);
   return (
     <span className="flex items-end gap-1.5">
       <KeyField
         className="w-full"
-        label={form.activeEndpoint ? 'API key' : 'TypeSafe API key'}
+        label={form.provider === 'jev' && form.activeEndpoint ? 'API key' : PROVIDER_SETTINGS[form.provider].label}
         value={form.inputs.apiKey}
         onChange={(apiKey) => form.onInput({ apiKey })}
         secret
@@ -488,19 +491,30 @@ function CustomKeyFields({ form, checking, showRemove }: { form: PowerUpFormProp
 function ProviderFields({ form, checking, showRemove }: { form: PowerUpFormProps; checking: boolean; showRemove: boolean }) {
   if (form.provider === 'custom') return <CustomKeyFields form={form} checking={checking} showRemove={showRemove} />;
   if (form.provider === 'clef') return <ClefKeyFields form={form} checking={checking} showRemove={showRemove} />;
-  return <JevKeyFields form={form} checking={checking} showRemove={showRemove} />;
+  return <ApiKeyFields form={form} checking={checking} showRemove={showRemove} />;
+}
+
+/** OpenAI saves only on "Check and save"; Custom has optional fields and an auth toggle inside the form. */
+function savesOnBlur(provider: Provider): boolean {
+  return provider === 'jev' || provider === 'clef';
 }
 
 function ManualProviderRows({ form }: { form: PowerUpFormProps }) {
   const checking = form.check.kind === 'checking';
   const showRemove = form.saved && !form.complete;
+  const wide = form.provider === 'clef' || form.provider === 'custom';
   return (
     <>
       <Row title="Model" hint={modelRowHint(form)}>
         <Segmented
           label="Model"
           value={form.provider}
-          options={[['jev', 'Jev'], ['clef', 'Clef'], ['custom', 'Custom']]}
+          options={[
+            ['jev', PROVIDER_NAME.jev],
+            ['clef', PROVIDER_NAME.clef],
+            ['openai', PROVIDER_NAME.openai],
+            ['custom', PROVIDER_NAME.custom],
+          ]}
           onChange={form.onSelectProvider}
         />
       </Row>
@@ -509,16 +523,16 @@ function ManualProviderRows({ form }: { form: PowerUpFormProps }) {
         hint={keyRowHint(form.check, form.provider, form.activeEndpoint, form.saved)}
       >
         <form
-          className={`flex flex-col gap-1 ${form.provider === 'jev' ? 'w-[280px]' : 'w-[340px]'}`}
+          className={`flex flex-col gap-1 ${wide ? 'w-[340px]' : 'w-[280px]'}`}
           data-power-up-key-set={form.saved ? '' : undefined}
           onSubmit={(e) => {
             e.preventDefault();
+            if (checking) return;
             if (form.complete) form.onSave();
             else form.onMissing();
           }}
           onBlur={(e) => {
-            // Custom has optional fields and an auth toggle inside the form, so save only on explicit submit.
-            if (form.provider !== 'custom' && !e.currentTarget.contains(e.relatedTarget as Node | null) && form.complete && !checking) {
+            if (savesOnBlur(form.provider) && !e.currentTarget.contains(e.relatedTarget as Node | null) && form.complete && !checking) {
               form.onSave();
             }
           }}
@@ -568,7 +582,9 @@ function PowerUpSection({
         />
       </Row>
       <p className="pt-1 text-xs text-muted-foreground">
-        Your key, your account; code is sent to {footerTarget(form.provider, form.activeEndpoint)}. Only the functions the engine asks about are sent, never the rest of the repository.
+        Your key, your account; code is sent to {form.savedProvider
+          ? footerTarget(form.savedProvider, form.savedEndpoint)
+          : footerTarget(form.provider, form.activeEndpoint)}. Only the functions the engine asks about are sent, never the rest of the repository.
       </p>
     </>
   );
@@ -602,6 +618,8 @@ export function SemanticDiffsTab() {
   const [editing, setEditing] = useState(false);
   const [inputs, setInputs] = useState<FormInputs>(EMPTY_INPUTS);
   const [check, setCheck] = useState<Check>({ kind: 'idle' });
+  // The saved Custom endpoint is not secret: it stays in its fields when the person switches models and back.
+  const [savedCustom, setSavedCustom] = useState<CustomInputs>(EMPTY_CUSTOM);
 
   const updateInputs = useCallback((patch: Partial<FormInputs>) => {
     setInputs((prev) => ({ ...prev, ...patch }));
@@ -609,11 +627,13 @@ export function SemanticDiffsTab() {
 
   const hydrateCustom = useCallback((data: SettingsData) => {
     if (data.provider !== 'custom') return;
-    updateInputs({
+    const kept: CustomInputs = {
       customUrl: data.url ?? '',
       customModel: data.model ?? '',
       customAuth: data.auth ?? 'bearer',
-    });
+    };
+    setSavedCustom(kept);
+    updateInputs(kept);
   }, [updateInputs]);
 
   const load = useCallback(async () => {
@@ -670,6 +690,9 @@ export function SemanticDiffsTab() {
       }
       setCheck({ kind: 'ok', ms: reply.ms });
       updateInputs({ accountId: '' });
+      if (provider === 'custom') {
+        setSavedCustom({ customUrl: inputs.customUrl.trim(), customModel: inputs.customModel.trim(), customAuth: inputs.customAuth });
+      }
       syncSavedMetadata(provider);
       setSavedProvider(provider);
       setConfigured(true);
@@ -682,11 +705,18 @@ export function SemanticDiffsTab() {
   };
 
   const remove = async () => {
-    await fetch(ROUTE, { method: 'DELETE' }).catch(() => {});
+    try {
+      const res = await fetch(ROUTE, { method: 'DELETE' });
+      if (!res.ok || !(await res.json()).ok) throw new Error('Could not remove key');
+    } catch {
+      setCheck({ kind: 'error', failure: 'noAnswer' });
+      return;
+    }
     setConfigured(false);
     if (savedProvider === 'custom') {
       setEndpoint(null);
       setModelName(null);
+      setSavedCustom(EMPTY_CUSTOM);
     }
     setSavedProvider(null);
     setEditing(true);
@@ -713,7 +743,10 @@ export function SemanticDiffsTab() {
     inputs,
     onInput: updateInputs,
     onSelectProvider: (next) => {
+      if (next === provider || check.kind === 'checking') return;
       setProvider(next);
+      // What was typed for one model never carries over to another; a saved Custom endpoint comes back.
+      setInputs({ ...EMPTY_INPUTS, ...savedCustom });
       setEditing(true);
       setCheck({ kind: 'idle' });
     },
@@ -743,10 +776,7 @@ export function SemanticDiffsTab() {
           <AnalysisLayerToggle
             checked={powerUp && configured}
             disabled={!configured || !semantic || !semanticDiffEnabled}
-            onChange={(on) => {
-              configStore.set('diffPowerUp', on);
-              changed();
-            }}
+            onChange={(on) => configStore.set('diffPowerUp', on)}
             label="Power Up"
             description={powerUpDescription(configured)}
           />

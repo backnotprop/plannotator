@@ -2439,11 +2439,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const powerUp = powerUpRef.current;
     if (!client || !texts || !powerUp?.active) return;
     const { file, oldText, newText, generation, signal } = texts;
-    const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+    const stale = () => signal.aborted || fileSetKeyRef.current !== generation || powerUpRef.current !== powerUp;
     const hadLinks = (powerUpFilesRef.current.get(itemId)?.links.length ?? 0) > 0;
     powerUpFilesRef.current.set(itemId, { state: 'asking', links: [] });
     reportPowerUp();
-    void client.diff(file.path, oldText, newText, signal, { rejected: powerUp.rejected }).then((result) => {
+    void client.diff(file.path, oldText, newText, signal, powerUp).then((result) => {
       if (stale()) return;
       const report = result?.secondOpinion;
       if (!result || !report) {
@@ -2504,20 +2504,38 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     restartPowerUpStream();
   }, [powerUpStream]);
   const powerUpRetry = powerUp?.retry ?? 0;
+  const settingsRevision = powerUp?.settingsRevision ?? 0;
+  const previousSettingsRevision = useRef(settingsRevision);
   useEffect(() => {
-    if (!powerUpActive) {
+    const providerChanged = previousSettingsRevision.current !== settingsRevision;
+    previousSettingsRevision.current = settingsRevision;
+    if (!powerUpActive || providerChanged) {
       const client = semClientRef.current;
+      const config = powerUpRef.current;
+      const restoring = new Set<string>();
       for (const [itemId, entry] of powerUpFilesRef.current) {
         const texts = semTextsRef.current.get(itemId);
         if (entry.links.length === 0 || !client || !texts) continue;
+        restoring.add(itemId);
         const { file, oldText, newText, generation, signal } = texts;
-        const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+        const stale = () => signal.aborted || fileSetKeyRef.current !== generation || powerUpRef.current !== config;
+        if (powerUpActive) {
+          showSemantic(itemId, false);
+          semDiffsRef.current.delete(itemId);
+          semStateRef.current.delete(itemId);
+          refreshItem(itemId);
+        }
         void client.diff(file.path, oldText, newText, signal).then((result) => {
-          if (result && !stale()) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {}, true, undefined, true);
+          if (stale()) return;
+          if (result) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {}, true, undefined, true);
+          if (powerUpActive) runPowerUp(itemId);
         });
       }
       powerUpFilesRef.current = new Map();
       reportPowerUp();
+      if (powerUpActive) {
+        for (const itemId of semTextsRef.current.keys()) if (!restoring.has(itemId)) runPowerUp(itemId);
+      }
       return;
     }
     for (const [itemId, entry] of powerUpFilesRef.current) {
@@ -2525,7 +2543,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
     for (const itemId of semTextsRef.current.keys()) if (!powerUpFilesRef.current.has(itemId)) runPowerUp(itemId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rejectedKey, powerUpActive, powerUpRetry]);
+  }, [rejectedKey, powerUpActive, powerUpRetry, settingsRevision]);
 
   const prefetchWholeFile = useCallback((itemId: string) => {
     const hostRead = fetchFileContentRef.current;

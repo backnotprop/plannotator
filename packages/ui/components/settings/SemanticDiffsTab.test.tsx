@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 function server() {
-  let configured = false;
+  let provider: string | null = null;
   const posts: unknown[] = [];
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'POST') {
@@ -26,10 +26,14 @@ function server() {
       posts.push(body);
       if (body.provider === 'clef') return new Response(JSON.stringify({ ok: false, failure: 'noCredit', reason: 'The account has no credit left.' }));
       if (body.apiKey !== KEY) return new Response(JSON.stringify({ ok: false, failure: 'refused', reason: 'The key was refused.' }));
-      configured = true;
-      return new Response(JSON.stringify({ ok: true, provider: 'jev', ms: 182 }));
+      provider = body.provider;
+      return new Response(JSON.stringify({ ok: true, provider, ms: 182 }));
     }
-    return new Response(JSON.stringify({ configured, provider: configured ? 'jev' : null }));
+    if (init?.method === 'DELETE') {
+      provider = null;
+      return Response.json({ ok: true });
+    }
+    return new Response(JSON.stringify({ configured: provider !== null, provider }));
   }) as typeof fetch;
   return posts;
 }
@@ -207,5 +211,26 @@ describe('Settings › Semantic diffs › Power Up', () => {
     expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom API key"]')!.value).toBe('');
     expect(host!.querySelector('[data-power-up-key-save]')!.textContent).toBe('Saved');
     expect(host!.innerHTML).not.toContain(KEY);
+  });
+
+  test.skipIf(!hasDom)('OpenAI Decisions uses a separate key and saves only on submit', async () => {
+    const posts = server();
+    await mount();
+    await type('TypeSafe API key', 'a-different-provider-key');
+    const openai = [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === 'OpenAI Decisions')!;
+    await act(async () => openai.click());
+    const key = host!.querySelector<HTMLInputElement>('input[aria-label="OpenAI API key"]')!;
+    expect(key.value).toBe('');
+    await type('OpenAI API key', KEY);
+    await act(async () => key.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: openai })));
+    expect(posts).toEqual([]);
+    await act(async () => host!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+    expect(posts).toEqual([{ provider: 'openai', apiKey: KEY }]);
+    expect(key.value).toBe('');
+    expect(host!.textContent).toContain('code is sent to OpenAI Decisions');
+    expect(host!.querySelector('[data-power-up-key-save]')?.textContent).toBe('Saved');
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-power-up-key-remove]')!.click());
+    const powerUp = [...host!.querySelectorAll<HTMLButtonElement>('[role="switch"]')].find((b) => b.textContent?.includes('Power Up'))!;
+    expect(powerUp.disabled).toBe(true);
   });
 });

@@ -24,7 +24,7 @@ const ROUTES: readonly { method: "GET" | "POST"; path: RegExp }[] = [
   { method: "GET", path: new RegExp(`^/api/inbox/threads/${ID}/decisions\\?[A-Za-z0-9_=&%.+/-]*$`) },
   { method: "POST", path: new RegExp(`^/api/inbox/threads/${ID}/decisions/post$`) },
   // `plannotator inbox capability` (inbox-capability-agent.ts): a list, and a turn.
-  { method: "GET", path: /^\/api\/inbox\/capability(\?computer=[^&#]{1,200})?$/ },
+  { method: "GET", path: /^\/api\/inbox\/capability$/ },
   { method: "POST", path: /^\/api\/inbox\/capability$/ },
 ];
 
@@ -32,7 +32,7 @@ const ROUTES: readonly { method: "GET" | "POST"; path: RegExp }[] = [
 const ROWS_FIELDS = ["rows", "rows_undo"];
 
 /** What a capability turn sends: who turns it and where its line goes are the door's to say. */
-const CAPABILITY_FIELDS = ["capability", "on", "computer", "thread_id"];
+const CAPABILITY_FIELDS = ["capability", "on", "thread_id"];
 
 const refuse = (message: string) => new InboxError("validation_error", message);
 

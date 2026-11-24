@@ -8,18 +8,28 @@ import {
   jevAnswers,
   type OpinionAnswer,
 } from "@plannotator/sem-jiff/opinions";
+import { checkOpenAIDecisions, openaiAnswers, OpenAIDecisionError } from "./sem-diff-openai";
 
 export const SEM_DIFF_OPINION_ROUTE = "/api/sem-diff/opinion";
 export const SEM_DIFF_OPINION_SETTINGS_ROUTE = "/api/sem-diff/opinion/settings";
 
-export type OpinionProvider = "jev" | "clef" | "custom";
 export type OpinionAuth = "bearer" | "api-key";
 export type OpinionEnv = Readonly<Record<string, string | undefined>>;
 
 export type OpinionSecret =
   | { provider: "jev"; apiKey: string }
+  | { provider: "openai"; apiKey: string }
   | { provider: "clef"; accountId: string; apiToken: string }
   | { provider: "custom"; url: string; model?: string; auth: OpinionAuth; apiKey: string };
+
+export type OpinionProvider = OpinionSecret["provider"];
+
+type SystemoneSecret = Extract<OpinionSecret, { provider: "jev" | "custom" }>;
+
+/** Jev and Custom speak the systemone contract; only they take the URL, model and auth overrides. */
+function usesSystemone(secret: OpinionSecret): secret is SystemoneSecret {
+  return secret.provider === "jev" || secret.provider === "custom";
+}
 
 export interface OpinionSettings {
   configured: boolean;
@@ -179,7 +189,7 @@ type ParsedSaveBody = { secret?: OpinionSecret; failure?: KeySaveFailure; reason
 
 const MISSING_SAVE_BODY: ParsedSaveBody = {
   failure: "missing",
-  reason: "Enter a key for Jev, an account ID and token for Clef, or an endpoint URL and key for Custom.",
+  reason: "Enter the credentials for the selected model.",
 };
 
 function parseOptionalModel(raw: unknown): { model?: string; error?: string } {
@@ -220,9 +230,9 @@ function parseClefSecret(fields: Record<string, unknown>): ParsedSaveBody {
 function parseSaveBody(value: unknown): ParsedSaveBody {
   if (!value || typeof value !== "object") return MISSING_SAVE_BODY;
   const fields = value as Record<string, unknown>;
-  if (fields.provider === "jev") {
+  if (fields.provider === "jev" || fields.provider === "openai") {
     const apiKey = boundedText(fields.apiKey);
-    return apiKey ? { secret: { provider: "jev", apiKey } } : MISSING_SAVE_BODY;
+    return apiKey ? { secret: { provider: fields.provider, apiKey } } : MISSING_SAVE_BODY;
   }
   if (fields.provider === "clef") return parseClefSecret(fields);
   if (fields.provider === "custom") return parseCustomSecret(fields);
@@ -280,12 +290,26 @@ export async function opinionSettings(dataDir: string, env: OpinionEnv = process
   return settings;
 }
 
-function verifyOpinionSecret(secret: OpinionSecret, envConfig: OpinionEnvConfig, fetchImpl: Fetch) {
+type KeyCheck = { ok: true; ms: number } | { ok: false; failure: KeySaveFailure; reason: string };
+
+function checkSemJiffKey(secret: Exclude<OpinionSecret, { provider: "openai" }>, envConfig: OpinionEnvConfig, fetchImpl: Fetch) {
   if (secret.provider === "clef") {
     return checkKey({ provider: "clef", accountId: secret.accountId, apiToken: secret.apiToken }, fetchImpl);
   }
   const target = resolveSystemoneTarget(secret, envConfig);
   return checkKey({ provider: "jev", apiKey: secret.apiKey, model: target.model }, systemoneFetch(fetchImpl, target));
+}
+
+async function verifyOpinionSecret(secret: OpinionSecret, envConfig: OpinionEnvConfig, fetchImpl: Fetch): Promise<KeyCheck> {
+  if (secret.provider === "openai") {
+    try {
+      return { ok: true, ms: await checkOpenAIDecisions(secret.apiKey, fetchImpl) };
+    } catch (e) {
+      return { ok: false, ...keyFailure(e instanceof OpenAIDecisionError ? e.failure : "noAnswer") };
+    }
+  }
+  const check = await checkSemJiffKey(secret, envConfig, fetchImpl);
+  return check.ok ? { ok: true, ms: check.ms } : { ok: false, ...plainReason(check.reason) };
 }
 
 export async function saveOpinionKey(
@@ -297,17 +321,22 @@ export async function saveOpinionKey(
   const parsed = parseSaveBody(body);
   if (!parsed.secret) return { ok: false, failure: parsed.failure ?? "missing", reason: parsed.reason ?? "Invalid settings." };
   const config = readOpinionEnv(env);
-  if (parsed.secret.provider !== "clef" && config.error) return { ok: false, failure: "noAnswer", reason: config.error };
+  if (usesSystemone(parsed.secret) && config.error) return { ok: false, failure: "noAnswer", reason: config.error };
   const check = await verifyOpinionSecret(parsed.secret, config, fetchImpl);
-  if (!check.ok) return { ok: false, ...plainReason(check.reason) };
+  if (!check.ok) return { ok: false, failure: check.failure, reason: check.reason };
   await writeOpinionSecret(dataDir, parsed.secret);
   return { ok: true, provider: parsed.secret.provider, ms: check.ms };
 }
 
 function plainReason(reason: string): { failure: KeySaveFailure; reason: string } {
-  if (/no credit/i.test(reason)) return { failure: "noCredit", reason: "The account has no credit left." };
-  if (/refused/i.test(reason)) return { failure: "refused", reason: "The key was refused." };
-  return { failure: "noAnswer", reason: "The provider did not answer. Try again in a moment." };
+  return keyFailure(/no credit/i.test(reason) ? "noCredit" : /refused/i.test(reason) ? "refused" : "noAnswer");
+}
+
+function keyFailure(failure: Exclude<KeySaveFailure, "missing">) {
+  const reason = failure === "noCredit" ? "The account has no credit left."
+    : failure === "refused" ? "The key was refused."
+    : "The provider did not answer. Try again in a moment.";
+  return { failure, reason };
 }
 
 function parseCandidates(body: unknown): Candidate[] | null {
@@ -329,6 +358,7 @@ const askers = new WeakMap<Fetch, { id: string; ask: (cs: Candidate[]) => Promis
 
 function askerCacheKey(secret: OpinionSecret, envConfig: OpinionEnvConfig): string {
   if (secret.provider === "clef") return `clef\0${secret.accountId}\0${secret.apiToken}`;
+  if (secret.provider === "openai") return `openai\0${secret.apiKey}`;
   const target = resolveSystemoneTarget(secret, envConfig);
   return `systemone\0${secret.apiKey}\0${target.url ?? ""}\0${target.model ?? ""}\0${target.auth}`;
 }
@@ -341,6 +371,7 @@ function createAsker(
   if (secret.provider === "clef") {
     return clefAnswers({ accountId: secret.accountId, apiToken: secret.apiToken, fetch: fetchImpl, concurrency: 4 });
   }
+  if (secret.provider === "openai") return openaiAnswers(secret.apiKey, fetchImpl);
   const target = resolveSystemoneTarget(secret, envConfig);
   return jevAnswers({
     apiKey: secret.apiKey,
@@ -364,6 +395,10 @@ function askerFor(
 }
 
 function classifyOpinionError(err: unknown): OpinionReply {
+  if (err instanceof OpenAIDecisionError) {
+    const state = err.failure === "noCredit" ? "noCredit" : err.failure === "refused" ? "refusedKey" : "failed";
+    return { ok: false, state, reason: keyFailure(err.failure).reason };
+  }
   if (err instanceof OpinionKeyError) {
     return err.status === 402
       ? { ok: false, state: "noCredit", reason: "The account has no credit left." }
@@ -383,7 +418,7 @@ export async function askOpinion(
   const config = readOpinionEnv(env);
   const secret = await resolveOpinionSecret(dataDir, config);
   if (!secret) return { ok: false, state: "off", reason: "Power Up has no key." };
-  if (secret.provider !== "clef" && config.error) return { ok: false, state: "failed", reason: config.error };
+  if (usesSystemone(secret) && config.error) return { ok: false, state: "failed", reason: config.error };
   try {
     return { ok: true, answers: await askerFor(secret, config, fetchImpl)(candidates) };
   } catch (err) {

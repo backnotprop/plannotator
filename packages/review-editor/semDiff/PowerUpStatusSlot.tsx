@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { PowerUpGuy } from '@plannotator/ui/components/agentFace/PowerUpGuy';
-import { PROVIDER_NAME, type PowerUpProvider, type PowerUpStatus } from './powerUp';
+import { POWER_UP_PROVIDER_NAMES } from '@plannotator/ui/components/settings/SemanticDiffsTab';
+import type { PowerUpConfig, PowerUpStatus } from './powerUp';
 
 type SlotState = 'unavailable' | 'asking' | 'powered' | 'nothing';
 
@@ -9,9 +10,10 @@ const UNAVAILABLE_TEXT: Record<string, string> = {
   noCredit: 'Power Up: no credit left',
 };
 
-function providerLabel(provider: PowerUpProvider | null, endpoint?: string): string {
-  if (provider && provider !== 'clef' && endpoint) return endpoint;
-  return provider ? PROVIDER_NAME[provider] : 'the model';
+function providerLabel(provider: PowerUpConfig['provider'], endpoint?: string): string {
+  // Only Jev and Custom go to an endpoint the person chose; OpenAI and Clef keep their names.
+  if ((provider === 'jev' || provider === 'custom') && endpoint) return endpoint;
+  return provider ? POWER_UP_PROVIDER_NAMES[provider] : 'the model';
 }
 
 function statusKind(status: PowerUpStatus): SlotState {
@@ -45,7 +47,7 @@ function statusTitle(state: SlotState, links: number, model: string): string {
 
 export const PowerUpStatusSlot: React.FC<{
   status: PowerUpStatus;
-  provider: PowerUpProvider | null;
+  provider: PowerUpConfig['provider'];
   endpoint?: string;
   onRetry: () => void;
   onSettings: () => void;

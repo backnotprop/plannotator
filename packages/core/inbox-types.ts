@@ -3724,11 +3724,13 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * (`scheduled…`; inbox-scheduled-machines.ts in the server). `capabilities`: its Settings → Capabilities switches are
  * read and turned from there (`capabilities`; core inbox-capability-switches.ts). `capability-note`: a switch an agent
  * there turns carries `capability_note` (the agent's name), and this Inbox posts its own line for it
- * (inbox-capability-note.ts in the server).
+ * (inbox-capability-note.ts in the server). `capability-set`: its Capabilities switches are one set with a linked
+ * machine's, the newer flip winning on both (its list's `capability_set`; inbox-capability-set.ts in the server); an
+ * Inbox without it keeps its own, and `capabilities` and `capability-note` stay for such an older machine's window.
  * `ships` (approval "inbox-ship-mode"): its ships are read, started and stopped through its door (`ships`, `ships/log`,
  * `ships/stop`), so a linked machine's Reviews draws them and offers its agents in Ship's list.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
