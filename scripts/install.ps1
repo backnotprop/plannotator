@@ -1326,7 +1326,7 @@ if ($vibeAvailable -and $skipVibeResolved) {
     Write-Host "2.25+, so no config.toml flag is needed."
     Write-Host ""
     Write-Host "The Vibe-specific skills are not installed on Windows. Vibe picks up the"
-    Write-Host "shared review and annotate skills from ~/.agents/skills instead;"
+    Write-Host "shared review, annotate and /diagram skills from ~/.agents/skills instead;"
     Write-Host "/plannotator-last is not supported for Vibe on Windows yet."
 }
 
@@ -2581,7 +2581,7 @@ if ($vibeAvailable) {
         Write-Host "No files under $vibeHome were written or removed."
     } else {
         Write-Host "Vibe detected. The Windows installer writes nothing under $vibeHome."
-        Write-Host "Vibe uses the shared review and annotate skills from ~/.agents/skills"
+        Write-Host "Vibe uses the shared review, annotate and /diagram skills from ~/.agents/skills"
         Write-Host "(/plannotator-last is not supported for Vibe on Windows yet). The"
         Write-Host "plan-review hook is macOS/Linux-only; see the manual setup instructions"
         Write-Host "printed above to wire plan review on a macOS/Linux box."

@@ -16,7 +16,7 @@
  */
 
 import type { InboxAttachment, InboxAttachmentKind, InboxAttachmentState, InboxInlineImage } from "./inbox-attachments";
-import { readInboxAttachmentKind } from "./inbox-attachments";
+import { readInboxAttachmentKind, readInboxDiagramId } from "./inbox-attachments";
 import type { InboxAuthor, InboxGuideRef } from "./inbox-types";
 
 /** One pinned artifact: its key (an attachment id, or `guide:<message id>`), its thread, and when it was pinned. */
@@ -58,18 +58,33 @@ export interface InboxArtifactRef<M> {
   guide: InboxGuideRef | null;
 }
 
-/** Group immutable sends within one thread. The first attachment keeps the pin key; the last supplies the bytes. */
-export function inboxDiagramRevisions(attachments: readonly Pick<InboxAttachment, "kind" | "id" | "diagram_id">[]) {
-  const families = new Map<string, string[]>();
-  for (const attachment of attachments) {
-    if (attachment.kind !== "plannotator-diagram" || !attachment.diagram_id) continue;
-    const family = families.get(attachment.diagram_id);
-    if (family) family.push(attachment.id);
-    else families.set(attachment.diagram_id, [attachment.id]);
+/** Group verified revisions in reading order. A path survives an editor's atomic save; a file identity survives a rename. */
+export function inboxDiagramRevisions(entries: readonly {attachment: InboxAttachment; author?: InboxAuthor}[]) {
+  type Family = { ids: string[]; path: string; file?: string };
+  const byPath = new Map<string, Family>();
+  const byFile = new Map<string, Family>();
+  const families = new Set<Family>();
+  for (const {attachment, author} of entries) {
+    const diagram = readInboxDiagramId(attachment.diagram_id);
+    if (attachment.kind !== "plannotator-diagram" || !diagram || !attachment.path || !author) continue;
+    if (author.kind === "agent" && !author.session) continue;
+    const sender = author.kind === "person" ? ["person"] : ["agent", author.host, author.session];
+    const path = JSON.stringify([sender, diagram, attachment.path]);
+    const file = attachment.diagram_file_id && /^[a-f0-9]{64}$/.test(attachment.diagram_file_id)
+      ? JSON.stringify([sender, diagram, attachment.diagram_file_id]) : undefined;
+    const family: Family = (file && byFile.get(file)) || byPath.get(path) || { ids: [], path, file };
+    if (family.path !== path && byPath.get(family.path) === family) byPath.delete(family.path);
+    if (family.file && family.file !== file && byFile.get(family.file) === family) byFile.delete(family.file);
+    family.ids.push(attachment.id);
+    family.path = path;
+    family.file = file;
+    byPath.set(path, family);
+    if (file) byFile.set(file, family);
+    families.add(family);
   }
   const byAttachment = new Map<string, readonly string[]>();
-  for (const family of families.values()) {
-    if (family.length > 1) for (const id of family) byAttachment.set(id, family);
+  for (const {ids} of families) {
+    if (ids.length > 1) for (const id of ids) byAttachment.set(id, ids);
   }
   return byAttachment;
 }
@@ -81,7 +96,7 @@ export function inboxDiagramRevisions(attachments: readonly Pick<InboxAttachment
  * An image both shown and attached (the same path, the same message) is one
  * artifact under the shown image's id. A key that appears twice is kept once.
  */
-export function inboxThreadArtifactRefs<M extends { id: string; attachments?: readonly InboxAttachment[] | null; inline_images?: readonly InboxInlineImage[] | null; guide?: InboxGuideRef | null }>(
+export function inboxThreadArtifactRefs<M extends { id: string; author?: InboxAuthor; attachments?: readonly InboxAttachment[] | null; inline_images?: readonly InboxInlineImage[] | null; guide?: InboxGuideRef | null }>(
   messages: readonly M[],
 ): InboxArtifactRef<M>[] {
   const out: InboxArtifactRef<M>[] = [];
@@ -102,7 +117,7 @@ export function inboxThreadArtifactRefs<M extends { id: string; attachments?: re
     }
     if (message.guide) out.push({ key: inboxGuideArtifactKey(message.id), message, attachment: null, inline: false, guide: message.guide });
   }
-  const revisions = inboxDiagramRevisions(out.flatMap((ref) => ref.attachment ? [ref.attachment] : []));
+  const revisions = inboxDiagramRevisions(out.flatMap((ref) => ref.attachment ? [{ attachment: ref.attachment, author: ref.message.author }] : []));
   return out.flatMap((ref) => {
     const family = revisions.get(ref.key);
     if (!family) return [ref];

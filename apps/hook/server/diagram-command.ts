@@ -20,11 +20,15 @@ async function createDiagram(name: string, cwd: string, dataDir: string): Promis
   const title = basename(path, ".diagram.json");
   const starter = {
     id: randomUUID(), title,
-    columns: [{id:"source",title:"Source"}, {id:"destination",title:"Destination"}],
-    links: [{id:"handoff",from:"source",to:"destination"}],
+    columns: [{ id: "subject", title: "Subject" }],
   };
   await mkdir(dirname(path), {recursive:true});
-  await writeFile(path, JSON.stringify(starter, null, 2) + "\n", {flag:"wx"});
+  try {
+    await writeFile(path, JSON.stringify(starter, null, 2) + "\n", {flag:"wx"});
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Diagram already exists at ${path}. Open it to revise it, or choose another name.`);
+    throw error;
+  }
   return path;
 }
 

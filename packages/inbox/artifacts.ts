@@ -145,7 +145,9 @@ export function threadArtifacts(
       out.push({ type: 'file', messageId: attachment.message_id, sender: 'the agent', sentAt: whenTime(attachment.sent_at), at: attachment.sent_at, fromPerson: false, host: null, attachment, inline, alsoIds: [] });
     }
   }
-  const revisions = inboxDiagramRevisions(out.flatMap((item) => item.type === 'file' ? [item.attachment] : []));
+  const authors = new Map(messages.map((message) => [message.id, message.author]));
+  const revisions = inboxDiagramRevisions(out.flatMap((item) => item.type === 'file'
+    ? [{ attachment: item.attachment, author: authors.get(item.messageId) }] : []));
   return out.flatMap((item): Artifact[] => {
     if (item.type !== 'file') return [item];
     const family = revisions.get(item.attachment.id);

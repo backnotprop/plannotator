@@ -174,6 +174,29 @@ describe("annotate agent instructions, executed against a live annotate server",
     }
   });
 
+  test("native diagram: the instructions post and retain a part and its point", async () => {
+    const source = JSON.stringify({ title: "Mail", columns: [{ id: "receiver", title: "Receiver" }] });
+    const file = join(dir, "mail.diagram.json");
+    writeFileSync(file, source);
+    const server = await startAnnotateServer({ markdown: source, filePath: file, htmlContent: SHELL });
+    try {
+      const { results } = await runInstructions(server.url, "plannotator-diagram");
+      for (const r of results) expect(r.status).toBeLessThan(300);
+      const list = await (await fetch(`${server.url}/api/external-annotations`)).json();
+      const saved = list.annotations.find((a: any) => a.diagramAnchor?.id === "receiver");
+      expect(saved.diagramAnchor.point).toEqual({ kind: "panel", x: 0.5, y: 0.5 });
+      const { point, ...incomplete } = saved.diagramAnchor;
+      const bad = await fetch(`${server.url}/api/external-annotations`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ annotations: [{ source: "review", type: "COMMENT", text: "Retries", originalText: "Receiver", diagramAnchor: incomplete }] }),
+      });
+      expect(bad.status).toBe(400);
+      expect((await bad.json()).error).toContain("point { kind: panel | section | group | link, x, y }");
+    } finally {
+      server.stop();
+    }
+  });
+
   test("folder: the document read command prints markdown, HTML and data files", async () => {
     const folder = join(dir, "notes");
     mkdirSync(folder);

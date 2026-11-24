@@ -1905,6 +1905,9 @@
         "diagram_id": {
           "type": "string"
         },
+        "diagram_file_id": {
+          "type": "string"
+        },
         "sent_sha256": {
           "type": "string"
         },
@@ -2076,6 +2079,9 @@
           "$ref": "#/$defs/InboxAttachmentKind"
         },
         "diagram_id": {
+          "type": "string"
+        },
+        "diagram_file_id": {
           "type": "string"
         },
         "sent_sha256": {
@@ -3174,6 +3180,9 @@
           "$ref": "#/$defs/InboxAttachmentKind"
         },
         "diagram_id": {
+          "type": "string"
+        },
+        "diagram_file_id": {
           "type": "string"
         },
         "sent_sha256": {

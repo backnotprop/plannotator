@@ -123,11 +123,22 @@ test('a tile says everything it shows in its name, in the Inbox\'s own words', (
   expect(artifactChanged(sql)).toBeNull();
 });
 
+test('same IDs only join verified editions from one sender; older records can still match by source path', () => {
+  const originals = [M1, M2, M3].map((m, i) => file(`att_${i}`, 'flow.diagram.json', 'plannotator-diagram', m, { diagram_id: ' flow ', sent_sha256: String(i).repeat(64) }));
+  const rows = threadArtifacts(messages, originals);
+  expect(rows.filter(r => r.type === 'file').map(artifactKey)).toEqual([originals[1]!.id, originals[0]!.id]);
+  expect(latestDiagramFor(rows, originals[0]!)).toBe(originals[2]!);
+  const otherAgent = agent(M3, messages[2]!.created_at, { author: { kind: 'agent', host: 'claude-code', session: 'another', name: 'Claude Code' } });
+  const separate = threadArtifacts([messages[0]!, messages[1]!, otherAgent], originals);
+  expect(separate.filter(r => r.type === 'file')).toHaveLength(3);
+});
+
 test('a new edition replaces its own diagram tile; a file with no diagram ID remains a separate artifact', () => {
-  const first = file('att_old', 'flow.diagram.json', 'plannotator-diagram', M1, { diagram_id: 'flow' });
-  const second = file('att_new', 'renamed.diagram.json', 'plannotator-diagram', M2, { diagram_id: 'flow', sent_sha256: 'b'.repeat(64) });
+  const first = file('att_old', 'flow.diagram.json', 'plannotator-diagram', M1, { diagram_file_id: 'f'.repeat(64), diagram_id: 'flow' });
+  const second = file('att_new', 'renamed.diagram.json', 'plannotator-diagram', M2, { diagram_file_id: 'f'.repeat(64), diagram_id: 'flow', sent_sha256: 'b'.repeat(64) });
   const separate = file('att_legacy', 'flow.diagram.json', 'plannotator-diagram', M3);
-  const rows = threadArtifacts(messages, [separate, second, first]);
+  const sameAgent = [messages[0]!, agent(M2, messages[1]!.created_at), messages[2]!];
+  const rows = threadArtifacts(sameAgent, [separate, second, first]);
   expect(rows.filter((row) => row.type === 'file').map(artifactKey)).toEqual([first.id, separate.id]);
   expect(stepIndexOf(stepsOf(rows), first.id)).toBe(stepIndexOf(stepsOf(rows), second.id));
   expect(latestDiagramFor(rows, first)).toBe(second);

@@ -136,7 +136,7 @@ import type { InboxT3WaitReason } from "@plannotator/core/inbox-types";
 import { INBOX_T3_HOST, isInboxT3WaitReason, isT3ThreadId } from "@plannotator/core/inbox-types";
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
-import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
+import { DIAGRAM_ANCHOR_EXPECTATION, parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
 import { parseHtmlBlockAnchor } from "@plannotator/core/html-block-anchor";
 import {
   INBOX_ANNOTATION_CURRENT,
@@ -153,6 +153,7 @@ import {
   isInboxTimedKind,
   INBOX_VIDEO_BLOCK_ID,
   readInboxAttachmentKind,
+  readInboxDiagramId,
   readInboxVideoTime,
   type InboxAnnotationRecord,
   type InboxAttachment,
@@ -1140,6 +1141,15 @@ export class InboxStore {
    * line's tags) is worked out by `store-log/history.ts`.
    */
   private apply(line: InboxLine): void {
+    // Older stores kept the raw root ID. Normalize only the derived metadata when replaying their messages.
+    if (line.kind === "message") {
+      for (const attachment of line.record.attachments ?? []) {
+        if (attachment?.diagram_id === undefined) continue;
+        const id = readInboxDiagramId(attachment.diagram_id);
+        if (!id) delete attachment.diagram_id;
+        else if (id !== attachment.diagram_id) attachment.diagram_id = id;
+      }
+    }
     this.changes += 1;
     if (line.seq > this.seq) this.seq = line.seq;
     const id = `${line.kind}:${line.id}`;
@@ -6369,7 +6379,7 @@ export class InboxStore {
     // A comment on a part of a diagram in the message: the part's label is its "words", and the anchor names the part.
     // The same fail-closed parser as the external-annotations route: what the window and the export read is what is stored.
     const diagramAnchor = fields.diagramAnchor === undefined ? undefined : parseDiagramAnchor(fields.diagramAnchor);
-    if (diagramAnchor === null) throw new InboxError("validation_error", "annotation.diagramAnchor: { v: 1, family, kind, id | from + to, label, sourceLine }.", { field: "annotation.diagramAnchor" });
+    if (diagramAnchor === null) throw new InboxError("validation_error", `annotation.diagramAnchor: ${DIAGRAM_ANCHOR_EXPECTATION}`, { field: "annotation.diagramAnchor" });
     if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
     const existing = this.annotations.get(id);
     if (existing && (!existing.message || existing.message_id !== message.id)) {

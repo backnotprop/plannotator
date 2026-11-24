@@ -21,6 +21,7 @@ export type AnnotateInstructionsSurface =
   | 'live-app'
   /** A whole-file Mermaid / Graphviz source rendered as one diagram. */
   | 'diagram'
+  | 'plannotator-diagram'
   /** A folder session (file browser, one document open at a time). */
   | 'folder'
   /** annotate-last: the agent's own message. */
@@ -76,6 +77,16 @@ curl -s -X PATCH "${origin}/api/external-annotations?id=<uuid>" \\
 \`family\` is one of flowchart, state, class, er, requirement, sequence, other, graphviz; \`kind\` is node, edge (use \`from\` + \`to\` instead of \`id\`), cluster, or diagram (the whole diagram, no id). A malformed anchor is a 400; one that names no part of the diagram lists as unanchored.`,
   },
 
+  'plannotator-diagram': {
+    read: (origin) => `curl -s ${origin}/api/plan | jq -r .plan`,
+    notes: () => `The document is an editable .diagram.json file. Choose a part from the JSON. Use its stable part ID and visible label. Set the anchor family to "plannotator-diagram" and supply a point within that part. Coordinates range from 0 to 1 on each axis; (0.5, 0.5) is the center. Use node for a panel or named section, cluster for a group, and edge for a link. In every case the point kind names the native part, and the anchor uses the part's ID. For a comment on the whole drawing use GLOBAL_COMMENT.
+
+\`\`\`json
+{"source": "claude-code", "type": "COMMENT", "text": "Show where this step retries.",
+ "originalText": "Receiver", "diagramAnchor": {"v": 1, "family": "plannotator-diagram", "kind": "node", "id": "receiver", "label": "Receiver", "sourceLine": null, "point": {"kind": "panel", "x": 0.5, "y": 0.5}}}
+\`\`\``,
+  },
+
   folder: {
     read: (origin) => `curl -s "${origin}/api/doc?path=<path-relative-to-folder>&doc=1" | jq -r '.markdown // .rawHtml'`,
     notes: (origin) => `The user browses a folder (\`curl -s ${origin}/api/plan | jq -r .filePath\`) and opens one document at a time. No API tells you which document is open.
@@ -104,7 +115,7 @@ All endpoints below are relative to that base. No authentication.
 ${section.read(origin)}
 \`\`\`
 
-Line numbers do not apply. Inline comments are pinned by quoting a verbatim phrase in \`originalText\`. ${section.notes(origin)}
+${surface === 'plannotator-diagram' ? 'Pin a comment to the part it describes.' : 'Line numbers do not apply. Inline comments are pinned by quoting a verbatim phrase in `originalText`.'} ${section.notes(origin)}
 
 ## Post comments
 
@@ -156,6 +167,7 @@ export function resolveAnnotateInstructionsSurface(input: {
   if (input.liveApp) return 'live-app';
   if (input.annotateSource === 'folder') return 'folder';
   if (input.annotateSource === 'message') return 'message';
+  if (input.renderAs === 'plannotator-diagram') return 'plannotator-diagram';
   if (input.renderAs === 'html') return 'html';
   if (input.renderAs === 'mermaid' || input.renderAs === 'graphviz') return 'diagram';
   return 'markdown';
