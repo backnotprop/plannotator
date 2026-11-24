@@ -178,7 +178,17 @@ async function typeAndCatch(page: Page, text: string, pauseAt: number | null = n
     { text, pauseAt },
   );
 }
-const release = (page: Page) => page.evaluate(() => document.getAnimations().forEach((a) => a.finish()));
+/**
+ * Finishes every animation that has an end; one that loops for ever (the sidebar's mascot, a spinner) cannot be
+ * finished, so it only plays on again from where `pauseAt` held it.
+ */
+const release = (page: Page) =>
+  page.evaluate(() => {
+    for (const a of document.getAnimations()) {
+      if (a.effect && Number.isFinite(a.effect.getComputedTiming().endTime as number)) a.finish();
+      else a.play();
+    }
+  });
 
 test('typing narrows the list on every key, no Enter; band counts follow', async () => {
   const { page, ids } = world;
