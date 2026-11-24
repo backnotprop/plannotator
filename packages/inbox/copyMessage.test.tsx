@@ -429,8 +429,9 @@ test.skipIf(!hasDom)("each open message's ⋯ sits after Reply; Copy message cop
   expect(button.hasAttribute('data-phone')).toBe(false);
   await press(button);
   await until(() => !!messageMenu(), 'the message menu');
-  // The approved items, in order: an agent's message leads with New thread from this message; Copy thread after a separator.
-  expect(labels(messageMenu())).toEqual(['New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
+  // The approved items, in order (approval "inbox-reactions-every-message", item 5): an agent's message leads with Reply and
+  // New thread from this message (the emoji row only where the message takes a reaction); Copy thread after a separator.
+  expect(labels(messageMenu())).toEqual(['Reply', 'New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
   expect(messageMenu()!.querySelector('[role="separator"]')).not.toBeNull();
   expect(button.hasAttribute('data-open')).toBe(true);
   await choose(item(messageMenu(), 'message'));
@@ -554,7 +555,7 @@ test.skipIf(!hasDom)('a right-click on the head line opens the same menu; Escape
   await until(() => !!document.querySelector('[data-message-menu][data-context]'), 'the context menu');
   // Ours, not the browser's.
   expect(event!.defaultPrevented).toBe(true);
-  expect(labels(document.querySelector('[data-message-menu][data-context]'))).toEqual(['New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
+  expect(labels(document.querySelector('[data-message-menu][data-context]'))).toEqual(['Reply', 'New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
   expect(more(M4)!.hasAttribute('data-open')).toBe(true);
   await key('Escape');
   await until(() => !messageMenu(), 'the context menu to close');

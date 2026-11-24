@@ -1411,6 +1411,9 @@
             }
           ]
         },
+        "standalone": {
+          "type": "boolean"
+        },
         "made_read": {
           "type": "boolean"
         },
@@ -5068,6 +5071,9 @@
               "type": "null"
             }
           ]
+        },
+        "skill_reaction": {
+          "$ref": "#/$defs/InboxSkillReaction"
         }
       },
       "required": [
@@ -5825,6 +5831,9 @@
           "type": "string"
         },
         "label": {
+          "type": "string"
+        },
+        "skill": {
           "type": "string"
         }
       },
@@ -7026,6 +7035,23 @@
         "owner",
         "wakes",
         "delivered_at"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxSkillReaction": {
+      "type": "object",
+      "properties": {
+        "emoji": {
+          "type": "string"
+        },
+        "skill": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "emoji",
+        "skill"
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"

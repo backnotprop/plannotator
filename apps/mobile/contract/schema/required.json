@@ -890,6 +890,10 @@
       "session",
       "wakes"
     ],
+    "InboxSkillReaction": [
+      "emoji",
+      "skill"
+    ],
     "InboxSupersededBy": [
       "key",
       "message_id"

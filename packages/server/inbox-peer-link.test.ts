@@ -524,6 +524,27 @@ describe("the list (rule 5)", () => {
     expect(peer.list!.show_archived).toBeNull();
   });
 
+  test("its saved reaction emoji (skills too) come from its list, and a `reactions` frame reads the list again", async () => {
+    const told: string[] = [];
+    const d = door({
+      cursor: 3,
+      frames: ['event: reactions\ndata: {"reactions":[],"rev":5}\n\n'],
+      threads: () =>
+        Response.json({ cursor: 3, sections: [], reactions: d.stats.threads > 1 ? { reactions: [{ emoji: "🧪", label: "Test it", skill: "test-it" }], rev: 5 } : { reactions: [], rev: 4 } }),
+    });
+    const { peer } = link(d.url, { onReread: (event) => void told.push(`${event}:${peer.list!.reactions?.rev}`) });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("reactions")).toBe("1");
+    expect(told).toEqual(["reactions:5"]);
+    expect(peer.list!.reactions).toEqual({ reactions: [{ emoji: "🧪", label: "Test it", skill: "test-it" }], rev: 5 });
+    // An older Inbox's list says nothing about them; an unreadable one is none.
+    peer.acceptList({ cursor: 4, sections: [] });
+    expect(peer.list!.reactions).toBeNull();
+    peer.acceptList({ cursor: 5, sections: [], reactions: { reactions: "🧪", rev: 6 } });
+    expect(peer.list!.reactions).toBeNull();
+  });
+
   test("a machine's stars and the marks it takes come from its list; an older Inbox's list says no marks", () => {
     const { peer } = link("http://127.0.0.1:9");
     peer.acceptList({ cursor: 3, sections: [], pins: [{ thread_id: "msg_a" }] });

@@ -135,6 +135,23 @@ export function changeSavedReaction(index: number, emoji: string): void {
   if (was) change({ op: 'change', emoji: was.emoji, to: emoji });
 }
 
+/** Gives saved emoji `index` a skill ('' takes it away; approval "inbox-reactions-every-message", item 6). */
+export function skillSavedReaction(index: number, skill: string): void {
+  const was = current[index];
+  if (was && (was.skill ?? '') !== skill) change({ op: 'skill', emoji: was.emoji, skill });
+}
+
+/**
+ * The editor's one field ("Name, or / for a skill"): a last `/name` word is the skill, the words before it the name.
+ * Kept as two changes, the name first.
+ */
+export function nameAndSkillSavedReaction(index: number, text: string): void {
+  const m = /(?:^|\s)\/([A-Za-z0-9][A-Za-z0-9._-]{0,63})\s*$/.exec(text);
+  const label = (m ? text.slice(0, m.index) : text).trim();
+  if ((current[index]?.label ?? '') !== label) nameSavedReaction(index, label);
+  skillSavedReaction(index, m ? m[1]! : '');
+}
+
 /** Takes saved emoji `index` out of the tray; the ones after it move up. */
 export function removeSavedReaction(index: number): void {
   const was = current[index];
