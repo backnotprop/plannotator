@@ -385,7 +385,12 @@ wake is made, so a change applies at the next Inbox start; no Settings switch ye
 writes none of the steering's files (no rollout look for it, no `codex-hook/`, `hooked.json`, `steered.json` or
 `hooks.json`, no clearing), logs nothing new and queues as before; a claim folder it did not make is left alone as
 before; a launched thread's host runs the same `turn/start` (then `turn/steer` only when Codex refuses a second turn)
-as before; the installer writes no PostToolUse hook, prints its old fallback words, and takes out one it wrote before
+as before. Off after on: an Inbox that starts with the switch on writes `inbox/codex-queue/steer-on`; one that starts
+with it off sees that name in the claims folder it lists at start anyway and clears, once, every held file, the
+`codex-queue/next-turn/` records and the mark (never on: none of it is there and nothing is done). The hook itself
+takes nothing without that mark, nor when config.json says `codexSteer: false` or PLANNOTATOR_EXPERIMENTAL says
+`-codex-steer`. The installer writes no PostToolUse hook, prints its old fallback words, writes a `hooks.json` byte
+for byte as before when none of ours is in it (an empty `"PostToolUse": []` kept), and takes out one it wrote before
 ("Codex: took Plannotator's PostToolUse hook out of <hooks.json> (the experimental codex-steer switch is off).");
 uninstall reads as before unless that hook or its note is there. No agent-facing text changes either way. Tests: "the
 experimental codex-steer switch" in `inbox-codex-steer.test.ts` (fs spied: nothing of it touched), "steering off" in
@@ -405,9 +410,14 @@ removal), the launch cases in `packages/server/inbox-launch-codex.test.ts`, and 
   the text). Seen before any turn boundary: delivered with `into_turn: true`; seen after one: delivered as a new turn.
   The turn ended (`task_complete` / `turn_complete` / `turn_aborted`, Esc included) with the words not seen, the
   file read to its end and untouched for 10 s (`CODEX_SIGHT_QUIET_MS`): the claim is dropped and `codex queue` gives
-  it as the next turn, never into a turn again (`nextTurnOnly`). Nothing written to the rollout for 20 minutes while
-  handed (a Codex that crashed and was not resumed; `CODEX_SIGHT_GIVE_UP_MS`, the hold's rule): the same, once. The
-  proof survives a restart (`hooked.json` / `steered.json` keep the rollout, offset and turn). A launched thread whose
+  it as the next turn, never into a turn again (`nextTurnOnly`, kept on disk as `codex-queue/next-turn/<item>.<thread>`;
+  a launched thread's reply is marked there before its `turn/steer`, so it is steered at most once, across a restart
+  too). Nothing written to the rollout for 20 minutes and handed on 20 minutes ago (a Codex that crashed and was not
+  resumed; `CODEX_SIGHT_GIVE_UP_MS`, the hold's rule): the same, once; never while a launched thread's host says a
+  turn runs (`turnRunning`: a steer waits in Codex for the end of a tool call, which writes nothing however long it
+  takes). The proof survives a restart (`hooked.json` / `steered.json` keep the rollout, offset, turn and when). A
+  claim found without `queued.json` or `hooked.json` (maybe the hook mid-take) is looked at every 2 s for 30 s, so a
+  reply the hook took reads handed at once, not after the next line or a restart. A launched thread whose
   rollout the wake cannot find is never steered: its host takes the old `turn/start` path and it reads plain
   Delivered. What Codex writes, from its source (openai/codex at `baf9b39`, cited in `inbox-codex-sight.ts`): a
   PostToolUse `additionalContext` is recorded (`record_additional_contexts`, core/src/tools/registry.rs, cancelled
@@ -430,8 +440,8 @@ removal), the launch cases in `packages/server/inbox-launch-codex.test.ts`, and 
   wake looks every 2 s while it holds or watches anything; a turn that ended before the claim (or a hold older than
   30 minutes) releases the hold and `codex queue` gives it as the next turn. Whoever makes the claim sends it, never
   both. The hook marks its claim at once (`hook-claim`, `CODEX_HOOK_CLAIM_MARK`); a claim with the mark and no
-  `hooked.json` for 30 s (the hook died before answering) is dropped and queued; a claim without the mark (another
-  Inbox on the same data dir) is left alone, never re-sent.
+  `hooked.json` for 30 s (the hook died before answering) is dropped and queued; a claim still without the mark after
+  30 s (another Inbox on the same data dir) is left alone, never re-sent.
   The hook takes only its own root thread's reply: a payload with `agent_id` (a subagent; its `session_id` is the
   root's), or whose `transcript_path` is not `rollout-*-<session_id>.jsonl`, takes nothing. A reply over 8 KiB
   (`CODEX_HOOK_CONTEXT_MAX_BYTES`, and replies taken together stay under it) is never held: it goes by `codex queue`

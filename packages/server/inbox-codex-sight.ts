@@ -15,7 +15,9 @@
  *    the turn it was handed to is over. Then the model's next step (its reasoning, a tool call, a reply) with no text
  *    before it: dropped. Nothing after the end for SIGHT_QUIET_MS: dropped too (the thread went idle without it).
  *  - nothing written to the rollout for CODEX_SIGHT_GIVE_UP_MS (20 minutes, the hold's rule: a Codex that crashed
- *    mid-turn and was not resumed): dropped, so it goes once as the next turn.
+ *    mid-turn and was not resumed), counted from the hand-off too, and never while a launched thread's host says its
+ *    turn still runs (a steer waits in Codex for the end of a tool call, which writes nothing however long it takes):
+ *    dropped, so it goes once as the next turn.
  *  - anything else: still waiting (a long tool call, the model still answering).
  *
  * What Codex writes, from its source (openai/codex at baf9b39, 2026-11-24): a PostToolUse hook's `additionalContext`
@@ -153,11 +155,20 @@ export async function codexSightStartOf(rollout: string): Promise<CodexSightStar
 }
 
 /**
+ * When the text was handed on (ms), and, for a thread whose Codex the Inbox runs (a launched one), whether its host
+ * says a turn runs now (true: the turn it was steered into has not ended, so it is never judged dropped by silence).
+ */
+export interface CodexSightHanded {
+  at: number;
+  running?: () => boolean | null;
+}
+
+/**
  * One look at the rollout for a handed-on text: `seen`, `dropped`, or `waiting` with how far it got. `now` and the
  * file's last write decide a turn that ended and then went quiet (CODEX_SIGHT_QUIET_MS). A rollout that cannot be read
  * is waiting: nothing is decided on a file that is not there.
  */
-export async function lookForCodexSight(start: CodexSight, cursor: CodexSightCursor | null, now: number): Promise<CodexSightAnswer> {
+export async function lookForCodexSight(start: CodexSight, cursor: CodexSightCursor | null, now: number, handed: CodexSightHanded): Promise<CodexSightAnswer> {
   const mark: CodexSightMark = start;
   const from = cursor ?? { pos: start.offset, ended: false };
   try {
@@ -178,8 +189,10 @@ export async function lookForCodexSight(start: CodexSight, cursor: CodexSightCur
       }
     }
     if (answer.kind === "waiting" && answer.cursor.ended && answer.cursor.pos >= info.size && now - info.mtimeMs >= CODEX_SIGHT_QUIET_MS) return { kind: "dropped" };
-    // A Codex that crashed mid-turn: its rollout stopped; after the hold's give-up time, the next turn, once.
-    if (answer.kind === "waiting" && answer.cursor.pos >= info.size && now - info.mtimeMs >= CODEX_SIGHT_GIVE_UP_MS) return { kind: "dropped" };
+    // A Codex that crashed mid-turn: its rollout stopped; the give-up time after both the hand-off and its last
+    // write, the next turn, once. Never while the host says the turn still runs (a long tool call writes nothing).
+    const silent = now - info.mtimeMs >= CODEX_SIGHT_GIVE_UP_MS && now - handed.at >= CODEX_SIGHT_GIVE_UP_MS;
+    if (answer.kind === "waiting" && answer.cursor.pos >= info.size && silent && handed.running?.() !== true) return { kind: "dropped" };
     return answer;
   } catch {
     return { kind: "waiting", cursor: from };

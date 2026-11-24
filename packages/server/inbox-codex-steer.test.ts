@@ -119,11 +119,12 @@ function world(options: { rollout?: "running" | "idle" | null; hook?: boolean; r
   const clock = { shift: 0 };
   const now = () => Date.now() + clock.shift;
   const logs: string[] = [];
-  const start = () => {
+  /** `extra`: more of the wake's options (a launched thread's host: `deliver`, `launched`, `turnRunning`); `home`: another Codex home. */
+  const start = (extra: Partial<Parameters<typeof createInboxCodexWake>[0]> = {}, home = codexHome) => {
     // The route under this scratch Codex home; the switch from config.json when the test names it, else on.
     const steering = options.switch ? {} : { steering: true };
-    const steer = createCodexSteerRoute({ codexHomeDir: () => codexHome, inboxDir: () => store.dir, allowed: () => true, likelyFolders: () => [], now, ...steering });
-    const wake = createInboxCodexWake({ store, environment, commandOf, extraClis: [], log: (line) => logs.push(line), steer, now });
+    const steer = createCodexSteerRoute({ codexHomeDir: () => home, inboxDir: () => store.dir, allowed: () => true, likelyFolders: () => [], now, ...steering });
+    const wake = createInboxCodexWake({ store, environment, commandOf, extraClis: [], log: (line) => logs.push(line), steer, now, ...extra });
     wakes.push(wake);
     return wake;
   };
@@ -136,7 +137,9 @@ function world(options: { rollout?: "running" | "idle" | null; hook?: boolean; r
     runCodexHook(JSON.stringify({ session_id: THREAD, turn_id: "t1", transcript_path: rollout, cwd: "/work/ledger", hook_event_name: "PostToolUse", model: "gpt-5.5", permission_mode: "default", tool_name: "Bash", tool_input: { command: "ls" }, tool_response: "a\nb", tool_use_id: "call_1", ...extra }), store.dir, Date.now());
   const contextOf = (out: string) => (JSON.parse(out) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } }).hookSpecificOutput;
   const handed = (id: string) => store.handover.handedTo(THREAD).includes(id);
-  return { store, project, codexHome, rollout, subRollout, hooksFile, clock, logs, turn, append, shows, aborted, modelStep, quiet, stale, reviewed, start, ask, reply, queues, held, hookRun, contextOf, handed };
+  /** How many `codex queue` calls carried this reply. */
+  const queuesOf = (id: string) => queues().filter((call) => call.args.some((arg) => arg.includes(`(${id})`))).length;
+  return { store, project, codexHome, dataDir, rollout, subRollout, hooksFile, clock, logs, turn, append, shows, aborted, modelStep, quiet, stale, reviewed, start, ask, reply, queues, queuesOf, held, hookRun, contextOf, handed };
 }
 
 /** Every path the fs calls name while `run` runs (sync and promise forms), for "nothing of the steering is touched". */
@@ -175,7 +178,7 @@ describe("the experimental codex-steer switch: off by default, and off is the qu
       expect(w.queues()).toHaveLength(1);
       expect(existsSync(leftHeld)).toBe(true);
       // (The wake reads a thread's rollout as before this, for T3 Code's threads; nothing of the steering's own.)
-      const steering = touched.filter((path) => /codex-hook|hooked\.json|steered\.json|hook-claim|hooks\.json|config\.json/.test(path));
+      const steering = touched.filter((path) => /codex-hook|hooked\.json|steered\.json|hook-claim|hooks\.json|config\.json|steer-on|next-turn/.test(path));
       expect(steering).toEqual([]);
       expect(w.logs).toEqual([]);
       expect(w.store.message(reply.id)!.delivery?.into_turn).toBeUndefined();
@@ -564,7 +567,12 @@ describe("the switch on: what Codex crashes and other Inboxes leave behind", () 
     await wake.sweep();
     expect(w.handed(reply.id)).toBe(true);
     expect(w.queues()).toHaveLength(0);
+    // 20 minutes without a write, but only just handed on: still waiting (counted from the hand-off too).
     w.stale();
+    await wake.sweep();
+    await wake.sweep();
+    expect(w.queues()).toHaveLength(0);
+    w.clock.shift = 21 * 60_000;
     await wake.sweep();
     await until("queued", () => w.queues().length === 1);
     await wake.sweep();
@@ -593,4 +601,320 @@ describe("the switch on: what Codex crashes and other Inboxes leave behind", () 
     expect(existsSync(codexHookClaimDir(w.store.dir, heldOne.id, THREAD))).toBe(true);
     expect(existsSync(codexHookClaimDir(w.store.dir, other.id, THREAD))).toBe(true);
   });
+});
+
+describe("a launched thread's steer: steered once, never judged dropped while its turn runs", () => {
+  /** A launched thread's host: `turn/steer` while `busy`, a new turn otherwise; every call kept. */
+  const host = () => {
+    const calls: { text: string; intoTurn: boolean }[] = [];
+    const state = { busy: true };
+    const options = {
+      deliver: async (_session: string, text: string, intoTurn?: boolean) => {
+        calls.push({ text, intoTurn: intoTurn === true });
+        return intoTurn && state.busy ? ("steered" as const) : ("delivered" as const);
+      },
+      launched: () => true,
+      turnRunning: () => state.busy,
+    };
+    return { calls, state, options };
+  };
+  const ago = (file: string, ms: number, shift: number) => {
+    const at = new Date(Date.now() + shift - ms);
+    utimesSync(file, at, at);
+  };
+
+  test("a 25-minute build, a reply steered in at minute 19: not given up at minute 20, delivered once when the build ends", async () => {
+    const w = world({ rollout: "running" });
+    const h = host();
+    // Minute 19 of the build: the rollout was last written when the build's tool call began.
+    ago(w.rollout, 19 * 60_000, 0);
+    const wake = w.start(h.options);
+    const reply = w.reply(w.ask(), "Also bump the version.");
+    await wake.sweep();
+    await until("steered", () => h.calls.length === 1);
+    expect(h.calls[0]!.intoTurn).toBe(true);
+    // Minute 20: 20 minutes without a rollout write, 1 since the steer, the build still runs.
+    w.clock.shift = 60_000;
+    ago(w.rollout, 20 * 60_000, w.clock.shift);
+    await wake.sweep();
+    await wake.sweep();
+    // Minute 24, after an Inbox restart: still the one steer.
+    wake.stop();
+    const second = w.start(h.options);
+    w.clock.shift = 5 * 60_000;
+    ago(w.rollout, 24 * 60_000, w.clock.shift);
+    await second.sweep();
+    await second.sweep();
+    expect(h.calls).toHaveLength(1);
+    expect(w.store.message(reply.id)!.delivery).toBeUndefined();
+    expect(w.queuesOf(reply.id)).toBe(0);
+    // Minute 25: the build ends and Codex records the steered text before the model's next request.
+    w.clock.shift = 6 * 60_000;
+    w.shows(h.calls[0]!.text, "user");
+    await second.sweep();
+    expect((await until("delivered", () => w.store.message(reply.id)!.delivery)).into_turn).toBe(true);
+    await second.sweep();
+    expect(h.calls).toHaveLength(1);
+    expect(w.queuesOf(reply.id)).toBe(0);
+  });
+
+  test("a turn that runs on long past the give-up time is never given up; when it ends without the text, one new turn", async () => {
+    const w = world({ rollout: "running" });
+    const h = host();
+    const wake = w.start(h.options);
+    const reply = w.reply(w.ask(), "Lost in a long turn?");
+    await wake.sweep();
+    await until("steered", () => h.calls.length === 1);
+    // 45 minutes on, nothing written, the host says the turn still runs.
+    w.clock.shift = 45 * 60_000;
+    ago(w.rollout, 45 * 60_000, w.clock.shift);
+    await wake.sweep();
+    await wake.sweep();
+    expect(h.calls).toHaveLength(1);
+    // The turn ends without it (Esc): one new turn, never a second steer, and nothing more after a restart.
+    h.state.busy = false;
+    w.aborted();
+    ago(w.rollout, 60_000, w.clock.shift);
+    await wake.sweep();
+    await until("a new turn", () => h.calls.length === 2);
+    expect(h.calls[1]!.intoTurn).toBe(false);
+    wake.stop();
+    const second = w.start(h.options);
+    await second.sweep();
+    await second.sweep();
+    expect(h.calls).toHaveLength(2);
+    expect(w.store.message(reply.id)!.delivery).toBeDefined();
+    expect(w.queuesOf(reply.id)).toBe(0);
+  });
+
+  test("a reply a turn ended without is never steered again after a restart, even while a new turn runs", async () => {
+    const w = world({ rollout: "running" });
+    const h = host();
+    const first = w.start(h.options);
+    const reply = w.reply(w.ask(), "Once into a turn.");
+    await first.sweep();
+    await until("steered", () => h.calls.length === 1);
+    // The Inbox stops right after the steer; the turn ends without the text and a new one starts.
+    first.stop();
+    w.aborted();
+    w.append({ type: "event_msg", payload: { type: "task_started", turn_id: "t2" } });
+    w.modelStep();
+    const second = w.start(h.options);
+    await second.sweep();
+    await until("a new turn", () => h.calls.length === 2);
+    expect(h.calls[1]!.intoTurn).toBe(false);
+    await second.sweep();
+    expect(h.calls).toHaveLength(2);
+    expect(w.store.message(reply.id)!.delivery).toBeDefined();
+  });
+});
+
+describe("switched on once, then off", () => {
+  test("never on: starting and sweeping with the switch off touches nothing of the steering's", async () => {
+    const w = world({ switch: "off", rollout: "running", hook: true });
+    w.reply(w.ask(), "Plain queue.");
+    const touched = await pathsTouched(async () => {
+      const wake = w.start();
+      await wake.sweep();
+      await until("queued", () => w.queues().length === 1);
+    });
+    expect(touched.filter((path) => /codex-hook|hooked\.json|steered\.json|hook-claim|hooks\.json|steer-on|next-turn/.test(path))).toEqual([]);
+  });
+
+  test("on before: what that run left is cleared once at the next start with the switch off; the hook takes nothing", async () => {
+    const w = world({ switch: "on", rollout: "running", hook: true });
+    const on = w.start();
+    const reply = w.reply(w.ask(), "Held, then the switch goes off.");
+    await on.sweep();
+    await until("held", () => w.held().length === 1);
+    on.stop();
+    // The hook still in hooks.json with the switch off: it takes nothing, before and after the Inbox starts again.
+    writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ experimental: { codexSteer: false } }));
+    expect(w.hookRun()).toBe("");
+    expect(w.held()).toHaveLength(1);
+    const off = w.start();
+    expect(w.held()).toHaveLength(0);
+    expect(existsSync(join(w.store.dir, "codex-queue", "steer-on"))).toBe(false);
+    await off.sweep();
+    await until("queued", () => w.queuesOf(reply.id) === 1);
+    expect(w.hookRun()).toBe("");
+    off.stop();
+    // Cleared once: the next start with the switch off does no steering file work at all.
+    const touched = await pathsTouched(async () => {
+      const again = w.start();
+      await again.sweep();
+    });
+    expect(touched.filter((path) => /codex-hook|hooked\.json|steered\.json|hook-claim|hooks\.json|steer-on|next-turn/.test(path))).toEqual([]);
+    expect(w.queuesOf(reply.id)).toBe(1);
+  });
+
+  test("the hook takes nothing without the on-mark, or with PLANNOTATOR_EXPERIMENTAL turning it off", async () => {
+    const w = world({ rollout: "running", hook: true });
+    const wake = w.start();
+    w.reply(w.ask(), "Mark first.");
+    await wake.sweep();
+    await until("held", () => w.held().length === 1);
+    const payload = JSON.stringify({ session_id: THREAD, transcript_path: w.rollout, hook_event_name: "PostToolUse" });
+    expect(runCodexHook(payload, w.store.dir, Date.now(), { PLANNOTATOR_EXPERIMENTAL: "-codex-steer" })).toBe("");
+    const mark = join(w.store.dir, "codex-queue", "steer-on");
+    fs.renameSync(mark, `${mark}-away`);
+    expect(runCodexHook(payload, w.store.dir, Date.now(), {})).toBe("");
+    expect(w.held()).toHaveLength(1);
+    fs.renameSync(`${mark}-away`, mark);
+    expect(runCodexHook(payload, w.store.dir, Date.now(), {})).not.toBe("");
+  });
+});
+
+describe("every way a steer cannot happen falls back to the next turn exactly once", () => {
+  const settle = async (wake: InboxCodexWake) => {
+    for (let i = 0; i < 3; i++) await wake.sweep();
+  };
+
+  test("Esc after the hook took it", async () => {
+    const w = world({ rollout: "running", hook: true });
+    const wake = w.start();
+    const reply = w.reply(w.ask(), "Esc case.");
+    await wake.sweep();
+    await until("held", () => w.held().length === 1);
+    expect(w.hookRun()).not.toBe("");
+    w.aborted();
+    w.quiet();
+    await settle(wake);
+    await until("queued", () => w.queuesOf(reply.id) === 1);
+    w.clock.shift = 40 * 60_000;
+    await settle(wake);
+    expect(w.queuesOf(reply.id)).toBe(1);
+  });
+
+  test("Codex crashed after the hook took it, and the Inbox restarted meanwhile", async () => {
+    const w = world({ rollout: "running", hook: true });
+    const first = w.start();
+    const reply = w.reply(w.ask(), "Crash case.");
+    await first.sweep();
+    await until("held", () => w.held().length === 1);
+    expect(w.hookRun()).not.toBe("");
+    first.stop();
+    w.clock.shift = 21 * 60_000;
+    w.stale();
+    const second = w.start();
+    await settle(second);
+    await until("queued", () => w.queuesOf(reply.id) === 1);
+    second.stop();
+    const third = w.start();
+    await settle(third);
+    expect(w.queuesOf(reply.id)).toBe(1);
+  });
+
+  test("two replies the turn ended without", async () => {
+    const w = world({ rollout: "running", hook: true });
+    const wake = w.start();
+    const asked = w.ask();
+    const one = w.reply(asked, "First of two.");
+    const two = w.reply(asked, "Second of two.");
+    await wake.sweep();
+    await until("both held", () => w.held().length === 2);
+    expect(w.contextOf(w.hookRun()).additionalContext).toContain("Second of two.");
+    w.aborted();
+    w.quiet();
+    await settle(wake);
+    await until("both queued", () => w.queuesOf(one.id) === 1 && w.queuesOf(two.id) === 1);
+    await settle(wake);
+    expect([w.queuesOf(one.id), w.queuesOf(two.id)]).toEqual([1, 1]);
+  });
+
+  test("the size cap", async () => {
+    const w = world({ rollout: "running", hook: true });
+    const wake = w.start();
+    const reply = w.reply(w.ask(), `Long:\n${"word ".repeat(3_000)}`);
+    await settle(wake);
+    await until("queued", () => w.queuesOf(reply.id) === 1);
+    w.turn("idle");
+    await settle(wake);
+    expect(w.queuesOf(reply.id)).toBe(1);
+    expect(w.held()).toHaveLength(0);
+  });
+
+  test("only a sub-thread's tool calls came, then the turn ended", async () => {
+    const w = world({ rollout: "running", hook: true });
+    const wake = w.start();
+    const reply = w.reply(w.ask(), "Sub-thread case.");
+    await wake.sweep();
+    await until("held", () => w.held().length === 1);
+    expect(w.hookRun({ agent_id: "sub-1" })).toBe("");
+    expect(w.hookRun({ transcript_path: w.subRollout })).toBe("");
+    w.turn("idle");
+    await settle(wake);
+    await until("queued", () => w.queuesOf(reply.id) === 1);
+    await settle(wake);
+    expect(w.queuesOf(reply.id)).toBe(1);
+    expect(w.hookRun()).toBe("");
+  });
+
+  test("a hook Codex has not run (not reviewed)", async () => {
+    const w = world({ rollout: "running", hook: true, reviewed: false });
+    const wake = w.start();
+    const reply = w.reply(w.ask(), "Unreviewed case.");
+    await settle(wake);
+    await until("queued", () => w.queuesOf(reply.id) === 1);
+    w.turn("idle");
+    await settle(wake);
+    expect(w.queuesOf(reply.id)).toBe(1);
+    expect(w.held()).toHaveLength(0);
+  });
+
+  test("Codex runs with another CODEX_HOME than the Inbox reads", async () => {
+    const w = world({ rollout: "running", hook: true });
+    const elsewhere = join(w.dataDir, "..", "other-codex-home");
+    mkdirSync(elsewhere, { recursive: true });
+    const wake = w.start({}, elsewhere);
+    const reply = w.reply(w.ask(), "Other home case.");
+    await settle(wake);
+    await until("queued", () => w.queuesOf(reply.id) === 1);
+    w.turn("idle");
+    await settle(wake);
+    expect(w.queuesOf(reply.id)).toBe(1);
+    expect(w.held()).toHaveLength(0);
+  });
+});
+
+describe("a reply the hook took reads handed on at once, never only after the next line or a restart", () => {
+  /** The hook part way through a take: its claim made, maybe its mark; `finish` writes the rest as the hook does. */
+  const partTaken = (w: ReturnType<typeof world>, id: string, mark: boolean) => {
+    const claim = codexHookClaimDir(w.store.dir, id, THREAD);
+    mkdirSync(claim, { recursive: true });
+    if (mark) writeFileSync(join(claim, CODEX_HOOK_CLAIM_MARK), "");
+    return () => {
+      if (!mark) writeFileSync(join(claim, CODEX_HOOK_CLAIM_MARK), "");
+      writeFileSync(join(claim, "hooked.json"), `${JSON.stringify({ at: Date.now(), sight: null })}\n`);
+    };
+  };
+
+  test("the hook between its mkdir and its mark when the Inbox looks: picked up by the next look by itself", async () => {
+    const w = world({ rollout: "running", hook: true });
+    const wake = w.start();
+    const reply = w.reply(w.ask(), "Mid-take.");
+    await wake.sweep();
+    await until("held", () => w.held().length === 1);
+    const finish = partTaken(w, reply.id, false);
+    await wake.sweep();
+    finish();
+    // No sweep from here: only the wake's own looks.
+    await until("delivered by the wake's own look", () => w.store.message(reply.id)!.delivery, 8_000);
+    expect(w.queuesOf(reply.id)).toBe(0);
+  }, 15_000);
+
+  test("an Inbox restart while the hook finishes its take: picked up by the next look by itself", async () => {
+    const w = world({ rollout: "running", hook: true });
+    const first = w.start();
+    const reply = w.reply(w.ask(), "Restart mid-take.");
+    await first.sweep();
+    await until("held", () => w.held().length === 1);
+    first.stop();
+    const finish = partTaken(w, reply.id, true);
+    const second = w.start();
+    await second.sweep();
+    finish();
+    await until("delivered by the wake's own look", () => w.store.message(reply.id)!.delivery, 8_000);
+    expect(w.queuesOf(reply.id)).toBe(0);
+  }, 15_000);
 });

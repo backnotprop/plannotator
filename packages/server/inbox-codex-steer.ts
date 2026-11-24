@@ -21,7 +21,8 @@
  * reads the `codex-steer` experimental switch (PLANNOTATOR_EXPERIMENTAL, else config.json `experimental.codexSteer`)
  * once, when the wake and the launch host are made (an Inbox restart applies a change). Off, delivery is exactly as
  * before this module: no file of it is read or written, a launched thread's host takes the text as it did, and the
- * installer writes no PostToolUse hook.
+ * installer writes no PostToolUse hook. Off after on: what the earlier run left is cleared once at start, and the hook
+ * takes nothing (inbox-codex-steer-ledger.ts).
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";

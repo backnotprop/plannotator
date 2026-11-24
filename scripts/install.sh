@@ -1723,8 +1723,9 @@ const isOurs = (value) =>
   typeof value === "string" &&
   ((value.startsWith("/bin/sh -c 'B=\"") && value.includes('exec "$B" codex-hook')) ||
     (value.startsWith("/bin/sh -c '") && value.includes("/plannotator/inbox/codex-hook/*.json") && value.includes('" codex-hook;')));
-if (steerOn !== "1" && Array.isArray(config.hooks.PostToolUse)) {
-  // The experimental switch off: ours taken out (a group left empty with it), every other hook kept as it is.
+if (steerOn !== "1" && Array.isArray(config.hooks.PostToolUse) && config.hooks.PostToolUse.some((entry) => Array.isArray(entry?.hooks) && entry.hooks.some((hook) => hook?.type === "command" && isOurs(hook.command)))) {
+  // The experimental switch off, and ours there (left by a run with it on): ours taken out (a group left empty with
+  // it, and the key when nothing else is left), every other hook kept as it is. None of ours: not touched at all.
   const kept = [];
   for (const entry of config.hooks.PostToolUse) {
     const hooks = Array.isArray(entry?.hooks) ? entry.hooks : null;

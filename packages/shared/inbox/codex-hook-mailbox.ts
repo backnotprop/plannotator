@@ -29,6 +29,27 @@ export const CODEX_QUEUE_DIR = "codex-queue";
 export const CODEX_HOOKED_FILE = "hooked.json";
 /** The hook's mark in a claim it made (empty), written before `hooked.json`. */
 export const CODEX_HOOK_CLAIM_MARK = "hook-claim";
+/**
+ * In the claims folder (`codex-queue/`): written by an Inbox that starts with the switch on, taken out (with every
+ * held file and `next-turn` record) by one that starts with it off. Without it the hook takes nothing. An Inbox
+ * started with the switch off reads the claims folder anyway, so it sees this with no new file work.
+ */
+export const CODEX_STEER_ON_FILE = "steer-on";
+/**
+ * In the claims folder: one empty file per reply (`<item id>.<thread id>`) that goes only as the next turn from now on
+ * (it was steered once, or a turn ended without it). Kept across a restart, so a reply is steered at most once.
+ */
+export const CODEX_NEXT_TURN_DIR = "next-turn";
+
+/** Whether the last Inbox to start on this folder had the switch on (`steer-on`). */
+export function codexSteerMarked(inboxDir: string): boolean {
+  try {
+    statSync(join(inboxDir, CODEX_QUEUE_DIR, CODEX_STEER_ON_FILE));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The most the hook hands Codex at once, in bytes. Codex shortens an `additionalContext` past about 2,500 tokens to a

@@ -2524,6 +2524,12 @@ ${result.text}`);
       return roots().some((m) => m.launch!.agent === agent && !m.launch!.deleted_at && m.to?.host === agent && m.to.session === session);
     },
 
+    /** Whether `session`'s host says a turn runs now (its process is up and in a turn), or null when no process of it is up here. */
+    turnRunning(agent: string, session: string): boolean | null {
+      if (!Object.hasOwn(hosts, agent)) return null;
+      return hosts[agent]!.live(session)?.busy ?? null;
+    },
+
     /** The launch ended before its agent wrote: it failed, its CLI is gone, or it was stopped or went away (the thread's own line says which). */
     didNotStart(threadId: string): boolean {
       const root = store.message(threadId)?.thread_id === threadId ? threadLaunch(threadId) : undefined;

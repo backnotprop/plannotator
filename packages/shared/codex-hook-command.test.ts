@@ -277,6 +277,30 @@ describe("the installer's Codex hooks", () => {
     expect(JSON.parse(readFileSync(file, "utf8")).hooks).toEqual({ Stop: [{ hooks: [{ type: "command", command: bin, timeout: 345600 }] }] });
   });
 
+  test("the switch off and none of ours there: hooks.json is written exactly as before the switch (an empty PostToolUse kept)", () => {
+    if (!nodePath) return;
+    const root = mkdtempSync(join(tmpdir(), "plannotator-codex-install-"));
+    const bin = join(root, "bin", "plannotator");
+    const file = join(root, "codex", "hooks.json");
+    mkdirSync(join(root, "codex"), { recursive: true });
+    const theirs = { hooks: [{ type: "command", command: "/usr/local/bin/lint-after", timeout: 5 }] };
+    for (const postToolUse of [[], [theirs], [{ matcher: "Bash" }]]) {
+      // An old Stop path, so the merge rewrites the file: only the Stop hook's command changes, every other byte as
+      // before the switch (the merge's JSON.stringify(config, null, 2) of the same keys in the same order).
+      const config = { hooks: { PostToolUse: postToolUse, Stop: [{ hooks: [{ type: "command", command: "/old/plannotator", timeout: 345600 }] }] }, extra: true };
+      writeFileSync(file, JSON.stringify(config));
+      const { run } = install(root, bin, { steer: null });
+      expect(run.status).toBe(0);
+      const expected = { hooks: { PostToolUse: postToolUse, Stop: [{ hooks: [{ type: "command", command: bin, timeout: 345600 }] }] }, extra: true };
+      expect(readFileSync(file, "utf8")).toBe(`${JSON.stringify(expected, null, 2)}\n`);
+      // A custom Plannotator Stop hook the installer leaves alone: the file left as it is, byte for byte.
+      const left = JSON.stringify({ hooks: { PostToolUse: postToolUse, Stop: [{ hooks: [{ type: "command", command: "PLANNOTATOR_BROWSER=/usr/bin/true plannotator", timeout: 9 }] }] } });
+      writeFileSync(file, left);
+      install(root, bin, { steer: null });
+      expect(readFileSync(file, "utf8")).toBe(left);
+    }
+  });
+
   test("no node to merge an existing file: unchanged, and the lines to add by hand name both hooks", () => {
     const root = mkdtempSync(join(tmpdir(), "plannotator-codex-install-"));
     const bin = join(root, "bin", "plannotator");

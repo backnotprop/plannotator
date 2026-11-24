@@ -84,6 +84,8 @@ import { clearCodexHookHolds, codexHookClaimed, codexHooked, codexHookFits, code
 import { CODEX_HOOK_CLAIM_GRACE_MS, CODEX_HOOK_HOLD_MAX_MS, CODEX_HOOK_LOOK_MS, createCodexSteerRoute, type CodexSteerRoute } from "./inbox-codex-steer";
 import { codexSightFor, codexSightStartOf, lookForCodexSight, type CodexSightCursor } from "./inbox-codex-sight";
 import { codexSteerAllowed } from "./inbox-codex-steer-guard";
+import { clearCodexSteerLeftovers, codexNextTurnOnly, markCodexSteerOn } from "./inbox-codex-steer-ledger";
+import { CODEX_STEER_ON_FILE } from "@plannotator/shared/inbox/codex-hook-mailbox";
 import { createT3Claims, INBOX_T3_READ_BACK_AFTER_MS, type T3Local, type T3Route, tryThroughT3 } from "./inbox-t3-local";
 
 /** The ChatGPT desktop app's own Codex CLI (macOS), used when no `codex` is on PATH. */
@@ -371,8 +373,11 @@ export function codexQueueMessage(command: InboxReplyCommand): string {
   return codexWakeText({ ...command, body: `${cut}${note}` });
 }
 
-/** A claim's `steered.json` (a steer Codex accepted, not yet seen): where to look, null for nowhere, undefined for none. */
-function readSteered(claim: string): CodexSight | null | undefined {
+/**
+ * A claim's `steered.json` (a steer Codex accepted, not yet seen): where to look (null for nowhere) and when it was
+ * steered, or undefined for none.
+ */
+function readSteered(claim: string, now: number): { sight: CodexSight | null; at: number } | undefined {
   let text: string;
   try {
     text = readFileSync(join(claim, "steered.json"), "utf8");
@@ -380,9 +385,10 @@ function readSteered(claim: string): CodexSight | null | undefined {
     return undefined;
   }
   try {
-    return codexSightOf((JSON.parse(text) as { sight?: unknown }).sight);
+    const record = JSON.parse(text) as { sight?: unknown; at?: unknown };
+    return { sight: codexSightOf(record.sight), at: typeof record.at === "number" ? record.at : now };
   } catch {
-    return null;
+    return { sight: null, at: now };
   }
 }
 
@@ -395,6 +401,8 @@ export function createInboxCodexWake(options: {
   deliver?: (session: string, text: string, intoTurn?: boolean) => Promise<LaunchDelivery>;
   /** Whether a launch of this Inbox owns the session (its host can take an item with no Codex CLI that queues). */
   launched?: (session: string) => boolean;
+  /** A launched session's host: whether a turn runs in it now (null: no process of it is up here). */
+  turnRunning?: (session: string) => boolean | null;
   /** An item not to hand at all (a steps-only Tidy wake once steps are off: the server withdraws it). */
   skip?: (item: InboxMessage, session: string) => boolean;
   /** A thread T3 Code runs: how its items go into the T3 thread (inbox-t3-local.ts). Without it they wait in the Inbox. */
@@ -432,15 +440,24 @@ export function createInboxCodexWake(options: {
    * rollout, by claim key (inbox-codex-sight.ts). Claimed; the line says handed, never Delivered, until the rollout
    * shows the text. `sight` null: no rollout was found to look in.
    */
-  const sighting = new Map<string, { sight: CodexSight | null; cursor: CodexSightCursor | null }>();
-  /** Replies a turn ended without (sighting said dropped, or the hook died taking it): they go as the next turn now. */
-  const nextTurnOnly = new Set<string>();
+  const sighting = new Map<string, { sight: CodexSight | null; cursor: CodexSightCursor | null; at: number }>();
+  /**
+   * Replies that go only as the next turn: steered once already (a launched thread's, marked before the steer), or a
+   * turn ended without them (sighting said dropped, the hook died taking it). On disk, so never steered twice.
+   */
+  const nextTurnOnly = codexNextTurnOnly(store.dir, steering);
+  /**
+   * Claims this Inbox found unfinished (no `queued.json`, no `hooked.json`), by claim key: since when. Maybe the hook's,
+   * between its mkdir and its `hooked.json`: looked at again every few seconds for CODEX_HOOK_CLAIM_GRACE_MS, so a
+   * reply the hook took reads handed on at once, not after the next line or restart.
+   */
+  const hookMaybe = new Map<string, number>();
   /** The hook waits for the person's review in Codex: said once in the log. */
   let reviewSaid = false;
   let lookTimer: ReturnType<typeof setTimeout> | null = null;
   /** While anything is held or handed on: look again soon (the hook took it, the turn ended, the rollout shows it). */
   const scheduleLook = () => {
-    if (lookTimer || (held.size === 0 && sighting.size === 0) || stopping.signal.aborted) return;
+    if (lookTimer || (held.size === 0 && sighting.size === 0 && hookMaybe.size === 0) || stopping.signal.aborted) return;
     lookTimer = setTimeout(() => {
       lookTimer = null;
       void sweep();
@@ -538,8 +555,11 @@ export function createInboxCodexWake(options: {
    * says the reply is saved for the agent's next read.
    */
   const uncertain = new Set<string>();
+  /** The switch was on when an Inbox last started on this folder (its `steer-on`, seen in the listing below). */
+  let steerMarked = false;
   try {
     for (const name of readdirSync(dir)) {
+      if (name === CODEX_STEER_ON_FILE) steerMarked = true;
       const dot = name.indexOf(".");
       if (dot <= 0) continue;
       const itemId = name.slice(0, dot);
@@ -550,9 +570,9 @@ export function createInboxCodexWake(options: {
       // in the rollout again from where it was handed on.
       if (steering) {
         const hooked = codexHooked(store.dir, itemId, session);
-        const handed = hooked ? hooked.sight : readSteered(join(dir, name));
+        const handed = hooked ?? readSteered(join(dir, name), now());
         if (handed !== undefined) {
-          sighting.set(name, { sight: handed, cursor: null });
+          sighting.set(name, { sight: handed.sight, cursor: null, at: handed.at });
           continue;
         }
       }
@@ -563,6 +583,8 @@ export function createInboxCodexWake(options: {
       } catch {
         // Claimed and never finished (the Inbox stopped mid-call): never queued again, and not known to have gone.
         uncertain.add(name);
+        // Or the hook's, still finishing: looked at again soon (the sweep picks up its `hooked.json`).
+        if (steering) hookMaybe.set(name, now());
       }
     }
   } catch {
@@ -570,7 +592,13 @@ export function createInboxCodexWake(options: {
   }
   // Nothing is held yet: a held file left by an Inbox that stopped is cleared (the first sweep holds again what still
   // waits), so it never enters an unrelated turn, nor makes the hook's gate start the binary.
-  if (steering) clearCodexHookHolds(store.dir, new Set());
+  if (steering) {
+    clearCodexHookHolds(store.dir, new Set());
+    markCodexSteerOn(store.dir);
+  } else if (steerMarked) {
+    // Off now, on before: what that run left is cleared once (never on: nothing of it is there, nothing is done).
+    clearCodexSteerLeftovers(store.dir);
+  }
   const dropClaim = (itemId: string, session: string) => {
     store.handover.giveBack(itemId, session);
     claimed.delete(`${itemId}.${session}`);
@@ -608,8 +636,9 @@ export function createInboxCodexWake(options: {
       delivered(id, session);
       return;
     }
-    writeFileSync(join(claimDir(id, session), "steered.json"), `${JSON.stringify({ at: now(), sight })}\n`);
-    sighting.set(key, { sight, cursor: null });
+    const at = now();
+    writeFileSync(join(claimDir(id, session), "steered.json"), `${JSON.stringify({ at, sight })}\n`);
+    sighting.set(key, { sight, cursor: null, at });
     scheduleLook();
   };
   /**
@@ -625,7 +654,10 @@ export function createInboxCodexWake(options: {
       delivered(id, session);
       return;
     }
-    const answer = await lookForCodexSight(one.sight, one.cursor, now());
+    // A launched thread's host knows whether its turn still runs: a steer waits in Codex for the end of a tool call,
+    // however long, and is never judged dropped before that turn ends.
+    const running = options.launched?.(session) === true && options.turnRunning ? () => options.turnRunning!(session) : undefined;
+    const answer = await lookForCodexSight(one.sight, one.cursor, now(), { at: one.at, running });
     if (answer.kind === "seen") {
       delivered(id, session, answer.intoTurn);
       return;
@@ -654,33 +686,42 @@ export function createInboxCodexWake(options: {
       held.delete(key);
       releaseCodexHookHold(store.dir, session, id);
       claimed.add(key);
-      sighting.set(key, { sight: hooked.sight, cursor: null });
+      uncertain.delete(key);
+      sighting.set(key, { sight: hooked.sight, cursor: null, at: hooked.at });
       await sightStep(key);
       return { next: "done" };
     }
     const hold = held.get(key);
     if (!hold) return { next: "go", hold: !nextTurnOnly.has(key) };
     if (existsSync(claimDir(id, session))) {
+      hold.claimSeen ??= now();
+      const graceOver = now() - hold.claimSeen >= CODEX_HOOK_CLAIM_GRACE_MS;
       if (!codexHookClaimed(store.dir, id, session)) {
-        // Not the hook's claim (another Inbox on this data dir took it): left alone, as any claim this Inbox did not make.
+        // No mark yet: the hook between its mkdir and its mark, looked at again (kept in `held`, so the looks go on)
+        // until its grace is over. Still none then: another Inbox on this data dir took it, left alone, as any claim
+        // this Inbox did not make (not known to have gone, never sent again).
+        if (!graceOver) return { next: "done" };
         held.delete(key);
         releaseCodexHookHold(store.dir, session, id);
         claimed.add(key);
-        // Not known to have gone; a `hooked.json` that comes after all (the hook between its mkdir and its mark) is
-        // picked up by the sweep.
         uncertain.add(key);
         return { next: "done" };
       }
       // The hook claimed it and is writing `hooked.json`. A claim left without one is a hook that died between the two,
       // before it wrote anything to Codex: once Codex has given up on it, the reply goes as the next turn.
-      hold.claimSeen ??= now();
-      if (now() - hold.claimSeen < CODEX_HOOK_CLAIM_GRACE_MS) return { next: "done" };
+      if (!graceOver) return { next: "done" };
       held.delete(key);
       releaseCodexHookHold(store.dir, session, id);
       rmSync(claimDir(id, session), { recursive: true, force: true });
       nextTurnOnly.add(key);
       log(`the Codex hook claimed ${id} for ${session} and did not finish; it goes as the next turn.`);
       return { next: "go", hold: false };
+    }
+    if (hold.claimSeen !== null) {
+      // A claim seen here is gone again (only an Inbox removes one): no longer held, it goes the usual way.
+      held.delete(key);
+      releaseCodexHookHold(store.dir, session, id);
+      return { next: "go", hold: !nextTurnOnly.has(key) };
     }
     if (now() - hold.since < CODEX_HOOK_HOLD_MAX_MS && (await steer.holdsForHook(session))) return { next: "done" };
     // The turn ended with no tool call after the reply: it goes as the next turn.
@@ -725,8 +766,9 @@ export function createInboxCodexWake(options: {
       mkdirSync(dir, { recursive: true });
       mkdirSync(claimDir(id, session));
     } catch {
-      if (steering && !claimed.has(key) && !inFlight.has(key) && codexHookClaimed(store.dir, id, session)) {
-        // The Codex hook's claim (its mark): it took it a moment ago (`hookStep` records it once it says so).
+      if (steering && !claimed.has(key) && !inFlight.has(key) && options.launched?.(session) !== true) {
+        // Maybe the Codex hook's claim, made a moment ago (with its mark, or still before it): `hookStep` looks again
+        // every few seconds and records it once the hook says so, or leaves it alone as another Inbox's after its grace.
         held.set(key, { since: now(), claimSeen: now() });
         scheduleLook();
         return;
@@ -745,7 +787,10 @@ export function createInboxCodexWake(options: {
     // A launched session: where its rollout stands before its host may steer the text in (looked for there after).
     // Off (the experimental switch), or no rollout found: nothing more is read, and the host takes it as it always did.
     const launchedHere = options.launched?.(session) === true;
-    const before = steering && launchedHere ? await sightStart(session, true) : null;
+    // Steered at most once: a reply steered before (or one a turn ended without) goes as a new turn only, and the mark
+    // is on disk before the steer, so neither a later look nor a restart steers it again.
+    const before = steering && launchedHere && !nextTurnOnly.has(key) ? await sightStart(session, true) : null;
+    if (before) nextTurnOnly.add(key);
     // A launched session: its host puts it in as a turn now (delivered), or leaves it to `codex queue`.
     const own = options.deliver ? await (before ? options.deliver(session, text, true) : options.deliver(session, text)).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) })) : "queue";
     if (own === "delivered") {
@@ -1014,7 +1059,8 @@ export function createInboxCodexWake(options: {
           const hooked = codexHooked(store.dir, id, session);
           if (hooked) {
             uncertain.delete(key);
-            sighting.set(key, { sight: hooked.sight, cursor: null });
+            hookMaybe.delete(key);
+            sighting.set(key, { sight: hooked.sight, cursor: null, at: hooked.at });
           }
         }
         // Handed into a running turn and not yet seen there (after a restart too): still handed to Codex.
@@ -1040,6 +1086,7 @@ export function createInboxCodexWake(options: {
       }
       clearCodexHookHolds(store.dir, new Set([...held.keys()].map((key) => `${itemOfKey(key)}.${sessionOfKey(key).toLowerCase()}`)));
       for (const key of [...nextTurnOnly]) if (!pendingKeys.has(key)) nextTurnOnly.delete(key);
+      for (const [key, since] of [...hookMaybe]) if (!pendingKeys.has(key) || !uncertain.has(key) || now() - since >= CODEX_HOOK_CLAIM_GRACE_MS) hookMaybe.delete(key);
       // What was handed into a running turn: Delivered once the rollout shows it, the next turn if the turn ended without it.
       for (const key of [...sighting.keys()]) {
         if (stopping.signal.aborted) return;

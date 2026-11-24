@@ -11,7 +11,19 @@ import { basename } from "node:path";
 import { join } from "node:path";
 import { CODEX_HOOK_HEAD_ENV } from "@plannotator/shared/codex-hook-command";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { codexHookOutput, noteCodexHookRan, takeForCodexHook } from "@plannotator/shared/inbox/codex-hook-mailbox";
+import { loadConfig, parseExperimentalEnv } from "@plannotator/shared/config";
+import { codexHookOutput, codexSteerMarked, noteCodexHookRan, takeForCodexHook } from "@plannotator/shared/inbox/codex-hook-mailbox";
+
+/** The `codex-steer` switch turned off by name: `-codex-steer` in PLANNOTATOR_EXPERIMENTAL, else `codexSteer: false`. */
+function codexSteerSaidOff(env: NodeJS.ProcessEnv): boolean {
+  const fromEnv = parseExperimentalEnv("codex-steer", env);
+  if (fromEnv !== undefined) return !fromEnv;
+  try {
+    return loadConfig({ quiet: true }).experimental?.codexSteer === false;
+  } catch {
+    return false;
+  }
+}
 
 /** The longest hook payload read (a tool's whole output can be in it; only the thread id is needed). */
 const PAYLOAD_MAX_BYTES = 64 * 1024 * 1024;
@@ -41,10 +53,13 @@ export function codexHookThread(payload: string): string | null {
 }
 
 /** What the hook writes to stdout for this payload ("" for nothing). */
-export function runCodexHook(payload: string, inboxDir: string, now: number): string {
+export function runCodexHook(payload: string, inboxDir: string, now: number, env: NodeJS.ProcessEnv = process.env): string {
   noteCodexHookRan(inboxDir, now);
   const thread = codexHookThread(payload);
   if (!thread) return "";
+  // The switch off: nothing taken. Off as the Inbox last started (no `steer-on`), or turned off since in config.json
+  // or PLANNOTATOR_EXPERIMENTAL (a held file left by an Inbox that has not started again since).
+  if (!codexSteerMarked(inboxDir) || codexSteerSaidOff(env)) return "";
   try {
     return codexHookOutput(takeForCodexHook(inboxDir, thread, now));
   } catch {
