@@ -71,7 +71,7 @@ describe("OpenCode 2 transport", () => {
 		} finally { server.stop(true); }
 	});
 
-	test("HTTP errors retain status/tag/message, successful envelopes unwrap, and only HTML detection falls back", async () => {
+	test("HTTP errors retain status/tag/message, successful envelopes unwrap, and a non-2.x answer keeps 1.x", async () => {
 		const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(req) {
 			const path = new URL(req.url).pathname;
 			if (path === "/error") return Response.json({ _tag: "InvalidRequestError", message: "Expected object" }, { status: 400 });
@@ -85,7 +85,8 @@ describe("OpenCode 2 transport", () => {
 			await expect(client.request("/error", {})).rejects.toThrow("OpenCode HTTP 400: InvalidRequestError: Expected object");
 			await expect(client.request("/plain")).rejects.toThrow("OpenCode HTTP 503: unavailable");
 			expect(await client.request("/data")).toEqual([]);
-			await expect(detectOpenCodeV2(server.url.origin, "Basic x")).rejects.toThrow("unexpected /api/info response");
+			// A 1.x answer that happens to be JSON (a 1.x /api/info, or its catch-all) is not 2.x.
+			expect(await detectOpenCodeV2(server.url.origin, "Basic x")).toBe(false);
 			expect(await detectOpenCodeV2(`${server.url.origin}/html`, "Basic x")).toBe(false);
 		} finally { server.stop(true); }
 	});

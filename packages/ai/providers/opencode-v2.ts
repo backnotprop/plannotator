@@ -34,8 +34,8 @@ export async function detectOpenCodeV2(url: string, authorization: string, signa
 	} catch {
 		return false;
 	}
-	if (typeof info?.version === "string" && Number.parseInt(info.version.split(".")[0], 10) >= 2) return true;
-	throw new Error("OpenCode startup failed: unexpected /api/info response.");
+	// Any other answer is not 2.x: on 1.x it comes from the catch-all, so it must not fail startup.
+	return typeof info?.version === "string" && Number.parseInt(info.version.split(".")[0], 10) >= 2;
 }
 
 export class OpenCodeV2Client {
