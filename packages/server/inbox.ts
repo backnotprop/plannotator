@@ -42,6 +42,7 @@
 import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
+import { codeReviewOfferAtStart, codeReviewOfferDue } from "./inbox-code-review-offer";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -3628,13 +3629,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const config = loadConfig();
     return INBOX_PROMPT_HOSTS.every((host) => inboxReminderRulesText(config, host) === null);
   };
+  // Who Code review's offer is for, decided at the first release start that shows it, as the tab icon's is
+  // (inbox-code-review-offer.ts): someone who used an earlier Inbox is marked due; a fresh install never sees it.
+  if (CODE_REVIEW_OFFER_SHOWN && normalizeStableVersion(version) !== null) {
+    const mark = codeReviewOfferAtStart(loadConfig().inboxReveals?.code_review, loadConfig().inboxCodeReview !== undefined, usedBefore, new Date().toISOString());
+    if (mark) saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, code_review: mark } });
+  }
   /**
-   * Code review's day-0 offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
-   * shared/inbox/reveals.ts): only while config.json `inboxCodeReview` is unset (nobody decided; `false` is the
-   * person's own off), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN` (false for now: the
-   * owner chose the switch without the offer, 2026-11-17), so it is never open and never claimed.
+   * Code review's one-time offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
+   * shared/inbox/reveals.ts): only for someone who used an earlier Inbox (marked due at a release start, above), only
+   * while config.json `inboxCodeReview` is unset (nobody decided; `false` is the person's own off; `true` is theirs
+   * too), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN` (held from 2026-11-17, shown again from
+   * the release after 2026-11-23, approval "inbox-code-review-offer": "for people who already use the Inbox").
    */
-  const codeReviewUndecided = () => CODE_REVIEW_OFFER_SHOWN && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined;
+  const codeReviewUndecided = () =>
+    CODE_REVIEW_OFFER_SHOWN && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && codeReviewOfferDue(loadConfig().inboxReveals?.code_review);
   /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
