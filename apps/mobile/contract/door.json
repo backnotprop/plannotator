@@ -2015,6 +2015,22 @@
       "relay": true
     },
     {
+      "name": "GET open-in/file",
+      "method": "GET",
+      "path": "open-in/file",
+      "params": [],
+      "call": "getOpenInFile",
+      "window": "/api/inbox/open-in/file",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST open-in/file/attach",
       "method": "POST",
       "path": "open-in/file/attach",

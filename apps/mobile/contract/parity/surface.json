@@ -32,6 +32,7 @@
       "GET messages/:id/guide/review-markdown-image",
       "GET messages/:id/image",
       "GET messages/:id/run",
+      "GET open-in/file",
       "GET open-in/file/code",
       "GET open-in/file/raw",
       "GET open-in/file/view",
