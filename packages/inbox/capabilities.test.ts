@@ -93,4 +93,15 @@ describe('event: capabilities', () => {
     const locked = { ...OFF, decision_mode: { on: false, env: false } } as Held;
     expect((hear(JSON.stringify({ board: { on: false }, decision_mode: { on: false } }), locked).settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: false, env: false });
   });
+
+  test('Grid (with Decision mode in its old place) turned in another window, or taken from a linked computer: this window follows; a frame without them leaves them', () => {
+    const before = { ...OFF, experimental: { decision_mode: { on: false, env: null }, grid: { on: false, env: null } } } as Held;
+    // The server names `experimental` only in the frame of its own change (inbox.ts onCapabilities).
+    const on = hear(JSON.stringify({ board: { on: false }, steps: { on: true }, experimental: { decision_mode: { on: false, env: null }, grid: { on: true, env: null } } }), before);
+    expect(on.reread).toBe(false);
+    expect((on.settings as { experimental?: unknown }).experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: true, env: null } });
+    expect((hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), on.settings).settings as { experimental?: unknown }).experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: true, env: null } });
+    // A malformed one is not applied.
+    expect((hear(JSON.stringify({ board: { on: false }, experimental: { grid: { on: true } } }), before).settings as { experimental?: unknown }).experimental).toEqual((before as { experimental?: unknown }).experimental);
+  });
 });

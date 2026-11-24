@@ -1,6 +1,7 @@
 /**
- * `plannotator inbox capability [<capability> on|off] [--computer <name>] [--thread <id>]`: the Inbox's capability
- * switches from a shell, for an agent the person asks (packages/server/inbox-capability-agent.ts). A command and not
+ * `plannotator inbox capability [<capability> on|off] [--thread <id>]`: the Inbox's capability switches from a shell,
+ * for an agent the person asks (packages/server/inbox-capability-agent.ts). A turn applies on every linked computer
+ * (one set of switches), so there is no computer to name. A command and not
  * an action of the agent tool (the owner, 2026-11-24): a thin client over the Inbox's `/api/inbox/capability` on this
  * computer's listener, or for a paired cloud agent through the agent door (`inboxPairedRouteFetch`), as `inbox rows`
  * is. Who is calling is what `inbox call` takes it to be (`inboxCallerOf`), so the person's line is the agent's. Works
@@ -23,13 +24,12 @@ const REQUEST_TIMEOUT_MS = 30_000;
 
 export const INBOX_CAPABILITY_USAGE = [
   "Usage:",
-  "  plannotator inbox capability [--computer <name>]",
-  "  plannotator inbox capability <capability> on|off [--computer <name>] [--thread <id>]",
+  "  plannotator inbox capability",
+  "  plannotator inbox capability <capability> on|off [--thread <id>]",
   "",
   "Lists the Inbox's capabilities (Settings → Capabilities) and whether each is on, or turns one on or off.",
   "Turn one on or off when the person asks you to; not on your own initiative.",
   `<capability>: ${INBOX_CAPABILITY_AGENT_IDS.join(", ")}.`,
-  "--computer <name>: a linked computer's name, as the Inbox shows it. Default: this computer.",
   "--thread <id>: the thread you work in; the line for the person goes there.",
   "--session <id>: as for 'plannotator inbox call'.",
   "",
@@ -37,15 +37,15 @@ export const INBOX_CAPABILITY_USAGE = [
 ].join("\n");
 
 /** What the command asks the Inbox: `capability` and `on` for a turn, neither to list them. */
-export type ParsedCapabilityCommand = { ok: true; call: { capability?: string; on?: boolean; computer?: string; thread_id?: string }; session: string | null } | { ok: false; error: string };
+export type ParsedCapabilityCommand = { ok: true; call: { capability?: string; on?: boolean; thread_id?: string }; session: string | null } | { ok: false; error: string };
 
 export function parseCapabilityCommand(argv: readonly string[]): ParsedCapabilityCommand {
   const positional: string[] = [];
-  const call: { computer?: string; thread_id?: string } = {};
+  const call: { thread_id?: string } = {};
   let session: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    const flag = arg === "--computer" ? "computer" : arg === "--thread" ? "thread_id" : arg === "--session" ? "session" : null;
+    const flag = arg === "--thread" ? "thread_id" : arg === "--session" ? "session" : null;
     if (flag) {
       const value = argv[++i];
       if (value === undefined || value.startsWith("--")) return { ok: false, error: `${arg} takes a value.` };
@@ -134,7 +134,7 @@ export async function runInboxCapabilityCommand(argv: readonly string[], deps: C
   }
   // A list reads (GET, so through the door it is never held as a write); a turn writes.
   const turn = parsed.call.on !== undefined;
-  const path = turn ? "/api/inbox/capability" : `/api/inbox/capability${parsed.call.computer ? `?computer=${encodeURIComponent(parsed.call.computer)}` : ""}`;
+  const path = "/api/inbox/capability";
   let answer: { status: number; json: Record<string, unknown> | null };
   try {
     const response = await route(path, turn ? { method: "POST", body: JSON.stringify(body) } : undefined);

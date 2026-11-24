@@ -8,15 +8,17 @@ import {
   jevAnswers,
   type OpinionAnswer,
 } from "@plannotator/sem-jiff/opinions";
+import { checkOpenAIDecisions, openaiAnswers, OpenAIDecisionError } from "./sem-diff-openai";
 
 export const SEM_DIFF_OPINION_ROUTE = "/api/sem-diff/opinion";
 export const SEM_DIFF_OPINION_SETTINGS_ROUTE = "/api/sem-diff/opinion/settings";
 
-export type OpinionProvider = "jev" | "clef";
-
 export type OpinionSecret =
   | { provider: "jev"; apiKey: string }
+  | { provider: "openai"; apiKey: string }
   | { provider: "clef"; accountId: string; apiToken: string };
+
+export type OpinionProvider = OpinionSecret["provider"];
 
 export interface OpinionSettings {
   configured: boolean;
@@ -45,9 +47,9 @@ function parseSecret(value: unknown): OpinionSecret | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
   const text = (x: unknown) => (typeof x === "string" && x.trim().length > 0 && x.length <= 400 ? x.trim() : null);
-  if (v.provider === "jev") {
+  if (v.provider === "jev" || v.provider === "openai") {
     const apiKey = text(v.apiKey);
-    return apiKey ? { provider: "jev", apiKey } : null;
+    return apiKey ? { provider: v.provider, apiKey } : null;
   }
   if (v.provider === "clef") {
     const accountId = text(v.accountId);
@@ -84,20 +86,32 @@ export async function opinionSettings(dataDir: string): Promise<OpinionSettings>
 
 export async function saveOpinionKey(dataDir: string, body: unknown, fetchImpl: Fetch = fetch): Promise<KeySaveReply> {
   const secret = parseSecret(body);
-  if (!secret) return { ok: false, failure: "missing", reason: "Enter a key for Jev, or an account ID and token for Clef." };
-  const check =
-    secret.provider === "jev"
-      ? await checkKey({ provider: "jev", apiKey: secret.apiKey }, fetchImpl)
-      : await checkKey({ provider: "clef", accountId: secret.accountId, apiToken: secret.apiToken }, fetchImpl);
-  if (!check.ok) return { ok: false, ...plainReason(check.reason) };
+  if (!secret) return { ok: false, failure: "missing", reason: "Enter the credentials for the selected model." };
+  let ms: number;
+  if (secret.provider === "openai") {
+    try {
+      ms = await checkOpenAIDecisions(secret.apiKey, fetchImpl);
+    } catch (e) {
+      return { ok: false, ...keyFailure(e instanceof OpenAIDecisionError ? e.failure : "noAnswer") };
+    }
+  } else {
+    const check = await checkKey(secret, fetchImpl);
+    if (!check.ok) return { ok: false, ...plainReason(check.reason) };
+    ms = check.ms;
+  }
   await writeOpinionSecret(dataDir, secret);
-  return { ok: true, provider: secret.provider, ms: check.ms };
+  return { ok: true, provider: secret.provider, ms };
 }
 
 function plainReason(reason: string): { failure: KeySaveFailure; reason: string } {
-  if (/no credit/i.test(reason)) return { failure: "noCredit", reason: "The account has no credit left." };
-  if (/refused/i.test(reason)) return { failure: "refused", reason: "The key was refused." };
-  return { failure: "noAnswer", reason: "The provider did not answer. Try again in a moment." };
+  return keyFailure(/no credit/i.test(reason) ? "noCredit" : /refused/i.test(reason) ? "refused" : "noAnswer");
+}
+
+function keyFailure(failure: Exclude<KeySaveFailure, "missing">) {
+  const reason = failure === "noCredit" ? "The account has no credit left."
+    : failure === "refused" ? "The key was refused."
+    : "The provider did not answer. Try again in a moment.";
+  return { failure, reason };
 }
 
 function parseCandidates(body: unknown): Candidate[] | null {
@@ -118,13 +132,12 @@ function parseCandidates(body: unknown): Candidate[] | null {
 const askers = new WeakMap<Fetch, { id: string; ask: (cs: Candidate[]) => Promise<OpinionAnswer[]> }>();
 
 function askerFor(secret: OpinionSecret, fetchImpl: Fetch): (cs: Candidate[]) => Promise<OpinionAnswer[]> {
-  const id = secret.provider === "jev" ? `jev\0${secret.apiKey}` : `clef\0${secret.accountId}\0${secret.apiToken}`;
+  const id = secret.provider === "clef" ? `clef\0${secret.accountId}\0${secret.apiToken}` : `${secret.provider}\0${secret.apiKey}`;
   const kept = askers.get(fetchImpl);
   if (kept?.id === id) return kept.ask;
-  const ask =
-    secret.provider === "jev"
-      ? jevAnswers({ apiKey: secret.apiKey, fetch: fetchImpl, concurrency: 4 })
-      : clefAnswers({ accountId: secret.accountId, apiToken: secret.apiToken, fetch: fetchImpl, concurrency: 4 });
+  const ask = secret.provider === "clef" ? clefAnswers({ ...secret, fetch: fetchImpl, concurrency: 4 })
+    : secret.provider === "jev" ? jevAnswers({ ...secret, fetch: fetchImpl, concurrency: 4 })
+    : openaiAnswers(secret.apiKey, fetchImpl);
   askers.set(fetchImpl, { id, ask });
   return ask;
 }
@@ -137,6 +150,10 @@ export async function askOpinion(dataDir: string, body: unknown, fetchImpl: Fetc
   try {
     return { ok: true, answers: await askerFor(secret, fetchImpl)(candidates) };
   } catch (e) {
+    if (e instanceof OpenAIDecisionError) {
+      const state = e.failure === "noCredit" ? "noCredit" : e.failure === "refused" ? "refusedKey" : "failed";
+      return { ok: false, state, reason: keyFailure(e.failure).reason };
+    }
     if (e instanceof OpinionKeyError) {
       return e.status === 402
         ? { ok: false, state: "noCredit", reason: "The account has no credit left." }

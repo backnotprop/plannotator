@@ -453,6 +453,7 @@
       "artifact-pins",
       "ask",
       "capabilities",
+      "capability-set",
       "cards",
       "deliveries",
       "drafts",
