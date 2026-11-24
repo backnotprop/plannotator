@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { PowerUpGuy } from '@plannotator/ui/components/agentFace/PowerUpGuy';
-import { PROVIDER_NAME, type PowerUpStatus } from './powerUp';
+import { POWER_UP_PROVIDER_NAMES } from '@plannotator/ui/components/settings/SemanticDiffsTab';
+import type { PowerUpConfig, PowerUpStatus } from './powerUp';
 
 export const PowerUpStatusSlot: React.FC<{
   status: PowerUpStatus;
-  provider: 'jev' | 'clef' | null;
+  provider: PowerUpConfig['provider'];
   onRetry: () => void;
   onSettings: () => void;
 }> = ({ status, provider, onRetry, onSettings }) => {
-  const model = provider ? PROVIDER_NAME[provider] : 'the model';
+  const model = provider ? POWER_UP_PROVIDER_NAMES[provider] : 'the model';
   const state = status.unavailable ? 'unavailable' : status.asking > 0 ? 'asking' : status.links > 0 ? 'powered' : 'nothing';
   const text =
     state === 'unavailable'
