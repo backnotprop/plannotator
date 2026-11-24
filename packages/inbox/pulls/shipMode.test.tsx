@@ -236,6 +236,22 @@ test.skipIf(!hasDom)("a shipped PR's thread, its PR merged (no stack left, the l
   expect(row('thr_receipt').textContent).toContain('Send a receipt after checkout');
 });
 
+test.skipIf(!hasDom)("a thread that shipped twice: yesterday's merge never hides today's, and the row is of today's PR", () => {
+  const old = ago(30 * HOUR);
+  const at = ago(5 * 60_000);
+  const landing = (p: InboxPull, when: string) => ({ key: p.key, thread_id: 'thr_receipt', state: 'merged' as const, at: when, url: p.url, number: p.number, title: p.title, platform: 'github' as const, head: p.head, through_review: null });
+  const landed: InboxReviewRow = { ...reviewed('thr_receipt', [RECEIPT]), stacks: [], pull_keys: [], landed: [landing(EXPORT, old), landing(RECEIPT, at)] };
+  const ships = new Map([
+    [EXPORT.key, ship(EXPORT.key, { state: 'merged', merged_at: old, ended_at: old, title: EXPORT.title })],
+    [RECEIPT.key, ship(RECEIPT.key, { state: 'merged', merged_at: at, ended_at: at })],
+  ]);
+  draw(ships, false, [landed]);
+  expect(row('thr_receipt').getAttribute('data-ship')).toBe('merged');
+  expect(row('thr_receipt').querySelector('[data-ship-words]')!.textContent).toMatch(/Merged \d/);
+  expect(row('thr_receipt').textContent).toContain('Send a receipt after checkout');
+  expect(row('thr_receipt').textContent).not.toContain('Rate-limit the export endpoint');
+});
+
 function stubLog(log: InboxShipLogEntry[]) {
   const asked: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
