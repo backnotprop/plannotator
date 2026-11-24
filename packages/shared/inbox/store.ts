@@ -450,8 +450,8 @@ export interface InboxReplyInput {
    */
   quote?: unknown;
   /**
-   * Only the session the reply goes to gets it (New thread from this message): the sessions the person added to the
-   * thread are not tagged again, and the words file no `#tag` (they quote the agent's message, not the person).
+   * New thread from this message: the words file no `#tag` (they quote the agent's message, not the person), and no
+   * "still open" line goes under them (the ask carries those questions on to a new thread).
    */
   author_only?: boolean;
   /**

@@ -1,8 +1,9 @@
 /**
  * New thread from this message, in the store: the ask (`author_only`, the words of
  * packages/core/inbox-reply-quote.ts) reaches only the session that wrote the message, never a session the person
- * added to the thread; and a `#tag` in the agent's quoted words is not filed as the person's (no card moves, no
- * thread is listed under it, and a card made later does not start there). Each test uses its own temp data dir.
+ * added to the thread; the agent reads those words alone, with no "still open" line; and a `#tag` in the agent's
+ * quoted words is not filed as the person's (no card moves, no thread is listed under it, and a card made later does
+ * not start there). Each test uses its own temp data dir.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -35,9 +36,9 @@ test("the ask reaches only the message's own session, not a session the person a
   store.sendReply(first.id, { words: "Codex, look too.", idempotency_key: "k1", tags: [{ host: "codex", session: "ses_codex", wakes: true, joined: true }] as never });
   expect(store.addedSessions(first.thread_id).map((t) => t.session)).toEqual(["ses_codex"]);
   const later = store.sendMessage({ project_id: project.id, author: CLAUDE, body: "Fixed the retry loop.", reply_to: first.id }).message;
-  // Guard: a plain reply carries the added session again.
+  // A reply goes only to the agents the reply box names: a plain reply does not reach the added session either.
   const plain = store.sendReply(later.id, { words: "Thanks.", idempotency_key: "k2" }).reply;
-  expect(store.isFor(plain, "ses_codex")).toBe(true);
+  expect(store.isFor(plain, "ses_codex")).toBe(false);
   const ask = store.sendReply(later.id, { words: NEW_THREAD_FROM_MESSAGE_WORDS("Fixed the retry loop.", later.id), idempotency_key: "k3", author_only: true }).reply;
   expect(store.isFor(ask, "ses_claude")).toBe(true);
   expect(store.isFor(ask, "ses_codex")).toBe(false);

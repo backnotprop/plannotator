@@ -8142,7 +8142,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 actions: body.actions,
                 // The message the reply quotes (approval "inbox-reply-quote"); absent from an older window.
                 ...(body.quote !== undefined ? { quote: body.quote } : {}),
-                // New thread from this message: the message's own session only, and no #tag read from the words.
+                // New thread from this message: no #tag read from the words, and no "still open" line under them.
                 ...(body.author_only === true ? { author_only: true } : {}),
               });
             } catch (error) {
