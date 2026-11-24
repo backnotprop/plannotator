@@ -286,7 +286,6 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           }
         },
         "ship": {
-          "description": "Log a step of shipping this thread's pull request.",
           "type": "object",
           "properties": {
             "kind": {
@@ -295,15 +294,12 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
                 "step",
                 "stuck",
                 "merged"
-              ],
-              "description": "step: something you did. stuck: you need the person; say why. merged: you merged it."
+              ]
             },
             "text": {
-              "type": "string",
-              "description": "A few words, shown in the ship log."
+              "type": "string"
             },
             "sha": {
-              "description": "The commit you pushed, if any.",
               "type": "string"
             }
           },

@@ -38,7 +38,7 @@ import {
   INBOX_THREAD_PULLS_REMOVE_DESCRIPTION,
 } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { SHIP_FIELD_DESCRIPTION, SHIP_KIND_DESCRIPTION, SHIP_SHA_DESCRIPTION, SHIP_TEXT_DESCRIPTION, shipStopLine } from "@plannotator/core/inbox-pull-handoff";
+import { shipStopLine } from "@plannotator/core/inbox-pull-handoff";
 import type { InboxShipStep, InboxShipStepResult } from "./inbox-ship-watch";
 import type { InboxStore, InboxThreadPullsChange } from "@plannotator/shared/inbox/store";
 import { sessionWho, shortTime, type SessionNameOf } from "./inbox-mcp-read";
@@ -190,15 +190,16 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
           thread_id: z.string().describe("Thread or message id."),
           add: z.array(z.string()).optional().describe(INBOX_THREAD_PULLS_ADD_DESCRIPTION),
           remove: z.array(z.string()).optional().describe(INBOX_THREAD_PULLS_REMOVE_DESCRIPTION),
+          // No words on it: every agent carries this schema, and only Ship (started from the window) uses it; the
+          // ship instruction and `--help` (SHIP_HELP_LINE) teach it.
           ship: z
             .object({
-              kind: z.enum(["step", "stuck", "merged"]).describe(SHIP_KIND_DESCRIPTION),
-              text: z.string().describe(SHIP_TEXT_DESCRIPTION),
-              sha: z.string().optional().describe(SHIP_SHA_DESCRIPTION),
+              kind: z.enum(["step", "stuck", "merged"]),
+              text: z.string(),
+              sha: z.string().optional(),
             })
             .strict()
-            .optional()
-            .describe(SHIP_FIELD_DESCRIPTION),
+            .optional(),
           project_path: z.string().optional(),
           agent_session: z.string().optional(),
           agent_name: z.string().optional(),

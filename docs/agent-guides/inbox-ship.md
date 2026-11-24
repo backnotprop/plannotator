@@ -64,7 +64,7 @@ Approval "inbox-ship-mode" (`.product/approved/inbox-ship-mode/`, look "Glint").
 
 ### The agent's side
 
-- **Logging steps.** `thread_pulls` takes `ship: { kind: step | stuck | merged, text, sha? }` (`packages/server/inbox-mcp-pulls.ts`; schema copy in `apps/hook/hooks/mod/inbox-default-tools.ts`; `--help` line `SHIP_HELP_LINE`). It logs a step of the thread's active ship. With no ship going, it says so and logs nothing. `merged` triggers a read at once.
+- **Logging steps.** `thread_pulls` takes `ship: { kind: step | stuck | merged, text, sha? }` (`packages/server/inbox-mcp-pulls.ts`; schema copy in `apps/hook/hooks/mod/inbox-default-tools.ts`). The field carries no description in the schema, nor do its members: every agent carries that schema on every request, and only Ship, started from the window, uses the field (the owner: "Why would it go here when ship is only activated from the interface?"). The ship instruction (`SHIP_INSTRUCTION`) and the `--help` line (`SHIP_HELP_LINE`) teach it; `inbox-ship-mcp.test.ts` guards both the missing words and the field's shape. It logs a step of the thread's active ship. With no ship going, it says so and logs nothing. `merged` triggers a read at once.
 - **Every host.** It works the same for Claude Code, Codex, OpenCode and Pi: the instruction and the notes are ordinary addressed messages, and the tool is the shared `plannotator_inbox` tool.
 
 ### The row (look "Glint")
