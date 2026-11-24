@@ -98,7 +98,9 @@ describe("routines and capability switches across linked computers", () => {
       // B's switches, read from A: the capability switches alone, no other setting.
       const switches = await get(a.port, `${far}/capabilities`);
       expect(switches.capabilities.scheduled_threads).toEqual({ on: false });
-      expect(Object.keys(switches)).toEqual(["capabilities"]);
+      // With the forward's own words: nothing held for B, B not away, when it was read.
+      expect(Object.keys(switches)).toEqual(["capabilities", "held", "away", "read_at"]);
+      expect([switches.held, switches.away, typeof switches.read_at]).toEqual([[], false, "string"]);
       // Routines on B, turned from A; A's stay off. The answer carries the switches only.
       const turned = await press(a.port, `${far}/capabilities`, { scheduled_threads: { on: true } });
       expect(turned.status).toBe(200);

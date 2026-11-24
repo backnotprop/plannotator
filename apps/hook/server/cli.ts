@@ -254,10 +254,11 @@ export function formatTopLevelHelp(options: { board?: boolean; scheduled?: boole
  *
  * `t3` (the T3 Code connection) was the last one to launch. Today:
  * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
- * runs; `system`, System's drawing commands, until the Inbox's
+ * runs; `codex-hook`, Codex's PostToolUse hook, which only Codex runs;
+ * `system`, System's drawing commands, until the Inbox's
  * System surfaces ship; and `plans`, Plans' switch and list, until its screens ship.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "system", "plans"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "codex-hook", "system", "plans"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -1223,6 +1224,13 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "",
     "Internal: the Claude Bash hook of the opt-in T3 Code connection and its",
     "settings helper (install.sh --with-t3 / --without-t3). Agents never run it.",
+  ].join("\n"),
+  "codex-hook": [
+    "Usage:",
+    "  plannotator codex-hook",
+    "",
+    "Internal: Codex's PostToolUse hook for the experimental codex-steer switch",
+    "(the installer writes it into Codex's hooks.json). Agents never run it.",
   ].join("\n"),
 };
 

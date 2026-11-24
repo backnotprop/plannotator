@@ -45,17 +45,21 @@ let context: BrowserContext;
 let page: Page;
 const errors: string[] = [];
 
-/** One computer: its own HOME (Plannotator's Claude Code plugin on, so a launch connects), PATH with the fake `claude`. */
+/**
+ * One computer: its own HOME, and the fake `claude` on its launch PATH (PLANNOTATOR_TEST_LAUNCH_PATH) with Plannotator's
+ * Claude Code plugin on in the sandbox's agent home, as in inbox-routine-row-run-ends.spec.ts: a sandboxed Inbox finds
+ * no other agent CLI, so without them a Run there does not start. The fake's turn holds, so a run stays Running.
+ */
 function machine(name: string, config: Record<string, unknown>): Machine {
   const root = inboxScratch(`plannotator-routines-machines-${name.toLowerCase()}-`);
   const bin = join(root, 'bin');
   const home = join(root, 'home');
   const dataDir = join(root, 'data');
-  for (const dir of [bin, home, dataDir, join(home, '.claude')]) mkdirSync(dir, { recursive: true });
+  for (const dir of [bin, home, dataDir, join(dataDir, 'agents-home', '.claude')]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\nexit 1\n');
   chmodSync(join(bin, 'tailscale'), 0o755);
-  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
-  const fake = installFakeClaude({ bin, state: join(root, 'fake-claude') });
+  writeFileSync(join(dataDir, 'agents-home', '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
+  const fake = installFakeClaude({ bin, state: join(root, 'fake-claude'), config: { hold: true } });
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true }, inboxReveals: E2E_GROUP_TIP_SEEN, ...config }));
   markTourDecided(dataDir);
   mkdirSync(join(dataDir, 'inbox'), { recursive: true });
@@ -73,6 +77,7 @@ function machine(name: string, config: Record<string, unknown>): Machine {
       SHELL: fake.shell,
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_TEST_SANDBOX: root,
+      PLANNOTATOR_TEST_LAUNCH_PATH: `${bin}:/usr/bin:/bin`,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER,
       PLANNOTATOR_MACHINE_NAME: name,
