@@ -128,14 +128,18 @@ function where(el: Element): Box {
   return place(el) ?? { top: 0, bottom: 0 };
 }
 
-/** What each watcher's browser would tell it now: every box it watches, against its own box (the scroll, less its margin). */
-function flush() {
+/**
+ * What each watcher's browser would tell it now: every box it watches, against its own box (the scroll, less its margin).
+ * With `only`, just the boxes it picks, in a batch of their own, as a browser can tell of one box a frame before another.
+ */
+function flush(only?: (el: Element) => boolean) {
   act(() => {
     for (const watcher of Watcher.all) {
-      if (watcher.targets.size === 0) continue;
+      const targets = only ? [...watcher.targets].filter(only) : [...watcher.targets];
+      if (targets.length === 0) continue;
       const inset = -parseFloat(String(watcher.options.rootMargin ?? '0px').split(' ')[0]!);
       const bounds = { top: inset, bottom: 400, left: 0, right: 200, x: 0, y: inset, width: 200, height: 400 - inset } as DOMRectReadOnly;
-      const entries = [...watcher.targets].map((target) => {
+      const entries = targets.map((target) => {
         const box = where(target);
         const height = box.bottom - box.top;
         const shown = Math.max(0, Math.min(box.bottom, bounds.bottom) - Math.max(box.top, bounds.top));
@@ -287,6 +291,30 @@ for (const width of ['computer', 'phone'] as const) {
     }
     scrollTo(0);
     expect(stuck().length + (edge() ? 1 : 0)).toBe(0);
+  });
+
+  test.skipIf(!hasDom)(`${width}: when the browser tells of one heading a batch before the other, never two are stuck`, () => {
+    phone = width === 'phone';
+    draw();
+    layout();
+    const of = (section: 'pinned' | 'projects') => (el: Element) => el === heading(section) || el === heading(section)!.parentElement;
+    // Down from Starred's rows into Projects', and back up, with either heading's news first.
+    for (const [from, to, first, then, want] of [
+      [60, 200, 'projects', 'pinned', 'projects'],
+      [60, 200, 'pinned', 'projects', 'projects'],
+      [200, 60, 'pinned', 'projects', 'pinned'],
+      [200, 60, 'projects', 'pinned', 'pinned'],
+    ] as const) {
+      scrollTo(from);
+      expect(stuck()).toEqual([from === 60 ? 'pinned' : 'projects']);
+      at = to;
+      flush(of(first));
+      expect(stuck().length).toBeLessThanOrEqual(1);
+      expect(stuck().length + (edge() ? 1 : 0)).toBe(1);
+      flush(of(then));
+      expect(stuck()).toEqual([want]);
+      expect(edge()).toBe(false);
+    }
   });
 
   test.skipIf(!hasDom)(`${width}: renders and scrolls add no listener and read no layout`, () => {

@@ -26,17 +26,31 @@ export function watchStuckHeadings(scroll: HTMLElement): () => void {
   const seen = new Map<Element, Seen>();
   /** Each heading watched, and the section block it heads. */
   const heads = new Map<HTMLElement, Element | null>();
+  /** The headings in the sidebar's order (querySelectorAll's), so the one that pushes another off comes after it. */
+  let order: HTMLElement[] = [];
   let scrolled = false;
+  /**
+   * One heading at most is stuck, worked out afresh from everything the browser has told whenever any of it changes:
+   * the last heading, in order, at the scroll's top while its section runs on under it. The browser can tell of the
+   * heading arriving before the one it pushes off (in another batch, a frame later), so for that moment both look stuck;
+   * the later one is the one on top, and the other's mark goes in the same pass, so two hairlines are never drawn.
+   */
   const mark = () => {
-    let any = false;
-    for (const [head, block] of heads) {
-      const at = seen.get(head);
-      const section = block ? seen.get(block) : undefined;
-      const stuck = scrolled && !!at && Math.abs(at.top) <= 1 && (!section || section.bottom > at.bottom + 2);
-      if (head.hasAttribute('data-stuck') !== stuck) head.toggleAttribute('data-stuck', stuck);
-      any ||= stuck;
+    let stuck: HTMLElement | null = null;
+    if (scrolled) {
+      for (const head of order) {
+        if (!heads.has(head)) continue;
+        const at = seen.get(head);
+        const block = heads.get(head);
+        const section = block ? seen.get(block) : undefined;
+        if (at && Math.abs(at.top) <= 1 && (!section || section.bottom > at.bottom + 2)) stuck = head;
+      }
     }
-    const edge = scrolled && !any;
+    for (const head of heads.keys()) {
+      const on = head === stuck;
+      if (head.hasAttribute('data-stuck') !== on) head.toggleAttribute('data-stuck', on);
+    }
+    const edge = scrolled && !stuck;
     if (scroll.hasAttribute('data-edge') !== edge) scroll.toggleAttribute('data-edge', edge);
   };
   const boxes = new IntersectionObserver(
@@ -80,6 +94,7 @@ export function watchStuckHeadings(scroll: HTMLElement): () => void {
       boxes.observe(head);
       if (section) boxes.observe(section);
     }
+    order = [...now.keys()];
   };
   watch();
   const changes = new MutationObserver(watch);
