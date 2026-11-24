@@ -114,7 +114,8 @@ export interface DecisionModeProps {
 
 /** What the window tells about a sitting it no longer shows. */
 export interface DecisionAwayNotice {
-  kind: 'send' | 'save';
+  /** `send`: a reply did not go (its answers are drafts in the thread); `save`: an answer; `reason`: a Can't do it's reason. */
+  kind: 'send' | 'save' | 'reason';
   threadId: string;
   /** The thread's subject, when known. */
   subject: string | null;
@@ -228,8 +229,11 @@ export function DecisionMode(props: DecisionModeProps) {
   const heldRef = useRef(held);
   heldRef.current = held;
   const messageOf = (id: string): InboxMessageWire | undefined => held?.thread.messages.find((m) => m.id === id);
+  /** How many answers' save failures the window's toast told: a Send that then sends nothing tells it only once. */
+  const savesToldAway = useRef(0);
   /** The thread of the sitting, for the window's toast. */
-  const away = (kind: 'send' | 'save') => {
+  const away = (kind: DecisionAwayNotice['kind']) => {
+    if (kind === 'save') savesToldAway.current += 1;
     const threadId = threadIdRef.current;
     if (threadId) propsRef.current.onAway?.({ kind, threadId, subject: heldRef.current?.thread.subject ?? propsRef.current.scope ?? null });
   };
@@ -266,7 +270,7 @@ export function DecisionMode(props: DecisionModeProps) {
   );
   /** The reasons typed under "Can't do it…", drafts like every answer (reasonDrafts.ts). */
   const { reasons, texts: reasonTexts } = useReasonDrafts((message) => {
-    if (awayRef.current) away('save');
+    if (awayRef.current) away('reason');
     else setError(message);
   });
   /** The answers not saved yet go into the held thread: the thread card shows the dialog's latest words at once. */
@@ -524,10 +528,13 @@ export function DecisionMode(props: DecisionModeProps) {
    */
   const sendGroups = async (keys: readonly string[]) => {
     setError(null);
+    const told = savesToldAway.current;
     const release = await saves.forSend();
     if (!release) {
-      if (awayRef.current) away('send');
-      else setError('An answer was not saved, so nothing was sent.');
+      // Away, the answer's own save notice tells it (it is not a draft in the thread): once, said here if not yet.
+      if (awayRef.current) {
+        if (savesToldAway.current === told) away('save');
+      } else setError('An answer was not saved, so nothing was sent.');
       return;
     }
     let results: SendResult[];
@@ -537,9 +544,10 @@ export function DecisionMode(props: DecisionModeProps) {
       release();
     }
     const failed = results.filter((r) => r === 'failed').length;
-    if (failed === 0) return;
-    if (awayRef.current) away('send');
-    else setError(`${failed === 1 ? 'A reply was' : `${formatCount(failed)} replies were`} not sent. Your answers wait as drafts in the thread.`);
+    // A reply draft waiting in the thread (`draft`) sends from there: the chip says so, the toast once away.
+    if (awayRef.current) {
+      if (failed > 0 || results.includes('draft')) away('send');
+    } else if (failed > 0) setError(`${failed === 1 ? 'A reply was' : `${formatCount(failed)} replies were`} not sent. Your answers wait as drafts in the thread.`);
   };
   /** The Send button: what is answered goes, one reply per agent; what is not stays open. */
   const sendAnswered = () => sendGroups(sendableKeys);
@@ -631,11 +639,9 @@ export function DecisionMode(props: DecisionModeProps) {
     pickChain.current = pickChain.current.then(async () => {
       try {
         await inboxApi.markAction(decision.message.id, decision.question.key, mark, true);
-        // The reason now waits as the mark's note: its own draft goes (Undo puts it back). Not saved, it stays.
-        if (mark.outcome === 'cant' && reasons.text(id)) {
-          reasons.type(decision.thread.id, id, '');
-          reasons.flush();
-        }
+        // The reason now waits as the mark's note: its own draft goes (Undo puts it back). That write failing is
+        // never told and never stops a reload: the reason already went with the mark (it is tried again quietly).
+        if (mark.outcome === 'cant' && reasons.text(id)) reasons.clear(decision.thread.id, id);
       } catch (cause) {
         setError(cause instanceof InboxApiError ? cause.message : 'That was not saved.');
         props.refresh();

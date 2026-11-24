@@ -82,7 +82,7 @@ async function agentSends(send: Record<string, unknown>): Promise<string> {
 }
 
 /** One seeded world per test (and one to spare): raise it with each test added. */
-const TESTS = 27;
+const TESTS = 30;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -956,4 +956,103 @@ test.skipIf(!hasDom)('a pick the Inbox refuses with a validation error is shown,
   choose('Retry with the same key');
   await until(() => dialog()?.querySelector('.ib-dm-error')?.textContent?.includes('is not one of the choices') === true, 'the error');
   expect((await questionsOf(world.decide.a))[0]!.state).toBe('open');
+}, 30_000);
+
+// ─────────────────────────────── Saves that fail ───────────────────────────────
+
+/** The Other field of the card on screen. */
+const otherField = () => cardEl()!.querySelector('textarea[data-question-other]') as HTMLTextAreaElement;
+const toasts = () => [...document.querySelectorAll<HTMLElement>('[data-inbox-toast]')];
+
+test.skipIf(!hasDom)('an answer that cannot be saved sends nothing and says so, its words kept; once it saves, Send carries them', async () => {
+  let failing = true;
+  intercept = (path, method) => (method === 'POST' && path.endsWith('/picks') && failing ? { status: 500, body: { error: 'The Inbox could not write.', code: 'error' } } : null);
+  const el = await renderApp();
+  await openDecide(el);
+  typeInto(otherField(), 'Use a fresh key each time');
+  await until(() => picks().length >= 1, 'the save tried');
+  await until(() => !sendButton().disabled, 'Send');
+  act(() => sendButton().click());
+  await until(() => dialog()?.querySelector('.ib-dm-error')?.textContent?.includes('An answer was not saved, so nothing was sent.') === true, 'the not-saved line');
+  await sleep(300);
+  expect(replies()).toHaveLength(0);
+  expect(otherField().value).toBe('Use a fresh key each time');
+  expect((await questionsOf(world.decide.a))[0]!.state).toBe('open');
+  // The Inbox takes saves again: the next Send saves the words first, then the reply carries them.
+  failing = false;
+  act(() => sendButton().click());
+  await until(async () => (await questionsOf(world.decide.a))[0]?.state === 'sent', 'the reply');
+  expect(replies()).toHaveLength(1);
+  expect((await questionsOf(world.decide.a))[0]!.answer?.other).toBe('Use a fresh key each time');
+}, 30_000);
+
+test.skipIf(!hasDom)('Send, then close while the answer is still saving: the thread card shows the words, and the failed save is told once, with Open the thread', async () => {
+  let release!: () => void;
+  const answered = new Promise<void>((r) => (release = r));
+  intercept = async (path, method) => {
+    if (method !== 'POST' || !path.endsWith('/picks')) return null;
+    await answered;
+    return { status: 500, body: { error: 'The Inbox could not write.', code: 'error' } };
+  };
+  const el = await renderApp();
+  await openDecide(el);
+  const key = (await questionsOf(world.decide.a))[0]!.key;
+  typeInto(otherField(), 'Use a fresh key each time');
+  await until(() => picks().length >= 1, 'the save on its way');
+  await until(() => !sendButton().disabled, 'Send');
+  act(() => sendButton().click());
+  closeDialog();
+  await until(() => dialog() === null, 'the dialog to close');
+  // The thread behind: that question's card holds the words still on their way.
+  const threadCard = () => el.querySelector<HTMLElement>(`section.ib-pane [data-message-id="${world.decide.a}"] fieldset[data-question-key="${key}"]`);
+  await until(() => [...(threadCard()?.querySelectorAll('textarea') ?? [])].some((t) => t.value === 'Use a fresh key each time'), "the words on the thread's card");
+  expect(toasts()).toHaveLength(0);
+  release();
+  await until(() => toasts().length > 0, 'the toast');
+  // Nothing replaces it with a Send's line (that answer is not a draft in the thread).
+  await sleep(600);
+  expect(toasts()).toHaveLength(1);
+  expect(toasts()[0]!.textContent).toContain('Pick not saved.');
+  expect(toasts()[0]!.textContent).not.toContain('A reply was not sent');
+  expect(toasts()[0]!.querySelector('[data-toast-action]')?.textContent?.trim()).toBe('Open the thread');
+  expect(replies()).toHaveLength(0);
+}, 30_000);
+
+test.skipIf(!hasDom)("a Can't do it reason is a draft: closed and opened again it is back; Save takes it into the mark, and Undo brings it back", async () => {
+  const action = await agentSends({
+    project: world.project,
+    session: world.decide.sessionB,
+    host: 'codex',
+    reply_to: world.decide.b,
+    body: [':::action', 'Rotate the staging keys', ':::'].join('\n'),
+  });
+  const key = (await questionsOf(action))[0]!.key;
+  const savedReason = async () =>
+    (await api<{ draft: { text: string } | null }>(`/api/inbox/threads/${world.decide.a}/comment-draft?key=${encodeURIComponent(`decision-reason:${action}/${key}`)}`)).draft?.text ?? '';
+  const reasonBox = () => cardEl()?.querySelector<HTMLTextAreaElement>('textarea.ib-dm-ta') ?? null;
+  const el = await renderApp();
+  await openDecide(el);
+  await goTo('Rotate the staging keys');
+  act(() => (dialog()!.querySelector('[data-decision-cant]') as HTMLButtonElement).click());
+  await until(() => reasonBox() !== null, 'the reason field');
+  typeInto(reasonBox()!, 'No access to the vault');
+  closeDialog();
+  await until(() => dialog() === null, 'the dialog to close');
+  await until(async () => (await savedReason()) === 'No access to the vault', 'the reason saved as a draft');
+  // Opened again: the reason is back under the card.
+  await openDecide(el);
+  await goTo('Rotate the staging keys');
+  await until(() => reasonBox()?.value === 'No access to the vault', 'the reason back');
+  // Save: the mark takes the reason as its note, and the reason's own draft goes.
+  act(() => (dialog()!.querySelector('[data-decision-cant-save]') as HTMLButtonElement).click());
+  await until(async () => (await questionsOf(action))[0]?.action_result?.outcome === 'cant', "Can't do it saved");
+  await until(async () => (await savedReason()) === '', 'the reason draft cleared');
+  expect(dialog()!.querySelector('.ib-dm-error')).toBeNull();
+  // Undo: the mark taken back, the reason the card's draft again.
+  act(() => (dialog()!.querySelector('[data-decision-undo]') as HTMLButtonElement).click());
+  await until(async () => !(await questionsOf(action))[0]?.action_result, 'the mark taken back');
+  await until(() => prompt() === 'Rotate the staging keys', 'back on the action item');
+  await until(() => reasonBox()?.value === 'No access to the vault', 'the reason back after Undo');
+  await until(async () => (await savedReason()) === 'No access to the vault', 'the reason saved again');
+  expect(replies()).toHaveLength(0);
 }, 30_000);

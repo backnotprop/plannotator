@@ -37,12 +37,15 @@ export function tuckDecide(deps: DecideTuckDeps, threadId: string, fileId?: stri
 
 /**
  * The toast for a sitting the window no longer shows: a Send that failed after the dialog closed (its answers wait as
- * drafts in the thread), or an answer whose save failed then (the thread line's own words for it).
+ * drafts in the thread), or an answer or a Can't do it's reason whose save failed then (the thread line's own words).
  */
 export function decideAwayToast(notice: DecisionAwayNotice): Omit<InboxToastModel, 'id'> {
+  const subject = notice.subject ?? 'this thread';
   const lead =
     notice.kind === 'send'
       ? 'A reply was not sent. Your answers wait as drafts in the thread.'
-      : `Pick not saved. Your answer in "${notice.subject ?? 'this thread'}" did not reach the Inbox.`;
+      : notice.kind === 'reason'
+        ? `Reason not saved. Your reason in "${subject}" did not reach the Inbox.`
+        : `Pick not saved. Your answer in "${subject}" did not reach the Inbox.`;
   return { icon: 'warn', lead, wrap: true, action: { label: 'Open the thread', onPress: () => writeRoute({ page: 'inbox', project: null, thread: notice.threadId }) } };
 }
