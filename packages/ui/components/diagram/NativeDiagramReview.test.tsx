@@ -1,3 +1,4 @@
+import { placeNativeNote } from './nativeNotePlacement';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -33,6 +34,24 @@ test('nearby comments remain reachable at every zoom and orphaned pins never lan
     expect(pins[0].x).toBeCloseTo(view.x + (part.x + .25 * part.w) * scale);
     expect(pins[0].y).toBeCloseTo(view.y + (part.y + .75 * part.h) * scale);
     expect(Math.abs(pins[1].x - pins[0].x)).toBeGreaterThanOrEqual(25);
+  }
+});
+
+test('a saved note leaves clustered pins, zoom, Ask, and the historical-revision control reachable', () => {
+  for (const [width, height, cardWidth] of [[1200, 700, 300], [390, 680, 374]] as const) {
+    const pins = [0, 27, -27, 54].map(dx => ({ left: width / 2 + dx, top: 165, width: 32, height: 32 }));
+    const boxes = [...pins, { left: 8, top: height - 54, width: 128, height: 46 },
+      { left: width - 95, top: height - 54, width: 87, height: 46 }, { left: 8, top: 8, width: 110, height: 42 }];
+    for (const pin of pins) {
+      const note = placeNativeNote(pin, cardWidth, 96, width, height, boxes);
+      expect(note.left).toBeGreaterThanOrEqual(8);
+      expect(note.left + cardWidth).toBeLessThanOrEqual(width - 8);
+      expect(note.top + 96).toBeLessThanOrEqual(height - 8);
+      for (const box of boxes) {
+        expect(note.left + cardWidth <= box.left || box.left + box.width <= note.left ||
+          note.top + 96 <= box.top || box.top + box.height <= note.top).toBe(true);
+      }
+    }
   }
 });
 
@@ -77,11 +96,13 @@ describe.if(typeof document !== 'undefined')('native diagram review', () => {
     await click('Protocol'); expect(host.querySelector('a')?.href).toBe(link.url);
     await click('Comment');
     expect(host.querySelector('[role=dialog]')?.textContent).not.toContain('Protocol');
+    expect(host.querySelector('textarea')?.closest('form')).toBeNull();
     await type('Rename this part'); await click('Add comment');
     expect(saved).toEqual([{ anchor, text: 'Rename this part' }]);
     expect(host.querySelector('textarea')).toBeNull();
     let edited = '';
     await show({ ...props, comments: [{ id: 'annotation', ...saved[0] }], onEditComment: (id, text) => { edited = id + text; } });
+    expect(document.activeElement).toBe(button('Comment 1 on Client'));
     await click('Comment 1 on Client');
     expect(host.querySelector('[role=dialog]')?.textContent).toContain('Rename this part');
     await click('Edit'); await type('New label'); await click('Save');
@@ -220,7 +241,7 @@ describe.if(typeof document !== 'undefined')('native diagram review', () => {
       if (asks.length === 2) throw new Error('offline');
     } });
     await click('Ask AI');
-    expect(host.querySelector('[role=dialog]')?.textContent).toContain('Replies appear in this thread.');
+    expect(host.querySelector('[role=dialog]')?.textContent).not.toContain('Replies appear in this thread.');
     const question = 'Can the owner confirm this route?';
     await type(question);
     for (let attempt = 0; attempt < 2; attempt++) {

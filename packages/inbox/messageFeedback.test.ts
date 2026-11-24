@@ -168,6 +168,15 @@ describe('which reply a comment rides', () => {
     expect(routed.carried.get('msg_A2')!.map((r) => r.id)).toEqual(['c1']);
   });
 
+  test('a diagram attachment comment goes to its agent when a different agent writes last', () => {
+    const t = thread([message('msg_A', 'ses_a'), message('msg_B', 'ses_b')]);
+    const file = { ...record('f1', 'x', 'y', {}, 'msg_A'), message: undefined, attachment_id: 'att_1', path: '/p/a.diagram.json' };
+    file.annotation.diagramAnchor = { v: 1, family: 'plannotator-diagram', id: 'a', kind: 'node', label: 'A', sourceLine: null, point: { kind: 'panel', x: .5, y: .5 } };
+    const routed = routeSendAnnotations(t, sendTargetsOf(t), [file]);
+    expect(routed.carried.get('msg_A')?.map(r => r.id)).toEqual(['f1']);
+    expect(routed.carried.has('msg_B')).toBe(false);
+  });
+
   test('a file comment rides the last reply', () => {
     const t = thread([message('msg_A', 'ses_a'), message('msg_B', 'ses_b')]);
     const file = { ...record('f1', 'x', 'y'), message: undefined, attachment_id: 'att_1', path: '/p/a.md' } as InboxAnnotationRecord;

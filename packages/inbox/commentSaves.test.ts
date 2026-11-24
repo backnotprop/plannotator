@@ -102,3 +102,16 @@ test("the Send's list takes what the writes answered: a new comment, an edit, a 
     ['c3', 'c3'],
   ]);
 });
+
+test('a successful response that dropped a diagram anchor stays a failed comment write', async () => {
+  const anchor = { v: 1, family: 'plannotator-diagram', kind: 'node', id: 'queue', label: 'Queue', sourceLine: null, point: { kind: 'panel', x: .5, y: .5 } };
+  const annotation = { text: 'Draft words', diagramAnchor: anchor };
+  const watch = watchCommentWrites();
+  try {
+    const old = record('c1', { annotation: { id: 'c1', type: 'COMMENT', text: annotation.text } });
+    await expect(trackCommentWrite(Promise.resolve({ annotation: old }), { id: 'c1', on: 'file', annotation })).rejects.toThrow('confirm');
+    expect(await watch.settled()).toContainEqual({ kind: 'failed', remove: false, on: 'file', id: 'c1' });
+    const current = { ...old, annotation };
+    expect(await trackCommentWrite(Promise.resolve({ annotation: current }), { id: 'c1', on: 'file', annotation })).toEqual({ annotation: current });
+  } finally { watch.stop(); }
+});

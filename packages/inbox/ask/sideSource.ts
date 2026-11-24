@@ -83,11 +83,11 @@ type Side = (words: string, source?: string) => void;
 type DiagramAsk = CommentAskAIHandler & { destination?: 'thread' };
 
 /** Keep a private Side private. When that host is absent the drawer labels its explicit thread send. */
-export function diagramAsk(messageId: string, provenance: (context: CommentAskAIContext) => string, onSide?: Side, reply?: DiagramThreadReply): DiagramAsk | undefined {
+export function diagramAsk(messageId: string, provenance: (context: CommentAskAIContext) => string, onSide?: Side, reply?: DiagramThreadReply, revision?: string): DiagramAsk | undefined {
   if (onSide) return (question, context) => onSide(question, [provenance(context), context.detail].filter(Boolean).join('\n'));
   if (!reply) return undefined;
   const send: CommentAskAIHandler = (question, context) => reply(messageId, question,
-    [provenance(context), context.diagramScope].filter(Boolean).join('\n'));
+    [provenance(context), context.diagramScope].filter(Boolean).join('\n'), revision);
   return Object.assign(send, { destination: 'thread' as const });
 }
 
@@ -97,6 +97,6 @@ export function diagramFileAsk(view: AttachmentView, onSide?: Side, reply?: Diag
   const sha = view.version === 'current' ? file.current?.sha256 : view.version;
   return diagramAsk(file.message_id, () => [
     `Diagram file: ${file.path}`, `Attachment: ${file.id}`, `Message: ${file.message_id}`,
-    `Version: ${view.version}`, sha && `SHA-256: ${sha}`,
-  ].filter(Boolean).join('\n'), onSide, reply);
+    `Version: ${view.version}`,
+  ].join('\n'), onSide, reply, sha);
 }

@@ -1543,17 +1543,17 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         caught.push(recordsRef.current.some((r) => r.id === annotation.id) ? { kind: 'edit', id: annotation.id, text: annotation.text ?? '' } : { kind: 'comment', annotation });
         return Promise.resolve(true);
       }
-      savedHere.current.push({ at: anchorKeyOf(annotation), id: annotation.id, text: (annotation.text ?? '').trim() });
-      // Written again on what a set-aside draft was on: that draft is spent.
-      if (waiting.current.length > 0 || reopening.current.length > 0) {
-        const at = anchorKeyOf(annotation);
-        const spent = (d: FileCommentDraft) => (d.kind === 'comment' && anchorKeyOf(d.annotation) === at) || (d.kind === 'edit' && d.id === annotation.id);
-        waiting.current = waiting.current.filter((d) => !spent(d));
-        reopening.current = reopening.current.filter((entry) => !spent(entry.draft));
-      }
       const answer = (async () => {
         try {
           const record = await source.saveAnnotation(attachment, annotationVersion, annotation);
+          savedHere.current.push({ at: anchorKeyOf(annotation), id: annotation.id, text: (annotation.text ?? '').trim() });
+          // Written again on what a set-aside draft was on: that draft is spent.
+          if (waiting.current.length > 0 || reopening.current.length > 0) {
+            const at = anchorKeyOf(annotation);
+            const spent = (d: FileCommentDraft) => (d.kind === 'comment' && anchorKeyOf(d.annotation) === at) || (d.kind === 'edit' && d.id === annotation.id);
+            waiting.current = waiting.current.filter((d) => !spent(d));
+            reopening.current = reopening.current.filter((entry) => !spent(entry.draft));
+          }
           props.onSaved(record);
           return true;
         } catch (cause) {
@@ -1716,7 +1716,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
 
   const edit = (id: string, updates: Partial<Annotation>) => {
     const record = props.records.find((r) => r.id === id);
-    if (!record) return;
+    if (!record) return false;
     const annotation = annotationOf(record);
     // A drawing's words emptied again: the agent's stand-in comes back.
     const text = updates.text !== undefined && updates.text.trim() === '' && isWordlessMarkup(annotation) ? MARKUP_ONLY_TEXT : updates.text;

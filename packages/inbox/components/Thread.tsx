@@ -3190,14 +3190,19 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       // that asked them, with no words, and the words go only to the aimed one. Each half keeps its own key.
       const wordsTo = aimed && !aimedAt && carries ? aimedAway : undefined;
       // A comment on another session's message rides a reply to that message (routeSendAnnotations).
-      const { targets, carried } = routeSendAnnotations(current, plain, pendingAnnotations);
+      const routed = routeSendAnnotations(current, plain, pendingAnnotations);
+      const { carried } = routed;
+      // A diagram note for an earlier author can leave the default words recipient with nothing to send.
+      const targets = routed.targets.filter(({ message, questions, skip, actions }, index, all) =>
+        (carried.get(message.id)?.length ?? 0) > 0 || questions.length || skip.length || actions.length ||
+        (index === all.length - 1 && (words !== '' || uploads.length > 0)));
       if (targets.length === 0) {
         setError('Write a reply or pick an answer first.');
         return;
       }
       /** One request of this Send: its target, the key it keeps across retries, its comments, and where it goes. */
       const parts = targets.map((t) => ({ target: t, key: replyKeyOf(t.message), own: carried.get(t.message.id) ?? [], wordsTo: undefined as typeof wordsTo }));
-      if (wordsTo) {
+      if (wordsTo && parts.at(-1)!.target.message.id === plain.at(-1)?.message.id) {
         const tail = parts.at(-1)!;
         const t = tail.target;
         const wordsPart = { target: { message: t.message, questions: [], skip: [], actions: [] }, key: `w:${wordsTo.session}`, own: tail.own, wordsTo };
