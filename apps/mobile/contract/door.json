@@ -789,6 +789,38 @@
       "relay": true
     },
     {
+      "name": "POST artifact-pins",
+      "method": "POST",
+      "path": "artifact-pins",
+      "params": [],
+      "call": "postArtifactPins",
+      "window": "/api/inbox/artifact-pins",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET artifacts",
+      "method": "GET",
+      "path": "artifacts",
+      "params": [],
+      "call": "getArtifacts",
+      "window": "/api/inbox/artifacts",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "GET events",
       "method": "GET",
       "path": "events",

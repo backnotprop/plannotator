@@ -13,6 +13,7 @@ import { INBOX_AGENTS_LISTED_MAX } from "@plannotator/core/inbox-types";
 import { PeerLink, readCapped, type PeerRecord } from "./inbox-peer-link";
 import { openTransport } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
+import { readFarWall } from "./inbox-artifacts-merged";
 
 const B = "ibx_01K00000000000000000000000";
 const TOKEN = "tok_test";
@@ -45,6 +46,8 @@ interface DoorScript {
   cards?: () => Response;
   /** Its archived threads (`GET threads/archived`). */
   archived?: () => Response;
+  /** Its Artifacts wall (`GET artifacts`). */
+  artifacts?: (search: string) => Response;
 }
 
 function door(script: DoorScript) {
@@ -64,6 +67,7 @@ function door(script: DoorScript) {
         return script.threads ? script.threads() : Response.json({ cursor: script.cursor ?? 0, sections: [{ threads: [{ thread_id: "msg_a", project: { id: "prj_a" } }] }], projects: [] });
       }
       if (route === "threads/archived" && script.archived) return script.archived();
+      if (route === "artifacts" && script.artifacts) return script.artifacts(url.search);
       if (route === "cards" && req.method === "GET") {
         stats.cards += 1;
         return script.cards ? script.cards() : Response.json({ code: "device_route_not_found" }, { status: 404 });
@@ -453,6 +457,54 @@ describe("the list (rule 5)", () => {
     old.start();
     await until("its list", () => old.list !== null);
     expect(await old.archivedPage("?limit=21")).toEqual({ machine: B, page: null, away: false });
+  });
+
+  test("its pinned artifacts come from its list, and an `artifact-pins` frame reads the list again before the windows hear it", async () => {
+    const told: string[] = [];
+    const pinned = { key: "att_01K000000000000000000000PA", thread_id: "msg_01K000000000000000000000TA", pinned_at: "2026-11-20T10:00:00.000Z" };
+    const d = door({
+      cursor: 3,
+      frames: ["event: artifact-pins\ndata: {}\n\n"],
+      threads: () => Response.json({ cursor: 3, sections: [], marks: ["artifact-pins"], artifact_pins: d.stats.threads > 1 ? [pinned] : [] }),
+    });
+    const { peer } = link(d.url, { onReread: (event) => void told.push(`${event}:${peer.list!.artifact_pins.map((pin) => pin.key).join(",")}`) });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("artifact-pins")).toBe("1");
+    expect(told).toEqual([`artifact-pins:${pinned.key}`]);
+    // An older Inbox's list carries none, and no mark.
+    peer.acceptList({ cursor: 4, sections: [] });
+    expect(peer.list!.artifact_pins).toEqual([]);
+    expect(peer.list!.marks).toEqual([]);
+  });
+
+  test("its Artifacts wall is read through its door; asleep, the last page for that ask, away; an older door, nothing", async () => {
+    let awake = true;
+    const asked: string[] = [];
+    const row = { key: "att_01K000000000000000000000PA", thread_id: "msg_01K000000000000000000000TA", message_id: "msg_01K000000000000000000000TA", at: "2026-11-20T10:00:00.000Z" };
+    const d = door({
+      cursor: 3,
+      artifacts: (search) => {
+        asked.push(search);
+        return awake ? Response.json({ artifacts: [row], next_cursor: null, total: 1, counts: { all: 1, pinned: 0, types: { images: 1 } } }) : new Response("", { status: 503 });
+      },
+    });
+    const { peer } = link(d.url);
+    peer.start();
+    await until("its list", () => peer.list !== null);
+    const first = await readFarWall(peer, "?limit=60");
+    expect(asked).toEqual(["?limit=60"]);
+    expect(first.away).toBe(false);
+    expect(first.page!.artifacts).toEqual([{ ...row, machine: B }]);
+    awake = false;
+    expect(await readFarWall(peer, "?limit=60")).toEqual({ ...first, away: true });
+    expect((await readFarWall(peer, "?limit=60&pinned=1")).page).toBeNull();
+
+    const older = door({ cursor: 3 });
+    const { peer: old } = link(older.url);
+    old.start();
+    await until("its list", () => old.list !== null);
+    expect(await readFarWall(old, "?limit=60")).toEqual({ machine: B, page: null, away: false });
   });
 
   test("its Show archived comes from its list, and a `show-archived` frame reads the list again before the windows hear it", async () => {

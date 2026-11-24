@@ -122,8 +122,10 @@ mark.g{--mk:var(--green)}
 .hn.out>span{opacity:0}
 @media (prefers-reduced-motion:reduce){.hn,.hn>span{transition:none}}
 /* The card's last line stays on one line (a wrap makes the card taller and pulls the beam off the band), except
-   on phones too narrow for "Claude Code built it. No surprises in review.", where it would run off the card. */
-@media (max-width:340px){.sheet.mock .q{white-space:normal}}
+   on phones too narrow for "Claude Code built it. No surprises in review." inside the card's padding (below 359px).
+   There it always holds two lines (2 x the card's 20px line-height), so the card keeps one height while the name
+   cycles, short names included. */
+@media (max-width:358px){.sheet.mock .q{white-space:normal;min-height:40px}}
 
 @media (max-width:1180px){
   .frame{height:auto;max-height:none;min-height:0;padding:96px 24px 48px}

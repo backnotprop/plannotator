@@ -24,6 +24,8 @@ export interface InboxArtifactPin {
   key: string;
   thread_id: string;
   pinned_at: string;
+  /** The linked machine that keeps it (its thread's own), in the merged read (`?machines=1`); absent for this Inbox's own. */
+  machine?: string;
 }
 
 /** The Wall's type chips. */
@@ -107,6 +109,8 @@ export interface InboxArtifactRow {
   archived: boolean;
   /** When the person pinned it, or null. */
   pinned_at: string | null;
+  /** The linked machine its thread lives on, in the merged read (`?machines=1`); absent for this Inbox's own. */
+  machine?: string;
 }
 
 /** The Wall's page (`GET /api/inbox/artifacts`). */

@@ -243,6 +243,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST open-in/file/attach": "now",
   // A thread's PRs live on the thread's machine: an add of one it holds, or a remove of one it does not, changes nothing.
   "POST threads/:id/pulls": "set",
+  // A pinned artifact lives on its thread's machine (mark `artifact-pins`): a pin or an unpin puts a state there.
+  "POST artifact-pins": "set",
   "POST messages/:id/picks": "set",
   "POST messages/:id/reply": "append",
   "POST messages/:id/resolve": "set",

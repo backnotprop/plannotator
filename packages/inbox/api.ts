@@ -17,7 +17,7 @@ import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@p
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, listGridAsked, type ListReadAnswer } from './listRead';
-import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
+import { inboxUrl, isContested, localRoute, machineOf, rememberArtifactMachines, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -1874,8 +1874,8 @@ export const inboxApi = {
   },
   /** The person looked at Dropped: an agent's drops there are seen. */
   seeDrops: (ids: readonly string[], machine?: string | null) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen', undefined, machine), { cards: [...ids] }),
-  /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order. This machine's threads only. */
-  artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
+  /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order: this machine's, then each linked machine's (`machine`). */
+  artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins', 'machines=1')).then(rememberArtifactMachines),
   /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */
   agentFaces: () => get<unknown>(inboxUrl('/agent-faces')),
   /**
@@ -1898,16 +1898,16 @@ export const inboxApi = {
   /** "Get": download a fetchable set into this Inbox's data folder (a stopped one resumes). */
   getIconSet: (id: string) => post<{ set?: unknown }>(inboxUrl('/icon-sets'), { get: id }),
   /** Pin one artifact of a thread (its key: an attachment id, or `guide:<message id>`), or unpin it. */
-  setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins'), { thread_id: threadId, key, pinned }),
+  setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins', undefined, machineOf(threadId)), { thread_id: threadId, key, pinned }),
   /** The Artifacts wall: a page of every thread's artifacts, newest first. */
   artifacts: (query: { pinned?: boolean; type?: InboxArtifactType | null; archived?: boolean; cursor?: string | null; limit?: number }, signal?: AbortSignal) => {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ machines: '1' });
     if (query.pinned) params.set('pinned', '1');
     if (query.type) params.set('type', query.type);
     params.set('archived', query.archived ? 'include' : 'exclude');
     if (query.cursor) params.set('cursor', query.cursor);
     if (query.limit) params.set('limit', String(query.limit));
-    return get<InboxArtifactsPage & { serverSession: string }>(inboxUrl('/artifacts', params.toString()), signal);
+    return get<InboxArtifactsPage & { serverSession: string }>(inboxUrl('/artifacts', params.toString()), signal).then(rememberArtifactMachines);
   },
   /** Star or unstar, on the thread's own machine (approval "inbox-linked-marks"). */
   pin: (threadId: string, pinned: boolean) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(threadUrl(threadId, '/pin'), { pinned }),

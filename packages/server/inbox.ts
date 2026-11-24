@@ -308,6 +308,7 @@ import { createIconSetFetcher, iconSetsPointer, INBOX_ICON_SETS_DIR } from "./in
 import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
 import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
+import { artifactPinsWire } from "./inbox-artifacts-merged";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { changedFileOf } from "./inbox-pull-diff-files";
@@ -4308,9 +4309,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // `tags` again. Windows, and a linked machine that asks (`tags=1`, as `pins=1`).
         const onThreadTags = () => send(`event: tags\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("tags") === "1") threadTagListeners.add(onThreadTags);
-        // The pinned artifacts changed (any window's, a phone's, or a deletion): the window reads them again. Windows only.
+        // The pinned artifacts changed (any window's, a linked machine's, or a deletion): the window reads them again.
+        // Windows, and a linked machine that asks (`artifact-pins=1`, as `pins=1`: a pin writes no record).
         const onArtifactPins = () => send(`event: artifact-pins\ndata: {}\n\n`);
-        if (windowId) artifactPinListeners.add(onArtifactPins);
+        if (windowId || url.searchParams.get("artifact-pins") === "1") artifactPinListeners.add(onArtifactPins);
         // Show a thread (`plannotator inbox --open <thread>`): every tab hears it, only the window it names moves. This computer's windows only.
         const onShow = (threadId: string | null, target: string, page?: string) => send(`event: show\ndata: ${JSON.stringify(page ? { page, window: target } : { thread_id: threadId, window: target })}\n\n`);
         if (windowId && via === "local") showListeners.add(onShow);
@@ -4911,8 +4913,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A Codex thread the Inbox launched: its host puts the item in as a turn over the app-server it runs (the launch
     // engine is made below; the wake's first look runs after this function's synchronous part, when it exists).
     // Until it exists, a launched thread's item waits (never `codex queue`), and any other goes the queue's way.
-    deliver: (session, text) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text) : Promise.resolve(launchedCodex(session) ? ("hold" as const) : ("queue" as const))),
+    deliver: (session, text, intoTurn) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text, intoTurn === true) : Promise.resolve(launchedCodex(session) ? ("hold" as const) : ("queue" as const))),
     launched: (session) => launchedCodex(session),
+    turnRunning: (session) => (launchReady ? launch.turnRunning(INBOX_CODEX_HOST, session) : null),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
     // A Codex thread T3 Code runs: its items go into the T3 thread with T3's own `t3` command (inbox-t3-local.ts).
@@ -5452,7 +5455,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const threadTags = createInboxThreadTags({ store, serverSession, readBody: (req) => readBody(req), json });
   const projectTagsRoute = createInboxProjectTagsRoute({ tags: projectTags, serverSession, readBody: (req) => readBody(req), json });
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
-  const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
+  // Across linked machines with `?machines=1` (inbox-artifacts-merged.ts); `machines` is made further down.
+  const farArtifacts = { pinLists: () => machines.artifactPins.pinLists(), walls: (searchOf: (machine: string) => string) => machines.artifactPins.walls(searchOf) };
+  const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json, machines: farArtifacts });
   // Icon sets for agents' icons ("Sets": built in, or fetched into the data folder on one click; inbox-icon-sets.ts).
   const builtInIconSets = createBuiltInIconSets();
   const iconSetFetcher = createIconSetFetcher({ dir: join(inboxDir(dataDir), INBOX_ICON_SETS_DIR), pointer: iconSetsPointer(), builtIn: builtInIconSets.ids });
@@ -6162,8 +6167,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const listed = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
         // Where this computer's agents live and what their panes say, as Rex says now, in every window; Show in Rex by where the window is.
         const agents = withRexPlaces(listed, phone ? null : thisComputersWindow(req, via) ? "here" : "away");
-        // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts).
-        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state() } : {}) };
+        // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts), and the
+        // artifacts pinned here (mark `artifact-pins`): that machine's windows show them on this Inbox's threads.
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()) } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
