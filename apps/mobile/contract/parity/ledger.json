@@ -1475,12 +1475,12 @@
     },
     {
       "id": "window-110",
-      "title": "Code review offer card (\"A new way to review\", Not now / \"Turn on code review\") — currently never shown",
+      "title": "Code review offer card (\"A new way to review\", Not now / \"Turn on code review\")",
       "surface": [],
       "flows": [],
       "mobile": "later",
-      "why": "L-off: the offer is never shown today",
-      "reason": "L-off",
+      "why": "L-door: after v1, slice S9 (owner, 2026-11-18: managing the computer comes later): turning a capability on at the computer from a phone",
+      "reason": "L-door",
       "source": "SCOPE I. One-time dialogs, tips and their schedule; L174",
       "ios": {
         "state": "not-started"
@@ -5043,7 +5043,7 @@
     },
     {
       "id": "messages-110",
-      "title": "Add: \"You added <agent> to this thread\" above the reply; later replies go to it too",
+      "title": "Add: \"You added <agent> to this thread\" above the reply; a later reply reaches it only when the reply box names it",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -22159,6 +22159,20 @@
       }
     },
     {
+      "id": "undecided-door-get-artifacts",
+      "title": "door:GET artifacts",
+      "surface": [
+        "door:GET artifacts"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-door-post-threads-id-remove-agent",
       "title": "door:POST threads/:id/remove-agent",
       "surface": [
@@ -22167,6 +22181,20 @@
       "flows": [],
       "mobile": "undecided",
       "why": "Remove an agent from a thread (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: the door takes the route for the web phone sheet's swipe and for a linked machine whose list names `remove-agent` in `marks`.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-artifact-pins",
+      "title": "door:POST artifact-pins",
+      "surface": [
+        "door:POST artifact-pins"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"

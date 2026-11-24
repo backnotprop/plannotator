@@ -51,6 +51,7 @@ import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from 
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 import type { FarArchived } from "./inbox-archived-merged";
+import { ARTIFACT_PINS_MARK, readFarWall } from "./inbox-artifacts-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
 
 /** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
@@ -1310,6 +1311,14 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const search = `?limit=${Math.min(count, FAR_ARCHIVED_LIMIT_MAX)}${project ? `&project=${encodeURIComponent(project)}` : ""}`;
     return Promise.all([...peers.values()].filter((peer) => !owner || peer.id === owner).map((peer) => peer.archivedPage(search)));
   };
+  /** The linked machines whose list takes artifact pins (inbox-artifacts-merged.ts): an older one is never asked. */
+  const artifactPeers = () => [...peers.values()].filter((peer) => peer.list?.marks.includes(ARTIFACT_PINS_MARK));
+  const artifactPins = {
+    /** Each one's pins as its list last said (an asleep machine's from memory). */
+    pinLists: () => artifactPeers().map((peer) => ({ machine: peer.id, pins: peer.list!.artifact_pins })),
+    /** Each one's Wall page for its own part of the ask, read now while it is online. */
+    walls: (searchOf: (machine: string) => string) => Promise.all(artifactPeers().map((peer) => readFarWall(peer, searchOf(peer.id)))),
+  };
   /** Each linked machine's "Show archived" switch as its list last said: a save here goes past the newest. */
   const showArchivedCopies = (): InboxShowArchived[] => [...peers.values()].flatMap((peer) => (peer.list?.show_archived ? [peer.list.show_archived] : []));
   /** A linked machine's card, as its Board last said: the lane marks and a link's site icon are read here for it. */
@@ -1364,6 +1373,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     tagColourLists,
     cardLists,
     archivedPages,
+    /** Pinned artifacts and the Wall on linked machines (mark `artifact-pins`, inbox-artifacts-merged.ts). */
+    artifactPins,
     showArchivedCopies,
     /** Each linked machine's PR board (mark `pulls`), for the merged board (inbox-machine-pulls.ts). */
     pullLists: (refresh: boolean) => {

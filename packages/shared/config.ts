@@ -485,9 +485,11 @@ export interface PlannotatorConfig {
    * flag the person turns on). Read through `resolveExperimental`;
    * PLANNOTATOR_EXPERIMENTAL wins over this key. Written by the Inbox's
    * Settings → Capabilities → Experimental through POST /api/inbox/settings
-   * `{ experimental: { decision_mode } }`.
+   * `{ experimental: { decision_mode } }`. `codexSteer` (an Inbox reply into a
+   * running Codex turn, packages/server/inbox-codex-steer.ts) has no Settings
+   * switch yet: config.json or PLANNOTATOR_EXPERIMENTAL only.
    */
-  experimental?: { decisionMode?: boolean };
+  experimental?: { decisionMode?: boolean; codexSteer?: boolean };
   /**
    * The Board's one-time first-visit dialog (approval "inbox-board", intro
    * amendment): `shownAt` once a page on this computer or the owner's phone
@@ -703,8 +705,12 @@ export interface PlannotatorConfig {
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
     waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; view_choice?: string; personal_agents?: string; priority?: string; routines?: string };
-    /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
-    code_review?: { shownAt?: string; key?: string };
+    /**
+     * Code review's one-time offer (approval "inbox-code-review-offer"), decided as the tab icon's: `dueAt` for someone
+     * who used an earlier Inbox, `freshAt` for a fresh install (never due), both written at the first release start that
+     * shows it (packages/server/inbox-code-review-offer.ts); then claimed once, as the Board's.
+     */
+    code_review?: { dueAt?: string; freshAt?: string; shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
     agent_rules?: { shownAt?: string; key?: string };
@@ -2457,6 +2463,7 @@ export function resolveInboxPhones(
  */
 export const EXPERIMENTAL_FEATURES = {
   "decision-mode": "decisionMode",
+  "codex-steer": "codexSteer",
 } as const;
 
 export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURES;

@@ -331,6 +331,15 @@ if (process.argv[2] === "t3-hook" && process.argv.length === 3 && !isAgentSdkEnt
   process.exit(0);
 }
 
+// Plannotator's Codex `PostToolUse` hook (`codex-hook`, internal: the installer writes it into the Codex hooks.json,
+// and its shell gate starts this binary only while a reply waits for a Codex turn). Before any startup work, and it
+// never fails a tool call: no output when nothing is taken (apps/hook/server/codex-hook.ts).
+if (process.argv[2] === "codex-hook" && process.argv.length === 3) {
+  const { codexHookMain } = await import("./codex-hook");
+  await codexHookMain().catch(() => undefined);
+  process.exit(0);
+}
+
 // Check for subcommand
 // "Ask this session" pull-bridge secret: take it out of process.env before
 // ANYTHING spawns (git/gh/sem before the server starts, the auto-update
@@ -518,6 +527,16 @@ const rawArgs = process.argv.slice(2);
     process.exit(await runFeedbackCommand(args.slice(1), { env: process.env, version: getCliVersion() ?? "dev" }));
   }
 }
+// `codex-hook` with anything after it (the hook itself, bare, ran above): its usage, nothing else.
+{
+  const args = rawArgs;
+  if (args[0] === "codex-hook") {
+    const { SUBCOMMAND_HELP } = await import("./cli");
+    console.log(SUBCOMMAND_HELP["codex-hook"]);
+    process.exit(0);
+  }
+}
+
 // T3 Code (opt-in, unreleased; HIDDEN_SUBCOMMANDS): `t3` is the connection's
 // CLI and worker, `t3-hook` the Claude Bash hook and its settings helper.
 // Loaded only when asked for, so no other subcommand evaluates any of it.

@@ -374,3 +374,112 @@ path — and only that path, which keeps every `turn_id`-carrying Codex
 byte-identical — also accepts the last developer message in the turn as the
 boundary. Without it the guard is inert on exactly the versions the fallback
 enables, and an unrevised denied plan is re-served on every Stop of the turn.
+
+### Codex PostToolUse hook and steering: a reply into a running turn
+
+**Experimental, off by default.** The owner, asked how a reply to a busy Codex should go: "Yeah, I don't know. Q's
+working fine for the most part." So `codex queue` stays the delivery, and steering waits behind the `codex-steer`
+experimental switch (`PLANNOTATOR_EXPERIMENTAL=codex-steer`, else config.json `{ "experimental": { "codexSteer": true } }`;
+`resolveExperimental`, read quietly once by `codexSteerOn()` in `packages/server/inbox-codex-steer.ts` when the Codex
+wake is made, so a change applies at the next Inbox start; no Settings switch yet). Off guarantees: the wake reads and
+writes none of the steering's files (no rollout look for it, no `codex-hook/`, `hooked.json`, `steered.json` or
+`hooks.json`, no clearing), logs nothing new and queues as before; a claim folder it did not make is left alone as
+before; a launched thread's host runs the same `turn/start` (then `turn/steer` only when Codex refuses a second turn)
+as before. Off after on: an Inbox that starts with the switch on writes `inbox/codex-queue/steer-on`; one that starts
+with it off sees that name in the claims folder it lists at start anyway and clears, once, every held file, the
+`codex-queue/next-turn/` records and the mark (never on: none of it is there and nothing is done). The hook itself
+takes nothing without that mark, nor when config.json says `codexSteer: false` or PLANNOTATOR_EXPERIMENTAL says
+`-codex-steer`. The installer writes no PostToolUse hook, prints its old fallback words, writes a `hooks.json` byte
+for byte as before when none of ours is in it (an empty `"PostToolUse": []` kept), and takes out one it wrote before
+("Codex: took Plannotator's PostToolUse hook out of <hooks.json> (the experimental codex-steer switch is off).");
+uninstall reads as before unless that hook or its note is there. No agent-facing text changes either way. Tests: "the
+experimental codex-steer switch" in `inbox-codex-steer.test.ts` (fs spied: nothing of it touched), "steering off" in
+`inbox-launch-codex.test.ts`, "the switch" in `codex-hook-command.test.ts`.
+
+With it on, a person's reply to a Codex thread that is in a turn goes into that turn; everything this cannot do still
+goes as the next turn through `codex queue`, so no reply goes worse than before. The code: `inbox-codex-steer.ts` (route and policy),
+`packages/shared/inbox/codex-hook-mailbox.ts` (the hook's mailbox and claim), `packages/shared/codex-hook-command.ts`
+(the hook's command), `apps/hook/server/codex-hook.ts` (the hook), `packages/server/inbox-codex-sight.ts` (the proof it
+arrived). Proof: `packages/server/inbox-codex-steer.test.ts` (fake `codex`, scratch rollout and hooks.json), `packages/shared/codex-hook-command.test.ts` (the gate under sh and zsh, the installer's string, merge and
+removal), the launch cases in `packages/server/inbox-launch-codex.test.ts`, and the uninstall cases in
+`packages/server/uninstall.test.ts`. None of it was run against a real, signed-in Codex.
+
+- **Delivered only on evidence.** A reply handed into a turn (by the hook or a launched thread's host)
+  reads "Handed to Codex; it takes this at its next step." until its words show in the thread's rollout after the
+  offset taken when it was handed (`inbox-codex-sight.ts`: a `response_item` message or `user_message` event holding
+  the text). Seen before any turn boundary: delivered with `into_turn: true`; seen after one: delivered as a new turn.
+  The turn ended (`task_complete` / `turn_complete` / `turn_aborted`, Esc included) with the words not seen, the
+  file read to its end and untouched for 10 s (`CODEX_SIGHT_QUIET_MS`): the claim is dropped and `codex queue` gives
+  it as the next turn, never into a turn again (`nextTurnOnly`, kept on disk as `codex-queue/next-turn/<item>.<thread>`;
+  a launched thread's reply is marked there before its `turn/steer`, so it is steered at most once, across a restart
+  too). Nothing written to the rollout for 20 minutes and handed on 20 minutes ago (a Codex that crashed and was not
+  resumed; `CODEX_SIGHT_GIVE_UP_MS`, the hold's rule): the same, once; never while a launched thread's host says a
+  turn runs (`turnRunning`: a steer waits in Codex for the end of a tool call, which writes nothing however long it
+  takes). The proof survives a restart (`hooked.json` / `steered.json` keep the rollout, offset, turn and when). A
+  claim found without `queued.json` or `hooked.json` (maybe the hook mid-take) is looked at every 2 s for 30 s, so a
+  reply the hook took reads handed at once, not after the next line or a restart. A launched thread whose
+  rollout the wake cannot find is never steered: its host takes the old `turn/start` path and it reads plain
+  Delivered. What Codex writes, from its source (openai/codex at `baf9b39`, cited in `inbox-codex-sight.ts`): a
+  PostToolUse `additionalContext` is recorded (`record_additional_contexts`, core/src/tools/registry.rs, cancelled
+  with the tool call) as a `HookAdditionalContext` developer message with the text whole as `input_text`, persisted
+  to the rollout as a `response_item` (core/src/session/mod.rs `record_prepared_items` → `persist_rollout_items`);
+  a `turn/steer` input as the user's message. Not yet seen against a live Codex.
+
+- **The Codex app (and any Codex that runs hooks): the hook.** The app runs its own app-server over stdio
+  (`initialize_processor.rs` names the host `Codex Desktop` on a stdio connection; openai/codex#48928), so no other
+  process can reach its threads. It runs the same hooks as the CLI (`$CODEX_HOME/hooks.json`, Settings → Hooks in
+  the app). While the thread's rollout (`$CODEX_HOME/sessions/…/rollout-…-<thread>.jsonl`, the last `event_msg`
+  `task_started` vs `task_complete` / `turn_aborted`, read from its last 512 KiB; a file untouched for 20 minutes is
+  not believed) says a turn runs, the PostToolUse hook is in that `hooks.json` and this Codex has run our hook since
+  `hooks.json` last changed (below), the wake does not queue the reply: it writes it to
+  `<data dir>/inbox/codex-hook/<thread>.<item>.json` (thread lowercased; handed, see above). After the turn's next
+  successful tool call Codex runs the hook, which claims the item with the wake's own mkdir claim
+  (`inbox/codex-queue/<item>.<thread>/`, plus `hooked.json`, written before it answers) and answers
+  `{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":<the wake text>}}`; Codex adds it to the
+  turn as a developer message before its next model request (`core/src/tools/registry.rs`, `hook_runtime.rs`). The
+  wake looks every 2 s while it holds or watches anything; a turn that ended before the claim (or a hold older than
+  30 minutes) releases the hold and `codex queue` gives it as the next turn. Whoever makes the claim sends it, never
+  both. The hook marks its claim at once (`hook-claim`, `CODEX_HOOK_CLAIM_MARK`); a claim with the mark and no
+  `hooked.json` for 30 s (the hook died before answering) is dropped and queued; a claim still without the mark after
+  30 s (another Inbox on the same data dir) is left alone, never re-sent.
+  The hook takes only its own root thread's reply: a payload with `agent_id` (a subagent; its `session_id` is the
+  root's), or whose `transcript_path` is not `rollout-*-<session_id>.jsonl`, takes nothing. A reply over 8 KiB
+  (`CODEX_HOOK_CONTEXT_MAX_BYTES`, and replies taken together stay under it) is never held: it goes by `codex queue`
+  as the next turn, so Codex never spills it to a file (`hooks/src/output_spill.rs`). Held files no claim waits for
+  (a crash, a reply taken back or read) are cleared at startup and each sweep.
+- **Reviewed hook only.** Codex runs a new or changed hook only after the person reviews it. The hook records each run
+  in `<data dir>/inbox/codex-hook-ran` (the gate touches it, the binary too); the wake holds a reply only when that
+  note is newer than `hooks.json`. Until then every reply to a busy Codex goes as its next turn, and the server logs
+  once: "Plannotator's Codex hook has not run yet: Codex runs it once you review it (Settings → Hooks, or /hooks).
+  Until then a reply to a busy Codex goes as its next turn." The window says nothing new for it.
+- **The hook's command and cost.** Codex runs a hook with the person's shell (`<shell> -c`, zsh on a Mac, where an
+  empty glob is an error), so the command is `/bin/sh -c '<gate>'` (`codexHookCommand`, with the binary and the
+  `hooks.json` path baked in): a missing binary exits 0 at once, silent; the binary starts only while a file for this
+  payload's thread (`session_id` read from the first 512 bytes with `dd`, passed on in
+  `PLANNOTATOR_CODEX_HOOK_HEAD`) waits in `$PLANNOTATOR_DATA_DIR/inbox/codex-hook/` (when Codex's env sets it),
+  `~/.plannotator/inbox/codex-hook/` or `$XDG_DATA_HOME/plannotator/inbox/codex-hook/`; otherwise one `sh` and a few
+  globs per tool call, no output (no effect in Codex). `plannotator codex-hook` is in `HIDDEN_SUBCOMMANDS` (cli.ts;
+  with arguments it prints its usage); bare, it answers before any startup work and never fails a tool call.
+- **Install.** With the switch on (the installer reads it as `resolveExperimental` does), `scripts/install.sh`
+  writes it beside the Stop hook, in the same `hooks.json`, under the same rules
+  (`--skip-codex` and `skipInstall.codex` skip both; a custom Plannotator Stop hook it leaves alone means it adds no
+  PostToolUse hook either): its own `PostToolUse` group, no matcher, `timeout: 10`, updated in place on a reinstall
+  (its position kept, so the trust of other hooks holds), never touching another hook. `plannotator update` runs the
+  installer, so existing installs get it, and it prints "Codex: review Plannotator's new hook in Codex (Settings >
+  Hooks, or /hooks) so an Inbox reply can reach a running turn." Once written it notes `<config dir>/codex-hook-installed`;
+  a later run that finds the hook gone (the person removed it) leaves it out and says so. Without node the fallback
+  text names both hooks (switch off: the Stop hook only, in its old words). Windows installs write no Codex hooks (as
+  before). Uninstall removes both hooks and the note ("managed Codex hooks"; with neither there, its old "managed
+  Codex Stop hook" words); its leftover check sees the binary inside `/bin/sh -c '…'`.
+- **No control socket.** A terminal Codex's background server socket (`app-server-control.sock`) is not used: its
+  `initialize` changes that shared server for every client and nothing checks who owns it. An earlier draft had that
+  route behind a constant fixed off; it was removed (git history has it).
+- **What does not steer.** A turn that makes no tool call after the reply (it only thinks or writes) fires no hook:
+  the reply goes as the next turn, as before. Nothing reaches a single model response while it runs. `codex exec`
+  is never woken.
+- **The line.** Delivered into the turn: "Delivered to Codex, <time> · went into its running turn"
+  (`INTO_RUNNING_TURN_TEXT`, from the delivery's `into_turn: true` on an item whose `deliver_now_by` is not "auto",
+  so never for an item the Inbox marked, even after a failed attempt cleared `deliver_now_at`). In the mobile words
+  contract as `delivery.into_running_turn`. A new turn and the fallback keep their words.
+- **Linked computers.** Each Inbox delivers to its own Codex: a reply written on another computer is forwarded to the
+  thread's home Inbox and takes the same route there (test: "a reply sent from the linked computer").
