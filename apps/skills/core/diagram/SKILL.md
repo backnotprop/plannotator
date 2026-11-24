@@ -1,52 +1,195 @@
 ---
 name: diagram
-description: Create or revise an editable Plannotator diagram (.diagram.json) of an architecture, process, or request path, and render it to SVG. Use when the person invokes /diagram or asks for a Plannotator diagram.
+description: Create or revise structured architecture and workflow diagrams (.diagram.json) rendered to SVG with @plannotator/diagrams, including clickable parts, source references, and pinned-feedback revisions.
 disable-model-invocation: true
 ---
 
-# Create a Plannotator diagram
+# Diagram
 
-Start with the question the drawing should answer. Read the relevant code, files or thread before naming systems or dependencies. Pick a concrete path to follow, label what moves across each connection, and include a failure or alternate path when it matters to the question.
+Create or revise a structured diagram as a `.diagram.json` specification and render it to SVG with `@plannotator/diagrams`. The renderer handles typography, panel sizing, arrow routing, and layout checks—reporting overlaps, line crossings, ports facing away, and label collisions so you can fix them before handing the drawing back.
 
-## Write the source
+## 1. Plan before drawing
 
-Use the person's requested path. For a new drawing with Plannotator installed, run `plannotator diagram new checkout` with a short name for the subject. It creates a file in the project's Plannotator data folder and prints its path. To start in a specific folder, use `plannotator diagram new ./checkout.diagram.json`. With only the npm renderer, write the UTF-8 JSON file in the working folder. For a revision, edit the existing file and preserve the diagram and part IDs so comments can still find their targets.
+- Start with the reader's question and pick the smallest diagram that answers it.
+- When documenting an existing codebase or repository, read the actual code, config, or docs first and use real component names, project-relative file paths, and 1-based line numbers—never invent paths or symbols. When drawing a conceptual or proposed system from a user's brief with no repo files, omit file `refs` (or include only real `link` URLs).
+- Show one main path plus any key branch, failure, or retry path relevant to the question. Keep labels short; move details into `sub`, `footer`, addressable `sections`, and `refs` instead of packing prose into boxes.
 
-For example, a payment capture could begin with this source:
+## 2. Create or locate the `.diagram.json` file
+
+- **New diagram with Plannotator CLI:**
+  ```bash
+  plannotator diagram new checkout-flow
+  # or an explicit path ending in .diagram.json:
+  plannotator diagram new docs/checkout-flow.diagram.json
+  ```
+  This writes a starter file with a generated UUID top-level `id` and prints the absolute path. Pass a plain name (letters, digits, spaces, `.`, `_`, `-`) to store it in the project's Plannotator diagram folder, or pass an explicit `*.diagram.json` path when a specific location was requested.
+  Never run `plannotator diagram new` on an existing diagram—it fails if the file exists, and replacing the top-level `id` breaks revision history.
+- **New diagram standalone (no Plannotator CLI, or an older Plannotator without `diagram`):**
+  Create a UTF-8 file such as `checkout-flow.diagram.json` in the requested or working directory with a unique top-level `"id"` (a UUID or stable slug).
+- **Revising an existing diagram:**
+  Edit the existing `.diagram.json` file in place.
+
+## 3. Write the `.diagram.json` specification
+
+Start from this complete, valid example and adapt it to the system you are documenting:
 
 ```json
 {
-  "id": "payment-capture",
-  "title": "How a payment is captured",
+  "id": "checkout-fulfillment",
+  "title": "Checkout Fulfillment",
+  "subtitle": "Asynchronous order processing with retry and dead-letter replay",
+  "steps": [[1, "Accept"], [2, "Queue"], [3, "Fulfill"]],
+  "gap": 100,
+  "row_gap": 44,
   "columns": [
-    {"id": "checkout", "title": "Checkout", "tiles": ["Confirm order"]},
-    {"id": "payments", "title": "Payments", "tiles": ["Capture funds"]}
+    {
+      "id": "checkout",
+      "title": "Checkout API",
+      "sub": "Validates cart and returns 202",
+      "step": 1,
+      "tone": "accent",
+      "tiles": ["Validate cart", "Reserve stock"],
+      "refs": [
+        { "kind": "file", "title": "Checkout route", "path": "src/api/checkout.ts", "start": 18, "end": 54 }
+      ]
+    },
+    {
+      "id": "queue",
+      "title": "Job Queue",
+      "sub": "Durable transactional outbox",
+      "step": 2,
+      "sections": [
+        {
+          "id": "retry-policy",
+          "title": "Retry policy",
+          "content": {
+            "card": {
+              "title": "Backoff",
+              "rows": [["Attempts", "5"], ["Timeout", "30 s"]]
+            }
+          },
+          "refs": [
+            { "kind": "file", "title": "Worker config", "path": "src/queue/config.ts", "start": 4, "end": 19 }
+          ]
+        }
+      ]
+    },
+    [
+      {
+        "id": "fulfill",
+        "title": "Fulfillment Worker",
+        "sub": "Charges card and creates shipment",
+        "step": 3,
+        "footer": "SLO: p99 < 2s"
+      },
+      {
+        "id": "deadletter",
+        "title": "Dead-Letter Queue",
+        "sub": "Holds failed jobs for replay",
+        "status": "planned",
+        "tone": "neutral"
+      }
+    ]
   ],
-  "gap": 120,
+  "groups": [
+    {
+      "id": "async-backend",
+      "label": "Async processing",
+      "sub": "Isolated from HTTP latency",
+      "members": ["queue", "fulfill", "deadletter"]
+    }
+  ],
   "links": [
-    {"id": "capture", "from": "checkout", "to": "payments", "label": "capture"}
+    { "id": "enqueue", "from": "checkout", "to": "queue", "label": "Enqueue job" },
+    { "id": "dispatch", "from": "queue", "to": "fulfill", "label": "Dispatch" },
+    { "id": "exhausted", "from": "fulfill", "to": "deadletter", "kind": "planned", "label": "After 5 retries", "start": "bottom", "end": "top" },
+    { "id": "replay", "from": "deadletter", "to": "queue", "kind": "planned", "label": "Replay", "lane": "bottom" }
   ]
 }
 ```
 
-Use `columns` for a flow. A column can be an array of panels stacked vertically, so parallel branches can have their own panels. Use `ring` for a cycle, or `panels` with numeric `x` and `y` for an explicitly positioned layout. Choose one layout per diagram. Add a boundary with `groups`, for example `{"id":"billing","label":"Billing","members":["payments"]}`. Give each panel, connection and boundary a unique durable ID, including separate IDs for parallel connections between the same endpoints.
+### Schema reference and common pitfalls
 
-When a source will help someone understand a part, add a `refs` array on that panel, connection, boundary or section. A file ref uses `{"kind":"file","title":"Capture handler","path":"src/payments.ts","start":12,"end":24}`. Check the path and lines against the project first. Omit the range when the whole file is relevant. A link ref uses `{"kind":"link","title":"Payment flow","url":"https://example.org/payments"}`. Replace example values with sources you actually inspected. To make a section addressable, use `{"id":"capture-handler","title":"Capture handler","content":{"text":"Captures an authorized payment."}}` inside the panel's `sections`. Keep long explanations and code in the linked material.
+Validation is strict—**unknown keys anywhere throw an error** naming the JSON path. Use exact field names: `sub` (not `description`), `status` (not `state`), `tone` (not `color`), and `columns`/`ring`/`panels` + `links` (not `nodes`/`edges`).
 
-## Render and hand it over
+- **Top-level fields:** `title` (required), `id` (required for revision tracking), `subtitle`, `tag`, `note: { title, lines?: string[] }`, `steps: [[1, "Label"], ...]`, `steps_label`, `legend` (boolean, default `true`), `gap`, `row_gap`, `valign` (`"top" | "center" | "bottom"`), `statuses` (map of panel/tile name or id to status), `groups`, `links`, `theme`.
+- **Choose exactly one layout:**
+  - `columns`: array of panels or vertical panel stacks (`Panel | Panel[]`). Best for left-to-right pipelines and branches.
+  - `ring`: array of ≥2 panels in a loop, plus optional `center: Panel[]` and `start_angle` (degrees, default `-90`). Best for cycles or hub-and-spoke topologies.
+  - `panels`: array of ≥1 panels where **every** panel sets numeric `x` and `y`. (`x` and `y` are forbidden in `columns` and `ring`.)
+- **Panels:** `title` (required), unique `id` (strongly recommended), `sub`, `status` (`"live"` default, `"building"`, `"trial"`, `"planned"`, `"retiring"`), `step` (positive integer), `tone` (`"default"`, `"neutral"`, `"accent"`, `"dark"`, or `#rrggbb`), `width`, `footer` (supports `\n` and `Key: value`), `tiles` (array of `"Label"` or `{ label, sub?, status? }`), `cols` and `label` (only valid when `tiles` is set), `sections`, `refs`.
+- **Sections inside `panel.sections`:**
+  - Plain text: `"string"` or `{ "text": "..." }`
+  - Tiles: `["A", "B"]` or `{ "tiles": [...], "cols": 2, "label": "..." }`
+  - Key-value card: `{ "card": { "title": "...", "intro": "...", "rows": [["Key", "Value"]] } }`
+  - Side-by-side row: `{ "row": [section1, section2] }`
+  - Mini node graph: `{ "graph": { "nodes": { "a": "A", "b": "B" }, "at": { "a": [0, 0], "b": [1, 0] }, "links": [["a", "b", "label?"]] } }` (no self-loops inside `graph`)
+  - Embedded image: `{ "image": { "src": "data:image/png;base64,...", "alt": "...", "width": 120, "height": 80 } }` (PNG or JPEG base64 data URL)
+  - **Addressable section** (clickable, commentable, and able to hold `refs`): `{ "id": "...", "title": "...", "refs": [...], "content": <section> }`. Section `id`s must be unique across the whole diagram.
+- **Groups:** `{ "id": "...", "label": "...", "members": ["panel-id", ...], "sub": "...", "refs": [...] }`. Groups may nest completely inside another group, but must not overlap non-member panels or partially overlap another group.
+- **Links:** `{ "id": "...", "from": "<panel-id>", "to": "<panel-id>", "label": "...", "kind": "flow" | "planned", "start": "left|right|top|bottom|auto", "end": "...", "lane": "top" | "bottom", "via_x": N, "via_y": N, "cross_ok": true, "refs": [...] }`.
+  - Give every link an explicit `id`—especially parallel links between the same two panels (without authored `id`s, reordering parallel links swaps pinned comments).
+  - Use at most **one** of `lane`, `via_x`, or `via_y` per link.
+  - In `columns`, ports default to `right` → `left`. Set `start`/`end` (or `"auto"`) for links within the same column, and `lane: "top"` or `"bottom"` for backward or skip-column links. Self-loops (`from === to`) route via a top lane automatically.
+- **References (`refs`)** (allowed on panels, addressable sections, groups, and links):
+  - File ref: `{ "kind": "file", "title": "...", "path": "src/foo.ts", "start": 10, "end": 25, "url": "https://..." }` — `path` must be project-relative (no leading `/` or `..`); `start` and `end` are 1-based integers with `end >= start` (omit both for the whole file); `url` is optional `http://`/`https://`.
+  - Web link ref: `{ "kind": "link", "title": "...", "url": "https://..." }` — `http://` or `https://` only.
+- **Theme and colors:** Leave `theme.paper`, `theme.ink`, and default palette colors unset unless fixed colors were explicitly requested—omitting them lets Plannotator adapt the drawing automatically to the reader's light, dark, and custom themes. Any custom color (including `tone`) must be a 6-digit hex string (`#rrggbb`).
 
-Run the renderer on the saved JSON. Substitute the path you wrote or the path the starter printed.
+## 4. Render and fix layout problems
 
-```sh
-plannotator diagram render checkout.diagram.json -o checkout.svg
-```
+Render the `.diagram.json` to a separate `.svg` file and check the exit code:
 
-With the standalone npm package `@plannotator/diagrams` installed, use its executable instead:
+- **With Plannotator CLI:**
+  ```bash
+  plannotator diagram render checkout-flow.diagram.json -o checkout-flow.svg
+  ```
+- **Standalone (`@plannotator/diagrams` npm package):**
+  Use this when Plannotator is not installed, or when an older Plannotator binary does not yet have the `diagram` subcommand:
+  ```bash
+  plannotator-diagrams render checkout-flow.diagram.json -o checkout-flow.svg
+  # or when installed locally in a project:
+  npm exec -- plannotator-diagrams render checkout-flow.diagram.json -o checkout-flow.svg
+  ```
+  If `plannotator-diagrams` is not already available, install it locally without modifying project dependencies (either from npm once published, or from a supplied preview tarball):
+  ```bash
+  npm install --no-save @plannotator/diagrams
+  # or with a supplied preview tarball:
+  npm install --no-save ./plannotator-diagrams-0.1.0.tgz
+  ```
+  (Programmatic ESM API in Node, browsers, or workers: `import { renderDiagram } from "@plannotator/diagrams"` → `const { svg, width, height, parts, description, problems } = await renderDiagram(spec)`.)
 
-```sh
-plannotator-diagrams render checkout.diagram.json -o checkout.svg
-```
+Arguments must be in the exact order `render <input> -o <output>` (or `--output`), and the output file must not be the same file as the input. Exit behavior distinguishes three outcomes:
+- **Exit `0`:** valid spec, zero layout problems, SVG written.
+- **Exit `1` with layout diagnostics:** valid spec, **the SVG was written** so you can inspect it, and each layout problem was printed to stderr.
+- **Exit `1` with invalid JSON, schema error, or bad arguments:** fails before rendering; **no new SVG is written**, and the error is printed to stderr.
 
-For a project-local npm install, run `npm exec -- plannotator-diagrams render checkout.diagram.json -o checkout.svg` from that project. If the renderer reports a bad field, fix the named JSON path. For a label or line that crosses another panel, increase the gap or route the connection above or below with `"lane":"top"` or `"lane":"bottom"`. Render again until the command succeeds and check that the SVG answers the original question.
+Loop until the render exits `0`:
+- **Port facing away:** set `"start"` and `"end"` (e.g. `"bottom"` / `"top"` or `"auto"`) or add `"lane": "top"` / `"bottom"`.
+- **Line crosses a panel:** move the panel to another column or stack, route with `"lane": "top"` / `"bottom"`, or use `via_x` / `via_y`.
+- **Label sits on a panel, group title, or another line:** increase top-level `gap` or `row_gap`, shorten the label, or move the link to a `lane`.
+- **Overlap or panels too close:** separate panels in `panels` mode, or adjust `groups` so each group's members form a clean rectangle without trapping non-members.
+- **Inner `graph` collision:** increase `[col, row]` spacing in `graph.at`, or split self-loops into a panel with a return lane.
 
-Return the editable `.diagram.json` and its rendered SVG. In a Plannotator Inbox thread, attach the JSON to a reply to the triggering message so the thread displays the reviewable artifact. For a local Plannotator review, run `plannotator annotate <path-to-file.diagram.json>` and act on the returned comments.
+## 5. Revise from pinned feedback
+
+Review feedback identifies specific parts by kind, title, and id, such as:
+- `Diagram panel Fulfillment Worker (fulfill)`
+- `Diagram section Retry policy (retry-policy)`
+- `Diagram group Async processing (async-backend)`
+- `Diagram link Replay (replay)`
+
+When revising:
+1. Edit the existing `.diagram.json` in place.
+2. **Preserve the top-level `id` and every unchanged part's `id`**—including when renaming a `title` or `label`, moving a panel across columns, or reordering parallel links. Stable IDs keep pinned comments anchored to the right part and group revisions into one diagram in Inbox.
+3. Never reuse a deleted part's `id` for a different concept.
+4. Re-render until exit `0` before sending the update.
+
+## 6. Hand the result back
+
+Interactive source navigation (`refs`), hover summaries, and pinned comments live in the editable `.diagram.json` when opened in Plannotator. The rendered `.svg` is a static image without clickable file anchors—keep and share the `.diagram.json` alongside any standalone `.svg`.
+
+- **Plannotator Inbox thread:** Reply to the triggering message with `reply_to` set to its message ID and pass the `.diagram.json` path in `attachments`. Inbox renders it inline with pan/zoom, clickable `refs`, pinned comments, and Ask AI, and groups revisions by its top-level `id`.
+- **Plannotator Markdown plan or document:** Link the `.diagram.json` file for a live diagram, or paste a ```` ```plannotator-diagram ```` fenced code block containing the JSON for a frozen snapshot.
+- **Local interactive review (Plannotator CLI):** Run `plannotator annotate checkout-flow.diagram.json` to open the review UI and collect the reader's pinned feedback.
+- **Standalone / outside Plannotator:** Return the paths to both the `.diagram.json` source and the rendered `.svg` (or embed the SVG where requested), along with a brief note explaining what the diagram shows and any intentional simplifications. Note to the reader that clickable `refs` are stored in the `.diagram.json` for Plannotator rather than inside the static `.svg`.
