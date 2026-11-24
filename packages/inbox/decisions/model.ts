@@ -246,7 +246,22 @@ export type GroupSend =
   | { kind: 'draft' }
   | { kind: 'sending' }
   | { kind: 'sent'; at: string }
-  | { kind: 'failed'; error: string };
+  /** `sent` of `of`: a group whose replies (one per message) went in part, the rest not. */
+  | { kind: 'failed'; error: string; sent?: number; of?: number };
+
+/**
+ * Whether a batch of records can have changed the decisions a window draws: it touched a thread whose decisions are
+ * drawn (`watched`), or a record named no thread. Any other batch leaves `GET /api/inbox/decisions` unread.
+ */
+export function batchTouches(records: { any: boolean; threads: ReadonlySet<string>; applied: ReadonlySet<string>; own: ReadonlySet<string> }, watched: ReadonlySet<string>): boolean {
+  if (records.any) return true;
+  return [records.threads, records.applied, records.own].some((ids) => [...ids].some((id) => watched.has(id)));
+}
+
+/** What a failed Send's chip says: "Not sent", or how much went when part of it did. */
+export function failedWords(send: { sent?: number; of?: number }): string {
+  return send.sent && send.of ? `${send.sent} of ${send.of} replies sent` : 'Not sent';
+}
 
 /** After a Send: Delivered, then working, then Replied (brief §4), from the list row and the connection. */
 export type AfterSend = 'sending' | 'stopped' | 'queued' | 'saved' | 'undelivered' | 'delivered' | 'working' | 'replied';
@@ -299,6 +314,8 @@ export interface SessionChip {
 
 export function sessionChips(state: QueueState): SessionChip[] {
   const chips = new Map<string, SessionChip>();
+  /** Each chip's projects, by whole name. */
+  const projectNames = new Map<string, string[]>();
   for (const id of state.order) {
     const decision = state.cache.get(id);
     if (!decision) continue;
@@ -315,7 +332,13 @@ export function sessionChips(state: QueueState): SessionChip[] {
         dots: [],
         groups: [],
       } satisfies SessionChip);
-    if (!chip.label.split(' · ').includes(decision.thread.project.name)) chip.label = `${chip.label} · ${decision.thread.project.name}`;
+    // Each project once, compared whole: a project's own name may hold " · " (a disambiguated name).
+    const names = projectNames.get(key) ?? [];
+    if (!names.includes(decision.thread.project.name)) {
+      names.push(decision.thread.project.name);
+      projectNames.set(key, names);
+      chip.label = names.join(' · ');
+    }
     const group = groupKeyOf(decision);
     if (!chip.groups.includes(group)) chip.groups.push(group);
     chip.dots.push({ id, state: id === state.current ? 'current' : isHandled(state, id) ? 'done' : state.later.has(id) ? 'later' : 'open' });

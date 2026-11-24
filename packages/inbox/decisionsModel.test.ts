@@ -10,7 +10,9 @@ import {
   AFTER_SEND_WORDS,
   answerWords,
   choiceAnswer,
+  batchTouches,
   emptyQueue,
+  failedWords,
   groupHalfAnswered,
   freshPicks,
   groupKeyOf,
@@ -119,6 +121,29 @@ describe('the queue', () => {
     expect(sessionChips(q).map((c) => c.name)).toEqual(['Claude Code', 'Claude Code (another session)', 'Claude Code (another session 3)']);
     // One session of each agent: the names as they are.
     expect(sessionChips(mergeDecisions(emptyQueue(), [A1, A2])).map((c) => c.name)).toEqual(['Claude Code']);
+  });
+
+  test('a batch of records reads the decisions only when it touched a thread whose decisions are drawn', () => {
+    const batch = (threads: string[], any = false) => ({ any, threads: new Set(threads), applied: new Set<string>(), own: new Set<string>() });
+    const watched = new Set(['msg_t1']);
+    expect(batchTouches(batch(['msg_t9']), watched)).toBe(false);
+    expect(batchTouches(batch(['msg_t9', 'msg_t1']), watched)).toBe(true);
+    expect(batchTouches({ ...batch([]), own: new Set(['msg_t1']) }, watched)).toBe(true);
+    // A record naming no thread could be anyone's: read.
+    expect(batchTouches(batch([], true), watched)).toBe(true);
+  });
+
+  test('a Send that went in part says how much went, never "Not sent"', () => {
+    expect(failedWords({ sent: 1, of: 2 })).toBe('1 of 2 replies sent');
+    expect(failedWords({})).toBe('Not sent');
+  });
+
+  test('a project whose own name holds " · " is named once per chip, however many decisions it has', () => {
+    // Two projects named "billing" read apart as "billing · api" and "billing · web" (a disambiguated name).
+    const inProject = (d: InboxDecision, name: string): InboxDecision => ({ ...d, thread: { ...d.thread, project: { ...d.thread.project, name } } });
+    const q = mergeDecisions(emptyQueue(), [inProject(A1, 'billing · api'), inProject(A2, 'billing · api'), inProject(decision('msg_a2/q-5', 'ses_a', 'msg_t9'), 'billing · web')]);
+    expect(sessionChips(q).map((c) => c.label)).toEqual(['billing · api · billing · web']);
+    expect(sessionChips(mergeDecisions(emptyQueue(), [inProject(A1, 'billing · api'), inProject(A2, 'billing · api')])).map((c) => c.label)).toEqual(['billing · api']);
   });
 
   test("an action item's Done waiting in the draft is an answer the Send carries, as a pick is", () => {

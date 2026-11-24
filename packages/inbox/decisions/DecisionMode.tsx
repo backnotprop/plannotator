@@ -49,6 +49,7 @@ import {
   afterSendOf,
   answerWords,
   emptyQueue,
+  failedWords,
   freshPicks,
   groupIds,
   groupKeyOf,
@@ -222,7 +223,8 @@ export function DecisionMode(props: DecisionModeProps) {
   // The sitting's thread, as the thread pane holds it: the card draws its message from there.
   const threadIdRef = useRef<string | null>(null);
   if (props.decisions?.[0]) threadIdRef.current = props.decisions[0].thread.id;
-  const held = useSittingThread(threadIdRef.current);
+  const sitting = useSittingThread(threadIdRef.current);
+  const held = sitting.held;
   const heldRef = useRef(held);
   heldRef.current = held;
   const messageOf = (id: string): InboxMessageWire | undefined => held?.thread.messages.find((m) => m.id === id);
@@ -444,6 +446,8 @@ export function DecisionMode(props: DecisionModeProps) {
     if (!first) return 'sent';
     const before = sendsRef.current.get(key) ?? { kind: 'waiting' as const };
     setSend(key, { kind: 'sending' });
+    /** The replies of this group (one per message) that went, of how many. */
+    let replies = { went: 0, of: 0 };
     try {
       await pickChain.current;
       // A thread whose reply goes from the thread (a reply draft, comments waiting): never from here. Both are
@@ -472,6 +476,7 @@ export function DecisionMode(props: DecisionModeProps) {
         return 'sent';
       }
       let sentAt: string | null = null;
+      replies = { went: 0, of: targets.length };
       for (const target of targets) {
         const keyId = `${key}\u0002${target.message.id}`;
         const contents: SentContents = { value: target.message.id, answers: answersOf(target) };
@@ -493,13 +498,16 @@ export function DecisionMode(props: DecisionModeProps) {
         // What this reply took, so a follow-up answered later is told apart from it.
         const ids = contents.answers.map(answerIdOf);
         setCarried((current) => new Map(current).set(key, new Set([...(current.get(key) ?? []), ...ids])));
+        replies.went += 1;
       }
       setSend(key, { kind: 'sent', at: sentAt ?? new Date().toISOString() });
       setSaid(`Sent ${agentLabel(first)} your answers.`);
       props.refresh();
       return 'sent';
     } catch (cause) {
-      setSend(key, { kind: 'failed', error: cause instanceof InboxApiError ? cause.message : 'The reply was not sent.' });
+      // One reply went and another did not: the chip says how much went, never "Not sent".
+      const part = replies.went > 0 ? { sent: replies.went, of: replies.of } : {};
+      setSend(key, { kind: 'failed', error: cause instanceof InboxApiError ? cause.message : 'The reply was not sent.', ...part });
       props.refresh();
       return 'failed';
     }
@@ -861,6 +869,8 @@ export function DecisionMode(props: DecisionModeProps) {
               key={current.id}
               decision={current}
               body={isActionDecision(current) ? null : cardBody(current)}
+              readFailed={sitting.failed}
+              onReadAgain={sitting.retry}
               stamp={stamp?.id === current.id ? stamp.value : null}
               sent={sentAnswer !== null}
               sending={sendingCard}
@@ -981,12 +991,12 @@ function agentLabel(decision: InboxDecision): string {
 function chipSend(chip: SessionChip, sends: ReadonlyMap<string, GroupSend>, rows: ReadonlyMap<string, InboxListRow>, busy: ReadonlyMap<string, boolean>, queue: QueueState):
   | { kind: 'none' }
   | { kind: 'draft'; key: string }
-  | { kind: 'failed'; key: string; error: string }
+  | { kind: 'failed'; key: string; error: string; words: string }
   | { kind: 'words'; text: string; tone: 'quiet' | 'ok' } {
   for (const key of chip.groups) {
     const state = sends.get(key);
     if (state?.kind === 'draft') return { kind: 'draft', key };
-    if (state?.kind === 'failed') return { kind: 'failed', key, error: state.error };
+    if (state?.kind === 'failed') return { kind: 'failed', key, error: state.error, words: failedWords(state) };
   }
   const sent = chip.groups.map((key) => ({ key, state: sends.get(key) })).filter((g) => g.state?.kind === 'sent' || g.state?.kind === 'sending');
   if (sent.length === 0) return { kind: 'none' };
@@ -1036,7 +1046,7 @@ function Strip(props: {
             )}
             {send.kind === 'failed' && (
               <span className="ib-dm-hold-l ib-dm-bad">
-                Not sent ·{' '}
+                {send.words} ·{' '}
                 <button type="button" className="ib-dm-lnk" onClick={() => props.onSendNow(send.key)}>
                   Try again
                 </button>
@@ -1124,7 +1134,7 @@ function EndScreen(props: { queue: QueueState; sends: ReadonlyMap<string, GroupS
                 : send.kind === 'draft'
                   ? 'Send it from the thread (draft reply)'
                   : send.kind === 'failed'
-                    ? 'Not sent'
+                    ? send.words
                     : chip.dots.some((d) => d.state === 'done')
                       ? 'Draft, not sent'
                       : 'Nothing to send';
