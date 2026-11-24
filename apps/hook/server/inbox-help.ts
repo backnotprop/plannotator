@@ -222,7 +222,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "Turn one of the Inbox's capabilities (Settings → Capabilities) on or off when the person asks you to; not on your own initiative.",
       `- \`capability\`: ${INBOX_CAPABILITY_AGENT_IDS.map(code).join(", ")}. \`on\`: \`true\` or \`false\`. Without \`capability\` and \`on\`, it lists each one and whether it is on.`,
       "- `computer`: a linked computer's name, as the Inbox shows it, to read or turn one there. One that is away gets it when it is back, and the result says so.",
-      "- A turn posts one line for the person (\"Turned on Routines.\"): in `thread_id`, the thread you work in, when you pass it, else in a new thread in your project. An action a capability serves (`card`, `steps`, `routine`) is in your session's next tool list.",
+      "- A turn posts one line for the person (\"Turned on Routines.\"): in `thread_id`, the thread you work in, when you pass it, else in a new thread in your project. An action a capability serves is in your session's next tool list.",
       "- From a shell: `plannotator inbox capability routines on [--computer <name>] [--thread <id>]`, or `plannotator inbox capability` to list them.",
     ],
   },
