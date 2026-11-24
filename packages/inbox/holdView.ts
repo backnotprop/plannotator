@@ -30,27 +30,31 @@ function rowBox(el: HTMLElement): HTMLElement {
   return el.closest<HTMLElement>('.ib-rw') ?? el;
 }
 
-/** Each row's box (`rowBox`) by thread, the first one drawn (a closed group's rows are not), only `ids` when given. */
-function drawnRows(body: HTMLElement, ids?: ReadonlyMap<string, unknown>): Map<string, HTMLElement> {
-  const out = new Map<string, HTMLElement>();
-  for (const el of body.querySelectorAll<HTMLElement>(ROWS)) {
-    const id = el.getAttribute('data-thread-id');
-    if (!id || out.has(id) || (ids && !ids.has(id))) continue;
-    const row = rowBox(el);
-    if (row.getClientRects().length > 0) out.set(id, row);
-  }
-  return out;
-}
-
 function rowsOnScreen(body: HTMLElement): Map<string, number> {
   const box = body.getBoundingClientRect();
   const tops = new Map<string, number>();
-  for (const [id, row] of drawnRows(body)) {
+  for (const el of body.querySelectorAll<HTMLElement>(ROWS)) {
+    const id = el.getAttribute('data-thread-id');
+    if (!id || tops.has(id)) continue;
+    const row = rowBox(el);
+    if (row.getClientRects().length === 0) continue;
     const rect = row.getBoundingClientRect();
     if (rect.bottom <= box.top || rect.top >= box.bottom) continue;
     tops.set(id, rect.top - box.top);
   }
   return tops;
+}
+
+/** The box (`rowBox`) of each thread of `ids`, the first one drawn (a closed group's rows are not): one pass. */
+function drawnRows(body: HTMLElement, ids: ReadonlyMap<string, unknown>): Map<string, HTMLElement> {
+  const out = new Map<string, HTMLElement>();
+  for (const el of body.querySelectorAll<HTMLElement>(ROWS)) {
+    const id = el.getAttribute('data-thread-id');
+    if (!id || out.has(id) || !ids.has(id)) continue;
+    const row = rowBox(el);
+    if (row.getClientRects().length > 0) out.set(id, row);
+  }
+  return out;
 }
 
 export function holdView(body: HTMLElement): ViewHold {
