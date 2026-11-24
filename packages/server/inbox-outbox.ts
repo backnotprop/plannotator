@@ -260,6 +260,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST annotations/:id/remove": "set",
   "POST messages/:id/guide/reviewed": "set",
   "POST messages/:id/guide/annotations": "set",
+  // The files ticked Viewed in a review on a linked machine's thread (mark `linked-reads`): the whole list, a state.
+  "POST messages/:id/guide/viewed": "set",
   "POST messages/:id/annotations": "set",
   "POST threads/:id/message": "append",
   "POST messages": "append",

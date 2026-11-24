@@ -69,6 +69,7 @@ import type { ReviewAt } from '../app/reviewAt';
 import type { GuideSelectionActions } from '../guide/types';
 import { reviewSourceLine } from '../guide/sourceLine';
 import { InboxApiError, inboxApi } from '../api';
+import { readsServedFor } from '../linkedReads';
 import { guideReviewImages } from '../reviewImages';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
@@ -166,8 +167,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   const walkthrough = !!message.guide?.walkthrough;
   const verdict = isReview && !thread.pull_theirs && !walkthrough;
   // Nor does a walkthrough take ticks (the owner, on the walkthrough's pictures): no chapter "Reviewed", no file
-  // "Viewed", and so no "N of M" line in the chapter menu. A review keeps all three.
-  const viewedTicks = isReview && !walkthrough;
+  // "Viewed", and so no "N of M" line in the chapter menu. A review keeps all three. Viewed is kept on the message's
+  // own machine: a linked machine too old to take it (no `linked-reads`) shows none, as no write could reach it.
+  const viewedTicks = isReview && !walkthrough && readsServedFor(message.id);
   // Post to GitHub/GitLab (the owner's answer C on #2590): a review of the one PR this thread was handed can go on
   // that PR instead. A teammate's posts with its full verdict; its agent path stays verdict-free (no control here).
   // A stack's review spans several PRs and posts from each layer's own review (Pull requests) instead.

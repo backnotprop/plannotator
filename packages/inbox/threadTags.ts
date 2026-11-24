@@ -35,7 +35,7 @@ export interface ThreadTagsHost {
   rows?: readonly InboxListRow[];
   /** A row's tags by the window's rule (`rowTagsHere`). */
   rowTags?: RowTags;
-  /** The tags this Inbox's own listed threads carry: Search's Tag chip offers these (search reads this Inbox's threads). */
+  /** The tags the listed threads search can filter carry (`tagsOnOwnRows`): Search's Tag chip offers these. */
   here?: readonly InboxInitiative[];
   /** A row's tags for the filters: its own and its project's (projectTags.ts). */
   filterTags?: (row: InboxListRow) => readonly string[];
@@ -123,9 +123,12 @@ export function tagWrite(tag: ListTag, machine: string | null, self: string | nu
   return id ? { tag: id } : { name: tag.name };
 }
 
-/** The tags this Inbox's own rows carry (`here` on the host): a linked machine's rows and tags left out. */
-export function tagsOnOwnRows<T extends ListTag>(tags: readonly T[], rows: readonly InboxListRow[], self: string | null, tagsOf: RowTags = ownTags): T[] {
-  const carried = new Set(rows.filter((row) => !row.machine || row.machine === self).flatMap((row) => tagsOf(row)));
+/**
+ * The tags this Inbox's own rows carry (`here` on the host), and a linked machine's rows where `searched` says its
+ * search takes a Tag filter (`linked-reads`); any other machine's rows and tags left out.
+ */
+export function tagsOnOwnRows<T extends ListTag>(tags: readonly T[], rows: readonly InboxListRow[], self: string | null, tagsOf: RowTags = ownTags, searched: (machine: string) => boolean = () => false): T[] {
+  const carried = new Set(rows.filter((row) => !row.machine || row.machine === self || searched(row.machine)).flatMap((row) => tagsOf(row)));
   return tags.filter((tag) => carried.has(tag.id));
 }
 

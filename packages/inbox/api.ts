@@ -18,6 +18,7 @@ import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
+import { readsServedFor } from './linkedReads';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -1328,14 +1329,13 @@ export const inboxApi = {
   systemSetup: () => get<SystemSetupAnswer>(inboxUrl('/system/setup')),
   saveSystemSetup: (input: SystemSetupInput) => post<{ setup: SystemSetup }>(inboxUrl('/system/setup'), { ...input }),
   /**
-   * A thread's steps, each session's list with its presence now (approval "inbox-thread-steps"). A linked
-   * machine's thread has none here (its read is not forwarded), and an Inbox older than steps answers 404: both
-   * read as off.
+   * A thread's steps, each session's list with its presence now (approval "inbox-thread-steps"), read on the thread's
+   * own machine. A linked machine without `linked-reads` is not asked, and an Inbox older than steps answers 404: off.
    */
   threadSteps: async (threadId: string): Promise<{ on: boolean; steps: InboxStepsWire[] }> => {
-    if (machineOf(threadId)) return { on: false, steps: [] };
+    if (!readsServedFor(threadId)) return { on: false, steps: [] };
     try {
-      const answer = await get<{ on?: unknown; steps?: unknown }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/steps`));
+      const answer = await get<{ on?: unknown; steps?: unknown }>(threadUrl(threadId, '/steps'));
       return { on: answer.on === true, steps: Array.isArray(answer.steps) ? (answer.steps as InboxStepsWire[]) : [] };
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.status === 404) return { on: false, steps: [] };
@@ -1628,7 +1628,7 @@ export const inboxApi = {
   /** The person commented on a file a message names: it becomes one of that message's attachments (once), on its thread's machine. */
   attachReferencedFile: (scope: ReferencedFileScope, path: string) =>
     post<{ attachment: InboxAttachmentState }>(inboxUrl('/open-in/file/attach', undefined, machineOf(scope.thread)), { thread: scope.thread, message: scope.message, path, idempotency_key: crypto.randomUUID() }),
-  openInFileCode: (scope: OpenInFileScope, path: string) => get<OpenInFileCode>(inboxUrl(`/open-in/file/code?${new URLSearchParams({ ...scope, path })}`)),
+  openInFileCode: async (scope: OpenInFileScope, path: string): Promise<OpenInFileCode> => ('thread' in scope && !readsServedFor(scope.thread) ? { found: false } : get<OpenInFileCode>(inboxUrl('/open-in/file/code', new URLSearchParams({ ...scope, path }).toString(), 'thread' in scope ? machineOf(scope.thread) : null))),
   openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),
   /** Keep a marked-up image (a comment drawn on an image attachment): its path rides the comment's `images`. */

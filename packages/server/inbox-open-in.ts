@@ -16,7 +16,8 @@
  * The view, raw and attach routes (approval "inbox-file-refs-open-viewer") are not behind Code review and not held to
  * the project: any file on this computer the Inbox can read, but never a secret (`secretOrSystem`, the dotenv family).
  *
- * The last only reads, so it also answers the owner through the tailnet (a phone's tap). A thread that owns a pull
+ * The code route and the file route's GET only read, so they also answer the owner through the tailnet (a phone's
+ * tap, a window's Copy path); a linked machine's window reads the code route through the door, held to its thread. A thread that owns a pull
  * request, and a PR page (`pull`), read the file at that PR's head commit from the forge (`InboxPulls.file`), so it needs
  * no checkout; otherwise, and when the PR has no such file, it is the file on this computer, under the rules below.
  *
@@ -347,8 +348,14 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     if (req.method !== "GET") return json({ error: "Use GET." }, 405);
     const url = new URL(req.url);
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
+    if (notFromWindow(req)) return json(INBOX_MACHINE_FILE_WINDOW_ONLY_BODY, 403);
     const params = url.searchParams;
-    const scope: FileScope = { thread: params.get("thread"), message: params.get("message"), repo: params.get("repo"), pull: params.get("pull"), from: params.get("from") };
+    // A linked machine's window asks about its thread here: only that thread's folders and PRs, never every clone of a
+    // repository (`repo`) or a PR it names (`pull`), so its window cannot read the rest of this computer through a hover.
+    const door = !!context.doorOf?.(req);
+    const scope: FileScope = door
+      ? { thread: params.get("thread"), message: params.get("message"), from: params.get("from") }
+      : { thread: params.get("thread"), message: params.get("message"), repo: params.get("repo"), pull: params.get("pull"), from: params.get("from") };
     const named = params.get("path") ?? "";
     const places = placesOf(scope, named);
     const pulls = typeof scope.pull === "string" ? [scope.pull] : typeof scope.thread === "string" ? threadPulls(scope.thread) : [];
@@ -619,6 +626,9 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     if (path === INBOX_OPEN_IN_RAW_PATH) return rawRoute(req);
     if (path === INBOX_OPEN_IN_ATTACH_PATH) return attachRoute(req);
     if (path !== INBOX_OPEN_IN_PATH && path !== INBOX_OPEN_IN_APPS_PATH && path !== INBOX_OPEN_IN_FILE_PATH) return null;
+    // Whether a referenced file is here, and its path: only a read, so the owner's window over the tailnet asks it too
+    // (its Copy path). Never a linked machine's: the door does not carry it.
+    if (path === INBOX_OPEN_IN_FILE_PATH && req.method === "GET") return fileRoute(req);
     // Launching an app changes this computer: never through the tailnet.
     if (via === "tailnet") return localOnly();
 

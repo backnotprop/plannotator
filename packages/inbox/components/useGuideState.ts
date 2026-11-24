@@ -19,6 +19,7 @@ import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plan
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { InboxApiError, inboxApi } from '../api';
 import { guideCommentOf } from '../attachments';
+import { readsServedFor } from '../linkedReads';
 
 /**
  * The review's state: the snapshot, the reviewed ticks, and the person's comments on its diffs as the store keeps
@@ -146,7 +147,9 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
     [readOnly, comments, selectedId, save, remove, scrollTarget, message.id],
   );
 
-  // The expand arrows' whole files, as the guide's patch names them.
-  const fileContents = useCallback((path: string, signal: AbortSignal) => inboxApi.guideFile(message.id, path, signal), [message.id]);
+  // The expand arrows' whole files, as the guide's patch names them, read on the message's own machine (none from a
+  // linked machine too old to serve them: no arrows, as before).
+  const readFile = useCallback((path: string, signal: AbortSignal) => inboxApi.guideFile(message.id, path, signal), [message.id]);
+  const fileContents = readsServedFor(message.id) ? readFile : undefined;
   return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, commentsRead, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites, fileContents };
 }

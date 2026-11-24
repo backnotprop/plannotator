@@ -223,6 +223,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
         const data = JSON.parse(frame.data) as Partial<MachineRecordFrame>;
         if (typeof data.machine === 'string' && typeof data.seq === 'number') {
           const machineKind = (data.record as { kind?: unknown } | undefined)?.kind;
+          // Another machine's steps line names one of its threads: the record handler only reads that thread's
+          // checklist again (never the list, a thread or a notification), so it takes it as it takes this Inbox's own.
+          if (machineKind === 'steps' && typeof (data.record as { thread_id?: unknown }).thread_id === 'string') return handlers.onRecord(data.record as InboxEvent);
           if (machineKind === 'steps' || machineKind === 'thread_pull') return;
           rememberMachine(idsIn(data.record), data.machine);
           handlers.onMachine?.({ machine: data.machine, seq: data.seq, live: data.live === true, record: (data.record as InboxEvent | undefined) ?? null });
