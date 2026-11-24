@@ -393,6 +393,21 @@ describe("landed PRs", () => {
   });
 
 
+  test("a teammate's PR, off the list once merged: its ship's record is its landing, with no forge read", () => {
+    const key = landing().key;
+    // A thread with no review tied to it ("Open, not reviewed" while open); the server links it from the tie.
+    const tied: InboxPullLink = { ...link("s", "owner"), ask: "thread" };
+    const handed = (shipMerged?: ReadonlyMap<string, InboxShipMergedPull>) => inboxReviewRows({ threads: [], stacks: [], links: { [key]: tied }, pulls: [], owners: new Map([[key, { thread_id: "s" }]]), shipMerged });
+    expect(handed(shipsOf(key)).map((r) => [r.id, r.move, r.link?.thread_id, r.landed.map((l) => [l.key, l.number, l.title, l.state, l.at])])).toEqual([["s", "not_reviewed", "s", [[key, 10, "PR 10", "merged", MERGED_AT]]]]);
+    expect(handed()).toEqual([]);
+    // A review thread on it, answered on the forge: Merged at once (no landing read yet), never On you.
+    const thread = review({ thread_id: "t", source: { kind: "pr", pr: { url: landing().url } } });
+    const posted = new Map([[key, { at: "2026-11-04T11:00:00.000Z", head: null }]]);
+    const reviewed = (shipMerged?: ReadonlyMap<string, InboxShipMergedPull>) => inboxReviewRows({ threads: [thread], stacks: [], links: {}, pulls: [], posted, shipMerged })[0]!;
+    expect(reviewed(shipsOf(key))).toMatchObject({ id: "t", move: "waiting", landed: [{ key, through_review: "t_r1" }] });
+    expect(reviewed()).toMatchObject({ id: "t", move: "on_you", landed: [] });
+  });
+
   test("a row kept for its ship's Merged words never moves to On you; an approval stays Ready to land", () => {
     // A teammate's PR, reviewed in a thread and answered on the forge only (Waiting on others while open), then shipped and merged.
     const theirs = pr({ number: 10, head: "feature", state: "merged", merged_at: MERGED_AT, mine: false });

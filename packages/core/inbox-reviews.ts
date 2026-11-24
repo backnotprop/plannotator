@@ -22,7 +22,7 @@
  */
 
 import { sameCommit, type InboxBranchReportRow } from "./inbox-branch-reports";
-import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
+import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfKey, inboxPullRefOfUrl, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
 import type { InboxReviewVerdict } from "./inbox-review";
 import type { InboxShipMergedPull } from "./inbox-ship";
 
@@ -596,6 +596,12 @@ export function inboxReviewRows(input: {
   const all = new Map<string, InboxPull>();
   for (const pull of input.pulls ?? input.stacks.flatMap((s) => s.layers)) if (!all.has(pull.key)) all.set(pull.key, pull);
   const owned = reviewOwned(byThread, all.values(), input.links);
+  // A shipped PR merged off the list (a teammate's: the list keeps only the person's own merged PRs): the thread the
+  // person tied it to (its link, the server's `linkUnlistedPulls`) still owns it while its Merged words show.
+  for (const key of input.shipMerged?.keys() ?? []) {
+    const link = input.links[key];
+    if (link?.via === "owner" && !all.has(key) && !owned.has(link.thread_id)) owned.set(link.thread_id, { pulls: [], link });
+  }
   const recorded = input.landed ?? [];
   const ownersOf = new Map<string, string[]>();
   for (const [key, owner] of input.owners ?? []) ownersOf.set(owner.thread_id, [...(ownersOf.get(owner.thread_id) ?? []), key]);
@@ -611,10 +617,21 @@ export function inboxReviewRows(input: {
     if (!report || !landing.at || !(Date.parse(landing.at) < Date.parse(report.at))) return false;
     return !(landing.head_sha && report.head && sameCommit(landing.head_sha, report.head));
   };
-  const landingsOf = (threadId: string, pulls: readonly InboxPull[], review: InboxReviewThread | null): InboxReviewLanding[] => [
-    ...recorded.filter((landing) => landing.thread_id === threadId && !earlierWork(landing)),
-    ...pulls.filter((pull) => !inboxPullIsOpen(pull) && !recorded.some((landing) => landing.key === pull.key && landing.thread_id === threadId)).map((pull) => inboxReviewLandingOf(landingFields(pull), threadId, review)),
-  ];
+  const landingsOf = (threadId: string, pulls: readonly InboxPull[], review: InboxReviewThread | null): InboxReviewLanding[] => {
+    const out = [
+      ...recorded.filter((landing) => landing.thread_id === threadId && !earlierWork(landing)),
+      ...pulls.filter((pull) => !inboxPullIsOpen(pull) && !recorded.some((landing) => landing.key === pull.key && landing.thread_id === threadId)).map((pull) => inboxReviewLandingOf(landingFields(pull), threadId, review)),
+    ];
+    // A merged ship knows its PR and when it merged: that is its landing until a read records one (a teammate's PR is
+    // off the list once merged, and only a review thread's PR is read for its state). No forge call.
+    for (const key of input.shipMerged ? ownedKeys(threadId, review) : []) {
+      const ship = input.shipMerged!.get(key);
+      if (!ship || out.some((landing) => landing.key === key) || recorded.some((landing) => landing.key === key && landing.thread_id === threadId)) continue;
+      const landing = inboxReviewLandingOf({ key, url: ship.url, number: ship.number, title: ship.title, platform: inboxPullRefOfKey(key)?.platform ?? "github", state: "merged", at: ship.at, head: null }, threadId, review);
+      if (!earlierWork(landing)) out.push(landing);
+    }
+    return out;
+  };
   const stacksOf = (pulls: readonly InboxPull[]) => input.stacks.filter((stack) => stack.layers.some((layer) => inboxPullIsOpen(layer) && pulls.some((p) => p.key === layer.key)));
 
   const rows: InboxReviewRow[] = [];

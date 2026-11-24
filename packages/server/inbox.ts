@@ -356,7 +356,7 @@ import { themeChooserLook, themeChooserOpen } from "@plannotator/shared/inbox/th
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
-import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { createInboxPulls, InboxPullsError, linkInboxPulls, linkUnlistedPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
 import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
@@ -6830,6 +6830,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The PRs whose ship merged and still says so, here and on each linked machine (that machine's as last read,
         // never waited for; a linked machine reading this list gets this machine's own).
         const shipMerged = shipsMergedShown([...ships.all(), ...(byWindow ? machines.mergedShips() : [])]);
+        // A teammate's PR leaves the list once merged: the thread the person tied it to keeps it while Merged shows.
+        linkUnlistedPulls(shipMerged.keys(), links, pullLinkStore, owners);
         const rows = reviewRowsShown(
           inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true, shipMerged }),
           hiddenKeys,
