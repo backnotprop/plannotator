@@ -56,6 +56,8 @@ export interface InboxArtifactRef<M> {
   /** An image the message's text shows (`inline_images`). */
   inline: boolean;
   guide: InboxGuideRef | null;
+  /** The attached twin's id when the same file is also shown in the text (one artifact): a pin under it is this one's. */
+  also: readonly string[];
 }
 
 /**
@@ -63,7 +65,9 @@ export interface InboxArtifactRef<M> {
  * them (packages/inbox/artifacts.ts `threadArtifacts`): message by message,
  * the images its text shows, then its attached files, then its guided review.
  * An image both shown and attached (the same path, the same message) is one
- * artifact under the shown image's id. A key that appears twice is kept once.
+ * artifact under the shown image's id, the attached record's id in `also`: a
+ * pin made under that id (before a read captured the shown copy) is this
+ * artifact's pin (the store moves it to `key`). A key that appears twice is kept once.
  */
 export function inboxThreadArtifactRefs<M extends { id: string; attachments?: readonly InboxAttachment[] | null; inline_images?: readonly InboxInlineImage[] | null; guide?: InboxGuideRef | null }>(
   messages: readonly M[],
@@ -71,20 +75,25 @@ export function inboxThreadArtifactRefs<M extends { id: string; attachments?: re
   const out: InboxArtifactRef<M>[] = [];
   const placed = new Set<string>();
   for (const message of messages) {
-    const shown: InboxAttachment[] = [];
+    const shown: { path: string; also: string[] }[] = [];
     for (const image of message.inline_images ?? []) {
       if (placed.has(image.id)) continue;
       placed.add(image.id);
-      shown.push(image);
-      out.push({ key: image.id, message, attachment: image, inline: true, guide: null });
+      const also: string[] = [];
+      shown.push({ path: image.path, also });
+      out.push({ key: image.id, message, attachment: image, inline: true, guide: null, also });
     }
     for (const attachment of message.attachments ?? []) {
       if (placed.has(attachment.id)) continue;
       placed.add(attachment.id);
-      if (shown.some((image) => image.path === attachment.path)) continue;
-      out.push({ key: attachment.id, message, attachment, inline: false, guide: null });
+      const twin = shown.find((image) => image.path === attachment.path);
+      if (twin) {
+        twin.also.push(attachment.id);
+        continue;
+      }
+      out.push({ key: attachment.id, message, attachment, inline: false, guide: null, also: [] });
     }
-    if (message.guide) out.push({ key: inboxGuideArtifactKey(message.id), message, attachment: null, inline: false, guide: message.guide });
+    if (message.guide) out.push({ key: inboxGuideArtifactKey(message.id), message, attachment: null, inline: false, guide: message.guide, also: [] });
   }
   return out;
 }
