@@ -89,8 +89,8 @@ export interface SettingsPageProps {
   context: ConnectContext | null;
   error: string | null;
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
-  /** Settings → Capabilities → Experimental: decision mode's switch. Absent (or an Inbox that reports no experimental features): no Experimental group. */
-  onToggleExperimental?: (next: boolean) => void;
+  /** Settings → Capabilities → Experimental: decision mode's switch, and Grid's (`feature`). Absent (or an Inbox that reports no experimental features): no Experimental group. */
+  onToggleExperimental?: (next: boolean, feature?: 'decision_mode' | 'grid') => void;
   /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184). Absent: no row. */
   onToggleCookieHost?: (next: boolean) => void;
   /** `#settings/experimental` (an old link): Capabilities scrolls to its Experimental group and focuses its heading. */
@@ -585,7 +585,7 @@ function CapabilitiesSection({
   floatDrafts: { on: boolean } | null;
   onToggleFloatDrafts?: (next: boolean) => void;
   experimental: InboxExperimentalSettings | null;
-  onToggleExperimental?: (next: boolean) => void;
+  onToggleExperimental?: (next: boolean, feature?: 'decision_mode' | 'grid') => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
   experimentalHeading: RefObject<HTMLHeadingElement | null>;
 }) {
@@ -730,6 +730,20 @@ function CapabilitiesSection({
                     disabled={experimental.decision_mode.env !== null}
                     onClick={() => onToggleExperimental(!experimental.decision_mode.on)}
                   />
+                </span>
+              </div>
+            )}
+            {decisionRow && experimental.grid && (
+              // Grid (approval "inbox-agent-grid"): its page in the sidebar while on; nothing of it while off.
+              <div className="ib-prow" data-settings-grid="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-grid-label">Grid</span>
+                  <span className="ib-desc">
+                    {experimental.grid.env !== null ? `PLANNOTATOR_EXPERIMENTAL turns it ${experimental.grid.env ? 'on' : 'off'}.` : 'A page in the sidebar with all your agents’ work: what needs you, what is moving, what landed and what was dropped.'}
+                  </span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={experimental.grid.on} labelledBy="ib-grid-label" disabled={experimental.grid.env !== null} onClick={() => onToggleExperimental(!experimental.grid!.on, 'grid')} />
                 </span>
               </div>
             )}
@@ -1157,7 +1171,7 @@ export function SettingsPage(props: SettingsPageProps) {
         return !voice?.on ? 'Off' : voice.engine === 'api' ? 'API key' : 'Codex login';
       case 'capabilities': {
         // What is on, by name: "Off", "Board", "Decision mode", or "2 on".
-        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, codeReview?.on ? 'Code review' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
+        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, codeReview?.on ? 'Code review' : null, experimental?.decision_mode.on ? 'Decision mode' : null, experimental?.grid?.on ? 'Grid' : null].filter((name): name is string => name !== null);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} on`;
       }
     }

@@ -223,6 +223,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^threads\/archived$/, window: () => "/api/inbox/threads/archived" },
   { method: "GET", route: /^threads\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}` },
   { method: "POST", route: /^threads\/([^/]+)\/seen$/, window: (m) => `/api/inbox/threads/${m[1]}/seen` },
+  // Grid's look at this Inbox's threads (approval "inbox-agent-grid", inbox-grid-seen.ts): a phone's or a linked machine's.
+  { method: "POST", route: /^grid\/seen$/, window: () => "/api/inbox/grid/seen" },
   // Mark read, its Undo (`unread`: Move back) and Mark unread (`mark-unread`).
   { method: "POST", route: /^threads\/([^/]+)\/(read|unread|mark-unread)$/, window: (m) => `/api/inbox/threads/${m[1]}/${m[2]}` },
   // Snooze and Unsnooze (approval "inbox-snooze"): a snooze lives on the thread's home machine.

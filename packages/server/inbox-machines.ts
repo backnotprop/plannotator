@@ -138,6 +138,8 @@ export interface InboxMachinesContext {
   ownVersions?: () => { current: string; latest: string | null };
   /** A linked machine's list was read: this Inbox takes its "Show archived" switch when that one is newer. */
   showArchivedSaid?: (value: InboxShowArchived) => void;
+  /** Grid is on here (experimental): only then are linked machines asked for Grid's fields and looks, and `clock_ms` shown. */
+  gridOn?: () => boolean;
   /** Where the person wrote a write this Inbox forwards, told from the request (inbox-sent-from.ts). */
   sentFrom?: (req: Request, via: "local" | "tailnet") => InboxSentFrom | null;
   /** Tests: the links' clocks. */
@@ -298,6 +300,8 @@ export interface MachineView {
    * (422) reads "<name> needs an update to delete words". True for this Inbox; false until its health is read, and for an older Inbox.
    */
   message_deletions: boolean;
+  /** How far its clock runs ahead of this one's (ms, whole minutes), from its list's `now`; absent within two minutes. Grid reads it. */
+  clock_ms?: number;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -529,6 +533,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         update: peer ? updateView(peer) : null,
         launch: peer?.launch ?? null,
         message_deletions: peer?.messageDeletions ?? false,
+        ...(context.gridOn?.() && peer?.list?.clock_ms ? { clock_ms: peer.list.clock_ms } : {}),
       } satisfies MachineView;
     }),
   ];
@@ -591,6 +596,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onCards: () => emit({ event: "cards", data: {} }),
       onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
+      gridOn: context.gridOn,
     });
     peers.set(link.id, peer);
     peer.start();
@@ -1374,6 +1380,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
     /** A linked machine's name, or null when it is not linked. */
     nameOf: (machine: string): string | null => links.get(machine)?.name ?? null,
     machinesView,
+    /** Grid was turned on or off here: every link asks its machine again (inbox-peer-link.ts `gridChanged`). */
+    gridChanged: () => {
+      for (const peer of peers.values()) peer.gridChanged();
+      machinesChanged();
+    },
     /** This Inbox's door changed by itself (published again once Tailscale ran): the windows hear the machines block. */
     machinesChanged,
     rows,
