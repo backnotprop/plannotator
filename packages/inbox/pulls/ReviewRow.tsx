@@ -30,6 +30,8 @@ import { COULD_NOT_RANK, RiskMark } from './RiskMark';
 import { Named, usePicture } from './Face';
 import { facesOnce } from './words';
 import { pullAvatarUrl } from './pullUrls';
+import { shipLook, type InboxShipView } from '@plannotator/core/inbox-ship';
+import { ShipMark, ShipWater, ShipWords } from './ShipRow';
 
 /**
  * The PR author's profile picture (the person's own PRs too; a stack's bottom layer's author), read through the
@@ -187,12 +189,16 @@ export interface ReviewRowProps {
   autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>;
   /** Its right-click menu is open (the muted background the Inbox's rows take then). */
   menu?: boolean;
+  /** Its pull request ships (ShipRow.tsx): ship mode. A stack's layers are looked up in `ships`. */
+  ship?: InboxShipView | null;
+  ships?: ReadonlyMap<string, InboxShipView>;
   onOpen: () => void;
 }
 
 /** One review: the line, and on the open row the second line. A stack's count is drawn by `ReviewStack` over it. */
-export function ReviewRowItem({ row, links, place, selected, phone, now, judgments, riskFailed, autoRuns, menu = false, onOpen, count }: ReviewRowProps & { count?: number }) {
+export function ReviewRowItem({ row, links, place, selected, phone, now, judgments, riskFailed, autoRuns, menu = false, ship = null, onOpen, count }: ReviewRowProps & { count?: number }) {
   const stack = row.stacks[0] ?? null;
+  const look = shipLook(ship, now);
   // A thread's row is judged by the PRs it owns, a reported branch by its report; a local review has neither, so no mark.
   const judged = rowRisk(row, judgments);
   const riskFailure = rowRiskFailure(row, judgments, riskFailed);
@@ -231,10 +237,14 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
       data-pulls-layers={stack ? layers : undefined}
       data-pulls-risk={level}
       data-menu={menu ? '' : undefined}
+      data-ship={look ?? undefined}
     >
+      {ship && look && look !== 'merged' && <ShipWater ship={ship} />}
       <span className="ib-rvr-l1">
         <span className="ib-rvr-mark" aria-hidden="true">
-          {line.kind === 'stack' ? (
+          {look === 'shipping' || look === 'stuck' ? (
+            <ShipMark />
+          ) : line.kind === 'stack' ? (
             <Icon name="layers" size={15} />
           ) : line.kind === 'pr' ? (
             <span className="ib-bc-mark" data-card-mark={prState} data-card-mark-kind="pr">
@@ -247,6 +257,7 @@ export function ReviewRowItem({ row, links, place, selected, phone, now, judgmen
         {markWords && <span className="ib-sr">{markWords}, </span>}
         <Title text={title} />
         <span className="ib-rvr-end">
+          {ship && look && <ShipWords ship={ship} now={now} />}
           {high && <RiskMark judgment={judged} />}
           {!selected && !twoLine && level && !high && <span className="ib-sr">, {quietRisk ? `${riskLevelWord[quietRisk.level]} risk` : COULD_NOT_RANK}</span>}
           {failing && (
@@ -351,7 +362,8 @@ const layerStateWord = (layer: InboxPull) => (layer.state === 'open' ? null : <s
  * reached by Tab after the stack's count, shows its own risk and failing checks, and opens like any row: selected, its
  * second line (the author, the number and repository, Medium or Low).
  */
-function LayerRow({ layer, place, selected, phone, now, judgments, riskFailed, menu, onOpen }: { layer: InboxPull; place: string; selected: boolean; phone: boolean; now: number; judgments: RiskJudgments; riskFailed: RiskFailures; menu: boolean; onOpen: () => void }) {
+function LayerRow({ layer, place, selected, phone, now, judgments, riskFailed, menu, ship, onOpen }: { layer: InboxPull; place: string; selected: boolean; phone: boolean; now: number; judgments: RiskJudgments; riskFailed: RiskFailures; menu: boolean; ship: InboxShipView | null; onOpen: () => void }) {
+  const look = shipLook(ship, now);
   const live = layer.state === 'open' || layer.state === 'draft';
   const judged = live ? (judgments[layer.key] ?? null) : null;
   const riskFailure = live && !judged ? (riskFailed[layer.key] ?? null) : null;
@@ -370,18 +382,25 @@ function LayerRow({ layer, place, selected, phone, now, judgments, riskFailed, m
       data-reviews-item={layerItem(layer.key)}
       data-pulls-risk={judged?.level ?? (riskFailure ? 'failed' : undefined)}
       data-menu={menu ? '' : undefined}
+      data-ship={look ?? undefined}
     >
+      {ship && look && look !== 'merged' && <ShipWater ship={ship} />}
       {/* The tree line from the stack down to this layer: an element of the row, so it is always drawn on it. */}
       <span className="ib-rvr-tree" aria-hidden="true" data-reviews-tree="" />
       <span className="ib-rvr-l1">
         <span className="ib-rvr-mark" aria-hidden="true">
-          <span className="ib-bc-mark" data-card-mark={layer.state} data-card-mark-kind="pr">
-            <RefMarkIcon kind="pr" state={layer.state} size={14} />
-          </span>
+          {look === 'shipping' || look === 'stuck' ? (
+            <ShipMark />
+          ) : (
+            <span className="ib-bc-mark" data-card-mark={layer.state} data-card-mark-kind="pr">
+              <RefMarkIcon kind="pr" state={layer.state} size={14} />
+            </span>
+          )}
         </span>
         <span className="ib-sr">{prStateWords(layer.state, layer.platform)}, </span>
         <Title text={layer.title} />
         <span className="ib-rvr-end">
+          {ship && look && <ShipWords ship={ship} now={now} />}
           {high && <RiskMark judgment={judged} />}
           {!selected && !twoLine && (quietRisk || riskFailure) && <span className="ib-sr">, {quietRisk ? `${riskLevelWord[quietRisk.level]} risk` : COULD_NOT_RANK}</span>}
           {failing && (
@@ -432,7 +451,7 @@ export const layerItem = (key: string) => `layer:${key}`;
  * that layer.
  */
 export function ReviewStack(props: ReviewRowProps & { open: boolean; onToggle: () => void; openLayer: string | null; onOpenLayer: (layer: InboxPull) => void; menuItem: string | null }) {
-  const { row, open, onToggle, phone, now, place, judgments, riskFailed, openLayer, onOpenLayer, menuItem } = props;
+  const { row, open, onToggle, phone, now, place, judgments, riskFailed, openLayer, onOpenLayer, menuItem, ships } = props;
   const stack = row.stacks[0]!;
   const n = stack.layers.length;
   const noun = pullNounWord(stack.platform);
@@ -464,6 +483,7 @@ export function ReviewStack(props: ReviewRowProps & { open: boolean; onToggle: (
               judgments={judgments}
               riskFailed={riskFailed}
               menu={menuItem === layerItem(layer.key)}
+              ship={ships?.get(layer.key) ?? null}
               onOpen={() => onOpenLayer(layer)}
             />
           ))}

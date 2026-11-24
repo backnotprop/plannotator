@@ -609,6 +609,10 @@
     "InboxMessageWireSentFrom": [
       "kind"
     ],
+    "InboxMessageWireShipNote": [
+      "kind",
+      "ship"
+    ],
     "InboxMessageWireThreadNaming": [
       "status"
     ],

@@ -22297,6 +22297,32 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "ship-mode",
+      "title": "Ship (Reviews): a row's Ship and its agent picker, ship mode on the row, the ship log and Stop; the Inbox's notes to the shipping agent",
+      "surface": [
+        "door:GET ships",
+        "door:GET ships/log",
+        "door:POST ships",
+        "door:POST ships/stop",
+        "window:/api/inbox/ships",
+        "window:/api/inbox/ships/log",
+        "window:/api/inbox/ships/stop",
+        "frame:ships",
+        "enum:InboxMessageWire.ship_note.kind.stop",
+        "enum:InboxMessageWire.ship_note.kind.watch",
+        "field:InboxMessageWire.ship_note"
+      ],
+      "flows": [],
+      "mobile": "later",
+      "why": "L-size: Ship is a Reviews row's, and the native app gets Reviews with its pull request screens; its door routes are machineOnly, as the pull routes are. A ship note is the person's own message: the thread shows it as one.",
+      "reason": "L-size",
+      "source": "approval inbox-ship-mode (2026-11-24)",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

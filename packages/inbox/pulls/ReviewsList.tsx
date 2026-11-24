@@ -21,6 +21,10 @@ import { ReviewGroup, type ReviewGroupFold } from './ReviewGroup';
 import type { InboxPullRiskAutoRun } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
 import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
+import { shipActive, type InboxShipView } from '@plannotator/core/inbox-ship';
+import { shipTarget, useShipAgents, type ShipTarget } from './shipStart';
+import { ShipAgentSheet, ShipMenuItems } from './ShipMenu';
+import type { PullThreadOption } from './threadTo';
 
 const NO_ROWS: readonly InboxReviewRow[] = [];
 const NO_JUDGMENTS: RiskJudgments = {};
@@ -41,6 +45,8 @@ export function reviewLinksOf(model: InboxPullsAnswer, answer: InboxReviewsAnswe
 interface MenuTarget {
   title: string;
   pulls: InboxPull[];
+  /** The row it is on (a layer's: its stack's): what Ship ships in. */
+  row: InboxReviewRow;
 }
 
 /** The menu's targets by id (`data-reviews-item`): each row about open PRs, and each open layer of a stack (`layerItem`). */
@@ -48,10 +54,10 @@ export function menuTargets(rows: readonly InboxReviewRow[], links: InboxPullsAn
   const targets = new Map<string, MenuTarget>();
   for (const row of rows) {
     const pulls = rowPulls(row);
-    if (pulls.length > 0) targets.set(row.id, { title: reviewRowTitle(row, (s) => stackTitle(s, links)), pulls });
+    if (pulls.length > 0) targets.set(row.id, { title: reviewRowTitle(row, (s) => stackTitle(s, links)), pulls, row });
     const stack = row.stacks[0];
     if (!stack || stack.layers.length < 2) continue;
-    for (const layer of stack.layers) if (inboxPullIsOpen(layer)) targets.set(layerItem(layer.key), { title: layer.title, pulls: [layer] });
+    for (const layer of stack.layers) if (inboxPullIsOpen(layer)) targets.set(layerItem(layer.key), { title: layer.title, pulls: [layer], row });
   }
   return targets;
 }
@@ -170,6 +176,7 @@ export function ReviewsMenu({
   onTarget,
   className,
   busy,
+  ship,
   children,
 }: {
   rows: readonly InboxReviewRow[];
@@ -180,6 +187,8 @@ export function ReviewsMenu({
   onTarget: (id: string | null) => void;
   className: string;
   busy?: boolean;
+  /** Ship (ShipMenu.tsx), first in the menu of a row about one open PR. Absent: no Ship. */
+  ship?: ShipHandlers;
   children: React.ReactNode;
 }) {
   const body = useRef<HTMLDivElement>(null);
@@ -209,6 +218,18 @@ export function ReviewsMenu({
   const targetId = target ? menu.targetId! : null;
   const targetPulls = target?.pulls ?? [];
   const title = target?.title ?? 'Review';
+  const shipTo = target && ship ? shipTarget(target.row, target.pulls, ship.repoProjects) : null;
+  const shipNow = shipTo ? (ship?.ships.get(shipTo.pull.key) ?? null) : null;
+  const shipping = !!shipNow && shipActive(shipNow);
+  const agents = useShipAgents(shipping ? null : shipTo, menu.open && !!shipTo && !shipping);
+  // A phone's agent sheet, after the menu closes.
+  const [sheet, setSheet] = useState<ShipTarget | null>(null);
+  const sheetAgents = useShipAgents(sheet, sheet !== null);
+  const shipWith = (to: ShipTarget, option: PullThreadOption) => {
+    setSheet(null);
+    menu.close();
+    ship?.onShip(to, option);
+  };
   return (
     <ContextMenu.Root {...menu.root}>
       <ContextMenu.Trigger ref={body} className={className} aria-busy={busy ? true : undefined} {...menu.trigger}>
@@ -223,6 +244,22 @@ export function ReviewsMenu({
                 <div className="ib-pm-title" dir="auto" aria-hidden="true">
                   {title}
                 </div>
+                {shipTo && ship && (
+                  <ShipMenuItems
+                    shipping={shipping}
+                    options={agents.options}
+                    chosen={agents.chosen}
+                    phone={phone}
+                    portal={portal}
+                    onShip={(option) => shipWith(shipTo, option)}
+                    onChoose={() => setSheet(shipTo)}
+                    onLog={() => {
+                      menu.keepFocus();
+                      ship.onLog(shipNow!, buttonFor(targetId!));
+                    }}
+                    onStop={() => ship.onStop(shipNow!)}
+                  />
+                )}
                 <Menu.Item
                   className="ib-pmi"
                   label={hideWords(targetPulls)}
@@ -240,8 +277,32 @@ export function ReviewsMenu({
           </ContextMenu.Popup>
         </ContextMenu.Positioner>
       </ContextMenu.Portal>
+      {ship && phone && (
+        <ShipAgentSheet open={sheet !== null} title={sheet?.pull.title ?? 'Ship'} options={sheetAgents.options} chosen={sheetAgents.chosen} host={portal} onShip={(option) => sheet && shipWith(sheet, option)} onClose={() => setSheet(null)} />
+      )}
     </ContextMenu.Root>
   );
+}
+
+/** What Reviews' Ship needs from its page (PullsPage.tsx). */
+export interface ShipHandlers {
+  ships: ReadonlyMap<string, InboxShipView>;
+  /** `host/repo` → the Inbox projects on it (the Reviews answer's). */
+  repoProjects: Readonly<Record<string, string[]>>;
+  onShip: (target: ShipTarget, option: PullThreadOption) => void;
+  /** Open the ship log by its row (`anchor`). */
+  onLog: (ship: InboxShipView, anchor: HTMLElement | null) => void;
+  onStop: (ship: InboxShipView) => void;
+}
+
+/** The ship a row draws: its one PR's; a folded stack's, any layer's (an unfolded one's layers draw their own). */
+function rowShip(row: InboxReviewRow, ships: ReadonlyMap<string, InboxShipView> | undefined, unfolded: boolean): InboxShipView | null {
+  if (!ships || ships.size === 0 || unfolded) return null;
+  for (const key of row.pull_keys) {
+    const ship = ships.get(key);
+    if (ship) return ship;
+  }
+  return null;
 }
 
 export function ReviewsList({
@@ -268,7 +329,10 @@ export function ReviewsList({
   onShowAgain,
   onShowRepo,
   onOpenThread,
+  ships,
 }: {
+  /** The ships by pull request key (data/ships.ts): their rows in ship mode. */
+  ships?: ReadonlyMap<string, InboxShipView>;
   answer: InboxReviewsAnswer;
   model: InboxPullsAnswer;
   rows: readonly InboxReviewRow[];
@@ -385,11 +449,12 @@ export function ReviewsList({
   };
   const links = reviewLinksOf(model, answer);
   const draw = (row: InboxReviewRow) => {
-    const props = { row, links, place: placeOf(row), selected: isOpenRow(row), phone, now, judgments, riskFailed, autoRuns, menu: menuRow === row.id, onOpen: () => onOpen(row) };
-    // A stack of several PRs unfolds its layers under its row; the choice lasts while the list is shown.
     const stack = row.stacks[0];
-    if (stack && stack.layers.length > 1) {
-      const unfolded = stackUnfolded(row);
+    const many = !!stack && stack.layers.length > 1;
+    const unfolded = many && stackUnfolded(row);
+    const props = { row, links, place: placeOf(row), selected: isOpenRow(row), phone, now, judgments, riskFailed, autoRuns, menu: menuRow === row.id, ship: rowShip(row, ships, unfolded), ships, onOpen: () => onOpen(row) };
+    // A stack of several PRs unfolds its layers under its row; the choice lasts while the list is shown.
+    if (many) {
       // An open layer shown on its own row takes the selection from the stack's row.
       const openLayer = unfolded ? openLayerOf(row) : null;
       return (

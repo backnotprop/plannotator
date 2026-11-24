@@ -222,6 +222,7 @@
   "inbox-settings.spec.ts": 13,
   "inbox-shared-events-webkit.spec.ts": 89,
   "inbox-shared-events.spec.ts": 112,
+  "inbox-ship.spec.ts": 20,
   "inbox-show-thread.spec.ts": 6,
   "inbox-side-by-side.spec.ts": 15,
   "inbox-sidebar-spacing.spec.ts": 7,

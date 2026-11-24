@@ -6,6 +6,7 @@ import { parseRestartAgents } from './restartAgents';
 import { readHello, type RestartHello } from './sessionAdopt';
 import { scheduledFrame } from './scheduled/store';
 import { readRunStateFrame, runEvents } from './data/runEvents';
+import { shipEvents } from './data/shipEvents';
 
 
 export interface MachineRecordFrame {
@@ -21,7 +22,7 @@ export interface InboxEventWindow {
   origin: string;
 }
 
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'runs', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'runs', 'ships', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -143,6 +144,10 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       if (change) runEvents.emit(change);
       return;
     }
+    case 'ships':
+      // A ship here changed: the Reviews rows read the ships again (data/ships.ts).
+      shipEvents.emit();
+      return;
     case 'thread-pulls':
       try {
         const data = JSON.parse(frame.data) as { thread_ids?: unknown };
