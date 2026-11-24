@@ -123,11 +123,35 @@ test('a tile says everything it shows in its name, in the Inbox\'s own words', (
   expect(artifactChanged(sql)).toBeNull();
 });
 
-test('same IDs only join verified editions from one sender; older records can still match by source path', () => {
+test('a restarted agent needs the same known host, drawing ID and verified file to inherit a pin', () => {
+  const source = file('att_first', 'flow.diagram.json', 'plannotator-diagram', M1, { diagram_id: 'flow', diagram_file_id: 'f'.repeat(64) });
+  const revision = file('att_second', 'flow.diagram.json', 'plannotator-diagram', M2, { diagram_id: 'flow', diagram_file_id: source.diagram_file_id, sent_sha256: 'b'.repeat(64) });
+  function keys(next = revision, host: string | null = 'claude-code', previous = source, oldHost: string | null = 'claude-code') {
+    const messages = [
+      agent(M1, previous.sent_at, { author: { kind: 'agent', host: oldHost, session: 'first', name: 'Reviewer' } }),
+      agent(M2, next.sent_at, { author: { kind: 'agent', host, session: 'restarted', name: 'Reviewer' } }),
+    ];
+    return threadArtifacts(messages, [previous, next]).map(artifactKey);
+  }
+  const separate = [source.id, revision.id];
+  expect(keys()).toEqual([source.id]);
+  expect(keys({ ...revision, path: '/renamed.diagram.json' })).toEqual([source.id]);
+  expect(keys(revision, 'codex')).toEqual(separate);
+  expect(keys(revision, null, source, null)).toEqual(separate);
+  expect(keys({ ...revision, diagram_id: 'another' })).toEqual(separate);
+  expect(keys({ ...revision, diagram_file_id: 'c'.repeat(64) })).toEqual(separate);
+  expect(keys({ ...revision, path: '/copy.diagram.json', diagram_file_id: 'c'.repeat(64) })).toEqual(separate);
+  expect(keys({ ...revision, diagram_file_id: undefined })).toEqual(separate);
+  expect(keys(revision, 'claude-code', { ...source, diagram_file_id: undefined })).toEqual(separate);
+});
+
+test('older records match by source path within the same session', () => {
   const originals = [M1, M2, M3].map((m, i) => file(`att_${i}`, 'flow.diagram.json', 'plannotator-diagram', m, { diagram_id: ' flow ', sent_sha256: String(i).repeat(64) }));
   const rows = threadArtifacts(messages, originals);
   expect(rows.filter(r => r.type === 'file').map(artifactKey)).toEqual([originals[1]!.id, originals[0]!.id]);
   expect(latestDiagramFor(rows, originals[0]!)).toBe(originals[2]!);
+  const moved = { ...originals[2]!, path: '/renamed.diagram.json' };
+  expect(threadArtifacts(messages, [originals[0]!, moved]).filter(r => r.type === 'file')).toHaveLength(2);
   const otherAgent = agent(M3, messages[2]!.created_at, { author: { kind: 'agent', host: 'claude-code', session: 'another', name: 'Claude Code' } });
   const separate = threadArtifacts([messages[0]!, messages[1]!, otherAgent], originals);
   expect(separate.filter(r => r.type === 'file')).toHaveLength(3);

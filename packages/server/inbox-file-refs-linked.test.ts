@@ -8,6 +8,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { diagramReplyTarget, diagramThreadReply } from "../inbox/ask/diagramThreadReply";
+import { artifactKey, threadArtifacts } from "../inbox/artifacts";
 import { diagramFileAsk } from "../inbox/ask/sideSource";
 import type { AttachmentView } from "../inbox/api";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -195,6 +196,41 @@ describe("a file a message names, on a linked machine's thread, two real Inboxes
       }
     }
   }, 30_000);
+
+  test("linked artifact tiles follow a verified file across an agent restart, leaving a copied diagram separate", async () => {
+    for (const [here, there] of both()) {
+      const files = ["lineage.diagram.json", "separate.diagram.json"];
+      const source = JSON.stringify({ id: "same-root-id", title: "Delivery", columns: [{ title: "Queue" }] });
+      for (const file of files) writeFileSync(join(there.w.project, file), source);
+      const client = new Client({ name: "diagram-lineage", version: "1" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${base(there)}/mcp`)));
+      try {
+        async function send(session: string, attachments: string[], replyTo?: string) {
+          const result = await client.callTool({ name: "send_message", arguments: {
+            project_path: there.w.project, agent_host: "codex", agent_session: session, attachments,
+            body: "Review these drawings.", reply_to: replyTo,
+          } });
+          expect(result.isError).not.toBe(true);
+          return result.structuredContent as Json;
+        }
+        const first = await send("lineage-original", files);
+        const next = await send("lineage-restarted", [files[0]!], first.message_id);
+        expect(next.thread_id).toBe(first.thread_id);
+        const remote = `/api/inbox/m/${there.id}/threads/${first.thread_id}`;
+        const read = await (await windowGet(here, remote)).json();
+        const listing = await (await windowGet(here, remote + "/attachments")).json();
+        const [old, copy] = read.thread.messages[0].attachments;
+        const [latest] = read.thread.messages[1].attachments;
+        const rows = threadArtifacts(read.thread.messages, listing.attachments);
+        const verified = !!old.diagram_file_id && old.diagram_file_id === latest.diagram_file_id;
+        expect(rows.map(artifactKey).sort()).toEqual((verified ? [old.id, copy.id] : [old.id, copy.id, latest.id]).sort());
+        const current = rows.find(row => artifactKey(row) === (verified ? old.id : latest.id));
+        expect(current?.type === "file" && current.attachment.id).toBe(latest.id);
+      } finally {
+        await client.close();
+      }
+    }
+  });
 
   test("each machine offers file refs on the other's threads: its list names the mark", async () => {
     for (const [here, there] of both()) {
