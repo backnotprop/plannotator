@@ -26,6 +26,7 @@ import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
 import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
+import { OUTBOX_FILE_SEND_MS, sendWithFiles } from "./inbox-outbox-files";
 import { INBOX_SENT_FROM_HEADER } from "@plannotator/core/inbox-types";
 import type { InboxPeerTransport } from "./inbox-transport";
 import { farArchivedPage, type FarArchived } from "./inbox-archived-merged";
@@ -664,14 +665,29 @@ export class PeerLink {
     return response;
   }
 
-  /** One outbox try: the entry's route and body under its own key (rule 1). */
-  private send = async (entry: OutboxEntry): Promise<OutboxAnswer> => {
+  /** One outbox try: the entry's route and body under its own key (rule 1), a held answer's files sent first. */
+  private send = (entry: OutboxEntry): Promise<OutboxAnswer> =>
+    sendWithFiles(entry, {
+      storeDir: this.options.outbox.storeDir,
+      machineName: this.options.link.name,
+      upload: (name, path) =>
+        this.options.transport.request("uploads", `?name=${encodeURIComponent(name)}`, {
+          method: "POST",
+          headers: this.auth({ "Content-Type": "application/octet-stream" }),
+          body: Bun.file(path),
+          signal: AbortSignal.timeout(OUTBOX_FILE_SEND_MS),
+        }),
+      note: (sent) => this.options.outbox.noteSentFiles(entry.key, sent),
+      post: (body) => this.post(entry, body),
+    });
+
+  private post = async (entry: OutboxEntry, sendBody: Record<string, unknown>): Promise<OutboxAnswer> => {
     try {
       const response = await this.options.transport.request(entry.route, "", {
         method: "POST",
         // A press in the person's window here: the other machine's door hands that on (inbox-devices.ts).
         headers: this.auth({ "Content-Type": "application/json", ...(entry.window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}), ...(entry.sent_from ? { [INBOX_SENT_FROM_HEADER]: entry.sent_from } : {}) }),
-        body: JSON.stringify(entry.body),
+        body: JSON.stringify(sendBody),
         signal: AbortSignal.timeout(this.t.sendMs),
       });
       const text = await response.text();

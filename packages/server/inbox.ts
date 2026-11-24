@@ -410,6 +410,7 @@ import { createShowArchived, type InboxShowArchived } from "./inbox-show-archive
 import { nextSharedReactionsRev, settleSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
 import { mergePullBoards } from "./inbox-machine-pulls";
 import { doorRefusesBare, replyIsStale } from "./inbox-outbox";
+import { outboxHeldUploadsOnDisk } from "./inbox-outbox-files";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay, readRelayFile, relayUrl as defaultRelayUrl } from "./inbox-relay";
 import { createInboxCloudGate } from "./inbox-cloud-gate";
@@ -5619,7 +5620,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A Combine's files copied from a linked computer wait as uploads until its new thread is here (inbox-combine-across.ts).
   let combineUploads: () => string[] = () => [];
   const compose = createInboxCompose({
-    keepUploads: () => combineUploads(),
+    // So do an agent's files held with its answer for a linked computer (inbox-outbox-files.ts), read from the outbox's
+    // own files, so the first sweep at start, before the linked machines are made, keeps them too.
+    keepUploads: () => [...combineUploads(), ...outboxHeldUploadsOnDisk(dataDir)],
     store,
     serverSession,
     live,

@@ -6,8 +6,9 @@
  * this computer named, so every field works as there: steps, PRs, Priority, a thread name, a branch report.
  *
  * What lives on this disk is read here and sent along: each attached file and each picture the body shows from this
- * disk is read by this Inbox's own file rules and sent to that computer's `uploads` route (as a window's reply on
- * another computer sends its files), and a branch report gets its head and remote from this computer's git.
+ * disk is read by this Inbox's own file rules, kept here with the answer while it waits (inbox-outbox-files.ts), and
+ * sent to that computer's `uploads` route just before the answer (as a window's reply on another computer sends its
+ * files), and a branch report gets its head and remote from this computer's git.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -17,35 +18,35 @@ import { isAbsolute } from "node:path";
 import type { InboxAttachment } from "@plannotator/core/inbox-types";
 import { childEnv } from "@plannotator/shared/child-env";
 import { planAgentBodyPictures } from "@plannotator/shared/inbox/agent-pictures";
-import { inboxBlobPath, recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
+import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { sameInboxSend, type InboxSendCall } from "@plannotator/shared/inbox/send-same";
 import type { OutboxEntry } from "./inbox-outbox";
+import { holdOutboxFiles, OUTBOX_FILE_SEND_MS, type OutboxFile } from "./inbox-outbox-files";
 import type { PeerLink } from "./inbox-peer-link";
 import { FAR_AGENT_REPLY_ROUTE, TAG_ACROSS_MARK } from "./inbox-far-tags";
 import { farReplyRefusal } from "./inbox-mcp-far-read";
 
 /** How long send_message waits for the other computer's answer while it is online. */
 const FAR_REPLY_WAIT_MS = 6_000;
+/** And this much more when files go first (the time one file may take, as the agent waited for them before they were held). */
+const FAR_FILES_WAIT_MS = OUTBOX_FILE_SEND_MS;
 
 export interface FarReplyDeps {
   /** The linked computer whose thread `id` (a message or thread id) is, and that thread; null: none (the send goes on as before). */
   placeOf: (id: string) => Promise<{ machine: string; thread_id: string } | null>;
   nameOf: (machine: string) => string | null;
-  online: (machine: string) => boolean;
   /** Whether that computer's list says it takes an agent's answer (mark `tag-across`); null while this Inbox holds no list of it. */
   takes: (machine: string) => boolean | null;
-  holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own?: { notify?: boolean }) => Promise<OutboxEntry | null> | null;
+  holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own?: { notify?: boolean; files?: readonly OutboxFile[] }) => Promise<OutboxEntry | null> | null;
   /** A held write of this Inbox's own, by its key (null: never held). */
   heldWrite: (key: string) => OutboxEntry | null;
   /** Its notice dismissed: the agent was told already. */
   dismissHeld: (key: string) => void;
   /** Files on this disk, read by this Inbox's attachment rules (no folder, no dotenv file, it must exist). */
   readFiles: (paths: string[], base: string | undefined) => Promise<InboxAttachment[]>;
-  /** This Inbox's own copy of a file it read (its blob). */
-  blobOf: (attachment: InboxAttachment) => string;
-  /** One file sent to that computer's `uploads` route: its upload id there. */
-  upload: (machine: string, name: string, path: string) => Promise<string>;
+  /** Those files kept here with the answer (pending uploads), by the other computer's upload rules. */
+  holdFiles: (files: readonly { attachment: InboxAttachment; name: string }[]) => Promise<OutboxFile[]>;
 }
 
 /** What this file needs of the linked machines (inbox-machines.ts) and of the wakes this Inbox was handed (inbox-far-wakes.ts). */
@@ -58,7 +59,7 @@ interface FarReplyMachines {
   readThread: (ask: { thread_id?: string; message_id?: string; limit?: number }) => Promise<{ machine: string; answer: { thread_id: string } } | null>;
 }
 
-/** The deps over this Inbox's linked machines: where a far id is (a wake's, a listed thread's, else asked), and its files sent there. */
+/** The deps over this Inbox's linked machines: where a far id is (a wake's, a listed thread's, else asked), and its files kept here. */
 export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: string) => { machine: string; thread_id: string } | null }, storeDir: string): FarReplyDeps {
   const peer = (machine: string) => machines.peerLinks().find((p) => p.id === machine) ?? null;
   return {
@@ -72,7 +73,6 @@ export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: 
       return found ? { machine: found.machine, thread_id: found.answer.thread_id } : null;
     },
     nameOf: machines.nameOf,
-    online: (machine) => peer(machine)?.state === "online",
     takes: (machine) => {
       const link = peer(machine);
       if (!link) return false;
@@ -82,17 +82,7 @@ export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: 
     heldWrite: machines.heldWrite,
     dismissHeld: machines.dismissHeld,
     readFiles: (paths, base) => recordInboxAttachments(storeDir, paths, { base: base ?? "/", at: new Date().toISOString() }),
-    blobOf: (attachment) => inboxBlobPath(storeDir, attachment.sent_sha256),
-    upload: async (machine, name, path) => {
-      const link = peer(machine);
-      if (!link) throw new InboxError("machine_offline", FAR_REPLY_WORDS.filesAway(machines.nameOf(machine) ?? "the other computer"));
-      const response = await link.request("uploads", `?name=${encodeURIComponent(name)}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: Bun.file(path), timeoutMs: 60_000 });
-      const answer = (await response.json().catch(() => ({}))) as { upload?: { upload_id?: unknown }; code?: unknown; error?: unknown };
-      if (!response.ok || typeof answer.upload?.upload_id !== "string") {
-        throw new InboxError(typeof answer.code === "string" ? answer.code : "upload_failed", typeof answer.error === "string" ? answer.error : `${name} could not be sent to ${machines.nameOf(machine) ?? "the other computer"}.`);
-      }
-      return answer.upload.upload_id;
-    },
+    holdFiles: (files) => holdOutboxFiles(storeDir, files, new Date().toISOString()),
   };
 }
 
@@ -101,7 +91,6 @@ export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: 
  */
 export const FAR_REPLY_WORDS = {
   held: (thread: string, machine: string) => `Waiting for ${machine}: your message goes into thread ${thread} when ${machine} is back.`,
-  filesAway: (machine: string) => `${machine} cannot be reached now, and files go to it only while it is online. Nothing was sent: send it again when ${machine} is back, or without the files.`,
 };
 
 /** A branch report's head and remote, read from this computer's git where the agent works, when it did not name them. */
@@ -162,23 +151,25 @@ export async function farAgentReply(
   if (before && !sameInboxSend(farCall(was ?? {}), farCall({ ...input, body: pictures.body, reply_to: replyTo }))) {
     throw new InboxError("idempotency_key_reused", "This idempotency_key was already used for a different message.");
   }
-  const uploads: string[] = [];
+  // Kept here with the answer, online or away: the outbox sends them just before it (inbox-outbox-files.ts). Refused
+  // now by the rules that computer's `uploads` route applies, never when it is back.
+  let keptFiles: OutboxFile[] = [];
   if (!before && files.length > 0) {
-    if (!deps.online(place.machine)) throw new InboxError("machine_offline", FAR_REPLY_WORDS.filesAway(name));
     const read = await deps.readFiles(files.map((file) => file.path), here);
-    for (const [i, attachment] of read.entries()) uploads.push(await deps.upload(place.machine, files[i]!.name ?? attachment.name, deps.blobOf(attachment)));
+    keptFiles = await deps.holdFiles(read.map((attachment, i) => ({ attachment, name: files[i]!.name ?? attachment.name })));
   }
-  const { agent_session: _session, agent_name: _name, agent_host: _host, project_path: _path, ...rest } = input;
-  const args: Record<string, unknown> = { ...rest, body: pictures.body, reply_to: replyTo, idempotency_key: `far:${scoped(session, key)}`, ...(uploads.length > 0 ? { attachments: uploads } : {}) };
+  const { agent_session: _session, agent_name: _name, agent_host: _host, project_path: _path, attachments: _attachments, ...rest } = input;
+  const args: Record<string, unknown> = { ...rest, body: pictures.body, reply_to: replyTo, idempotency_key: `far:${scoped(session, key)}` };
   if (args.branch !== undefined) args.branch = branchHere(args.branch, here);
+  const withFiles = (before?.files?.length ?? keptFiles.length) > 0;
   const held = deps.holdWrite(
     place.machine,
     FAR_AGENT_REPLY_ROUTE,
     before?.body ?? { idempotency_key: heldKey, session, ...(input.agent_host ? { host: input.agent_host } : {}), ...(input.agent_name ? { name: input.agent_name } : {}), args },
     place.thread_id,
-    FAR_REPLY_WAIT_MS,
+    FAR_REPLY_WAIT_MS + (withFiles ? FAR_FILES_WAIT_MS : 0),
     // Refused after the agent was told it waits: the person sees it under that thread.
-    { notify: true },
+    { notify: true, files: keptFiles },
   );
   if (!held) return null;
   const entry = await held;

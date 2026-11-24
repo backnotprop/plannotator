@@ -254,26 +254,26 @@ describe("the tagged agent's answer, written on the thread's computer", () => {
   test("on the agent's computer: sent through the outbox, held while the thread's computer is away, other far threads untouched", async () => {
     const ids = { machine: STUDIO, thread_id: MSG(0) };
     const sent: Record<string, unknown>[] = [];
-    const uploaded: { name: string; path: string }[] = [];
+    const held: { name: string; sha: string }[][] = [];
     let state: OutboxEntry["state"] = "delivered";
-    let online = true;
     const folder = temp("laptop-work");
     await Bun.write(join(folder, "notes.md"), "# Notes\n");
     await Bun.write(join(folder, "shot.png"), new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
     const deps = {
       placeOf: async (id: string) => (id === MSG(1) || id === MSG(0) ? ids : null),
       nameOf: () => "Studio",
-      online: () => online,
       takes: () => true,
       heldWrite: () => null,
       dismissHeld: () => {},
-      holdWrite: (_m: string, route: string, body: Record<string, unknown>) => {
-        sent.push({ route, ...body });
+      holdWrite: (_m: string, route: string, body: Record<string, unknown>, _thread: string | null, _wait: number, own: { files?: readonly { upload: string; name: string }[] } = {}) => {
+        sent.push({ route, ...body, files: own.files ?? [] });
         return Promise.resolve({ state, answer: { text: "Sent to the Plannotator Inbox (thread X).", structured: { message_id: MSG(2), thread_id: ids.thread_id } } } as unknown as OutboxEntry);
       },
       readFiles: async (paths: string[], base: string | undefined) => paths.map((path) => ({ name: path.split("/").at(-1)!, sent_sha256: `sha-${path}`, base }) as never),
-      blobOf: (attachment: { sent_sha256: string }) => `/blobs/${attachment.sent_sha256}`,
-      upload: async (_machine: string, name: string, path: string) => (uploaded.push({ name, path }), `upl_${uploaded.length}`),
+      holdFiles: async (files: readonly { attachment: { sent_sha256: string }; name: string }[]) => {
+        held.push(files.map((file) => ({ name: file.name, sha: file.attachment.sent_sha256 })));
+        return files.map((file, i) => ({ upload: `upl_${held.length}_${i}`, name: file.name }));
+      },
     };
     const next = async () => "NEXT";
     // Any session here, tagged or not: that computer's own answer comes back as it is, with the computer.
@@ -281,21 +281,25 @@ describe("the tagged agent's answer, written on the thread's computer", () => {
     expect(sent[0]).toMatchObject({ route: FAR_AGENT_REPLY_ROUTE, session: "ses_any", host: "pi", args: { body: "The order holds.", reply_to: MSG(1), steps: [{ title: "Ship" }] } });
     expect((sent[0]!.args as Record<string, unknown>).project_path).toBeUndefined();
     expect(done).toEqual({ text: "Sent to the Plannotator Inbox (thread X).", structured: { message_id: MSG(2), thread_id: ids.thread_id, machine: { id: STUDIO, name: "Studio" } } });
-    // Files and the pictures the body shows from this disk: read here, sent there, the send naming the uploads.
+    // Files and the pictures the body shows from this disk: read here, kept here with the answer under the names the
+    // body gives them, never as this disk's paths in the words sent on.
     await farAgentReply(deps, { body: "See ![shot](shot.png).", reply_to: MSG(1), agent_session: FAR, attachments: ["notes.md"] }, next, folder);
-    expect(uploaded.map((u) => u.name)).toEqual(["notes.md", "shot.png"]);
-    expect((sent.at(-1)!.args as Record<string, unknown>).attachments).toEqual(["upl_1", "upl_2"]);
-    // The thread's computer away: words without files wait for it; files are refused, nothing sent.
+    expect(held.at(-1)!.map((file) => file.name)).toEqual(["notes.md", "shot.png"]);
+    expect(sent.at(-1)!.files).toEqual([
+      { upload: "upl_1_0", name: "notes.md" },
+      { upload: "upl_1_1", name: "shot.png" },
+    ]);
+    expect((sent.at(-1)!.args as Record<string, unknown>).attachments).toBeUndefined();
+    // The thread's computer away: words wait for it, and so do words with files, with the same line.
     state = "queued";
     const waiting = await farAgentReply(deps, { body: "x", reply_to: MSG(1), agent_session: FAR }, next, undefined);
     expect(waiting!.structured).toMatchObject({ held: true });
     expect(waiting!.text).toStartWith("Waiting for Studio:");
-    online = false;
-    const before = sent.length;
-    await expect(farAgentReply(deps, { body: "x", reply_to: MSG(1), agent_session: FAR, attachments: ["notes.md"] }, next, folder)).rejects.toMatchObject({ code: "machine_offline" });
-    expect(sent.length).toBe(before);
+    const withFiles = await farAgentReply(deps, { body: "x", reply_to: MSG(1), agent_session: FAR, attachments: ["notes.md"] }, next, folder);
+    expect(withFiles!.structured).toMatchObject({ held: true });
+    expect(withFiles!.text).toBe(waiting!.text);
+    expect(sent.at(-1)!.files).toEqual([{ upload: "upl_2_0", name: "notes.md" }]);
     // Its refusal there is the agent's refusal here.
-    online = true;
     state = "refused";
     deps.holdWrite = (_m, route, body) => (sent.push({ route, ...body }), Promise.resolve({ state, answer: { code: "steps_off", error: "Steps are off." } } as unknown as OutboxEntry));
     await expect(farAgentReply(deps, { body: "x", reply_to: MSG(1), agent_session: FAR }, next, undefined)).rejects.toMatchObject({ code: "steps_off", message: "Steps are off." });
