@@ -13,12 +13,11 @@ import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
 import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } from '@plannotator/core/inbox-system';
 import type { SystemModel } from '@plannotator/system';
-import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
-import { createListReader, type ListReadAnswer } from './listRead';
-import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import { createListReader, listGridAsked, type ListReadAnswer } from './listRead';
+import { inboxUrl, isContested, localRoute, machineOf, rememberArtifactMachines, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -116,11 +115,11 @@ import { trackCommentWrite } from './commentSaves';
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'agent_rules' | 'star' | 'list_view' | 'personal_agents' | 'priority' | 'routines';
+export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'agent_rules' | 'star' | 'view_choice' | 'personal_agents' | 'priority' | 'routines';
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
-export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip';
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip' | 'band_tip';
 
 /**
  * This page load's id, sent with every read and write (`X-Plannotator-Load`): the Inbox keeps it with a one-time
@@ -343,7 +342,7 @@ export interface SettingsModel {
   list_intro?: { due: boolean };
   /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
   snooze_intro?: { due: boolean };
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; band_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -406,8 +405,6 @@ export interface SettingsModel {
   mark_read_warning?: { on: boolean };
   /** Code review (config.json `inboxCodeReview`, approval "inbox-code-review-direction"): off unless the person turned it on. Absent from an older Inbox (off then). */
   code_review?: { on: boolean };
-  /** Shape (Settings → Capabilities): the boards agents draw. Absent from an older Inbox. */
-  shape?: { on: boolean };
   /**
    * System (config.json `inboxSystem`, approval "system-inbox"): its switch, present only while Code review is on (the
    * Settings row shows only then). Whether System shows is `systemShown()` (system/gate.ts).
@@ -488,7 +485,7 @@ export function inboxAskOn(settings: Pick<SettingsModel, 'via'> | null | undefin
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
 export interface InboxExperimentalSettings {
-  decision_mode: { on: boolean; env: boolean | null };
+  decision_mode: { on: boolean; env: boolean | null }; /** Grid (approval "inbox-agent-grid"); absent from an older Inbox. */ grid?: { on: boolean; env: boolean | null };
 }
 
 /** One live agent session of a thread's project (New message, record 5.x). */
@@ -926,7 +923,7 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
   });
   if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
   if (machine && response.status === 202) {
-    const held = (await response.json().catch(() => ({}))) as { outbox?: OutboxView; machine?: MachineView | null };
+    const held = (await response.clone().json().catch(() => ({}))) as { outbox?: OutboxView; machine?: MachineView | null };
     if (held.outbox) {
       const entry = held.outbox;
       // Still on its way: held. A key sent before and already settled (replayed) says how it ended instead.
@@ -974,7 +971,7 @@ const attachmentUrl = (attachmentId: string, rest = '', query?: string) => inbox
 const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encodeURIComponent(projectId)}${rest}`, undefined, machineOf(projectId));
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
-  setSelfMachine(model.self);
+  setSelfMachine(model.self, model.machines);
   // Starred rows too: another machine's archived star is in no section here.
   const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? []), ...(model.pins ?? [])];
   // This Inbox's own rows and projects first, every id in them (a row's delivery and message ids too): a linked
@@ -1052,7 +1049,7 @@ export interface SearchRequest {
   offset?: number;
   limit?: number;
   tags?: readonly string[] | null;
-  /** The project open in the list: a tie boost, never a filter. */
+  machines?: boolean;
   current?: string | null;
   /** Newest first instead of best match (sent only for `newest`, so a best-match request is what it was). */
   sort?: InboxSearchSort | null;
@@ -1207,7 +1204,7 @@ export function uploadFile(
 
 /** Search (read only). `signal` aborts a request a newer query replaced. */
 export async function searchInbox(request: SearchRequest, signal?: AbortSignal): Promise<SearchModel> {
-  const query = new URLSearchParams({ q: request.q });
+  const query = new URLSearchParams({ q: request.q, ...(request.machines && selfMachineId() ? { machines: '1' } : {}) });
   for (const key of ['project', 'status', 'from'] as const) if (request[key]) query.set(key, request[key]!);
   for (const tag of request.tags ?? []) query.append('tag', tag);
   if (request.group) query.set('group', request.group);
@@ -1215,7 +1212,7 @@ export async function searchInbox(request: SearchRequest, signal?: AbortSignal):
   if (request.limit) query.set('limit', String(request.limit));
   if (request.current) query.set('current', request.current);
   if (request.sort === 'newest') query.set('sort', 'newest');
-  return readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal }));
+  return rememberSearchMachines(await readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal })));
 }
 
 /** Remember a search the person opened a result from (the last 6), or forget them all. */
@@ -1225,7 +1222,7 @@ export function saveRecentSearch(input: { q: string } | { clear: true }): Promis
 
 /** The window's list reads (listRead.ts): `since` names the list it holds; empty asks for the whole list. */
 const listReader = createListReader<ListModel>((since) =>
-  get<ListReadAnswer<ListModel>>(inboxUrl(`/threads?archived=exclude&snoozed=exclude&machines=1&since=${encodeURIComponent(since)}`)),
+  get<ListReadAnswer<ListModel>>(inboxUrl(`/threads?archived=exclude&snoozed=exclude&machines=1${listGridAsked() ? '&grid=1' : ''}&since=${encodeURIComponent(since)}`)),
 );
 
 /** Tests only: the next list read is a whole one. */
@@ -1306,7 +1303,7 @@ export const inboxApi = {
   startTidy: (input: { sessions: readonly string[]; idempotency_key: string; project: string | null; surface: 'list' | 'board'; thread_ids?: readonly string[]; words?: string }, machine?: string | null) =>
     post<{ run: InboxTidyRun | null; asked: string[] }>(inboxUrl('/tidy', undefined, machine), { ...input, sessions: [...input.sessions], ...(input.thread_ids ? { thread_ids: [...input.thread_ids] } : {}) }),
   saveCookieHost: (on: boolean) => post<{ cookie_host: InboxCookieHost }>(inboxUrl('/settings'), { cookie_host: on }),
-  saveExperimental: (change: { decision_mode: boolean }) =>
+  saveExperimental: (change: { decision_mode?: boolean; grid?: boolean }) =>
     post<{ experimental: InboxExperimentalSettings }>(inboxUrl('/settings'), { experimental: change }),
   /** The Board on or off (Settings → Capabilities): agents get the card action from their next session. */
   saveBoard: (on: boolean) => post<{ board: { on: boolean } }>(inboxUrl('/settings'), { board: { on } }),
@@ -1319,7 +1316,6 @@ export const inboxApi = {
   saveMarkReadWarning: (on: boolean) => post<{ mark_read_warning: { on: boolean } }>(inboxUrl('/settings'), { mark_read_warning: { on } }),
   /** Code review on or off (Settings → Capabilities, approval "inbox-code-review-direction"): every window hears `event: capabilities`. */
   saveCodeReview: (on: boolean) => post<{ code_review: { on: boolean } }>(inboxUrl('/settings'), { code_review: { on } }),
-  saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
   /** System on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
   saveSystem: (on: boolean) => post<{ system?: { on: boolean } }>(inboxUrl('/settings'), { system: { on } }),
   /** Chapter diagrams on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
@@ -1331,16 +1327,6 @@ export const inboxApi = {
   /** System's setup dialog (System on only): the projects found on this Mac with a git remote, and one project's save. */
   systemSetup: () => get<SystemSetupAnswer>(inboxUrl('/system/setup')),
   saveSystemSetup: (input: SystemSetupInput) => post<{ setup: SystemSetup }>(inboxUrl('/system/setup'), { ...input }),
-  // Shape (packages/server/shape-routes.ts): this computer's boards only, never another machine's.
-  shapes: (signal?: AbortSignal) => get<{ shapes: InboxShapeSummary[] }>('/api/shapes?preview=1', signal),
-  /** Where a board's kept picture loads from. */
-  shapeFileUrl: (id: string, src: string) => `/api/shapes/${encodeURIComponent(id)}/files/${encodeURIComponent(src.replace(/^files\//, ''))}`,
-  shape: (id: string, n?: number) => get<ShapeLoadedWire>(`/api/shapes/${encodeURIComponent(id)}${n ? `?n=${n}` : ''}`),
-  shapeNote: (id: string, input: Record<string, unknown>) => post<{ note: ShapeNote }>(`/api/shapes/${encodeURIComponent(id)}/notes`, input),
-  shapeAnswer: (id: string, input: { re: string; text: string; from: { host: string; id: string } }) => post<{ note: ShapeNote }>(`/api/shapes/${encodeURIComponent(id)}/answer`, input),
-  shapeSeen: (id: string, n: number) => post<{ seen: number | null }>(`/api/shapes/${encodeURIComponent(id)}/seen`, { n }),
-  shapeCodeFile: (id: string, path: string) => get<{ content: string }>(`/api/shapes/${encodeURIComponent(id)}/code/file?path=${encodeURIComponent(path)}`),
-  shapeCodeHover: (id: string, request: Record<string, unknown>) => post<unknown>(`/api/shapes/${encodeURIComponent(id)}/code/hover`, request),
   /**
    * A thread's steps, each session's list with its presence now (approval "inbox-thread-steps"). A linked
    * machine's thread has none here (its read is not forwarded), and an Inbox older than steps answers 404: both
@@ -1392,10 +1378,10 @@ export const inboxApi = {
    * message the window showed; the look stops there, so a message that landed
    * after the window read the thread stays new (an older Inbox ignores it).
    */
-  seen: (threadId: string, throughSeq?: number | null) =>
+  seen: (threadId: string, throughSeq?: number | null, opened?: boolean) =>
     post<{ thread: InboxListRow }>(
-      threadUrl(threadId, `/seen`),
-      typeof throughSeq === 'number' ? { through_seq: throughSeq } : {},
+      threadUrl(threadId, `/seen`), // `opened`: the person chose the thread (recentActs.ts); an older Inbox ignores it.
+      { ...(typeof throughSeq === 'number' ? { through_seq: throughSeq } : {}), ...(opened ? { opened: true } : {}) },
     ),
   /** Mark read (the thread leaves the top for Quiet, its waiting questions closed) or its Undo. */
   markRead: (threadId: string, read: boolean) =>
@@ -1496,14 +1482,14 @@ export const inboxApi = {
        */
       quote?: { of: string; words?: string; time?: string };
       /** The answer carries the thread as a read of it would (`thread_read`): the Send's last reply asks, and reads nothing after. */
-      with_thread?: boolean;
+      with_thread?: boolean; /** New thread from this message: no #tag read, no still-open line, no length noted. */ author_only?: boolean; /** A skill emoji pressed: drawn as one line (thread/skillReaction.ts). */ skill_reaction?: { emoji: string; skill: string };
     },
   ) =>
     // To another machine: the newest seq the person saw there rides along (rule 11), and a reply its Inbox has not
     // confirmed yet is held (`held`): the Send went into this Inbox's outbox, not into the thread.
     post<ReplyResult>(messageUrl(messageId, `/reply`), { ...input, ...seenThrough(messageId) }).then(
       (result) => {
-        noteReplySent(input.words);
+        if (input.author_only !== true) noteReplySent(input.words);
         // Only this Inbox's own thread, read as `thread` reads one; a linked machine's thread is read after, as before.
         const read = result.thread_read && !machineOf(messageId) && result.thread_read.thread?.thread_id ? threadModelOf(result.thread_read.thread.thread_id, result.thread_read) : undefined;
         const { thread_read: _read, ...rest } = result;
@@ -1888,8 +1874,8 @@ export const inboxApi = {
   },
   /** The person looked at Dropped: an agent's drops there are seen. */
   seeDrops: (ids: readonly string[], machine?: string | null) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen', undefined, machine), { cards: [...ids] }),
-  /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order. This machine's threads only. */
-  artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
+  /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order: this machine's, then each linked machine's (`machine`). */
+  artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins', 'machines=1')).then(rememberArtifactMachines),
   /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */
   agentFaces: () => get<unknown>(inboxUrl('/agent-faces')),
   /**
@@ -1912,16 +1898,16 @@ export const inboxApi = {
   /** "Get": download a fetchable set into this Inbox's data folder (a stopped one resumes). */
   getIconSet: (id: string) => post<{ set?: unknown }>(inboxUrl('/icon-sets'), { get: id }),
   /** Pin one artifact of a thread (its key: an attachment id, or `guide:<message id>`), or unpin it. */
-  setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins'), { thread_id: threadId, key, pinned }),
+  setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins', undefined, machineOf(threadId)), { thread_id: threadId, key, pinned }),
   /** The Artifacts wall: a page of every thread's artifacts, newest first. */
   artifacts: (query: { pinned?: boolean; type?: InboxArtifactType | null; archived?: boolean; cursor?: string | null; limit?: number }, signal?: AbortSignal) => {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ machines: '1' });
     if (query.pinned) params.set('pinned', '1');
     if (query.type) params.set('type', query.type);
     params.set('archived', query.archived ? 'include' : 'exclude');
     if (query.cursor) params.set('cursor', query.cursor);
     if (query.limit) params.set('limit', String(query.limit));
-    return get<InboxArtifactsPage & { serverSession: string }>(inboxUrl('/artifacts', params.toString()), signal);
+    return get<InboxArtifactsPage & { serverSession: string }>(inboxUrl('/artifacts', params.toString()), signal).then(rememberArtifactMachines);
   },
   /** Star or unstar, on the thread's own machine (approval "inbox-linked-marks"). */
   pin: (threadId: string, pinned: boolean) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(threadUrl(threadId, '/pin'), { pinned }),
@@ -2030,8 +2016,8 @@ export const inboxApi = {
   /** Ask AI (packages/server/inbox-ask.ts): the chat list, one thread's chat, a question, and what the window saw. */
   askChats: () => get<{ chats: InboxAskChat[] }>(inboxUrl('/ask')),
   askRead: (threadId: string) => get<InboxAskModel>(inboxUrl(`/threads/${threadId}/ask`)),
-  askSend: (threadId: string, turnId: string, question: string, showMe?: InboxShowMeAsk, source?: string) =>
-    post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question, ...(showMe ?? {}), ...(source ? { source } : {}) }),
+  askSend: (threadId: string, turnId: string, question: string, source?: string) =>
+    post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question, ...(source ? { source } : {}) }),
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
@@ -2051,20 +2037,9 @@ export interface InboxAskTurnWire {
   answered_at?: string;
   stopped?: boolean;
   failure?: 'gone' | 'taken_over' | 'failed';
-  /** A Show me (code review in the Inbox): the agent was asked for a Shape of these lines of a review. */
+  /** An older Inbox's Show me, as it was stored: the Ask window shows it as the person asked it (`askShownQuestion`). */
   kind?: 'show_me';
   show_me?: InboxShowMeTarget;
-  /** Show me again: the board it asked to bring up to date. */
-  again_shape?: string;
-  /** The board this Show me made, once it has one. */
-  shape?: string;
-}
-
-/** What a Show me sends beside its question on `POST …/ask`. */
-export interface InboxShowMeAsk {
-  kind: 'show_me';
-  show_me: InboxShowMeTarget;
-  again_shape?: string;
 }
 
 export interface InboxAskConversationWire {
@@ -2154,31 +2129,4 @@ interface LinkedPageBase {
 
 export type LinkedPageView = LinkedPageBase & ({ html: string } | { html: null; text: string });
 
-// ───────────────────────────── Shape ─────────────────────────────
-
-/** One board in the list (packages/shared/shape/store.ts `ShapeSummary`), with its latest Picture for the grid. */
-export interface InboxShapeSummary {
-  id: string;
-  title: string;
-  project: { name: string; root: string };
-  thread: string | null;
-  state: 'active' | 'finished';
-  updated: string;
-  latest: number;
-  seen: number | null;
-  changed: boolean;
-  drawing: boolean;
-  waiting: number;
-  session: { host: string; id: string } | null;
-  preview?: { picture: ShapeDrawnView | null; refs: ShapeRef[] } | null;
-}
-
-/** `GET /api/shapes/:id`. */
-export interface ShapeLoadedWire {
-  shape: ShapeRecord;
-  version: ShapeVersion;
-  seen: number | null;
-  notes: ShapeNote[];
-  session: { state: 'live' | 'busy' | 'gone'; agent: string };
-}
 

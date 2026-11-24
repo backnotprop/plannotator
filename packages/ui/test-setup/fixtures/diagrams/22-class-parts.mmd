@@ -1,0 +1,13 @@
+classDiagram
+  class User {
+    +name
+    +login() bool
+  }
+  class Order~T~
+  User --> Order : places
+  User "1" --> "*" Order : owns
+  Order <|-- BigOrder
+  User ..> User : self
+  class Odd["Odd & <x>"]
+  Odd --> User : "a < b"
+  note for User "a note"

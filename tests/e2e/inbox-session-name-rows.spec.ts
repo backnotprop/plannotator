@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -103,7 +103,7 @@ test.beforeAll(async () => {
       inboxThemeChooser: { notNeededAt: past },
       inboxSnoozeIntro: { shownAt: past },
       inboxBoardIntro: { shownAt: past },
-      inboxReveals: { lastShownAt: past },
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN, lastShownAt: past },
     }),
   );
   const env = {

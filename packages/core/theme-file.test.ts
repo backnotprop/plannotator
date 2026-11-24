@@ -157,7 +157,7 @@ describe('validating a theme file', () => {
       const r = validateThemeFile(ok({ id }));
       expect(r.ok ? null : r.problem.field).toBe('id');
     }
-    expect(BUILT_IN_THEME_IDS.length).toBe(55);
+    expect(BUILT_IN_THEME_IDS.length).toBe(57);
   });
 });
 

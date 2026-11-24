@@ -37,6 +37,7 @@ import { hearOwnIcons, ownFaceShows, ownIconsNow } from './ownIcons';
 import { pictureFromFile } from '../projectPictures';
 import { errorText } from '../toastError';
 import { setAgentNames } from './agentNames';
+import { usePictureWorld } from '../pictureWorld';
 
 /** This browser's faces from before the Inbox kept them: `{ [agent id]: face }`. */
 export const AGENT_FACES_KEY = 'plannotator-inbox-agent-faces';
@@ -453,8 +454,11 @@ export function useAgentTakesTiles(id: string | null | undefined): boolean {
 
 /** The face kept for an agent, redrawn only when its own face changes; its own mark for no id. */
 export function useAgentFace(id: string | null | undefined): AgentFace {
-  const subscribe = useCallback((listener: () => void) => (id ? subscribeTo(id, listener) : nothing()), [id]);
-  return useSyncExternalStore(subscribe, () => agentFaceOf(id), plain);
+  // In a picture (pictureWorld.ts): the face it gives, never one the person kept.
+  const world = usePictureWorld();
+  const subscribe = useCallback((listener: () => void) => (id && !world ? subscribeTo(id, listener) : nothing()), [id, world]);
+  const kept = useSyncExternalStore(subscribe, () => (world ? 'agent' : agentFaceOf(id)), plain);
+  return world ? ((id ? world.faces.get(id) : undefined) ?? 'agent') : kept;
 }
 
 /**

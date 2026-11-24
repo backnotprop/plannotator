@@ -9,6 +9,14 @@ struct FileBook {
   var open: [AttachmentID: [(version: AttachmentVersion, key: String)]] = [:]
 }
 
+/// One viewer's hold on a file's bytes, from `openHeld`: while it is held, room is never made with those bytes.
+/// Released once, with `release`, whatever version the file opens in by then.
+public struct AttachmentHold: Hashable, Sendable {
+  public let file: AttachmentID
+  public let version: AttachmentVersion
+  let key: String
+}
+
 /// Whether a file's bytes can be opened now.
 public enum AttachmentAvailability: Hashable, Sendable {
   /// Kept on the phone: it opens with or without the computer.
@@ -43,13 +51,56 @@ extension InboxSession {
     return AttachmentItem.list(model.thread, states: files.states[thread])
   }
 
-  /// Ask the computer how each of a thread's files stands now (changed since sent, missing).
-  public func readAttachments(_ thread: ThreadID) async {
-    if client == nil { _ = await connect() }
-    guard let client, offers(DoorRoutes.getThreadAttachments) else { return }
-    if let read = try? await client.get(Door.getThreadAttachments(thread: thread), as: DoorThreadAttachmentsAnswer.self) {
-      files.states[thread] = read.attachments + (read.inlineImages ?? [])
+  /// The files attached to one message (not the pictures its words show), each with what the computer said of it
+  /// when last asked: the tiles under the message.
+  public func attachments(of message: InboxMessageWire, in thread: ThreadID) -> [AttachmentItem] {
+    guard let records = message.attachments, !records.isEmpty else { return [] }
+    let states = files.states[thread] ?? []
+    return records.map { record in
+      var item = AttachmentItem(record: record, message: message.id, inline: false)
+      if let state = states.first(where: { $0.id == record.id }) { item.take(state) }
+      return item
     }
+  }
+
+  /// Ask the computer how each of a thread's files stands now (changed since sent, missing), and which comments
+  /// on them wait for a Send. Returns the ids of the comments it listed, when it listed them.
+  @discardableResult
+  public func readAttachments(_ thread: ThreadID) async -> Set<String>? {
+    if case .listed(let ids) = await readComments(thread) { return ids }
+    return nil
+  }
+
+  /// What a read of a thread's files said about its comments.
+  enum CommentsRead {
+    /// The comments it listed.
+    case listed(Set<String>)
+    /// It answered, with no list to read: an older Inbox, or comments this app cannot read. Asking again changes
+    /// nothing.
+    case unlisted
+    /// No answer: worth asking again.
+    case failed
+  }
+
+  func readComments(_ thread: ThreadID) async -> CommentsRead {
+    if client == nil { _ = await connect() }
+    guard let client else { return .failed }
+    guard offers(DoorRoutes.getThreadAttachments) else { return .unlisted }
+    // What the computer answers about a comment from here on is newer than this list.
+    let started = commentBook.landSeq
+    guard let answer = try? await client.call(Door.getThreadAttachments(thread: thread)) else { return .failed }
+    if let read = try? JSONDecoder().decode(DoorThreadAttachmentsAnswer.self, from: answer.body) {
+      files.states[thread] = read.attachments + (read.inlineImages ?? [])
+      // The comments that wait for a Send, the window's among them (an older Inbox's door lists none).
+      guard let waiting = read.annotations else { return .unlisted }
+      takeComments(thread, from: waiting, started: started)
+      return .listed(Set(waiting.map(\.id)))
+    } else if case .object(var fields)? = try? JSONDecoder().decode(JSONValue.self, from: answer.body) {
+      // A comment this app cannot read never hides the files: they are read without the comments.
+      fields["annotations"] = nil
+      if let read = try? JSONDecoder().decode(DoorThreadAttachmentsAnswer.self, from: JSONEncoder().encode(JSONValue.object(fields))) { files.states[thread] = read.attachments + (read.inlineImages ?? []) }
+    }
+    return .unlisted
   }
 
   /// The route a file's bytes come from, and whether it takes a Range. A picture comes whole (its ETag is its
@@ -64,7 +115,8 @@ extension InboxSession {
   }
 
   /// The cache's key for one version of a file: its id and the hash of those bytes, so a changed file is a new entry.
-  static func cacheKey(_ item: AttachmentItem, _ version: AttachmentVersion) -> String {
+  /// Two opens of a file show the same bytes only when their keys are the same.
+  public static func cacheKey(_ item: AttachmentItem, _ version: AttachmentVersion) -> String {
     switch version {
     case .sent: return "\(item.id.rawValue)@\(item.sentSha256)"
     case .current: return "\(item.id.rawValue)@\(item.current?.sha256 ?? (item.changedSinceSent == false ? item.sentSha256 : "current"))"
@@ -91,13 +143,50 @@ extension InboxSession {
   /// against the hash the computer named. Cancelling the calling task stops the fetch; the next one resumes it.
   /// The file stays kept while it is open: call `attachmentClosed` when the viewer closes.
   public func openAttachment(_ item: AttachmentItem, version: AttachmentVersion? = nil, progress: @Sendable @escaping (Int64, Int64?) -> Void = { _, _ in }) async throws -> URL {
+    try await openHeld(item, version: version, progress: progress).url
+  }
+
+  /// `openAttachment`, with the hold it took: a viewer that may open a file twice at once (a version asked while
+  /// another comes) releases exactly its own with `release`.
+  public func openHeld(_ item: AttachmentItem, version: AttachmentVersion? = nil, progress: @Sendable @escaping (Int64, Int64?) -> Void = { _, _ in }) async throws -> (url: URL, hold: AttachmentHold?) {
     let version = version ?? item.opens
     let url = try await fetchAttachment(item, version: version, progress: progress)
-    if let bytes, let key = keptKey(item, version: version) {
-      bytes.hold(key)
-      files.open[item.id, default: []].append((version, key))
-    }
-    return url
+    guard let bytes, let key = keptKey(item, version: version) else { return (url, nil) }
+    bytes.hold(key)
+    files.open[item.id, default: []].append((version, key))
+    return (url, AttachmentHold(file: item.id, version: version, key: key))
+  }
+
+  /// Release one hold from `openHeld`.
+  public func release(_ hold: AttachmentHold) {
+    guard var opened = files.open[hold.file], let index = opened.lastIndex(where: { $0.version == hold.version && $0.key == hold.key }) else { return }
+    opened.remove(at: index)
+    bytes?.release(hold.key)
+    files.open[hold.file] = opened.isEmpty ? nil : opened
+  }
+
+  /// The file as this phone last read it, when the computer has not said how it stands since the app started (so
+  /// it opens as sent) and the phone keeps no sent copy but does keep a later version: the item with that version
+  /// as its current one, changed since sent. A file read before a relaunch then opens with the computer away, and
+  /// says it is not the sent version.
+  public func lastKept(_ item: AttachmentItem) -> AttachmentItem? {
+    guard item.changedSinceSent == nil, item.unavailable == nil, let bytes, keptKey(item, version: .sent) == nil else { return nil }
+    let prefix = "\(item.id.rawValue)@"
+    let sent = Self.cacheKey(item, .sent)
+    guard let last = bytes.entries(prefix: prefix).filter({ $0.key != sent }).max(by: { $0.opened < $1.opened }) else { return nil }
+    var kept = item
+    kept.changedSinceSent = true
+    kept.current = InboxAttachmentStateCurrent(sha256: String(last.key.dropFirst(prefix.count)), size: last.size, mtime: "")
+    return kept
+  }
+
+  /// What a file opens as: the version asked for, else the one the file opens with; but a file whose sent version
+  /// this phone does not keep, which the computer has not spoken of since the app started, opens as this phone last
+  /// read it (`lastKept`). `keptCopy` says so: that copy is neither the sent version nor known to be the file as it
+  /// is now, so the viewer says only that the computer is away, and offers no other version.
+  public func opening(_ item: AttachmentItem, asked: AttachmentVersion?) -> (item: AttachmentItem, version: AttachmentVersion, keptCopy: Bool) {
+    if asked != .sent, item.changedSinceSent == nil, availability(item, version: .sent) == .notKept, let kept = lastKept(item) { return (kept, .current, true) }
+    return (item, asked ?? item.opens, false)
   }
 
   /// The viewer of a file opened with `openAttachment` closed: room can be made with it again. `version`: the one
@@ -109,7 +198,7 @@ extension InboxSession {
     files.open[item.id] = opened.isEmpty ? nil : opened
   }
 
-  private func fetchAttachment(_ item: AttachmentItem, version: AttachmentVersion, progress: @Sendable @escaping (Int64, Int64?) -> Void) async throws -> URL {
+  func fetchAttachment(_ item: AttachmentItem, version: AttachmentVersion, progress: @Sendable @escaping (Int64, Int64?) -> Void) async throws -> URL {
     // Opened: it goes last when room is made.
     if let key = keptKey(item, version: version), let kept = bytes?.file(key) { return kept }
     if version == .current, let unavailable = item.unavailable { throw AttachmentError.unavailable(unavailable.message) }

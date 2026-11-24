@@ -4,13 +4,22 @@ import { inboxApi } from '../api';
 import { riskFilterWords } from './risk';
 
 const MADE: Record<InboxPullRiskAuto['make'], string> = { guide: 'a guided review', picture_it: 'a Picture page' };
+const MADE_MANY: Record<InboxPullRiskAuto['make'], string> = { guide: 'guided reviews', picture_it: 'Picture pages' };
 
 export function riskAlreadyRanked(answer: InboxPullRiskAnswer): number {
   return answer.auto ? (answer.auto_waiting?.length ?? answer.auto_would_start?.[answer.auto.level] ?? 0) : 0;
 }
 
+export function riskRankPhrase(count: number, level: InboxPullRiskAuto['level'], already: boolean): string {
+  return `${count}${already ? ' already' : ''} ${count === 1 ? 'ranks' : 'rank'} ${riskFilterWords[level]}`;
+}
+
 export function riskRankWords(count: number, level: InboxPullRiskAuto['level'], already: boolean): string {
-  return `${count}${already ? ' already' : ''} ${count === 1 ? 'ranks' : 'rank'} ${riskFilterWords[level]}.`;
+  return `${riskRankPhrase(count, level, already)}.`;
+}
+
+export function riskTurnedOnWords(auto: InboxPullRiskAuto, count: number): string {
+  return `You turned on ${MADE_MANY[auto.make]} for ${riskFilterWords[auto.level]}. ${count === 1 ? 'Make one now?' : 'Make one for each now?'}`;
 }
 
 export function riskMakeWords(make: InboxPullRiskAuto['make']): string {
@@ -24,15 +33,18 @@ export function dismissRanked(keys: readonly string[]): Promise<InboxPullRiskAns
 export function useRankedChoice(keys: readonly string[], onDone: (next: InboxPullRiskAnswer) => void) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const run = async (ask: () => Promise<InboxPullRiskAnswer>, fallback: string) => {
+  const run = async (ask: () => Promise<InboxPullRiskAnswer>, fallback: string): Promise<{ failed: unknown } | null> => {
     setBusy(true);
     setError(null);
     try {
       onDone(await ask());
+      setBusy(false);
+      return null;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : fallback);
+      setBusy(false);
+      return { failed: cause };
     }
-    setBusy(false);
   };
   return {
     busy,

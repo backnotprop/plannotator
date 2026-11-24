@@ -54,9 +54,11 @@ const listing = (paths: string[], extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-async function render(props: { enabled: boolean; snapshotId?: string }, fetchImpl: typeof fetch) {
+type ListingProps = Pick<Parameters<typeof useRepoFiles>[0], 'enabled' | 'snapshotId' | 'filter' | 'listingVersion'>;
+
+async function render(props: ListingProps, fetchImpl: typeof fetch) {
   const latest: { current: RepoFiles | null } = { current: null };
-  const Probe = (p: { enabled: boolean; snapshotId?: string }) => {
+  const Probe = (p: ListingProps) => {
     latest.current = useRepoFiles({ ...p, fetchImpl, eventSourceImpl: FakeEventSource as unknown as typeof EventSource });
     return null;
   };
@@ -66,7 +68,7 @@ async function render(props: { enabled: boolean; snapshotId?: string }, fetchImp
   await act(async () => root?.render(<Probe {...props} />));
   return {
     latest,
-    rerender: async (next: { enabled: boolean; snapshotId?: string }) => {
+    rerender: async (next: ListingProps) => {
       await act(async () => root?.render(<Probe {...next} />));
     },
   };
@@ -145,6 +147,43 @@ describe.skipIf(!hasDom)('useRepoFiles', () => {
     if (state.status !== 'ready') throw new Error('not ready');
     expect(state.paths).toBeNull();
     expect(state.dirs.get('src')?.map((entry) => entry.path)).toEqual(['src/a.ts']);
+  });
+
+  test('a new lazy filter cancels the old request and scopes folder loads without opening a live stream', async () => {
+    const streams = FakeEventSource.opened;
+    const calls: URLSearchParams[] = [];
+    let oldSignal: AbortSignal | null | undefined;
+    let finishOld!: (response: Response) => void;
+    const oldResponse = new Promise<Response>((resolve) => { finishOld = resolve; });
+    const fetchImpl = (async (input: string, init?: RequestInit) => {
+      const params = new URL(input, 'http://localhost').searchParams;
+      calls.push(params);
+      if (params.get('include') === 'docs/**') {
+        oldSignal = init?.signal;
+        return oldResponse;
+      }
+      const dir = params.get('dir') ?? '';
+      const entry = dir
+        ? { name: 'app.ts', path: 'src/app.ts', type: 'file' }
+        : { name: 'src', path: 'src', type: 'dir', files: 1 };
+      return Response.json(listing([], { paths: undefined, total: 300_000, lazy: true, dir, entries: [entry] }));
+    }) as typeof fetch;
+
+    const target = { enabled: true, snapshotId: 's1' };
+    const view = await render({ ...target, filter: { include: 'docs/**', exclude: '' } }, fetchImpl);
+    await view.rerender({ ...target, filter: { include: 'src/**', exclude: '**/*.test.ts' } });
+    expect(oldSignal?.aborted).toBe(true);
+    finishOld(Response.json(listing([], { paths: undefined, lazy: true, entries: [] })));
+    await flush();
+    await act(async () => view.latest.current!.loadDir('src'));
+
+    const state = view.latest.current!.state;
+    if (state.status !== 'ready') throw new Error('not ready');
+    expect(state.dirs.get('')?.map((entry) => entry.path)).toEqual(['src']);
+    expect(state.dirs.get('src')?.map((entry) => entry.path)).toEqual(['src/app.ts']);
+    expect(calls.at(-1)?.get('include')).toBe('src/**');
+    expect(calls.at(-1)?.get('exclude')).toBe('**/*.test.ts');
+    expect(FakeEventSource.opened).toBe(streams);
   });
 
   test('says when the session cannot list', async () => {

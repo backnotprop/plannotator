@@ -15,7 +15,6 @@ import { HOVER_PREVIEW_HIDE_DELAY_MS, HOVER_PREVIEW_SHOW_DELAY_MS } from '@plann
 
 const hasDom = typeof document !== 'undefined';
 const { OpenInCodeHover, OpenInCodeSpan, OpenInCodeSpans, OpenInFile, useOpenInCodeRegion } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
-const { ShapeInline } = (hasDom ? await import('@plannotator/ui/components/shape/inline') : {}) as typeof import('@plannotator/ui/components/shape/inline');
 const { InboxFileSourceProvider, INBOX_FILE_SOURCE } = (hasDom ? await import('./fileSource') : {}) as typeof import('./fileSource');
 
 type Asked = { method: string; url: string; body: Record<string, unknown> | null };
@@ -79,18 +78,18 @@ test.skipIf(!hasDom)('through the tailnet: the apps route refuses, so nothing dr
 });
 
 test.skipIf(!hasDom)('a file on disk: the split button; its primary launches with the scope, the path and the line, and no root', async () => {
-  await act(async () => root!.render(<OpenInFile scope={{ shape: 'shp_one' }} path="src/a.ts" line={12} />));
+  await act(async () => root!.render(<OpenInFile scope={{ thread: 'msg_one' }} path="src/a.ts" line={12} />));
   await settle();
   expect(caret()).not.toBeNull();
   const read = new URL(fileReads()[0]!.url, 'http://x').searchParams;
-  expect(Object.fromEntries(read)).toEqual({ shape: 'shp_one', path: 'src/a.ts' });
+  expect(Object.fromEntries(read)).toEqual({ thread: 'msg_one', path: 'src/a.ts' });
   const primary = host!.querySelector<HTMLButtonElement>('[data-open-in-primary]')!;
   expect(primary.getAttribute('data-open-in-primary')).toBe('vscode');
   await act(async () => primary.click());
   await settle();
   const post = asked.find((a) => a.method === 'POST')!;
   const { serverSession: _session, ...body } = post.body!;
-  expect(body).toEqual({ shape: 'shp_one', path: 'src/a.ts', app_id: 'vscode', line: 12 });
+  expect(body).toEqual({ thread: 'msg_one', path: 'src/a.ts', app_id: 'vscode', line: 12 });
 });
 
 test.skipIf(!hasDom)('a file that is not here: nothing at all', async () => {
@@ -528,8 +527,8 @@ describe('code spans drawn as HTML: Ask AI\'s answers', () => {
   });
 });
 
-describe('code spans in a guide and a board', () => {
-  const scope = { shape: 'shp_x' };
+describe('code spans in a guide and a message', () => {
+  const scope = { thread: 'msg_x' };
   const spans = () => [...host!.querySelectorAll('[data-code-hover]')].map((el) => el.getAttribute('data-code-hover'));
 
   test.skipIf(!hasDom)('a guide: a span naming a file is the control, others and a link label are not', async () => {
@@ -545,28 +544,15 @@ describe('code spans in a guide and a board', () => {
     expect(host!.querySelector('[data-link]')!.querySelector('code')!.textContent).toBe('src/label.ts');
   });
 
-  test.skipIf(!hasDom)('a board: a span naming a file is the control, a number stays a number', async () => {
-    await act(async () =>
-      root!.render(
-        <OpenInCodeSpans scope={scope} on>
-          <p><ShapeInline text="See **`src/b.ts`**, `not code`." /></p>
-        </OpenInCodeSpans>,
-      ),
-    );
-    expect(spans()).toEqual(['src/b.ts']);
-  });
-
   test.skipIf(!hasDom)('with Code review off, and with no host, both draw the same plain span', async () => {
     const drawn = async (node: ReactNode) => {
       await act(async () => root!.render(<div>{node}</div>));
       return host!.innerHTML;
     };
     const guide = () => <p>{renderInlineMarkdown('See `src/a.ts`.')}</p>;
-    const board = () => <p><ShapeInline text="See `src/a.ts`." /></p>;
     const plainGuide = await drawn(guide());
-    const plainBoard = await drawn(board());
     expect(await drawn(<GuideCodeSpanContext.Provider value={null}>{guide()}</GuideCodeSpanContext.Provider>)).toBe(plainGuide);
-    expect(await drawn(<OpenInCodeSpans scope={scope} on={false}>{board()}</OpenInCodeSpans>)).toBe(plainBoard);
+    expect(await drawn(<OpenInCodeSpans scope={scope} on={false}>{guide()}</OpenInCodeSpans>)).toBe(plainGuide);
     expect(spans()).toEqual([]);
     expect(asked.filter((a) => a.url.includes('/open-in/'))).toHaveLength(0);
   });

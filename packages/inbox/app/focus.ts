@@ -2,9 +2,10 @@
 
 import type { ConnectContext } from '../harnesses';
 import { modalOpen } from '../shortcuts/guards';
+import { rowSwipeInHand } from '../rowSwipe';
 import { replyBeingWritten, unsentReply } from '../unsent';
 import { isPhone } from '../phone';
-import { backTo } from '../history';
+import { backTo, type HistoryLike } from '../history';
 import { actedSince, inputMark } from '../lastInput';
 import { focusLost } from '../backFocus';
 import { focusFirst } from '../focusLanding';
@@ -19,7 +20,29 @@ import { hashOf, writeRoute } from './writeRoute';
  * a new entry, so the browser's Back reopens what was just closed.
  */
 export function closeTo(route: Route): void {
-  if (!((isPhone() || leavesCoveringPane(route)) && backTo(hashOf(route)))) writeRoute(route);
+  if (!backOnClose(route, isPhone(), window.history)) writeRoute(route);
+}
+
+/**
+ * The close as the browser's Back (returns true), or nothing and the caller writes a new entry (false). A layer's
+ * diff opened from Reviews' list (a layer's row) goes back to that list, as a phone's swipe back does, and the list
+ * it lands on shows that layer selected, its stack unfolded (`&back=`); opened from its stack's page, to that page.
+ */
+export function backOnClose(route: Route, phone: boolean, history: HistoryLike): boolean {
+  const list = listUnder(route);
+  if (list && (phone || covering.thread) && backTo(backHashOf(list), history, sameScreen, () => writeRoute(list, { replace: true }))) return true;
+  return (phone || leavesCoveringPane(route)) && backTo(backHashOf(route), history, sameScreen);
+}
+
+/** The entry a close goes back to: the layer a diff closed from (`backLayer`) is only the list's selection, not a screen. */
+export const backHashOf = (route: Route): string => hashOf({ ...route, backLayer: null });
+
+/** An entry is the screen a close goes back to whatever layer its list showed selected (`&back=`, not a screen). */
+const sameScreen = (from: string, hash: string): boolean => from === hash || (from.startsWith('#reviews') && from.replace(/&back=[^&]*/, '') === hash);
+
+/** The Reviews list under a layer's closed diff (`layerClosed`), that layer its selection; null for any other close. */
+export function listUnder(closed: Route): Route | null {
+  return closed.page === 'reviews' && closed.stack && closed.backLayer ? { ...closed, stack: null, layer: null, scope: 'layer' } : null;
 }
 
 /**
@@ -33,11 +56,12 @@ export function closeTo(route: Route): void {
 export const covering = { thread: false };
 
 export function leavesCoveringPane(route: Route): boolean {
+  if (!covering.thread) return false;
   const from = readRoute();
-  if (covering.thread && route.page === 'inbox' && !route.thread) {
+  if (route.page === 'inbox' && !route.thread) {
     return from.page === 'inbox' && !!from.thread && !from.file && !from.guide;
   }
-  if (covering.thread && route.page === 'reviews' && !route.stack) {
+  if (route.page === 'reviews' && !route.stack) {
     return from.page === 'reviews' && !!from.stack && !from.layer;
   }
   return false;
@@ -95,9 +119,10 @@ export function replyInProgress(): boolean {
 /**
  * The list options dialog waits (its claim unspent, or a claimed one unopened) while anything else is over the page or
  * a reply is under way: another dialog, a modal panel ui draws (`aria-modal`), an image opened full size, a pinned
- * reference card, a reply being typed, or a reply box left open with words or files in it, wherever focus is.
+ * reference card, a reply being typed, a reply box left open with words or files in it, wherever focus is, or a row
+ * being swiped or resting open on its action (rowSwipe.ts `rowSwipeInHand`: never a dialog under a finger).
  */
 export function listIntroHeldBack(): boolean {
-  if (modalOpen() || replyInProgress() || replyBeingWritten()) return true;
+  if (modalOpen() || replyInProgress() || replyBeingWritten() || rowSwipeInHand()) return true;
   return document.querySelector('[role="dialog"][aria-modal="true"], [data-image-lightbox], [data-ref-card-pinned]') !== null;
 }

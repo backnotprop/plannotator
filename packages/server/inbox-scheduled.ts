@@ -27,6 +27,7 @@ import {
   inboxScheduleWords,
   SCHEDULED_LATE_MS,
   SCHEDULED_TICK_MS,
+  routineLineText,
 } from "@plannotator/core/inbox-scheduled";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
@@ -240,9 +241,12 @@ export function createInboxScheduled(deps: {
 
   // ── What an agent's change says in its thread ──
 
-  const linkOf = (record: InboxScheduledThread) => `[${record.name.replace(/[[\]]/g, "")}](#routine=${record.id})`;
-  const folderWords = (folder: InboxScheduledFolder) =>
-    "scratch" in folder ? "a new scratch folder" : "path" in folder ? deps.displayFolder(folder.path) : (store.project(folder.project_id) && deps.displayFolder(store.project(folder.project_id)!.root)) || "a folder that is gone";
+  const linkOf = (record: InboxScheduledThread) => `[${routineLineText(record.name.replace(/[[\]]/g, ""))}](#routine=${record.id})`;
+  const folderWords = (folder: InboxScheduledFolder) => {
+    if ("scratch" in folder) return "a new scratch folder";
+    const words = "path" in folder ? deps.displayFolder(folder.path) : store.project(folder.project_id) && deps.displayFolder(store.project(folder.project_id)!.root);
+    return words ? routineLineText(words, "path") : "a folder that is gone";
+  };
   const agentWords = (agent: string) => INBOX_HOST_NAMES[agent] ?? agent;
   const scheduleSentence = (schedule: InboxScheduledSchedule) => (schedule ? inboxScheduleWords(schedule).replace(/^Every /, "every ").replace(/^Once /, "once ").replace(/^On the /, "on the ") : "only when someone runs it");
   const fence = (lines: string[]) => {
@@ -254,7 +258,8 @@ export function createInboxScheduled(deps: {
   /**
    * Every change an agent makes says so, as that agent: in the thread it named, else in the routine's own thread (made
    * for the line when the routine has none yet, where its first run would go). The line is no one's words: it takes
-   * no reply and wakes no run (the store's `threadOwner`, the window's `wordsMessage`).
+   * no reply and wakes no run (the store's `threadOwner`, the window's `wordsMessage`). With no thread and no project
+   * to make one in (a scratch routine while New message is off), nothing is posted: null, and the result says so.
    */
   const tell = async (by: InboxScheduledBy, record: InboxScheduledThread, body: string, change: Omit<InboxScheduledChange, "scheduled_id" | "name">): Promise<string | null> => {
     if (by.kind !== "agent") return null;
@@ -275,7 +280,7 @@ export function createInboxScheduled(deps: {
     if (fields.includes("schedule")) out.push(`It now runs ${scheduleSentence(after.schedule)} (was ${scheduleSentence(before.schedule)}).`);
     if (fields.includes("folder")) out.push(`It now works in ${folderWords(after.folder)} (was ${folderWords(before.folder)}).`);
     if (fields.includes("agent")) out.push(`It now uses ${agentWords(after.agent)} (was ${agentWords(before.agent)}).`);
-    if (fields.includes("name")) out.push(`Its name was ${before.name}.`);
+    if (fields.includes("name")) out.push(`Its name was ${routineLineText(before.name)}.`);
     const rest = fields.filter((f) => !["schedule", "folder", "agent", "name", "prompt"].includes(f));
     if (rest.length > 0) out.push(`Also changed: ${rest.join(", ").replace(/_/g, " ")}.`);
     if (fields.includes("prompt")) out.push(`The prompt:\n\n${fence([...before.prompt.split("\n").map((l) => `- ${l}`), ...after.prompt.split("\n").map((l) => `+ ${l}`)])}`);
@@ -530,7 +535,7 @@ export function createInboxScheduled(deps: {
       return { record: found(record.id), told };
     },
 
-    async update(id: string, input: InboxScheduledInput, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; told: string | null }> {
+    async update(id: string, input: InboxScheduledInput, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; changed: boolean; told: string | null }> {
       found(id);
       const fields = await fieldsOf(input, false);
       // Folder validation can yield to a concurrent edit or delete. Apply only the fields
@@ -538,7 +543,7 @@ export function createInboxScheduled(deps: {
       const before = found(id);
       if (input.schedule !== undefined) fields.schedule = scheduleOf(input.schedule, before.schedule);
       const changed = (Object.keys(fields) as (keyof InboxScheduledThread)[]).filter((key) => JSON.stringify(fields[key] ?? null) !== JSON.stringify(before[key] ?? null));
-      if (changed.length === 0) return { record: before, told: null };
+      if (changed.length === 0) return { record: before, changed: false, told: null };
       // An agent that changes where it works or which agent runs it hands the switch back to the person.
       const moved = by.kind === "agent" && (changed.includes("folder") || changed.includes("agent"));
       const patch: Partial<InboxScheduledThread> = { ...fields, ...(moved ? { enabled: false, approved_at: null } : {}) };
@@ -552,19 +557,19 @@ export function createInboxScheduled(deps: {
         fields: changed as InboxScheduledChange["fields"],
         ...(turnedOff ? { turned_off: true as const } : {}),
       });
-      return { record, told };
+      return { record, changed: true, told };
     },
 
-    async setOn(id: string, on: boolean, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; told: string | null }> {
+    async setOn(id: string, on: boolean, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; changed: boolean; told: string | null }> {
       const before = found(id);
       if (on && by.kind === "agent" && !before.approved_at) {
         throw new InboxError("routine_not_approved", `The person turns ${before.name} on the first time, in the Inbox. Nothing was changed.`);
       }
-      if (before.enabled === on) return { record: before, told: null };
+      if (before.enabled === on) return { record: before, changed: false, told: null };
       const at = iso();
       const record = save(before, on ? { enabled: true, handled_through: at, ...(by.kind === "person" ? { approved_at: at } : {}) } : { enabled: false });
       const told = await tell(by, record, `Turned the routine ${linkOf(record)} ${on ? "on" : "off"}.`, { op: on ? "on" : "off" });
-      return { record, told };
+      return { record, changed: true, told };
     },
 
     /** Run now: the run's divider (its `scheduled_run.failed` says why when it didn't start). */
@@ -582,10 +587,14 @@ export function createInboxScheduled(deps: {
       return { message, told };
     },
 
-    async stopRun(id: string): Promise<InboxScheduledThread> {
+    /**
+     * Stop. `run`: the run it was pressed for (its divider's id), so a Stop that waited for this computer (asleep at
+     * 8:55) never ends a later run (9:00's); that run already over, it does nothing. Without it: the run going now.
+     */
+    async stopRun(id: string, run?: string): Promise<InboxScheduledThread> {
       const record = found(id);
       const running = runningOf(record);
-      if (running) await stopRunning(running.message_id);
+      if (running && (run === undefined || running.message_id === run)) await stopRunning(running.message_id);
       return record;
     },
 
@@ -595,7 +604,7 @@ export function createInboxScheduled(deps: {
       const running = runningOf(record);
       if (running) await stopRunning(running.message_id);
       save(found(id), { deleted_at: iso() });
-      return { told: await tell(by, record, `Deleted the routine ${record.name}. Its thread and past runs stay.`, { op: "delete" }) };
+      return { told: await tell(by, record, `Deleted the routine ${routineLineText(record.name)}. Its thread and past runs stay.`, { op: "delete" }) };
     },
 
     /** The window's Undo of a delete: back as it was, counting from now (nothing due meanwhile is caught up). */

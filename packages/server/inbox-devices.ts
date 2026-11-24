@@ -46,6 +46,8 @@
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
+import { INBOX_CAPABILITY_SWITCH_KEYS } from "@plannotator/core/inbox-types";
+import { CAPABILITY_NOTE_FIELD } from "./inbox-capability-note";
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { hostname } from "node:os";
@@ -65,6 +67,7 @@ import { INBOX_DEVICE_MARKUP_MAX_BYTES } from "@plannotator/shared/inbox/markups
 import { inboxDiskFullError, INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
 import { describeTailscaleFailure, runTailscale, serveStatusProxy, TAILSCALE_CLI_TIMEOUT_MS, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner, type TailscaleRunResult } from "@plannotator/shared/tailscale";
 import { MACHINE_WINDOW_HEADER } from "./inbox-outbox";
+import { INBOX_SENT_FROM_HEADER, inboxSentFromPlaceOf, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
 import { formatInboxAppHeader } from "@plannotator/core/inbox-door-version";
 import { APP_HEADER, APP_UPGRADE, appBelowFloor, parseAppHeader, type DoorDeviceApp } from "./inbox-door-version";
 import { INBOX_SNOOZE_HELD } from "./inbox-snooze";
@@ -164,6 +167,17 @@ function refuse(status: number, code: string, error: string, details: Record<str
 }
 
 /**
+ * A raw command (a file to `uploads` or `markups`) carries its key in the query, which rides on whole: the door's
+ * refusal when it has none, before a byte of the file is taken. Null: it has one. Exported so a stand-in door in a
+ * test refuses exactly what this door refuses (inbox-far-reply-files.test.ts).
+ */
+export function rawCommandKeyRefusal(search: URLSearchParams): Response | null {
+  const key = search.get("idempotency_key");
+  if (key !== null && key.trim()) return null;
+  return refuse(422, "validation_error", "idempotency_key: required on a phone's command (in the query for a file).", { field: "idempotency_key" });
+}
+
+/**
  * A path the door does not open to this caller: `404 device_route_not_found`. Clients act on the code (a linked
  * machine reads it as "needs an update"), never the words. A linked machine's own Inbox gets words for a computer;
  * a phone, and a caller not known yet, "Not a phone route."
@@ -175,7 +189,7 @@ function routeNotFound(device: Pick<InboxDevice, "platform"> | null = null): Res
 /**
  * The allowlist (contract section 2): door route to the window's route. A
  * door path outside it is `404 device_route_not_found`; the window, `/mcp`,
- * the bridge, control, settings, restart, the raw text route
+ * the bridge, control, settings (but Capabilities' switches, for a linked machine), restart, the raw text route
  * (`attachments/<id>`; text reaches the phone through `view`), project
  * deletion, drafts, recent searches, "Open in",
  * pairing and the device list are never on it. An attachment's bytes reach
@@ -202,6 +216,10 @@ interface DoorRoute {
   fromMachine?: string;
   /** Only a linked machine's token reaches it (a phone gets the unknown-route 404): starting and stopping agents from another machine. */
   machineOnly?: true;
+  /** The only body fields it takes (with `idempotency_key`); any other is refused (`422`) before the window route runs. */
+  only?: readonly string[];
+  /** A field the door takes besides `only` and never hands to the window route: the caller's note, told after it applies. */
+  note?: string;
 }
 
 const ALLOWLIST: readonly DoorRoute[] = [
@@ -219,6 +237,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^threads\/archived$/, window: () => "/api/inbox/threads/archived" },
   { method: "GET", route: /^threads\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}` },
   { method: "POST", route: /^threads\/([^/]+)\/seen$/, window: (m) => `/api/inbox/threads/${m[1]}/seen` },
+  // Grid's look at this Inbox's threads (approval "inbox-agent-grid", inbox-grid-seen.ts): a phone's or a linked machine's.
+  { method: "POST", route: /^grid\/seen$/, window: () => "/api/inbox/grid/seen" },
   // Mark read, its Undo (`unread`: Move back) and Mark unread (`mark-unread`).
   { method: "POST", route: /^threads\/([^/]+)\/(read|unread|mark-unread)$/, window: (m) => `/api/inbox/threads/${m[1]}/${m[2]}` },
   // Snooze and Unsnooze (approval "inbox-snooze"): a snooze lives on the thread's home machine.
@@ -260,17 +280,32 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^reviews\/branches$/, window: () => "/api/inbox/reviews/branches", machineOnly: true },
   { method: "GET", route: /^pulls\/(risk|details|diff|file|repo-files|repo-file|avatar|media|media\/sizes)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   { method: "POST", route: /^pulls\/(close|reopen|merge|owner)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
+  // Ship (approval "inbox-ship-mode"): a ship lives on the machine of its agent's thread; a window on either ships,
+  // reads and stops it there.
+  { method: "GET", route: /^ships$/, window: () => "/api/inbox/ships", machineOnly: true },
+  { method: "GET", route: /^ships\/log$/, window: () => "/api/inbox/ships/log", machineOnly: true },
+  { method: "POST", route: /^ships$/, window: () => "/api/inbox/ships", machineOnly: true },
+  { method: "POST", route: /^ships\/stop$/, window: () => "/api/inbox/ships/stop", machineOnly: true },
+  // A linked computer's Inbox started shipping a pull request: an older ship of it here stops (one ship per PR).
+  { method: "POST", route: /^ships\/newer$/, window: () => "/api/inbox/ships/newer", machineOnly: true },
   // "Changed since you looked" (approval "inbox-pr-dashboard"): the look at a PR lives on the machine that lists it.
   { method: "POST", route: /^pulls\/looked$/, window: () => "/api/inbox/pulls/looked", machineOnly: true },
   // A thread's PRs (approval "inbox-pr-binding"): read, added and removed on the thread's own machine.
   { method: "GET", route: /^threads\/([^/]+)\/pulls$/, window: (m) => `/api/inbox/threads/${m[1]}/pulls`, machineOnly: true },
   { method: "POST", route: /^threads\/([^/]+)\/pulls$/, window: (m) => `/api/inbox/threads/${m[1]}/pulls`, machineOnly: true },
+  // Pinned artifacts (mark `artifact-pins`, approval "inbox-artifact-stars"): a linked machine's window pins and unpins
+  // this Inbox's threads' artifacts here, and reads this Inbox's Artifacts wall. A phone never sees artifact pins.
+  { method: "POST", route: /^artifact-pins$/, window: () => "/api/inbox/artifact-pins", machineOnly: true },
+  { method: "GET", route: /^artifacts$/, window: () => "/api/inbox/artifacts", machineOnly: true },
   { method: "GET", route: /^events$/, window: () => "/api/inbox/events" },
   // `to`: Send to another session (7.41), a person message no session took yet. `ack`: 👍 Looks good and its Undo (7.56).
   // `reask`: Re-ask, the agent asks its open questions again in one message (7.61).
   { method: "POST", route: /^messages\/([^/]+)\/(picks|reply|resolve|to|ack|send-now|take-back|reask)$/, window: (m) => `/api/inbox/messages/${m[1]}/${m[2]}` },
   // A hand-off's Undo inside its window (approval "inbox-tag-handoff", contract 7.64): the reply goes as an Ask.
   { method: "POST", route: /^messages\/([^/]+)\/handoff\/undo$/, window: (m) => `/api/inbox/messages/${m[1]}/handoff/undo` },
+  // Remove an agent from a thread, and its Undo (approval "inbox-remove-agent-from-thread", mark `remove-agent`).
+  { method: "POST", route: /^threads\/([^/]+)\/remove-agent$/, window: (m) => `/api/inbox/threads/${m[1]}/remove-agent` },
+  { method: "POST", route: /^threads\/([^/]+)\/remove-agent\/undo$/, window: (m) => `/api/inbox/threads/${m[1]}/remove-agent/undo` },
   // An action item's Done or Can't do it, and its Undo (approval "inbox-next-actions", contract 7.63).
   { method: "POST", route: /^messages\/([^/]+)\/actions\/(a-[0-9a-f]{8}(?:-\d{1,3})?)$/, window: (m) => `/api/inbox/messages/${m[1]}/actions/${m[2]}` },
   // Run on a `:::run` block, its Stop and Open in terminal, and Save or Remove on a `:::secret` block: the person on
@@ -346,6 +381,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^combine$/, window: () => "/api/inbox/combine", machineOnly: true },
   { method: "POST", route: /^combine$/, window: () => "/api/inbox/combine", machineOnly: true },
   { method: "POST", route: /^combine\/(cmb_[^/]+)\/(cancel|undo)$/, window: (m) => `/api/inbox/combine/${m[1]}/${m[2]}`, machineOnly: true },
+  // A linked computer's Combine that holds some of this Inbox's threads marks them busy here while it waits, and lets go
+  // (approval "inbox-combine-across-computers"; inbox-combine-across.ts). A machine's token only: the route knows which.
+  { method: "POST", route: /^combine\/hold$/, window: () => "/api/inbox/combine/hold", machineOnly: true },
   // A launched agent's Stop, Try again, Trust folder and Delete from a linked machine's window (remote launch). Open in
   // Terminal and the launch settings never cross: they are this computer's.
   { method: "POST", route: /^launch\/([^/]+)\/(stop|retry|trust|delete)$/, window: (m) => `/api/inbox/launch/${m[1]}/${m[2]}`, machineOnly: true },
@@ -362,19 +400,46 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^launch\/folders$/, window: () => "/api/inbox/launch/folders", machineOnly: true },
   // Clone from a git URL: where a URL would be cloned on that machine, and whether its git can read it.
   { method: "GET", route: /^launch\/(clone|clone-check)$/, window: (m) => `/api/inbox/launch/${m[1]}`, machineOnly: true },
+  // Routines (mark `routines`): a linked computer's window lists, opens, previews, makes, edits, turns on or off, runs,
+  // stops, deletes and brings back this Inbox's routines here, which run here as ever. The window's own routes, so the
+  // same checks: a write only with the window's mark (`scheduledRoute`'s `farWindow`), Routines off answers
+  // `routines_off`. Phones have no Routines.
+  { method: "GET", route: /^scheduled$/, window: () => "/api/inbox/scheduled", machineOnly: true },
+  { method: "GET", route: /^scheduled\/(sch_[A-Za-z0-9_-]{1,80})$/, window: (m) => `/api/inbox/scheduled/${m[1]}`, machineOnly: true },
+  { method: "POST", route: /^scheduled$/, window: () => "/api/inbox/scheduled", machineOnly: true },
+  { method: "POST", route: /^scheduled\/preview$/, window: () => "/api/inbox/scheduled/preview", machineOnly: true },
+  { method: "POST", route: /^scheduled\/(sch_[A-Za-z0-9_-]{1,80})$/, window: (m) => `/api/inbox/scheduled/${m[1]}`, machineOnly: true },
+  { method: "POST", route: /^scheduled\/(sch_[A-Za-z0-9_-]{1,80})\/(on|off|run|stop|delete|restore)$/, window: (m) => `/api/inbox/scheduled/${m[1]}/${m[2]}`, machineOnly: true },
+  // Settings → Capabilities' switches (mark `capabilities`, core inbox-capability-switches.ts): a linked computer's
+  // window reads them, and turns one on or off through the settings route with those keys alone. No other setting.
+  { method: "GET", route: /^capabilities$/, window: () => "/api/inbox/capabilities", machineOnly: true },
+  // `capability_note`: which agent there turned it, so this computer posts its own line (inbox-capability-note.ts).
+  { method: "POST", route: /^capabilities$/, window: () => "/api/inbox/settings", machineOnly: true, only: INBOX_CAPABILITY_SWITCH_KEYS, note: CAPABILITY_NOTE_FIELD },
 ];
 
 /**
  * The door's own routes, beside the allowlist: `pair` (no token, answered before the token is read), `revoke`, and a
  * linked machine's own (never on the allowlist, so no phone reaches them): its link-back and unlink (inbox-machines.ts
- * answers them), this computer's update, read and started for a linked machine's window, and this computer's
- * accounts. `serve` answers the machine's through `machineOwn`, typed by this list, so a route here without an answer,
+ * answers them), this computer's update, read and started for a linked machine's window, this computer's accounts,
+ * and its agents' reads of this computer's threads and their files (`agent-read`, `agent-file`), search and list (`agent-search`, `agent-threads`). `serve` answers the machine's through `machineOwn`, typed by this list, so a route here without an answer,
  * or an answer not here, does not compile. `needs`: answered only while this Inbox has it, and only then listed.
  */
 const DOOR_OWN_ROUTES = [
   { method: "POST", route: "pair", grant: "phone" },
   { method: "POST", route: "revoke", grant: "phone" },
   { method: "GET", route: "accounts", grant: "machine" },
+  // A linked machine's agent reads this Inbox's threads and fetches the files they list (inbox-far-read.ts, mark `agent-read`).
+  { method: "GET", route: "agent-read", grant: "machine", needs: "machines" },
+  { method: "GET", route: "agent-file", grant: "machine", needs: "machines" },
+  // Its agent's search and thread list of this Inbox's threads (inbox-far-find.ts, mark `agent-search`).
+  { method: "GET", route: "agent-search", grant: "machine", needs: "machines" },
+  { method: "GET", route: "agent-threads", grant: "machine", needs: "machines" },
+  // Tag an agent on another computer (inbox-far-tags.ts, mark `tag-across`): this Inbox's agents for that computer's
+  // `@` list, a wake that computer hands one of them, one of its sessions' answer in a thread here, and its delivery.
+  { method: "GET", route: "taggable-agents", grant: "machine", needs: "machines" },
+  { method: "POST", route: "far-wake", grant: "machine", needs: "machines" },
+  { method: "POST", route: "agent-reply", grant: "machine", needs: "machines" },
+  { method: "POST", route: "far-delivered", grant: "machine", needs: "machines" },
   { method: "POST", route: "link-back", grant: "machine", needs: "machines" },
   { method: "POST", route: "unlink", grant: "machine", needs: "machines" },
   { method: "GET", route: "update", grant: "machine", needs: "machine_update" },
@@ -387,6 +452,12 @@ type DoorOwnRoute = (typeof DOOR_OWN_ROUTES)[number];
 /** A linked machine's own routes by name (`POST link-back`). */
 type OwnName<R> = R extends { method: infer M extends string; route: infer P extends string } ? `${M} ${P}` : never;
 type MachineOwnName = OwnName<Extract<DoorOwnRoute, { grant: "machine" }>>;
+
+/** Of an answer, only the named fields (a route with `only`). */
+function onlyFields(answer: unknown, only: readonly string[]): Record<string, unknown> {
+  if (!answer || typeof answer !== "object" || Array.isArray(answer)) return {};
+  return Object.fromEntries(Object.entries(answer).filter(([field]) => only.includes(field)));
+}
 
 /** Door routes the sealed relay path never carries (`asDevice`): `pair`, and the event stream. Raw bodies neither. */
 const NOT_BY_RELAY = new Set(["pair", "events"]);
@@ -596,6 +667,19 @@ export interface InboxDevicesContext {
   phones?: boolean;
   /** Linked machines (inbox-machines.ts): the two door routes only a machine calls. Bound after both exist. */
   machines?: () => InboxDoorMachines | null;
+  /** A door write's note (`DoorRoute.note`), once its write applied: the device that sent it, the note as sent, the write. */
+  noted?: (device: InboxDevice, note: unknown, written: Record<string, unknown>) => void;
+  /** A linked machine's agents' reads of this Inbox's threads and their files (inbox-far-read.ts). */
+  agentRead?: { read: (url: URL, device: InboxDevice) => Response; file: (url: URL) => Promise<Response> };
+  /** A linked machine's agents' search and thread list of this Inbox's threads (inbox-far-find.ts). */
+  agentFind?: { search: (url: URL) => Promise<Response>; threads: (url: URL) => Response | Promise<Response> };
+  /** Tag an agent on another computer (inbox-far-tags.ts, inbox-far-wakes.ts): each write named by the machine whose token sent it. */
+  farTags?: {
+    agents: () => Response;
+    wake: (machine: string, body: Record<string, unknown>) => unknown;
+    reply: (machine: string, body: Record<string, unknown>) => Promise<unknown>;
+    delivered: (machine: string, body: Record<string, unknown>) => unknown;
+  };
   /** A linked machine's Update (inbox-updates.ts). */
   machineUpdate?: { read: () => unknown; start: () => Promise<{ outcome: string }> };
   /** Tests: the door's look-again clock (`INBOX_DOOR_REPUBLISH`). Default: unref'd timers. */
@@ -613,6 +697,8 @@ export interface InboxDoorCaller {
   name: string;
   platform: string;
   window: boolean;
+  /** A linked machine says where the person was when not at its own window (`X-Plannotator-Sent-From`); a phone's never counts. */
+  place?: InboxSentFromPlace | null;
 }
 
 /** What the door hands to inbox-machines.ts. */
@@ -623,6 +709,8 @@ export interface InboxDoorMachines {
   unlinkedBy: (deviceId: string) => Response;
   /** A machine is linked: publish the tailnet door at start even with Phones off. */
   hasLinks: () => boolean;
+  /** The linked machine a door device belongs to, or null. */
+  machineOfDevice?: (deviceId: string) => { machine: string; name: string } | null;
 }
 
 /** The platform a linked Inbox pairs as. */
@@ -1017,6 +1105,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       name: device.name,
       platform: device.platform,
       window: device.platform === MACHINE_PLATFORM && req.headers.get(MACHINE_WINDOW_HEADER) === "1",
+      place: device.platform === MACHINE_PLATFORM ? inboxSentFromPlaceOf(req.headers.get(INBOX_SENT_FROM_HEADER)) : null,
     };
     return context.dispatch(new Request(`http://127.0.0.1:${context.port()}${windowPath}${search}`, { method: req.method, headers, body, signal }), from);
   };
@@ -1040,10 +1129,9 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const metered = req.body ? meteredBody(req.body, raw.max, () => new InboxError(raw.code, `${raw.what} is too large.`)) : null;
       /** Every raw answer: what is left of the file read and dropped (bounded), else the connection closes. */
       const finish = async (response: Response) => ((await metered?.settle()) === false ? withClose(response) : response);
-      const key = url.searchParams.get("idempotency_key");
-      if (key === null || !key.trim()) {
-        return finish(refuse(422, "validation_error", "idempotency_key: required on a phone's command (in the query for a file).", { field: "idempotency_key" }));
-      }
+      const missing = rawCommandKeyRefusal(url.searchParams);
+      if (missing) return finish(missing);
+      const key = url.searchParams.get("idempotency_key")!;
       return claim(req, device, doorPath, key, finish, async () => {
         const response = await toWindow(req, device, windowPath, url.search, metered?.stream ?? null, req.signal, true);
         const answer = await response.text();
@@ -1069,10 +1157,22 @@ export function createInboxDevices(context: InboxDevicesContext) {
     for (const refused of entry.refuse ?? []) {
       if (fields[refused.field] !== undefined) throw new InboxError("validation_error", refused.message, { field: refused.field });
     }
+    const outside = entry.only ? Object.keys(fields).find((field) => field !== "idempotency_key" && field !== entry.note && !entry.only!.includes(field)) : undefined;
+    if (outside !== undefined) throw new InboxError("validation_error", `${outside}: not taken here; only ${entry.only!.join(", ")}.`, { field: outside });
+    // The caller's note goes no further than here: the window route gets the write alone.
+    const note = entry.note && fields[entry.note] !== undefined ? fields[entry.note] : undefined;
+    if (entry.note && note !== undefined) {
+      const { [entry.note]: _note, ...rest } = fields;
+      text = JSON.stringify(rest);
+    }
     return claim(req, device, doorPath, key, async (response) => response, async () => {
       const response = await toWindow(req, device, windowPath, device.platform === MACHINE_PLATFORM ? (entry.fromMachine ?? "") : "", text, req.signal);
-      const answer = await response.text();
-      return { response: new Response(answer, { status: response.status, headers: response.headers }), answer, status: response.status, record: true };
+      if (note !== undefined && response.ok) context.noted?.(device, note, JSON.parse(text) as Record<string, unknown>);
+      // A route that takes only some fields answers only those: the settings route's answer says every setting.
+      const answer = entry.only && response.ok ? JSON.stringify(onlyFields(await response.json().catch(() => ({})), entry.only)) : await response.text();
+      const headers = new Headers(response.headers);
+      headers.delete("content-length");
+      return { response: new Response(answer, { status: response.status, headers }), answer, status: response.status, record: true };
     });
   };
 
@@ -1138,10 +1238,34 @@ export function createInboxDevices(context: InboxDevicesContext) {
   /** Whether this Inbox answers an own route that needs something: linked machines, or Update from another machine. */
   const hasOwn = (needs: DoorOwnNeeds): boolean => (needs === "machines" ? (context.machines?.() ?? null) !== null : context.machineUpdate !== undefined);
 
+  /** A far tag's write from a linked machine (inbox-far-tags.ts): the machine its token belongs to, and its answer or refusal. */
+  const farTagWrite = async (device: InboxDevice, body: () => Promise<Record<string, unknown>>, run: (machine: string, body: Record<string, unknown>) => unknown): Promise<Response> => {
+    const machine = context.machines?.()?.machineOfDevice?.(device.id)?.machine ?? null;
+    if (!machine) return routeNotFound(device);
+    try {
+      return json(await run(machine, await body()));
+    } catch (error) {
+      if (error instanceof InboxError && (error.code === "message_not_found" || error.code === "thread_not_found")) return json({ error: error.message, code: error.code }, 404);
+      if (error instanceof InboxError && error.code === "not_your_session") return json({ error: error.message, code: error.code }, 403);
+      return caught(error);
+    }
+  };
+
   /** A linked machine's own routes (`DOOR_OWN_ROUTES`), each answered only when `hasOwn` says so. */
   const machineOwn: Record<MachineOwnName, (req: Request, url: URL, device: InboxDevice) => Promise<Response>> = {
     // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
     "GET accounts": (req, url, device) => toWindow(req, device, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal),
+    // read_thread's read of one of this Inbox's threads, and a file it lists: reads only, as a guest's.
+    "GET agent-read": async (_req, url, device) => context.agentRead?.read(url, device) ?? routeNotFound(device),
+    "GET agent-file": async (_req, url, device) => (context.agentRead ? await context.agentRead.file(url) : routeNotFound(device)),
+    // Its agent's search and thread list here: reads only, as a guest's.
+    "GET agent-search": async (_req, url, device) => (context.agentFind ? await context.agentFind.search(url) : routeNotFound(device)),
+    "GET agent-threads": async (_req, url, device) => (context.agentFind ? await context.agentFind.threads(url) : routeNotFound(device)),
+    // Tag an agent on another computer (inbox-far-tags.ts): who the machine asking is comes from its token only.
+    "GET taggable-agents": async (_req, _url, device) => (context.farTags ? context.farTags.agents() : routeNotFound(device)),
+    "POST far-wake": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.wake) : routeNotFound(device)),
+    "POST agent-reply": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.reply) : routeNotFound(device)),
+    "POST far-delivered": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.delivered) : routeNotFound(device)),
     "POST link-back": async (req, _url, device) => context.machines?.()?.linkBack(device.id, await context.readBody(req)) ?? routeNotFound(device),
     "POST unlink": async (_req, _url, device) => context.machines?.()?.unlinkedBy(device.id) ?? routeNotFound(device),
     // The body is never read, so a machine cannot name a version or a place to download from.

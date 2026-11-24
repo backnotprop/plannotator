@@ -473,12 +473,15 @@
       "id": "window-036",
       "title": "A file opened beside a thread folds the sidebar away temporarily",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02"
+      ],
       "mobile": "rethink",
       "why": "A file opens full screen over the thread",
       "source": "SCOPE C. Sidebar; L61",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -1472,12 +1475,12 @@
     },
     {
       "id": "window-110",
-      "title": "Code review offer card (\"A new way to review\", Not now / \"Turn on code review\") — currently never shown",
+      "title": "Code review offer card (\"A new way to review\", Not now / \"Turn on code review\")",
       "surface": [],
       "flows": [],
       "mobile": "later",
-      "why": "L-off: the offer is never shown today",
-      "reason": "L-off",
+      "why": "L-door: after v1, slice S9 (owner, 2026-11-18: managing the computer comes later): turning a capability on at the computer from a phone",
+      "reason": "L-door",
       "source": "SCOPE I. One-time dialogs, tips and their schedule; L174",
       "ios": {
         "state": "not-started"
@@ -2381,7 +2384,7 @@
     },
     {
       "id": "window-178",
-      "title": "Capabilities section: switches for the Board, the Checklist, Code review (with Chapter diagrams), Shape; \"Experimental\" group: Decision mode, Bro mode, Float reply drafts; Routines switch",
+      "title": "Capabilities section: switches for the Board, the Checklist, Code review (with Chapter diagrams), Shape; \"Experimental\" group: Decision mode, Grid, Bro mode, Float reply drafts; Routines switch",
       "surface": [],
       "flows": [],
       "mobile": "later",
@@ -2530,12 +2533,14 @@
       "id": "window-190",
       "title": "A file covers the thread full screen: toolbar bottom right with 44 px targets (‹ Back to the thread, pen, comment count, ⋯, Hide tools); count opens the annotation panel as a bottom sheet; Hide tucks the toolbar into a 44 × 52 px handle",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02"
+      ],
       "mobile": "v1",
       "why": "Full-screen cover with a toolbar",
       "source": "SCOPE O. Phone layout (under 768 px) as described in this guide; L324",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -2547,7 +2552,7 @@
       "why": "Native sheets",
       "source": "SCOPE O. Phone layout (under 768 px) as described in this guide; L325",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -2844,7 +2849,7 @@
       "why": "Thread foot bar",
       "source": "SCOPE Q. Thread view: reading, question cards, the foot, Send; L349",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -2886,14 +2891,14 @@
     },
     {
       "id": "window-218",
-      "title": "Reply box: one card, words first; chevron at top right closes it and keeps the draft (as Esc); row with Send, paperclip, Skills (inserts `/`, opens the skill list), mic, a middle cell with what goes with the reply and the recipient pill, and a bin \"Discard draft\"",
+      "title": "Reply box: one card, words first; chevron at top right closes it and keeps the draft (as Esc); row with Send, paperclip, Skills (inserts `/`, opens the skill list), mic, a middle cell with what goes with the reply, and a bin \"Discard draft\"; with several agents, the recipient chip at the start of the words (a phone: the mark-only control in the row)",
       "surface": [],
       "flows": [],
       "mobile": "v1",
       "why": "Native reply box",
       "source": "SCOPE Q. Thread view: reading, question cards, the foot, Send; L380-L381",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3078,6 +3083,9 @@
       "title": "Take back: pull an unsent-to-agent message back into the reply draft (button beside Send now and in the message ⋯ menu); refusal line when too late",
       "surface": [
         "door:POST messages/:id/take-back",
+        "field:DoorTakeBackAnswer.compose",
+        "field:DoorTakeBackAnswer.draft",
+        "field:DoorTakeBackAnswer.message",
         "field:InboxMessageWire.read_by_agent",
         "window:/api/inbox/messages/:id/take-back"
       ],
@@ -3086,7 +3094,7 @@
       "why": "Take back",
       "source": "SCOPE Q. Thread view: reading, question cards, the foot, Send; L362",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3239,7 +3247,8 @@
       "why": "Photos, camera, Files picker",
       "source": "SCOPE R. Attachments in a reply, comment card, full-screen composer; L388-L389, L391",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e9ac51f3e83fa1d4"
       }
     },
     {
@@ -3268,7 +3277,7 @@
       "why": "File tiles in the draft",
       "source": "SCOPE R. Attachments in a reply, comment card, full-screen composer; L390",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3294,7 +3303,7 @@
       "why": "Read-only tiles and viewers",
       "source": "SCOPE R. Attachments in a reply, comment card, full-screen composer; L391",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3558,7 +3567,8 @@
       "why": "Native text field, saves itself",
       "source": "SCOPE 1. Reply box and reply drafts; M:L4, M:L5, M:L10",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "0d970d030eb91c72"
       }
     },
     {
@@ -3570,7 +3580,8 @@
       "why": "",
       "source": "SCOPE 1. Reply box and reply drafts; M:L4, M:L5",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -3582,7 +3593,8 @@
       "why": "Keyboard down keeps the words",
       "source": "SCOPE 1. Reply box and reply drafts; M:L5",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -3596,7 +3608,7 @@
       "why": "Discard button",
       "source": "SCOPE 1. Reply box and reply drafts; M:L4, M:L5, M:L7, C:L98",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3701,7 +3713,7 @@
       "why": "Photo picker, camera, Files",
       "source": "SCOPE 1. Reply box and reply drafts; M:L4, M:L5, M:L12, S:L404",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3815,7 +3827,8 @@
       "why": "The v1 grant adds draft writes",
       "source": "SCOPE 1. Reply box and reply drafts; M:L10",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "34463cce97bec635"
       }
     },
     {
@@ -4473,7 +4486,7 @@
       "why": "Send button",
       "source": "SCOPE 7. Send; S:L404, C:L143, W:L351",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -4499,7 +4512,7 @@
       "why": "",
       "source": "SCOPE 7. Send; M:L46",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -4535,7 +4548,8 @@
       "why": "",
       "source": "SCOPE 7. Send; S:L404, C:L42",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -4645,7 +4659,8 @@
       "why": "Reply arrow or swipe",
       "source": "SCOPE 8. Reply with a quote, and mentioning a thread; C:L116",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -4669,7 +4684,8 @@
       "why": "",
       "source": "SCOPE 8. Reply with a quote, and mentioning a thread; C:L117",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -4684,7 +4700,8 @@
       "why": "",
       "source": "SCOPE 8. Reply with a quote, and mentioning a thread; C:L118",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "99b5b2b4206c7168"
       }
     },
     {
@@ -4701,7 +4718,7 @@
       "why": "",
       "source": "SCOPE 8. Reply with a quote, and mentioning a thread; M:L24, M:L25, M:L26, M:L27, M:L28, M:L30, C:L119, C:L120",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -4876,7 +4893,7 @@
     },
     {
       "id": "messages-100",
-      "title": "See who gets the words: pill \"to [mark] <agent>\" (only in a thread with several agents, a hand-off, or an ended only-agent with another session live)",
+      "title": "See who gets the words: a chip \"to [mark] <agent>\" at the start of the reply's first line on a computer, the words after it; on a phone the agent's mark and a chevron in the box's row (only in a thread with several agents, a hand-off, or an ended only-agent with another session live)",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -4971,6 +4988,24 @@
       "title": "Type `@` to tag another agent session: grouped list (owner first \"Owns this thread\", others, \"Reads the Inbox, not woken\")",
       "surface": [
         "door:GET threads/:id/taggable",
+        "enum:DoorTaggableSession.kind.live",
+        "enum:DoorTaggableSession.kind.mcp",
+        "field:DoorTaggableAnswer.owner",
+        "field:DoorTaggableAnswer.serverSession",
+        "field:DoorTaggableAnswer.sessions",
+        "field:DoorTaggableSession.busy",
+        "field:DoorTaggableSession.host",
+        "field:DoorTaggableSession.idle_since",
+        "field:DoorTaggableSession.kind",
+        "field:DoorTaggableSession.label",
+        "field:DoorTaggableSession.last_at",
+        "field:DoorTaggableSession.name",
+        "field:DoorTaggableSession.owner",
+        "field:DoorTaggableSession.project",
+        "field:DoorTaggableSession.session",
+        "field:DoorTaggableSession.started_at",
+        "field:DoorTaggableSession.taggable",
+        "field:DoorTaggableSession.wrote_thread",
         "window:/api/inbox/threads/:id/taggable"
       ],
       "flows": [],
@@ -4978,7 +5013,8 @@
       "why": "List above the keyboard",
       "source": "SCOPE 10. Who gets the reply: recipient pill, @ tags, hand-off, ended sessions; C:L111, C:L170, C:L171, C:L175, C:L176",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "5427388e7ffe4359"
       }
     },
     {
@@ -4990,7 +5026,7 @@
       "why": "",
       "source": "SCOPE 10. Who gets the reply: recipient pill, @ tags, hand-off, ended sessions; C:L173, C:L176",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -5007,7 +5043,7 @@
     },
     {
       "id": "messages-110",
-      "title": "Add: \"You added <agent> to this thread\" above the reply; later replies go to it too",
+      "title": "Add: \"You added <agent> to this thread\" above the reply; a later reply reaches it only when the reply box names it",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -5352,7 +5388,8 @@
       "why": "",
       "source": "SCOPE 11. Delivery lines and states; C:L178",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e2e8dc64c03b9a99"
       }
     },
     {
@@ -5381,7 +5418,8 @@
       "why": "",
       "source": "SCOPE 11. Delivery lines and states; C:L174",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "0329ea7bec4696b3"
       }
     },
     {
@@ -5430,6 +5468,11 @@
       "title": "Press \"Looks good\" (thumbs-up): thread goes to Quiet and after 10 s the agent is told",
       "surface": [
         "door:POST messages/:id/ack",
+        "field:DoorAckAnswer.message",
+        "field:DoorAckAnswer.thread",
+        "field:DoorAckBody.ack",
+        "field:DoorAckBody.idempotency_key",
+        "field:DoorAckBody.reaction",
         "field:InboxAck.reaction",
         "field:InboxListRow.ack",
         "field:InboxMessageWire.ack",
@@ -5440,7 +5483,8 @@
       "why": "Looks good button",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L75, M:L76, M:L77, M:L80",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "df7a8acd51d62fc5"
       }
     },
     {
@@ -5452,7 +5496,8 @@
       "why": "",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L76, M:L77, M:L286",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -5464,7 +5509,8 @@
       "why": "Tap again; no Z key",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L77, M:L78, M:L79",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -5479,7 +5525,8 @@
       "why": "",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L79",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "46705f7503f14f85"
       }
     },
     {
@@ -5491,7 +5538,8 @@
       "why": "",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L78",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -5518,7 +5566,7 @@
       "why": "Long-press opens the tray",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L84",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -5557,7 +5605,8 @@
       "why": "",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L85, M:L87",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -6045,7 +6094,7 @@
     },
     {
       "id": "messages-182",
-      "title": "Pick bar: Select all box, \"N selected\" (or \"Tap threads to select them\"), Archive, Snooze, ⋯ (Mark read, Mark unread, Star, Unstar, Add to Priority, Remove from Priority, Hide pull requests, Add tag), Done",
+      "title": "Pick bar: Select all box, \"N selected\" (or \"Tap threads to select them\"), Archive, Snooze, Mark read (its own button where there is room; beside an open thread in the ⋯), ⋯ (Mark unread, Star, Unstar, Add to Priority, Remove from Priority, Hide pull requests, Add tag), Done",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -6097,7 +6146,7 @@
     },
     {
       "id": "messages-186",
-      "title": "Combine refusals: \"Pick two or more threads to combine\", \"No agent that wrote in these threads is running…\", \"These threads are on two machines…\", \"<machine> can't be asked now: it is away.\"",
+      "title": "Combine refusals: \"Pick two or more threads to combine\", \"No agent is running…\", \"These threads are on two machines…\", \"<machine> can't be asked now: it is away.\"",
       "surface": [],
       "flows": [],
       "mobile": "later",
@@ -6156,6 +6205,19 @@
       "mobile": "v1",
       "why": "",
       "source": "SCOPE 16. The project menu; M:L68, M:L95, M:L104, M:L181",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "messages-262",
+      "title": "Mark all as read and Archive all on the list: \"Mark all as read\" in the list ⋮ (after \"Select threads\") takes every row the list shows that takes Mark read; a group band's menu (right-click, Shift+F10, or a finger held on the band; a bottom sheet on a phone) offers \"Mark all as read\" and \"Archive all\" for that band's rows, each only where it applies, none on a band with nothing to take (the browser's own menu there) or while picking; neither toggles the band; never a snoozed row; a thread with news not yet shown is left out; the set-aside warning, one toast and one Undo; a one-time tooltip on the band (\"Right-click for group actions\", a phone's \"Hold a group for actions\") until shown once or the band's menu was opened",
+      "surface": [],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "source": "SCOPE 16. The project menu; inbox-window.md, Mark all as read on the list",
+      "since": "2026-11-20",
       "ios": {
         "state": "not-started"
       }
@@ -6709,7 +6771,8 @@
       "why": "Compose button",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L37",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -6738,7 +6801,7 @@
       "why": "Full-screen sheet",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L25, C:L35, C:L38, C:L41, C:L142, C:L143",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6753,7 +6816,7 @@
       "why": "Native To sheet",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L38, C:L145, C:L149",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6765,7 +6828,7 @@
       "why": "",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L28, C:L38, C:L39, C:L41",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6828,7 +6891,7 @@
       "why": "Photo picker, camera, Files",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L34, C:L35, C:L41, C:L42",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6840,7 +6903,7 @@
       "why": "",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L26, C:L29, C:L43",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6852,7 +6915,7 @@
       "why": "",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L40",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -6918,7 +6981,8 @@
       "why": "Swipe to delete",
       "source": "SCOPE 21. New message (compose) and its drafts; C:L40",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7205,12 +7269,14 @@
         "field:InboxUpload.size",
         "field:InboxUpload.width"
       ],
-      "flows": [],
+      "flows": [
+        "file-01"
+      ],
       "mobile": "v1",
       "why": "native attachment tiles",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L3-L9",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7229,48 +7295,58 @@
       "id": "files-003",
       "title": "Markdown file (kind `markdown`)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
-      "why": "native Markdown document",
+      "why": "native Markdown document; building: raw HTML blocks, display math and link reference definitions are not ported yet, so a `<details>` block is drawn as its own text and the block ids after one are not the window's",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L51, L69",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
       "id": "files-004",
       "title": "Plain text file (kind `text`; `.txt` keeps the text view)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
       "why": "native text view",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L69",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-005",
       "title": "Data and log files (`.log`, yaml, json, toml, ini, csv, tsv, xml, `.env.example`...) drawn as code though stored as `text`",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
       "why": "native code view",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L69",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-006",
       "title": "Code file (kind `code`: any other UTF-8 text)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
       "why": "native code view, tap a line",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L69",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7279,12 +7355,14 @@
       "surface": [
         "window:/api/inbox/pages"
       ],
-      "flows": [],
+      "flows": [
+        "file-06"
+      ],
       "mobile": "v1",
-      "why": "sandboxed web view block",
+      "why": "sandboxed web view block; building: the page's relative pictures and frames are not fetched yet (they come with the page routes)",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L20-L22, L27, L54",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7305,12 +7383,14 @@
       "surface": [
         "field:InboxQuestionChoice.image"
       ],
-      "flows": [],
+      "flows": [
+        "file-04"
+      ],
       "mobile": "v1",
       "why": "native gallery and zoom viewer",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L25",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7322,36 +7402,45 @@
         "field:InboxInlineImage.media_type",
         "field:InboxUpload.media_type"
       ],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "native player (AVPlayer)",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L73",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "99284f332e96496c"
       }
     },
     {
       "id": "files-011",
       "title": "Audio recording (MP3, AAC, M4A, WAV, Ogg, FLAC, WebM audio)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "native audio player",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L74",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-012",
       "title": "PDF",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "rethink",
       "why": "opens in the system PDF preview (Quick Look), plus share sheet",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L25, L51, L95",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7360,36 +7449,45 @@
       "surface": [
         "field:InboxReviewAnchor.file"
       ],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "save to Files, share sheet",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9-L10, L25",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "91b8e04f80dfad25"
       }
     },
     {
       "id": "files-014",
       "title": "A text or code file over 16 MB is a download, not a viewer",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "download card, share sheet",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L13",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-015",
       "title": "A file that changed since it was sent says so, and the sent version still opens",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-08"
+      ],
       "mobile": "v1",
       "why": "changed line and sent version",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L11, L25, L54, L78",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7411,12 +7509,14 @@
         "door:GET threads/:id/attachments",
         "window:/api/inbox/threads/:id/attachments"
       ],
-      "flows": [],
+      "flows": [
+        "file-01"
+      ],
       "mobile": "v1",
       "why": "native tile grid",
       "source": "SCOPE B. Tiles, gallery and the attachments count; F L11, L15, L25, L95",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7497,24 +7597,28 @@
       "id": "files-024",
       "title": "Full screen: file fills the window, floating toolbar (Back, pen, comment count, N/M, ⋯, Side by side, ×, Hide tools)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02"
+      ],
       "mobile": "rethink",
       "why": "full-screen push with a native navigation bar and bottom toolbar",
       "source": "SCOPE C. Opening a file: the pane, side by side, full screen; F L54",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
       "id": "files-025",
       "title": "Hide tools: everything floating flies into one corner control; one press brings it back",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-04"
+      ],
       "mobile": "rethink",
       "why": "tap the file to hide and show the bars",
       "source": "SCOPE C. Opening a file: the pane, side by side, full screen; F L54",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7533,12 +7637,15 @@
       "id": "files-027",
       "title": "Changed chip: \"Changed since sent · View sent version\" / \"Showing the sent version · View current file\" / \"The file is gone; showing the sent copy\"",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-08"
+      ],
       "mobile": "v1",
       "why": "changed chip, top left",
       "source": "SCOPE C. Opening a file: the pane, side by side, full screen; F L54",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7569,24 +7676,30 @@
       "id": "files-030",
       "title": "Coming back from a file keeps your place in the thread",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02"
+      ],
       "mobile": "v1",
       "why": "native navigation keeps scroll",
       "source": "SCOPE C. Opening a file: the pane, side by side, full screen; F L50",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-031",
       "title": "Where full screen goes back to: exactly the view before it; browser Back matches",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02"
+      ],
       "mobile": "rethink",
       "why": "native navigation stack returns to the view before",
       "source": "SCOPE C. Opening a file: the pane, side by side, full screen; F L57",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7629,12 +7742,15 @@
       "id": "files-035",
       "title": "Stepper bar \"‹ 3 of 9 · name ⌄ ›\" under the file; order is per message: images in the text, then attached files",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02",
+        "file-03"
+      ],
       "mobile": "rethink",
-      "why": "position pill in the toolbar plus swipe; no bar under the file",
+      "why": "position pill in the toolbar plus swipe; no bar under the file; building: the cover leaves the pictures in a message's words out and steps through a message's attached files first, not the window's order",
       "source": "SCOPE D. Stepping between files, and picture choices; F L51",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7653,12 +7769,15 @@
       "id": "files-037",
       "title": "Swipe sideways with one finger to step; file follows the finger; \"Next · name\" card at the edge",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-03"
+      ],
       "mobile": "v1",
       "why": "native paging swipe",
       "source": "SCOPE D. Stepping between files, and picture choices; F L51",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7719,31 +7838,37 @@
       "why": "native zoom and paging",
       "source": "SCOPE D. Stepping between files, and picture choices; F L52",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
       "id": "files-043",
       "title": "Swipe down to close an image at Fit (past 15% of height or a flick)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-04"
+      ],
       "mobile": "v1",
       "why": "swipe down to dismiss",
       "source": "SCOPE D. Stepping between files, and picture choices; F L52",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-044",
       "title": "Picture stays clear of the option card / toolbar at Fit",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-04"
+      ],
       "mobile": "v1",
       "why": "safe area inset",
       "source": "SCOPE D. Stepping between files, and picture choices; F L53",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7752,24 +7877,29 @@
       "surface": [
         "window:/api/inbox/attachments/:id"
       ],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
       "why": "native document, comments sheet",
       "source": "SCOPE E. Viewers, one per kind; F L13, L69, L77",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
       "id": "files-046",
       "title": "Copy file (raw text of the version on screen)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-10"
+      ],
       "mobile": "v1",
       "why": "Copy and share sheet",
       "source": "SCOPE E. Viewers, one per kind; F L69",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7827,12 +7957,14 @@
       "id": "files-051",
       "title": "Code view: line numbers, line and range comments, plain text above 100,000 characters, wrapped when a line is over 1,000",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
       "why": "native code view with line comments",
       "source": "SCOPE E. Viewers, one per kind; F L69",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7904,12 +8036,15 @@
       "id": "files-057",
       "title": "Image viewer: pinch / Ctrl+wheel zoom about the pointer, pan, double tap toggles Fit and 2x, Fit to 800%, size bar with scale and Fit / Actual size",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-04"
+      ],
       "mobile": "v1",
       "why": "native pinch and double tap",
       "source": "SCOPE E. Viewers, one per kind; F L69",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7982,12 +8117,15 @@
       "id": "files-063",
       "title": "PDF / other / too-large file: Download card in the pane (reachable by stepping)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "download card; Quick Look for a PDF",
       "source": "SCOPE E. Viewers, one per kind; F L51, L95",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7997,12 +8135,15 @@
         "door:GET attachments/:id/download",
         "window:/api/inbox/attachments/:id/download"
       ],
-      "flows": [],
+      "flows": [
+        "file-10"
+      ],
       "mobile": "v1",
       "why": "save to Files, share sheet",
       "source": "SCOPE F. Download, Open in, reveal, copy; F L17, L19, L29",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "dbccbcc322fdb79e"
       }
     },
     {
@@ -8055,12 +8196,15 @@
       "id": "files-068",
       "title": "Copy image (HTML `<img>` plus PNG on the clipboard)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-10"
+      ],
       "mobile": "v1",
       "why": "Copy in the long-press menu",
       "source": "SCOPE F. Download, Open in, reveal, copy; F L29",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -8137,7 +8281,7 @@
       "why": "plain notes",
       "source": "SCOPE G. Links to files, and files a message only names; F L60, L62",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8146,24 +8290,28 @@
       "surface": [
         "field:InboxUpdate.current"
       ],
-      "flows": [],
+      "flows": [
+        "file-11"
+      ],
       "mobile": "rethink",
       "why": "native text selection with Comment and Redline in the edit menu; Global comment in the toolbar",
       "source": "SCOPE H. Comments and annotations; F L69, L79; P L113",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
       "id": "files-076",
       "title": "Comment on a code line or range (click, drag)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-12"
+      ],
       "mobile": "v1",
       "why": "tap a line; long-press and drag for a range",
       "source": "SCOPE H. Comments and annotations; F L61, L69, L75",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8182,12 +8330,14 @@
       "id": "files-078",
       "title": "Pin a comment on an HTML element (pinpoint), shift-click joins elements, Cmd/Ctrl-click pins a link, pen",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-14"
+      ],
       "mobile": "v1",
       "why": "tap to pin inside the web view; comment card as a sheet",
       "source": "SCOPE H. Comments and annotations; F L54, L65, L69",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8206,12 +8356,15 @@
       "id": "files-080",
       "title": "Comment on an image: one row with words, \"Mark up\", Comment",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-13"
+      ],
       "mobile": "v1",
       "why": "comment row under the image",
       "source": "SCOPE H. Comments and annotations; F L70",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -8221,14 +8374,19 @@
         "door:GET markups/:id",
         "door:POST markups",
         "window:/api/inbox/markups",
-        "window:/api/inbox/markups/:id"
+        "window:/api/inbox/markups/:id",
+        "field:DoorMarkupAnswer.name",
+        "field:DoorMarkupAnswer.path",
+        "field:DoorMarkupAnswer.url"
       ],
-      "flows": [],
+      "flows": [
+        "file-13"
+      ],
       "mobile": "v1",
-      "why": "native drawing screen, undo banner",
+      "why": "native drawing screen, undo banner; a drawing goes on the computer's own network only (the relay carries no upload): away from it the comment stays in the list, \"Needs your computer's network\", queues no Send, and goes by itself once the drawing has gone (owner, 2026-11-21)",
       "source": "SCOPE H. Comments and annotations; F L71-L72",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8240,7 +8398,7 @@
       "why": "overlay in the native viewer",
       "source": "SCOPE H. Comments and annotations; F L72",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8283,24 +8441,29 @@
       "id": "files-086",
       "title": "Comments panel at the right; folds into a Comments button under 780 px; floats over the page in full screen (320 px)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-15"
+      ],
       "mobile": "v1",
       "why": "comments sheet",
       "source": "SCOPE H. Comments and annotations; F L54, L76",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-087",
       "title": "Panel foot: \"N annotations ride your next Send to <agent>. M are on other files.\" and Write the reply",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-15"
+      ],
       "mobile": "v1",
       "why": "sheet foot",
       "source": "SCOPE H. Comments and annotations; F L54",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8319,10 +8482,10 @@
       "id": "files-089",
       "title": "Comment on words of an agent's message: toolbar with Delete, Comment, Looks good",
       "surface": [
-        "door:POST annotations/:id/remove",
         "door:POST messages/:id/annotations",
-        "window:/api/inbox/annotations/:id/remove",
-        "window:/api/inbox/messages/:id/annotations"
+        "window:/api/inbox/messages/:id/annotations",
+        "field:InboxAnnotationRecord.message",
+        "field:InboxMessageCommentTarget.at"
       ],
       "flows": [],
       "mobile": "rethink",
@@ -8403,12 +8566,15 @@
       "id": "files-095",
       "title": "Comments cannot be made on PDFs, plain files or unknown kinds",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-15"
+      ],
       "mobile": "v1",
       "why": "no comment control shown",
       "source": "SCOPE H. Comments and annotations; F L79",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -8724,12 +8890,14 @@
       "surface": [
         "field:DoorReplyBody.annotation_ids"
       ],
-      "flows": [],
+      "flows": [
+        "file-15"
+      ],
       "mobile": "v1",
       "why": "same export text",
       "source": "SCOPE L. What the Send carries (feedback export text); F L80, L109, L156",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8912,7 +9080,17 @@
       "title": "Comment on diff lines: click a line number, drag across numbers, or select code",
       "surface": [
         "door:POST messages/:id/guide/annotations",
-        "window:/api/inbox/messages/:id/guide/annotations"
+        "window:/api/inbox/messages/:id/guide/annotations",
+        "field:InboxAnnotationRecord.guide",
+        "enum:InboxGuideCommentTarget.scope.general",
+        "enum:InboxGuideCommentTarget.side.new",
+        "enum:InboxGuideCommentTarget.side.old",
+        "field:InboxGuideCommentTarget.file",
+        "field:InboxGuideCommentTarget.line_end",
+        "field:InboxGuideCommentTarget.line_start",
+        "field:InboxGuideCommentTarget.scope",
+        "field:InboxGuideCommentTarget.side",
+        "field:InboxGuideCommentTarget.title"
       ],
       "flows": [],
       "mobile": "v1",
@@ -9026,9 +9204,7 @@
     {
       "id": "files-142",
       "title": "Show me: agent draws a board that opens over the review; a part click jumps to its code; corner card brings it back",
-      "surface": [
-        "frame:shapes"
-      ],
+      "surface": [],
       "flows": [],
       "mobile": "later",
       "why": "L-off: needs Shape on at the computer; an agent-drawn board over the review",
@@ -9294,8 +9470,7 @@
       "surface": [
         "field:InboxLaunchClone.branch",
         "field:InboxReviewSource.branch",
-        "window:/api/inbox/reviews/branches/rank",
-        "window:/api/inbox/reviews/branches/unreported"
+        "window:/api/inbox/reviews/branches/rank"
       ],
       "flows": [],
       "mobile": "v1",
@@ -11262,7 +11437,7 @@
       "why": "",
       "source": "SCOPE 8. Agents: connections, settings and status in a thread; N214, N288, N294",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -11326,7 +11501,7 @@
     },
     {
       "id": "agents-126",
-      "title": "\"How does this work?\" five-step walk-through",
+      "title": "\"How does this work?\" four-step walk-through",
       "surface": [],
       "flows": [],
       "mobile": "later",
@@ -13975,12 +14150,14 @@
         "field:InboxMessageWire.attachments",
         "field:InboxQuestionChoice.image"
       ],
-      "flows": [],
+      "flows": [
+        "file-09"
+      ],
       "mobile": "v1",
       "why": "native viewers, share sheet",
       "source": "SCOPE 1. Inventory; P:18, P:14",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -13992,7 +14169,7 @@
       "why": "native markup and comments",
       "source": "SCOPE 1. Inventory; P:18",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -14010,13 +14187,37 @@
     {
       "id": "foundation-102",
       "title": "Phone app: New message to an agent, live sessions, compose (sessions, messages, `messages/:id/to`), skill catalog",
-      "surface": [],
+      "surface": [
+        "field:DoorComposeAnswer.message",
+        "field:DoorComposeAnswer.project",
+        "field:DoorComposeAnswer.replayed",
+        "field:DoorComposeAnswer.thread_id",
+        "field:DoorComposeBody.body",
+        "field:DoorComposeBody.idempotency_key",
+        "field:DoorComposeBody.to",
+        "field:DoorComposeBody.uploads",
+        "field:DoorSessionsAnswer.machine",
+        "field:DoorSessionsAnswer.projects",
+        "field:DoorSessionsAnswer.serverSession",
+        "field:InboxComposeProject.project",
+        "field:InboxComposeProject.sessions",
+        "field:InboxComposeSession.busy",
+        "field:InboxComposeSession.host",
+        "field:InboxComposeSession.idle_since",
+        "field:InboxComposeSession.label",
+        "field:InboxComposeSession.last_seen_at",
+        "field:InboxComposeSession.last_thread",
+        "field:InboxComposeSession.place",
+        "field:InboxComposeSession.root",
+        "field:InboxComposeSession.session",
+        "field:InboxComposeSession.started_at"
+      ],
       "flows": [],
       "mobile": "v1",
       "why": "native compose sheet",
       "source": "SCOPE 1. Inventory; P:18",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -14034,13 +14235,16 @@
     {
       "id": "foundation-104",
       "title": "Phone app: upload files",
-      "surface": [],
+      "surface": [
+        "field:DoorUploadAnswer.upload"
+      ],
       "flows": [],
       "mobile": "v1",
       "why": "photo picker, files, camera",
       "source": "SCOPE 1. Inventory; P:18",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "dc44aa53876e12f7"
       }
     },
     {
@@ -14067,7 +14271,7 @@
       "why": "native viewers; a web view only for HTML pages",
       "source": "SCOPE 1. Inventory; P:24-30",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -14295,7 +14499,8 @@
       "why": "Cancel on the held line",
       "source": "SCOPE 1. Inventory; M:45, M:121",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "16ee6eee3ac38e79"
       }
     },
     {
@@ -15836,12 +16041,14 @@
       "surface": [
         "door:GET attachments/:id/audio"
       ],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "native audio player with moment comments",
       "source": "SCOPE 4. Voice; `packages/inbox/components/AudioPlayer.tsx`; the mobile ADR (inbox-mobile), section 12",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -16545,7 +16752,7 @@
     },
     {
       "id": "other-settings-10",
-      "title": "Capabilities (`capabilities`): Board; Checklist; Routines; Code review; Chapter diagrams; System (hidden unless turned on in config); Shape. **Experimental**: Decision mode, Bro mode, Float reply drafts",
+      "title": "Capabilities (`capabilities`): Board; Checklist; Routines; Code review; Chapter diagrams; System (hidden unless turned on in config); Shape. **Experimental**: Decision mode, Grid, Bro mode, Float reply drafts",
       "surface": [
         "settings:capabilities"
       ],
@@ -16810,6 +17017,52 @@
       "source": "seed: flows",
       "ios": {
         "state": "not-started"
+      }
+    },
+    {
+      "id": "flow-attachment",
+      "title": "The attachment flow (flows/07-attachment.md)",
+      "surface": [
+        "check:file-01",
+        "check:file-02",
+        "check:file-03",
+        "check:file-04",
+        "check:file-05",
+        "check:file-06",
+        "check:file-07",
+        "check:file-08",
+        "check:file-09",
+        "check:file-10",
+        "check:file-11",
+        "check:file-12",
+        "check:file-13",
+        "check:file-14",
+        "check:file-15",
+        "check:file-16"
+      ],
+      "flows": [
+        "file-01",
+        "file-02",
+        "file-03",
+        "file-04",
+        "file-05",
+        "file-06",
+        "file-07",
+        "file-08",
+        "file-09",
+        "file-10",
+        "file-11",
+        "file-12",
+        "file-13",
+        "file-14",
+        "file-15",
+        "file-16"
+      ],
+      "mobile": "v1",
+      "why": "The phone's own flow spec; each check is proved by a UI test.",
+      "source": "seed: flows",
+      "ios": {
+        "state": "building"
       }
     },
     {
@@ -17086,14 +17339,54 @@
       "title": "The door route POST annotations",
       "surface": [
         "door:POST annotations",
-        "window:/api/inbox/annotations"
+        "window:/api/inbox/annotations",
+        "field:DoorAnnotationAnswer.annotation",
+        "field:DoorAnnotationBody.annotation",
+        "field:DoorAnnotationBody.attachment_id",
+        "field:DoorAnnotationBody.idempotency_key",
+        "field:DoorAnnotationBody.version",
+        "field:DoorAnnotationRemoveBody.idempotency_key",
+        "field:DoorThreadAttachmentsAnswer.annotations",
+        "field:InboxAnnotationRecord.annotation",
+        "field:InboxAnnotationRecord.attachment_id",
+        "field:InboxAnnotationRecord.created_at",
+        "field:InboxAnnotationRecord.id",
+        "field:InboxAnnotationRecord.message_id",
+        "field:InboxAnnotationRecord.path",
+        "field:InboxAnnotationRecord.project_id",
+        "field:InboxAnnotationRecord.removed_at",
+        "field:InboxAnnotationRecord.sent_reply_id",
+        "field:InboxAnnotationRecord.thread_id",
+        "field:InboxAnnotationRecord.updated_at",
+        "field:InboxAnnotationRecord.version"
       ],
-      "flows": [],
+      "flows": [
+        "file-15",
+        "file-16"
+      ],
       "mobile": "v1",
       "why": "Comments on any words (SCOPE 2, A thread).",
       "source": "seed: no SCOPE row names it",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e7e3f6b3dc4c8c2d"
+      }
+    },
+    {
+      "id": "door-post-annotation-remove",
+      "title": "The door route POST annotations/:id/remove",
+      "surface": [
+        "door:POST annotations/:id/remove",
+        "window:/api/inbox/annotations/:id/remove"
+      ],
+      "flows": [
+        "file-15"
+      ],
+      "mobile": "v1",
+      "why": "A comment on a file removed before it is sent (the list's Remove, a cleared comment): the phone sends the removal once the computer may have the comment.",
+      "source": "files-089 split: the route is used by comments on files, not by comments on a message's words",
+      "ios": {
+        "state": "building"
       }
     },
     {
@@ -17607,11 +17900,29 @@
       }
     },
     {
+      "id": "window-only-messages",
+      "title": "Window endpoints under messages with no door route",
+      "surface": [
+        "window:/api/inbox/messages/:id/guide/review-image",
+        "window:/api/inbox/messages/:id/guide/review-markdown-image"
+      ],
+      "flows": [],
+      "mobile": "later",
+      "why": "L-nodoor: the phone reaches these only once a door route is added for them (messages).",
+      "reason": "L-nodoor",
+      "source": "seed: no SCOPE row names it",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "window-only-pulls",
       "title": "Window endpoints under pulls with no door route",
       "surface": [
         "window:/api/inbox/pulls/repo-file",
-        "window:/api/inbox/pulls/repo-files"
+        "window:/api/inbox/pulls/repo-files",
+        "window:/api/inbox/pulls/review-image",
+        "window:/api/inbox/pulls/review-markdown-image"
       ],
       "flows": [],
       "mobile": "later",
@@ -17675,10 +17986,7 @@
     {
       "id": "window-only-shapes",
       "title": "Window endpoints under shapes with no door route",
-      "surface": [
-        "window:/api/shapes",
-        "window:/api/shapes/*"
-      ],
+      "surface": [],
       "flows": [],
       "mobile": "later",
       "why": "L-nodoor: the phone reaches these only once a door route is added for them (shapes).",
@@ -17711,7 +18019,11 @@
         "window:/api/inbox/threads/:id/live/:id",
         "window:/api/inbox/threads/:id/live/:id/annotations",
         "window:/api/inbox/threads/:id/live/:id/frame",
-        "window:/api/inbox/threads/:id/live/:id/ping"
+        "window:/api/inbox/threads/:id/live/:id/ping",
+        "field:InboxAnnotationRecord.live",
+        "field:InboxLiveCommentTarget.page_url",
+        "field:InboxLiveCommentTarget.site_id",
+        "field:InboxLiveCommentTarget.url"
       ],
       "flows": [],
       "mobile": "later",
@@ -18847,7 +19159,8 @@
       "decoded": true,
       "source": "seed: no SCOPE row names it",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "9d85254e9028637d"
       }
     },
     {
@@ -19712,7 +20025,6 @@
         "setting:board",
         "setting:code_review",
         "setting:scheduled_threads",
-        "setting:shape",
         "setting:steps",
         "setting:system"
       ],
@@ -21281,6 +21593,1547 @@
       "mobile": "undecided",
       "why": "",
       "since": "2026-11-20",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-moved-to",
+      "title": "field:InboxMessageWire.moved_to",
+      "surface": [
+        "field:InboxMessageWire.moved_to"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-subject",
+      "title": "field:InboxMovedTo.subject",
+      "surface": [
+        "field:InboxMovedTo.subject"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-thread-id",
+      "title": "field:InboxMovedTo.thread_id",
+      "surface": [
+        "field:InboxMovedTo.thread_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-name",
+      "title": "field:InboxMovedTo.name",
+      "surface": [
+        "field:InboxMovedTo.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-open",
+      "title": "field:InboxMovedTo.open",
+      "surface": [
+        "field:InboxMovedTo.open"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-moved-note",
+      "title": "field:InboxMessageWire.moved_note",
+      "surface": [
+        "field:InboxMessageWire.moved_note"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovednote-questions",
+      "title": "field:InboxMovedNote.questions",
+      "surface": [
+        "field:InboxMovedNote.questions"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovednote-thread-id",
+      "title": "field:InboxMovedNote.thread_id",
+      "surface": [
+        "field:InboxMovedNote.thread_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "files-101-annotate",
+      "title": "Pen under an `html` block: comment on an element of the live page in place (the element boxed, the comment box beside it, a numbered marker, \"HTML · <element>\" in the list of comments)",
+      "surface": [
+        "window:/api/inbox/embed-pages",
+        "window:/api/inbox/embed-pages/:id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-context",
+      "title": "field:InboxAgent.context",
+      "surface": [
+        "field:InboxAgent.context"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-effort",
+      "title": "field:InboxAgent.effort",
+      "surface": [
+        "field:InboxAgent.effort"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-model",
+      "title": "field:InboxAgent.model",
+      "surface": [
+        "field:InboxAgent.model"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-reask",
+      "title": "window:/api/inbox/threads/:id/reask",
+      "surface": [
+        "window:/api/inbox/threads/:id/reask"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-file",
+      "title": "door:GET agent-file",
+      "surface": [
+        "door:GET agent-file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-read",
+      "title": "door:GET agent-read",
+      "surface": [
+        "door:GET agent-read"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-control-machines-fetch-file",
+      "title": "window:/api/inbox/control/machines/fetch-file",
+      "surface": [
+        "window:/api/inbox/control/machines/fetch-file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-sent-from-via-cloudflare",
+      "title": "enum:InboxMessageWire.sent_from.via.cloudflare",
+      "surface": [
+        "enum:InboxMessageWire.sent_from.via.cloudflare"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-sent-from-via-phone",
+      "title": "enum:InboxMessageWire.sent_from.via.phone",
+      "surface": [
+        "enum:InboxMessageWire.sent_from.via.phone"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-sent-from-via-tailnet",
+      "title": "enum:InboxMessageWire.sent_from.via.tailnet",
+      "surface": [
+        "enum:InboxMessageWire.sent_from.via.tailnet"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsentfromplace-cloudflare",
+      "title": "enum:InboxSentFromPlace.cloudflare",
+      "surface": [
+        "enum:InboxSentFromPlace.cloudflare"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsentfromplace-phone",
+      "title": "enum:InboxSentFromPlace.phone",
+      "surface": [
+        "enum:InboxSentFromPlace.phone"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsentfromplace-tailnet",
+      "title": "enum:InboxSentFromPlace.tailnet",
+      "surface": [
+        "enum:InboxSentFromPlace.tailnet"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-sent-from",
+      "title": "field:InboxMessageWire.sent_from",
+      "surface": [
+        "field:InboxMessageWire.sent_from"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-search",
+      "title": "door:GET agent-search",
+      "surface": [
+        "door:GET agent-search"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-threads",
+      "title": "door:GET agent-threads",
+      "surface": [
+        "door:GET agent-threads"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-combine-hold",
+      "title": "door:POST combine/hold",
+      "surface": [
+        "door:POST combine/hold"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-combine-hold",
+      "title": "window:/api/inbox/combine/hold",
+      "surface": [
+        "window:/api/inbox/combine/hold"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxcombineleft-files",
+      "title": "field:InboxCombineLeft.files",
+      "surface": [
+        "field:InboxCombineLeft.files"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxcombineleft-open",
+      "title": "field:InboxCombineLeft.open",
+      "surface": [
+        "field:InboxCombineLeft.open"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-combine-left",
+      "title": "field:InboxMessageWire.combine_left",
+      "surface": [
+        "field:InboxMessageWire.combine_left"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-22",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-acted",
+      "title": "window:/api/inbox/threads/:id/acted",
+      "surface": [
+        "window:/api/inbox/threads/:id/acted"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-acted-at",
+      "title": "field:InboxListRow.acted_at",
+      "surface": [
+        "field:InboxListRow.acted_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestion-scenarios",
+      "title": "field:InboxQuestion.scenarios",
+      "surface": [
+        "field:InboxQuestion.scenarios"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestionscenarios-columns",
+      "title": "field:InboxQuestionScenarios.columns",
+      "surface": [
+        "field:InboxQuestionScenarios.columns"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestionscenarios-rows",
+      "title": "field:InboxQuestionScenarios.rows",
+      "surface": [
+        "field:InboxQuestionScenarios.rows"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-reviews-local",
+      "title": "window:/api/inbox/reviews/local",
+      "surface": [
+        "window:/api/inbox/reviews/local"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-reviews-local-diff",
+      "title": "window:/api/inbox/reviews/local/diff",
+      "surface": [
+        "window:/api/inbox/reviews/local/diff"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-messages-id-guide-package-changes",
+      "title": "window:/api/inbox/messages/:id/guide/package-changes",
+      "surface": [
+        "window:/api/inbox/messages/:id/guide/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-pulls-package-changes",
+      "title": "window:/api/inbox/pulls/package-changes",
+      "surface": [
+        "window:/api/inbox/pulls/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-reviews-local-refs",
+      "title": "window:/api/inbox/reviews/local/refs",
+      "surface": [
+        "window:/api/inbox/reviews/local/refs"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-artifacts",
+      "title": "door:GET artifacts",
+      "surface": [
+        "door:GET artifacts"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-remove-agent",
+      "title": "door:POST threads/:id/remove-agent",
+      "surface": [
+        "door:POST threads/:id/remove-agent"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Remove an agent from a thread (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: the door takes the route for the web phone sheet's swipe and for a linked machine whose list names `remove-agent` in `marks`.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-artifact-pins",
+      "title": "door:POST artifact-pins",
+      "surface": [
+        "door:POST artifact-pins"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-remove-agent-undo",
+      "title": "door:POST threads/:id/remove-agent/undo",
+      "surface": [
+        "door:POST threads/:id/remove-agent/undo"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The toast's Undo of a Remove (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: the door takes the route for the web phone sheet and for a linked machine whose list names `remove-agent` in `marks`.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-remove-agent",
+      "title": "window:/api/inbox/threads/:id/remove-agent",
+      "surface": [
+        "window:/api/inbox/threads/:id/remove-agent"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The window's Remove on a \"to\" picker row (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now; the phone reaches it through the door route of the same name.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-remove-agent-undo",
+      "title": "window:/api/inbox/threads/:id/remove-agent/undo",
+      "surface": [
+        "window:/api/inbox/threads/:id/remove-agent/undo"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The window's Undo of a Remove (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now; the phone reaches it through the door route of the same name.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-removed",
+      "title": "field:InboxMessageWire.removed",
+      "surface": [
+        "field:InboxMessageWire.removed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The thread's removals, on its root (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: it does not draw \"You removed <name> from this thread\", and it may still offer a removed agent as a recipient; writing to it brings it back, as on the computer.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-after",
+      "title": "field:InboxRemoval.after",
+      "surface": [
+        "field:InboxRemoval.after"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the last message before it, where the line is drawn. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-at",
+      "title": "field:InboxRemoval.at",
+      "surface": [
+        "field:InboxRemoval.at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): when the person removed the agent. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-host",
+      "title": "field:InboxRemoval.host",
+      "surface": [
+        "field:InboxRemoval.host"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's host. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-name",
+      "title": "field:InboxRemoval.name",
+      "surface": [
+        "field:InboxRemoval.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's name, for the line. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-session",
+      "title": "field:InboxRemoval.session",
+      "surface": [
+        "field:InboxRemoval.session"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's session. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-grid-seen",
+      "title": "door:POST grid/seen",
+      "surface": [
+        "door:POST grid/seen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-grid-seen",
+      "title": "window:/api/inbox/grid/seen",
+      "surface": [
+        "window:/api/inbox/grid/seen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-frame-grid-seen",
+      "title": "frame:grid-seen",
+      "surface": [
+        "frame:grid-seen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-checks-failing",
+      "title": "enum:InboxThreadPullsSummaryItem.checks.failing",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.checks.failing"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-checks-passing",
+      "title": "enum:InboxThreadPullsSummaryItem.checks.passing",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.checks.passing"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-checks-running",
+      "title": "enum:InboxThreadPullsSummaryItem.checks.running",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.checks.running"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-review-approved",
+      "title": "enum:InboxThreadPullsSummaryItem.review.approved",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.review.approved"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-review-changes-requested",
+      "title": "enum:InboxThreadPullsSummaryItem.review.changes_requested",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.review.changes_requested"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-review-review-required",
+      "title": "enum:InboxThreadPullsSummaryItem.review.review_required",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.review.review_required"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-grid-seen",
+      "title": "field:InboxListRow.grid_seen",
+      "surface": [
+        "field:InboxListRow.grid_seen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-steps-progress",
+      "title": "field:InboxListRow.steps_progress",
+      "surface": [
+        "field:InboxListRow.steps_progress"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummary-items",
+      "title": "field:InboxThreadPullsSummary.items",
+      "surface": [
+        "field:InboxThreadPullsSummary.items"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-added-at",
+      "title": "field:InboxThreadPullsSummaryItem.added_at",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.added_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-checks",
+      "title": "field:InboxThreadPullsSummaryItem.checks",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.checks"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-key",
+      "title": "field:InboxThreadPullsSummaryItem.key",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.key"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-read-at",
+      "title": "field:InboxThreadPullsSummaryItem.read_at",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.read_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-review",
+      "title": "field:InboxThreadPullsSummaryItem.review",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.review"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-state",
+      "title": "field:InboxThreadPullsSummaryItem.state",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.state"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-machineview-clock-ms",
+      "title": "field:MachineView.clock_ms",
+      "surface": [
+        "field:MachineView.clock_ms"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxack-standalone",
+      "title": "field:InboxAck.standalone",
+      "surface": [
+        "field:InboxAck.standalone"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-skill-reaction",
+      "title": "field:InboxMessageWire.skill_reaction",
+      "surface": [
+        "field:InboxMessageWire.skill_reaction"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreaction-skill",
+      "title": "field:InboxReaction.skill",
+      "surface": [
+        "field:InboxReaction.skill"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxskillreaction-emoji",
+      "title": "field:InboxSkillReaction.emoji",
+      "surface": [
+        "field:InboxSkillReaction.emoji"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxskillreaction-skill",
+      "title": "field:InboxSkillReaction.skill",
+      "surface": [
+        "field:InboxSkillReaction.skill"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-ships",
+      "title": "door:GET ships",
+      "surface": [
+        "door:GET ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-ships-log",
+      "title": "door:GET ships/log",
+      "surface": [
+        "door:GET ships/log"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-ships",
+      "title": "door:POST ships",
+      "surface": [
+        "door:POST ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-ships-newer",
+      "title": "door:POST ships/newer",
+      "surface": [
+        "door:POST ships/newer"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-ships-stop",
+      "title": "door:POST ships/stop",
+      "surface": [
+        "door:POST ships/stop"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-ships",
+      "title": "window:/api/inbox/ships",
+      "surface": [
+        "window:/api/inbox/ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-ships-log",
+      "title": "window:/api/inbox/ships/log",
+      "surface": [
+        "window:/api/inbox/ships/log"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-ships-newer",
+      "title": "window:/api/inbox/ships/newer",
+      "surface": [
+        "window:/api/inbox/ships/newer"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-ships-stop",
+      "title": "window:/api/inbox/ships/stop",
+      "surface": [
+        "window:/api/inbox/ships/stop"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-frame-ships",
+      "title": "frame:ships",
+      "surface": [
+        "frame:ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-ship-note-kind-stop",
+      "title": "enum:InboxMessageWire.ship_note.kind.stop",
+      "surface": [
+        "enum:InboxMessageWire.ship_note.kind.stop"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-ship-note-kind-watch",
+      "title": "enum:InboxMessageWire.ship_note.kind.watch",
+      "surface": [
+        "enum:InboxMessageWire.ship_note.kind.watch"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-ship-note",
+      "title": "field:InboxMessageWire.ship_note",
+      "surface": [
+        "field:InboxMessageWire.ship_note"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-capabilities",
+      "title": "door:GET capabilities",
+      "surface": [
+        "door:GET capabilities"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-scheduled",
+      "title": "door:GET scheduled",
+      "surface": [
+        "door:GET scheduled"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-scheduled-id",
+      "title": "door:GET scheduled/:id",
+      "surface": [
+        "door:GET scheduled/:id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-capabilities",
+      "title": "door:POST capabilities",
+      "surface": [
+        "door:POST capabilities"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled",
+      "title": "door:POST scheduled",
+      "surface": [
+        "door:POST scheduled"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id",
+      "title": "door:POST scheduled/:id",
+      "surface": [
+        "door:POST scheduled/:id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-delete",
+      "title": "door:POST scheduled/:id/delete",
+      "surface": [
+        "door:POST scheduled/:id/delete"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-off",
+      "title": "door:POST scheduled/:id/off",
+      "surface": [
+        "door:POST scheduled/:id/off"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-on",
+      "title": "door:POST scheduled/:id/on",
+      "surface": [
+        "door:POST scheduled/:id/on"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-restore",
+      "title": "door:POST scheduled/:id/restore",
+      "surface": [
+        "door:POST scheduled/:id/restore"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-run",
+      "title": "door:POST scheduled/:id/run",
+      "surface": [
+        "door:POST scheduled/:id/run"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-id-stop",
+      "title": "door:POST scheduled/:id/stop",
+      "surface": [
+        "door:POST scheduled/:id/stop"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-scheduled-preview",
+      "title": "door:POST scheduled/preview",
+      "surface": [
+        "door:POST scheduled/preview"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-capabilities",
+      "title": "window:/api/inbox/capabilities",
+      "surface": [
+        "window:/api/inbox/capabilities"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-capability",
+      "title": "window:/api/inbox/capability",
+      "surface": [
+        "window:/api/inbox/capability"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-taggable-agents",
+      "title": "door:GET taggable-agents",
+      "surface": [
+        "door:GET taggable-agents"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-agent-reply",
+      "title": "door:POST agent-reply",
+      "surface": [
+        "door:POST agent-reply"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-far-delivered",
+      "title": "door:POST far-delivered",
+      "surface": [
+        "door:POST far-delivered"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-far-wake",
+      "title": "door:POST far-wake",
+      "surface": [
+        "door:POST far-wake"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxaddressee-machine",
+      "title": "field:InboxAddressee.machine",
+      "surface": [
+        "field:InboxAddressee.machine"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxtag-machine",
+      "title": "field:InboxTag.machine",
+      "surface": [
+        "field:InboxTag.machine"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
       "ios": {
         "state": "not-started"
       }

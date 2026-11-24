@@ -188,7 +188,7 @@ test('the second click merges one after another at the heads seen; a refusal is 
   expect(sent.map((s) => s.key)).toEqual([key(5)]);
   expect(sent[0]).toMatchObject({ head_sha: pull(5).head_sha, confirmed: true });
   expect($('[data-pr-merging]')!.textContent).toBe('Merging 1 of 3…');
-  expect($('[data-pr-clear]')).toBeNull();
+  expect($('[data-pr-select="done"]')!.hasAttribute('disabled')).toBe(true);
   sent[0]!.answer(200, { ok: true, key: key(5), method: 'merge', url: '' });
   await settle();
   expect(sent.map((s) => s.key)).toEqual([key(5), key(7)]);

@@ -26,7 +26,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
-import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -403,12 +403,20 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
 
 test('the rows: all three levels; an answer that makes no sense and a refused diff say so, with no level; how the agent ran', async () => {
   await expect(row(501).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
-  await expect(row(502).locator('[data-pull-risk="medium"]')).toBeVisible({ timeout: 30_000 });
-  await expect(row(503).locator('[data-pull-risk="low"]')).toBeVisible({ timeout: 30_000 });
+  // Medium, Low and a failure: the row's level, its mark drawn on the open row's second line only.
+  await expect(row(502)).toHaveAttribute('data-pulls-risk', 'medium', { timeout: 30_000 });
+  await expect(row(503)).toHaveAttribute('data-pulls-risk', 'low', { timeout: 30_000 });
+  await expect(row(502).locator('[data-pull-risk]')).toHaveCount(0);
   // A stack is one row, at its highest layer.
   await expect(row(506).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
   await expect.poll(() => prompts().length).toBe(11);
-  await expect(row(504).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 30_000 });
+  await expect(row(504)).toHaveAttribute('data-pulls-risk', 'failed', { timeout: 30_000 });
+  for (const [n, level] of [[502, 'medium'], [503, 'low']] as const) {
+    await row(n).click();
+    await expect(row(n).locator(`[data-reviews-line2] [data-pull-risk="${level}"]`)).toBeVisible();
+  }
+  await row(504).click();
+  await expect(row(504).locator('[data-reviews-line2] [data-pull-risk="failed"]')).toBeVisible();
   await expect(row(504).locator('[data-pull-risk="failed"]')).toContainText('I would say this looks fine to me.');
 
   // The forge refused #503 as one document: the agent read its per-file pages, and ranked it.
@@ -419,13 +427,18 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   // The whole 9 MB reached the agent, and it refused: failed to rank, with its words. Not Low.
   const big = prompts().find((l) => l.prompt!.includes('Title: Regenerate the API client'))!.prompt!;
   expect(big.match(/export const line = 1;/g)).toHaveLength(BIG_LINES);
+  await expect(row(507)).toHaveAttribute('data-pulls-risk', 'failed', { timeout: 30_000 });
+  await row(507).click();
   const refused = row(507).locator('[data-pull-risk]');
-  await expect(refused).toHaveAttribute('data-pull-risk', 'failed', { timeout: 30_000 });
+  await expect(refused).toHaveAttribute('data-pull-risk', 'failed');
   await expect(refused).toContainText('Couldn\u2019t rank');
   await refused.hover();
   await expect(page.locator('[data-pn-tooltip]')).toContainText(REFUSAL);
   await page.mouse.move(0, 0);
-  await shots('rows-refused');
+  // Open beside the list: a phone would show the PR's page in its place.
+  await shots('rows-refused', [1440]);
+  await page.locator('[data-launchpad] .ib-pr-bar [aria-label="Close"]').click();
+  await expect(page.locator('[data-pulls-list] [aria-current="true"]')).toHaveCount(0);
 
   const judged = piLog().filter((l) => l.argv?.includes('--no-tools'));
   expect(judged).toHaveLength(11);
@@ -577,12 +590,12 @@ test('the automatic line: a pick names the agent it would start; Save starts not
     expect(Object.keys(await autoRuns())).toEqual([keyOf(509)]);
     expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } })).status()).toBe(200);
     await openPulls();
-    for (const n of [504, 507]) await expect(row(n).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 60_000 });
+    for (const n of [504, 507]) await expect(row(n)).toHaveAttribute('data-pulls-risk', 'failed', { timeout: 60_000 });
   } finally {
     page.off('request', onRequest);
     await page.setViewportSize(VIEWPORTS[1440]);
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
-    const left = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json().catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
+    const left = (await page.request.get(`${url}api/inbox/pulls/risk`).then((r) => r.json()).catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
     if (left) await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: left.rules, provider: left.provider, model: left.model, auto: null } }).catch(() => {});
     await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } }).catch(() => {});
   }
@@ -616,8 +629,8 @@ test('the filter: High, Medium and up, remembered; under High what it could not 
   await shots('filter-high');
   await notRanked.click();
   for (const n of [504, 507, 508]) await expect(page.locator(`[data-pulls-risk-not-ranked] [data-pulls-row="${keyOf(n)}"]`)).toBeVisible();
-  await expect(row(504).locator('[data-pull-risk="failed"]')).toBeVisible();
-  await expect(row(508).locator('[data-pull-risk]')).toHaveCount(0);
+  await expect(row(504)).toHaveAttribute('data-pulls-risk', 'failed');
+  await expect(row(508)).not.toHaveAttribute('data-pulls-risk');
   await page.mouse.move(0, 0);
   await shots('filter-high-open');
   await notRanked.click();
@@ -697,13 +710,14 @@ test('empty rules turn it off again: the marks and the filter choices go, the ch
   await expect(page.locator('[data-pulls-risk-option]')).toHaveCount(0);
 });
 
-test('set up with nothing ranked: no agent starts; once ranking lands the line at the top of Reviews asks; Not now keeps it away; Make them now starts what it counted', async () => {
+test('set up with nothing ranked: no agent starts; once ranking lands a dialog on Reviews asks; Not now keeps it away; Make them now starts what it counted', async () => {
   await context.close();
   await stopScratchInbox(dataDir);
   const config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
   const was = (config.inboxPullRisk ?? {}) as Record<string, unknown>;
   config.inboxCodeReview = true;
   config.inboxPullRisk = { ...was, rules: RULES, provider: 'pi-sdk', auto: { level: 'high', make: 'guide' } };
+  config.inboxReveals = { ...E2E_GROUP_TIP_SEEN, ...((config.inboxReveals as Record<string, unknown> | undefined) ?? {}) };
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify(config));
   for (const name of ['pull-risk.json', 'pull-risk-auto.json']) rmSync(join(dataDir, 'inbox', name), { force: true });
   const base = 600 + 10 * lineRound++;
@@ -723,7 +737,8 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
     await page.setViewportSize(VIEWPORTS[390]);
     await page.goto(`${url}#pulls`);
     await expect(page.locator('[data-pulls-list]')).toBeVisible();
-    const waitingLine = page.locator('[data-pull-risk-waiting]');
+    const asking = page.getByRole('dialog', { name: /already ranks? High$/ });
+    const waitingLine = asking.locator('[data-pull-risk-waiting]');
     await expect(waitingLine)
       .toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 })
       .catch(async (cause: Error) => {
@@ -731,25 +746,32 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
         const { pending, judgments, auto, auto_waiting, auto_dismissed, auto_agent, auto_agent_unavailable, auto_runs } = risk;
         throw new Error(`${cause.message}\nrisk answer now: ${JSON.stringify({ pending, judgments: Object.keys((judgments ?? {}) as object), auto, auto_waiting, auto_dismissed, auto_agent, auto_agent_unavailable, auto_runs })}`);
       });
-    await expect(waitingLine.locator('.ib-riskw-t')).toHaveText('2 rank High. Make a guided review for each?');
+    await expect(asking.getByRole('heading')).toHaveText('2 already rank High');
+    await expect(asking.locator('p').first()).toHaveText('You turned on guided reviews for High. Make one for each now?');
+    await expect(asking.locator('li')).toHaveCount(2);
+    for (const [n, title] of [[base + 1, 'Refund to the card on file'], [base + 2, 'Waive the card fee for teams']] as const) await expect(asking.locator('li', { hasText: title })).toContainText(`#${n}`);
     expect(await autoRuns()).toEqual({});
     expect(launches()).toBe(launchedBefore);
-    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
-    for (const size of SHEETS) {
-      await page.setViewportSize(size);
-      await page.waitForTimeout(350);
-      await sheetFits(waitingLine, size.width);
-      await page.screenshot({ path: join(proofDir, `risk-line-${size.width}.png`) });
+    for (const scheme of ['dark', 'light'] as const) {
+      await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+      for (const size of SHEETS) {
+        await page.setViewportSize(size);
+        await page.waitForTimeout(350);
+        await sheetFits(asking, size.width);
+        await page.screenshot({ path: join(proofDir, `risk-ask-${size.width}-${scheme}.png`) });
+      }
     }
     await page.setViewportSize(VIEWPORTS[1440]);
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 
-    const settled = (name: string) => waitingLine.locator(`[data-pull-risk-waiting-${name}]:not([aria-disabled])`);
-    await settled('not-now').click();
-    await expect(waitingLine).toHaveCount(0);
+    await expect(asking.locator('[data-pull-risk-waiting-armed]')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(asking).toHaveCount(0);
+    await expect.poll(async () => ((await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as { auto_dismissed?: string[] }).auto_dismissed?.sort()).toEqual([keyOf(base + 1), keyOf(base + 2)].sort());
     await openPulls();
     await expect(row(base + 2).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
-    await expect(waitingLine).toHaveCount(0);
+    await page.waitForTimeout(1_500);
+    await expect(asking).toHaveCount(0);
     expect(await autoRuns()).toEqual({});
 
     writeGhPulls(LINE_LATER(base), LINE(base));
@@ -757,8 +779,9 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
     await openPulls();
     await expect(waitingLine).toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 });
     expect(await autoRuns()).toEqual({});
-    await settled('make-now').click();
-    await expect(waitingLine).toHaveCount(0);
+    await expect(asking.locator('[data-pull-risk-waiting-armed]')).toBeVisible();
+    await asking.getByRole('button', { name: 'Make them now', exact: true }).click();
+    await expect(asking).toHaveCount(0);
     await expect.poll(async () => (await autoRuns())[keyOf(base - 2)]?.state, { timeout: 30_000 }).toBe('started');
     const runs = await autoRuns();
     expect(Object.keys(runs).sort()).toEqual([keyOf(base - 2), keyOf(base - 1)]);
@@ -769,7 +792,7 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
   } finally {
     await page.setViewportSize(VIEWPORTS[1440]).catch(() => {});
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' }).catch(() => {});
-    const left = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json().catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
+    const left = (await page.request.get(`${url}api/inbox/pulls/risk`).then((r) => r.json()).catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
     if (left) await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: left.rules, provider: left.provider, model: left.model, auto: null } }).catch(() => {});
     await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } }).catch(() => {});
   }
