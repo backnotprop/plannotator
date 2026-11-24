@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FIXTURE_PATCH_TS_JSON, FIXTURE_V1_LOCAL } from "@plannotator/core/guide-format-fixtures";
 import { buildGuideSnapshot } from "@plannotator/core/guide-format";
-import { INBOX_REVIEW_CHAPTER_DIAGRAM_DOC, inboxReviewChapterDiagramDoc } from "@plannotator/core/inbox-review";
+import { INBOX_REVIEW_CHAPTER_DIAGRAM_DOC } from "@plannotator/core/inbox-review";
 import { checkInboxGuide } from "./inbox-guides";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 
@@ -45,7 +45,7 @@ describe("submit_guide: a chapter's diagram", () => {
     expect(checked.ok && checked.snapshot.version).toBe(1);
   });
 
-  test("an html picture is checked by Shape's rules and the patch's files, the refusal naming its chapter", () => {
+  test("an html picture is checked by the drawing rules and the patch's files, the refusal naming its chapter", () => {
     const good = send(guide(drawing("src/auth.ts#L2")));
     expect(good.ok).toBe(true);
     if (good.ok) expect(good.snapshot.guide.sections[0]!.diagram?.kind).toBe("html");
@@ -118,45 +118,34 @@ describe("submit_guide: a chapter's diagram", () => {
 
 describe("get_guide_brief offers a chapter's diagram, not the overview's", () => {
   type Registered = Record<string, { handler?: (input: unknown, ctx: unknown) => Promise<unknown> }>;
-  const brief = async (codeReview: boolean, shape = true) => {
-    const server = createInboxMcpServer({ codeReviewOn: () => codeReview, shapeOn: () => shape } as unknown as InboxMcpContext);
+  const brief = async (context: Record<string, unknown>) => {
+    const server = createInboxMcpServer(context as unknown as InboxMcpContext);
     const tools = (server as unknown as { _registeredTools: Registered })._registeredTools;
     return ((await tools.get_guide_brief!.handler!({}, {})) as { structuredContent: { output_schema: Record<string, any>; rules: string[] } }).structuredContent;
   };
 
-  test("Code review on: the schema has sections[].diagram and an overview of text only; the rules say when to draw", async () => {
-    const { output_schema: schema, rules } = await brief(true);
-    expect(schema.properties.sections.items.properties.diagram.properties.kind.enum).toEqual(["mermaid", "html"]);
+  test("Code review on: a chapter's diagram is Mermaid only, the overview text only, and no word of an html drawing", async () => {
+    const { output_schema: schema, rules } = await brief({ codeReviewOn: () => true });
+    expect(schema.properties.sections.items.properties.diagram).toEqual({
+      type: "object",
+      properties: { kind: { enum: ["mermaid"] }, source: { type: "string" } },
+      required: ["kind", "source"],
+      additionalProperties: false,
+    });
     expect(schema.properties.overview.properties).toEqual({ text: { type: "string" } });
     expect(rules).toContain(INBOX_REVIEW_CHAPTER_DIAGRAM_DOC);
-    expect(rules.join("\n")).not.toContain("overview.diagram");
+    const all = JSON.stringify({ schema, rules });
+    for (const word of ["overview.diagram", "html", "plannotator shape", "Shape", "\"css\"", "\"tall\""]) expect([word, all.includes(word)]).toEqual([word, false]);
+  });
+
+  test("a context that still carries an older Inbox's Shape switch gets the same brief", async () => {
+    const plain = await brief({ codeReviewOn: () => true });
+    expect(await brief({ codeReviewOn: () => true, shapeOn: () => true })).toEqual(plain);
   });
 
   test("Code review off: no diagram anywhere in the brief's schema or rules", async () => {
-    const { output_schema: schema, rules } = await brief(false);
+    const { output_schema: schema, rules } = await brief({ codeReviewOn: () => false });
     expect(JSON.stringify(schema)).not.toContain("diagram");
     expect(rules.join("\n")).not.toContain("diagram");
-  });
-
-  test("Code review on and Shape off (#2974): the schema's chapter diagram is Mermaid only and no rule names Shape", async () => {
-    const { output_schema: schema, rules } = await brief(true, false);
-    expect(schema.properties.sections.items.properties.diagram.properties).toEqual({ kind: { enum: ["mermaid"] }, source: { type: "string" } });
-    expect(schema.properties.overview.properties).toEqual({ text: { type: "string" } });
-    expect(rules).toContain(inboxReviewChapterDiagramDoc(false));
-    const all = JSON.stringify({ schema, rules });
-    for (const word of ["html", "plannotator shape", "Shape", "\"css\"", "\"tall\""]) expect([word, all.includes(word)]).toEqual([word, false]);
-    // Shape's switch absent from the context: off.
-    const server = createInboxMcpServer({ codeReviewOn: () => true } as unknown as InboxMcpContext);
-    const tools = (server as unknown as { _registeredTools: Registered })._registeredTools;
-    const absent = ((await tools.get_guide_brief!.handler!({}, {})) as { structuredContent: { rules: string[] } }).structuredContent;
-    expect(absent.rules).toContain(inboxReviewChapterDiagramDoc(false));
-  });
-
-  test("with Shape off the rule offers Mermaid only: no html kind, no Shape rules", () => {
-    const off = inboxReviewChapterDiagramDoc(false);
-    expect(off).toContain('{ "kind": "mermaid", "source" }');
-    expect(off).not.toContain("html");
-    expect(off).not.toContain("plannotator shape --help");
-    expect(inboxReviewChapterDiagramDoc(true)).toContain("plannotator shape --help");
   });
 });

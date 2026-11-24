@@ -406,10 +406,14 @@ test.skipIf(!hasDom)('several Claude marks never move in step: each starts its g
   await until(() => made.filter((an) => an.target === spin).length >= 3, 'three turns of one star');
   const turns = made.filter((an) => an.target === spin);
   const deg = (f: Keyframe | undefined) => Number(/rotate\((-?[\d.]+)deg\)/.exec(String(f?.transform ?? ''))?.[1]);
+  // Compared on the circle within 0.01°: the frames are written to 0.001°, and rounding each side to 0.1° split an angle
+  // that lies on a .x5 (323.45 read as 323.4 on one side and 323.5 on the other). A jump is whole degrees.
+  const apart = (a: number, b: number) => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
   for (let i = 1; i < turns.length; i++) {
-    const end = (((deg(turns[i - 1]!.frames.at(-1)) % 360) + 360) % 360).toFixed(1);
-    const start = (((deg(turns[i]!.frames[0]) % 360) + 360) % 360).toFixed(1);
-    expect(start).toBe(end);
+    const end = deg(turns[i - 1]!.frames.at(-1));
+    const start = deg(turns[i]!.frames[0]);
+    expect(Number.isFinite(start) && Number.isFinite(end)).toBe(true);
+    expect(apart(start, end)).toBeLessThan(0.01);
   }
 });
 

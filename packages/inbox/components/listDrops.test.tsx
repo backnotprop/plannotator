@@ -227,7 +227,7 @@ const move = (x: number, y: number) => act(() => void window.dispatchEvent(new P
 const release = (x: number, y: number) =>
   act(() => {
     window.dispatchEvent(new PointerEvent('pointerup', at(x, y, 0)));
-    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
   });
 /** ⌘-click: picks the row (useListPicks.ts), as the person does before carrying several. */
 const cmdClick = (id: string) => act(() => void rowEl(id).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })));
@@ -485,6 +485,48 @@ describe.skipIf(!hasDom)('the list edges take a carried thread', () => {
     } finally {
       document.elementsFromPoint = realStack;
       toast.remove();
+    }
+  });
+});
+
+describe.skipIf(!hasDom)("the drop's own click, and the person's next one", () => {
+  /** A button outside the list (the drop's toast's Undo), counting the clicks that reach it. */
+  function undoButton() {
+    const undo = document.createElement('button');
+    const pressed = { count: 0 };
+    undo.addEventListener('click', () => void pressed.count++);
+    document.querySelector('.pn-inbox')!.appendChild(undo);
+    return { undo, pressed };
+  }
+  const clickAt = (el: Element, x: number, y: number) => act(() => void el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y })));
+
+  test("a drop on Archive that the browser follows with no click: Undo pressed at once still undoes (it was swallowed for 400 ms)", () => {
+    draw();
+    const { undo, pressed } = undoButton();
+    pickUp(RATE.thread_id);
+    move(100, 2100);
+    // The place under the release leaves with the drop, so the browser fires no click of its own.
+    act(() => void window.dispatchEvent(new PointerEvent('pointerup', at(100, 2100, 0))));
+    expect(actions).toEqual([[RATE.thread_id, 'archive']]);
+    clickAt(undo, 700, 2300);
+    expect(pressed.count).toBe(1);
+  });
+
+  test("the click a release brings, where it was let go, still opens nothing; the next one elsewhere goes through", () => {
+    draw();
+    const { undo, pressed } = undoButton();
+    let reached = 0;
+    const count = () => void reached++;
+    document.body.addEventListener('click', count);
+    try {
+      pickUp(RATE.thread_id);
+      move(100, 2100);
+      release(100, 2100);
+      expect(reached).toBe(0);
+      clickAt(undo, 700, 2300);
+      expect(pressed.count).toBe(1);
+    } finally {
+      document.body.removeEventListener('click', count);
     }
   });
 });

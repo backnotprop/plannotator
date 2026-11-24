@@ -1,0 +1,25 @@
+sequenceDiagram
+  participant A as Ada Novak
+  participant B as Bob Tully
+  actor C as Charlie Dunn
+  A->>B: ping
+  B-->>A: pong
+  A->>A: think
+  Note over A,B: shared note
+  loop Every minute
+    B->>C: ping
+    opt busy
+      C->>C: wait
+    end
+  end
+  alt ok
+    C->>B: ack
+  else failed
+    C-xB: fail "x" < y & z
+  end
+  par first
+    A->>B: one
+  and second
+    A->>C: two
+  end
+  Note right of C: done

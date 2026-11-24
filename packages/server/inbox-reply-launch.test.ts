@@ -146,6 +146,47 @@ describe("a reply sent to a new session when the asking one ended", () => {
     await until(() => fake.calls.includes("resume f1"));
   });
 
+  test("the note that its questions moved never starts the stopped session again; the person's reply still does", async () => {
+    const { store, clock, fake, asked, send, post } = setup();
+    const { reply } = await send("k1", "Retry 3 times.");
+    await until(() => store.message(reply.id)!.launch!.session_ref === "f1");
+    fake.poll("session-f1", false, clock.now);
+    store.recordDelivery(reply.id, { host: FAKE, session: "session-f1" });
+    const ASK = [":::question", "Alert on the third failure?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
+    const question = store.sendMessage({ project_id: asked.project_id, author: { kind: "agent", host: FAKE, session: "session-f1", name: "Fake Agent" }, body: ASK, reply_to: reply.id, idempotency_key: "ask" }).message;
+    await post(reply.launch!.id, "stop");
+    clock.now += 1_000;
+    // An orchestrator moves the question into its brief and archives the thread: the stopped session gets the note.
+    const orch = { kind: "agent" as const, host: "claude-code", session: "ses-orch", name: "Claude Code" };
+    const brief = store.sendMessage({ project_id: asked.project_id, author: orch, subject: "Morning brief", body: ASK, idempotency_key: "brief" }).message;
+    store.resolveThread(asked.thread_id, true, "agent", { to: brief.id, session: "ses-orch" });
+    expect(store.pendingReplies("session-f1").some((m) => m.moved_note)).toBe(true);
+    await Bun.sleep(50);
+    expect(fake.calls).not.toContain("resume f1");
+    // The person unarchives and answers there: that reply starts it again, as before.
+    store.resolveThread(asked.thread_id, false, "person");
+    store.sendReply(question.id, { words: "Yes, alert.", idempotency_key: "k2" });
+    await until(() => fake.calls.includes("resume f1"));
+  });
+
+  test("Ship's stop line never starts the stopped session again; Ship's watch note does (the job is not done)", async () => {
+    const { store, clock, fake, asked, send, post } = setup();
+    const { reply } = await send("k1", "Ship this pull request.");
+    await until(() => store.message(reply.id)!.launch!.session_ref === "f1");
+    fake.poll("session-f1", false, clock.now);
+    store.recordDelivery(reply.id, { host: FAKE, session: "session-f1" });
+    store.sendMessage({ project_id: asked.project_id, author: { kind: "agent", host: FAKE, session: "session-f1", name: "Fake Agent" }, body: "Pushed.", reply_to: reply.id, idempotency_key: "answer" });
+    await post(reply.launch!.id, "stop");
+    clock.now += 1_000;
+    const to = { host: FAKE, session: "session-f1" };
+    store.tellShip(asked.thread_id, { body: "Stop shipping #614. Don't push or merge it; leave it as it is.", to, ship_note: { ship: "shp_1", kind: "stop" } });
+    expect(store.pendingReplies("session-f1").some((m) => m.ship_note?.kind === "stop")).toBe(true);
+    await Bun.sleep(50);
+    expect(fake.calls).not.toContain("resume f1");
+    store.tellShip(asked.thread_id, { body: "Checks failed on abc1234: lint. Fix them and push.\nYou are still shipping #614.", to, ship_note: { ship: "shp_1", kind: "watch" } });
+    await until(() => fake.calls.includes("resume f1"));
+  });
+
   test("a start that fails keeps the reply on its placeholder, with the failed line and Try again", async () => {
     const { store, fake, launch, asked, send } = setup();
     fake.faults.untrusted = true;

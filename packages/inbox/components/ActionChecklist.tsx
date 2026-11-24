@@ -6,19 +6,22 @@
  * Holds up badge; one row per item, a round tick (Done), the task and a
  * chevron. Rows are disclosures and one is open at a time (the first open item
  * to start with): why, what it holds up in words, Open for its link, the whole
- * command with Copy, then Done / Can't do it….
+ * command with Copy, then Done / Can't do it… / Skip.
  *
  * Done and Can't do it go into the person's reply draft, like a pick
  * (approval "inbox-action-items-in-reply", 2026-10-26): recorded at once, sent
  * only with their Send, under "Action items you asked for". The marked row
  * shows a note field ("Add a note for <agent>") and "Done 3:12 PM · in your
- * draft"; the tick takes the mark back. No timer, no toast. A mark made
+ * draft"; the tick takes the mark back. Skip (approval "action-item-skip",
+ * option A) goes the same way with one click and no reason: the row goes
+ * quiet with a "Skipped" chip and "Skipped 3:12 PM · in your draft", no note
+ * field. No timer, no toast. A mark made
  * through the timed path (decision mode, the phone door) still shows its
  * "Goes to <agent> in a few seconds" line and Undo.
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { inboxActionInDraft, inboxActionPersonMark, type InboxQuestion } from '@plannotator/core/inbox-types';
+import { inboxActionInDraft, inboxActionPersonMark, type InboxActionOutcome, type InboxQuestion } from '@plannotator/core/inbox-types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { CROSS_REPO_REF_PATTERN } from '@plannotator/core/forge-refs';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
@@ -29,10 +32,11 @@ import { Icon } from '../icons';
 import { registerActionFlush, trackActionSave } from '../actionSaves';
 import { registerReloadFlush } from '../stalePage';
 import { inboxApi } from '../api';
+import { useLineToggle } from './actionLineToggle';
 
-/** A Done or Can't do it as the window marks it: always into the reply draft (`staged` on the wire). */
+/** A Done, Can't do it or Skip as the window marks it: always into the reply draft (`staged` on the wire). */
 export interface ActionMark {
-  outcome: 'done' | 'cant';
+  outcome: InboxActionOutcome;
   note?: string | null;
   /** A note typed under the marked row: saved without a word for a screen reader. */
   quiet?: boolean;
@@ -43,7 +47,7 @@ export interface ActionChecklistProps {
   actions: readonly InboxQuestion[];
   /** The agent that asked, as the person sees it ("Claude Code"). */
   agent: string;
-  /** The thread's repo: refs in an item's why link into it. Never in the task (a button): its refs stay plain. */
+  /** The thread's repo: refs in an item's why link into it. Never in the task (a click on it opens the row): its refs stay plain. */
   refRepo?: { display: string; host?: string } | null;
   /** No Done (the thread is archived, a test). */
   readOnly?: boolean;
@@ -54,10 +58,11 @@ export interface ActionChecklistProps {
 /** The row's chip once it is no longer open. */
 const CHIP: Record<ActionCardState, { label: string; className: string } | null> = {
   open: null,
-  pending: null, // Done or Can't do it, by its outcome (below)
+  pending: null, // Done, Can't do it or Skipped, by its outcome (below)
   done: { label: 'Done', className: 'ib-badge ib-b-ok' },
   seen: { label: 'Done', className: 'ib-badge ib-b-ok' },
   cant: { label: "Can't do it", className: 'ib-badge ib-b-stop' },
+  skipped: { label: 'Skipped', className: 'ib-badge ib-b-mut' },
   'set-aside': { label: 'Set aside', className: 'ib-badge ib-b-mut' },
   archived: { label: 'Closed', className: 'ib-badge ib-b-mut' },
   replaced: { label: 'Replaced', className: 'ib-badge ib-b-mut' },
@@ -68,12 +73,17 @@ function isDoneState(action: InboxQuestion, state: ActionCardState): boolean {
   return state === 'pending' && action.action_result?.outcome === 'done';
 }
 
+/** Skipped by the person: in the reply draft (or inside the timed path's Undo window), or sent. */
+function isSkippedState(action: InboxQuestion, state: ActionCardState): boolean {
+  return state === 'skipped' || (state === 'pending' && action.action_result?.outcome === 'skip');
+}
+
 const CROSS_REPO_REF_GLOBAL = new RegExp(CROSS_REPO_REF_PATTERN.source, 'g');
 
 /**
- * The task, for its row's toggle (a button): inline markdown as a question's
- * prompt draws it (bold, `code`), but never a link, which cannot sit inside a
- * button: `[label](url)` keeps its label, and a bare or `<…>` URL reads as
+ * The task, on its row's toggle line (a click on it opens the row): inline
+ * markdown as a question's prompt draws it (bold, `code`), but never a link,
+ * which would fight that click: `[label](url)` keeps its label, and a bare or `<…>` URL reads as
  * code. An `owner/repo#123` ref stays plain text (its `#` escaped). The row's
  * Open button carries a `Where:` link.
  */
@@ -108,6 +118,8 @@ export function ActionChecklist({ actions, agent, refRepo = null, readOnly = fal
   const replaced = states.filter((st) => st === 'replaced').length;
   const total = actions.length - replaced;
   const done = actions.filter((a, i) => isDoneState(a, states[i]!)).length;
+  // Skipped items stay in the total, counted apart like replaced ones: "0 of 2 done · 1 skipped".
+  const skipped = actions.filter((a, i) => isSkippedState(a, states[i]!)).length;
   const openItems = actions.filter((_, i) => states[i] === 'open');
   const stopped = openItems.some((a) => a.stopped !== null);
   const holds = openItems.reduce((n, a) => n + a.holds_up.length, 0);
@@ -116,9 +128,9 @@ export function ActionChecklist({ actions, agent, refRepo = null, readOnly = fal
     : holds > 0
       ? { label: `Holds up ${holds}`, className: 'ib-badge ib-b-hold' }
       : null;
-  // What the agent watches, for the items it still waits on (open, or marked and not sent): a settled or replaced item's watch is over.
+  // What the agent watches, for the items it still waits on (open, or marked and not sent): a settled, skipped or replaced item's watch is over.
   const watching = useMemo(
-    () => [...new Set(actions.filter((_, i) => states[i] === 'open' || states[i] === 'pending').map((a) => a.action?.watching).filter((w): w is string => !!w))],
+    () => [...new Set(actions.filter((a, i) => (states[i] === 'open' || states[i] === 'pending') && !isSkippedState(a, states[i]!)).map((a) => a.action?.watching).filter((w): w is string => !!w))],
     [actions],
   );
 
@@ -145,7 +157,7 @@ export function ActionChecklist({ actions, agent, refRepo = null, readOnly = fal
       if (from === 'panel') setFocusKey(action.key);
       return;
     }
-    // After Done (or Can't do it) the next open item opens; focus follows from the panel, whose buttons go.
+    // After Done (Can't do it, Skip) the next open item opens; focus follows from the panel, whose buttons go.
     const next = nextOpen(actions, action.key);
     setOpenKey(next);
     if (from === 'panel') setFocusKey(next ?? action.key);
@@ -164,7 +176,7 @@ export function ActionChecklist({ actions, agent, refRepo = null, readOnly = fal
         </span>
         {total > 0 && (
           <span className="ib-chk-count" data-action-progress="">
-            {done} of {total} done{replaced > 0 ? ` · ${replaced} replaced` : ''}
+            {done} of {total} done{skipped > 0 ? ` · ${skipped} skipped` : ''}{replaced > 0 ? ` · ${replaced} replaced` : ''}
           </span>
         )}
         {badge && (
@@ -250,6 +262,9 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
   const tickDoneAt = useRef(0);
   const panelId = useId();
   const noteId = useId();
+  const taskId = useId();
+  const chipId = useId();
+  const { onLinePress, onLineClick } = useLineToggle(onToggle);
   useEffect(() => {
     if (composing) areaRef.current?.focus();
     else if (refocusCant.current) {
@@ -292,7 +307,9 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
   const chip = pending
     ? result?.outcome === 'cant'
       ? CHIP.cant
-      : CHIP.done
+      : result?.outcome === 'skip'
+        ? CHIP.skipped
+        : CHIP.done
     : CHIP[state];
 
   // The line under the task: a timed mark's Undo, a reason the person sent, the agent's own done over a note in the draft.
@@ -303,7 +320,7 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
           <span>
             {result.outcome === 'cant'
               ? `Can't do it: “${result.note ?? ''}”. Goes to ${agent} in a few seconds.`
-              : `Done ${when}${result.note ? ' with a note' : ''}. Goes to ${agent} in a few seconds.`}
+              : `${result.outcome === 'skip' ? 'Skipped' : 'Done'} ${when}${result.note ? ' with a note' : ''}. Goes to ${agent} in a few seconds.`}
           </span>
           {!readOnly && (
             <button type="button" className="ib-act-undo" data-action-undo="" onClick={() => void mark(null, 'panel')} disabled={busy}>
@@ -320,6 +337,7 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
   // The settled line inside the open row.
   const settled = (() => {
     if (state === 'done' && result) return `You marked it done, ${when}${result.note ? ' with a note' : ''}. Sent to ${agent}${result.staged ? ' with your reply' : ''}.`;
+    if (state === 'skipped' && result) return `You skipped it, ${when}${result.note ? ' with a note' : ''}. Sent to ${agent}${result.staged ? ' with your reply' : ''}.`;
     if (state === 'seen' && result && inDraft) return null;
     if (state === 'seen' && result && mine?.note) return `${agent} saw it done, ${when}. Your note went with your reply.`;
     if (state === 'seen' && result) return `${agent} saw it done, ${when}.`;
@@ -329,8 +347,15 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
     return null;
   })();
 
-  // Uncircled glyphs: the dot is the circle. A set-aside, closed or replaced item is a dashed, empty dot.
-  const tickIcon = doneLike ? 'check' : state === 'cant' || (pending && result?.outcome === 'cant') ? 'x' : null;
+  // Uncircled glyphs: the dot is the circle. A skipped item shows the open questions list's skip arrow; a
+  // set-aside, closed or replaced item is a dashed, empty dot.
+  const tickIcon = doneLike
+    ? 'check'
+    : state === 'cant' || (pending && result?.outcome === 'cant')
+      ? 'x'
+      : isSkippedState(action, state)
+        ? 'forward'
+        : null;
   const onTick = (event: MouseEvent) => {
     // The second click of a double-click (or one within half a second of Done) never undoes it.
     if (event.detail > 1) return;
@@ -349,7 +374,8 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
         className="ib-chk-tick"
         data-action-tick=""
         aria-pressed={pending}
-        aria-label={`Done: ${action.prompt}`}
+        // A skip waiting in the draft is named as the question card names its skipped button: "Unskip", pressed.
+        aria-label={`${pending && result?.outcome === 'skip' ? 'Unskip' : 'Done'}: ${action.prompt}`}
         // aria-disabled, not disabled: a disabled button drops keyboard focus to the page. mark() ignores clicks while busy.
         aria-disabled={busy || undefined}
         onClick={onTick}
@@ -374,28 +400,43 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
     >
       <div className="ib-chk-line">
         {tick}
-        <button
-          type="button"
-          className="ib-chk-toggle"
-          ref={toggleRef}
-          onClick={onToggle}
-          aria-expanded={open}
-          aria-controls={panelId}
-          data-action-toggle=""
-        >
-          <span className="ib-chk-do">
+        {/* The task and its chip sit beside the toggle, not in it: text inside a button cannot be selected. The
+            button fills the line under them (inbox.css), so its focus ring and its name are the row's as before. */}
+        <div className="ib-chk-toggle" onPointerDown={onLinePress} onClick={onLineClick} data-action-line="">
+          <button
+            type="button"
+            className="ib-chk-hit"
+            ref={toggleRef}
+            onClick={onToggle}
+            aria-expanded={open}
+            aria-controls={panelId}
+            aria-labelledby={chip ? `${taskId} ${chipId}` : taskId}
+            data-action-toggle=""
+          />
+          <span className="ib-chk-do" id={taskId} aria-hidden="true" data-action-task="">
             <InlineMarkdown text={taskMarkdown(action.prompt)} />
           </span>
-          {chip && <span className={chip.className}>{chip.label}</span>}
+          {chip && (
+            <span className={chip.className} id={chipId} aria-hidden="true">
+              {chip.label}
+            </span>
+          )}
           <Icon name={open ? 'chevD' : 'chevR'} />
-        </button>
+        </div>
       </div>
       {underLine && (
         <p className="ib-chk-under" data-action-settled="">
           {underLine}
         </p>
       )}
-      {inDraft && mine && (
+      {inDraft && mine && mine.outcome === 'skip' && state !== 'seen' ? (
+        // Skipped in the draft: no note field (Skip asks for no words), only when and where it waits.
+        <div className="ib-chk-draft" data-action-draft="">
+          <p className="ib-chk-dline" data-action-draft-line="">
+            Skipped {clockTime(mine.at)} · in your draft
+          </p>
+        </div>
+      ) : inDraft && mine && (
         <DraftNote
           mark={mine}
           seen={state === 'seen'}
@@ -501,6 +542,9 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
             <button type="button" className="ib-btn ib-sm ib-ghost" data-action-cant="" ref={cantRef} disabled={busy} onClick={() => setComposing('cant')}>
               Can't do it…
             </button>
+            <button type="button" className="ib-btn ib-sm ib-ghost" data-action-skip="" disabled={busy} onClick={() => void mark({ outcome: 'skip' }, 'panel')}>
+              Skip
+            </button>
           </div>
         ))}
       </div>
@@ -527,7 +571,7 @@ function DraftNote({
   onSave,
   onLeave,
 }: {
-  mark: { outcome: 'done' | 'cant'; note: string | null; at: string };
+  mark: { outcome: InboxActionOutcome; note: string | null; at: string };
   seen: boolean;
   agent: string;
   readOnly: boolean;

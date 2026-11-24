@@ -457,7 +457,7 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
   const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-  // Code review shows to everyone, off (the owner, 2026-11-17); Shape is held: off, and without PLANNOTATOR_INBOX_PREVIEW, no row.
+  // Code review shows to everyone, off (the owner, 2026-11-17). The window has no Shape row.
   expect(rows).toEqual(['Board', 'Checklist', ...SCHEDULED_ROW, 'Code review']);
   // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
   expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
@@ -514,14 +514,11 @@ test.skipIf(!hasDom)('Capabilities → Experimental: Float reply drafts is off b
   }
 });
 
-// Code review (approval "inbox-code-review-direction") and Shape (approval "shape-inbox-placement"). Code review's row
-// shows to everyone, off by default (the owner, 2026-11-17: "enable it in the capabilities"). Shape is held
-// (packages/server/inbox.ts `heldSwitch`): a person who never turned it on sees no row; one who has it on keeps the row
-// and can turn it off (the row then goes at the next load); PLANNOTATOR_INBOX_PREVIEW=1 shows it. Each saves config.json
-// `inboxCodeReview` / `inboxShape`.
+// Code review (approval "inbox-code-review-direction"): its row shows to everyone, off by default (the owner,
+// 2026-11-17: "enable it in the capabilities"), and saves config.json `inboxCodeReview`. The window has no Shape: no
+// row, whatever config.json or PLANNOTATOR_INBOX_PREVIEW say.
 const HELD = [
   { name: 'Code review', key: 'inboxCodeReview', wire: 'code_review', selector: '[data-settings-code-review]', held: false },
-  { name: 'Shape', key: 'inboxShape', wire: 'shape', selector: '[data-settings-shape]', held: true },
 ] as const;
 
 function readConfig(server: Server): Record<string, unknown> {
@@ -581,15 +578,18 @@ for (const held of HELD) {
 // Read only: the window keeps the first server session it saw, so a save to this second Inbox would be refused. The
 // server test (packages/server/inbox-held-switches.test.ts) proves the preview's saves and events.
 test.skipIf(!hasDom)(
-  'Capabilities: PLANNOTATOR_INBOX_PREVIEW=1 shows the Shape row while off, beside Code review\'s',
+  'Capabilities: PLANNOTATOR_INBOX_PREVIEW=1 with Shape on in config.json still shows no Shape row, only Code review\'s',
   async () => {
     const preview = await spawnServer('preview', [], { PLANNOTATOR_INBOX_PREVIEW: '1' });
     current = preview;
+    writeFileSync(join(preview.dataDir, 'config.json'), JSON.stringify({ ...readConfig(preview), inboxShape: true }));
     try {
       const el = await renderApp('#settings/capabilities');
-      await until(() => switchNamed(el, 'Shape') !== null, 'the Shape switch');
+      await until(() => switchNamed(el, 'Code review') !== null, 'the Code review switch');
       const rows = [...el.querySelectorAll('[data-settings-capabilities] .ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-      expect(rows).toEqual(['Board', 'Checklist', ...SCHEDULED_ROW, 'Code review', 'Shape']);
+      expect(rows).toEqual(['Board', 'Checklist', ...SCHEDULED_ROW, 'Code review']);
+      expect(switchNamed(el, 'Shape')).toBeNull();
+      expect(el.querySelector('[data-settings-shape]')).toBeNull();
       for (const held of HELD) {
         expect(el.querySelector(held.selector)?.contains(switchNamed(el, held.name))).toBe(true);
         expect(switchNamed(el, held.name)!.getAttribute('aria-checked')).toBe('false');

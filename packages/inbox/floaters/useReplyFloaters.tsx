@@ -25,6 +25,7 @@ import { AuthorMark } from '../icons';
 import { inboxApi } from '../api';
 import { AskSparkle } from '../ask/AskChatMenu';
 import type { AskCorner } from '../ask/useInboxAsk';
+import { SIDE_CORNER, SIDE_CORNER_HIT, SIDE_CORNER_R } from '../ask/scoop';
 import type { InboxToastModel } from '../components/Toast';
 import { Icon } from '../icons';
 import { machineOf } from '../inboxUrl';
@@ -53,6 +54,15 @@ export interface ReplyFloatersOptions {
 }
 
 const TILE = 44;
+/** A draft window's bottom offset while the minimized chat's circle is in the corner: clear of its 44 px box. */
+const CIRCLE_CLEAR = SIDE_CORNER_HIT + 8;
+/**
+ * The pile's right offset while it rests above the minimized chat's circle: on the circle's centre line (SIDE_CORNER_R
+ * in from the window's edge) as near as the window lets it, never nearer the edge than the circle itself (5 px).
+ * Exactly centred, 3 px of the 44 px tile and 8 of its count badge would be past the edge; so its right edge is the
+ * circle's, 8 px left of the centre line.
+ */
+const CIRCLE_LINE_RIGHT = Math.max(SIDE_CORNER_R - TILE / 2, SIDE_CORNER_R - SIDE_CORNER.d / 2);
 /** How long a closed box's or a left thread's draft is looked at again while its save lands. */
 const SETTLE_WINDOW_MS = 5_000;
 
@@ -193,13 +203,22 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     });
   }, []);
 
-  /** Beside Ask's window when it is open (they never cover each other), else in the corner. */
+  /**
+   * Beside Ask's window when it is open (they never cover each other), else in the corner: above the minimized chat's
+   * circle while it shows (the same size, lifted clear of its 44 px corner).
+   */
   const placeWindow = useCallback(() => {
     if (ask.threadId !== null && !ask.store.minimized && !ask.store.fullscreen) {
       const at = ask.store.geometry();
       frame.setWindowOffsets(at.right + at.w + 12, at.bottom);
-    } else frame.setWindowOffsets(16, 16);
-  }, [ask.threadId, ask.store, frame]);
+    } else frame.setWindowOffsets(16, ask.circle ? CIRCLE_CLEAR : 16);
+  }, [ask.threadId, ask.store, ask.circle, frame]);
+  // The circle coming while a draft's window rests on the corner (Ask minimized, or another thread's chat): it moves up.
+  useEffect(() => {
+    if (!ask.circle || openId === null || phone) return;
+    const d = frame.geometry();
+    if (d.right < SIDE_CORNER_HIT && d.bottom < SIDE_CORNER_HIT) frame.setWindowOffsets(d.right, CIRCLE_CLEAR);
+  }, [ask.circle, openId, phone, frame]);
 
   const openBox = useCallback(
     (id: string) => {
@@ -371,7 +390,15 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
 
   // Where the button sits: level with Send at the foot's right end; beside Ask's window while that is open.
   const askGeom = !phone && askOpen && !ask.store.fullscreen ? ask.store.geometry() : null;
-  const place: CSSProperties = askGeom ? { right: askGeom.right + askGeom.w + 12, bottom: askGeom.bottom } : { right: room.right, bottom: room.bottom };
+  const spot: StackProps['spot'] = askGeom ? 'ask' : room.foot ? 'foot' : 'corner';
+  // In the window's very corner (no reply foot on screen) while the minimized chat's circle shows there: both show, the
+  // pile straight above the circle, clear of its 44 px box as a draft's window is (CIRCLE_CLEAR).
+  const aboveCircle = spot === 'corner' && ask.circle;
+  const place: CSSProperties = askGeom
+    ? { right: askGeom.right + askGeom.w + 12, bottom: askGeom.bottom }
+    : aboveCircle
+      ? { right: CIRCLE_LINE_RIGHT, bottom: CIRCLE_CLEAR }
+      : { right: room.right, bottom: room.bottom };
   const showCorner = items.length > 0 && !room.hidden && !(phone && (room.boxOpen || askOpen || openRow !== null)) && !(!phone && openRow !== null) && !(askOpen && ask.store.fullscreen);
   const onAll = () => {
     setMenu(false);
@@ -380,9 +407,16 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
 
   return {
     layer: (
-      <div ref={layerRef} className={`ib-rf-layer${phone && openRow ? ' ib-rf-over' : ''}`} data-rf-layer="" data-rf-phone={phone ? '' : undefined}>
+      <div
+        ref={layerRef}
+        className={`ib-rf-layer${phone && openRow ? ' ib-rf-over' : ''}`}
+        data-rf-layer=""
+        data-rf-phone={phone ? '' : undefined}
+        // A draft's window dragged onto the circle is above it: the circle never takes its clicks.
+        data-rf-over-circle={!phone && openRow && ask.circle ? '' : undefined}
+      >
         {showCorner &&
-          (phone ? <PhoneCorner style={place} items={items} menu={menu} setMenu={setMenu} onAll={onAll} /> : <Stack style={place} items={items} menu={menu} setMenu={setMenu} onAll={onAll} />)}
+          (phone ? <PhoneCorner style={place} spot={spot} items={items} menu={menu} setMenu={setMenu} onAll={onAll} /> : <Stack style={place} spot={spot} items={items} menu={menu} setMenu={setMenu} onAll={onAll} />)}
         {openRow && (
           <FloaterBox
             key={openRow.thread_id}
@@ -405,6 +439,8 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
 
 interface StackProps {
   style: CSSProperties;
+  /** Where it rests: beside Ask's window, level with Send, or in the window's corner. */
+  spot: 'ask' | 'foot' | 'corner';
   items: readonly CornerItem[];
   menu: boolean;
   setMenu: (open: boolean) => void;
@@ -412,7 +448,7 @@ interface StackProps {
 }
 
 /** The corner's pile: a round button that spreads into named rows when you reach for it. */
-function Stack({ style, items, menu, setMenu, onAll }: StackProps) {
+function Stack({ style, spot, items, menu, setMenu, onAll }: StackProps) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
   const spread = (on: boolean, wait: number) => {
@@ -445,6 +481,7 @@ function Stack({ style, items, menu, setMenu, onAll }: StackProps) {
       role="group"
       aria-label={groupName}
       data-rf-corner=""
+      data-rf-spot={spot}
       data-spread={menu ? '' : undefined}
       onPointerEnter={(event) => event.pointerType === 'mouse' && spread(true, 70)}
       onPointerLeave={(event) => event.pointerType === 'mouse' && spread(false, 260)}
@@ -516,7 +553,7 @@ function Stack({ style, items, menu, setMenu, onAll }: StackProps) {
 }
 
 /** A phone: no hover. The round button sits in the foot's row; a press opens one sheet with the list. */
-function PhoneCorner({ style, items, menu, setMenu, onAll }: StackProps) {
+function PhoneCorner({ style, spot, items, menu, setMenu, onAll }: StackProps) {
   const front = items[0]!;
   const drafts = items.filter((item) => item.kind === 'draft');
   const withAsk = items.some((item) => item.kind === 'ask');
@@ -533,6 +570,7 @@ function PhoneCorner({ style, items, menu, setMenu, onAll }: StackProps) {
         aria-label={withAsk ? (drafts.length > 0 ? `Ask AI and ${drafts.length === 1 ? '1 draft reply' : `${drafts.length} draft replies`}` : front.label) : items.length === 1 ? front.label : `Draft replies, ${items.length}`}
         data-rf-launcher=""
         data-rf-corner=""
+        data-rf-spot={spot}
         onClick={press}
       >
         {front.mark}

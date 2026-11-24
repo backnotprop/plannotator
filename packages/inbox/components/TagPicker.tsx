@@ -17,28 +17,31 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import type { MentionMenuState } from '@plannotator/ui/hooks/useMentionAutocomplete';
 import { inboxApi, type TaggableModel } from '../api';
 import type { RecipientConnection } from '../deliveryLine';
+import { useKeptState } from '../data/keptState';
+import { pollWhileShown } from '../data/shownPoll';
 
 /** How often an open reply box reads who can be tagged, so a session that started or stopped shows. */
 const TAGGABLE_REFRESH_MS = 10_000;
 
-/** Who the person can tag in this thread, read while `enabled` (the reply box or a comment is open). */
-export function useTaggable(threadId: string, enabled: boolean) {
-  const [model, setModel] = useState<TaggableModel | null>(null);
+/**
+ * Who the person can tag in this thread, read while `enabled` (the reply box or a comment is open), never while the tab
+ * is hidden or the pane `parked` (data/shownPoll.ts). The same answer keeps the held one.
+ */
+export function useTaggable(threadId: string, enabled: boolean, parked = false) {
+  const [model, keepModel] = useKeptState<TaggableModel | null>(null);
   const load = useCallback(async () => {
     try {
       const next = await inboxApi.taggable(threadId);
       // Only a well-formed answer: an older Inbox (or a stub) leaves nobody to tag.
-      setModel(next && Array.isArray(next.sessions) ? next : null);
+      keepModel(next && Array.isArray(next.sessions) ? next : null);
     } catch {
       // An older Inbox, or a failed read: nobody to tag; `@` stays text.
     }
   }, [threadId]);
   useEffect(() => {
-    if (!enabled) return;
-    void load();
-    const timer = setInterval(() => void load(), TAGGABLE_REFRESH_MS);
-    return () => clearInterval(timer);
-  }, [load, enabled]);
+    if (!enabled || parked) return;
+    return pollWhileShown(() => void load(), TAGGABLE_REFRESH_MS);
+  }, [load, enabled, parked]);
   return model;
 }
 
@@ -47,24 +50,23 @@ export function useTaggable(threadId: string, enabled: boolean) {
  * sessions route's `recipients`), read every few seconds while any of them
  * still waits: each line's "Queued", "Sending" and its own Send now.
  */
-export function useTagConnections(threadId: string, sessions: readonly string[], enabled: boolean) {
+export function useTagConnections(threadId: string, sessions: readonly string[], enabled: boolean, parked = false) {
   const key = sessions.join(',');
-  const [connections, setConnections] = useState<Record<string, RecipientConnection | null>>({});
+  const [connections, keepConnections] = useKeptState<Record<string, RecipientConnection | null>>({});
   const load = useCallback(async () => {
     if (!key) return;
     try {
       const model = await inboxApi.sessions(threadId, null, key.split(','));
-      setConnections(model.recipients ?? {});
+      keepConnections(model.recipients ?? {});
     } catch {
       // Unknown: the lines read "Queued … as its next turn".
     }
   }, [threadId, key]);
   useEffect(() => {
-    if (!enabled || !key) return;
-    void load();
-    const timer = setInterval(() => void load(), 3_000);
-    return () => clearInterval(timer);
-  }, [load, enabled, key]);
+    // Not while the tab is hidden or the pane parked; once the moment it shows again (data/shownPoll.ts).
+    if (!enabled || !key || parked) return;
+    return pollWhileShown(() => void load(), 3_000);
+  }, [load, enabled, key, parked]);
   return { connections, load };
 }
 import { mentionGroups } from '@plannotator/ui/components/MentionPicker';

@@ -32,6 +32,7 @@ import { pageInFront } from './sound';
 import { RANG_FOR_NOTHING, type RangFor, type RingNews } from './soundRing';
 import { inboxEventsServedBy } from './sharedEvents';
 import { signalNotificationClick } from './history';
+import { gestured } from './recentActs';
 
 /** The one tag every Inbox notification carries: a new one replaces the last. */
 export const NOTIFICATION_TAG = 'plannotator-inbox';
@@ -570,7 +571,7 @@ export function useInboxNotifications(options: {
       open = () => openRef.current.list();
     }
     // Silent only when the bell really rang for this news (this tab away): never for news it stayed quiet for.
-    const silent = !front && items.some((item) => (item.asks ? rang.asks : rang.plain));
+    const silent = !front && items.some((item) => (item.asks ? rang.asks : item.fresh ? rang.fresh : rang.plain));
     try {
       const notification = new Notification(text.title, inboxNotificationOptions(text, { silent }));
       notification.onclick = () => {
@@ -578,6 +579,8 @@ export function useInboxNotifications(options: {
         notification.close();
         burst.current.clear();
         lastNotice.current = null;
+        // The person's click: the thread it opens is one they chose ("Recent activity", recentActs.ts).
+        gestured();
         open();
         signalNotificationClick();
       };
@@ -647,11 +650,12 @@ export function useInboxNotifications(options: {
       }
       const found = [...threads.values()];
       const asks = found.some((item) => item.asks);
-      // Plain news: an agent message in a thread that asks nothing here (a reply, a new thread, a failed turn's note).
-      const plain = found.some((item) => !item.asks) || news.some((threadId) => !snoozed.has(threadId) && threads.get(threadId)?.asks !== true);
+      // Plain news: an agent message in a thread that asks nothing here (a reply or a failed turn's note).
+      const newThread = found.some((item) => item.fresh && !item.asks);
+      const plain = found.some((item) => !item.asks && !item.fresh) || news.some((threadId) => !snoozed.has(threadId) && threads.get(threadId)?.asks !== true && threads.get(threadId)?.fresh !== true);
       // The sound does not depend on notifications (off, not allowed or blocked, it still rings); it hears every
       // agent message and rings by the person's choice. A plain reply raises no notice, so it ends here.
-      const rang = asks || plain ? (soundRef.current.news?.({ asks, plain }) ?? RANG_FOR_NOTHING) : RANG_FOR_NOTHING;
+      const rang = asks || plain || newThread ? (soundRef.current.news?.({ asks, plain, fresh: newThread }) ?? RANG_FOR_NOTHING) : RANG_FOR_NOTHING;
       if (threads.size === 0) return;
       const settings = settingsRef.current;
       if (!settings || !settings.enabled || !supported()) return;

@@ -23,8 +23,9 @@ const tools: InboxToolInfo[] = [
   { name: "read_thread", description: "Read.", inputSchema: { type: "object", properties: { thread_id: { type: "string" } } } },
 ];
 const filled = { project_path: "/work/notes", agent_session: "ses_1", agent_host: "claude-code", agent_name: "Claude Code" };
-const errorOf = (input: unknown) => {
-  const call = inboxToolCall(input, tools, filled);
+const readTools: InboxToolInfo[] = [{ name: "read_thread", description: "Read.", inputSchema: { type: "object", properties: { thread_id: { type: "string" }, message_id: { type: "string" } } } }];
+const errorOf = (input: unknown, among: InboxToolInfo[] = tools) => {
+  const call = inboxToolCall(input, among, filled);
   return "error" in call ? call.error : null;
 };
 const UNREAD = "its input could not be read as fields";
@@ -47,6 +48,7 @@ test("input that never arrived as fields says to check the quoting, with a call 
   for (const input of broken) {
     const error = errorOf(input)!;
     expect(error).toContain(UNREAD);
+    expect(error).toContain("nothing was sent");
     expect(error).toContain('"supersedes": ["msg_…/q-…"]');
     expect(error).toContain("action is one of send_message, read_thread");
     expect(error).not.toContain("action must be one of");
@@ -62,6 +64,14 @@ test("a readable call with no action, or a wrong one, still gets the action list
     expect(error).toContain("action must be one of send_message, read_thread");
     expect(error).not.toContain(UNREAD);
   }
+});
+
+test("read_thread's id reads as message_id, only when neither thread_id nor message_id is given", () => {
+  expect(inboxToolCall({ action: "read_thread", id: "msg_01" }, readTools, filled)).toEqual({ name: "read_thread", arguments: { message_id: "msg_01" } });
+  expect(errorOf({ action: "read_thread", id: "msg_01", thread_id: "msg_02" }, readTools)).toContain('read_thread takes no "id"');
+  expect(errorOf({ action: "read_thread", id: "" }, readTools)).toContain('read_thread takes no "id"');
+  expect(errorOf({ action: "read_thread", id: 3 }, readTools)).toContain('read_thread takes no "id"');
+  expect(errorOf({ action: "send_message", id: "msg_01", body: "x" })).toContain('send_message takes no "id"');
 });
 
 test("a call with an action goes through unchanged, JSON in its body included", () => {
@@ -98,7 +108,7 @@ test("a bare id the host could not parse is quoted, the call runs, and the resul
 test("anything else the host could not parse is refused at its spot, never with the action list", () => {
   const raw = `{"action": "send_message", "thread": sync-work, "body": "${BODY}"}`;
   const error = errorOf(unparsed(raw))!;
-  expect(error).toContain(`couldn't be read at character ${raw.indexOf("sync-work")}:`);
+  expect(error).toContain(`nothing was sent: this call's JSON couldn't be read at character ${raw.indexOf("sync-work")}:`);
   expect(error).toContain('"thread": sync-work ← this value needs double quotes. Fix that spot and call again.');
   expect(error).not.toContain("action must be one of");
   // A quote inside the body that is not escaped: the spot after the string it closed.

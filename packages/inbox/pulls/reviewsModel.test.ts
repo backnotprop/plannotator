@@ -231,11 +231,14 @@ test('the groups start folded, are remembered, and a bad stored value is the def
   const saved = globalThis.localStorage;
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v) } });
   try {
-    expect(readReviewFolds()).toEqual({ waiting: false, not_reviewed: false });
-    saveReviewFolds({ waiting: true, not_reviewed: false });
-    expect(readReviewFolds()).toEqual({ waiting: true, not_reviewed: false });
+    expect(readReviewFolds()).toEqual({ waiting: false, not_reviewed: false, local: false });
+    saveReviewFolds({ waiting: true, not_reviewed: false, local: true });
+    expect(readReviewFolds()).toEqual({ waiting: true, not_reviewed: false, local: true });
+    // Folds kept before "On this computer" was a group: it starts folded.
+    store.set([...store.keys()][0]!, JSON.stringify({ waiting: true, not_reviewed: true }));
+    expect(readReviewFolds()).toEqual({ waiting: true, not_reviewed: true, local: false });
     store.set([...store.keys()][0]!, '{not json');
-    expect(readReviewFolds()).toEqual({ waiting: false, not_reviewed: false });
+    expect(readReviewFolds()).toEqual({ waiting: false, not_reviewed: false, local: false });
   } finally {
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: saved });
   }

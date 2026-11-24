@@ -198,7 +198,7 @@ export function DecisionCard(props: DecisionCardProps) {
   const { decision } = props;
   const q = decision.question;
   // The thread's repo, so `#123` and `owner/repo#123` link as in the thread (none: they stay plain).
-  const refRepo = useRefRepo(decision.thread.project.repo ?? null);
+  const refRepo = useRefRepo(decision.message.repo !== undefined ? decision.message.repo : (decision.thread.project.repo ?? null));
   const refProps = { githubRepo: refRepo?.display, repoHost: refRepo?.host };
   const kind = readInboxQuestionKind(q.kind);
   const facts = cardFacts(decision);
@@ -516,7 +516,7 @@ export function DecisionCard(props: DecisionCardProps) {
           <p className="ib-dm-sentline" data-decision-sent={props.sending && !props.sent ? undefined : ''} data-decision-sending={props.sending && !props.sent ? '' : undefined}>
             <Icon name={props.sending && !props.sent ? 'clock' : 'check'} size={16} />
             <span>
-              <b>{props.sending && !props.sent ? 'Sending' : 'Sent'}</b> · {kind === 'action' ? (q.action_result?.outcome === 'cant' ? "Can't do it" : 'Done') : answerWords(q.answer)}
+              <b>{props.sending && !props.sent ? 'Sending' : 'Sent'}</b> · {kind === 'action' ? (q.action_result?.outcome === 'cant' ? "Can't do it" : q.action_result?.outcome === 'skip' ? 'Skipped' : 'Done') : answerWords(q.answer)}
             </span>
           </p>
         )}

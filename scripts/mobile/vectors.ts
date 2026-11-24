@@ -10,7 +10,11 @@
  * (the relay's collapse id, beside the existing relay vectors), questions (the
  * answer each act makes and the body that saves it), skew (health answers and
  * app headers read by the door's version rules), snooze (the snooze times,
- * words and the list's clock over snoozed rows, in each zone). The stream
+ * words and the list's clock over snoozed rows, in each zone), rows (the list's
+ * groups and what each row offers), acts (the words said after a row action,
+ * scripts/mobile/vectors-actions.ts), quote (a quoting reply's lead, written and
+ * taken away, and where ↩ quotes; scripts/mobile/vectors-quote.ts), writing (who `@` tags, the
+ * line under a 👍 and where Take back is offered; scripts/mobile/vectors-writing.ts). The stream
  * suite reads with the window's own parser, so it has its own generator,
  * scripts/mobile/vectors-stream.ts.
  */
@@ -33,6 +37,11 @@ import { archivedRowPatch, readRowPatch } from '../../packages/inbox/rowActions'
 import { rowMenuActions } from '../../packages/inbox/rowMenu';
 import { rowSwipeActions } from '../../packages/inbox/rowSwipe';
 import { ROOT, cli, jsonText, readRepoText, type Output } from './lib';
+import { ACTS_FIXTURE, ACTS_ROWS, actVectors } from './vectors-actions';
+import { FEEDBACK_FIXTURE, feedbackVectors } from './vectors-feedback';
+import { DOCUMENTS_FIXTURE, FILES_FIXTURE, documentVectors, fileVectors } from './vectors-files';
+import { QUOTE_FIXTURE, quoteVectors } from './vectors-quote';
+import { WRITING_FIXTURE, writingVectors } from './vectors-writing';
 import { buildWords } from './words';
 
 export const FIXTURES = {
@@ -42,6 +51,12 @@ export const FIXTURES = {
   skew: 'apps/mobile/contract/fixtures/skew.json',
   snooze: 'apps/mobile/contract/fixtures/snooze.json',
   rows: 'apps/mobile/contract/fixtures/rows.json',
+  acts: 'apps/mobile/contract/fixtures/acts.json',
+  files: 'apps/mobile/contract/fixtures/files.json',
+  documents: 'apps/mobile/contract/fixtures/documents.json',
+  feedback: 'apps/mobile/contract/fixtures/feedback.json',
+  quote: 'apps/mobile/contract/fixtures/quote.json',
+  writing: 'apps/mobile/contract/fixtures/writing.json',
   relay: 'packages/core/fixtures/inbox-relay-vectors.json',
 } as const;
 
@@ -54,6 +69,12 @@ export const VECTORS = {
   skew: 'apps/mobile/contract/vectors/skew.json',
   snooze: 'apps/mobile/contract/vectors/snooze.json',
   rows: 'apps/mobile/contract/vectors/rows.json',
+  acts: 'apps/mobile/contract/vectors/acts.json',
+  files: 'apps/mobile/contract/vectors/files.json',
+  documents: 'apps/mobile/contract/vectors/documents.json',
+  feedback: 'apps/mobile/contract/vectors/feedback.json',
+  quote: 'apps/mobile/contract/vectors/quote.json',
+  writing: 'apps/mobile/contract/vectors/writing.json',
 } as const;
 
 const TIME_SCRIPT = 'scripts/mobile/vectors-time.ts';
@@ -332,6 +353,30 @@ export async function generateVectors(): Promise<Output[]> {
     { path: VECTORS.skew, text: jsonText(skewVectors()) },
     { path: VECTORS.snooze, text: jsonText(snoozeVectors()) },
     { path: VECTORS.rows, text: jsonText(rowVectors()) },
+    {
+      path: VECTORS.acts,
+      text: jsonText(actVectors(about('The words the window says after a row action: Mark read and Mark unread at each place, the set-aside warning, a bulk action\'s one toast, the short agent name and the address Copy link copies.', `${ACTS_FIXTURE} and ${ACTS_ROWS}`))),
+    },
+    {
+      path: VECTORS.files,
+      text: jsonText(fileVectors(about('What a file\'s tile and viewer say of it and how it is drawn: a size in words, a kind\'s name, the line under a tile\'s name, a moment, the kind a file is drawn as, and the size past which text is not drawn.', FILES_FIXTURE))),
+    },
+    {
+      path: VECTORS.documents,
+      text: jsonText(documentVectors(about('The blocks the window splits each Markdown file into (parseMarkdownToBlocks), with the number each list item shows (computeListIndices).', DOCUMENTS_FIXTURE))),
+    },
+    {
+      path: VECTORS.feedback,
+      text: jsonText(feedbackVectors(about('The text a Send carries for comments on attached files (attachmentFeedback), and the comments the window makes on code lines and on a picture (codeCommentAnnotation, imageCommentAnnotation, codeHash).', FEEDBACK_FIXTURE))),
+    },
+    {
+      path: VECTORS.quote,
+      text: jsonText(quoteVectors(about('The lead the Inbox writes in front of a quoting reply\'s words (inboxReplyQuoteLead), each body with it and what the window draws of it (withoutInboxReplyQuoteLead), and in each thread which messages ↩ quotes whole (arrowQuotesWhole).', QUOTE_FIXTURE))),
+    },
+    {
+      path: VECTORS.writing,
+      text: jsonText(writingVectors(about('Who the reply box can tag with @ and how (tagOptions, tagPickedWords, tagsToSend, mentionTrigger, applyMentionPick, survivingMentions), who a sent reply\'s tags name (tagName), the line under a 👍 Looks good (ackPillLine) and which of the person\'s messages Take back is offered on (takeBackOffered).', WRITING_FIXTURE))),
+    },
   ];
 }
 

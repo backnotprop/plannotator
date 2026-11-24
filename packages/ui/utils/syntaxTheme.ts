@@ -14,6 +14,9 @@
  * costs no additional bytes.
  */
 
+import { customSyntaxThemeFor } from './customSyntaxThemes';
+import { FENCE_SYNTAX_THEME } from './fenceSyntaxThemes';
+
 /** Plannotator theme id -> Shiki theme name, per mode. `null` = this palette
  *  has no counterpart in that mode and falls back to the Pierre default. */
 export const SHIKI_THEME_MAP: Record<string, { dark: string | null; light: string | null }> = {
@@ -53,6 +56,7 @@ export const SHIKI_THEME_MAP: Record<string, { dark: string | null; light: strin
   'synthwave-84': { dark: 'synthwave-84', light: null },
   'tokyo-night': { dark: 'tokyo-night', light: null },
   'tokyo-night-moon': { dark: 'tokyo-night', light: null },
+  'tritanopia': { dark: 'pierre-dark-tritanopia', light: 'pierre-light-tritanopia' },
   'vesper': { dark: 'vesper', light: null },
   'vitesse': { dark: 'vitesse-dark', light: 'vitesse-light' },
   'vitesse-black': { dark: 'vitesse-black', light: null },
@@ -71,6 +75,14 @@ export const DEFAULT_SYNTAX_THEME = { dark: 'pierre-dark', light: 'pierre-light'
  * customised it.
  */
 export function resolveSyntaxTheme(colorTheme: string, mode: 'dark' | 'light'): { dark: string; light: string } | undefined {
+  // A custom theme's own code colours (customSyntaxThemes.ts), per half; a half without them, Pierre's default.
+  const custom = customSyntaxThemeFor(colorTheme, mode);
+  if (custom) {
+    return {
+      dark: customSyntaxThemeFor(colorTheme, 'dark') ?? DEFAULT_SYNTAX_THEME.dark,
+      light: customSyntaxThemeFor(colorTheme, 'light') ?? DEFAULT_SYNTAX_THEME.light,
+    };
+  }
   const map = SHIKI_THEME_MAP[colorTheme];
   if (!map || !map[mode]) return undefined;
   return { dark: map.dark || DEFAULT_SYNTAX_THEME.dark, light: map.light || DEFAULT_SYNTAX_THEME.light };
@@ -104,6 +116,10 @@ export function resetFenceThemeResolver(): void {
  * fences, `CodeBlock`, the code-file hover preview, the plan diff view, code
  * review's suggestion snippets), so a host override applies to all of them.
  * The diff pane's dark/light pair (`resolveSyntaxTheme`) is not affected.
+ *
+ * Where that pair would be Pierre's default (`pierre-light` / `pierre-dark`),
+ * a fence gets `FENCE_SYNTAX_THEME`: the same colours with every one under
+ * 4.5:1 on a code block fixed (fenceSyntaxThemes.ts).
  */
 export function resolveFenceTheme(colorTheme: string, mode: 'dark' | 'light'): string {
   if (fenceThemeResolver) {
@@ -115,5 +131,8 @@ export function resolveFenceTheme(colorTheme: string, mode: 'dark' | 'light'): s
     }
     if (typeof override === 'string' && override) return override;
   }
-  return resolveSyntaxTheme(colorTheme, mode)?.[mode] ?? DEFAULT_SYNTAX_THEME[mode];
+  const resolved = resolveSyntaxTheme(colorTheme, mode)?.[mode] ?? DEFAULT_SYNTAX_THEME[mode];
+  // Where the diff pane would draw Pierre's default, a fence draws the same
+  // colours with the low-contrast ones fixed (fenceSyntaxThemes.ts).
+  return resolved === DEFAULT_SYNTAX_THEME[mode] ? FENCE_SYNTAX_THEME[mode] : resolved;
 }

@@ -4,6 +4,10 @@ import { inboxApi } from '../api';
 import { rememberFarBranches } from './branchReviews';
 import { onHiddenWritten, pullsShown, reviewsShown, settleHidden, useHiddenChanges } from './hiddenPulls';
 import { REVIEWS_AFTER_STORE_MAX_MS, REVIEWS_AFTER_STORE_MS } from '../app/boot';
+import { useKeptState } from '../data/keptState';
+
+/** The list's PRs on a ref card: "Open in Reviews" (refCardReviews.ts). */
+export { useRefCardReviews } from './refCardReviews';
 
 /** The window got its focus back: the list is read again, at most this often. */
 export const PULLS_FOCUS_MS = 20_000;
@@ -40,7 +44,7 @@ export interface PullsState {
  */
 export function usePulls(enabled: boolean, counted = false, othersView = false): PullsState {
   const [model, setModel] = useState<InboxPullsAnswer | null>(null);
-  const [reviews, setReviews] = useState<InboxReviewsAnswer | null>(null);
+  const [reviews, keepReviews] = useKeptState<InboxReviewsAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const inFlight = useRef<AbortController | null>(null);
@@ -71,7 +75,8 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
           settleHidden(answer.hidden, Date.now(), answer.hidden_repos);
           // A linked machine's reported branch: its thread opens there (Branch reviews).
           rememberFarBranches(rows);
-          setReviews(rows);
+          // The same rows keep the held answer (most reads are the server's cache): what reads them draws nothing new.
+          keepReviews(rows);
           setError(null);
           // Others still on its way: its answer lands on the server's next answer (a cache read, no forge call). The
           // same for a linked machine's reported branches, read in the background too.
@@ -158,7 +163,7 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
         // Nothing read since the Inbox started (`cold`): the next read of the list brings them.
         if (controller.signal.aborted || 'cold' in rows) return;
         rememberFarBranches(rows);
-        setReviews(rows);
+        keepReviews(rows);
       },
       () => {
         // The next read of the list says what is wrong.

@@ -53,7 +53,7 @@ import {
   type ArchivedPlan,
 } from "./storage";
 import { getRepoInfo } from "./repo";
-import { createRefCards, refCardRouteResponse, type RefRunner } from "./ref-cards";
+import { createRefCardsWithLinear, refCardRouteResponse, type RefRunner } from "./ref-cards";
 import { detectProjectName } from "./project";
 import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory } from "./config";
 import { getAutoUpdateAdvert, getUpdateAdvert, handleUpdateRoute } from "./auto-update";
@@ -61,7 +61,7 @@ import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
-import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, missingDraftResponse, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
+import { handleAnnotateMedia, handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, missingDraftResponse, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft, loadDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
@@ -252,6 +252,8 @@ export async function startPlannotatorServer(
   // `planRevisions` pushes revised plans into the open review (updatePlan).
   let plan = options.plan;
   let planFile = mode === "archive" ? null : readPlanFile(planFilePath, plan);
+  // Linked documents this review served: their folders may play local videos.
+  const servedMediaDocuments = new Set<string>();
   // Bumped by every accepted updatePlan; decisions echo the revision the tab
   // shows and a stale one is refused (409), so nobody approves unseen text.
   let planRevision = 0;
@@ -280,7 +282,7 @@ export async function startPlannotatorServer(
   };
 
   const isRemote = isRemoteSession();
-  const app = openPackedApp(htmlContent);
+  const app = openPackedApp(htmlContent, { page: (html) => customThemesPage(html) });
   // The localhost subdomain this session is advertised at (#2184), read once:
   // the one extra name the loopback Host checks accept.
   const localHostname = getLocalUrlHostname();
@@ -288,7 +290,7 @@ export async function startPlannotatorServer(
   const notionAvailable = isNotionAvailable(isRemote);
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for,
   // and never in remote mode, where anyone who reaches the URL could drive the user's gh / glab.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  const refCards = createRefCardsWithLinear(options.refRunner);
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
 
@@ -560,8 +562,14 @@ export async function startPlannotatorServer(
             if (!isSameOriginRequest(req)) return Response.json(crossOriginRefusalBody(), { status: 403 });
             return handleDoc(req, {
               planFile,
+              onDocumentServed: (path) => servedMediaDocuments.add(path),
               anyPath: isThisMachineRequest(req),
             });
+          }
+
+          // API: A linked document's local <video> (HtmlBlock rewrites its src here)
+          if (url.pathname === "/api/annotate-media" && req.method === "GET") {
+            return handleAnnotateMedia(req, url, servedMediaDocuments);
           }
 
           // API: Batch existence check for code-file paths the renderer detected
@@ -959,6 +967,7 @@ export async function startPlannotatorServer(
 
           // Favicon
           if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") return handleFavicon(url.pathname);
+          if (url.pathname === "/plannotator-themes.js" && req.method === "GET") return handleCustomThemesScript(url.searchParams);
 
           // API 404 guard: unknown /api/* routes should return JSON, not HTML
           if (url.pathname.startsWith("/api/")) {
@@ -997,7 +1006,7 @@ export async function startPlannotatorServer(
 
   // Remote sessions serve the app page compressed (#1617); start the likely
   // encoding (gzip over plain http) now so the first load does not wait.
-  if (isRemote) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+  if (isRemote) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
 
   // The cache warm must never gate the listening socket. Its async filesystem
   // walk yields between directories while requests remain serviceable.

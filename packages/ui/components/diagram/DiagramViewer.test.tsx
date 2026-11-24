@@ -47,6 +47,10 @@ import { __setMermaidRuntimeLoaderForTests, setMermaidRuntime } from '../../util
 import { DiagramViewer, type DiagramHostDraft, type DiagramViewerProps } from './DiagramViewer';
 import type { DiagramComment } from './useDiagramComments';
 import { PREVIEW_DEBOUNCE_MS, type SaveResult } from './useDiagramSourceDraft';
+import { drawMermaidFencesWithMermaid } from '../../test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 const hasDom = typeof document !== 'undefined';
 const FIXTURES = join(import.meta.dir, '..', '..', 'test-setup', 'fixtures', 'diagrams');

@@ -40,6 +40,33 @@ public struct LocalCopy: Sendable {
 
   func read(_ name: String) -> Data? { file(name).flatMap { try? Data(contentsOf: $0) } }
 
+  /// A file of the copy mapped rather than read whole into memory (an attached file's bytes, up to 100 MB).
+  func read(_ name: String, mapped: Bool) -> Data? { file(name).flatMap { try? Data(contentsOf: $0, options: mapped ? .alwaysMapped : []) } }
+
+  /// Copy a file into the copy as it is, never read whole into memory. False when it could not be.
+  func copyFile(_ source: URL, to name: String) -> Bool {
+    guard let folder, let file = file(name) else { return false }
+    do {
+      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+      if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
+      try FileManager.default.copyItem(at: source, to: file)
+      try (file as NSURL).setResourceValue(URLFileProtection.completeUntilFirstUserAuthentication, forKey: .fileProtectionKey)
+      var values = URLResourceValues()
+      values.isExcludedFromBackup = true
+      var target = folder
+      try? target.setResourceValues(values)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /// Let go of one file of the copy (a drawing the computer has now).
+  func remove(_ name: String) {
+    guard let file = file(name) else { return }
+    try? FileManager.default.removeItem(at: file)
+  }
+
   public func saveList(_ model: ListModel) { if let data = try? JSONEncoder().encode(model) { write(data, to: "list.json") } }
   public func list() -> ListModel? { read("list.json").flatMap { try? DoorClient.readList($0).model } }
 
@@ -52,7 +79,11 @@ public struct LocalCopy: Sendable {
   }
 
   public func saveOutbox(_ writes: [HeldWrite]) { if let data = try? JSONEncoder().encode(writes) { write(data, to: "outbox.json") } }
-  public func outbox() -> [HeldWrite] { read("outbox.json").flatMap { try? JSONDecoder().decode([HeldWrite].self, from: $0) } ?? [] }
+  /// The outbox, write by write: one this build cannot read (a kind a newer build made) is left out, never the rest.
+  public func outbox() -> [HeldWrite] {
+    guard let data = read("outbox.json"), let items = try? JSONDecoder().decode([Readable<HeldWrite>].self, from: data) else { return [] }
+    return items.compactMap(\.value)
+  }
 
   /// Words a refused Send gave back to the person, and why, by thread: kept until the composer takes them.
   public struct GivenBack: Codable, Hashable, Sendable {
@@ -79,11 +110,20 @@ public struct LocalCopy: Sendable {
   }
 }
 
+/// One item of a list, or nil where this build cannot read it.
+struct Readable<Value: Decodable>: Decodable {
+  let value: Value?
+  init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
+}
+
 /// A write the person made that has no definite answer yet. Its key never changes: across retries, paths and
 /// restarts the door sees one intent.
 public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   /// `state`: a thread action (ThreadAct): archive, read, star, snooze, priority and their reverses.
-  public enum Kind: String, Codable, Sendable { case pick, reply, seen, action, state }
+  /// `annotation`: a comment on a file, saved or changed; `annotationRemove`: one removed; `markup`: a drawing on a
+  /// picture, kept on the computer before the comment that names it (FileCommentsSession.swift). `compose`: a new
+  /// message (`POST messages`), its `thread` a stand-in name until the computer makes the thread (Compose.swift).
+  public enum Kind: String, Codable, Sendable { case pick, reply, seen, action, state, annotation, annotationRemove, markup, compose }
 
   /// The idempotency key.
   public var id: String
@@ -112,4 +152,14 @@ public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   /// The reverses an Undo made of an act whose answer never came carry that act's key. The first to meet the
   /// computer's row says whether the act was taken: if there is nothing to take back, none of them goes.
   public var undoes: String?
+  /// A comment's write: the comment's id. A drawing's: the hash that names it.
+  public var subject: String?
+  /// True once this write was sent and no definite answer came back: the computer may have it.
+  public var mayHaveArrived: Bool?
+  /// A reply's or a new message's files: handed back to the draft with the words if the computer refuses it.
+  public var files: [DraftFile]?
+  /// The quote a reply carries: handed back with its words.
+  public var quote: DraftQuote?
+  /// True once its files went up again under new keys because the computer no longer had an upload it named.
+  public var reuploaded: Bool?
 }

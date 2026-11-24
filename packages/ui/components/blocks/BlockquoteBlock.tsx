@@ -11,7 +11,7 @@ import { BlockRenderer } from '../BlockRenderer';
 import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 
 /** The quote's look. Shared by both render paths so they cannot drift. */
-export const BLOCKQUOTE_CLASS_NAME = 'relative border-l-2 border-primary/50 pl-4 my-4 text-muted-foreground italic';
+export const BLOCKQUOTE_CLASS_NAME = 'relative border-l-2 border-primary/50 pl-4 my-4 text-muted-foreground italic [overflow-wrap:anywhere]';
 
 /**
  * Spacing and tone for a quote whose content has block structure. A

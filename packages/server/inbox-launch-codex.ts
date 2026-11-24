@@ -40,6 +40,7 @@ import { agentVersionRun, codexHome, createAgentEnvironmentFor, INBOX_MCP_SERVER
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache, type LaunchChoiceLists } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { createCodexPermissions, CODEX_APPROVALS } from "./inbox-launch-codex-permission";
+import { createInboxCodexAccount } from "./inbox-codex-account";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, launchTurnErrorNote, writeLaunchNote, type LaunchAvailability, type LaunchDelivery, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
 
@@ -661,7 +662,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
 
     /**
      * `codex` on the plain env's PATH and new enough, the person's Codex has Plannotator's Inbox MCP entry (it is
-     * how a Codex session answers in the Inbox), and Codex has a login (`codex login status`, local only).
+     * how a Codex session answers in the Inbox), and Codex has a login or a provider that requires no OpenAI account.
      */
     async available(): Promise<LaunchAvailability> {
       const e = await ctx.environment();
@@ -675,7 +676,21 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
       choiceKey = `${path}@${shown}`;
       const home = homeEnv();
       const status = await e.run([path, "login", "status"], { timeoutMs: 10_000, ...(home ? { env: { CODEX_HOME: home } } : {}) });
-      if (codexLoginStatusSignedOut(status)) return { ok: false, missing: false, reason: "Codex isn't signed in", code: "signed_out" };
+      if (codexLoginStatusSignedOut(status)) {
+        // Codex's own account answer, for a provider that needs no OpenAI account: the same `codex` and home as the
+        // checks above. It starts an app-server each time this check runs (the engine's 30 s answer, again each time
+        // To opens while Codex is not ready), only while `codex login status` says signed out.
+        const account = createInboxCodexAccount({
+          environment: () => ({ ...e, env: { ...e.env, ...(home ? { CODEX_HOME: home } : {}) }, which: (command) => (command === "codex" ? path : e.which(command)) }),
+          dataDir: ctx.dataDir,
+          extraClis: [],
+        });
+        try {
+          if ((await account.read()).state !== "signed_in") return { ok: false, missing: false, reason: "Codex isn't signed in", code: "signed_out" };
+        } finally {
+          account.stop();
+        }
+      }
       return { ok: true, version: shown };
     },
 
