@@ -2384,7 +2384,7 @@
     },
     {
       "id": "window-178",
-      "title": "Capabilities section: switches for the Board, the Checklist, Code review (with Chapter diagrams), Shape; \"Experimental\" group: Decision mode, Bro mode, Float reply drafts; Routines switch",
+      "title": "Capabilities section: switches for the Board, the Checklist, Code review (with Chapter diagrams), Shape; \"Experimental\" group: Decision mode, Grid, Bro mode, Float reply drafts; Routines switch",
       "surface": [],
       "flows": [],
       "mobile": "later",
@@ -16752,7 +16752,7 @@
     },
     {
       "id": "other-settings-10",
-      "title": "Capabilities (`capabilities`): Board; Checklist; Routines; Code review; Chapter diagrams; System (hidden unless turned on in config); Shape. **Experimental**: Decision mode, Bro mode, Float reply drafts",
+      "title": "Capabilities (`capabilities`): Board; Checklist; Routines; Code review; Chapter diagrams; System (hidden unless turned on in config); Shape. **Experimental**: Decision mode, Grid, Bro mode, Float reply drafts",
       "surface": [
         "settings:capabilities"
       ],
@@ -22321,6 +22321,272 @@
       "flows": [],
       "mobile": "undecided",
       "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's session. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-grid-seen",
+      "title": "door:POST grid/seen",
+      "surface": [
+        "door:POST grid/seen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-grid-seen",
+      "title": "window:/api/inbox/grid/seen",
+      "surface": [
+        "window:/api/inbox/grid/seen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-frame-grid-seen",
+      "title": "frame:grid-seen",
+      "surface": [
+        "frame:grid-seen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-checks-failing",
+      "title": "enum:InboxThreadPullsSummaryItem.checks.failing",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.checks.failing"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-checks-passing",
+      "title": "enum:InboxThreadPullsSummaryItem.checks.passing",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.checks.passing"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-checks-running",
+      "title": "enum:InboxThreadPullsSummaryItem.checks.running",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.checks.running"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-review-approved",
+      "title": "enum:InboxThreadPullsSummaryItem.review.approved",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.review.approved"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-review-changes-requested",
+      "title": "enum:InboxThreadPullsSummaryItem.review.changes_requested",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.review.changes_requested"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxthreadpullssummaryitem-review-review-required",
+      "title": "enum:InboxThreadPullsSummaryItem.review.review_required",
+      "surface": [
+        "enum:InboxThreadPullsSummaryItem.review.review_required"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-grid-seen",
+      "title": "field:InboxListRow.grid_seen",
+      "surface": [
+        "field:InboxListRow.grid_seen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-steps-progress",
+      "title": "field:InboxListRow.steps_progress",
+      "surface": [
+        "field:InboxListRow.steps_progress"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummary-items",
+      "title": "field:InboxThreadPullsSummary.items",
+      "surface": [
+        "field:InboxThreadPullsSummary.items"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-added-at",
+      "title": "field:InboxThreadPullsSummaryItem.added_at",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.added_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-checks",
+      "title": "field:InboxThreadPullsSummaryItem.checks",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.checks"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-key",
+      "title": "field:InboxThreadPullsSummaryItem.key",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.key"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-read-at",
+      "title": "field:InboxThreadPullsSummaryItem.read_at",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.read_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-review",
+      "title": "field:InboxThreadPullsSummaryItem.review",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.review"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-state",
+      "title": "field:InboxThreadPullsSummaryItem.state",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.state"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-machineview-clock-ms",
+      "title": "field:MachineView.clock_ms",
+      "surface": [
+        "field:MachineView.clock_ms"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
