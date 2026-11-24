@@ -163,7 +163,7 @@ const tagOfMember = (m: InboxSwarmMember): InboxTag => ({ host: m.host, session:
  * `swarm say` (an agent, `from` its session) or the ghost pane's box (the person, `from` null): words in the ghost
  * thread for every other member, or the one `to` names. Delivered only to members (store.ts `pendingFor`).
  */
-export function saySwarm(store: InboxStore, threadId: string, from: SwarmCaller | null, text: string, to?: string | null): { message: InboxMessage; to: string | null; alone: boolean } {
+export function saySwarm(store: InboxStore, threadId: string, from: SwarmCaller | null, text: string, to?: string | null, key: string | null = null): { message: InboxMessage; to: string | null; alone: boolean } {
   const swarm = onSwarm(store, threadId);
   const words = text.trim();
   if (!words) throw refuse("validation_error", SWARM_WORDS.emptySay);
@@ -181,7 +181,8 @@ export function saySwarm(store: InboxStore, threadId: string, from: SwarmCaller 
   const author: InboxMessage["author"] = from
     ? { kind: "agent", host: from.host, session: from.session, name: me!.name, ...(from.machine ? { machine: from.machine, ...(from.machine_name ? { machine_name: from.machine_name } : {}) } : {}) }
     : { kind: "person" };
-  const message = store.writeGhostMessage(ghost, author, words, targets.map(tagOfMember));
+  // `key`: a held say from a linked computer (inbox-swarm-far.ts), written once however often it is sent.
+  const message = store.writeGhostMessage(ghost, author, words, targets.map(tagOfMember), from ? key : null);
   return { message, to: to ? targets[0]!.name : null, alone: targets.length === 0 };
 }
 

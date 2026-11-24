@@ -33,6 +33,8 @@ import {
   type SwarmLiveState,
 } from "@plannotator/shared/inbox/swarm";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { FAR_REPLY_WORDS } from "./inbox-mcp-far-reply";
+import type { SwarmFarJoins, SwarmFarPlace, SwarmHeldSay } from "./inbox-swarm-far";
 
 export const INBOX_SWARM_ROUTE = "/api/inbox/swarm";
 /** The door route a linked computer's agent's swarm command arrives by (inbox-devices.ts `DOOR_OWN_ROUTES`). */
@@ -62,6 +64,10 @@ export interface SwarmRouteContext {
     placeOf: (ref: string) => Promise<{ machine: string; thread_id: string } | null>;
     nameOf: (machine: string) => string | null;
     ask: (machine: string, body: Record<string, unknown>) => Promise<{ status: number; json: Record<string, unknown> | null }>;
+    /** Which swarm each session here joined there, kept across restarts (inbox-swarm-far.ts). Absent: in memory. */
+    joins?: SwarmFarJoins;
+    /** A `say` held while that computer is away, sent once when it is back (inbox-swarm-far.ts). Absent: asked now. */
+    holdSay?: (machine: string, thread: string, body: Record<string, unknown>) => Promise<SwarmHeldSay | null>;
   };
   /** Whether `session` is one of this computer's own (a linked computer may not speak for it). */
   ownSession?: (session: string) => boolean;
@@ -94,7 +100,7 @@ const callerOf = (ask: SwarmAsk): SwarmCaller => {
 };
 
 /** The answer for an agent: `text` and the swarm. `caller.machine` set: the ask came from that linked computer. */
-export function swarmAgentAnswer(ctx: SwarmRouteContext, ask: SwarmAsk, caller: SwarmCaller): { text: string; swarm?: InboxThreadSwarm; thread_id?: string } {
+export function swarmAgentAnswer(ctx: SwarmRouteContext, ask: SwarmAsk, caller: SwarmCaller, key: string | null = null): { text: string; swarm?: InboxThreadSwarm; thread_id?: string } {
   const { store } = ctx;
   const wire = (threadId: string) => swarmWire(store, threadId, ctx.live)!;
   switch (ask.action) {
@@ -107,7 +113,7 @@ export function swarmAgentAnswer(ctx: SwarmRouteContext, ask: SwarmAsk, caller: 
     }
     case "say": {
       const threadId = callerSwarmThread(store, caller, ask.thread);
-      const said = saySwarm(store, threadId, caller, ask.text ?? "", ask.to);
+      const said = saySwarm(store, threadId, caller, ask.text ?? "", ask.to, key);
       return { text: said.alone ? SWARM_WORDS.saidAlone : SWARM_WORDS.said(said.to ?? "everyone"), thread_id: threadId };
     }
     case "doing": {
@@ -132,11 +138,10 @@ const refusal = (error: unknown): Response => {
   return Response.json({ code: "internal_error", error: error instanceof Error ? error.message : String(error) }, { status: 500 });
 };
 
-/**
- * The swarms a session here joined on a linked computer (`swarm say` names no thread): kept in memory; after a restart
- * the agent names the thread with --thread.
- */
-const farJoined = new Map<string, { machine: string; thread: string }>();
+/** The swarms a session here joined on a linked computer, when the context keeps none (a test's): in memory. */
+const farJoinedHere = new Map<string, SwarmFarPlace>();
+const farJoinsOf = (ctx: SwarmRouteContext): SwarmFarJoins =>
+  ctx.far?.joins ?? { get: (s) => farJoinedHere.get(s) ?? null, set: (s, p) => void farJoinedHere.set(s, p), drop: (s) => void farJoinedHere.delete(s) };
 
 /** Where an ask goes: this Inbox, or the linked computer holding its thread. */
 async function farPlace(ctx: SwarmRouteContext, ask: SwarmAsk, session: string): Promise<{ machine: string; thread: string } | null> {
@@ -147,7 +152,7 @@ async function farPlace(ctx: SwarmRouteContext, ask: SwarmAsk, session: string):
     return place ? { machine: place.machine, thread: place.thread_id } : null;
   }
   const here = ctx.store.allSwarms().some((swarm) => swarm.on && swarm.members.some((m) => m.session === session));
-  return here ? null : (farJoined.get(session) ?? null);
+  return here ? null : farJoinsOf(ctx).get(session);
 }
 
 /** `POST /api/inbox/swarm`, or null for any other path. */
@@ -164,9 +169,15 @@ export async function swarmRoute(req: Request, url: URL, ctx: SwarmRouteContext,
     const caller = callerOf(ask);
     const far = await farPlace(ctx, ask, caller.session);
     if (far && ctx.far) {
-      const answer = await ctx.far.ask(far.machine, { ask: { ...ask, thread: ask.thread ?? far.thread, by: undefined }, session: caller.session, host: caller.host, name: caller.name });
-      if (answer.status === 200 && ask.action === "join") farJoined.set(caller.session, far);
-      if (answer.status === 200 && ask.action === "leave") farJoined.delete(caller.session);
+      const body = { ask: { ...ask, thread: ask.thread ?? far.thread, by: undefined }, session: caller.session, host: caller.host, name: caller.name };
+      // `say` waits for an away computer, as a far reply does, and goes once when it is back.
+      const held = ask.action === "say" && ctx.far.holdSay ? await ctx.far.holdSay(far.machine, far.thread, body) : null;
+      if (held?.kind === "waiting") return Response.json({ text: FAR_REPLY_WORDS.held(far.thread, ctx.far.nameOf(far.machine) ?? "the other computer"), held: true, thread_id: far.thread });
+      const answer = held ?? (await ctx.far.ask(far.machine, body));
+      // The swarm's own thread, as that computer answered it (a ghost thread's or a message's id names its thread).
+      const thread = typeof answer.json?.thread_id === "string" && /^msg_[A-Za-z0-9_-]{1,80}$/.test(answer.json.thread_id) ? answer.json.thread_id : far.thread;
+      if (answer.status === 200 && ask.action === "join") farJoinsOf(ctx).set(caller.session, { machine: far.machine, thread });
+      if (answer.status === 200 && ask.action === "leave") farJoinsOf(ctx).drop(caller.session);
       return Response.json(answer.json ?? { code: "machine_refused", error: `${ctx.far.nameOf(far.machine) ?? "The other computer"} did not answer.` }, { status: answer.status });
     }
     return Response.json(swarmAgentAnswer(ctx, ask, caller));
@@ -186,7 +197,9 @@ export function farSwarmAnswer(ctx: SwarmRouteContext, machine: string, body: Re
   const { by: _by, ...rest } = raw;
   const short = (value: unknown, max: number) => (typeof value === "string" && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value) ? value : null);
   const caller: SwarmCaller = { session, host: short(body.host, 64), name: short(body.name, 80), machine, machine_name: ctx.far?.nameOf(machine) ?? null };
-  return swarmAgentAnswer(ctx, swarmAskOf(rest), caller) as unknown as Record<string, unknown>;
+  // A held say's key (inbox-swarm-far.ts): sent again after a lost answer, it is written once.
+  const key = typeof body.idempotency_key === "string" && /^swarm-say:[0-9a-f-]{36}$/.test(body.idempotency_key) ? body.idempotency_key : null;
+  return swarmAgentAnswer(ctx, swarmAskOf(rest), caller, key) as unknown as Record<string, unknown>;
 }
 
 /** The window's read of a ghost thread: its words, oldest first. */

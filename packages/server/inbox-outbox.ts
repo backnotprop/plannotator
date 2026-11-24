@@ -313,7 +313,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST far-wake": "set",
   "POST agent-reply": "append",
   "POST far-delivered": "set",
-  // Swarm (inbox-swarm-route.ts): a linked computer's agent's swarm command, answered now or refused (never held).
+  // Swarm (inbox-swarm-route.ts): a linked computer's agent's swarm command, never forwarded (the forward's kind). That
+  // computer holds its own `say` while this one is away, written here once under its key (inbox-swarm-far.ts).
   "POST swarm": "now",
   // The ghost pane's press on another computer's thread: the person's words to the agents, Turn off, or "looked at".
   "POST threads/:id/swarm": "now",
