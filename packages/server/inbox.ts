@@ -2968,14 +2968,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (body.reactions !== undefined) {
       const input = body.reactions;
       const list = parseInboxSavedReactions(input);
-      if (!list || !Array.isArray(input) || list.length !== input.length || input.length > INBOX_SAVED_REACTIONS_MAX) {
-        throw new InboxError("validation_error", `reactions: up to ${INBOX_SAVED_REACTIONS_MAX} of { emoji: one emoji, label?: string }, each emoji once.`, { field: "reactions" });
+      // A skill that is not a skill name is refused here (strict on write), not dropped as on read.
+      const skillDropped = (entry: unknown, i: number) =>
+        !!entry && typeof entry === "object" && (entry as { skill?: unknown }).skill !== undefined && list?.[i]?.skill !== (entry as { skill?: unknown }).skill;
+      if (!list || !Array.isArray(input) || list.length !== input.length || input.length > INBOX_SAVED_REACTIONS_MAX || input.some(skillDropped)) {
+        throw new InboxError("validation_error", `reactions: up to ${INBOX_SAVED_REACTIONS_MAX} of { emoji: one emoji, label?: string, skill?: a skill name }, each emoji once.`, { field: "reactions" });
       }
       return list;
     }
     const change = parseInboxReactionChange(body.reaction_change);
     if (!change) {
-      throw new InboxError("validation_error", "reaction_change: { op: add | remove, emoji } or { op: name, emoji, label } or { op: change, emoji, to }, each one emoji other than 👍.", { field: "reaction_change" });
+      throw new InboxError("validation_error", "reaction_change: { op: add | remove, emoji } or { op: name, emoji, label } or { op: change, emoji, to } or { op: skill, emoji, skill: a skill name or '' }, each one emoji other than 👍.", { field: "reaction_change" });
     }
     const list = applyInboxReactionChange(reactionsState().reactions, change);
     if (!list) throw new InboxError("validation_error", `reaction_change: your tray already has ${INBOX_SAVED_REACTIONS_MAX} emoji. Remove one to save another.`, { field: "reaction_change" });
@@ -8161,6 +8164,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 ...(body.quote !== undefined ? { quote: body.quote } : {}),
                 // New thread from this message: no #tag read from the words, and no "still open" line under them.
                 ...(body.author_only === true ? { author_only: true } : {}),
+                // A skill emoji pressed in the reaction tray: kept on the reply; the words are the window's `/<skill>` reply.
+                ...(body.skill_reaction !== undefined ? { skill_reaction: body.skill_reaction } : {}),
               });
             } catch (error) {
               removeInboxAttachmentFiles(store.dir, attachments);

@@ -1070,7 +1070,7 @@ interface ModelMessage {
   /** A thread the person started: addressed to a session, until that session's connection delivers it. */
   addressed?: { delivered: boolean };
   /** The person's 👍 on this agent message: the step of the Mark read it stands on, and whether the 👍 made it. */
-  ack?: { readTick: number | null; made: boolean } | null;
+  ack?: { readTick: number | null; made: boolean; standalone?: boolean } | null;
 }
 
 interface ModelThread {
@@ -1549,10 +1549,11 @@ class ThreadStateModel {
         }
         if (message.author !== "agent") return "refused:ack_not_allowed";
         if (thread.resolved) return "refused:thread_resolved";
+        // Any agent message takes one (approval "inbox-reactions-every-message"). It marks the thread read only on
+        // the latest agent message, with no person's message after it (the Inbox's own notes aside) and nothing
+        // waiting; anywhere else it stands on its own: no Mark read, and Move back leaves it.
         const latest = [...thread.messages].reverse().find((m) => m.author === "agent");
-        if (latest !== message) return "refused:ack_stale";
-        // The person already wrote back after it (the Inbox's own notes aside).
-        if (thread.messages.some((m) => m.tick > message.tick && m.author === "person" && m.note === null)) return "refused:ack_after_reply";
+        const repliedAfter = thread.messages.some((m) => m.tick > message.tick && m.author === "person" && m.note === null);
         const waiting = thread.messages
           .filter((m) => m.author === "agent")
           .flatMap((m) => m.questions)
@@ -1560,8 +1561,11 @@ class ThreadStateModel {
             const s = this.recordState(q);
             return s === "open" || s === "picked";
           });
-        if (waiting) return "refused:question_open";
         if (message.ack) return "ok";
+        if (latest !== message || repliedAfter || waiting) {
+          message.ack = { readTick: null, made: false, standalone: true };
+          return "ok";
+        }
         const before = thread.read;
         this.event({ op: "read", target: op.target, read: true }, target, store, tick);
         message.ack = { readTick: thread.read, made: thread.read !== before };
@@ -1729,7 +1733,7 @@ function checkThreadState(world: StateWorld): void {
       last_agent_at: lastAgent ? new Date(world.timeOf.get(lastAgent.tick)!).toISOString() : null,
       waiting_on_person: model.waitingOnPerson(t),
       messages: t.messages.length,
-      ack: model.readHolds(t) && (lastAgent?.ack ?? null) !== null,
+      ack: model.readHolds(t) && (lastAgent?.ack ?? null) !== null && !lastAgent?.ack?.standalone,
       unread: model.unread(t),
       draft: t.draft === true,
       picks: model.unsent(t) ? row.questions.picked : 0,

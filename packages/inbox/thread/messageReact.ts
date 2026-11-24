@@ -1,0 +1,64 @@
+/**
+ * Reactions on every agent message (approval "inbox-reactions-every-message", 2026-11-24). What the message's face,
+ * its menu's emoji row and the thread's one shared tray call (`MessageReactApi`, made by the thread pane), and two
+ * tiny stores the one shared host draws from: the face that is open into the person's emoji (`faceStrip`), and the
+ * skill emoji the pointer rests on (`skillPreview`). Nothing here measures layout or listens per message.
+ */
+import { useSyncExternalStore } from 'react';
+import type { InboxMessageWire, InboxReaction } from '@plannotator/core/inbox-types';
+
+export interface MessageReactApi {
+  /** The message takes a reaction here: an agent's message, live, whose reaction was not sent yet. */
+  offered: (message: InboxMessageWire) => boolean;
+  /** React: null is 👍 Looks good; a saved emoji with a skill sends a reply with that skill. `from`: where the press was. */
+  react: (message: InboxMessageWire, reaction: InboxReaction | null, from: Element | null) => void;
+  /** Open the full tray (the face at the end of the emoji), anchored on the message's face. */
+  openTray: (message: InboxMessageWire) => void;
+  /** The head's Reply, from the menu. */
+  reply: (message: InboxMessageWire) => void;
+  /** The agent's name, for the skill preview's last line. */
+  agentOf: (message: InboxMessageWire) => string;
+  /** Reply's own rule: not a message from before an archive. */
+  live: (message: InboxMessageWire) => boolean;
+  /** Mark or take back as the foot's tray does (its flight already flown): `was` only when it was marked. */
+  ack: (message: InboxMessageWire, on: boolean, reaction: InboxReaction | null, was?: InboxReaction | null) => void;
+}
+
+function store<T>(initial: T) {
+  let value = initial;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (next: T) => {
+      if (Object.is(next, value)) return;
+      value = next;
+      for (const listener of listeners) listener();
+    },
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+  };
+}
+
+/** The face open into the emoji: the message, and the face's own slot the strip is drawn into (no layout read). */
+export type FaceStripAt = { messageId: string; slot: HTMLElement };
+export const faceStrip = store<FaceStripAt | null>(null);
+export const useFaceStrip = () => useSyncExternalStore(faceStrip.subscribe, faceStrip.get, () => null);
+
+/** A skill emoji under the pointer (or keyboard focus): its card opens beside `anchor`, to the left first. */
+export type SkillPreviewAt = { reaction: InboxReaction & { skill: string }; agent: string; anchor: Element };
+export const skillPreview = store<SkillPreviewAt | null>(null);
+export const useSkillPreview = () => useSyncExternalStore(skillPreview.subscribe, skillPreview.get, () => null);
+
+/** A saved emoji that carries a skill. */
+export const hasSkill = (reaction: InboxReaction | null | undefined): reaction is InboxReaction & { skill: string } =>
+  !!reaction && typeof (reaction as { skill?: unknown }).skill === 'string' && (reaction as { skill: string }).skill !== '';
+
+/** A skill emoji's tooltip and accessible name (approved words): "/bro", or "Test it /test-it" when it is named too. */
+export const skillTip = (reaction: InboxReaction & { skill: string }): string => (reaction.label ? `${reaction.label} /${reaction.skill}` : `/${reaction.skill}`);
+export const skillSaid = (reaction: InboxReaction & { skill: string }): string => (reaction.label ? `${reaction.label}, skill ${reaction.skill}` : `/${reaction.skill}`);
+
+/** The field's words for a saved emoji: its name, then its skill. */
+export const nameAndSkillText = (reaction: InboxReaction | undefined): string =>
+  [reaction?.label ?? '', hasSkill(reaction) ? `/${reaction.skill}` : ''].filter(Boolean).join(' ');

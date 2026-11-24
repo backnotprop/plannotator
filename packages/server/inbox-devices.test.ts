@@ -1434,8 +1434,14 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     const undone = await door(`messages/${news.id}/ack`, { body: { idempotency_key: "ack-2", ack: false } });
     expect(((await undone.json()) as Json).message.ack).toBeNull();
     const asking = inbox.store.sendMessage({ project_id: project.id, author, body: ask("Ship it?"), reply_to: news.id }).message;
+    // Any agent message takes one (approval "inbox-reactions-every-message"): with a question open it stands on its own.
     const open = await door(`messages/${asking.id}/ack`, { body: { idempotency_key: "ack-3" } });
-    expect([open.status, ((await open.json()) as Json).code]).toEqual([409, "question_open"]);
+    expect(open.status).toBe(200);
+    expect(((await open.json()) as Json).message.ack).toMatchObject({ standalone: true, made_read: false });
+    // A refusal passes through: an archived thread.
+    inbox.store.resolveThread(news.thread_id, true, "person");
+    const archived = await door(`messages/${news.id}/ack`, { body: { idempotency_key: "ack-4" } });
+    expect([archived.status, ((await archived.json()) as Json).code]).toEqual([409, "thread_resolved"]);
   });
 
   test("7.42: search, read only, with its query; a phone's fetch metadata never reaches the window's cross-site check", async () => {

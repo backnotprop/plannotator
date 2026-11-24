@@ -174,6 +174,7 @@ import type { ThreadPaneProps } from '../thread/paneProps';
 export type { ThreadPaneProps };
 import { DeliveredLine, EndedActions } from '../parts/EndedActions';
 import { ReactionTray } from './ReactionTray';
+import { MessageReactHost, useMessageReactApi } from '../thread/MessageReactHost'; import { ReactFace } from '../thread/ReactStrip';
 import { useHoldPress } from '../holdPress';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton } from './OpenQuestions';
@@ -212,8 +213,7 @@ import { replyWordsWithMentions, useMentionBoxOpener } from '../threadMentions';
 import { labelledAuthorName } from '../parts/AuthorName';
 import { MessageBody } from '../parts/MessageBody/MessageBody';
 
-export { AckPill, MessageBody };
-export { routeSendAnnotations, sendTargetsOf, type SendTarget };
+export { AckPill, MessageBody, routeSendAnnotations, sendTargetsOf, type SendTarget };
 
 export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, onSide, onSideWords, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
@@ -299,9 +299,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const recipientName = (message: InboxMessageWire | null | undefined) => (isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker);
   const agentMessages = thread.messages.filter((m) => m.author.kind === 'agent');
   const lastAgent = agentMessages[agentMessages.length - 1] ?? root;
-  // 👍 Looks good (design record "inbox-acknowledge"): on the agent's latest
-  // message, offered only while no question in the thread waits on the person
-  // (open or picked) and the thread is not archived.
+  // The foot's 👍 Looks good (design record "inbox-acknowledge"): on the agent's latest message, while no question waits on the person
+  // (open or picked) and the thread is not archived. Any agent message also reacts from its face and menu (thread/MessageReactHost.tsx).
   const ackTarget = agentMessages.at(-1) ?? null;
   // An action item counts like a question here (approval "inbox-next-actions"): the store refuses a 👍 while one waits.
   const questionWaits = agentMessages.some((m) => [...(m.questions ?? []), ...(m.actions ?? [])].some((q) => q.state === 'open' || q.state === 'picked'));
@@ -4519,10 +4518,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf, setPageStart, openFileRef };
   const acts = useRef(newest);
   acts.current = newest;
+  const reactApi = useMessageReactApi({ thread, onAck, agentOf: (m) => agentName(m.author), liveOf: liveMessage, reply: (m) => acts.current.replyToMessage(m), onToast, onChanged, announce });
   const copyHost: CopyMenuHost = {
-    thread,
-    phone,
-    onToast, onChanged,
+    thread, phone,
+    onToast, onChanged, react: reactApi,
     linkOf: linkOf ?? ((messageId) => threadLink(thread.thread_id, null, window.location.origin, messageId)),
   };
   const newestCopyHost = useRef(copyHost);
@@ -4751,7 +4750,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         // A named session wrote here (issue #2450): every head's name column is wider, so the rows still line up.
         data-session-labels={thread.messages.some((m) => m.author.kind === 'agent' && labelOf(sessionLabels, m.author.session)) ? '' : undefined}
       >
-        {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
+        {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. Reactions on every message: one host. */}
+        <MessageReactHost body={bodyRef} api={reactApi} copy={newestCopyHost} phone={phone} takeBackOf={(m) => acts.current.takeBackOf(m)} />
         {reviewView && <ReviewContextLine view={reviewView} thread={thread} onOpenGuide={onOpenGuide} />}
         <ThreadTagLine threadId={thread.thread_id} phone={phone} />
         {reviewView?.fromThread && (
@@ -5077,6 +5077,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 draw={drawMessageHead}
               />
               <div className="ib-msg" data-revealed={revealed ? '' : undefined}>
+                {!phone && reactApi.offered(message) && <ReactFace messageId={message.id} />}
                 {fileCount > 0 && (
                   <div className="ib-hatts" id={bandId} role="region" aria-label="Attachments in this message" hidden={!filesOpen} onKeyDown={closeHeaderOnEscape(message.id)} data-header-band={message.id}>
                     {filesOpen && (
@@ -5655,9 +5656,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 )}
                 <ShortcutHint scope={inboxThreadShortcuts} action="reply" className="ib-kbd ib-btn-kbd" />
               </button>
-              {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits.
-                  Before the checklist: the actions first, the status after. */}
-              {/* With its tray of reactions (approval "inbox-reaction-tray"): one click still marks it Looks good. */}
+              {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits. Before the checklist:
+                  the actions first, the status after. With its tray of reactions (approval "inbox-reaction-tray"): one click still marks it. */}
               {ackOffered && !waiting && !draftKept && (
                 <ReactionTray
                   messageId={ackTarget!.id}
@@ -5665,7 +5665,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   on={ackOn}
                   current={ackTarget!.ack?.reaction ?? null}
                   phone={phone}
-                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
+                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)} onSkill={(reaction, from) => reactApi.react(ackTarget!, reaction, from)}
                   openRequest={trayRequest}
                 />
               )}
