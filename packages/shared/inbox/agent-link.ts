@@ -159,6 +159,7 @@ async function mcpCall(
   method: string,
   params: Record<string, unknown>,
   signal?: AbortSignal,
+  tool?: string,
 ): Promise<{ result?: unknown; error?: { message?: string } } | null> {
   const response = await fetch(`http://127.0.0.1:${port}/mcp`, directFetchInit({
     method: "POST",
@@ -166,7 +167,7 @@ async function mcpCall(
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     signal,
   }));
-  return mcpAnswerOfResponse(response.status, await response.text());
+  return mcpAnswerOfResponse(response.status, await response.text(), tool);
 }
 
 /**
@@ -264,7 +265,7 @@ export class InboxAgentConnection {
     if ("error" in running) return { text: running.error, isError: true };
     let answer: Awaited<ReturnType<typeof mcpCall>>;
     try {
-      answer = await mcpCall(running.port, "tools/call", inboxToolCallParams(call, { wakes: at.wakes === true }));
+      answer = await mcpCall(running.port, "tools/call", inboxToolCallParams(call, { wakes: at.wakes === true }), undefined, call.name);
     } catch (error) {
       return { text: `The Plannotator Inbox did not answer (${errorText(error)}).`, isError: true };
     }

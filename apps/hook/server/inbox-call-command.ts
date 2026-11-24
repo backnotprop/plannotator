@@ -47,7 +47,7 @@ import { planAgentBodyPictures } from "@plannotator/shared/inbox/agent-pictures"
 import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS, INBOX_AGENT_FETCH_FILE, INBOX_AGENT_ROUTE, INBOX_AGENT_UPLOAD_FINISH, INBOX_AGENT_UPLOAD_PIECE, type InboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import { callInboxThroughRelay, inboxAgentSignalUrl, type InboxAgentRelayOutcome } from "@plannotator/shared/inbox/agent-relay-client";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
-import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
+import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, INBOX_SWARM_BUSY_RESULT_TEXT, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
@@ -299,7 +299,7 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
       body,
       signal: AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS),
     });
-    answer = mcpAnswerOfResponse(response.status, await response.text());
+    answer = mcpAnswerOfResponse(response.status, await response.text(), parsed.action);
   } catch (error) {
     return refused("inbox_no_answer", `Plannotator Inbox did not answer: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -469,6 +469,10 @@ async function runPairedCall(
     return at && remote.includes(Number(at[1])) ? `${words} (Looked for on the person's computer: it is no file on this machine, or was given as { "path": … }.)` : words;
   };
   const outcome = await transport(parsed.action, args);
+  // The swarm action refused for rate (the relay's 429, or the Inbox's): a plain result, never an error (nothing is wrong).
+  if (parsed.action === "swarm" && ((outcome.kind === "refused" && outcome.code === "too_many_waiting") || (outcome.kind === "answer" && outcome.status === 429))) {
+    return printResult({ content: [{ text: INBOX_SWARM_BUSY_RESULT_TEXT }] }, out, err, deps.text === true);
+  }
   if (outcome.kind === "refused") return refused(outcome.code, outcome.message);
   if (outcome.kind === "queued") {
     await out(

@@ -22,6 +22,7 @@ export const INBOX_TOOL_ACTIONS = [
   'resolve_message',
   'snooze_thread',
   'thread_pulls',
+  'swarm',
   'submit_guide',
   'get_guide_brief',
   'card',
@@ -489,7 +490,7 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
  * and its field's description say what they do, and a field description does
  * not count toward the 2,048 (the owner: do not grow the main description).
  */
-export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls']
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls', 'swarm']
 
 /**
  * Before saying something was never discussed (approved 2026-11-15): the MCP search tool's description and --help's
@@ -511,6 +512,9 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
   get_guide_brief: "How to write a guided review, with a worked submit_guide call.",
   card: "A Board card for work that outlasts this reply: create it, then move it and say where it is as the work moves.",
   steps: INBOX_STEPS_ACTION_LINE,
+  // Swarm mode: INBOX_SWARM_ACTION_LINE (packages/shared/inbox/swarm-words.ts) word for word; the contract imports nothing, a test keeps them equal.
+  // Not shown while `swarm` is in INBOX_AGENT_ACTIONS_NO_LINE (with steps on, its line passes the 2,048).
+  swarm: 'See what each agent in a swarm thread is doing, and say what you are doing (doing).',
 }
 
 /** A prototype is tried before it is sent (the owner approved these words 2026-11-15): after the option lines' `Prototype:`, and in --help's. */
@@ -683,6 +687,11 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
   submit_guide: {
     guide: "The guide in get_guide_brief's output_schema, as an object or its JSON.",
     snapshot: 'Instead of guide and patch: a complete Plannotator guide snapshot, as an object or its JSON.',
+  },
+  // INBOX_SWARM_FIELD_DESCRIPTIONS (packages/shared/inbox/swarm-words.ts) word for word; a test keeps them equal.
+  swarm: {
+    thread_id: 'The swarm thread (or any message in it).',
+    doing: 'One line on what you are doing now; every agent in the thread and the person see it. Leave it out to only look.',
   },
 }
 
@@ -1246,8 +1255,16 @@ export function inboxRequestTooLargeMessage(bytes?: number): string {
   return `The message is too large for the Plannotator Inbox${size}: one request may carry at most ${INBOX_MAX_REQUEST_BYTES} bytes (128 MiB). Send a smaller message, or attach the content as a file.`
 }
 
-/** {@link mcpAnswerOf} with the HTTP status: an unreadable 413 (the server's own refusal, no body) is the request bound. */
-export function mcpAnswerOfResponse(status: number, text: string): { result?: unknown; error?: { message?: string } } | null {
+/** INBOX_SWARM_BUSY_TEXT (packages/shared/inbox/swarm-words.ts) word for word; the contract imports nothing, a test keeps them equal. */
+export const INBOX_SWARM_BUSY_RESULT_TEXT = 'swarm_busy: Not saved just now: too many calls. Nothing is wrong; try again in a minute.'
+
+/**
+ * {@link mcpAnswerOf} with the HTTP status: an unreadable 413 (the server's own refusal, no body) is the request bound.
+ * `tool`: the action called, so a 429 for `swarm` reads as INBOX_SWARM_BUSY_RESULT_TEXT.
+ */
+export function mcpAnswerOfResponse(status: number, text: string, tool?: string): { result?: unknown; error?: { message?: string } } | null {
+  // A hosted Inbox refused the `swarm` action for rate: a plain result, never an error (nothing is wrong).
+  if (status === 429 && tool === 'swarm') return { result: { content: [{ type: 'text', text: INBOX_SWARM_BUSY_RESULT_TEXT }] } }
   return mcpAnswerOf(text) ?? (status === 413 ? { error: { message: inboxRequestTooLargeMessage() } } : null)
 }
 

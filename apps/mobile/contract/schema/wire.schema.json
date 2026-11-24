@@ -1926,6 +1926,9 @@
         "turns_unknown": {
           "type": "boolean",
           "const": true
+        },
+        "activity": {
+          "$ref": "#/$defs/InboxAgentActivity"
         }
       },
       "required": [
@@ -1938,6 +1941,26 @@
         "live",
         "started_at",
         "last_seen_at"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxAgentActivity": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "at"
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
@@ -4749,6 +4772,10 @@
           "type": "boolean",
           "const": true
         },
+        "swarm": {
+          "type": "boolean",
+          "const": true
+        },
         "decision_ask": {
           "type": "boolean",
           "const": true
@@ -6952,6 +6979,55 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
+    "InboxSwarm": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "changed_at": {
+          "type": "string"
+        },
+        "doing": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxSwarmDoing"
+          }
+        }
+      },
+      "required": [
+        "on",
+        "started_at",
+        "changed_at",
+        "doing"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxSwarmDoing": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session",
+        "text",
+        "at"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
     "InboxTag": {
       "type": "object",
       "properties": {
@@ -7251,6 +7327,9 @@
           "items": {
             "type": "string"
           }
+        },
+        "swarm": {
+          "$ref": "#/$defs/InboxSwarm"
         },
         "messages": {
           "type": "array",

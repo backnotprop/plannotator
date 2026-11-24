@@ -64,13 +64,14 @@ import { farReplyRefusal, farThreadRead, farThreadWords, type InboxFarReadMcpCon
 import { farThreadsFor, mergedThreadRows, type InboxFarFindMcpContext } from "./inbox-mcp-far-find";
 import { notePullFoundLater, pullsToLookUp, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 import { registerInboxScheduledTool, type InboxScheduledMcpContext } from "./inbox-mcp-scheduled";
+import { registerInboxSwarmTool, type InboxSwarmMcpContext } from "./inbox-mcp-swarm";
 import type { ProjectHostOf } from "./inbox-thread-pulls";
 import { applyAgentPriority, priorityLine, PRIORITY_FIELD } from "./inbox-mcp-priority";
 import { BRANCH_FIELD, branchReportOf, checkBranchSend, planBranchSend, type BranchSendPlan, type InboxBranchMcpContext } from "./inbox-mcp-branch";
 import { inboxBranchReportedLine, inboxBranchSameLine } from "@plannotator/core/inbox-branch-reports";
 import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps", "routine"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "swarm", "get_guide_brief", "submit_guide", "card", "steps", "routine"] as const;
 
 /**
  * The tools this Inbox serves with the Board on (and steps off): every one,
@@ -276,7 +277,7 @@ export const SEND_ROUTING_FIELDS = {
   agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
 };
 
-export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext, InboxBranchMcpContext, InboxFarReadMcpContext, InboxFarFindMcpContext {
+export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext, InboxSwarmMcpContext, InboxBranchMcpContext, InboxFarReadMcpContext, InboxFarFindMcpContext {
   store: InboxStore;
   /** The Inbox's base URL, `http://localhost:<port>/`. */
   baseUrl: () => string;
@@ -1623,6 +1624,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
 
   // A thread's PRs (approval "inbox-pr-binding"): packages/server/inbox-mcp-pulls.ts. Always served.
   registerInboxThreadPullsTool(server, context);
+
+  // Swarm mode: who in a thread is doing what, and the caller's own line (packages/server/inbox-mcp-swarm.ts). Always served.
+  registerInboxSwarmTool(server, context);
 
   // Guided reviews (step 5): packages/server/inbox-guides.ts.
   registerInboxGuideTools(server, context);

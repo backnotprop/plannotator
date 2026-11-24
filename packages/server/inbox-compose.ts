@@ -95,6 +95,8 @@ export function createInboxCompose(options: {
   boardOn?: () => boolean;
   /** A New review on local changes started this thread (`review` on a Send): its row shows from now on. */
   onReviewStart?: (threadId: string, review: unknown, where: { host: string; project_id: string; at: string }) => void;
+  /** A Send with several agents and the Swarm badge on wrote its thread: swarm goes on for it (inbox/swarms.json). */
+  onSwarmStart?: (threadId: string) => void;
   /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
   machine?: () => string;
   /** Uploads something else keeps for later (a Combine's files copied from a linked computer): the sweep leaves them. */
@@ -205,6 +207,9 @@ export function createInboxCompose(options: {
     if (!target) {
       throw new InboxError("session_not_live", "That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.");
     }
+    // The other agents picked in To (`tags`, each `{ host, session }`): resolved as a reply's tags are, refused before
+    // anything is written when one is not reachable.
+    const picks = body.tags === undefined || body.tags === null ? [] : live.tagTargets(body.tags).filter((tag) => tag.session !== target.session);
     const root = placeOf(target.root, target.session, store.lastThreadsBySession());
     if (root === null) throw new InboxError("session_not_live", "That session has not said where it works yet; try again in a moment.");
     const project = prepared ? prepared.project : target.root !== null ? await options.resolveProject(root) : store.projectByRoot(root);
@@ -248,6 +253,8 @@ export function createInboxCompose(options: {
         decision_ask: body.decision_ask === true,
         // Settings -> Rows' ask box: the agent also receives how to change the rows (INBOX_ROWS_ASK_BLOCK).
         rows_ask: body.rows_ask === true,
+        // New message's other picks (one thread, every agent in it) and its Swarm badge: `swarmPicks` checked them first.
+        ...(picks.length > 0 ? { tags: picks, swarm: body.swarm === true } : {}),
         ...(prepared ? { launch: prepared.launch } : {}),
         sent_from: sentFrom,
       });
@@ -267,6 +274,7 @@ export function createInboxCompose(options: {
       sent?.(result.message);
       if (body.review) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
       if (prepared) options.launch!.begin(result.message);
+      if (result.message.swarm) options.onSwarmStart?.(result.message.thread_id);
     }
     // Sent: the uploads are attachments now, and the draft it came from is done.
     removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));

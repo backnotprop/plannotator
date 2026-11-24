@@ -18,7 +18,7 @@ import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../schedu
 import { useMessageRefRepos } from '../messageRefRepo';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { outboxLine } from '../machines';
-import { ThreadSessions } from './ThreadSessions';
+import { SwarmOrSessions } from '../swarm/SwarmOrSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
@@ -4864,10 +4864,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         )}
         {/* The count and time; a one-message thread has none. No name chip: the top bar shows the name whenever the
             chip would (the owner, 2026-11-02: never the same words twice). */}
-        {!one && !reviewView && (
-          <div className="ib-tmeta" data-thread-meta="" data-sessions={sessions.length > 1 ? '' : undefined}>
+        {(!one || thread.swarm) && !reviewView && (
+          <div className="ib-tmeta" data-thread-meta="" data-sessions={sessions.length > 1 || thread.swarm ? '' : undefined}>
             {/* Two or more sessions: who at the start, the count and time at the end. */}
-            {sessions.length > 1 && <ThreadSessions sessions={sessions} phone={phone} agentFilter={agentFilter} onAgentFilter={onAgentFilter} />}
+            {(sessions.length > 1 || thread.swarm) && <SwarmOrSessions threadId={thread.thread_id} swarm={thread.swarm} machine={machine?.id ?? null} machines={agentContext?.machines} sessions={sessions} phone={phone} agentFilter={agentFilter} onAgentFilter={onAgentFilter} />}
             <span className="ib-tmeta-rest" data-thread-meta-rest="">
                 <span>{plural(thread.messages.length, 'message')}</span>
                 <span className="ib-tdot" aria-hidden="true" />

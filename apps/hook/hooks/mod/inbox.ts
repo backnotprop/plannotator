@@ -1042,13 +1042,13 @@ export function inboxProjectDirArgv(cwd: string, given: string): string[] {
   return shellArgv('inbox-project', INBOX_PROJECT_DIR_SCRIPT, 'plannotator-inbox-project', [cwd, given])
 }
 
-async function mcpCall(host: Host, port: number, method: string, params: Record<string, unknown>): Promise<{ result?: unknown; error?: { message?: string } } | null> {
+async function mcpCall(host: Host, port: number, method: string, params: Record<string, unknown>, tool?: string): Promise<{ result?: unknown; error?: { message?: string } } | null> {
   const response = await host.fetch(`http://127.0.0.1:${port}/mcp`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   })
-  return mcpAnswerOfResponse(response.status, response.text)
+  return mcpAnswerOfResponse(response.status, response.text, tool)
 }
 
 /** `work`'s answer, or null once `ms` passed first; the bounding sleep is aborted as soon as `work` settles. */
@@ -1493,7 +1493,7 @@ export class InboxLink {
       // This session's wake delivers the reply as a turn: the send tools say to end the turn. Without the wake
       // they say to read the thread later, as for any agent nothing wakes.
       const wakes = this.options.wake !== false
-      answer = await mcpCall(this.host, running.port, 'tools/call', inboxToolCallParams(call, { wakes, ...(workingFolder ? { workingFolder } : {}) }))
+      answer = await mcpCall(this.host, running.port, 'tools/call', inboxToolCallParams(call, { wakes, ...(workingFolder ? { workingFolder } : {}) }), call.name)
     } catch (error) {
       return { deny: `The Plannotator Inbox did not answer (${error instanceof Error ? error.message : String(error)}).` }
     }

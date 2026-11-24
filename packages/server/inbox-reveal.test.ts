@@ -1440,3 +1440,22 @@ describe("the Group tip: a band's one-time tooltip, outside the line, stamped on
     expect((await shown.post("/api/inbox/reveal", { id: "sidebar_tip", used: true })).status).toBe(422);
   });
 });
+
+describe("the Swarm tip: the badge's first-time card, outside the line, stamped once", () => {
+  const KEY = "swarm-tip-key-1";
+
+  test("shown on a first-run day too; the claim stamps only inboxReveals.swarm_tip; another window gets no; the same key again yes", async () => {
+    const w = await world({ days: 0 });
+    const lineBefore = (await w.settings()).reveal.next;
+    expect((await w.claim("swarm_tip", KEY)).show).toBe(true);
+    const saved = w.saved().inboxReveals;
+    expect(saved.swarm_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), key: KEY });
+    expect(saved.lastShownAt).toBeUndefined();
+    expect(saved.dayShownAt).toBeUndefined();
+    expect((await w.settings()).reveal.next).toBe(lineBefore);
+    expect((await w.claim("swarm_tip", "another-key-22")).show).toBe(false);
+    expect((await w.claim("swarm_tip")).show).toBe(false);
+    expect((await w.claim("swarm_tip", KEY)).show).toBe(true);
+    expect(w.saved().inboxReveals.swarm_tip.shownAt).toBe(saved.swarm_tip.shownAt);
+  });
+});

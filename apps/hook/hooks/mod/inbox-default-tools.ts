@@ -305,6 +305,44 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
     }
   },
   {
+    "name": "swarm",
+    "description": "See what each agent in a swarm thread is doing, and say what you are doing (doing).",
+    "inputSchema": {
+      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "thread_id": {
+          "type": "string",
+          "description": "The swarm thread (or any message in it)."
+        },
+        "doing": {
+          "description": "One line on what you are doing now; every agent in the thread and the person see it. Leave it out to only look.",
+          "type": "string"
+        },
+        "project_path": {
+          "description": "Absolute path of the repository or folder you work in; the thread lands in that project's row. The `plannotator inbox mcp` shim fills it from its working folder.",
+          "type": "string"
+        },
+        "agent_session": {
+          "description": "Your session id; the `plannotator inbox mcp` shim fills it.",
+          "type": "string"
+        },
+        "agent_name": {
+          "description": "How the person sees you, e.g. \"Claude Code\".",
+          "type": "string"
+        },
+        "agent_host": {
+          "description": "Your agent host, e.g. claude-code, codex, cursor.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "submit_guide",
     "description": "Send the person a guided review of a code change. It lands in the Plannotator Inbox as a message with a \"Guided review\" card that opens in Plannotator's guide viewer. Pass `guide` (the shape get_guide_brief gives) and `patch` (the exact unified diff it describes), or `snapshot` (a complete Plannotator guide snapshot). Every file a section names must be in the patch, in one section only; a refusal names the file. Files you leave out show under \"Everything else\". `body` is your note above the card (default: the guide's intent). thread, reply_to, supersedes, done and idempotency_key work as in send_message, and the person's answer comes back the same way.\n\nExample: get_guide_brief's `example` is a call that works as it is.",
     "inputSchema": {

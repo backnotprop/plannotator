@@ -26,6 +26,7 @@ import { INBOX_CARD_ACTION_ON, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIV
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
 import { INBOX_SNOOZE_MAX_DAYS } from "@plannotator/core/inbox-snooze";
+import { INBOX_SWARM_ACTION_LINE, INBOX_SWARM_FIELD_DESCRIPTIONS } from "@plannotator/shared/inbox/swarm-words";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
 import { INBOX_RUN_EXAMPLE, INBOX_RUN_GUIDE, INBOX_RUN_REPORT_HEADING, INBOX_SECRET_EXAMPLE } from "@plannotator/core/inbox-run-guide";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
@@ -186,6 +187,11 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
     lines: [
       "`thread_pulls`: A thread's pull/merge requests. `thread_id`; `add` and `remove`, lists of `owner/repo#123` (GitHub), `group/sub/project!45` (GitLab) or PR URLs (Bitbucket: the URL only). Neither lists them. You own your thread's list: add a PR when you open or take on one for this work (or pass `pulls` on send_message), and remove one when it stops being part of the work; merged ones stay. The person can add and remove too; read_thread shows who did, and your next reply in the thread says what they changed. From a shell: `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`.",
     ],
+  },
+  // Swarm mode: the action's own words (packages/shared/inbox/swarm-words.ts). Always on.
+  swarm: {
+    args: ["thread_id", "doing"],
+    lines: [INBOX_SWARM_ACTION_LINE, `- \`thread_id\`: ${INBOX_SWARM_FIELD_DESCRIPTIONS.thread_id}`, `- \`doing\`: ${INBOX_SWARM_FIELD_DESCRIPTIONS.doing}`],
   },
   get_guide_brief: {
     args: [],

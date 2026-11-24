@@ -259,6 +259,42 @@
       "relay": true
     },
     {
+      "name": "GET threads/:id/swarm",
+      "method": "GET",
+      "path": "threads/{thread}/swarm",
+      "params": [
+        "thread"
+      ],
+      "call": "getThreadSwarm",
+      "window": "/api/inbox/threads/{thread}/swarm",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/swarm",
+      "method": "POST",
+      "path": "threads/{thread}/swarm",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadSwarm",
+      "window": "/api/inbox/threads/{thread}/swarm",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST pins",
       "method": "POST",
       "path": "pins",

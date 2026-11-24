@@ -1,0 +1,64 @@
+/* Swarm mode (packages/inbox/swarm/): New message's other picks and the thread's swarm line and status view. The
+   badge and its motion are in swarmBadge.css. */
+
+/* ── New message: other picks, Add an agent, the badge at the row's end ── */
+.ib-swarm-add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; min-width: 34px; height: 34px; padding: 0 8px; border: 0; border-radius: 7px; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-14, 14px); cursor: pointer; align-self: center; }
+@media (hover: hover) { .ib-swarm-add:hover { background: color-mix(in oklch, var(--muted) 70%, transparent); color: var(--foreground); } }
+.ib-swarm-add[aria-expanded="true"] { background: color-mix(in oklch, var(--muted) 70%, transparent); color: var(--foreground); }
+.pn-inbox .ib-swarm-add:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-swarm-end { display: inline-flex; align-items: center; margin-left: auto; align-self: center; }
+.ib-cp-to:has(.ib-swarm-end) .ib-cp-dsaved { margin-left: 10px; }
+.ib-swarm-phoneline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 12px; }
+
+/* ── The thread's line ── */
+.ib-swarm-line { position: relative; display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.ib-swarm-tog { display: inline-flex; align-items: center; gap: 9px; height: 30px; padding: 0 10px 0 2px; border: 0; border-radius: 15px; background: none; color: inherit; font: inherit; cursor: pointer; }
+@media (hover: hover) { .ib-swarm-tog:hover { background: var(--muted); } }
+.ib-swarm-line[data-open] .ib-swarm-tog { background: var(--muted); }
+.pn-inbox .ib-swarm-tog:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-swarm-line .ib-mk { width: var(--ib-mark-20); height: var(--ib-mark-20); border-radius: var(--ib-mark-20-r); background: var(--muted); }
+.ib-swarm-line .ib-mk > svg, .ib-swarm-line .ib-mk > img { width: var(--ib-mark-20-g); height: var(--ib-mark-20-g); }
+.ib-swarm-line .ib-ss-pile .ib-mk { box-shadow: 0 0 0 2px var(--card); }
+.ib-swarm-line .ib-ss-pile .ib-mk + .ib-mk { margin-left: -6px; }
+.ib-swarm-sum { font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
+.ib-swarm-sum b { font-weight: 600; color: var(--primary); }
+.ib-swarm-sum b[data-swarm-sum-state="waiting"] { color: color-mix(in oklab, var(--warning) 80%, var(--foreground)); }
+
+/* ── The status view: over the thread on a computer ── */
+.ib-swarm-pop { position: absolute; z-index: 6; left: 0; top: calc(100% + 6px); width: min(500px, calc(100vw - 48px)); box-sizing: border-box; padding: 4px; border-radius: 10px; background: var(--popover); color: var(--popover-foreground); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 80%, transparent), 0 10px 28px -14px color-mix(in oklch, var(--foreground) 45%, transparent), 0 2px 6px -2px color-mix(in oklch, var(--foreground) 12%, transparent); }
+.ib-swarm-rows { margin: 0; padding: 0; list-style: none; }
+.ib-swarm-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 1px 10px; align-items: center; margin: 0; padding: 8px 10px; border-radius: 6px; }
+.ib-swarm-row::before, .ib-swarm-row::marker { content: none; }
+.ib-swarm-mk { grid-row: 1 / 3; align-self: start; margin-top: 1px; display: inline-flex; }
+.ib-swarm-mk .ib-mk { width: 24px; height: 24px; border-radius: 7px; background: var(--muted); }
+.ib-swarm-nm { display: flex; align-items: baseline; gap: 7px; min-width: 0; font-size: var(--ib-fs-14, 13.5px); font-weight: 550; color: var(--foreground); }
+.ib-swarm-nm > bdi { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-swarm-wh { flex: none; font-weight: 400; font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; }
+.ib-swarm-st { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; color: var(--muted-foreground); }
+.ib-swarm-row[data-state="working"] .ib-swarm-st { color: var(--primary); font-weight: 550; }
+.ib-swarm-row[data-state="waiting"] .ib-swarm-st { color: color-mix(in oklab, var(--warning) 80%, var(--foreground)); font-weight: 600; }
+.ib-swarm-now { grid-column: 2 / 4; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--foreground); }
+.ib-swarm-now code { font-family: var(--font-mono); font-size: 12px; color: var(--muted-foreground); background: none; padding: 0; }
+.ib-swarm-alsof { font-size: 12.5px; color: color-mix(in oklab, var(--warning) 80%, var(--foreground)); }
+.ib-swarm-row[data-state="quiet"] :is(.ib-swarm-nm, .ib-swarm-now) { color: var(--muted-foreground); }
+.ib-swarm-row[data-state="quiet"] .ib-swarm-mk { opacity: 0.55; }
+.ib-swarm-spin { width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; border: 1.6px solid color-mix(in oklab, var(--primary) 24%, transparent); border-top-color: var(--primary); }
+@media (prefers-reduced-motion: no-preference) { .ib-swarm-spin { animation: ib-swarm-turn 900ms linear infinite; } }
+@keyframes ib-swarm-turn { to { transform: rotate(360deg); } }
+.ib-swarm-foot { display: flex; justify-content: flex-end; margin-top: 4px; padding: 4px 4px 2px; border-top: 1px solid color-mix(in oklch, var(--border) 80%, transparent); }
+.ib-swarm-off { height: 30px; padding: 0 10px; border: 0; border-radius: 7px; background: none; color: var(--muted-foreground); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+@media (hover: hover) { .ib-swarm-off:hover { background: var(--muted); color: var(--foreground); } }
+.pn-inbox .ib-swarm-off:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* ── A phone: the view opens below the line, one agent per row ── */
+.ib-swarm-line[data-phone] { flex-wrap: wrap; }
+.ib-tmeta[data-sessions]:has(> .ib-swarm-line[data-phone]) > .ib-tmeta-rest { margin-left: 0; flex-basis: 100%; }
+.ib-swarm-line[data-phone] .ib-swarm-tog { height: 40px; min-height: 44px; padding: 0 12px 0 4px; border-radius: 20px; background: var(--muted); }
+.ib-swarm-line[data-phone] .ib-swarm-pop { position: static; flex-basis: 100%; width: auto; margin: 6px -8px 4px; padding: 0; background: none; box-shadow: none; }
+.ib-swarm-line[data-phone] .ib-swarm-row { grid-template-columns: 28px minmax(0, 1fr); padding: 10px 8px; }
+.ib-swarm-line[data-phone] .ib-swarm-mk { grid-row: 1 / 4; }
+.ib-swarm-line[data-phone] .ib-swarm-mk .ib-mk { width: 28px; height: 28px; border-radius: 8px; }
+.ib-swarm-line[data-phone] .ib-swarm-nm { font-size: 15px; }
+.ib-swarm-line[data-phone] .ib-swarm-st { grid-column: 2; font-size: 13.5px; }
+.ib-swarm-line[data-phone] .ib-swarm-now { grid-column: 2; white-space: normal; font-size: 14px; }
+.ib-swarm-line[data-phone] .ib-swarm-off { min-height: 44px; font-size: 15px; }

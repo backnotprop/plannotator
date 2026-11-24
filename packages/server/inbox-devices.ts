@@ -227,6 +227,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // Star and Unstar (`threads/:id/pin`), and the stars' order or Unstar's Undo (`pins`): contract 7.65, approval
   // "inbox-starred-pills". A linked machine sends the same two for this Inbox's threads (approval "inbox-linked-marks").
   { method: "POST", route: /^threads\/([^/]+)\/pin$/, window: (m) => `/api/inbox/threads/${m[1]}/pin` },
+  // A thread's swarm (inbox-swarm-route.ts): read it, turn it off or on; it lives on the thread's own machine.
+  { method: "GET", route: /^threads\/([^/]+)\/swarm$/, window: (m) => `/api/inbox/threads/${m[1]}/swarm` },
+  { method: "POST", route: /^threads\/([^/]+)\/swarm$/, window: (m) => `/api/inbox/threads/${m[1]}/swarm` },
   { method: "POST", route: /^pins$/, window: () => "/api/inbox/pins" },
   // Add to Priority, Remove from Priority and their Undo (contract 7.66). A linked machine sends the same for this
   // Inbox's threads (approval "inbox-linked-marks").

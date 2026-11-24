@@ -103,6 +103,11 @@ export class SimAgent {
     return this.call('card', { ...input, agent_name: this.name, agent_host: this.host });
   }
 
+  /** The `swarm` tool: say what `agent_session` is doing in a thread (`doing`), or leave it out to only look. */
+  swarm(input: { thread_id: string; doing?: string; agent_session?: string }): Promise<Structured> {
+    return this.call('swarm', { ...input, agent_name: this.name, agent_host: this.host });
+  }
+
   /** get_guide_brief: the method, the guide's shape, the diff steps, the rules and a worked example call. */
   guideBrief(): Promise<Structured> {
     return this.call('get_guide_brief', {});

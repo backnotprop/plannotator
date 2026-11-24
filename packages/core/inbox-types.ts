@@ -873,6 +873,12 @@ export interface InboxMessage {
    */
   board_request?: true;
   /**
+   * On the root of a thread the person started with several agents and New message's Swarm badge on: what each agent
+   * receives for this message carries the swarm block (`inboxSwarmStartBlock`, packages/shared/inbox/swarm-words.ts)
+   * after it. Whether swarm is on now is the thread's `swarm` (inbox/swarms.json). Absent on every other message.
+   */
+  swarm?: true;
+  /**
    * On the root of a thread the person started from Settings -> Decision data's Ask. The body stays as typed; what
    * the agent receives for this message (the delivered turn, read_thread) carries `INBOX_DECISION_ASK_BLOCK` after it.
    * Absent on every other message.
@@ -2290,7 +2296,38 @@ export interface InboxThread {
    * keys). Its review can be posted to one of them on GitHub/GitLab (`POST /api/inbox/pulls/review`). Absent otherwise.
    */
   pull_keys?: string[];
+  /** Swarm mode (`InboxSwarm`): present once the thread was ever a swarm, on or off. Absent otherwise and from an older Inbox. */
+  swarm?: InboxSwarm;
   messages: InboxMessageWire[];
+}
+
+/**
+ * A swarm thread's own record (packages/shared/inbox/swarms.ts, `inbox/swarms.json`, outside the event log). `on` is
+ * the person's switch. `doing` holds each agent's last line from the `swarm` action: a claim, kept apart from its
+ * state, which is never stored here but read from its live connection (`InboxAgent.state`).
+ */
+export interface InboxSwarm {
+  on: boolean;
+  started_at: string;
+  changed_at: string;
+  doing: InboxSwarmDoing[];
+}
+
+/** One agent's line in a swarm thread: its session, its words (one line), and when it said them. */
+export interface InboxSwarmDoing {
+  session: string;
+  text: string;
+  at: string;
+}
+
+/**
+ * The last tool a session ran, as its plugin said (the Claude Code mod, Pi, OpenCode): the tool's name and, for a
+ * tool that works on one file, that file's path. Never its arguments or any prompt text.
+ */
+export interface InboxAgentActivity {
+  tool: string;
+  file?: string;
+  at: string;
 }
 
 // ─────────────────────────────── Lines ───────────────────────────────
@@ -3813,6 +3850,11 @@ export interface InboxAgent {
    * neither working nor idle is known, so the window says neither. Absent otherwise. Additive.
    */
   turns_unknown?: true;
+  /**
+   * Its last tool and file (`InboxAgentActivity`), from the agent activity source (a separate change fills it; until
+   * then never set). Live agents only. Absent when none. Additive.
+   */
+  activity?: InboxAgentActivity;
 }
 
 /**

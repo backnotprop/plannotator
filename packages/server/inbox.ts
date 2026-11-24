@@ -150,6 +150,8 @@ import { encodeAppHtml, negotiateAppHtmlEncoding, prepareAppHtml } from "@planno
 import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX, PACKED_ASSETS_MARKER } from "@plannotator/shared/packed-app";
 import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
+import { InboxSwarms } from "@plannotator/shared/inbox/swarms";
+import { createInboxSwarmView } from "./inbox-swarm-view";
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
 import { createInboxCombine } from "./inbox-combine";
@@ -292,6 +294,7 @@ import { createInboxTakeBack } from "./inbox-take-back";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
+import { createInboxSwarmRoute } from "./inbox-swarm-route";
 import { createInboxActedRoute } from "./inbox-acted";
 import { createInboxActed, laterActed } from "@plannotator/shared/inbox/acted";
 import { createInboxPriority } from "./inbox-priority";
@@ -335,6 +338,7 @@ import {
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { bandTipClaim, bandTipDue, bandTipUsed, type BandTipState } from "@plannotator/shared/inbox/band-tip";
+import { swarmTipClaim } from "@plannotator/shared/inbox/swarm-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
@@ -1466,6 +1470,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
+  // Swarm threads (inbox/swarms.json; packages/shared/inbox/swarms.ts): the person's switch and each agent's line.
+  const swarms = new InboxSwarms(inboxDir(dataDir));
+  // A swarm thread's view (inbox-swarm-view.ts): its agents found in the agents list the window reads, linked computers' too.
+  const swarmView = createInboxSwarmView({
+    store,
+    swarms,
+    agents: () => {
+      const own = agentsOf(store.listRows(), new Date());
+      return machines ? inboxMergedAgents(machines.selfId, own, machines.agents()) : [own];
+    },
+    selfMachine: () => machines?.selfId ?? null,
+    machineName: (machine) => machines?.machinesView().find((m) => m.id === machine)?.name ?? null,
+  });
   const pullLooked = createInboxPullLooked(dataDir);
   // PRs the person hid from Reviews, the PR board and the Inbox list (inbox-pull-hidden.ts): nothing is done on the forge.
   const pullHidden = createInboxPullHidden(dataDir);
@@ -1880,6 +1897,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     findOnMachines: () => machines?.agentFind ?? null,
     projectRemoteKey: (root, waitMs) => farRemoteOf(repos, root, waitMs),
     snoozeMade: () => markSnoozeUsed(),
+    // Swarm mode's `swarm` action: the thread's record and its view, with every agent's state as the window lists it.
+    swarms,
+    swarmView: (threadId) => swarmView.swarmViewOf(threadId),
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
   const mcp = createMcpHandler(() => createInboxMcpServer(mcpContext), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
@@ -3930,6 +3950,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return loadConfig().inboxReveals?.band_tip?.shownAt === at;
   };
+  /** The Swarm tip (packages/shared/inbox/swarm-tip.ts): once, the first time the badge appears; no tenure, no gap. */
+  const claimSwarmTip = (key: string | null): boolean => {
+    const at = new Date().toISOString();
+    const claim = swarmTipClaim(loadConfig().inboxReveals?.swarm_tip, key, at);
+    if (!claim.save) return claim.show;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, swarm_tip: claim.save } });
+    return loadConfig().inboxReveals?.swarm_tip?.shownAt === at;
+  };
   /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
@@ -4539,7 +4567,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         thread_id: reply.thread_id,
         reply_to: reply.reply_to,
         subject,
-        body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply)),
+        body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply), tag.session),
         url: threadPageUrl(baseUrl, reply.thread_id),
         tagged: { owner: hostAgentName(store.recipientOf(reply)?.host) },
         // Added to the thread ("Add instead"): it works alongside the owner.
@@ -4573,7 +4601,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       thread_id: reply.thread_id,
       reply_to: reply.reply_to,
       subject,
-      body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply)),
+      body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply), reply.to?.session ?? null),
       url: threadPageUrl(baseUrl, reply.thread_id),
       ...(redirected ? { redirected_from: redirected } : {}),
       // A thread the person started: the wake says so (INBOX_NEW_THREAD_INSTRUCTION).
@@ -5066,7 +5094,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const sessions = presence !== lastPresenceSignature;
     const moved = sessions || signature !== lastDeliverySignature;
     const labels = live.labelVersion() !== lastLabelVersion;
-    const agentsSignature = `${live.agentsSignature(inboxAgentsEndedSince(live.clock()))}#${launched}#${rexVersion()}#${agentStatus.on() ? 1 : 0}`;
+    // A swarm's switch or an agent's line moves it too: the window reads the swarm again with the agents.
+    const agentsSignature = `${live.agentsSignature(inboxAgentsEndedSince(live.clock()))}#${launched}#${rexVersion()}#${agentStatus.on() ? 1 : 0}#${swarms.revision}`;
     const agents = agentsSignature !== lastAgentsSignature;
     lastAgentsSignature = agentsSignature;
     if (!moved && !labels && !agents) return;
@@ -5345,6 +5374,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody: (req) => readBody(req),
     json,
     boardOn,
+    onSwarmStart: (threadId) => void swarms.setOn(threadId, true),
     onReviewStart: (threadId, review, where) => {
       const start = codeReviewOn() ? inboxReviewStartOf(review, where) : null;
       if (!start) return;
@@ -5409,6 +5439,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
+  const swarmRoute = createInboxSwarmRoute({ store, swarms, serverSession, readBody: (req) => readBody(req), json });
   // The person's Add to Priority and Remove from Priority (packages/server/inbox-priority.ts).
   const priority = createInboxPriority({ store, serverSession, readBody: (req) => readBody(req), json });
   // Tags on threads (packages/server/inbox-thread-tags.ts).
@@ -5872,6 +5903,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
       ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
       ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
+      ...(swarms.get(thread.thread_id) ? { swarm: swarms.get(thread.thread_id)! } : {}),
     };
     // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
     // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
@@ -7344,8 +7376,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || id === "swarm_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip, swarm_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -7372,6 +7404,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Group tip: outside the line, its own stamp only (packages/shared/inbox/band-tip.ts).
         if (id === "band_tip") {
           return json({ show: claimBandTip(key ?? null, body.used === true), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Swarm tip: outside the line, its own stamp only (packages/shared/inbox/swarm-tip.ts).
+        if (id === "swarm_tip") {
+          return json({ show: claimSwarmTip(key ?? null), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {
@@ -7448,6 +7484,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.
       const pinned = await pins.route(req, url);
       if (pinned) return pinned;
+      // A thread's swarm switch (inbox-swarm-route.ts).
+      const swarmed = await swarmRoute.route(req, url);
+      if (swarmed) return swarmed;
       // Add to Priority and Remove from Priority.
       const prioritized = await priority.route(req, url);
       if (prioritized) return prioritized;

@@ -58,6 +58,7 @@ import {
 import { cutText } from "@plannotator/core/inbox-questions";
 import { decideInboxAttachmentKind, inboxAttachmentCurrentInfo, inboxBlobPath, inboxBlobsDir, openInboxAttachmentVersion, scanInboxFile } from "./attachments";
 import { InboxError } from "./schema";
+import { inboxSwarmStartFor } from "./swarm-start";
 
 export const INBOX_UPLOADS_DIR = "uploads";
 
@@ -127,7 +128,10 @@ export function inboxBodyForAgent(message: {
   sent_from?: unknown;
   id?: string;
   review_anchor?: InboxReviewAnchor | null;
-}, batch: readonly { id: string; body: string; review_anchor?: InboxReviewAnchor | null }[] = [], within: InboxReviewAnchor | null = null): string {
+  swarm?: true;
+  to?: { host: string | null; session: string } | null;
+  tags?: readonly { host: string | null; session: string }[] | null;
+}, batch: readonly { id: string; body: string; review_anchor?: InboxReviewAnchor | null }[] = [], within: InboxReviewAnchor | null = null, reader: string | null = null): string {
   const review = message.id
     ? batch.length > 0
       ? reviewBatchBlock({ id: message.id }, batch)
@@ -141,6 +145,9 @@ export function inboxBodyForAgent(message: {
   if (message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
   if (message.decision_ask === true) words = `${words}\n\n${INBOX_DECISION_ASK_BLOCK}`;
   if (message.rows_ask === true) words = `${words}\n\n${INBOX_ROWS_ASK_BLOCK}`;
+  // A swarm thread's first message: each agent it goes to reads who else it went to (`reader`: the session reading).
+  const swarm = inboxSwarmStartFor(message, reader);
+  if (swarm) words = `${words}\n\n${swarm}`;
   return words;
 }
 const PENDING_DIR = "pending";

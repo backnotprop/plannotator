@@ -64,12 +64,11 @@ import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, inboxSkillsBl
 import { THREAD_NAME_TAKEN, threadNameHolder, type ThreadNameHolder } from './threadNameHolder';
 import { BoardChip } from './BoardChip';
 import { ThreadPill } from './ThreadPill';
+import { useSwarmPicks } from '../swarm/useSwarmPicks';
 import { registerReloadFlush } from '../stalePage';
 import {
-  DRAFT_TOO_LONG,
-  NOTHING_SENT_NO_AGENT,
-  composeGroups,
-  composeTargets,
+  DRAFT_TOO_LONG, NOTHING_SENT_NO_AGENT,
+  composeGroups, composeTargets,
   draftSnapshot,
   draftThreadName,
   draftTo,
@@ -843,7 +842,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         // A second review of the same changes is named too: "… (2)" rather than the request's first line.
         ...(box && 'thread_name_auto' in named ? { thread_name_numbered: true as const } : {}),
         ...(draft ? { draft_id: draft.id } : {}),
-        ...(boardChip && boardRequest ? { board_request: true as const } : {}),
+        ...(boardChip && boardRequest ? { board_request: true as const } : {}), ...swarm.send,
       };
       // Another machine's project (remote launch) or running agent: through the forward, so that machine's Inbox takes it.
       const result = transport ? await transport.startThread(input) : await inboxApi.startThread(input, machine);
@@ -1213,7 +1212,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           : 'To: choose an agent';
 
   // A computer: the To line at the top. A phone has none: To is the pill in the foot's row (`phoneTo`).
-  const toRow = phone ? null : (
+  const toRowOf = () => phone ? null : (
     <div ref={toRowRef} className="ib-cp-to" data-start={start ? '' : undefined}>
       <span className="ib-cp-tol">To</span>
       {noAgent ? (
@@ -1267,7 +1266,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           <Icon name="chevD" size={15} />
         </button>
       )}
-      {tipCard}
+      {tipCard}{swarm.row}
       {start && (
         <span className="ib-cp-startin">
           <span className="ib-cp-in">in</span>
@@ -1374,6 +1373,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otherMachines, there.machines, there.reads, linkedSessions, selfView?.name, home, groups, toStart?.launch, model?.launch, lastSent]);
   const toOpensOn = targetOn ?? start?.machine ?? HERE;
+  const swarm = useSwarmPicks({ first: target ? { session: target.session, machineKey: toOpensOn } : null, starting: !!start, machines: toMachines, home, phone, host: dialogRef.current, after: afterPicker });
 
   const reviewRows = box && (
     <ReviewRows
@@ -1507,7 +1507,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           )}
         </div>
       )}
-      {phoneStartIn}
+      {phoneStartIn}{swarm.phoneLine}
       <div className="ib-cp-foot" ref={footRef}>
         {phone && tipCard}
         {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, startHome)} facts={trustFacts} said={errorInDetails ? error : null} />}
@@ -1665,7 +1665,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             )}
           </div>
           {reviewRows}
-          {toRow}
+          {toRowOf()}
         </div>
       ) : (
         <>
@@ -1673,7 +1673,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             {title}
           </h2>
           {reviewRows}
-          {toRow}
+          {toRowOf()}
         </>
       )}
       {card && (
@@ -1689,7 +1689,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       ) : (
         picker && <ToPicker groups={groups} selected={toSelected} home={home} phone={false} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} machines={toMachines} opensOn={toOpensOn} />
       )}
-      {launchChoice.menu()}
+      {launchChoice.menu()}{swarm.picker}
       {folderMenu && start && launch && (
         <FolderMenu
           projects={launch.projects}

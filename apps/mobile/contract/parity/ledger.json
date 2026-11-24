@@ -22157,6 +22157,230 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-get-threads-id-swarm",
+      "title": "door:GET threads/:id/swarm",
+      "surface": [
+        "door:GET threads/:id/swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-swarm",
+      "title": "door:POST threads/:id/swarm",
+      "surface": [
+        "door:POST threads/:id/swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-swarm",
+      "title": "window:/api/inbox/threads/:id/swarm",
+      "surface": [
+        "window:/api/inbox/threads/:id/swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-activity",
+      "title": "field:InboxAgent.activity",
+      "surface": [
+        "field:InboxAgent.activity"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagentactivity-at",
+      "title": "field:InboxAgentActivity.at",
+      "surface": [
+        "field:InboxAgentActivity.at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagentactivity-file",
+      "title": "field:InboxAgentActivity.file",
+      "surface": [
+        "field:InboxAgentActivity.file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagentactivity-tool",
+      "title": "field:InboxAgentActivity.tool",
+      "surface": [
+        "field:InboxAgentActivity.tool"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-swarm",
+      "title": "field:InboxMessageWire.swarm",
+      "surface": [
+        "field:InboxMessageWire.swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarm-changed-at",
+      "title": "field:InboxSwarm.changed_at",
+      "surface": [
+        "field:InboxSwarm.changed_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarm-doing",
+      "title": "field:InboxSwarm.doing",
+      "surface": [
+        "field:InboxSwarm.doing"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarm-on",
+      "title": "field:InboxSwarm.on",
+      "surface": [
+        "field:InboxSwarm.on"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarm-started-at",
+      "title": "field:InboxSwarm.started_at",
+      "surface": [
+        "field:InboxSwarm.started_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarmdoing-at",
+      "title": "field:InboxSwarmDoing.at",
+      "surface": [
+        "field:InboxSwarmDoing.at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarmdoing-session",
+      "title": "field:InboxSwarmDoing.session",
+      "surface": [
+        "field:InboxSwarmDoing.session"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarmdoing-text",
+      "title": "field:InboxSwarmDoing.text",
+      "surface": [
+        "field:InboxSwarmDoing.text"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthread-swarm",
+      "title": "field:InboxThread.swarm",
+      "surface": [
+        "field:InboxThread.swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

@@ -740,6 +740,8 @@ export interface PlannotatorConfig {
     sidebar_tip?: { shownAt?: string; key?: string };
     /** The Group tip (packages/shared/inbox/band-tip.ts): stamped once when shown, or when a band's menu was opened first. */
     band_tip?: { shownAt?: string; key?: string; usedAt?: string };
+    /** The Swarm tip (packages/shared/inbox/swarm-tip.ts): stamped once when shown, the first time the Swarm badge appears. */
+    swarm_tip?: { shownAt?: string; key?: string };
   };
   /** `enabled` / `volume` are settings (config.json); `dialogDueFor` / `dialogShownFor` are machine state (state.json). */
   inboxSound?: {

@@ -7691,6 +7691,13 @@ export class InboxStore {
     decision_ask?: unknown;
     /** Sent from Settings → Rows' ask box: the root carries `rows_ask`, and what the agent receives for it carries the Rows instructions. */
     rows_ask?: unknown;
+    /**
+     * New message's other picks (the server resolved them with `tagTargets`): one message, handed to `to` and to each
+     * of these, each with its own delivery, as a reply's tags are. `to`'s own session is never one of them.
+     */
+    tags?: InboxTag[];
+    /** New message's Swarm badge was on at Send: the root carries `swarm` (the swarm block for each agent). Only `true` sets it. */
+    swarm?: unknown;
     /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
     launch?: InboxLaunchRecord;
     review_live?: InboxReviewLive;
@@ -7738,6 +7745,10 @@ export class InboxStore {
       ...(input.board_request === true ? { board_request: true as const } : {}),
       ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
       ...(input.rows_ask === true ? { rows_ask: true as const } : {}),
+      ...(() => {
+        const tags = (input.tags ?? []).filter((tag, i, all) => tag.session !== input.to!.session && all.findIndex((t) => t.session === tag.session) === i);
+        return tags.length > 0 ? { tags, ...(input.swarm === true ? { swarm: true as const } : {}) } : {};
+      })(),
       ...(input.launch ? { launch: input.launch } : {}),
       ...(input.review_live ? { review_live: input.review_live } : {}),
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),

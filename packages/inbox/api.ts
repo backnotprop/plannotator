@@ -119,7 +119,7 @@ export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_in
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
-export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip' | 'band_tip';
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip' | 'band_tip' | 'swarm_tip';
 
 /**
  * This page load's id, sent with every read and write (`X-Plannotator-Load`): the Inbox keeps it with a one-time

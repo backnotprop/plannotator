@@ -269,6 +269,10 @@
       "state",
       "waiting"
     ],
+    "InboxAgentActivity": [
+      "at",
+      "tool"
+    ],
     "InboxAgentFaceEntry": [
       "face",
       "sessions"
@@ -877,6 +881,17 @@
     "InboxSupersededBy": [
       "key",
       "message_id"
+    ],
+    "InboxSwarm": [
+      "changed_at",
+      "doing",
+      "on",
+      "started_at"
+    ],
+    "InboxSwarmDoing": [
+      "at",
+      "session",
+      "text"
     ],
     "InboxTag": [
       "host",
