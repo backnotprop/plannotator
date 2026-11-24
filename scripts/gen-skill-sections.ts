@@ -18,7 +18,6 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DIAGRAM_SKILL } from "../packages/core/diagram-skill";
 import { SHAPE_SKILL_DESCRIPTION_PHRASE, SHAPE_SKILL_SECTION } from "../packages/core/shape-skill";
 
 export const PLANNOTATOR_SKILL_MD = join(import.meta.dir, "..", "apps", "skills", "core", "plannotator", "SKILL.md");
@@ -73,13 +72,7 @@ export function renderSkillSections(doc: string, options: SkillSectionOptions): 
   return `${out.slice(0, anchor)}${SHAPE_SKILL_SECTION}\n${out.slice(anchor)}`;
 }
 
-export function diagramSkillMarkdown(): string {
-  const { name, description, body } = DIAGRAM_SKILL;
-  return `---\nname: ${name}\ndescription: ${description}\ndisable-model-invocation: true\n---\n\n${body}\n`;
-}
-
 if (import.meta.main) {
-  writeFileSync(join(import.meta.dir, "..", "apps", "skills", "core", "diagram", "SKILL.md"), diagramSkillMarkdown());
   const { HIDDEN_SUBCOMMANDS } = await import("../apps/hook/server/cli");
   const before = readFileSync(PLANNOTATOR_SKILL_MD, "utf-8");
   const after = renderSkillSections(before, { shapeReleased: !HIDDEN_SUBCOMMANDS.has("shape") });

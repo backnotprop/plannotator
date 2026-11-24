@@ -1,4 +1,4 @@
-// Canonical authoring instructions for Inbox and installed agents. Regenerate SKILL.md with bun run gen:skills.
+// Canonical authoring instructions for Inbox and installed agents. Regenerate SKILL.md with bun run gen:diagram-skill.
 export const DIAGRAM_SKILL = {
   name: "diagram",
   description: "Create or revise an editable Plannotator diagram (.diagram.json) of an architecture, process, or request path, and render it to SVG. Use when the person invokes /diagram or asks for a Plannotator diagram.",

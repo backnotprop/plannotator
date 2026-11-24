@@ -3374,3 +3374,9 @@ Release: these are changes in core and in ui, and ui gains the `pele` dependency
 ## `PopoverContent`: `anchor`, `collisionPadding`, `container` (unreleased; additive, opt-in, no core change)
 
 `components/Popover`'s `PopoverContent` takes three optional props and passes them through to Base UI: `anchor` and `collisionPadding` to the `Positioner`, `container` to the `Portal`. `anchor` points the content at an element the host drew itself instead of a `PopoverTrigger` (the Plannotator Inbox anchors its risk card to a button inside a diff's shadow root); the host then holds the Root's `open`. `collisionPadding` is the room kept from the screen's edges. `container` is where the content portals (default: the body), so it can take the theme of the host's own root. Backward compatible: a caller that passes none of them gets the same DOM and positioning as before, and no export, prop or default changed. A host needs the next ui version after 0.64.0 to use them.
+
+## Native diagram review
+
+The `plannotator-diagram` fence and `.diagram.json` source use the separately versioned `@plannotator/diagrams` renderer. Publish its matching version before publishing a UI version that depends on it. Wrap `Viewer` in `NativeDiagramProvider` from `@plannotator/ui/components/diagram/NativeDiagramProvider` to enable native review. Importing `Viewer` alone leaves the canvas and renderer out of the application bundle. A reusable host owns file navigation, stored comment records and the transport for questions. The shared canvas supplies the part ID, reference metadata and click position.
+
+`InboxAttachmentKind` and the shared document render-kind unions now include `plannotator-diagram`. Consumers with exhaustive switches should add a branch. A native diagram anchor uses the existing version-1 envelope with the new family and an optional normalized point. Older anchors retain their existing interpretation.
