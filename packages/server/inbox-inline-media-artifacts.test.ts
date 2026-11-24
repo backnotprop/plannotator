@@ -13,15 +13,17 @@
  * Inbox server and no network.
  */
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxThreadArtifactRefs } from "@plannotator/core/inbox-artifact-pins";
 import { inboxId, type InboxAttachment } from "@plannotator/core/inbox-types";
-import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
+import { inboxBlobPath, inboxBlobsDir, writeBlob } from "@plannotator/shared/inbox/attachments";
 import { captureInboxInlineImages } from "@plannotator/shared/inbox/inline-images";
+import { captureInboxInlineMedia } from "@plannotator/shared/inbox/inline-media-capture";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxWallEntries } from "./inbox-artifact-pins";
 import { createInboxImageCapture } from "./inbox-message-images";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
@@ -114,6 +116,115 @@ test("the same ids on every read, no new store line, and a film's pin is taken a
   store.setArtifactPinned(message.thread_id, first[1]!, true);
   const reopened = InboxStore.open(dataDir, { now });
   expect(reopened.threadArtifactPins(message.thread_id).map((pin) => pin.key)).toEqual([first[1]!]);
+});
+
+test("a film pinned while only its attached copy was an artifact keeps its pin once a read captures the copy its text plays", async () => {
+  const { project, dataDir, now, store, repo } = world();
+  const twin = attached(join(project, "walkthrough.mp4"), "walkthrough.mp4", "video");
+  const message = store.sendMessage({ project_id: repo.id, author: agent, body: BODY, attachments: [twin] }).message;
+  // Before any read: the attached film is the artifact.
+  expect(inboxThreadArtifactRefs([store.message(message.id)!]).map((ref) => ref.key)).toContain(twin.id);
+  store.setArtifactPinned(message.thread_id, twin.id, true);
+
+  const capture = createInboxImageCapture(store);
+  capture.schedule(message.thread_id);
+  await capture.idle();
+  capture.stop();
+  const film = store.message(message.id)!.inline_images!.find((record) => record.ref === "walkthrough.mp4")!;
+  // One artifact now, under the shown record's id, and the pin is on it: in the thread's Pinned group and on the Wall.
+  expect(store.threadArtifactPins(message.thread_id).map((pin) => pin.key)).toEqual([film.id]);
+  const wall = inboxWallEntries(store, false).filter((entry) => entry.pinnedAt !== null);
+  expect(wall.map((entry) => entry.ref.key)).toEqual([film.id]);
+  expect(InboxStore.open(dataDir, { now }).threadArtifactPins(message.thread_id).map((pin) => pin.key)).toEqual([film.id]);
+});
+
+test("a pin made on the captured film (attached as well) is kept across a restart, and the attached id unpins it", async () => {
+  const { project, dataDir, now, store, repo } = world();
+  const twin = attached(join(project, "walkthrough.mp4"), "walkthrough.mp4", "video");
+  const message = store.sendMessage({ project_id: repo.id, author: agent, body: BODY, attachments: [twin] }).message;
+  const capture = createInboxImageCapture(store);
+  capture.schedule(message.thread_id);
+  await capture.idle();
+  capture.stop();
+  const film = store.message(message.id)!.inline_images!.find((record) => record.ref === "walkthrough.mp4")!;
+  store.setArtifactPinned(message.thread_id, film.id, true);
+  const reopened = InboxStore.open(dataDir, { now });
+  expect(reopened.threadArtifactPins(message.thread_id).map((pin) => pin.key)).toEqual([film.id]);
+  // A window that read the thread before the capture still names the attached copy: the same artifact.
+  reopened.setArtifactPinned(message.thread_id, twin.id, false);
+  expect(reopened.artifactPins()).toEqual([]);
+});
+
+test("a film the message also attached, unchanged, names the attached copy's blob: nothing is copied again", async () => {
+  const { project, store, repo } = world();
+  const path = join(project, "walkthrough.mp4");
+  const stat = statSync(path);
+  // The attached copy's blob under its own hash: what the record names shows whether the capture read the file again.
+  const sent = Buffer.concat([mp4(), Buffer.from("as sent")]);
+  const sentHash = createHash("sha256").update(sent).digest("hex");
+  writeBlob(store.dir, sentHash, sent);
+  const twin: InboxAttachment = { ...attached(path, "walkthrough.mp4", "video"), sent_sha256: sentHash, sent_mtime: stat.mtime.toISOString(), media_type: "video/mp4" };
+  const message = store.sendMessage({ project_id: repo.id, author: agent, body: BODY, attachments: [twin] }).message;
+  const capture = createInboxImageCapture(store);
+  capture.schedule(message.thread_id);
+  await capture.idle();
+  capture.stop();
+  const film = store.message(message.id)!.inline_images!.find((record) => record.ref === "walkthrough.mp4")!;
+  expect(film.kind).toBe("video");
+  expect(film.sent_sha256).toBe(sentHash);
+  expect(existsSync(inboxBlobPath(store.dir, createHash("sha256").update(mp4()).digest("hex")))).toBe(false);
+
+  // Changed since it was attached (another mtime): copied as its own file.
+  const later = world();
+  writeBlob(later.store.dir, sentHash, sent);
+  const laterTwin: InboxAttachment = { ...attached(join(later.project, "walkthrough.mp4"), "walkthrough.mp4", "video"), sent_sha256: sentHash, sent_mtime: "2026-01-01T00:00:00.000Z" };
+  const laterMessage = later.store.sendMessage({ project_id: later.repo.id, author: agent, body: BODY, attachments: [laterTwin] }).message;
+  const laterCapture = createInboxImageCapture(later.store);
+  laterCapture.schedule(laterMessage.thread_id);
+  await laterCapture.idle();
+  laterCapture.stop();
+  const copied = later.store.message(laterMessage.id)!.inline_images!.find((record) => record.ref === "walkthrough.mp4")!;
+  expect(copied.sent_sha256).toBe(createHash("sha256").update(mp4()).digest("hex"));
+});
+
+test("a film past the cap while it is copied is refused, and no partial copy is left beside the blobs", async () => {
+  const { project, store } = world();
+  const result = await captureInboxInlineMedia(store.dir, { body: BODY, root: project, base: null, path: "walkthrough.mp4", anywhere: true, sentAt: new Date().toISOString(), maxBytes: 1024 });
+  expect(result).toEqual({ ok: false, code: "image_too_large" });
+  const blobs = inboxBlobsDir(store.dir);
+  expect(existsSync(blobs) ? readdirSync(blobs).filter((name) => name.endsWith(".tmp")) : []).toEqual([]);
+});
+
+test("a copy that could not be written waits the long wait, not the minute's retry, while the thread stays open", async () => {
+  const { store, repo } = world();
+  const message = store.sendMessage({ project_id: repo.id, author: agent, body: "![Walkthrough](walkthrough.mp4)" }).message;
+  let t = 1_000_000;
+  const reads: string[] = [];
+  const capture = createInboxImageCapture(store, {
+    now: () => t,
+    retryMs: 60_000,
+    missWaitsMs: [30_000, 120_000, 600_000],
+    capture: async (_dir, input) => {
+      reads.push(...(input.refs ?? []));
+      return { images: [], failures: (input.refs ?? []).map((ref) => ({ ref, code: "write_failed" })), bytes: 0, commit: async () => {}, discard: async () => {} };
+    },
+  });
+  const read = async () => {
+    capture.schedule(message.thread_id);
+    await capture.idle();
+  };
+  await read();
+  expect(reads).toEqual(["walkthrough.mp4"]);
+  t += 61_000;
+  await read();
+  // The thread changing (a reply) does not end the wait either.
+  store.sendMessage({ project_id: repo.id, author: agent, body: "Still copying?", reply_to: message.id });
+  await read();
+  expect(reads).toEqual(["walkthrough.mp4"]);
+  t += 600_000;
+  await read();
+  expect(reads).toEqual(["walkthrough.mp4", "walkthrough.mp4"]);
+  capture.stop();
 });
 
 test("a body with no picture, sound or video gets no records; the send's own capture still takes pictures only", async () => {

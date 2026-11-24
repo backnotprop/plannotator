@@ -41,7 +41,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
-import { inboxAttachmentId, type InboxInlineImage } from "@plannotator/core/inbox-types";
+import { inboxAttachmentId, type InboxAttachment, type InboxInlineImage } from "@plannotator/core/inbox-types";
 import { inboxBlobPath, inboxBlobsDir } from "./attachments";
 import { captureInboxInlineMedia } from "./inline-media-capture";
 import { inboxMessageImageRefsInOrder, readInboxMessageImageAsync, readInboxPictureAsync } from "./message-images";
@@ -72,6 +72,10 @@ export interface CaptureInlineImagesInput {
    * from where the Inbox keeps those bytes, before any file of that name on disk. Every other src is read as usual.
    */
   files?: ReadonlyMap<string, { path: string; name: string }>;
+  /** The message's attached files: a sound or video attached as well is not copied again (inline-media-capture.ts). */
+  attached?: readonly InboxAttachment[] | null;
+  /** The caller stopped: a sound or video being copied ends at its next chunk. */
+  stopped?: () => boolean;
 }
 
 export interface InlineImageFailure {
@@ -130,17 +134,31 @@ export async function captureInboxInlineImages(inboxDirPath: string, input: Capt
     const file = input.files?.get(ref);
     if (!file && inboxInlineMediaKind(ref)) {
       // A sound or a video (only when asked for by `refs`: the send's default list is pictures).
-      const media = await captureInboxInlineMedia(inboxDirPath, { body: input.body, root: input.root, base: input.base ?? null, path: ref, anywhere: input.anywhere === true, sentAt: input.sentAt, capturedOnOpenAt: input.capturedOnOpenAt });
+      const media = await captureInboxInlineMedia(inboxDirPath, {
+        body: input.body,
+        root: input.root,
+        base: input.base ?? null,
+        path: ref,
+        anywhere: input.anywhere === true,
+        sentAt: input.sentAt,
+        capturedOnOpenAt: input.capturedOnOpenAt,
+        attached: input.attached,
+        stopped: input.stopped,
+      });
       if (!media.ok) {
         failures.push({ ref, code: media.code, ...(media.notYet ? { notYet: true as const } : {}) });
         continue;
       }
       const path = inboxBlobPath(inboxDirPath, media.sha256);
+      const temp = media.temp;
       try {
-        if (input.stage) staged.push({ temp: media.temp, path });
-        else await place(media.temp, path);
+        // No temp: the record names the attached twin's blob (the message's own record keeps it).
+        if (temp !== null) {
+          if (input.stage) staged.push({ temp, path });
+          else await place(temp, path);
+        }
       } catch {
-        await unlink(media.temp).catch(() => {});
+        if (temp !== null) await unlink(temp).catch(() => {});
         failures.push({ ref, code: "write_failed" });
         continue;
       }
