@@ -97,6 +97,8 @@
     "./inbox-skills-compose": "./inbox-skills-compose.ts",
     "./skill-references-render": "./skill-references-render.ts",
     "./inbox-pull-handoff": "./inbox-pull-handoff.ts",
+    "./inbox-ship": "./inbox-ship.ts",
+    "./inbox-ship-words": "./inbox-ship-words.ts",
     "./picture-it-skill": "./picture-it-skill.ts",
     "./picture-it-page": "./picture-it-page.ts",
     "./inbox-reply-draft": "./inbox-reply-draft.ts",

@@ -337,10 +337,12 @@ export function isInboxNote(message: {
   ack_of?: string | null;
   tidy?: InboxTidyMark | null;
   scheduled_run?: { run?: number } | null;
+  ship_note?: { ship: string } | null;
 }): boolean {
   return (
     message.author.kind === "person" &&
     ((message.set_aside?.length ?? 0) > 0 ||
+      !!message.ship_note ||
       !!message.moved_note ||
       (!!message.scheduled_run && message.scheduled_run.run === undefined) ||
       (message.reopened?.length ?? 0) > 0 ||
@@ -619,6 +621,11 @@ export interface InboxMessage {
    * Absent on every other message.
    */
   set_aside?: string[];
+  /**
+   * On Ship's note to the shipping agent (inbox-ship.ts): what the watch saw change on the pull request, or the stop
+   * line. Stored as the person's message, addressed to that session, so it wakes it like any reply.
+   */
+  ship_note?: { ship: string; kind: "watch" | "stop" };
   /**
    * On the Inbox's note to an agent whose questions another session moved
    * (resolve_message's `moved_to`, the owner 2026-11-21: "The Inbox tells it,

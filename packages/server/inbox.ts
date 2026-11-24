@@ -357,6 +357,10 @@ import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
+import { readShipPull } from "./inbox-ship-read";
+import { createInboxShipRoutes } from "./inbox-ship-routes";
+import { createInboxShipStore } from "./inbox-ship-store";
+import { createInboxShipWatch, shipEndedWaiting } from "./inbox-ship-watch";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullRiskAuto, type PullRiskAuto } from "./inbox-pull-risk-auto";
 import { lastStartedReviewAgent, pullRiskAutoAgent, pullRiskAutoSettled, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
@@ -1330,6 +1334,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * which writes no record: the windows' streams say `event: thread-pulls` and each reads those threads' PRs again.
    */
   const threadPullLiveListeners = new Set<(threadIds: readonly string[]) => void>();
+  /** A ship changed (inbox-ship-watch.ts): the windows' streams say `event: ships` and each reads the ships again. */
+  const shipListeners = new Set<() => void>();
   // A `:::run` card's state changed (a run started, ended or was stopped; a secret saved or removed: null, every card).
   const runStateListeners = new Set<(messageIds: readonly string[] | null) => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
@@ -1851,6 +1857,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
     pulls: threadPullStates,
     projectHost: projectRepoHost,
+    // Ship: the shipping agent's `thread_pulls` `ship` (inbox-ship-watch.ts), only while Code review is on.
+    shipStep: (threadId, step) => (codeReviewOn() ? shipWatch.step(threadId, step) : null),
     // The attach hint's `#12`: the project's cached origin, and a PR the Pull requests list, a hover card or a lookup
     // already read. Never a git or forge call on the send's path: a number not known yet is looked up after it.
     knownPulls: (projectId) => {
@@ -4289,6 +4297,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // again. Windows only (additive; a window that predates it skips the frame).
         const onThreadPullsLive = (threadIds: readonly string[]) => send(`event: thread-pulls\ndata: ${JSON.stringify({ thread_ids: threadIds })}\n\n`);
         if (windowId) threadPullLiveListeners.add(onThreadPullsLive);
+        // A ship changed (started, stopped, the watch saw a change, the agent logged a step): the ships are read again. Windows only.
+        const onShips = () => send(`event: ships\ndata: {}\n\n`);
+        if (windowId) shipListeners.add(onShips);
         // A run card's state changed here (any window's press, a phone's, a run ending): the cards showing it read
         // again, so a window polls only while a command it shows is running. Windows only (additive).
         const onRunState = (messageIds: readonly string[] | null) => send(`event: runs\ndata: ${JSON.stringify(messageIds ? { message_ids: messageIds } : { all: true })}\n\n`);
@@ -4362,6 +4373,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           showListeners.delete(onShow);
           snoozeListeners.delete(onSnoozes);
           threadPullLiveListeners.delete(onThreadPullsLive);
+          shipListeners.delete(onShips);
           runStateListeners.delete(onRunState);
           rowsListeners.delete(onRows);
           soundListeners.delete(onSound);
@@ -5285,6 +5297,76 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
   const pullRepoProjects = async (pull: Pick<InboxPull, "host" | "repo">) => (await pullProjects()).projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? [];
+  // Ship (inbox-ship-*.ts): the records, the watch that wakes the shipping agent, and the routes.
+  const ships = createInboxShipStore(dataDir);
+  const shipWatch = createInboxShipWatch({
+    ships,
+    read: (ship) => readShipPull(options.refRunner ?? refCliRunner, ship),
+    note: (ship, body, kind) => {
+      const agent = threadAgent(pullLinkStore, ship.thread_id);
+      const session = agent?.session ?? ship.agent.session;
+      const host = agent?.host ?? ship.agent.host;
+      store.tellShip(ship.thread_id, { body, to: session && host ? { host, session } : null, ship_note: { ship: ship.id, kind } });
+    },
+    endedWaiting: (ship) => shipEndedWaiting(store, ship, (threadId) => threadAgent(pullLinkStore, threadId)),
+    onChange: () => {
+      for (const listener of shipListeners) listener();
+    },
+  });
+  shipWatch.resume();
+  const shipRoutes = createInboxShipRoutes({
+    ships,
+    watch: shipWatch,
+    serverSession,
+    json,
+    readBody: (req) => readBody(req),
+    findPull: async (key) => {
+      if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
+      return pulls.find(key);
+    },
+    threadProject: (threadId) => pullLinkStore.threadProject(threadId),
+    threadAgent: (threadId) => {
+      const agent = threadAgent(pullLinkStore, threadId);
+      return agent ? { host: agent.host, session: agent.session, name: agent.name } : null;
+    },
+    guard: (req, write, body) => {
+      if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+        return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+      }
+      if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+      if (write && !pullWriteFromWindow(req)) return json(INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, 403);
+      if (write && body && checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+      return null;
+    },
+    // The person's reply to the chosen agent in the thread, as the reply route sends one: a live session it names, or
+    // a new session started for it (Ship is the person's own choice, so a live agent already there never refuses it).
+    sendInstruction: async ({ threadId, to, words, idempotencyKey }) => {
+      const ids = store.threadMessageIds(threadId);
+      const answered = [...ids].reverse().map((id) => store.message(id)).find((m) => m?.author.kind === "agent") ?? store.message(threadId);
+      if (!answered) throw new InboxError("thread_not_found", "That thread isn't in this Inbox.");
+      if ("launch" in to) {
+        if (!launch.enabled()) throw new InboxError("launch_off", "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
+        const target = launch.target(to);
+        if (!target) throw new InboxError("launch_off", "That agent can't be started here.");
+        const prepared = await launch.prepare(target, { name: null, body: words, resolveProject });
+        let result: ReturnType<typeof store.sendReply>;
+        try {
+          result = store.sendReply(answered.id, { words, to: prepared.to, launch: prepared.launch, took_over: true, questions: [], idempotency_key: idempotencyKey } as never);
+        } catch (error) {
+          launch.abandon(prepared.launch, prepared.project);
+          throw error;
+        }
+        if (result.replayed) launch.abandon(prepared.launch, prepared.project);
+        else launch.begin(result.reply);
+        return { host: prepared.to.host, session: null, name: INBOX_HOST_NAMES[to.launch.agent] ?? to.launch.agent };
+      }
+      const target = live.replyTarget(threadId, to);
+      if (!target) throw new InboxError("session_not_live", "That agent isn't running any more. Pick another.");
+      store.sendReply(answered.id, { words, to: target, questions: [], idempotency_key: idempotencyKey } as never);
+      const agent = threadAgent(pullLinkStore, threadId);
+      return { host: target.host, session: target.session, name: agent?.session === target.session ? agent.name : (INBOX_HOST_NAMES[target.host] ?? target.host) };
+    },
+  });
   const pullRiskAutoPick = { launch, lastReviewAgent: () => lastStartedReviewAgent(store, [...[...pullOwners.all().values()].map((owner) => owner.thread_id), ...pullOwners.started().keys()]) };
   const pullRiskAutoAgentWords = async (on: boolean): Promise<Pick<InboxPullRiskAnswer, "auto_agent" | "auto_agent_unavailable">> => {
     if (!on) return { auto_agent: null };
@@ -6463,6 +6545,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // a review card (the same thread the Inbox lists, never a copy), with the PRs it owns, plus the listed PRs no
       // review thread owns. The PR part is the pulls list's own read (same cache, same hosts). Same guards as the
       // pulls list: refused before anything runs (no git, gh or glab) while Code review is off.
+      // Ship (inbox-ship-routes.ts): ship a pull request, stop, read the ships and a ship's log.
+      if (path.startsWith("/api/inbox/ships")) {
+        const answer = await shipRoutes(req, path, url);
+        if (answer) return answer;
+      }
       if (path === "/api/inbox/reviews") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -6477,6 +6564,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { projectsByRepo, wanted } = last ?? (await pullProjects());
         const listed = last?.listed ?? (await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" }));
         lastReviewsRead = { projectsByRepo, wanted, listed };
+        if (!cached) shipWatch.saw(listed.pulls);
         pullRisk.assess(listed.pulls, { covered: pulls.othersCovered(listed) });
         pullRiskAuto?.resume();
         // A reported branch's thread owns the person's own PR on that branch (the person's own choice still wins).
@@ -8655,6 +8743,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // No judgment written after stop, and no agent left running.
     pullRisk.stop();
     pullRiskAuto?.stop();
+    shipWatch.close();
     void mcp.close().catch(() => {});
     server.stop(true);
     // The tailnet mapping and the door listener, the Wi-Fi listener and its
