@@ -131,7 +131,6 @@ test("a run's end takes Running off its list row, on a wide window and a phone a
   // A routine made in the window, run once now: its turn keeps working (`hold`) until the spec lets it answer.
   mkdirSync(join(world.home, 'code', 'acme-api'), { recursive: true });
   const folder = realpathSync(join(world.home, 'code', 'acme-api'));
-  spawnSync('/usr/bin/git', ['init', '-q'], { cwd: folder, env: { PATH: '/usr/bin:/bin', HOME: world.home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
   const made = await windowPost(desk, '/api/inbox/scheduled', { name: 'Nightly dependency check', prompt: 'Check the dependencies for updates.', schedule: null, folder: { path: folder }, agent: 'claude-code', attachments: [], enabled: true });
   expect(made.status, JSON.stringify(made.body)).toBe(201);
   const id = (made.body.scheduled as RoutineRow).id;
