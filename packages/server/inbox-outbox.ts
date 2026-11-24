@@ -455,7 +455,8 @@ export class InboxOutbox {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a write to another machine.", { field: "idempotency_key" });
-    if (JSON.stringify(body).length > OUTBOX_MAX_BODY_BYTES) {
+    // A reply draft is held whole, as that machine's store keeps it (its own limit on the words): never refused here.
+    if (!(auto && own.draft) && JSON.stringify(body).length > OUTBOX_MAX_BODY_BYTES) {
       throw new InboxError("validation_error", `body: at most ${OUTBOX_MAX_BODY_BYTES} bytes are held for another machine; send files while it is online.`, { field: "body" });
     }
     const existing = this.entries.get(key);
@@ -651,10 +652,19 @@ export class InboxOutbox {
    */
   compact(): void {
     const now = this.now().getTime();
+    // Each thread's newest reply draft write (inbox-machine-drafts.ts).
+    const newestDraft = new Map<string, OutboxEntry>();
+    for (const entry of this.entries.values()) {
+      if (!entry.draft || entry.state === "cancelled") continue;
+      const at = `${entry.machine} ${entry.thread}`;
+      const before = newestDraft.get(at);
+      if (!before || entry.n > before.n) newestDraft.set(at, entry);
+    }
     const keep = (entry: OutboxEntry) => {
       if (pending(entry)) return true;
-      // A reply draft's settled write: nobody asks for it by its key again (each save has its own), and it held words.
-      if (entry.draft) return false;
+      // A reply draft's settled write: nobody asks for it by its key again (each save has its own). Kept only while its
+      // words are the draft shown here: the thread's newest, that machine did not take it, and no write carried it yet.
+      if (entry.draft) return newestDraft.get(`${entry.machine} ${entry.thread}`) === entry && entry.notice !== null && !entry.dismissed;
       const settled = entry.settled_at ? Date.parse(entry.settled_at) : now;
       // Not sent because the link went: its words are the only copy, so it stays until the person dismisses it.
       if (entry.state === "dropped" && !entry.dismissed) return true;

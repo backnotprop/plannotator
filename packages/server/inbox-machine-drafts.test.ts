@@ -7,7 +7,9 @@
  *    row's Draft mark and the Drafts page show it; a reload's read and a restart keep it;
  *  - saves that never left fold into one, file changes and all; a Discard takes them with it;
  *  - back online, what waits lands on that machine's real store, its compare-and-set passing;
- *  - a held save refused there because the draft changed meanwhile keeps both words;
+ *  - a held save refused there because the draft changed meanwhile keeps both words; one naming a file swept there
+ *    goes again without it; one refused for any other reason keeps its words here until the next save carries them;
+ *  - a draft past the outbox's limit is held whole, never refused for it;
  *  - a held reply that carries the draft leaves no draft of the sent words;
  *  - a machine whose list lacks the mark gets no Drafts rows from here.
  */
@@ -18,7 +20,8 @@ import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxListRow, InboxReplyDraft } from "@plannotator/core/inbox-types";
-import { InboxOutbox, type OutboxEntry } from "./inbox-outbox";
+import { receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
+import { InboxOutbox, OUTBOX_MAX_BODY_BYTES, type OutboxEntry } from "./inbox-outbox";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createMachineDrafts, type DraftAnswer, type DraftPeer } from "./inbox-machine-drafts";
 
@@ -52,7 +55,7 @@ function farMachine() {
     try {
       return (await routes.route(req, new URL(req.url))) ?? Response.json({ code: "device_route_not_found" }, { status: 404 });
     } catch (error) {
-      if (error instanceof InboxError) return Response.json({ error: error.message, code: error.code, ...error.details }, { status: error.code === "draft_conflict" ? 409 : 422 });
+      if (error instanceof InboxError) return Response.json({ error: error.message, code: error.code, ...error.details }, { status: error.code === "draft_conflict" ? 409 : error.code.endsWith("_not_found") ? 404 : 422 });
       throw error;
     }
   };
@@ -227,6 +230,64 @@ describe("a linked machine's reply draft, from this Inbox", () => {
     await l.settle();
     expect(l.far.store.replyDraft(l.far.thread)?.body).toBe("Typed on the MacBook\n\nTyped on the Studio");
     expect(l.outbox.notices()).toEqual([]);
+  });
+
+  test("a held join whose list names a file swept there since goes again without it: the words and the other file land", async () => {
+    const l = linked();
+    l.peer.state = "online";
+    const start = await answerOf(await l.save({ body: "Shared start", base: null }));
+    const upload = (name: string) => receiveInboxUpload(l.far.store.dir, name, new Response(`bytes of ${name}`).body, { at: new Date().toISOString() });
+    const kept = await upload("trace.txt");
+    const swept = await upload("old-log.txt");
+    for (const file of [kept, swept]) l.drafts.noteUpload(Response.json({ upload: file }));
+    // The uploads' answers read, as they are long before the box saves them.
+    await Bun.sleep(5);
+    l.peer.state = "offline";
+    await answerOf(await l.save({ body: "Typed on the Studio", base: start.body.draft.updated_at, base_body: "Shared start", files_add: [{ upload_id: kept.upload_id }, { upload_id: swept.upload_id }] }));
+    // Meanwhile the MacBook's own window changes the draft, and a day later its sweep takes one upload.
+    l.far.store.saveReplyDraft(l.far.thread, { body: "Typed on the MacBook", base: start.body.draft.updated_at });
+    removeInboxUploads(l.far.store.dir, [swept.upload_id]);
+    l.peer.state = "online";
+    l.peer.flush();
+    await l.settle();
+    const landed = l.far.store.replyDraft(l.far.thread);
+    expect(landed?.body).toBe("Typed on the MacBook\n\nTyped on the Studio");
+    expect(landed?.files?.map((file) => file.upload_id)).toEqual([kept.upload_id]);
+    expect(l.outbox.notices()).toEqual([]);
+    expect(l.drafts.read(l.peer, l.far.thread)).toBeNull();
+  });
+
+  test("a held save refused there for another reason keeps its words as the draft here, through a restart, and the next save carries them", async () => {
+    const l = linked();
+    const held = await answerOf(await l.save({ body: "Words that machine refused", base: null }));
+    await l.outbox.drain(MACHINE, async () => ({ status: 422, body: { error: "Not this time.", code: "validation_error" } }));
+    expect(l.outbox.list(MACHINE, "pending")).toEqual([]);
+    expect(l.outbox.notices()).toEqual([]);
+    expect(l.drafts.read(l.peer, l.far.thread)).toEqual({ draft: held.body.draft });
+    const [row] = l.drafts.overlay([l.row()]);
+    expect(row!.unsent?.reply_at).toBe(held.body.draft.updated_at);
+    expect((await l.drafts.rowsFor([l.peer], [row!]))[0]!.reply_preview).toBe("Words that machine refused");
+    l.restart();
+    expect(l.drafts.read(l.peer, l.far.thread)?.draft?.body).toBe("Words that machine refused");
+    // The window's next save, on the draft it was shown: those words go there with it.
+    l.peer.state = "online";
+    const next = await answerOf(await l.save({ body: "Words that machine refused, and more", base: held.body.draft.updated_at, base_body: "Words that machine refused" }));
+    expect(next.status).toBe(200);
+    expect(l.far.store.replyDraft(l.far.thread)?.body).toBe("Words that machine refused, and more");
+    expect(l.drafts.read(l.peer, l.far.thread)).toBeNull();
+  });
+
+  test("a draft past the outbox's limit is held whole while that machine is away, and lands when it is back", async () => {
+    const l = linked();
+    const long = "Retry the webhook. ".repeat(20_000);
+    expect(long.length).toBeGreaterThan(OUTBOX_MAX_BODY_BYTES);
+    const held = await answerOf(await l.save({ body: long, base: null }));
+    expect(held.status).toBe(200);
+    expect(l.drafts.read(l.peer, l.far.thread)?.draft?.body).toBe(long);
+    l.peer.state = "online";
+    l.peer.flush();
+    await l.settle();
+    expect(l.far.store.replyDraft(l.far.thread)?.body).toBe(long);
   });
 
   test("a held reply that carries the draft leaves no draft of the sent words, here or there", async () => {

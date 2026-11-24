@@ -13,10 +13,12 @@
  * Drafts page. So typed words outlive leaving the thread, a reload and a restart while that machine is away. Held writes
  * of a thread go in order; a save that never left is folded into the next one (its file changes too), and a Discard
  * takes those with it. A held save that machine refuses because its draft changed there meanwhile keeps both words:
- * its draft's, a blank line, then these (as Take back joins a reply with a kept draft).
+ * its draft's, a blank line, then these (as Take back joins a reply with a kept draft). One whose list names a file
+ * swept there since goes again without it. Any other refusal keeps its words as the draft shown here, carried by the
+ * thread's next write: a person's words are never dropped.
  */
 import { applyReplyDraftFileOps, composeReplyDraftFileOps, settleReplyDraftAfterSend, type ReplyDraftFileOps, type ReplyDraftFileRef } from "@plannotator/core/inbox-reply-draft";
-import { inboxHasUnsent, inboxRowArchived, type InboxDraftFile, type InboxListRow, type InboxReplyDraft, type InboxReplyDraftRow, type InboxUpload } from "@plannotator/core/inbox-types";
+import { INBOX_DRAFT_BODY_MAX, inboxHasUnsent, inboxRowArchived, type InboxDraftFile, type InboxListRow, type InboxReplyDraft, type InboxReplyDraftRow, type InboxUpload } from "@plannotator/core/inbox-types";
 import type { InboxOutbox, OutboxEntry } from "./inbox-outbox";
 
 /** A forwarded route of a thread's reply draft: its read and save (`draft`), or Discard (`draft/delete`). */
@@ -101,6 +103,26 @@ export function createMachineDrafts(options: {
       .filter((entry) => entry.draft && entry.thread === threadId)
       .at(-1) ?? null;
 
+  /**
+   * Each thread's held save that machine did not take (refused for another reason than a conflict, parked, or the
+   * link gone), when it is the thread's newest write: its words are the draft shown here until the next write carries
+   * them, so a refusal never takes the person's words.
+   */
+  const strandedOf = (machine: string): Map<string, OutboxEntry> => {
+    const newest = new Map<string, OutboxEntry>();
+    for (const entry of outbox.list(machine)) {
+      if (!entry.draft || !entry.thread || entry.state === "cancelled") continue;
+      const before = newest.get(entry.thread);
+      if (!before || entry.n > before.n) newest.set(entry.thread, entry);
+    }
+    for (const [threadId, entry] of newest) {
+      const lost = entry.state === "refused" || entry.state === "parked" || entry.state === "dropped";
+      if (!lost || entry.notice === null || entry.dismissed || entry.route.endsWith("/delete") || entry.draft!.view === null) newest.delete(threadId);
+    }
+    return newest;
+  };
+  const stranded = (machine: string, threadId: string): OutboxEntry | null => strandedOf(machine).get(threadId) ?? null;
+
   const stamp = (prior: InboxReplyDraft | null) => {
     const at = now().toISOString();
     return prior && at <= prior.updated_at ? new Date(Date.parse(prior.updated_at) + 1).toISOString() : at;
@@ -153,10 +175,14 @@ export function createMachineDrafts(options: {
   };
 
   /** Hold a save or a Discard for that machine: in order behind what waits, a save that never left folded into this one. */
-  const hold = (peer: DraftPeer, threadId: string, deleting: boolean, body: Body): DraftAnswer => {
+  const hold = (peer: DraftPeer, threadId: string, deleting: boolean, body: Body, from?: InboxReplyDraft | null): DraftAnswer => {
     const machine = peer.id;
     let last = held(machine, threadId);
-    const prior = last ? last.draft!.view : (known.get(key(machine, threadId)) ?? null);
+    if (!deleting && words(body).length > INBOX_DRAFT_BODY_MAX) {
+      // As that machine's store refuses it: the box says the words are too long, and keeps them.
+      return { status: 422, body: { error: `body: a string of at most ${INBOX_DRAFT_BODY_MAX} characters.`, code: "validation_error", field: "body" } };
+    }
+    const prior = last ? last.draft!.view : from !== undefined ? from : (known.get(key(machine, threadId)) ?? null);
     if (deleting) {
       // Discard: nothing before it that never left needs to go any more.
       for (const entry of outbox.list(machine, "pending")) if (entry.draft && entry.thread === threadId && !entry.left) outbox.cancel(entry.key);
@@ -201,17 +227,33 @@ export function createMachineDrafts(options: {
 
   /** A save or a Discard from the window. */
   const write = async (peer: DraftPeer, threadId: string, deleting: boolean, body: Body, signal?: AbortSignal): Promise<DraftAnswer> => {
-    const sent: Body = { ...body, idempotency_key: typeof body.idempotency_key === "string" && body.idempotency_key.trim() ? body.idempotency_key.trim() : crypto.randomUUID() };
+    let sent: Body = { ...body, idempotency_key: typeof body.idempotency_key === "string" && body.idempotency_key.trim() ? body.idempotency_key.trim() : crypto.randomUUID() };
+    // A save that machine did not take is the draft the window shows: this write carries its words, on its base.
+    const left = stranded(peer.id, threadId);
+    if (left) {
+      outbox.dismiss(left.key);
+      if (!deleting) sent = carry(left, sent);
+    }
     // Nothing waits for this thread and that machine is there: its answer is the window's, a conflict included.
     if (!held(peer.id, threadId) && peer.state === "online") {
       try {
-        const far = await peer.request(`threads/${threadId}/draft${deleting ? "/delete" : ""}`, "", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(deleting ? { idempotency_key: sent.idempotency_key } : sent),
-          signal,
-          timeoutMs: DRAFT_WAIT_MS,
-        });
+        const send = () =>
+          peer.request(`threads/${threadId}/draft${deleting ? "/delete" : ""}`, "", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(deleting ? { idempotency_key: sent.idempotency_key } : sent),
+            signal,
+            timeoutMs: DRAFT_WAIT_MS,
+          });
+        let far = await send();
+        // A carried list naming a file that machine swept since: the same save without it, so the words land.
+        for (let tries = 0; far.status === 404 && !deleting && tries < 50; tries++) {
+          const next = withoutMissing(sent, await far.clone().json().catch(() => null));
+          if (!next) break;
+          await far.body?.cancel().catch(() => {});
+          sent = next;
+          far = await send();
+        }
         if (far.status < 500) {
           void noteAnswer(peer.id, threadId, deleting, far.clone());
           return { far };
@@ -221,7 +263,27 @@ export function createMachineDrafts(options: {
         // Not there after all, or too slow: held below, under the same key (its door answers a key it saw once).
       }
     }
-    return hold(peer, threadId, deleting, sent);
+    return hold(peer, threadId, deleting, sent, left && !deleting ? left.draft!.view : undefined);
+  };
+
+  /**
+   * The window's save after one that machine did not take (`stranded`): that save's change and this one's, on the base
+   * that save stood on, so its words (which the window shows) go there too. Its file changes compose when both are
+   * changes; after a whole list (a conflict's join), the whole list again with this save's changes.
+   */
+  const carry = (left: OutboxEntry, body: Body): Body => {
+    const was = left.body;
+    const kept: Body = {
+      base: was.base ?? null,
+      base_body: typeof was.base_body === "string" ? was.base_body : null,
+      ...(body.recipients === undefined && was.recipients !== undefined ? { recipients: was.recipients } : {}),
+      ...(!("quote" in body) && "quote" in was ? { quote: was.quote } : {}),
+      ...(body.mentions === undefined && was.mentions !== undefined ? { mentions: was.mentions } : {}),
+    };
+    if (opsForm(was) && opsForm(body)) return { ...body, ...kept, ...withOps(composeReplyDraftFileOps(opsOf(was), opsOf(body))) };
+    if (!opsForm(body)) return { ...body, ...kept };
+    const { files_add: _add, files_remove: _remove, files_place: _place, files_order: _order, ...rest } = body;
+    return { ...rest, ...kept, files: applyReplyDraftFileOps<ReplyDraftFileRef>(refs(was.files), opsOf(body), { from: words(was), to: words(body) }), all_files: true };
   };
 
   const noteAnswer = async (machine: string, threadId: string, deleting: boolean, answer: Response) => {
@@ -251,18 +313,33 @@ export function createMachineDrafts(options: {
   };
 
   outbox.onChange(({ machine, entry }) => {
-    if (!entry.draft || !entry.thread || entry.state === "queued" || entry.state === "sending" || entry.state === "cancelled") return;
+    // A dismissed one: its words went on with a newer write.
+    if (!entry.draft || !entry.thread || entry.dismissed || entry.state === "queued" || entry.state === "sending" || entry.state === "cancelled") return;
     const threadId = entry.thread;
     const peer = options.peer(machine);
     const deleting = entry.route.endsWith("/delete");
     if (entry.state === "delivered") known.set(key(machine, threadId), deleting ? null : draftOf(entry.answer));
     else if (entry.state === "refused" && codeOf(entry.answer) === "draft_conflict") known.set(key(machine, threadId), draftOf(entry.answer));
-    // Only the newest write of the thread decides: the ones behind it go on as they were queued.
+    // Only the newest write of the thread decides: the ones behind it go on as they were queued (and carry its words).
     if (held(machine, threadId)) return;
     if (peer && entry.state === "refused" && codeOf(entry.answer) === "draft_conflict" && entry.draft.view) {
       rejoin(peer, threadId, draftOf(entry.answer), entry.draft.view);
+      outbox.dismiss(entry.key);
       return;
     }
+    const next = peer && entry.state === "refused" && !deleting && entry.draft.view ? withoutMissing(entry.body, entry.answer) : null;
+    if (peer && next) {
+      // A file that machine swept since (an upload is kept a day): the same save without it, the words and other files kept.
+      const gone = new Set(refs(entry.body.files).map((ref) => ref.upload_id));
+      for (const ref of refs(next.files)) gone.delete(ref.upload_id);
+      const view = entry.draft.view!;
+      const files = (view.files ?? []).filter((file) => !gone.has(file.upload_id));
+      const { files: _files, ...rest } = view;
+      queue(peer, threadId, false, next, { ...rest, ...(files.length > 0 ? { files } : {}) });
+      outbox.dismiss(entry.key);
+      return;
+    }
+    // Any other refusal keeps the words: the thread's draft here is that save's (`strandedOf`) until the next write.
     // Landed (or given up): that machine's list says the Draft mark again before the windows read it.
     void (peer && entry.state === "delivered" ? peer.refreshList() : Promise.resolve()).finally(() => changed(machine, threadId));
   });
@@ -272,6 +349,8 @@ export function createMachineDrafts(options: {
     read(peer: DraftPeer, threadId: string): { draft: InboxReplyDraft | null } | null {
       const last = held(peer.id, threadId);
       if (last) return { draft: last.draft!.view };
+      const left = stranded(peer.id, threadId);
+      if (left) return { draft: left.draft!.view };
       const heard = known.get(key(peer.id, threadId));
       return peer.state !== "online" && heard !== undefined ? { draft: heard } : null;
     },
@@ -300,16 +379,20 @@ export function createMachineDrafts(options: {
      * will settle it (`settleReplyDraftAfterSend`), and a Discard goes behind the reply, so the sent words never come back.
      */
     afterReply(peer: DraftPeer, threadId: string, body: Body): void {
-      const last = held(peer.id, threadId);
-      const view = last?.draft?.view;
+      const left = held(peer.id, threadId) ? null : stranded(peer.id, threadId);
+      const view = (left ?? held(peer.id, threadId))?.draft?.view;
       if (!view || typeof body.clear_draft !== "string") return;
       const after = settleReplyDraftAfterSend(view, { clearDraft: body.clear_draft, words: typeof body.words === "string" ? body.words : undefined, uploads: strings(body.uploads) });
-      if (after.kind === "delete") hold(peer, threadId, true, {});
+      if (after.kind !== "delete") return;
+      // The Send carried words that machine never took: they are sent, and its older draft goes too.
+      if (left) outbox.dismiss(left.key);
+      hold(peer, threadId, true, {});
     },
     /** That machine's rows, each with the Draft mark of a draft waiting to land there. */
     overlay<R extends InboxListRow & { machine: string }>(rows: readonly R[]): R[] {
       const views = new Map<string, InboxReplyDraft | null>();
       for (const machine of new Set(rows.map((row) => row.machine))) {
+        for (const [threadId, entry] of strandedOf(machine)) views.set(key(machine, threadId), entry.draft!.view);
         for (const entry of outbox.list(machine, "pending")) if (entry.draft && entry.thread) views.set(key(machine, entry.thread), entry.draft.view);
       }
       if (views.size === 0) return [...rows];
@@ -328,7 +411,7 @@ export function createMachineDrafts(options: {
       return Promise.all(
         open.map(async (row) => {
           const peer = takers.get(row.machine)!;
-          let draft: InboxReplyDraft | null | undefined = held(peer.id, row.thread_id)?.draft?.view;
+          let draft: InboxReplyDraft | null | undefined = (held(peer.id, row.thread_id) ?? stranded(peer.id, row.thread_id))?.draft?.view;
           if (draft === undefined) {
             const heard = known.get(key(peer.id, row.thread_id));
             if (heard !== undefined && (heard?.updated_at ?? null) === row.unsent!.reply_at) draft = heard;
@@ -347,6 +430,24 @@ export function createMachineDrafts(options: {
     },
   };
 }
+
+/**
+ * A save whose whole list names a file that machine no longer holds (`404 upload_not_found`, `field: files[i]`; an
+ * upload is kept a day): the same save without that file, under a new key. Which file is not said: the words go on
+ * that machine's files as they are. Null: not that refusal.
+ */
+const withoutMissing = (body: Body, answer: unknown): Body | null => {
+  if (codeOf(answer) !== "upload_not_found" || !Array.isArray(body.files)) return null;
+  const field = (answer as { field?: unknown }).field;
+  const at = typeof field === "string" ? /^files\[(\d+)\]$/.exec(field) : null;
+  const index = at ? Number(at[1]) : -1;
+  const idempotency_key = crypto.randomUUID();
+  if (index < 0 || index >= body.files.length) {
+    const { files: _files, all_files: _all, ...rest } = body;
+    return { ...rest, idempotency_key, files_add: [], files_remove: [], files_place: [] };
+  }
+  return { ...body, idempotency_key, files: body.files.filter((_, i) => i !== index) };
+};
 
 const withOps = (ops: ReplyDraftFileOps): Body => ({ files_add: ops.add, files_remove: ops.remove, files_place: ops.place, ...(ops.order ? { files_order: ops.order } : {}) });
 
