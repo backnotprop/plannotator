@@ -7,6 +7,7 @@
 import type { CanvasLogEntry } from '@plannotator/shared/inbox/canvas/changes';
 import type { CanvasScene } from '@plannotator/shared/inbox/canvas/scene';
 import { apiGet, apiPost } from '../api';
+import { inboxUrl } from '../inboxUrl';
 import { canvasWork } from '../lazyParts';
 
 /** `event: canvas`: a thread's canvas is at a new revision. `by`: the agent's name, null for the person. */
@@ -80,7 +81,7 @@ export function onCanvasJob(data: string): void {
   }, wait);
 }
 
-const path = (threadId: string) => `/api/inbox/threads/${encodeURIComponent(threadId)}/canvas`;
+const path = (threadId: string) => inboxUrl(`/threads/${encodeURIComponent(threadId)}/canvas`);
 
 export const canvasApi = {
   /** `look`: the canvas is on the person's screen, so an agent's change up to here is no longer news (the thread's mark goes quiet). */
@@ -90,7 +91,7 @@ export const canvasApi = {
   },
   /** Take back one change an agent made (its revision): the answer is the canvas after. */
   undo: (threadId: string, rev: number) => apiPost<{ rev: number; scene: CanvasScene; kept?: string[]; kept_count?: number; already?: boolean }>(`${path(threadId)}/undo`, { rev, window: CANVAS_WINDOW }),
-  marks: () => apiGet<{ canvases: CanvasMark[] }>('/api/inbox/canvases'),
+  marks: () => apiGet<{ canvases: CanvasMark[] }>(inboxUrl('/canvases')),
   /** `have`: the revision this window last took. The answer carries the merged scene when the Inbox held changes this window did not. */
   save: (threadId: string, scene: CanvasScene, have: number, options: { gone?: string[]; keepalive?: boolean; plain?: boolean } = {}) =>
     // Compressed: a scene is repetitive JSON, so a save is about a tenth of its size, and the one made as the page
@@ -104,9 +105,9 @@ export const canvasApi = {
   },
   async answerPicture(jobId: string, png: Blob | null, place?: { x: number; y: number; w: number; h: number; scale: number }): Promise<void> {
     const query = place ? new URLSearchParams({ x: String(place.x), y: String(place.y), w: String(place.w), h: String(place.h), scale: String(place.scale) }) : new URLSearchParams({ failed: '1' });
-    await fetch(`/api/inbox/canvas/jobs/${jobId}?${query}`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: png ?? new Blob([]) });
+    await fetch(inboxUrl(`/canvas/jobs/${jobId}`, query.toString()), { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: png ?? new Blob([]) });
   },
-  answerMermaid: (jobId: string, drawn: Record<string, unknown>) => apiPost<{ ok: boolean }>(`/api/inbox/canvas/jobs/${jobId}`, { drawn }),
+  answerMermaid: (jobId: string, drawn: Record<string, unknown>) => apiPost<{ ok: boolean }>(inboxUrl(`/canvas/jobs/${jobId}`), { drawn }),
 };
 
 /** What a reply sent from the canvas carries beside its words and files (the reply route's `sketch`). */

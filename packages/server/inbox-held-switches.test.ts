@@ -109,7 +109,7 @@ test("off, no preview: the settings read and a Checklist save's event carry Code
     expect(saved.code_review).toEqual({ on: false });
     expect("shape" in saved).toBe(false);
     await stream.next(1);
-    expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, bro: { on: false }, code_review: { on: false } }]);
+    expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, bro: { on: false }, code_review: { on: false }, canvas: { on: false } }]);
     await stream.stop();
   }
 });
@@ -127,7 +127,7 @@ test("already on: both rows' keys are there; turning each off answers off and te
   expect(stream.frames[0]!.shape).toEqual({ on: true });
   expect((await w.save({ shape: { on: false } })).shape).toEqual({ on: false });
   await stream.next(2);
-  expect(stream.frames[1]).toEqual({ board: { on: false }, steps: { on: false }, bro: { on: false }, code_review: { on: false }, shape: { on: false } });
+  expect(stream.frames[1]).toEqual({ board: { on: false }, steps: { on: false }, bro: { on: false }, code_review: { on: false }, canvas: { on: false }, shape: { on: false } });
   await stream.stop();
 
   const after = await w.read();
@@ -144,7 +144,7 @@ test("PLANNOTATOR_INBOX_PREVIEW=1: Shape is there while off, in the read and in 
   const stream = await windowCapabilities(w.base);
   await w.save({ steps: { on: true } });
   await stream.next(1);
-  expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, bro: { on: false }, code_review: { on: false }, shape: { on: false } }]);
+  expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, bro: { on: false }, code_review: { on: false }, canvas: { on: false }, shape: { on: false } }]);
   await stream.stop();
 });
 
