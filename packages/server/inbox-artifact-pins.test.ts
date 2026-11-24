@@ -83,6 +83,54 @@ test("a pinned diagram follows the newest sent edition through a rename; both me
   expect(reopened.setArtifactPinned(first.message.thread_id, next.attachment.id, false)).toEqual([]);
 });
 
+test("copied diagram IDs keep independent wall entries and pins, including when a vacated name is reused", async () => {
+  const root = mkdtempSync(join(tmpdir(), "inbox-diagram-copy-"));
+  roots.push(root);
+  const store = InboxStore.open(join(root, "data"));
+  const project = store.ensureProject({ name: "repo", root });
+  const send = async (...names: string[]) => {
+    const files = await recordInboxAttachments(store.dir, names, { base: root, at: new Date().toISOString() });
+    const message = store.sendMessage({ project_id: project.id, author: agent("A"), thread: "copies", body: "Drawings", attachments: files }).message;
+    return { files, message };
+  };
+  const first = "one.diagram.json", other = "two.diagram.json", renamed = "new-name.diagram.json";
+  const spec = (title: string, id = "  reused  ") => JSON.stringify({ id, title, columns: [{title: "Subject"}] });
+  for (const name of [first, other]) writeFileSync(join(root, name), spec(name));
+  const { files, message } = await send(first, other);
+  expect(files.map(f => f.diagram_id)).toEqual(["reused", "reused"]);
+  expect(keys(await page(store))).toEqual(files.map(f => f.id));
+  store.setArtifactPinned(message.thread_id, files[0]!.id, true);
+  renameSync(join(root, first), join(root, renamed));
+  const edition = (await send(renamed)).files[0]!;
+  writeFileSync(join(root, first), spec("A separate file at the old name"));
+  const replacement = (await send(first)).files[0]!;
+  const reopened = InboxStore.open(join(root, "data"));
+  expect((await page(reopened)).total).toBe(3);
+  expect((await page(reopened, "?pinned=1")).artifacts[0]).toMatchObject({key: files[0]!.id, attachment: {id: edition.id}});
+  expect(keys(await page(reopened))).toContain(replacement.id);
+});
+
+test("invalid diagram metadata omits the identity while retaining the attachment and its sent bytes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "inbox-diagram-id-"));
+  roots.push(root);
+  const store = InboxStore.open(join(root, "data"));
+  const project = store.ensureProject({ name: "repo", root });
+  for (const [index, raw] of [" ", "a".repeat(257), 7, " z ", "x".repeat(256)].entries()) {
+    const name = `case-${index}.diagram.json`, source = JSON.stringify({id: raw, title: "Subject"});
+    writeFileSync(join(root, name), source);
+    const [sent] = await recordInboxAttachments(store.dir, [name], {base: root, at: new Date().toISOString()});
+    const expected = index === 3 ? "z" : index === 4 ? raw : undefined;
+    expect(sent!.diagram_id).toBe(expected);
+    // Replay the record format used before IDs were screened at ingestion.
+    const message = store.sendMessage({project_id: project.id, author: agent("a"), thread: "ids", body: name,
+      attachments: [{...sent!, diagram_id: raw as string}]}).message;
+    const stored = InboxStore.open(join(root, "data")).message(message.id)!.attachments![0]!;
+    expect(stored.diagram_id).toBe(expected);
+    const read = await readInboxAttachmentText(store.dir, stored, "sent");
+    expect(read.ok && read.bytes.toString()).toBe(source);
+  }
+});
+
 const page = (store: InboxStore, query = "") => inboxArtifactsPage(store, new URL(`http://localhost/api/inbox/artifacts${query}`));
 const keys = (p: InboxArtifactsPage) => p.artifacts.map((a) => a.key);
 

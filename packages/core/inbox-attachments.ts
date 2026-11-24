@@ -76,6 +76,13 @@ export function isInboxAnnotatableKind(kind: unknown): boolean {
   return k !== "pdf" && k !== "file";
 }
 
+/** A root ID names a logical drawing, independently of its current title or filename. */
+export function readInboxDiagramId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const id = value.trim();
+  return id.length > 0 && id.length <= 256 ? id : undefined;
+}
+
 export interface InboxAttachment {
   /** `att_<ULID>`. */
   id: string;
@@ -88,6 +95,8 @@ export interface InboxAttachment {
   kind: InboxAttachmentKind;
   /** Optional logical ID from the immutable .diagram.json sent with this attachment. */
   diagram_id?: string;
+  /** Opaque identity of the originating file, when available, for recognizing a rename. */
+  diagram_file_id?: string;
   /** The sha256 of the bytes sent: the blob `inbox/blobs/<sent_sha256>`. */
   sent_sha256: string;
   /** Size in bytes of the sent version. */

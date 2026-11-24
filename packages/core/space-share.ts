@@ -8,6 +8,7 @@
  * person's approval last. What went up is kept beside the plan (`SpaceShareRecord`, `<pln_id>/share.json`), so a
  * later Update plans only what is new, and a run that stopped midway goes on from the step after the last one kept.
  */
+import { parseDiagramAnchor } from "./diagram-anchor";
 import type { PlanArtifact, PlanComment, PlanDocumentKind } from "./plans";
 import { ulid } from "./ulid";
 
@@ -409,6 +410,8 @@ export function spaceCommentAnchor(comment: PlanComment): Record<string, unknown
   if (isObject(a.diagramAnchor)) {
     const anchor = { ...copy(a.diagramAnchor, {}, [], ["v"]), ...diagramTarget(a.diagramAnchor) };
     if (lines(a.diagramAnchor.sourceLine) !== undefined) anchor.sourceLine = a.diagramAnchor.sourceLine;
+    const point = parseDiagramAnchor(a.diagramAnchor)?.point;
+    if (point) anchor.point = point;
     out.diagramAnchor = anchor;
   }
   if (Array.isArray(a.diagramAdditionalTargets)) out.diagramAdditionalTargets = objects(a.diagramAdditionalTargets).map(diagramTarget);

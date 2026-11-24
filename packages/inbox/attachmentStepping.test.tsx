@@ -10,6 +10,7 @@
  *
  * DOM-gated: the rendering tests run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
+import { NativeDiagramProvider } from "@plannotator/ui/components/diagram/NativeDiagramProvider";
 import { afterEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -531,8 +532,8 @@ test.skipIf(!hasDom)('the arrows stand down inside a block that scrolls sideways
 
 test.skipIf(!hasDom)('on a linked thread the inline drawing and old pane read the exact sent blob, and Open latest loads the newest sent blob', async () => {
   const machine = 'ibx_01K7AAAAAAAAAAAAAAAAAAAAAA';
-  const first = file('att_old', 'a.diagram.json', 'plannotator-diagram', M1, { diagram_id: 'checkout', changed_since_sent: true });
-  const next = file('att_new', 'b.diagram.json', 'plannotator-diagram', M2, { diagram_id: 'checkout', sent_sha256: 'b'.repeat(64) });
+  const first = file('att_old', 'a.diagram.json', 'plannotator-diagram', M1, { diagram_file_id: 'f'.repeat(64), diagram_id: 'checkout', changed_since_sent: true });
+  const next = file('att_new', 'b.diagram.json', 'plannotator-diagram', M2, { diagram_file_id: 'f'.repeat(64), diagram_id: 'checkout', sent_sha256: 'b'.repeat(64) });
   const rows = threadArtifacts([message(M1, first.sent_at), message(M2, next.sent_at)], [first, next]);
   const steps = stepsOf(rows);
   rememberMachine([M1, M2, first.id, next.id], machine);
@@ -553,10 +554,10 @@ test.skipIf(!hasDom)('on a linked thread the inline drawing and old pane read th
   document.body.append(host);
   root = createRoot(host);
   try {
-    await act(async () => root!.render(<>
+    await act(async () => root!.render(<NativeDiagramProvider>
       <InlineDiagrams files={[first, next]} artifacts={rows} onOpenLatest={(a) => { inlineOpens.push(a.id); }} records={[]} readOnly onSaved={() => {}} />
       <Pane start={first} harness={{ steps: [], closed: 0, saved: [] }} steps={steps} editions={rows} />
-    </>));
+    </NativeDiagramProvider>));
     await settle();
     const sent = (id: string) => `/api/inbox/m/${machine}/attachments/${id}/view?version=sent`;
     expect(reads).toEqual([sent(first.id), sent(next.id), sent(first.id)]);

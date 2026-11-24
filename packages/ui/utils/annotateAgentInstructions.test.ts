@@ -19,6 +19,7 @@ describe('resolveAnnotateInstructionsSurface', () => {
     const pick = (renderAs: string) => resolveAnnotateInstructionsSurface({ liveApp: false, annotateSource: 'file', renderAs });
     expect(pick('html')).toBe('html');
     expect(pick('mermaid')).toBe('diagram');
+    expect(pick('plannotator-diagram')).toBe('plannotator-diagram');
     expect(pick('graphviz')).toBe('diagram');
     expect(pick('markdown')).toBe('markdown');
   });

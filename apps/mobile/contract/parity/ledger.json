@@ -22176,6 +22176,48 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxattachment-diagram-file-id",
+      "title": "field:InboxAttachment.diagram_file_id",
+      "surface": [
+        "field:InboxAttachment.diagram_file_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-diagram-file-id",
+      "title": "field:InboxAttachmentState.diagram_file_id",
+      "surface": [
+        "field:InboxAttachmentState.diagram_file_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxinlineimage-diagram-file-id",
+      "title": "field:InboxInlineImage.diagram_file_id",
+      "surface": [
+        "field:InboxInlineImage.diagram_file_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

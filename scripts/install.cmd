@@ -1222,7 +1222,7 @@ if "!VIBE_AVAILABLE!"=="1" if "!SKIP_VIBE!"=="0" (
     echo 2.25+, so no config.toml flag is needed.
     echo.
     echo The Vibe-specific skills are not installed on Windows. Vibe picks up the
-    echo shared review and annotate skills from %USERPROFILE%\.agents\skills instead;
+    echo shared review, annotate and /diagram skills from %USERPROFILE%\.agents\skills instead;
     echo /plannotator-last is not supported for Vibe on Windows yet.
 )
 
@@ -1847,7 +1847,7 @@ if "!VIBE_AVAILABLE!"=="1" (
         echo No files under !VIBE_HOME! were written or removed.
     ) else (
         echo Vibe detected. The Windows installer writes nothing under !VIBE_HOME!.
-        echo Vibe uses the shared review and annotate skills from ~/.agents/skills
+        echo Vibe uses the shared review, annotate and /diagram skills from ~/.agents/skills
         echo ^(/plannotator-last is not supported for Vibe on Windows yet^). The
         echo plan-review hook is macOS/Linux-only; see the manual setup instructions
         echo printed above to wire plan review on a macOS/Linux box.

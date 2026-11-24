@@ -16,6 +16,7 @@ export { validateReplyTarget } from "./annotation-threads";
 
 import {
   parseDiagramAdditionalTargets,
+  DIAGRAM_ANCHOR_EXPECTATION,
   parseDiagramAnchor,
   type DiagramAnchor,
 } from "./diagram-anchor";
@@ -193,7 +194,7 @@ export function transformPlanInput(
     if (obj.diagramAnchor !== undefined) {
       const parsed = parseDiagramAnchor(obj.diagramAnchor);
       if (parsed === null) {
-        return { error: `annotations[${i}] invalid "diagramAnchor" (expected { v: 1, family, kind, id | from + to, label, sourceLine })` };
+        return { error: `annotations[${i}] invalid "diagramAnchor" (${DIAGRAM_ANCHOR_EXPECTATION})` };
       }
       diagramAnchor = parsed;
     }
@@ -683,7 +684,7 @@ const PLAN_PATCH_FIELDS: Record<string, FieldValidator> = {
   endOffset: finiteNumber,
   diagramAnchor: viaParser(
     parseDiagramAnchor,
-    'expected { v: 1, family, kind, id | from + to, label, sourceLine }',
+    DIAGRAM_ANCHOR_EXPECTATION,
   ),
   diagramAdditionalTargets: viaArrayParser((value) =>
     parseDiagramAdditionalTargets(value, MAX_DIAGRAM_ADDITIONAL_TARGETS),

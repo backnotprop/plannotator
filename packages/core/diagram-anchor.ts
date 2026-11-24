@@ -386,6 +386,9 @@ export function parseDiagramTarget(value: unknown): DiagramTarget | null {
   };
 }
 
+export const DIAGRAM_ANCHOR_EXPECTATION =
+  'expected { v: 1, family, kind, id | from + to, label, sourceLine }. The plannotator-diagram family requires an id and point { kind: panel | section | group | link, x, y } with x and y between 0 and 1';
+
 /** Read an anchor tolerantly: a foreign, partial or unversioned value is
  * null, never a throw (the comment then lists as unanchored, the standing
  * rule). A malformed `sourceLine` drops to null while the target survives. */

@@ -40,6 +40,7 @@ import {
   inboxAttachmentNameRefusal,
   isInboxTextKind,
   readInboxAttachmentKind,
+  readInboxDiagramId,
   type InboxAttachment,
   type InboxAttachmentKind,
   type InboxAttachmentState,
@@ -293,12 +294,16 @@ export function sweepStaleInboxSendTemps(inboxDirPath: string, now = Date.now())
 }
 
 /** Identify successive sends from their saved bytes, even if the working file is renamed or replaced later. */
-export async function sentDiagramIdentity(kind: InboxAttachmentKind, size: number, blob: string, head?: Buffer): Promise<{ diagram_id?: string }> {
+export async function sentDiagramIdentity(kind: InboxAttachmentKind, size: number, blob: string, head?: Buffer, stat?: Stats): Promise<Pick<InboxAttachment, "diagram_id" | "diagram_file_id">> {
   if (kind !== "plannotator-diagram" || size > INBOX_VIEW_MAX_BYTES) return {};
   try {
     const bytes = head?.length === size ? head : await readFile(blob);
-    const id: unknown = JSON.parse(bytes.toString("utf8")).id;
-    return typeof id === "string" && id.trim() ? { diagram_id: id } : {};
+    const id = readInboxDiagramId(JSON.parse(bytes.toString("utf8")).id);
+    if (!id) return {};
+    // A new file may reuse an inode. Include its creation time, and fall back to the path on filesystems without it.
+    if (!stat?.ino || !(stat.birthtimeMs > 0)) return { diagram_id: id };
+    const file = createHash("sha256").update(JSON.stringify([stat.dev, stat.ino, stat.birthtimeMs])).digest("hex");
+    return { diagram_id: id, diagram_file_id: file };
   } catch {
     return {};
   }
@@ -412,7 +417,7 @@ export async function recordInboxAttachments(inboxDirPath: string, paths: readon
       named_path: named === real ? null : named,
       name: basename(real),
       kind: decided.kind,
-      ...await sentDiagramIdentity(decided.kind, scan.size, path, scan.head),
+      ...await sentDiagramIdentity(decided.kind, scan.size, path, scan.head, stat),
       sent_sha256: scan.sha256,
       size: scan.size,
       sent_at: options.at,
