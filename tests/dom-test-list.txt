@@ -232,7 +232,10 @@ packages/inbox/markReadWarningWindow.test.tsx
 packages/inbox/ack.test.tsx
 packages/inbox/reactionLanding.test.ts
 packages/inbox/reactionTray.test.tsx
+packages/inbox/reactionSkillEnter.test.tsx
 packages/inbox/replyHoldTray.test.tsx
+packages/inbox/reactEveryMessage.test.tsx
+packages/inbox/reactFaceSelect.test.tsx
 packages/inbox/actionChecklist.test.tsx
 packages/inbox/keyboardKeys.test.tsx
 packages/inbox/keyGuardsPageQueries.test.tsx
@@ -259,12 +262,14 @@ packages/inbox/projectMenu.test.tsx
 packages/inbox/projectRenameWarning.test.tsx
 packages/inbox/rowMenu.test.tsx
 packages/inbox/copyMessage.test.tsx
+packages/inbox/newThreadFromMessage.test.tsx
 packages/inbox/decisionExportMenu.test.tsx
 packages/inbox/guideRequest.test.tsx
 packages/inbox/pinnedThreads.test.tsx
 packages/inbox/priority.test.tsx
 packages/inbox/rowStar.test.tsx
 packages/inbox/artifactPins.test.tsx
+packages/inbox/filePinsReadFails.test.tsx
 packages/inbox/pinnedRowLabel.test.tsx
 packages/inbox/fileBack.test.tsx
 packages/inbox/archived.test.tsx
@@ -310,6 +315,7 @@ packages/inbox/showOpensGroups.test.tsx
 packages/inbox/listNewPill.test.tsx
 packages/inbox/showLight.test.tsx
 packages/inbox/holdView.test.tsx
+packages/inbox/holdViewRowBoxes.test.tsx
 packages/inbox/projectSort.test.tsx
 packages/inbox/updateStuck.test.tsx
 packages/inbox/palettePicker.test.tsx
@@ -869,6 +875,7 @@ packages/inbox/scheduled/scheduledTable.test.tsx
 packages/inbox/scheduled/scheduledEditor.test.tsx
 packages/inbox/scheduled/scheduledThread.test.tsx
 packages/inbox/scheduled/scheduledRows.test.tsx
+packages/inbox/scheduled/rowRunEnds.test.tsx
 packages/inbox/scheduled/scheduledActions.test.tsx
 packages/inbox/scheduled/routineAutosave.test.tsx
 packages/inbox/scheduled/routineTabs.test.tsx
@@ -915,4 +922,6 @@ packages/ui/components/RefCardProseMark.dom.test.tsx
 packages/inbox/components/diffControlsWholeFile.test.tsx
 packages/inbox/commentBoxFiles.test.tsx
 packages/inbox/commentRowFiles.test.tsx
+packages/inbox/sidebarStickyHeadings.test.tsx
+packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx

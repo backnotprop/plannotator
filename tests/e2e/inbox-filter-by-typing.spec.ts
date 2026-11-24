@@ -165,20 +165,35 @@ test('the row closes the menu; the field eases in under the header, focused; the
 async function typeAndCatch(page: Page, text: string, pauseAt: number | null = null) {
   return field(page).evaluate(
     (input: HTMLInputElement, { text, pauseAt }) => {
+      // Only what this key starts counts: an earlier test's last key may still be playing its exit in the list.
+      const ghostsBefore = new Set(document.querySelectorAll('.ib-lbody [data-tflt-ghost]'));
+      const movingBefore = new Set(document.querySelector('.ib-lbody')!.getAnimations({ subtree: true }));
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
       input.dispatchEvent(new Event('input', { bubbles: true }));
-      const ghosts = [...document.querySelectorAll<HTMLElement>('.ib-lbody [data-tflt-ghost]')];
+      const body = document.querySelector('.ib-lbody')!;
+      const ghosts = [...body.querySelectorAll<HTMLElement>('[data-tflt-ghost]')].filter((g) => !ghostsBefore.has(g));
+      const moving = body.getAnimations({ subtree: true }).filter((a) => !movingBefore.has(a));
       if (pauseAt !== null) for (const a of document.getAnimations()) (a.pause(), (a.currentTime = pauseAt));
       return {
         ghosts: ghosts.length,
         hidden: ghosts.every((g) => g.getAttribute('aria-hidden') === 'true' && g.inert && !g.querySelector('[data-thread-id]')),
-        moving: document.querySelector('.ib-lbody')!.getAnimations({ subtree: true }).length,
+        moving: moving.length,
       };
     },
     { text, pauseAt },
   );
 }
-const release = (page: Page) => page.evaluate(() => document.getAnimations().forEach((a) => a.finish()));
+/**
+ * Finishes every animation that has an end; one that loops for ever (the sidebar's mascot, a spinner) cannot be
+ * finished, so it only plays on again from where `pauseAt` held it.
+ */
+const release = (page: Page) =>
+  page.evaluate(() => {
+    for (const a of document.getAnimations()) {
+      if (a.effect && Number.isFinite(a.effect.getComputedTiming().endTime as number)) a.finish();
+      else a.play();
+    }
+  });
 
 test('typing narrows the list on every key, no Enter; band counts follow', async () => {
   const { page, ids } = world;
@@ -249,7 +264,16 @@ test('a thread opened and closed, and a reload, keep the field and its words', a
   await expect.poll(async () => sorted(await listOrder(page))).toEqual(sorted([ids.trash, ids.search, ids.history]));
   await page.reload();
   await expect(field(page)).toHaveValue('page');
+  // The thread opened is read now, so the reload sorts it into Quiet, folded: two rows drawn, Quiet counts the third.
+  await expect.poll(async () => sorted(await listOrder(page))).toEqual(sorted([ids.trash, ids.history]));
+  const quiet = page.locator('.ib-lbody [data-section-id="quiet"] .ib-band');
+  await expect(quiet).toHaveAttribute('aria-expanded', 'false');
+  await expect(quiet.locator('.ib-n')).toHaveText(/^1(\D|$)/);
+  // Unfolded, the third match is there (and stays unfolded for the tests after this one).
+  await quiet.click();
+  await expect(quiet).toHaveAttribute('aria-expanded', 'true');
   await expect.poll(async () => sorted(await listOrder(page))).toEqual(sorted([ids.trash, ids.search, ids.history]));
+  await expect(page.locator(`.ib-lbody [data-section-id="quiet"] [data-thread-id="${ids.search}"]`)).toBeVisible();
   expect(world.errors).toEqual([]);
 });
 

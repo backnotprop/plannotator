@@ -973,6 +973,19 @@ export interface InboxMessage {
   review_anchor?: InboxReviewAnchor;
   review_batch?: InboxReviewBatch;
   review_resolved?: InboxReviewResolved | null;
+  /**
+   * On a person's reply sent by pressing a skill emoji in the reaction tray (approval
+   * "inbox-reactions-every-message"): the emoji and its skill, so the window draws the reply as one line. The reply's
+   * body is what a typed `/<skill>` reply sends (the window composes it). Absent on every other message; agents
+   * never see it (they read the body).
+   */
+  skill_reaction?: InboxSkillReaction;
+}
+
+/** A skill emoji's reply (`InboxMessage.skill_reaction`): one emoji (`isInboxReactionEmoji`) and a skill name (`isInboxReactionSkill`). */
+export interface InboxSkillReaction {
+  emoji: string;
+  skill: string;
 }
 
 /** A hand-off a person's reply carries (`InboxMessage.handoff`). */
@@ -1133,6 +1146,14 @@ export interface InboxAck {
   reaction?: InboxReaction | null;
   /** The Mark read this ack stands on (the root's `person_read_seq`): Move back on that read withdraws the ack. */
   read_seq: number | null;
+  /**
+   * A reaction on its own (approval "inbox-reactions-every-message"): on an agent message that is not the thread's
+   * latest, or that the person wrote after (none while a question or action item in the thread waits). It made no
+   * Mark read (`read_seq` null, `made_read` false), Move back never withdraws it, and it is sent when its Undo window
+   * ends, unless the agent asked a question inside it (`not_sent: "wrote_again"`). Absent on a 👍 that stands on its
+   * Mark read.
+   */
+  standalone?: boolean;
   /** This ack made that Mark read (the thread was not read before), so its Undo undoes the read too. */
   made_read?: boolean;
   /**
@@ -1427,7 +1448,9 @@ export interface InboxDelivery {
    * Written for an item the Inbox marked to go in by itself (approval
    * "inbox-busy-agent-reply"): true when it went into a running turn, false
    * when its session went idle after the mark (the session's own Ask question
-   * held the turn, so it went in when the turn ended). Absent otherwise.
+   * held the turn, so it went in when the turn ended). Also true, with no
+   * mark, when the Codex wake put it into the thread's running turn itself
+   * (`turn/steer`, inbox-codex-steer.ts). Absent otherwise.
    */
   into_turn?: boolean;
 }
@@ -2035,6 +2058,19 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   pulls?: InboxThreadPullsSummary;
   /**
+   * Grid (approval "inbox-agent-grid"): the person's last look at this thread's line on Grid, kept on the thread's
+   * own machine (server inbox-grid-seen.ts), so a look on a phone or a linked computer counts everywhere. `through`:
+   * the line's last landing or drop (ms, that machine's clock) the look showed; `at`: when the look was (ms). Absent
+   * until a line of it was shown, and from an older Inbox.
+   */
+  grid_seen?: { through: number; at: number };
+  /**
+   * The thread's checklist as Grid reads it (approval "inbox-agent-grid": "checklist steps may show"): the latest
+   * list's steps done and counted (a dropped step not counted), the step in progress, and when a step last changed.
+   * Only while that machine's Checklist switch is on; a linked machine's rows carry their own. Absent otherwise.
+   */
+  steps_progress?: { done: number; total: number; doing: string | null; at: string };
+  /**
    * The thread's open PRs that are not hidden (keys; the server's inbox-pull-hidden.ts): the row menu's and the picks'
    * "Hide pull request". Only on this Inbox's own rows of the list the window and the phone read; absent when none.
    * A thread whose open PRs are all hidden is left out of that list (it stays in search and in Reviews' Hidden).
@@ -2526,6 +2562,24 @@ export interface InboxReaction {
   emoji: string;
   /** The person's name for it ("Ship it"); absent when they gave none. */
   label?: string;
+  /**
+   * A saved emoji's skill (approval "inbox-reactions-every-message"): pressing it sends a reply of `/<skill>`
+   * (the window composes it, as a typed `/<skill>` reply). Only on a saved emoji (`parseInboxSavedReactions`),
+   * never on an ack's reaction (`parseInboxReaction` drops it). Absent: a plain reaction.
+   */
+  skill?: string;
+}
+
+/** The longest skill name a reaction carries, in characters. */
+export const INBOX_REACTION_SKILL_MAX = 64;
+
+/**
+ * A skill name a reaction may carry: what the composer reads as a `/name` reference
+ * (`[A-Za-z0-9][A-Za-z0-9._-]*`, packages/ui/utils/skillReferences.ts), at most INBOX_REACTION_SKILL_MAX characters,
+ * and not ending in a dot (the composer reads a final dot as punctuation, so `/name.` would not name it).
+ */
+export function isInboxReactionSkill(value: unknown): value is string {
+  return typeof value === "string" && value.length <= INBOX_REACTION_SKILL_MAX && /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/.test(value);
 }
 
 /** How many emoji the tray saves: there is always one free + until this many are saved. */
@@ -2559,7 +2613,8 @@ export function inboxReactionLabel(value: unknown): string {
 /**
  * A reaction from the wire, or null when it is not one (no emoji, or not an
  * emoji). A long name is cut to its limit, not refused. 👍 with no name is null
- * too: that is 👍 Looks good, the ack with no reaction.
+ * too: that is 👍 Looks good, the ack with no reaction. It never carries a `skill`
+ * (a skill emoji sends a reply, not an ack).
  */
 export function parseInboxReaction(value: unknown): InboxReaction | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -2572,18 +2627,18 @@ export function parseInboxReaction(value: unknown): InboxReaction | null {
 
 /**
  * The saved emoji from config.json or the wire: up to INBOX_SAVED_REACTIONS_MAX,
- * in the order saved, each emoji once. Lenient: an entry that is not a reaction
- * is dropped. Null when `value` is not a list.
+ * in the order saved, each emoji once, each with its `skill` when it has one. Lenient: an entry that is not a
+ * reaction is dropped, and a skill that is not a skill name is dropped from its entry. Null when `value` is not a list.
  */
 export function parseInboxSavedReactions(value: unknown): InboxReaction[] | null {
   if (!Array.isArray(value)) return null;
   const out: InboxReaction[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-    const { emoji, label } = entry as { emoji?: unknown; label?: unknown };
+    const { emoji, label, skill } = entry as { emoji?: unknown; label?: unknown; skill?: unknown };
     if (!isInboxReactionEmoji(emoji) || out.some((r) => r.emoji === emoji)) continue;
     const name = inboxReactionLabel(label);
-    out.push(name ? { emoji, label: name } : { emoji });
+    out.push({ emoji, ...(name ? { label: name } : {}), ...(isInboxReactionSkill(skill) ? { skill } : {}) });
     if (out.length === INBOX_SAVED_REACTIONS_MAX) break;
   }
   return out;
@@ -2593,23 +2648,31 @@ export function parseInboxSavedReactions(value: unknown): InboxReaction[] | null
  * One change to the saved emoji (POST /api/inbox/settings `reaction_change`), named by its emoji, not its place,
  * so the server applies it to the list as it is now: a change made in another window meanwhile is kept, not
  * written over. `add` saves an emoji at the end; `name` names one ('' takes the name away); `change` puts another
- * emoji in its place, keeping its name; `remove` takes it out. 👍 is never saved (it is the tray's first).
+ * emoji in its place, keeping its name and skill; `skill` gives one a skill ('' takes the skill away); `remove`
+ * takes it out. `name` keeps the skill, `skill` keeps the name. 👍 is never saved (it is the tray's first).
  */
 export type InboxReactionChange =
   | { op: "add"; emoji: string }
   | { op: "name"; emoji: string; label: string }
   | { op: "change"; emoji: string; to: string }
+  | { op: "skill"; emoji: string; skill: string }
   | { op: "remove"; emoji: string };
 
 /** A change from the wire, or null when it is not one. A long name is cut, not refused. */
 export function parseInboxReactionChange(value: unknown): InboxReactionChange | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const { op, emoji, label, to } = value as { op?: unknown; emoji?: unknown; label?: unknown; to?: unknown };
+  const { op, emoji, label, to, skill } = value as { op?: unknown; emoji?: unknown; label?: unknown; to?: unknown; skill?: unknown };
   if (!isInboxReactionEmoji(emoji) || emoji === "👍") return null;
   if (op === "add" || op === "remove") return { op, emoji };
   if (op === "name") return typeof label === "string" ? { op, emoji, label: inboxReactionLabel(label) } : null;
   if (op === "change") return isInboxReactionEmoji(to) && to !== "👍" ? { op, emoji, to } : null;
+  if (op === "skill") return skill === "" || isInboxReactionSkill(skill) ? { op, emoji, skill: skill as string } : null;
   return null;
+}
+
+/** A saved emoji with only the parts it has: `{ emoji, label?, skill? }`. */
+function savedReaction(emoji: string, label: string | undefined, skill: string | undefined): InboxReaction {
+  return { emoji, ...(label ? { label } : {}), ...(skill ? { skill } : {}) };
 }
 
 /**
@@ -2626,12 +2689,17 @@ export function applyInboxReactionChange(list: readonly InboxReaction[], change:
     case "name": {
       if (!was) return [...list];
       const label = inboxReactionLabel(change.label);
-      return list.map((r, i) => (i === at ? (label ? { emoji: r.emoji, label } : { emoji: r.emoji }) : r));
+      return list.map((r, i) => (i === at ? savedReaction(r.emoji, label, r.skill) : r));
     }
     case "change": {
       if (!was || change.to === change.emoji) return [...list];
-      const moved = was.label ? { emoji: change.to, label: was.label } : { emoji: change.to };
+      const moved = savedReaction(change.to, was.label, was.skill);
       return list.flatMap((r, i) => (i === at ? [moved] : r.emoji === change.to ? [] : [r]));
+    }
+    case "skill": {
+      if (!was) return [...list];
+      const skill = isInboxReactionSkill(change.skill) ? change.skill : undefined;
+      return list.map((r, i) => (i === at ? savedReaction(r.emoji, r.label, skill) : r));
     }
     case "remove":
       return list.filter((_, i) => i !== at);
@@ -3616,8 +3684,11 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * machine too (read there, archived there through the outbox), so a linked machine's window offers this Inbox's
  * agents for picks on both. `remove-agent` (approval "inbox-remove-agent-from-thread"): an agent of one of its threads
  * is removed there and put back with Undo (`threads/:id/remove-agent`), so a linked machine's list offers Remove.
+ * `artifact-pins` (approval "inbox-artifact-stars"): its threads' artifacts are pinned from
+ * a linked machine's window and kept here (`POST artifact-pins` through its door); its list carries its pins to a
+ * linked machine (`artifact_pins`), and its Artifacts wall is read through its door (`GET artifacts`).
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

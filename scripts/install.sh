@@ -1521,6 +1521,46 @@ elif [ "$codex_available" -eq 1 ]; then
     CODEX_HOOKS="$CODEX_DIR/hooks.json"
     PLANNOTATOR_BIN="${INSTALL_DIR}/plannotator"
     codex_hook_configured=0
+    # The PostToolUse hook next to the Stop hook, only with the experimental `codex-steer` switch on (off by default):
+    # a reply from the Inbox goes into a running Codex turn after its next tool call (the Codex app too). Its shell
+    # gate starts the binary only while a reply waits for that thread, and exits 0 when the binary is gone. The same
+    # string as codexHookCommand() in packages/shared/codex-hook-command.ts (packages/shared/codex-hook-command.test.ts
+    # holds them equal); none for a binary path the gate's quotes cannot carry.
+    CODEX_POST_TOOL_HOOK=""
+    # The switch read as resolveExperimental() reads it (packages/shared/config.ts): PLANNOTATOR_EXPERIMENTAL (a comma
+    # list, the last mention wins, `-codex-steer` turns it off), else config.json `experimental.codexSteer`. Off: no
+    # PostToolUse hook is written, and one this installer wrote before is taken out.
+    codex_steer_on=0
+    if [ -f "$_config_dir/config.json" ] && grep -q '"codexSteer"[[:space:]]*:[[:space:]]*true' "$_config_dir/config.json" 2>/dev/null; then
+        codex_steer_on=1
+    fi
+    if [ -n "${PLANNOTATOR_EXPERIMENTAL:-}" ]; then
+        _codex_exp_ifs=$IFS
+        IFS=,
+        set -f
+        for _codex_exp in $(printf '%s' "$PLANNOTATOR_EXPERIMENTAL" | tr '[:upper:]' '[:lower:]' | tr -d ' \t'); do
+            case "$_codex_exp" in
+                codex-steer) codex_steer_on=1 ;;
+                -codex-steer) codex_steer_on=0 ;;
+            esac
+        done
+        set +f
+        IFS=$_codex_exp_ifs
+    fi
+    case "$codex_steer_on:$PLANNOTATOR_BIN$CODEX_HOOKS" in
+        0:*) ;;
+        *[\'\"\$\`\\]*) ;;
+        *) CODEX_POST_TOOL_HOOK="/bin/sh -c 'B=\"${PLANNOTATOR_BIN}\"; H=\"${CODEX_HOOKS}\"; [ -x \"\$B\" ] || exit 0; for d in \"\${PLANNOTATOR_DATA_DIR:-/nonexistent}/inbox\" \"\$HOME/.plannotator/inbox\" \"\${XDG_DATA_HOME:-/nonexistent}/plannotator/inbox\"; do [ -d \"\$d\" ] || continue; m=\"\$d/codex-hook-ran\"; [ -e \"\$m\" ] && [ ! \"\$H\" -nt \"\$m\" ] || true 2>/dev/null >\"\$m\"; for f in \"\$d\"/codex-hook/*.json; do [ -e \"\$f\" ] || break; p=\$(dd bs=512 count=1 2>/dev/null); t=\${p#*session_id???}; t=\${t%%[!0-9a-f-]*}; export PLANNOTATOR_CODEX_HOOK_HEAD=\"\$p\"; [ \${#t} -eq 36 ] || exec \"\$B\" codex-hook; for g in \"\$d/codex-hook/\$t\".*.json; do [ -e \"\$g\" ] && exec \"\$B\" codex-hook; done; exit 0; done; done; exit 0'" ;;
+    esac
+    CODEX_POST_TOOL_HOOK_JSON=$(printf '%s' "$CODEX_POST_TOOL_HOOK" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    # Written once this installer added the PostToolUse hook: from then on, a hook the person removed from hooks.json
+    # is not added back (uninstall removes this note with the hook).
+    CODEX_POST_TOOL_NOTE="$_config_dir/codex-hook-installed"
+    codex_post_tool_noted=0
+    [ -e "$CODEX_POST_TOOL_NOTE" ] && codex_post_tool_noted=1
+    # added | updated | kept | removed (the person took it out: left out) | dropped (the switch off: ours taken out) |
+    # none (no hook written)
+    codex_post_tool_state="none"
 
     mkdir -p "$CODEX_DIR"
 
@@ -1593,6 +1633,24 @@ CODEX_CONFIG_EOF
     }
 
     if [ ! -f "$CODEX_HOOKS" ]; then
+        codex_post_tool_entry=""
+        if [ -n "$CODEX_POST_TOOL_HOOK" ] && [ "$codex_post_tool_noted" -eq 1 ]; then
+            codex_post_tool_state="removed"
+        elif [ -n "$CODEX_POST_TOOL_HOOK" ]; then
+            codex_post_tool_state="added"
+            codex_post_tool_entry=",
+    \"PostToolUse\": [
+      {
+        \"hooks\": [
+          {
+            \"type\": \"command\",
+            \"command\": \"${CODEX_POST_TOOL_HOOK_JSON}\",
+            \"timeout\": 10
+          }
+        ]
+      }
+    ]"
+        fi
         cat > "$CODEX_HOOKS" << CODEX_HOOKS_EOF
 {
   "hooks": {
@@ -1606,17 +1664,17 @@ CODEX_CONFIG_EOF
           }
         ]
       }
-    ]
+    ]${codex_post_tool_entry}
   }
 }
 CODEX_HOOKS_EOF
         echo "Created Codex hooks at ${CODEX_HOOKS}"
         codex_hook_configured=1
     elif command -v node >/dev/null 2>&1; then
-        if codex_merge_result=$(node - "$CODEX_HOOKS" "$PLANNOTATOR_BIN" <<'NODE'
+        if codex_merge_result=$(node - "$CODEX_HOOKS" "$PLANNOTATOR_BIN" "$CODEX_POST_TOOL_HOOK" "$codex_post_tool_noted" "$codex_steer_on" <<'NODE'
 const fs = require("fs");
 const path = require("path");
-const [hooksPath, command] = process.argv.slice(2);
+const [hooksPath, command, postToolCommand, postToolNoted, steerOn] = process.argv.slice(2);
 const config = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
 config.hooks ||= {};
 const stopHooks = Array.isArray(config.hooks.Stop) ? config.hooks.Stop : [];
@@ -1655,13 +1713,70 @@ if (!updated && !foundCustomPlannotatorHook) {
   });
 }
 config.hooks.Stop = stopHooks;
-if (updated || !foundCustomPlannotatorHook) {
+// The PostToolUse hook (a reply from the Inbox into a running turn), kept with the Stop hook: updated in place when
+// it is there (any path), added as its own group otherwise, never touching another hook. Only beside a Stop hook
+// this installer manages, and never added back once the person removed it (this installer added it before).
+// The same recognition as parseCodexHookCommand() in packages/shared/codex-hook-command.ts.
+let postToolChanged = false;
+let postTool = "none";
+const isOurs = (value) =>
+  typeof value === "string" &&
+  ((value.startsWith("/bin/sh -c 'B=\"") && value.includes('exec "$B" codex-hook')) ||
+    (value.startsWith("/bin/sh -c '") && value.includes("/plannotator/inbox/codex-hook/*.json") && value.includes('" codex-hook;')));
+if (steerOn !== "1" && Array.isArray(config.hooks.PostToolUse) && config.hooks.PostToolUse.some((entry) => Array.isArray(entry?.hooks) && entry.hooks.some((hook) => hook?.type === "command" && isOurs(hook.command)))) {
+  // The experimental switch off, and ours there (left by a run with it on): ours taken out (a group left empty with
+  // it, and the key when nothing else is left), every other hook kept as it is. None of ours: not touched at all.
+  const kept = [];
+  for (const entry of config.hooks.PostToolUse) {
+    const hooks = Array.isArray(entry?.hooks) ? entry.hooks : null;
+    if (!hooks) {
+      kept.push(entry);
+      continue;
+    }
+    const left = hooks.filter((hook) => !(hook?.type === "command" && isOurs(hook.command)));
+    if (left.length === hooks.length) kept.push(entry);
+    else {
+      postToolChanged = true;
+      postTool = "dropped";
+      if (left.length > 0) kept.push({ ...entry, hooks: left });
+    }
+  }
+  if (kept.length > 0) config.hooks.PostToolUse = kept;
+  else delete config.hooks.PostToolUse;
+}
+if (postToolCommand && (updated || !foundCustomPlannotatorHook)) {
+  const entries = Array.isArray(config.hooks.PostToolUse) ? config.hooks.PostToolUse : [];
+  let found = false;
+  for (const entry of entries) {
+    for (const hook of Array.isArray(entry?.hooks) ? entry.hooks : []) {
+      if (hook?.type !== "command" || !isOurs(hook.command)) continue;
+      found = true;
+      postTool = "kept";
+      if (hook.command !== postToolCommand || hook.timeout !== 10) {
+        hook.command = postToolCommand;
+        hook.timeout = 10;
+        postToolChanged = true;
+        postTool = "updated";
+      }
+    }
+  }
+  if (!found && postToolNoted === "1") {
+    postTool = "removed";
+  } else if (!found) {
+    entries.push({ hooks: [{ type: "command", command: postToolCommand, timeout: 10 }] });
+    postToolChanged = true;
+    postTool = "added";
+  }
+  if (entries.length > 0) config.hooks.PostToolUse = entries;
+}
+if (updated || !foundCustomPlannotatorHook || postToolChanged) {
   fs.writeFileSync(hooksPath, JSON.stringify(config, null, 2) + "\n");
 }
-process.stdout.write(updated ? "updated" : foundCustomPlannotatorHook ? "custom" : "added");
+process.stdout.write(`${updated ? "updated" : foundCustomPlannotatorHook ? "custom" : "added"} ${postTool}`);
 NODE
         ); then
-            case "$codex_merge_result" in
+            codex_post_tool_state="${codex_merge_result#* }"
+            case "${codex_merge_result%% *}" in
                 custom)
                     echo "Existing custom Codex Plannotator hook found at ${CODEX_HOOKS}; left it unchanged."
                     ;;
@@ -1676,19 +1791,55 @@ NODE
         else
             echo ""
             echo "Codex hooks file already exists at ${CODEX_HOOKS}, but it could not be merged automatically."
+            if [ -n "$CODEX_POST_TOOL_HOOK" ]; then
+                echo "Leaving Codex hook support unchanged. Add or update these hooks manually:"
+                echo ""
+                echo "  Stop:        command: ${PLANNOTATOR_BIN}"
+                echo "               timeout: 345600"
+                echo "  PostToolUse: command: ${CODEX_POST_TOOL_HOOK}"
+                echo "               timeout: 10"
+            else
+                echo "Leaving Codex hook support unchanged. Add or update this Stop hook manually:"
+                echo ""
+                echo "  command: ${PLANNOTATOR_BIN}"
+                echo "  timeout: 345600"
+            fi
+        fi
+    else
+        echo ""
+        echo "Codex hooks file already exists at ${CODEX_HOOKS}, but node was not found to merge it safely."
+        if [ -n "$CODEX_POST_TOOL_HOOK" ]; then
+            echo "Leaving Codex hook support unchanged. Add or update these hooks manually:"
+            echo ""
+            echo "  Stop:        command: ${PLANNOTATOR_BIN}"
+            echo "               timeout: 345600"
+            echo "  PostToolUse: command: ${CODEX_POST_TOOL_HOOK}"
+            echo "               timeout: 10"
+        else
             echo "Leaving Codex hook support unchanged. Add or update this Stop hook manually:"
             echo ""
             echo "  command: ${PLANNOTATOR_BIN}"
             echo "  timeout: 345600"
         fi
-    else
-        echo ""
-        echo "Codex hooks file already exists at ${CODEX_HOOKS}, but node was not found to merge it safely."
-        echo "Leaving Codex hook support unchanged. Add or update this Stop hook manually:"
-        echo ""
-        echo "  command: ${PLANNOTATOR_BIN}"
-        echo "  timeout: 345600"
     fi
+
+    # The PostToolUse hook: said once, and noted so an update never adds back one the person removed.
+    case "$codex_post_tool_state" in
+        added|updated)
+            { mkdir -p "$_config_dir" && : > "$CODEX_POST_TOOL_NOTE"; } 2>/dev/null || true
+            echo "Codex: review Plannotator's new hook in Codex (Settings > Hooks, or /hooks) so an Inbox reply can reach a running turn."
+            ;;
+        kept)
+            [ -e "$CODEX_POST_TOOL_NOTE" ] || { { mkdir -p "$_config_dir" && : > "$CODEX_POST_TOOL_NOTE"; } 2>/dev/null || true; }
+            ;;
+        removed)
+            echo "Codex: Plannotator's PostToolUse hook was removed from ${CODEX_HOOKS}; left out (an Inbox reply to a busy Codex goes as its next turn)."
+            ;;
+        dropped)
+            rm -f "$CODEX_POST_TOOL_NOTE" 2>/dev/null || true
+            echo "Codex: took Plannotator's PostToolUse hook out of ${CODEX_HOOKS} (the experimental codex-steer switch is off)."
+            ;;
+    esac
 
     if [ "$codex_hook_configured" -eq 1 ]; then
         enable_codex_hooks_config || true
