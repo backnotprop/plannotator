@@ -494,7 +494,7 @@ export interface PlannotatorConfig {
    * `{ experimental: { decision_mode, grid } }`. `grid`: the Inbox's Grid page
    * (approval "inbox-agent-grid").
    */
-  experimental?: { decisionMode?: boolean; grid?: boolean };
+  experimental?: { decisionMode?: boolean; grid?: boolean; swarm?: boolean };
   /**
    * The Board's one-time first-visit dialog (approval "inbox-board", intro
    * amendment): `shownAt` once a page on this computer or the owner's phone
@@ -2469,6 +2469,7 @@ export function resolveInboxPhones(
 export const EXPERIMENTAL_FEATURES = {
   "decision-mode": "decisionMode",
   grid: "grid",
+  swarm: "swarm",
 } as const;
 
 export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURES;

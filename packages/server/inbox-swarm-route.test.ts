@@ -1,0 +1,138 @@
+/**
+ * `POST /api/inbox/swarm` (`plannotator inbox swarm`), the door's `POST swarm` for a linked computer's agent, the
+ * window's `threads/:id/swarm`, and what a member is handed. The failures these guard: another site's page or a
+ * device door (a phone, a linked computer's window) reaching the agents' route; the route answering while the switch
+ * is off; a linked computer speaking for one of this computer's sessions; a ghost message worded as the person's
+ * reply; and a swarm's first message handed without its join line.
+ */
+import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { INBOX_BUILTIN_SKILL_ROOT } from "@plannotator/core/inbox-review";
+import { composeInboxSkillsBlock, inboxBuiltinSkillContent } from "@plannotator/core/inbox-skills-compose";
+import { INBOX_MESSAGE_SKILL_AUDIENCE } from "@plannotator/core/skill-reference-block";
+import type { SkillCatalogEntry } from "@plannotator/core/skill-references-render";
+import { SWARM_SKILL, swarmJoinLine } from "@plannotator/core/swarm-skill";
+import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
+import { InboxStore } from "@plannotator/shared/inbox/store";
+import { joinSwarm, saySwarm, startSwarm } from "@plannotator/shared/inbox/swarm";
+import { farSwarmAnswer, swarmRoute, swarmWindowRoute, type SwarmRouteContext } from "./inbox-swarm-route";
+import { swarmWakeOf } from "./inbox-swarm-wake";
+
+/** The block the window composes for `/swarm` (its text pasted, as a human-only built-in). */
+const SWARM_REF = { name: SWARM_SKILL.name, root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true } as SkillCatalogEntry;
+const SWARM_BLOCK = composeInboxSkillsBlock([SWARM_REF], new Map([[SWARM_SKILL.name, inboxBuiltinSkillContent(SWARM_REF, false)!]]), INBOX_MESSAGE_SKILL_AUDIENCE);
+
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function world(on = true) {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-swarm-route-"));
+  roots.push(dir);
+  const store = InboxStore.open(dir, { now: () => new Date() });
+  const project = store.ensureProject({ name: "harbor", root: "/work/harbor" });
+  const thread = store.startPersonThread({
+    project_id: project.id,
+    body: `Add per-berth pricing. /swarm\n\n${SWARM_BLOCK}`,
+    idempotency_key: "k1",
+    to: { host: "claude-code", session: "ses_claude" },
+    tags: [{ host: "codex", session: "ses_codex", wakes: true }],
+  }).message;
+  const state = { on };
+  const ctx: SwarmRouteContext = { store, on: () => state.on, live: () => null, ownSession: (s) => s === "ses_claude" };
+  return { store, thread: thread.id, ctx, state };
+}
+
+const readBody = async (req: Request) => (await req.json()) as Record<string, unknown>;
+const post = (body: unknown, headers: Record<string, string> = {}) => new Request("http://127.0.0.1:1/api/inbox/swarm", { method: "POST", headers: { "Content-Type": "application/json", Host: "127.0.0.1:1", ...headers }, body: JSON.stringify(body) });
+const ask = async (ctx: SwarmRouteContext, body: unknown, headers?: Record<string, string>, door = false) => {
+  const req = post(body, headers);
+  const res = (await swarmRoute(req, new URL(req.url), ctx, readBody, door))!;
+  return { status: res.status, json: (await res.json()) as Record<string, unknown> };
+};
+const CLAUDE = { host: "claude-code", session: "ses_claude", name: "Claude Code" };
+const CODEX = { host: "codex", session: "ses_codex", name: "Codex" };
+
+test("another site's page, a device door, and a switched-off Inbox never reach the agents' route", async () => {
+  const { ctx, thread, state } = world();
+  startSwarm(ctx.store, thread);
+  expect((await ask(ctx, { action: "join", thread, by: CLAUDE }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+  expect((await ask(ctx, { action: "join", thread, by: CLAUDE }, {}, true)).status).toBe(404);
+  state.on = false;
+  const off = await ask(ctx, { action: "join", thread, by: CLAUDE });
+  expect(off.status).toBe(409);
+  expect(off.json.code).toBe("swarm_off");
+  expect(ctx.store.swarmOf(thread)!.members).toEqual([]);
+});
+
+test("join, say, doing, status and leave through the route; an unknown field or action is refused", async () => {
+  const { ctx, thread, store } = world();
+  startSwarm(store, thread);
+  const joined = await ask(ctx, { action: "join", thread, by: CLAUDE });
+  expect(joined.status).toBe(200);
+  expect(joined.json.text).toContain(`Joined the swarm of thread ${thread} as Claude Code.`);
+  // Codex is named by the thread and not joined yet.
+  expect(joined.json.text).toContain("- Codex, on the thread's computer, not joined yet");
+  expect((await ask(ctx, { action: "join", thread, by: CLAUDE })).json.text).toContain("Already in the swarm");
+  await ask(ctx, { action: "join", thread: store.swarmOf(thread)!.ghost_id, by: CODEX });
+  expect((await ask(ctx, { action: "say", text: "Price endpoint shape?", to: "codex", by: CLAUDE })).json.text).toBe("Said to Codex in the ghost thread.");
+  expect(store.pendingReplies("ses_codex").at(-1)!.body).toBe("Price endpoint shape?");
+  expect((await ask(ctx, { action: "doing", text: "Berth screen", by: CLAUDE })).json.text).toBe("Your status: Berth screen");
+  const status = await ask(ctx, { action: "status", by: CODEX });
+  expect(status.json.text).toContain("- Claude Code, on the thread's computer, state not known: Berth screen (just now)");
+  expect((await ask(ctx, { action: "leave", by: CODEX })).json.text).toBe(`You left the swarm of thread ${thread}.`);
+  expect((await ask(ctx, { action: "say", text: "x", by: CODEX })).json.code).toBe("not_in_swarm");
+  expect((await ask(ctx, { action: "take", by: CLAUDE })).status).toBe(422);
+  expect((await ask(ctx, { action: "say", text: "x", by: CLAUDE, extra: 1 })).status).toBe(422);
+  expect((await ask(ctx, { action: "say", text: "x" })).status).toBe(422);
+});
+
+test("a linked computer's agent joins and speaks as its own session only", () => {
+  const { ctx, thread, store } = world();
+  startSwarm(store, thread);
+  const machine = "ibx_01KAZ0000000000000000000PI";
+  const answer = farSwarmAnswer(ctx, machine, { ask: { action: "join", thread }, session: "ses_pi", host: "pi", name: null });
+  expect(String(answer.text)).toContain("as Pi");
+  expect(store.swarmOf(thread)!.members.find((m) => m.session === "ses_pi")!.machine).toBe(machine);
+  expect(() => farSwarmAnswer(ctx, machine, { ask: { action: "join", thread }, session: "ses_claude", host: "claude-code" })).toThrow("not one of your computer's");
+  expect(() => farSwarmAnswer(ctx, machine, { ask: { action: "join", thread }, session: "bad session\n" })).toThrow("session");
+});
+
+test("the window reads the ghost thread, writes as the person, turns the swarm off, and nothing answers while the switch is off", async () => {
+  const { ctx, thread, store, state } = world();
+  startSwarm(store, thread);
+  joinSwarm(store, thread, { session: "ses_claude", host: "claude-code", name: null });
+  const call = async (method: "GET" | "POST", body?: unknown) => {
+    const req = new Request(`http://127.0.0.1:1/api/inbox/threads/${thread}/swarm`, { method, headers: { "Content-Type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const res = (await swarmWindowRoute(req, new URL(req.url), ctx, readBody))!;
+    return { status: res.status, json: (await res.json()) as { swarm: { on: boolean } | null; ghost: { body: string; author: { kind: string } }[] } };
+  };
+  expect((await call("GET")).json.ghost).toEqual([]);
+  const said = await call("POST", { say: { text: "Weekend rates are on tab 2." } });
+  expect(said.json.ghost.map((m) => [m.author.kind, m.body])).toEqual([["person", "Weekend rates are on tab 2."]]);
+  expect((await call("POST", { on: false })).json.swarm!.on).toBe(false);
+  expect((await call("POST", { bogus: true })).status).toBe(422);
+  state.on = false;
+  expect((await call("GET")).status).toBe(404);
+});
+
+test("a ghost message is a notice naming who wrote it; the swarm's first message ends with its join line", () => {
+  const { store, thread } = world();
+  startSwarm(store, thread);
+  joinSwarm(store, thread, { session: "ses_claude", host: "claude-code", name: null });
+  joinSwarm(store, thread, { session: "ses_codex", host: "codex", name: null });
+  const base = (id: string): InboxReplyCommand => ({ type: "reply", id, thread_id: "x", reply_to: null, subject: "s", body: "b", url: "http://127.0.0.1:1/x" });
+  const said = saySwarm(store, thread, { session: "ses_claude", host: "claude-code", name: null }, "Shape?").message;
+  const wake = swarmWakeOf(store, said, base(said.id), true);
+  expect(wake.moved).toBe(true);
+  expect(wake.notice).toStartWith("Claude Code wrote in the swarm's ghost thread.");
+  expect(wake.notice!.length).toBeLessThanOrEqual(300);
+  expect(wake.body).toBe("Shape?");
+  const root = store.message(thread)!;
+  expect(swarmWakeOf(store, root, { ...base(root.id), body: root.body }, true).body).toEndWith(swarmJoinLine(thread));
+  // Off: nothing changes.
+  expect(swarmWakeOf(store, said, base(said.id), false)).toEqual(base(said.id));
+});

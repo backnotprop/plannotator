@@ -244,7 +244,8 @@ export function createInboxFarTags(deps: FarTagsDeps) {
 
   /** A person's message was written here: every far session of its thread that it (or anything still owed) is for is sent its wake. */
   const onPersonMessage = (record: InboxMessage) => {
-    if (record.author.kind !== "person") return;
+    // An agent's words in a ghost thread go to its far members as a person's do (Swarm, store.ts `isGhostSay`).
+    if (record.author.kind !== "person" && !store.isGhostSay(record)) return;
     const members = store.farSessions(record.thread_id);
     for (const [session, member] of members) {
       // This reply's own change after its wake went: taken back (not handed there), or Send now (into the running turn).

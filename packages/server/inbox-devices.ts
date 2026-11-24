@@ -429,6 +429,8 @@ const DOOR_OWN_ROUTES = [
   { method: "POST", route: "far-wake", grant: "machine", needs: "machines" },
   { method: "POST", route: "agent-reply", grant: "machine", needs: "machines" },
   { method: "POST", route: "far-delivered", grant: "machine", needs: "machines" },
+  // Swarm (inbox-swarm-route.ts): a linked computer's agent's `plannotator inbox swarm` for a thread here.
+  { method: "POST", route: "swarm", grant: "machine", needs: "machines" },
   { method: "POST", route: "link-back", grant: "machine", needs: "machines" },
   { method: "POST", route: "unlink", grant: "machine", needs: "machines" },
   { method: "GET", route: "update", grant: "machine", needs: "machine_update" },
@@ -668,6 +670,8 @@ export interface InboxDevicesContext {
     wake: (machine: string, body: Record<string, unknown>) => unknown;
     reply: (machine: string, body: Record<string, unknown>) => Promise<unknown>;
     delivered: (machine: string, body: Record<string, unknown>) => unknown;
+    /** Swarm: that computer's agent's swarm command for a thread here (inbox-swarm-route.ts `farSwarmAnswer`). */
+    swarm?: (machine: string, body: Record<string, unknown>) => unknown;
   };
   /** A linked machine's Update (inbox-updates.ts). */
   machineUpdate?: { read: () => unknown; start: () => Promise<{ outcome: string }> };
@@ -1256,6 +1260,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     "POST far-wake": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.wake) : routeNotFound(device)),
     "POST agent-reply": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.reply) : routeNotFound(device)),
     "POST far-delivered": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.delivered) : routeNotFound(device)),
+    "POST swarm": async (req, _url, device) => (context.farTags?.swarm ? await farTagWrite(device, () => context.readBody(req), context.farTags.swarm) : routeNotFound(device)),
     "POST link-back": async (req, _url, device) => context.machines?.()?.linkBack(device.id, await context.readBody(req)) ?? routeNotFound(device),
     "POST unlink": async (_req, _url, device) => context.machines?.()?.unlinkedBy(device.id) ?? routeNotFound(device),
     // The body is never read, so a machine cannot name a version or a place to download from.

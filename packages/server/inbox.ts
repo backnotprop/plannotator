@@ -226,6 +226,11 @@ import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { capabilityNoteOf, postCapabilityNotes } from "./inbox-capability-note";
 import { capabilityRoute, type InboxCapabilityContext } from "./inbox-capability-agent";
+import { farSwarmAnswer, swarmRoute, swarmWindowRoute } from "./inbox-swarm-route";
+import { inboxSwarmContext } from "./inbox-swarm-context";
+import { swarmWakeOf } from "./inbox-swarm-wake";
+import { startSwarm, swarmWire } from "@plannotator/shared/inbox/swarm";
+import { inboxMessageStartsSwarm } from "@plannotator/shared/inbox/swarm-start";
 import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
 import { createRoutineGrants, sendRecipients } from "./inbox-routine-grants";
 import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
@@ -1921,6 +1926,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     snoozeMade: () => markSnoozeUsed(),
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
+  // Swarm (inbox-swarm-route.ts), behind the experimental switch: `plannotator inbox swarm`, the window's ghost pane,
+  // and a linked computer's agent's command through its door.
+  const swarmCtx = inboxSwarmContext({
+    store,
+    on: () => swarmOn(),
+    connectionOf: (session) => live.deliveryConnectionOf(session) ?? farTags.connectionOf(session),
+    machines: () => machines,
+    farWakes,
+    ownSession: (session) => live.allLive().some((entry) => entry.session === session),
+  });
   // `plannotator inbox capability` (inbox-capability-agent.ts): this computer's switches, turned through the settings
   // route as Settings turns them; a linked computer's through the forward, as its Settings group does.
   const capabilityAgent: InboxCapabilityContext = {
@@ -3435,6 +3450,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const decisionModeOn = () => resolveExperimental(loadConfig(), "decision-mode");
   /** Grid (approval "inbox-agent-grid"), off by default: its sidebar row is never saved while it is off. */
   const gridOn = () => resolveExperimental(loadConfig(), "grid");
+  /** Swarm (docs/agent-guides/inbox-swarm.md), off by default, with no Settings row: PLANNOTATOR_EXPERIMENTAL=swarm or config `experimental.swarm`. */
+  const swarmOn = () => resolveExperimental(loadConfig(), "swarm");
   /**
    * The Board (approval "inbox-board", 2026-10-26): on only when the person
    * turned it on (config.json `inboxBoard`), and only in a build that has the
@@ -4071,6 +4088,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
     // Grid (approval "inbox-agent-grid"): the window's page of work in flight, drawn from what the window already reads.
     grid: { on: gridOn(), env: parseExperimentalEnv("grid") ?? null },
+    // Swarm: read by the window only; no Settings row turns it (config.json or the env var).
+    swarm: { on: swarmOn(), env: parseExperimentalEnv("swarm") ?? null },
   });
 
   /** Save `experimental: { decision_mode?, grid? }` (one switch or both). `validateOnly`: check and write nothing. */
@@ -4595,7 +4614,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * that tags others is told who else it went to.
    */
   const replyCommand = (reply: InboxMessage, sendNow = false, session: string | null = null): InboxReplyCommand => {
-    const command = replyCommandOf(reply, sendNow, session);
+    // Swarm (inbox-swarm-wake.ts): a ghost thread's words are a notice; a swarm's first message carries its join line.
+    const command = swarmWakeOf(store, reply, replyCommandOf(reply, sendNow, session), swarmOn());
     // A Tidy body is written when the run starts: with steps turned off since, it goes without its steps lines.
     if (command.tidy && !stepsOn()) return { ...command, body: inboxTidyBodyStepsOff(command.body) };
     // Never on a Tidy, a 👍, a hand-off notice or the note that questions moved: those are not about the thread's work.
@@ -4782,7 +4802,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       };
       const timer = setTimeout(finish, waitMs);
       const unsubscribe = store.subscribe((line) => {
-        if (line.kind === "message" && line.record.author.kind === "person" && live.pendingOf(session, { tags }).length > 0) finish();
+        if (line.kind === "message" && (line.record.author.kind === "person" || store.isGhostSay(line.record)) && live.pendingOf(session, { tags }).length > 0) finish();
       });
       const stopAskWaits = ask.onWaits((waiting) => {
         if (waiting === session) finish();
@@ -5133,7 +5153,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A person's item written while its session is already busy starts its clock at once, not at the next sweep.
   let waitsQueued = false;
   const unsubscribeWaits = store.subscribe((line) => {
-    if (line.kind !== "message" || line.record.author.kind !== "person" || waitsQueued) return;
+    if (line.kind !== "message" || (line.record.author.kind !== "person" && !store.isGhostSay(line.record)) || waitsQueued) return;
     waitsQueued = true;
     queueMicrotask(() => {
       waitsQueued = false;
@@ -5228,9 +5248,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     knownHere: (session) => live.allLive().some((entry) => entry.session === session) || (store.sessionMachine(session) === null && live.mcpAgents().some((agent) => agent.session === session)),
   });
   const unsubscribeFarTags = store.subscribe((line) => {
-    if (line.kind !== "message" || line.record.author.kind !== "person") return;
+    if (line.kind !== "message" || (line.record.author.kind !== "person" && !store.isGhostSay(line.record))) return;
     const record = line.record;
     queueMicrotask(() => farTags.onPersonMessage(record));
+    // Swarm: a person's message whose skills block names `/swarm` starts the swarm of its thread (swarm-start.ts),
+    // once, when it is written (a later rewrite of it never turns a swarm the person turned off back on).
+    if (line.at === record.created_at && swarmOn() && inboxMessageStartsSwarm(record) && !store.swarmOf(record.thread_id)) {
+      queueMicrotask(() => {
+        try {
+          startSwarm(store, record.thread_id);
+        } catch (error) {
+          process.stderr.write(`Inbox: the swarm of ${record.thread_id} did not start (${error instanceof Error ? error.message : String(error)})\n`);
+        }
+      });
+    }
   });
   const tagsRoute = createInboxTagsRoute({
     store,
@@ -5587,7 +5618,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       store,
       resolveProject,
       projectOf: async ({ stack }) => (await pullRepoProjects(stack))[0] ?? null,
-      skillsBlock: (names) => inboxSkillsBlockFor(names, { codeReview: codeReviewOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn() }),
+      skillsBlock: (names) => inboxSkillsBlockFor(names, { codeReview: codeReviewOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn(), swarm: swarmOn() }),
       own: (layers, threadId, made) => {
         const keys = layers.map((layer) => layer.key);
         const theirs = layers.every((layer) => !layer.mine);
@@ -5623,6 +5654,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store,
     serverSession,
     live,
+    // Swarm: New message's other agents, resolved as a reply's tags (this computer's and a linked one's).
+    severalAgents: () => (swarmOn() ? (value: unknown) => farTags.targets(value, live.tagTargets) : null),
     resolveProject,
     readBody: (req) => readBody(req),
     json,
@@ -6156,6 +6189,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
       ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
       ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
+      // Swarm (additive, only while its switch is on): the summary row, the Ghost button and the status view read it.
+      ...(swarmOn() && store.swarmOf(thread.thread_id) ? { swarm: swarmWire(store, thread.thread_id, swarmCtx.live) } : {}),
     };
     // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
     // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
@@ -7417,6 +7452,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const answer = await capabilityRoute(req, url, capabilityAgent, readBody, fromDeviceDoor.has(req));
         if (answer) return answer;
       }
+      // Swarm (inbox-swarm-route.ts): an agent's `plannotator inbox swarm` (never a device door's), and the ghost pane's.
+      if (path === "/api/inbox/swarm") {
+        const answer = await swarmRoute(req, url, swarmCtx, readBody, fromDeviceDoor.has(req));
+        if (answer) return answer;
+      }
+      if (path.endsWith("/swarm") && path.startsWith("/api/inbox/threads/")) {
+        const answer = await swarmWindowRoute(req, url, swarmCtx, readBody);
+        if (answer) return answer;
+      }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") {
           // The page's load id (api.ts): kept with a claim's stamp as a record (`inboxReveals.shownLoad`).
@@ -7725,7 +7769,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       });
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
-      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), routines: scheduledCap.on() });
+      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), routines: scheduledCap.on(), swarm: swarmOn() });
       if (skills) return skills;
 
       // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its settings (404 while `inboxLaunch.enabled` is off, but for the settings route).
@@ -8831,6 +8875,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         wake: (machine, body) => farWakes.receive(machine, body, (threadId) => threadPageUrl(baseUrl, threadId)),
         reply: (machine, body) => farTags.agentReply(machine, body),
         delivered: (machine, body) => farTags.delivered(machine, body),
+        swarm: (machine, body) => farSwarmAnswer(swarmCtx, machine, body),
       },
       machineUpdate: {
         read: () => updates.machineRead(),

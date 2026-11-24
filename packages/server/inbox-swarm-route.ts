@@ -1,0 +1,233 @@
+/**
+ * Swarm on the Inbox's side (docs/agent-guides/inbox-swarm.md), behind the experimental switch `swarm`:
+ *
+ * - `POST /api/inbox/swarm`: `plannotator inbox swarm` (apps/hook/server/inbox-swarm-command.ts), a thin client over
+ *   it, as `inbox capability` is over `/api/inbox/capability`. This computer's agents only: a device door's request
+ *   (a phone, a linked computer's window) is not found here, and another site's page is refused. A paired cloud agent
+ *   reaches it through the agent door's `route` (inbox-agent-routes.ts). A thread on a linked computer is asked
+ *   there, through that computer's door (`POST swarm`, a machine's token only), as that computer's own agents are.
+ * - `GET|POST /api/inbox/threads/:id/swarm`: the window's (and the phone's, through the door's allowlist): the swarm,
+ *   the ghost thread's words, the person's words to the agents, Turn off, and "looked at" for the Ghost button.
+ *
+ * Nothing here is an action of the agent tool (the owner, 2026-11-24: "don't bloat or change the tool").
+ */
+
+import type { InboxMessage } from "@plannotator/core/inbox-types";
+import type { InboxThreadSwarm } from "@plannotator/core/inbox-swarm-types";
+import { InboxError } from "@plannotator/shared/inbox/schema";
+import type { InboxStore } from "@plannotator/shared/inbox/store";
+import {
+  SWARM_WORDS,
+  callerSwarmThread,
+  joinSwarm,
+  leaveSwarm,
+  markGhostSeen,
+  saySwarm,
+  setSwarmDoing,
+  setSwarmOn,
+  swarmJoinText,
+  swarmStatusText,
+  swarmThreadOf,
+  swarmWire,
+  type SwarmCaller,
+  type SwarmLiveState,
+} from "@plannotator/shared/inbox/swarm";
+import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+
+export const INBOX_SWARM_ROUTE = "/api/inbox/swarm";
+/** The door route a linked computer's agent's swarm command arrives by (inbox-devices.ts `DOOR_OWN_ROUTES`). */
+export const FAR_SWARM_ROUTE = "swarm";
+
+export const SWARM_ACTIONS = ["join", "say", "doing", "status", "leave"] as const;
+export type SwarmAction = (typeof SWARM_ACTIONS)[number];
+
+/** What the command sends. `by`: the agent, as its shell names it (the agent door says it for a paired agent). */
+export interface SwarmAsk {
+  action: SwarmAction;
+  thread?: string;
+  as?: string;
+  for?: string;
+  text?: string;
+  to?: string;
+  by?: { host?: string; session?: string; name?: string };
+}
+
+export interface SwarmRouteContext {
+  store: InboxStore;
+  /** The experimental switch. */
+  on: () => boolean;
+  live: SwarmLiveState;
+  /** A linked computer holding a thread this Inbox does not have, and the way to ask it; absent without links. */
+  far?: {
+    placeOf: (ref: string) => Promise<{ machine: string; thread_id: string } | null>;
+    nameOf: (machine: string) => string | null;
+    ask: (machine: string, body: Record<string, unknown>) => Promise<{ status: number; json: Record<string, unknown> | null }>;
+  };
+  /** Whether `session` is one of this computer's own (a linked computer may not speak for it). */
+  ownSession?: (session: string) => boolean;
+}
+
+const ASK_FIELDS = ["action", "thread", "as", "for", "text", "to", "by"];
+const STATUS: Record<string, number> = { validation_error: 422, thread_not_found: 404, not_a_swarm: 409, swarm_off: 409, not_in_swarm: 409, several_swarms: 409, name_taken: 409, member_not_found: 404, not_your_session: 403 };
+
+/** The command's ask, checked: an unknown field or action is refused. */
+export function swarmAskOf(body: Record<string, unknown>): SwarmAsk {
+  const extra = Object.keys(body).find((field) => !ASK_FIELDS.includes(field));
+  if (extra) throw new InboxError("validation_error", `${extra}: not taken here.`);
+  if (!(SWARM_ACTIONS as readonly unknown[]).includes(body.action)) throw new InboxError("validation_error", `action: one of ${SWARM_ACTIONS.join(", ")}.`);
+  const out: SwarmAsk = { action: body.action as SwarmAction };
+  for (const field of ["thread", "as", "for", "text", "to"] as const) {
+    const value = body[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "string") throw new InboxError("validation_error", `${field}: a string.`);
+    out[field] = value;
+  }
+  const by = body.by && typeof body.by === "object" && !Array.isArray(body.by) ? (body.by as Record<string, unknown>) : null;
+  if (by) out.by = { host: typeof by.host === "string" ? by.host : undefined, session: typeof by.session === "string" ? by.session : undefined, name: typeof by.name === "string" ? by.name : undefined };
+  return out;
+}
+
+const callerOf = (ask: SwarmAsk): SwarmCaller => {
+  const session = ask.by?.session?.trim();
+  if (!session) throw new InboxError("validation_error", "by.session: the agent's session (run it from an agent session, or pass --session).");
+  return { session, host: ask.by?.host?.trim() || null, name: ask.by?.name?.trim() || null };
+};
+
+/** The answer for an agent: `text` and the swarm. `caller.machine` set: the ask came from that linked computer. */
+export function swarmAgentAnswer(ctx: SwarmRouteContext, ask: SwarmAsk, caller: SwarmCaller): { text: string; swarm?: InboxThreadSwarm; thread_id?: string } {
+  const { store } = ctx;
+  const wire = (threadId: string) => swarmWire(store, threadId, ctx.live)!;
+  switch (ask.action) {
+    case "join": {
+      if (!ask.thread) throw new InboxError("validation_error", "thread: the thread's id (plannotator inbox swarm join <thread>).");
+      const threadId = swarmThreadOf(store, ask.thread);
+      const joined = joinSwarm(store, threadId, caller, { as: ask.as, for: ask.for });
+      const swarm = wire(threadId);
+      return { text: swarmJoinText(store, threadId, swarm, joined.member.name, joined.again), swarm, thread_id: threadId };
+    }
+    case "say": {
+      const threadId = callerSwarmThread(store, caller, ask.thread);
+      const said = saySwarm(store, threadId, caller, ask.text ?? "", ask.to);
+      return { text: said.alone ? SWARM_WORDS.saidAlone : SWARM_WORDS.said(said.to ?? "everyone"), thread_id: threadId };
+    }
+    case "doing": {
+      const threadId = callerSwarmThread(store, caller, ask.thread);
+      return { text: SWARM_WORDS.doing(setSwarmDoing(store, threadId, caller.session, ask.text ?? "")), thread_id: threadId };
+    }
+    case "status": {
+      const threadId = callerSwarmThread(store, caller, ask.thread);
+      if (!store.swarmOf(threadId)) throw new InboxError("not_a_swarm", SWARM_WORDS.notSwarm(threadId));
+      const swarm = wire(threadId);
+      return { text: swarmStatusText(threadId, swarm), swarm, thread_id: threadId };
+    }
+    case "leave": {
+      const threadId = callerSwarmThread(store, caller, ask.thread);
+      return { text: leaveSwarm(store, threadId, caller.session) ? SWARM_WORDS.left(threadId) : SWARM_WORDS.notIn(threadId), thread_id: threadId };
+    }
+  }
+}
+
+const refusal = (error: unknown): Response => {
+  if (error instanceof InboxError) return Response.json({ code: error.code, error: error.message }, { status: STATUS[error.code] ?? 422 });
+  return Response.json({ code: "internal_error", error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+};
+
+/**
+ * The swarms a session here joined on a linked computer (`swarm say` names no thread): kept in memory; after a restart
+ * the agent names the thread with --thread.
+ */
+const farJoined = new Map<string, { machine: string; thread: string }>();
+
+/** Where an ask goes: this Inbox, or the linked computer holding its thread. */
+async function farPlace(ctx: SwarmRouteContext, ask: SwarmAsk, session: string): Promise<{ machine: string; thread: string } | null> {
+  if (!ctx.far) return null;
+  if (ask.thread) {
+    if (ctx.store.message(ask.thread.trim())) return null;
+    const place = await ctx.far.placeOf(ask.thread.trim());
+    return place ? { machine: place.machine, thread: place.thread_id } : null;
+  }
+  const here = ctx.store.allSwarms().some((swarm) => swarm.on && swarm.members.some((m) => m.session === session));
+  return here ? null : (farJoined.get(session) ?? null);
+}
+
+/** `POST /api/inbox/swarm`, or null for any other path. */
+export async function swarmRoute(req: Request, url: URL, ctx: SwarmRouteContext, readBody: (req: Request) => Promise<Record<string, unknown>>, fromDeviceDoor = false): Promise<Response | null> {
+  if (url.pathname !== INBOX_SWARM_ROUTE) return null;
+  if (fromDeviceDoor) return Response.json({ error: "Not found", code: "not_found" }, { status: 404 });
+  if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+    return Response.json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, { status: 403 });
+  }
+  if (req.method !== "POST") return Response.json({ error: "Use POST." }, { status: 405 });
+  if (!ctx.on()) return Response.json({ code: "swarm_off", error: SWARM_WORDS.off }, { status: 409 });
+  try {
+    const ask = swarmAskOf(await readBody(req));
+    const caller = callerOf(ask);
+    const far = await farPlace(ctx, ask, caller.session);
+    if (far && ctx.far) {
+      const answer = await ctx.far.ask(far.machine, { ask: { ...ask, thread: ask.thread ?? far.thread, by: undefined }, session: caller.session, host: caller.host, name: caller.name });
+      if (answer.status === 200 && ask.action === "join") farJoined.set(caller.session, far);
+      if (answer.status === 200 && ask.action === "leave") farJoined.delete(caller.session);
+      return Response.json(answer.json ?? { code: "machine_refused", error: `${ctx.far.nameOf(far.machine) ?? "The other computer"} did not answer.` }, { status: answer.status });
+    }
+    return Response.json(swarmAgentAnswer(ctx, ask, caller));
+  } catch (error) {
+    return refusal(error);
+  }
+}
+
+/** `POST swarm` at the door, from linked computer `machine`: its session's command, run here as that session. */
+export function farSwarmAnswer(ctx: SwarmRouteContext, machine: string, body: Record<string, unknown>): Record<string, unknown> {
+  if (!ctx.on()) throw new InboxError("swarm_off", SWARM_WORDS.off);
+  const raw = body.ask && typeof body.ask === "object" && !Array.isArray(body.ask) ? (body.ask as Record<string, unknown>) : null;
+  if (!raw) throw new InboxError("validation_error", "ask: the swarm command.");
+  const session = typeof body.session === "string" ? body.session.trim() : "";
+  if (!/^[A-Za-z0-9_.:-]{1,200}$/.test(session)) throw new InboxError("validation_error", "session: a session id.");
+  if (ctx.ownSession?.(session)) throw new InboxError("not_your_session", "That session is not one of your computer's: nothing was written.");
+  const { by: _by, ...rest } = raw;
+  const short = (value: unknown, max: number) => (typeof value === "string" && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value) ? value : null);
+  const caller: SwarmCaller = { session, host: short(body.host, 64), name: short(body.name, 80), machine, machine_name: ctx.far?.nameOf(machine) ?? null };
+  return swarmAgentAnswer(ctx, swarmAskOf(rest), caller) as unknown as Record<string, unknown>;
+}
+
+/** The window's read of a ghost thread: its words, oldest first. */
+export interface SwarmGhostRead {
+  swarm: InboxThreadSwarm | null;
+  ghost: InboxMessage[];
+}
+
+/**
+ * `GET|POST /api/inbox/threads/:id/swarm` (the window, the phone): GET reads the swarm and the ghost thread; POST
+ * takes `{ say: { text, to? } }` (the person's words to the agents), `{ on: boolean }` (Turn off) or `{ seen: true }`.
+ * Null for any other path, and while the switch is off.
+ */
+export async function swarmWindowRoute(req: Request, url: URL, ctx: SwarmRouteContext, readBody: (req: Request) => Promise<Record<string, unknown>>): Promise<Response | null> {
+  const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_-]{1,80})\/swarm$/.exec(url.pathname);
+  if (!match) return null;
+  if (!ctx.on()) return Response.json({ error: "Not found", code: "not_found" }, { status: 404 });
+  const { store } = ctx;
+  try {
+    const threadId = swarmThreadOf(store, match[1]!);
+    const read = (): SwarmGhostRead => {
+      const swarm = swarmWire(store, threadId, ctx.live) ?? null;
+      return { swarm, ghost: swarm?.ghost_id ? store.ghostMessages(swarm.ghost_id) : [] };
+    };
+    if (req.method === "GET") return Response.json(read());
+    if (req.method !== "POST") return Response.json({ error: "Use GET or POST." }, { status: 405 });
+    const body = await readBody(req);
+    const keys = Object.keys(body);
+    if (keys.length !== 1 || !["say", "on", "seen"].includes(keys[0]!)) throw new InboxError("validation_error", "One of say, on or seen.");
+    if (body.say !== undefined) {
+      const say = body.say && typeof body.say === "object" ? (body.say as Record<string, unknown>) : {};
+      if (typeof say.text !== "string" || (say.to !== undefined && say.to !== null && typeof say.to !== "string")) throw new InboxError("validation_error", "say: { text, to? }.");
+      saySwarm(store, threadId, null, say.text, (say.to as string | null | undefined) ?? null);
+      markGhostSeen(store, threadId);
+    } else if (body.on !== undefined) {
+      if (typeof body.on !== "boolean") throw new InboxError("validation_error", "on: true or false.");
+      setSwarmOn(store, threadId, body.on);
+    } else if (body.seen === true) markGhostSeen(store, threadId);
+    else throw new InboxError("validation_error", "seen: true.");
+    return Response.json(read());
+  } catch (error) {
+    return refusal(error);
+  }
+}

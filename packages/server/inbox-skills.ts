@@ -24,6 +24,7 @@
 import { INBOX_BUILTIN_SKILL_ROOT, INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
 import { CREATE_ROUTINE_SKILL } from "@plannotator/core/create-routine-skill";
 import { PICTURE_IT_SKILL } from "@plannotator/core/picture-it-skill";
+import { SWARM_SKILL } from "@plannotator/core/swarm-skill";
 import { composeInboxSkillsBlock, inboxBuiltinSkillContent } from "@plannotator/core/inbox-skills-compose";
 import { INBOX_MESSAGE_SKILL_AUDIENCE } from "@plannotator/core/skill-reference-block";
 import type { SkillCatalogEntry, SkillExportContent } from "@plannotator/core/skill-references-render";
@@ -49,11 +50,11 @@ function noStore(res: Response): Response {
  * A skill of the person's own with the same name wins: the built-in is left
  * out. Off, the catalog is exactly the discovered skills. `/create-routine` the same way while Routines are on. `/picture-it` always, first.
  */
-export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills, routines = false): Response {
-  return Response.json({ skills: inboxSkillEntries(codeReview, discovered, routines) });
+export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills, routines = false, swarm = false): Response {
+  return Response.json({ skills: inboxSkillEntries(codeReview, discovered, routines, swarm) });
 }
 
-function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills>, routines: boolean): SkillCatalogEntry[] {
+function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills>, routines: boolean, swarm = false): SkillCatalogEntry[] {
   let skills: ReturnType<typeof listReferenceSkills>;
   try {
     skills = discovered();
@@ -62,7 +63,8 @@ function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typ
   }
   const own = new Set(skills.map((skill) => skill.name));
   // `/create-routine` (packages/core/create-routine-skill.ts) while Routines are on.
-  const offered = [PICTURE_IT_SKILL, ...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
+  // `/swarm` (packages/core/swarm-skill.ts) while the experimental switch `swarm` is on: the Swarm badge puts it in the words.
+  const offered = [PICTURE_IT_SKILL, ...(swarm ? [SWARM_SKILL] : []), ...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
   const builtins = offered.filter((skill) => !own.has(skill.name)).map((skill) => ({
     name: skill.name,
     root: INBOX_BUILTIN_SKILL_ROOT as SkillCatalogEntry["root"],
@@ -76,6 +78,7 @@ export interface InboxSkillSwitches {
   codeReview: boolean;
   routines: boolean;
   diagrams: boolean;
+  swarm?: boolean;
 }
 
 export function inboxSkillsBlockFor(
@@ -83,7 +86,7 @@ export function inboxSkillsBlockFor(
   switches: InboxSkillSwitches,
   sources: { discovered: () => ReturnType<typeof listReferenceSkills>; read: (name: string) => ReferenceSkillContent | null } = { discovered: listReferenceSkills, read: readReferenceSkillContent },
 ): string {
-  const catalog = inboxSkillEntries(switches.codeReview, sources.discovered, switches.routines);
+  const catalog = inboxSkillEntries(switches.codeReview, sources.discovered, switches.routines, switches.swarm === true);
   const refs = names.flatMap((name) => catalog.find((entry) => entry.name === name) ?? []);
   const contents = new Map<string, SkillExportContent>();
   for (const ref of refs) {
@@ -95,9 +98,9 @@ export function inboxSkillsBlockFor(
 }
 
 /** The answer for a skills path, or null for any other path. `codeReview`, `routines`: the person's switches. */
-export function inboxSkillsRoute(req: Request, url: URL, options: { codeReview?: boolean; routines?: boolean } = {}): Response | null {
+export function inboxSkillsRoute(req: Request, url: URL, options: { codeReview?: boolean; routines?: boolean; swarm?: boolean } = {}): Response | null {
   if (url.pathname !== INBOX_SKILLS_PATH && url.pathname !== INBOX_SKILL_CONTENT_PATH) return null;
   if (req.method !== "GET") return noStore(Response.json({ error: "Use GET." }, { status: 405 }));
   if (isCrossSiteRequest(req)) return noStore(Response.json(INBOX_CROSS_SITE_BODY, { status: 403 }));
-  return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true, undefined, options.routines === true) : handleReferenceSkillContent(req));
+  return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true, undefined, options.routines === true, options.swarm === true) : handleReferenceSkillContent(req));
 }
