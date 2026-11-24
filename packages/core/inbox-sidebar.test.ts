@@ -22,7 +22,7 @@ import {
 const D = INBOX_SIDEBAR_DEFAULT;
 const layout = (top: InboxSidebarItem[], bottom: InboxSidebarItem[], hidden: InboxSidebarItem[] = []): InboxSidebarLayout => ({ top, bottom, hidden });
 
-test('the default is today\'s sidebar: Search to Drafts at the top, Copy prompt to Settings at the bottom, nothing hidden', () => {
+test('the default is today\'s sidebar: Search to Drafts at the top, Connect agent to Settings at the bottom, nothing hidden', () => {
   expect(D).toEqual(layout(['search', 'new-message', 'inbox', 'plans', 'board', 'scheduled', 'artifacts', 'reviews', 'drafts'], ['copy-prompt', 'feedback', 'usage', 'settings']));
   // Every stack item is in it once; the logo and the Settings row's buttons are not stack items.
   const stackItems = INBOX_SIDEBAR_ITEMS.filter((spec) => spec.place === 'stack').map((spec) => spec.id);
@@ -148,7 +148,7 @@ describe('showing and hiding', () => {
   const cases: [string, InboxSidebarItem, boolean, InboxSidebarItem[]][] = [
     ['Feedback hides', 'feedback', false, ['feedback']],
     ['the logo hides', 'logo', false, ['logo']],
-    ['Copy prompt hides', 'copy-prompt', false, ['copy-prompt']],
+    ['Connect agent hides', 'copy-prompt', false, ['copy-prompt']],
     ['the keyboard button hides', 'shortcuts', false, ['shortcuts']],
     ['Settings never hides', 'settings', false, []],
     ['Inbox never hides', 'inbox', false, []],

@@ -1,7 +1,7 @@
 /**
  * The window's side of the sidebar's items (the registry is core `INBOX_SIDEBAR_ITEMS`): each item's icon in the
  * menu and the Customize panel, and which items this Inbox draws now. An item it does not draw (Board with the
- * Board off, Reviews with Code review off, Usage without `cswap`, Search, New message, Copy prompt and the
+ * Board off, Reviews with Code review off, Usage without `cswap`, Search, New message, Connect agent and the
  * keyboard button on a phone) is left out of the menu and the panel, and keeps its place in the layout for when it comes back.
  * Agents and Tags have no icon here: the panel draws the sections' own marks (the goggles, the tag's `#`).
  */

@@ -1376,6 +1376,24 @@ describe("the Sidebar tip: outside the line, stamped once when shown, never for 
     expect(w.saved().inboxReveals?.sidebar_tip).toBeUndefined();
   });
 
+  test("the Connect agent pill's own switch-off (agents wrote 4 days ago) is no customizing: the pill is off, the tip still due", async () => {
+    const w = await world();
+    // Switched off at start, through its sidebar switch: the windows read the saved layout.
+    const read = await w.settings();
+    expect(read.sidebar).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ["copy-prompt"] });
+    expect(read.sidebar_rev).toBe(1);
+    expect(w.saved().inboxSidebarConnectOff).toEqual({ at: expect.stringMatching(/^\d{4}-/), rev: 1, first: true });
+    expect(read.reveal.sidebar_tip).toBe(true);
+    // The person turns it back on: their save, so the sidebar is customized now; the pill stays on.
+    expect((await w.post("/api/inbox/settings", { sidebar: INBOX_SIDEBAR_DEFAULT })).status).toBe(200);
+    const after = await w.settings();
+    expect(after.sidebar).toEqual(INBOX_SIDEBAR_DEFAULT);
+    expect(after.reveal.sidebar_tip).toBe(false);
+    // A day-zero Inbox (its agents wrote today): the pill stays.
+    const dayZero = await world({ days: 0 });
+    expect((await dayZero.settings()).sidebar).toBeNull();
+  });
+
   test("never on the first day, or as a Not now; the owner's phone claims it", async () => {
     const dayZero = await world({ days: 0 });
     expect((await dayZero.settings()).reveal.sidebar_tip).toBe(false);

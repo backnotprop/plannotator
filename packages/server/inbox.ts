@@ -48,6 +48,7 @@ import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { type InboxSidebarLayout } from "@plannotator/core/inbox-sidebar";
 import { inboxSidebarState, saveInboxSidebar } from "./inbox-sidebar-save";
+import { createConnectPillOff, firstAgentMessageAt, sidebarCustomizedByPerson } from "./inbox-connect-pill-off";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
   INBOX_APP_ID,
@@ -3054,6 +3055,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return { sidebar, rev };
   };
   const sidebarWire = (state: { sidebar: InboxSidebarLayout | null; rev: number }) => ({ sidebar: state.sidebar, sidebar_rev: state.rev });
+  // The Connect agent pill switches itself off once, a day after the first agent wrote here, as its Customize switch
+  // would (inbox-connect-pill-off.ts): checked at each settings read and each agent message.
+  const connectPillOff = createConnectPillOff({ firstAgentAt: () => firstAgentMessageAt(store), saveSidebar: (layout) => saveSidebar(layout) });
+  const unsubscribeConnectPill = store.subscribe((line) => {
+    if (line.kind !== "message" || line.record.author.kind !== "agent") return;
+    connectPillOff.heard(line.record.created_at);
+    connectPillOff.check();
+  });
 
   /**
    * The onboarding tour (config.json `inboxTour`, approval
@@ -3890,12 +3899,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const sidebarTipState = (): SidebarTipState => {
     const config = loadConfig();
     return {
-      customized: sidebarState().rev > 0 || config.inboxSidebar !== undefined,
+      // The pill's own switch-off is not the person customizing (inbox-connect-pill-off.ts).
+      customized: sidebarCustomizedByPerson(config, sidebarState().rev),
       firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
       tenure: snoozeIntroRelease,
       saved: config.inboxReveals?.sidebar_tip,
     };
   };
+  // At start too (after `capabilities`, which the save reads): an Inbox upgraded after a day of agents drops the pill
+  // before its first page asks.
+  connectPillOff.check();
   const claimSidebarTip = (key: string | null): boolean => {
     const at = new Date().toISOString();
     const claim = sidebarTipClaim(sidebarTipState(), key, at);
@@ -7116,6 +7129,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method === "GET") {
           // The page's load id (api.ts): kept with a claim's stamp as a record (`inboxReveals.shownLoad`).
           const load = revealLoadId(req.headers.get("x-plannotator-load"));
+          connectPillOff.check();
           // Plans in the answer only for a window its routes answer (this computer, not a linked device's door).
           return json(settingsModel(via, url.searchParams.get("store") !== "0", load, via === "local" && !fromDeviceDoor.has(req)));
         }
@@ -8620,6 +8634,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launch.stop();
     rex.close();
     unsubscribeLaunchTip();
+    unsubscribeConnectPill();
     unsubscribeAgentWork();
     // Every `:::run` still running stops with the Inbox: no command outlives it.
     runRoutes.stop();
