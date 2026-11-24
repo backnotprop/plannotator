@@ -319,7 +319,7 @@ function Row({ title, hint, children }: { title: string; hint?: React.ReactNode;
     <div className="flex items-start justify-between gap-4 border-t border-border py-3">
       <div className="min-w-0">
         <div className="text-sm font-medium">{title}</div>
-        {hint && <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{hint}</div>}
+        {hint && <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{hint}</div>}
       </div>
       {children && <div className="shrink-0">{children}</div>}
     </div>
