@@ -1405,7 +1405,8 @@ describe("experimental features", () => {
   test("a saved experimental choice is told from the untouched default", () => {
     expect(savedExperimental({}, "grid")).toBeUndefined();
     expect(savedExperimental({ experimental: { grid: false } }, "grid")).toBe(false);
-    expect(savedExperimental({ experimental: { decisionMode: "true" as unknown as boolean } }, "decision-mode")).toBe(true);
+    // Decision mode left Experimental (its own `inboxDecisionMode`): Grid is the one feature read here.
+    expect(savedExperimental({ experimental: { grid: "true" as unknown as boolean } }, "grid")).toBe(true);
   });
 
   test("a hand-edited experimental value that is not an object is replaced, never spread", () => {
