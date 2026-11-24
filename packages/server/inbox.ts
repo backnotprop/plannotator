@@ -307,7 +307,7 @@ import { createIconSetFetcher, iconSetsPointer, INBOX_ICON_SETS_DIR } from "./in
 import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
 import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
-import { inboxCapabilitySwitchesOf } from "@plannotator/core/inbox-capability-switches";
+import { inboxCapabilitySwitchesOf } from "@plannotator/core/inbox-types";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { changedFileOf } from "./inbox-pull-diff-files";
