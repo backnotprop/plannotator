@@ -10,7 +10,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_SHIP_LOG_MAX, shipActive, type InboxShip, type InboxShipLogEntry } from "@plannotator/core/inbox-ship";
+import { INBOX_SHIP_LOG_MAX, shipActive, type InboxShip, type InboxShipLogEntry } from "@plannotator/core/inbox-pull-handoff";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_SHIPS_FILE = "ships.json";

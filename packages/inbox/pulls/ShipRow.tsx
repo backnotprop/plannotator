@@ -6,7 +6,7 @@
  * the coloured row and the sail, still. Stuck: sand comes over the water and it stops. Merged: the words take the end.
  */
 import { useEffect, useRef, useState } from 'react';
-import { shipRowWords, type InboxShipView } from '@plannotator/core/inbox-ship';
+import { shipRowWords, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 
 /** The sail (the approval's own glyph), in the text's colour. */
 export function SailGlyph({ size = 15 }: { size?: number }) {

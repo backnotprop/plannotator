@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { InboxShip } from "@plannotator/core/inbox-ship";
+import type { InboxShip } from "@plannotator/core/inbox-pull-handoff";
 import type { InboxPull } from "@plannotator/core/inbox-types";
 import { parseGitlabPulls } from "./inbox-pulls";
 import { createShipReader, parseShipPull, readShipPull, shipReadFailure } from "./inbox-ship-read";

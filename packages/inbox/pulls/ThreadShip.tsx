@@ -9,7 +9,7 @@
  */
 import { Menu } from '@base-ui/react/menu';
 import { useMemo, useState, type ReactNode } from 'react';
-import { shipActive, type InboxShipView } from '@plannotator/core/inbox-ship';
+import { shipActive, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import type { InboxToastModel } from '../components/Toast';
 import { Icon } from '../icons';

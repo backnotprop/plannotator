@@ -11,7 +11,7 @@
  *
  * A read that fails says why in a few words (`{ failed }`): the watch counts them and shows Stuck after a few in a row.
  */
-import { shipPlatform, type InboxShip, type InboxShipRead } from "@plannotator/core/inbox-ship";
+import { shipPlatform, type InboxShip, type InboxShipRead } from "@plannotator/core/inbox-pull-handoff";
 import type { InboxPull } from "@plannotator/core/inbox-types";
 import { refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "@plannotator/shared/ref-cards";
 

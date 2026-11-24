@@ -19,7 +19,7 @@
  * A linked machine reaches them through the door (`machineOnly` rows in inbox-devices.ts), so a window on either
  * computer ships the other's; a phone token gets the door's 404 (the native app has no pull routes).
  */
-import { shipForge, shipMessage, shipView, type InboxShip, type InboxShipAgent } from "@plannotator/core/inbox-ship";
+import { shipForge, shipMessage, shipView, type InboxShip, type InboxShipAgent } from "@plannotator/core/inbox-pull-handoff";
 import type { InboxPull } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxShipStore } from "./inbox-ship-store";

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { shipActive } from "@plannotator/core/inbox-ship";
+import { shipActive } from "@plannotator/core/inbox-pull-handoff";
 import type { InboxPull } from "@plannotator/core/inbox-types";
 import { InboxOutbox } from "./inbox-outbox";
 import { createInboxShipRoutes } from "./inbox-ship-routes";

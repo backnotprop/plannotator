@@ -26,7 +26,7 @@ import { INBOX_CARD_ACTION_ON, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIV
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
 import { INBOX_SNOOZE_MAX_DAYS } from "@plannotator/core/inbox-snooze";
-import { SHIP_HELP_LINE } from "@plannotator/core/inbox-ship-words";
+import { SHIP_HELP_LINE } from "@plannotator/core/inbox-pull-handoff";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
 import { INBOX_RUN_EXAMPLE, INBOX_RUN_GUIDE, INBOX_RUN_REPORT_HEADING, INBOX_SECRET_EXAMPLE } from "@plannotator/core/inbox-run-guide";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";

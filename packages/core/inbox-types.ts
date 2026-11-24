@@ -3402,10 +3402,15 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * the entry's bytes per token (3.7), +142. The `moved_to` field's next draft words: +24 more (15,221 → 15,245 on the
  * same build), +6 tokens, Board on the same. The rule's last sentence (pass the answers on, 2026-11-21): +80 more
  * (15,245 → 15,325), +22 tokens; the description stays 1,948 (2,039 with steps and the Board on).
+ * Ship's `ship` field on `thread_pulls` (approval "inbox-ship-mode", its shorter draft words): CI measured the entry on
+ * Pi at 16,318 bytes with the longer draft (7.7% over 15,151; main alone was 3.6% over by then); the shorter words take
+ * 131 bytes off. Re-measured on the entry as the tool builds it from the default tool list (Pi's request shape), with
+ * main as of 2026-11-24: 16,141 bytes; tokens scaled at the entry's bytes per token (3.7), 4,342. Board on: the
+ * `card` action's measured share (1,929 bytes) on top, 18,070, tokens scaled at its own ratio, 4,932.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 15151, tokens: 4076 };
+const INBOX_TOOL_COST_NOW = { bytes: 16141, tokens: 4342 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 17080, tokens: 4662 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 18070, tokens: 4932 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

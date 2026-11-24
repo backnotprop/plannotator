@@ -4,7 +4,7 @@
  * page only: nothing reads or draws while it is not shown.
  */
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
-import { shipActive, type InboxShipView } from '@plannotator/core/inbox-ship';
+import { shipActive, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import type { InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { machineOf } from '../inboxUrl';
 import type { InboxToastModel } from '../components/Toast';

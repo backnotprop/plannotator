@@ -5,7 +5,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
-import { shipActive, shipTimeWords, type InboxShipLogEntry, type InboxShipView } from '@plannotator/core/inbox-ship';
+import { shipActive, shipTimeWords, type InboxShipLogEntry, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import { HostMark, Icon } from '../icons';
 import { BottomSheet } from '../components/BottomSheet';
 import { readShipLog, shipEvents } from '../data/ships';

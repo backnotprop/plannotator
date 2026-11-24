@@ -21,7 +21,7 @@ import { ReviewGroup, type ReviewGroupFold } from './ReviewGroup';
 import type { InboxPullRiskAutoRun } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
 import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
-import { shipActive, type InboxShipView } from '@plannotator/core/inbox-ship';
+import { shipActive, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import { shipTarget, useShipAgents, type ShipOption, type ShipTarget } from './shipStart';
 import { ShipAgentSheet, ShipMenuItems } from './ShipMenu';
 

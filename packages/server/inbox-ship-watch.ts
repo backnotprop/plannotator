@@ -45,8 +45,10 @@ import {
   type InboxShip,
   type InboxShipAgent,
   type InboxShipLogEntry,
-} from "@plannotator/core/inbox-ship";
-import { shipClosedLine, shipStillLine, shipStopLine } from "@plannotator/core/inbox-ship-words";
+  shipClosedLine,
+  shipStillLine,
+  shipStopLine,
+} from "@plannotator/core/inbox-pull-handoff";
 import type { InboxShipReadResult } from "./inbox-ship-read";
 import type { InboxShipStore } from "./inbox-ship-store";
 

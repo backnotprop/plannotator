@@ -16,7 +16,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxPullStacks, type InboxPull, type InboxReviewRow, type InboxThread } from '@plannotator/core/inbox-types';
-import type { InboxShipView } from '@plannotator/core/inbox-ship';
+import type { InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import type { ShipHandlers } from './ReviewsList';
 import type { ShipOption, ShipTarget } from './shipStart';
 

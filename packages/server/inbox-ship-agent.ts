@@ -8,7 +8,7 @@
  * session that message was delivered to. The watch then binds the ship to it. No other session ever binds it: not the
  * thread's other agents, not the one an earlier ship of the thread was given.
  */
-import type { InboxShip } from "@plannotator/core/inbox-ship";
+import type { InboxShip } from "@plannotator/core/inbox-pull-handoff";
 import { inboxLaunchedSession } from "@plannotator/core/inbox-run-line";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 

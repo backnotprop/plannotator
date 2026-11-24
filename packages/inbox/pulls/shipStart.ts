@@ -10,7 +10,7 @@
  * computer, and its agent works where it runs. The row shows the ship whichever computer holds it (data/ships.ts).
  */
 import { useMemo } from 'react';
-import { shipForge, shipMessage } from '@plannotator/core/inbox-ship';
+import { shipForge, shipMessage } from '@plannotator/core/inbox-pull-handoff';
 import { pullHandoffThreadName } from '@plannotator/core/inbox-pull-handoff';
 import { inboxPullIsOpen, inboxPullRepoKey, type InboxComposeLaunch, type InboxComposeProject, type InboxPull, type InboxPullStack, type InboxReviewRow } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi } from '../api';

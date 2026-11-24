@@ -9,8 +9,8 @@
  * One read per computer at a time, kept for the window: the Reviews list and an open thread draw from the same reads.
  */
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import type { InboxShipLogEntry, InboxShipView } from '@plannotator/core/inbox-ship';
-import { shipActive } from '@plannotator/core/inbox-ship';
+import type { InboxShipLogEntry, InboxShipView } from '@plannotator/core/inbox-pull-handoff';
+import { shipActive } from '@plannotator/core/inbox-pull-handoff';
 import { apiGet, apiPost } from '../api';
 import { inboxUrl, linkedMachinesRev, linkedMachinesWith, onLinkedMachines } from '../inboxUrl';
 import { newUuid } from '../uuid';

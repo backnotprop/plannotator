@@ -30,7 +30,7 @@ import { COULD_NOT_RANK, RiskMark } from './RiskMark';
 import { Named, usePicture } from './Face';
 import { facesOnce } from './words';
 import { pullAvatarUrl } from './pullUrls';
-import { shipLook, type InboxShipView } from '@plannotator/core/inbox-ship';
+import { shipLook, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import { ShipMark, ShipWater, ShipWords } from './ShipRow';
 
 /**

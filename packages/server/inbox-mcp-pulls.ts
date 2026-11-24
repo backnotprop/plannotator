@@ -38,7 +38,7 @@ import {
   INBOX_THREAD_PULLS_REMOVE_DESCRIPTION,
 } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { SHIP_FIELD_DESCRIPTION, SHIP_KIND_DESCRIPTION, SHIP_SHA_DESCRIPTION, SHIP_TEXT_DESCRIPTION, shipStopLine } from "@plannotator/core/inbox-ship-words";
+import { SHIP_FIELD_DESCRIPTION, SHIP_KIND_DESCRIPTION, SHIP_SHA_DESCRIPTION, SHIP_TEXT_DESCRIPTION, shipStopLine } from "@plannotator/core/inbox-pull-handoff";
 import type { InboxShipStep, InboxShipStepResult } from "./inbox-ship-watch";
 import type { InboxStore, InboxThreadPullsChange } from "@plannotator/shared/inbox/store";
 import { sessionWho, shortTime, type SessionNameOf } from "./inbox-mcp-read";

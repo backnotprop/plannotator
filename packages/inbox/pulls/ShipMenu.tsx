@@ -133,7 +133,7 @@ export function ShipMenuItems({ shipping, options, chosen, phone, portal, onShip
         </Menu.SubmenuTrigger>
         <Menu.Portal container={portal ?? undefined}>
           <Menu.Positioner className="ib-pm-pos" side="right" align="start" sideOffset={2}>
-            <Menu.Popup className="ib-pm ib-rpick ib-shp-agents" aria-label="Ship with" data-ship-agents="">
+            <Menu.Popup className="ib-pm ib-shp-agents" aria-label="Ship with" data-ship-agents="">
               {shipSections(options).map((section, i) =>
                 section.kind === 'sep' ? (
                   <Menu.Separator key={`sep${i}`} className="ib-pm-sep" />
@@ -195,7 +195,8 @@ export function ShipAgentSheet({ open, title, options, chosen, host, onShip, onC
   );
   return (
     <BottomSheet open={open} onClose={onClose} title={title} host={host} attrs={{ 'data-ship-sheet': '' }}>
-      <div className="ib-rpick ib-shp-sheet" role="group" aria-label="Ship with">
+      {/* Its rows share the reply picker's row rules (`ib-rpick-row` …); the list is not `.ib-rpick`, the reply picker's page mark. */}
+      <div className="ib-shp-sheet" role="group" aria-label="Ship with">
         {shipSections(options).map((section, i) =>
           section.kind === 'sep' ? (
             <div key={`sep${i}`} className="ib-pm-sep" role="separator" />
