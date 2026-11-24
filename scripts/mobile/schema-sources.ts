@@ -12,6 +12,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/inbox-antigravity.ts',
   'packages/core/inbox-attachments.ts',
   'packages/core/inbox-branch-reports.ts',
+  'packages/core/inbox-capability-switches.ts',
   'packages/core/inbox-cards.ts',
   'packages/core/inbox-cloud.ts',
   'packages/core/inbox-codex.ts',

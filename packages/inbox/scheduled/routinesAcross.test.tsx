@@ -8,7 +8,10 @@
  *
  * What regresses: a far routine missing or unnamed, a far press going to this computer's routes (or without a key), a
  * far run's 202 answer read as a failure, a held write silent, the page hidden while only a linked computer has
- * Routines, the create made here when the person picked another computer, a far switch not offered or not sent there.
+ * Routines, the create made here when the person picked another computer, a far switch not offered or not sent there;
+ * an away computer's rows claiming a run going or a next run, or not said away; a Run while it is away held (or said
+ * as waiting) instead of refused in plain words; a Stop without the run it was pressed for; Starting agents off there
+ * unsaid; a far computer's switches gone after a reload while it is away, or a held turn not shown as waiting.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -17,13 +20,13 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import type { InboxToastModel } from '../components/Toast';
-import { scheduledRow } from './testRows';
+import { lastRun, scheduledRow } from './testRows';
 
 const hasDom = typeof document !== 'undefined';
 const { ScheduledPage } = (hasDom ? await import('./ScheduledPage') : {}) as typeof import('./ScheduledPage');
 const { resetScheduledForTests } = (hasDom ? await import('./store') : {}) as typeof import('./store');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
-const { LinkedCapabilities, resetLinkedCapabilitiesForTests } = (hasDom ? await import('../components/LinkedCapabilities') : {}) as typeof import('../components/LinkedCapabilities');
+const { LinkedCapabilities } = (hasDom ? await import('../components/LinkedCapabilities') : {}) as typeof import('../components/LinkedCapabilities');
 const { resetMachineRoutes, setLinkedMachines } = await import('../inboxUrl');
 
 const STUDIO = 'ibx_01HZZZZZZZZZZZZZZZZZZZZZZZ';
@@ -37,7 +40,6 @@ afterEach(() => {
   document.body.innerHTML = '';
   window.sessionStorage.clear();
   resetMachineRoutes();
-  resetLinkedCapabilitiesForTests?.();
 });
 
 type Call = { method: string; path: string; body: Record<string, any> | null };
@@ -45,7 +47,7 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const HELD = (key: string) => json({ outbox: { key, machine: STUDIO, state: 'queued', route: '', created_at: '', n: 1 }, machine: { id: STUDIO, name: 'Studio', state: 'offline' } }, 202);
 
 /** This Inbox and, through its forward, Studio's: `away` makes every write to Studio wait in the outbox. */
-function inbox(here: InboxScheduledRow[], there: InboxScheduledRow[], options: { hereOn?: boolean; away?: boolean } = {}) {
+function inbox(here: InboxScheduledRow[], there: InboxScheduledRow[], options: { hereOn?: boolean; away?: boolean; launchOff?: boolean } = {}) {
   const calls: Call[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -53,10 +55,12 @@ function inbox(here: InboxScheduledRow[], there: InboxScheduledRow[], options: {
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, any>) : null;
     calls.push({ method, path, body });
     if (path === '/api/inbox/scheduled?machines=1') {
-      return json({ scheduled: [...(options.hereOn === false ? [] : here), ...there.map((row) => ({ ...row, machine: STUDIO }))], launch_on: true, computers: [{ id: STUDIO, on: true, launch_on: true, away: options.away === true }] });
+      return json({ scheduled: [...(options.hereOn === false ? [] : here), ...there.map((row) => ({ ...row, machine: STUDIO }))], launch_on: true, computers: [{ id: STUDIO, on: true, launch_on: options.launchOff !== true, away: options.away === true, read_at: '2026-11-24T14:10:00.000Z' }] });
     }
     if (path.endsWith('/scheduled/preview')) return json({ ok: true, schedule_words: 'Every day at 9:00 AM', tz_short: 'EST', next_run: '2026-11-16T14:00:00.000Z' });
     if (path.startsWith('/api/inbox/sessions') || path.startsWith(`${FAR}/sessions`)) return json({ home: '/home/ada', launch: { agents: [{ agent: 'claude-code', name: 'Claude Code', models: [] }], projects: [], scratch: null } });
+    // Run once now is sent at the press or not at all (the forward's `now`): away, it is refused, never held.
+    if (path.startsWith(FAR) && method === 'POST' && options.away && path.endsWith('/run')) return json({ error: 'Studio cannot be reached now.', code: 'machine_offline' }, 503);
     if (path.startsWith(FAR) && method === 'POST' && options.away) return HELD(String(body?.idempotency_key));
     const far = path.startsWith(FAR);
     const rows = far ? there : here;
@@ -128,6 +132,35 @@ test.skipIf(!hasDom)('Studio away: Turn off waits in the outbox, and the waiting
   expect(host.querySelector('[role="alert"]')).toBeNull();
 });
 
+test.skipIf(!hasDom)("Studio away: Run is refused at the press, said where the person pressed it, never held; its rows say away, with no Running or next run claimed", async () => {
+  const running = scheduledRow('sch_far', { name: 'Nightly build', state: 'running', running_since: '2026-11-24T14:05:00.000Z', last_run: lastRun(4, '2026-11-24T14:05:00.000Z', 'running') });
+  const server = inbox([], [running, scheduledRow('sch_far2', { name: 'Weekly cleanup', state: 'on' })], { away: true });
+  const { host, toasts } = page(null);
+  await settle();
+  const row = host.querySelector('[data-scheduled-row="sch_far"]')!;
+  expect(row.getAttribute('data-scheduled-computer')).toBe('Studio · away');
+  expect(row.textContent).not.toContain('Running');
+  expect(host.querySelector('[data-scheduled-row="sch_far2"] [data-scheduled-next]')!.textContent).toBe('');
+  expect(host.querySelector(`[data-scheduled-away="${STUDIO}"]`)!.textContent).toMatch(/^Studio has been away since .+\. Its routines are as it last said\.$/);
+  // Its last-known run keeps its Stop, which names that run.
+  await click(row.querySelector('[data-scheduled-run="stop"]'));
+  await settle();
+  expect(server.calls.find((c) => c.path.endsWith('/stop'))!.body?.run).toBe('msg_run4');
+  toasts.length = 0;
+  await click(host.querySelector('[data-scheduled-row="sch_far2"] [data-scheduled-run="run"]'));
+  await settle();
+  expect(host.querySelector('[role="alert"]')!.textContent).toBe("Studio is away. It didn't run.");
+  expect(toasts).toEqual([]);
+});
+
+test.skipIf(!hasDom)("Starting agents off on Studio: the page says nothing runs there", async () => {
+  inbox([], [scheduledRow('sch_far', { name: 'Nightly build', state: 'on' })], { launchOff: true });
+  const { host } = page(null);
+  await settle();
+  expect(host.querySelector(`[data-scheduled-far-launch-off="${STUDIO}"]`)!.textContent).toBe('Starting agents is off on Studio, so nothing runs there.');
+  expect(host.querySelector('[data-scheduled-launch-off]')).toBeNull();
+});
+
 test.skipIf(!hasDom)("Routines off here, on Studio: the page says this computer's are off and still lists and makes Studio's", async () => {
   inbox([], [scheduledRow('sch_far', { name: 'Nightly build', state: 'on' })], { hereOn: false });
   const { host } = page(null, 'off');
@@ -164,40 +197,61 @@ test.skipIf(!hasDom)("a new routine's computer is picked in the editor, and it i
   expect(creates[0]!.body?.name).toBe('Weekly cleanup');
 });
 
-test.skipIf(!hasDom)("Settings → Capabilities: a linked computer's switches by name, turned there; away, the line says it waits; an older one has none", async () => {
+test.skipIf(!hasDom)("Settings → Capabilities: a linked computer's switches by name, turned there; away, its group stays (a reload too), said away, a held turn shown turned and waiting; an older one has none", async () => {
   const calls: Call[] = [];
   let away = false;
+  // The Inbox's forward (inbox-capabilities-machines.ts): Studio's switches, away the last it gave, held turns laid on.
+  const there: Record<string, { on: boolean }> = { board: { on: true }, steps: { on: false }, scheduled_threads: { on: false }, code_review: { on: false }, system: { on: false }, bro: { on: false }, float_drafts: { on: false } };
+  const held: Record<string, { on: boolean }> = {};
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? 'GET';
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, any>) : null;
     calls.push({ method, path, body });
-    if (path === `${FAR}/capabilities` && method === 'GET') return json({ capabilities: { board: { on: true }, steps: { on: false }, scheduled_threads: { on: false }, code_review: { on: false }, system: { on: false }, bro: { on: false }, float_drafts: { on: false } } });
-    if (path === `${FAR}/capabilities` && away) return HELD(String(body?.idempotency_key));
-    if (path === `${FAR}/capabilities`) return json({ scheduled_threads: { on: true } });
+    if (path === `${FAR}/capabilities` && method === 'GET') return json({ capabilities: { ...there, ...held }, away, read_at: '2026-11-24T14:10:00.000Z', held: Object.keys(held) });
+    if (path === `${FAR}/capabilities` && away) {
+      Object.assign(held, { scheduled_threads: body!.scheduled_threads });
+      return HELD(String(body?.idempotency_key));
+    }
+    if (path === `${FAR}/capabilities`) {
+      Object.assign(there, body);
+      return json({ scheduled_threads: there.scheduled_threads });
+    }
     return json({ scheduled: [], launch_on: true, computers: [] });
   }) as typeof fetch;
   const host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
   root = createRoot(host);
-  const machine = (id: string, name: string, marks: string[]) => ({ id, name, self: false, state: 'online', marks }) as never;
-  act(() => root!.render(<LinkedCapabilities machines={[machine(STUDIO, 'Studio', ['capabilities']), machine('ibx_01HOLDERXXXXXXXXXXXXXXXXX', 'Old laptop', [])]} />));
+  const machine = (id: string, name: string, marks: string[], state = 'online') => ({ id, name, self: false, state, marks }) as never;
+  const draw = (state: string) => act(() => root!.render(<LinkedCapabilities machines={[machine(STUDIO, 'Studio', ['capabilities'], state), machine('ibx_01HOLDERXXXXXXXXXXXXXXXXX', 'Old laptop', [])]} />));
+  draw('online');
   await settle();
-  const group = host.querySelector(`[data-settings-linked-capabilities="${STUDIO}"]`)!;
-  expect(group.querySelector('h2')?.textContent).toBe('Studio');
+  const group = () => host.querySelector(`[data-settings-linked-capabilities="${STUDIO}"]`)!;
+  expect(group().querySelector('h2')?.textContent).toBe('Studio');
   // System is off there (and Code review too): no row, as on this computer.
-  expect([...group.querySelectorAll('[data-settings-linked-switch]')].map((r) => r.getAttribute('data-settings-linked-switch'))).toEqual(['board', 'steps', 'scheduled_threads', 'code_review', 'bro', 'float_drafts']);
+  expect([...group().querySelectorAll('[data-settings-linked-switch]')].map((r) => r.getAttribute('data-settings-linked-switch'))).toEqual(['board', 'steps', 'scheduled_threads', 'code_review', 'bro', 'float_drafts']);
   expect(host.querySelectorAll('[data-settings-linked-capabilities]').length).toBe(1);
-  const routines = () => group.querySelector<HTMLButtonElement>('[data-settings-linked-switch="scheduled_threads"] [role="switch"]')!;
+  expect(group().querySelector('[data-settings-linked-away]')).toBeNull();
+  const routines = () => group().querySelector<HTMLButtonElement>('[data-settings-linked-switch="scheduled_threads"] [role="switch"]')!;
   await click(routines());
   await settle();
   const sent = calls.filter((c) => c.method === 'POST');
   expect(sent.map((c) => [c.path, c.body?.scheduled_threads])).toEqual([[`${FAR}/capabilities`, { on: true }]]);
   expect(routines().getAttribute('aria-checked')).toBe('true');
   away = true;
+  draw('offline');
+  await settle();
   await click(routines());
   await settle();
-  expect(group.querySelector('[data-settings-linked-line]')?.textContent).toBe('Waiting for Studio: this applies when Studio is back.');
-  expect(routines().getAttribute('aria-checked')).toBe('true');
+  const shownHeld = () => [routines().getAttribute('aria-checked'), group().querySelector('[data-settings-linked-switch="scheduled_threads"]')!.hasAttribute('data-held'), group().querySelector('[data-settings-linked-switch="scheduled_threads"] .ib-desc')?.textContent];
+  expect(shownHeld()).toEqual(['false', true, 'Waiting for Studio: this applies when Studio is back.']);
+  // A reload of the page: the group is there, said away, its held turn still shown.
+  act(() => root!.unmount());
+  root = createRoot(host);
+  draw('offline');
+  await settle();
+  expect(group().querySelector('[data-settings-linked-away]')!.textContent).toMatch(/^ Studio has been away since .+\. These switches are as it last said\.$/);
+  expect(shownHeld()).toEqual(['false', true, 'Waiting for Studio: this applies when Studio is back.']);
+  expect(group().querySelector('[data-settings-linked-switch="board"]')!.hasAttribute('data-held')).toBe(false);
 });

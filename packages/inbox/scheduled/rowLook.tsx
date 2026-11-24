@@ -34,7 +34,8 @@ export function scheduledLook(row: InboxListRow, scheduled: readonly InboxSchedu
   const had = looks.get(row);
   if (had?.from === from) return had.look;
   const last = from.last_run;
-  const running = from.state === 'running';
+  // A linked computer that is away says no running time (store.ts lastKnownRows): no Running claimed for it.
+  const running = from.state === 'running' && !!from.running_since;
   const failed = !running && (last?.outcome === 'didnt_finish' || last?.outcome === 'didnt_start');
   const run = last?.run ?? null;
   // An agent's change line is the thread's latest: the row says that change, not the run.

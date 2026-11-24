@@ -15,6 +15,8 @@ import { createdWords, elapsedWords, lastRunWords, nextRunWords, shortScheduleWo
 export interface RowActs {
   /** A linked computer's routine: that computer's name, said after the routine's own, as a project row says its computer. */
   computer?: (row: InboxScheduledRow) => string | null;
+  /** Its computer is away: the row is as that computer last said, so no next run is claimed. */
+  away?: (row: InboxScheduledRow) => boolean;
   open: (row: InboxScheduledRow) => void;
   run: (row: InboxScheduledRow) => void;
   stop: (row: InboxScheduledRow) => void;
@@ -104,7 +106,7 @@ function lastCell(row: InboxScheduledRow, now: number): ReactNode {
 }
 
 function WideRow({ row, acts, now }: { row: InboxScheduledRow; acts: RowActs; now: number }) {
-  const next = nextRunWords(row, now);
+  const next = acts.away?.(row) ? '' : nextRunWords(row, now);
   const computer = acts.computer?.(row) ?? null;
   return (
     <div className="st-row st-cols" role="row" onClick={() => acts.open(row)} data-scheduled-row={row.id} data-state={row.state} data-scheduled-computer={computer ?? undefined}>

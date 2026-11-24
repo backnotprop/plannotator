@@ -194,7 +194,8 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   second copy answers the same attachment); and a Combine, or a Tidy with the
  *   person's words, which asks an agent there to act on the person's threads
  *   (one held for days would archive threads nobody is looking at); and Show in
- *   Rex for an agent there (`rex/show`), which moves Rex's app at the click.
+ *   Rex for an agent there (`rex/show`), which moves Rex's app at the click; and a routine's Run once now there
+ *   (`scheduled/:id/run`), which starts an agent at the press.
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
  *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
@@ -292,15 +293,16 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // would move it when nobody asked.
   "POST rex/show": "now",
   // A routine on a linked computer (mark `routines`), from a press in a window here. A create carries its
-  // `idempotency_key`, which that computer keeps on the routine (one key, one routine); an edit, a turn, a stop, a delete
-  // and a restore put a state; a Run is answered once per key by that computer's door. A preview is the editor's
-  // words for a schedule, wanted now or not at all.
+  // `idempotency_key`, which that computer keeps on the routine (one key, one routine); an edit, a turn, a delete
+  // and a restore put a state; a Stop names the run it was pressed for (`run`), so a late one never ends a later run.
+  // Run once now starts an agent at the press or not at all: held, it would start one hours later when nobody asked.
+  // A preview is the editor's words for a schedule, wanted now or not at all.
   "POST scheduled": "append",
   "POST scheduled/preview": "now",
   "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})": "set",
   "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/on": "set",
   "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/off": "set",
-  "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/run": "append",
+  "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/run": "now",
   "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/stop": "set",
   "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/delete": "set",
   "POST scheduled/(sch_[A-Za-z0-9_-]{1,80})/restore": "set",

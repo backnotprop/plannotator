@@ -47,6 +47,20 @@ const wanted = () => on === true || (on !== null && linkedMachinesWith(ROUTINES_
 /** A linked computer has Routines on, so its routines can be listed and made from here. */
 export const farRoutinesOn = (s: Pick<ScheduledSnapshot, 'computers'>): boolean => s.computers.some((c) => c.on);
 
+/**
+ * A linked computer that is away: its routines as it last said, with nothing live claimed for it. A run it said was
+ * going keeps its Stop (held, it ends that run only) but no running time (`running_since`, which the Running marks
+ * read), and no next run is counted down.
+ */
+export function lastKnownRows(rows: readonly InboxScheduledRow[], computers: readonly RoutineComputer[]): InboxScheduledRow[] {
+  const away = new Set(computers.filter((c) => c.away).map((c) => c.id));
+  if (away.size === 0) return [...rows];
+  return rows.map((row) => (row.machine && away.has(row.machine) ? { ...row, running_since: null, next_run: null } : row));
+}
+
+/** The row's computer is away (its row is as that computer last said). */
+export const rowAway = (s: Pick<ScheduledSnapshot, 'computers'>, row: Pick<InboxScheduledRow, 'machine'>): boolean => !!row.machine && s.computers.some((c) => c.id === row.machine && c.away);
+
 export function readScheduled(): Promise<void> {
   if (!wanted()) return Promise.resolve();
   if (reading) {
@@ -54,7 +68,10 @@ export function readScheduled(): Promise<void> {
     return reading;
   }
   reading = scheduledApi.list().then(
-    (answer) => emit({ rows: answer.scheduled, launchOn: answer.launch_on, computers: answer.computers ?? [], error: null, version: snap.version + 1 }),
+    (answer) => {
+      const computers = answer.computers ?? [];
+      emit({ rows: lastKnownRows(answer.scheduled, computers), launchOn: answer.launch_on, computers, error: null, version: snap.version + 1 });
+    },
     (error: unknown) => emit({ error: error instanceof Error ? error.message : String(error) }),
   );
   return reading.finally(() => {

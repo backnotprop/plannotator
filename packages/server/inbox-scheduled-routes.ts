@@ -103,7 +103,7 @@ export async function scheduledRoute(
     return json({
       scheduled: [...(deps.on() ? scheduled.list() : []), ...far.flatMap((one) => one.rows)],
       launch_on: deps.launchOn(),
-      computers: far.map(({ machine, on, launch_on, away }) => ({ id: machine, on, launch_on, away })),
+      computers: far.map(({ machine, on, launch_on, away, read_at }) => ({ id: machine, on, launch_on, away, read_at })),
     });
   }
   if (!deps.on()) return json({ error: "Routines are off on this computer. Turn them on in Settings, Capabilities.", code: "routines_off" }, 404);
@@ -142,7 +142,8 @@ export async function scheduledRoute(
       return json({ scheduled: scheduled.get(id).scheduled, message_id: message.id, ...(message.scheduled_run?.failed ? { failed: message.scheduled_run.failed } : {}) }, 202);
     }
     case "stop":
-      return json({ scheduled: scheduled.rowOf(await scheduled.stopRun(id)) });
+      // `run`: the run the person pressed Stop on (its divider's id). Another run going now is left alone.
+      return json({ scheduled: scheduled.rowOf(await scheduled.stopRun(id, typeof body.run === "string" ? body.run : undefined)) });
     case "delete":
       await scheduled.remove(id, person);
       return json({ deleted: true });

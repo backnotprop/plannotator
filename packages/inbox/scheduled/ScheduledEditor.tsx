@@ -12,7 +12,7 @@ import type { InboxScheduledPreview, InboxScheduledRow, InboxScheduledRunSummary
 import { Icon } from '../icons';
 import { Switch } from '../components/SoundRow';
 import { Tip } from '../components/Tip';
-import { scheduledApi } from './client';
+import { runShown, scheduledApi } from './client';
 import { InboxApiError } from '../apiError';
 import { putScheduled, readScheduled } from './store';
 import { FilesRow, FolderPick, RunsAs, useLaunchBlock } from './EditorParts';
@@ -340,7 +340,7 @@ export function ScheduledEditor(props: EditorProps) {
         ready={ready}
         onTurnOn={() => void turn(true)}
         onRun={() => void runOnce()}
-        onStop={() => record && void act(() => scheduledApi.stop(record.id))}
+        onStop={() => record && void act(() => scheduledApi.stop(record.id, runShown(record)))}
       />
     </div>
   );
