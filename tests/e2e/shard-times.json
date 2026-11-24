@@ -77,6 +77,7 @@
   "inbox-explicit-skip.spec.ts": 8,
   "inbox-feedback-search-phone-webkit.spec.ts": 14,
   "inbox-feedback-search.spec.ts": 22,
+  "inbox-filter-by-typing.spec.ts": 20,
   "inbox-first-run.spec.ts": 26,
   "inbox-fit-counts.spec.ts": 55,
   "inbox-floating-comments.spec.ts": 22,
