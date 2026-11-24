@@ -378,7 +378,8 @@ import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxFarTags, FAR_DELIVERED_ROUTE } from "./inbox-far-tags";
 import { farSendMessage } from "./inbox-far-send";
 import { createInboxFarWakes, type FarWake } from "./inbox-far-wakes";
-import { farWakeItem, farWakeStore } from "./inbox-far-host-wakes";
+import { isInboxCloudSession } from "@plannotator/core/inbox-cloud";
+import { FAR_WOKEN_HOSTS, farWakeItem, farWakeStore } from "./inbox-far-host-wakes";
 import { farAgentReply, farReplyDeps } from "./inbox-mcp-far-reply";
 import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
@@ -5001,7 +5002,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // this listener's own handler as the same commands on this computer are (inbox-agent-routes.ts).
   const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext, route: (req) => handle(req, "local") });
   const cloudWake = createInboxCloudWake({
-    store,
+    store: farHosts.store,
     agents: cloudAgents,
     pin: (session, root, name, host) => live.pinCloud(session, root, name, host),
     threadUrl: (threadId) => threadPageUrl(baseUrl, threadId),
@@ -5130,7 +5131,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const record = line.record;
     queueMicrotask(() => farTags.onPersonMessage(record));
   });
-  const tagsRoute = createInboxTagsRoute({ store, serverSession, live, json, far: farTags });
+  const tagsRoute = createInboxTagsRoute({
+    store,
+    serverSession,
+    live,
+    json,
+    far: farTags,
+    // A cloud agent is tagged from a linked computer while it has a wake here (its webhook, inbox-far-host-wakes.ts).
+    wokenHere: (session, host) => {
+      const cloud = isInboxCloudSession(session) ? cloudAgents.agent(session) : null;
+      return FAR_WOKEN_HOSTS.has(host) || (cloud !== null && hasCloudWake(cloud));
+    },
+  });
   const stepsRoute = createInboxStepsRoute({ store, serverSession, live, stepsOn, json });
 
   // Launch: compose starts Claude Code, Pi or Codex in a project, behind `inboxLaunch.enabled`, on unless false (packages/server/inbox-launch.ts).

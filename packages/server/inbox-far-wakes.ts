@@ -16,6 +16,7 @@
 
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { InboxCloudWake } from "@plannotator/core/inbox-cloud";
 import { INBOX_SESSION_ID_PATTERN, isInboxId } from "@plannotator/core/inbox-types";
 import type { InboxReplyCommand, InboxWakeContext, InboxWakeReplyingTo } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -34,6 +35,8 @@ export interface FarWake {
   delivered_at: string | null;
   /** Taken back on the thread's computer before the session took it. */
   withdrawn?: true;
+  /** A cloud agent's wake here (inbox-cloud-wake.ts), as it stands: kept so a wake that went is never sent twice. */
+  cloud_wake?: InboxCloudWake;
 }
 
 /** The most a far wake's body may be: what an outbox entry holds (256 KB) bounds it there already. */
@@ -192,6 +195,15 @@ export function createInboxFarWakes(options: { dataDir: string; now?: () => Date
     return [...wakes.values()].filter((w) => w.reply_id === reply);
   };
 
+  /** A cloud agent's wake of `id` for `session` changed (inbox-cloud-wake.ts): kept on its far wake. */
+  const recordCloudWake = (session: string, id: string, cloud: InboxCloudWake): FarWake | null => {
+    const wake = find(id).find((w) => w.session === session);
+    if (!wake) return null;
+    const next = { ...wake, cloud_wake: cloud };
+    save(next);
+    return next;
+  };
+
   /** Every session a wake waits for, with its host. */
   const waiting = (): FarWake[] => [...wakes.values()].filter((w) => !w.delivered_at);
 
@@ -202,6 +214,7 @@ export function createInboxFarWakes(options: { dataDir: string; now?: () => Date
     placeOf,
     find,
     waiting,
+    recordCloudWake,
     /** Called with the session a new wake waits for (a held poll answers at once). */
     onWake: (listener: (session: string) => void) => {
       listeners.add(listener);

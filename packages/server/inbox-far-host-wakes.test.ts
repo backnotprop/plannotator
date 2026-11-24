@@ -13,6 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import type { AgentEnvironment, AgentRunResult } from "./inbox-agents";
+import type { InboxCloudAgent, InboxCloudAgents } from "./inbox-cloud-agents";
+import { createInboxCloudWake } from "./inbox-cloud-wake";
 import { createInboxCodexWake } from "./inbox-codex-wake";
 import { farWakeStore } from "./inbox-far-host-wakes";
 import { createInboxFarWakes, type FarWake } from "./inbox-far-wakes";
@@ -22,6 +24,7 @@ import { createInboxTagsRoute } from "./inbox-tags";
 const STUDIO = `ibx_01JZ${"0".repeat(20)}S1`;
 const MSG = (n: number) => `msg_01JZ${"0".repeat(20)}${String(n).padStart(2, "0")}`;
 const THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
+const CLOUD = "cloud.0123456789ab";
 
 const roots: string[] = [];
 const stops: (() => void)[] = [];
@@ -132,6 +135,47 @@ describe("a far tag for a session this Inbox wakes itself", () => {
   });
 });
 
+describe("a far tag for a cloud agent paired here", () => {
+  test("is posted to its webhook once with the far thread's words, and the started run is told to the thread's computer", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-far-cloud-")));
+    roots.push(root);
+    const dataDir = join(root, "data");
+    const store = InboxStore.open(dataDir);
+    const farWakes = createInboxFarWakes({ dataDir });
+    const told: string[] = [];
+    const far = farWakeStore(store, farWakes, (wake, session) => told.push(`${wake.reply_id} ${session}`));
+    const agent = { session: CLOUD, name: "Nightly fixer", preset: "other", url: "https://hooks.example.test/wake", key: "k", project_id: null, created_at: "2026-11-24T09:00:00.000Z", key_set_at: null, key_rejected_at: null, device_id: null } as InboxCloudAgent;
+    const agents = { list: () => [agent], agent: (s: string) => (s === CLOUD ? agent : null), homeRoot: () => null, markKeyRejected: () => {} } as unknown as InboxCloudAgents;
+    const posts: Record<string, unknown>[] = [];
+    const cloud = createInboxCloudWake({
+      store: far.store,
+      agents,
+      pin: () => {},
+      threadUrl: (threadId) => `http://laptop/#thread=${threadId}`,
+      gapMs: 0,
+      log: () => {},
+      fetch: (async (_url: string, init: { body: string }) => {
+        posts.push(JSON.parse(init.body) as Record<string, unknown>);
+        return new Response("{}", { status: 202 });
+      }) as unknown as typeof fetch,
+    });
+    stops.push(() => cloud.stop());
+    farWakes.receive(
+      STUDIO,
+      { reply_id: MSG(6), thread_id: MSG(1), session: CLOUD, host: "cloud-other", command: { type: "reply", id: MSG(6), thread_id: MSG(1), reply_to: MSG(1), subject: "Retry queue", body: "Nightly fixer, can you rerun the flaky job?", url: "http://studio/", tagged: { owner: "Claude Code" } } },
+      () => "http://laptop/#thread",
+    );
+    await until(() => told.length === 1);
+    expect(posts).toHaveLength(1);
+    expect(JSON.stringify(posts[0])).toContain("Nightly fixer, can you rerun the flaky job?");
+    expect(posts[0]!.thread).toEqual(expect.objectContaining({ id: MSG(1), subject: "Retry queue" }));
+    expect(told).toEqual([`${MSG(6)} ${CLOUD}`]);
+    await cloud.sweep();
+    expect(posts).toHaveLength(1);
+    expect(store.message(MSG(6))).toBeNull();
+  });
+});
+
 describe("the list a linked computer tags from (taggable-agents)", () => {
   test("offers a Codex thread this Inbox wakes, with the polling sessions", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-far-host-list-")));
@@ -143,5 +187,9 @@ describe("the list a linked computer tags from (taggable-agents)", () => {
     const route = createInboxTagsRoute({ store, serverSession: "srv", live, json: (body, status) => Response.json(body, { status: status ?? 200 }) });
     const rows = route.liveHere();
     expect(rows.map((row) => [row.session, row.host, row.taggable])).toEqual(expect.arrayContaining([[THREAD, "codex", true], ["ses_claude_here", "claude-code", expect.any(Boolean)]]));
+    // A cloud agent paired here, listed while this Inbox has a wake for it.
+    live.pinCloud(CLOUD, root, "Nightly fixer", "cloud-other");
+    const withWake = createInboxTagsRoute({ store, serverSession: "srv", live, json: (body) => Response.json(body), wokenHere: (session) => session === CLOUD });
+    expect(withWake.liveHere().map((row) => row.session)).toContain(CLOUD);
   });
 });

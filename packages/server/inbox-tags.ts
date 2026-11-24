@@ -76,6 +76,8 @@ export function createInboxTagsRoute(options: {
   live: ReturnType<typeof createInboxLiveSessions>;
   json: (body: unknown, status?: number) => Response;
   far?: InboxTaggableFar;
+  /** A session with no poll this Inbox wakes itself, so a linked computer's tag reaches it. Default: Codex, Qwen, T3, Antigravity. */
+  wokenHere?: (session: string, host: string) => boolean;
 }) {
   const { store, live, json } = options;
 
@@ -151,12 +153,14 @@ export function createInboxTagsRoute(options: {
   /**
    * This Inbox's own sessions a linked computer may tag in one of its threads (`GET taggable-agents` on the door,
    * inbox-far-tags.ts): the live ones whose connection polls here, and the ones this Inbox wakes itself (Codex, Qwen,
-   * T3, Antigravity: their wakes send a far wake as a local tag, inbox-far-host-wakes.ts), so each gets that computer's wake.
+   * T3, Antigravity, a cloud agent with a wake: their wakes send a far wake as a local tag, inbox-far-host-wakes.ts),
+   * so each gets that computer's wake.
    */
+  const wokenHere = options.wokenHere ?? ((_session: string, host: string) => FAR_WOKEN_HOSTS.has(host));
   const liveHere = (): InboxTaggableSession[] =>
     live
       .allLive()
-      .filter((entry) => entry.polls || FAR_WOKEN_HOSTS.has(entry.host))
+      .filter((entry) => entry.polls || wokenHere(entry.session, entry.host))
       .map((entry) => {
         const known = entry.root !== null ? store.projectByRoot(entry.root) : null;
         const project = entry.root !== null ? { id: null, name: known?.name ?? (basename(entry.root) || entry.root), root: null } : null;

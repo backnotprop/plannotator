@@ -11,7 +11,8 @@
  * store. A wake taken back there reads as taken back here, so a wake that has not sent it yet never does.
  */
 
-import { INBOX_ANTIGRAVITY_HOST, INBOX_CODEX_HOST, INBOX_QWEN_HOST, INBOX_T3_HOST, type InboxLine, type InboxMessage } from "@plannotator/core/inbox-types";
+import { isInboxCloudSession, type InboxCloudWake } from "@plannotator/core/inbox-cloud";
+import { INBOX_ANTIGRAVITY_HOST, INBOX_CODEX_HOST, INBOX_QWEN_HOST, INBOX_T3_HOST, type InboxLine, type InboxMessage, type InboxThread } from "@plannotator/core/inbox-types";
 import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { FarWake, InboxFarWakes } from "./inbox-far-wakes";
@@ -35,8 +36,12 @@ export function farWakeItem(wake: FarWake): InboxMessage {
     idempotency_key: null,
     tags: [{ host: wake.host, session: wake.session, wakes: true, ...(wake.command.handed_away ? { handed_away: true } : {}), ...delivered }],
     ...(wake.withdrawn ? { taken_back_at: wake.delivered_at } : {}),
+    ...(wake.cloud_wake ? { cloud_wake: wake.cloud_wake } : {}),
   } as InboxMessage;
 }
+
+/** Whether this Inbox wakes `session` of `host` itself, through a wake given `farWakeStore` (a cloud agent's: its webhook). */
+export const farWokenHere = (session: string, host: string | null): boolean => (host !== null && FAR_WOKEN_HOSTS.has(host)) || isInboxCloudSession(session);
 
 export interface FarWakeStore {
   /** The store the self-waking hosts' wakes are given. */
@@ -51,7 +56,7 @@ export function farWakeStore(store: InboxStore, farWakes: InboxFarWakes, deliver
     if (store.message(id)) return null;
     return farWakes.find(id).find((w) => session === undefined || w.session === session) ?? null;
   };
-  const waitingFor = (session: string) => farWakes.pendingFor(session).filter((w) => w.host !== null && FAR_WOKEN_HOSTS.has(w.host));
+  const waitingFor = (session: string) => farWakes.pendingFor(session).filter((w) => farWokenHere(w.session, w.host));
 
   const handover: InboxStore["handover"] = {
     hand: (item, session, way) => (farOf(item.id, session) ? true : store.handover.hand(item, session, way)),
@@ -90,6 +95,29 @@ export function farWakeStore(store: InboxStore, farWakes: InboxFarWakes, deliver
       return farWakeItem(done ?? far);
     },
     recordT3Wait: (id: string, wait: Parameters<InboxStore["recordT3Wait"]>[1]) => (farOf(id) ? null : store.recordT3Wait(id, wait)),
+    // The cloud wake: the thread's subject and the wake's own items, the details line its computer counted, and each
+    // state kept on the far wake (a run that started is that wake delivered).
+    thread: (threadId: string) => {
+      const real = store.thread(threadId);
+      if (real) return real;
+      const items = farWakes.waiting().filter((w) => w.thread_id === threadId);
+      return items.length === 0 ? null : ({ id: threadId, subject: items[0]!.command.subject, thread_name: null, messages: items.map(farWakeItem) } as unknown as InboxThread);
+    },
+    wakeContext: (message: InboxMessage, session: string | null) => {
+      const far = session === null ? null : farOf(message.id, session);
+      return far ? (far.command.context ?? { messages: 0, open_questions: 0, open_actions: 0 }) : store.wakeContext(message, session);
+    },
+    recordCloudWake: (id: string, cloud: InboxCloudWake, session: string, host: string) => {
+      const far = farOf(id, session);
+      if (!far) return store.recordCloudWake(id, cloud, session, host);
+      const kept = farWakes.recordCloudWake(session, id, cloud);
+      if (cloud.state === "started" && !far.delivered_at) {
+        const done = farWakes.delivered(session, id);
+        if (done) delivered(done, session);
+        return farWakeItem(done ?? kept ?? far);
+      }
+      return farWakeItem(kept ?? far);
+    },
     subscribe: (listener: (line: InboxLine) => void) => {
       const off = store.subscribe(listener);
       // A wake a linked computer handed one of these sessions reads as a person's line that tags it.
