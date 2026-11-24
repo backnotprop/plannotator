@@ -27,6 +27,12 @@ A diagram can use columns, a ring or explicitly positioned panels. Supply a pers
 
 Each entry in `parts` includes its kind, ID, title, references and bounds in the outer SVG coordinate system. Links also include their endpoints and sampled route. References contain display metadata. A link reference takes `{kind: "link", title, url}`. A file reference takes `{kind: "file", title, path, start?, end?, url?}`. Use a project-relative path and one-based line numbers. The host resolves references and owns annotations and AI conversations. Rendering performs no network requests for fonts or references.
 
+## Input limits
+
+A diagram supports up to 512 addressable parts in total. Each panel, named section, group and top-level link counts once, including parts whose IDs the renderer supplies. Up to 128 top-level and mini-graph links combined can carry a nonempty label.
+
+Each mini-graph grid can measure up to 8,192 pixels on each axis, including node labels, padding and any extra width its panel or column gives it. Node coordinates are relative, so the spacing between nodes determines the grid extent. A limit error names the part, label or graph field that exceeds the limit.
+
 ## Development and credits
 
 Run `npm test` in this directory. `npm pack` builds the package, including type declarations, the module worker and the four faces used for extended glyphs. The checked-in font geometry is the offline build input. To regenerate it, install Python fontTools and run `python3 scripts/generate-fonts.py /path/to/open-diagram` against upstream revision `387b2c09`. This extracts Inter 4.1 glyphs, advances, kerning and the default theme.
