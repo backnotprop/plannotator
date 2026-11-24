@@ -156,3 +156,62 @@ test.skipIf(!hasDom)('"/zzz" names no skill: Enter saves no skill and the field 
   expect(savedReactions()).toEqual([{ emoji: '🚀' }]);
   expect(changes).not.toContainEqual(expect.objectContaining({ op: 'skill' }));
 });
+
+async function keyIn(field: HTMLInputElement, key: string) {
+  await act(async () => {
+    field.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  });
+  await settle();
+}
+
+function withCatalog(skills: { name: string; root: 'claude' | 'plannotator' }[]) {
+  resetSkillCatalogCache();
+  setSkillCatalogTransport(async () => skills.map((s) => ({ ...s, description: `About ${s.name}`, humanOnly: false })));
+}
+
+test.skipIf(!hasDom)('a name typed in full wins over a Plannotator skill listed first: "/review" + Enter keeps review', async () => {
+  withCatalog([{ name: 'plannotator-review', root: 'plannotator' }, { name: 'review', root: 'claude' }]);
+  const field = await nameField('/review');
+  // The list keeps its order (Plannotator's first); the exact name is the active row.
+  expect(options().length).toBe(2);
+  expect(options()[0]!.textContent).toContain('plannotator-review');
+  expect(options()[0]!.getAttribute('aria-selected')).toBe('false');
+  expect(options()[1]!.getAttribute('aria-selected')).toBe('true');
+  await enter(field);
+  expect(savedReactions()).toEqual([{ emoji: '🚀', skill: 'review' }]);
+});
+
+test.skipIf(!hasDom)('the arrows move from the exact name\'s row; ArrowDown then Enter takes the row it landed on', async () => {
+  withCatalog([{ name: 'plannotator-review', root: 'plannotator' }, { name: 'review', root: 'claude' }]);
+  const field = await nameField('/review');
+  await keyIn(field, 'ArrowUp');
+  expect(options().map((o) => o.getAttribute('aria-selected'))).toEqual(['true', 'false']);
+  await keyIn(field, 'ArrowUp');
+  expect(options().map((o) => o.getAttribute('aria-selected'))).toEqual(['false', 'true']);
+  await keyIn(field, 'ArrowDown');
+  expect(options().map((o) => o.getAttribute('aria-selected'))).toEqual(['true', 'false']);
+  await enter(field);
+  expect(savedReactions()).toEqual([{ emoji: '🚀', skill: 'plannotator-review' }]);
+});
+
+test.skipIf(!hasDom)('a bare "/" + Enter saves no skill: nothing is active until a letter is typed', async () => {
+  withCatalog([{ name: 'picture-it', root: 'plannotator' }, { name: 'tidy-notes', root: 'claude' }]);
+  const field = await nameField('/');
+  expect(options().length).toBe(2);
+  expect(options().some((o) => o.getAttribute('aria-selected') === 'true')).toBe(false);
+  await enter(field);
+  expect(savedReactions()[0]!.skill).toBeUndefined();
+  expect(changes).not.toContainEqual(expect.objectContaining({ op: 'skill' }));
+});
+
+test.skipIf(!hasDom)('the skill list could not be read: "/test-it" + Enter keeps the name as typed (unknown is not missing)', async () => {
+  resetSkillCatalogCache();
+  setSkillCatalogTransport(async () => {
+    throw new Error('offline');
+  });
+  const field = await nameField('/test-it');
+  expect(options()).toEqual([]);
+  await enter(field);
+  expect($('[data-name-field]')).toBeNull();
+  expect(savedReactions()).toEqual([{ emoji: '🚀', skill: 'test-it' }]);
+});

@@ -4,8 +4,9 @@
  * writes `/name` into the field. "Test it /test-it" names the emoji and gives it a skill. The field's words are
  * painted as a skill while they are only one, and only a skill there is.
  *
- * In this one-line field "/" only ever means a skill, so the list's first row is active as it opens (`firstActive`):
- * "/tid" then Enter takes the first skill listed and keeps it, as a pick then Enter would; Tab takes it and stays.
+ * In this one-line field "/" only ever means a skill, so once a letter is typed a row is active (`firstActive`): the
+ * one named exactly what was typed, else the first. "/tid" then Enter takes it and keeps it, as a pick then Enter
+ * would; Tab takes it and stays. A bare "/" has none, so its Enter is the field's.
  */
 import { useEffect, useId, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
 import { useSkillReferenceAutocomplete } from '@plannotator/ui/hooks/useSkillReferenceAutocomplete';

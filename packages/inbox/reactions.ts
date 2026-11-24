@@ -145,10 +145,13 @@ export function skillSavedReaction(index: number, skill: string): void {
 /**
  * The skill a `/name` in the editor's field names: this computer's skill of that name (the list's own spelling, any
  * case typed), or the emoji's own skill as it is saved (one a linked computer gave it). Null: no such skill.
+ * With no list read (its request failed or is still on its way; the Inbox's list always holds its built-ins), what
+ * is there is not known: the name is taken as typed, as before.
  */
 export function knownReactionSkill(name: string, own?: string): string | null {
   if (own && name === own) return own;
   const catalog = getCachedSkillCatalog();
+  if (catalog.length === 0) return name;
   return (catalog.find((s) => s.name === name) ?? catalog.find((s) => s.name.toLowerCase() === name.toLowerCase()))?.name ?? null;
 }
 

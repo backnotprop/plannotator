@@ -104,9 +104,10 @@ export function useSkillReferenceAutocomplete(options: {
    */
   quietOnDelete?: boolean;
   /**
-   * The list's first row is active whenever the list is open (opt-in; a one-line field where `/` only ever means a
-   * skill, the Inbox's saved-emoji name): Enter and Tab take it, the arrows move from it. Typing re-filters and the
-   * first row of the new list is active again. Absent: the no-preselection invariant above, as before.
+   * Once a query character is typed, a row is active (opt-in; a one-line field where `/` only ever means a skill, the
+   * Inbox's saved-emoji name): the row named exactly what was typed, else the first. Enter and Tab take it, the arrows
+   * move from it; the list's order is unchanged. Typing re-filters and picks again. A bare trigger has no active row,
+   * so its Enter is the field's. Absent: the no-preselection invariant above, as before.
    */
   firstActive?: boolean;
 }): UseSkillReferenceAutocompleteResult {
@@ -186,8 +187,15 @@ export function useSkillReferenceAutocomplete(options: {
 
   // Never let a stale activation point past the list (catalog refreshes can
   // shrink it without a query change). Out of range reads as "nothing active".
+  // `firstActive`: the row named exactly what was typed, else the first; a bare trigger (nothing typed yet) has none.
+  const defaultActive = useMemo(() => {
+    if (!firstActive || !trigger || trigger.query.length === 0 || items.length === 0) return null;
+    const exact = items.findIndex((row) => row.name === trigger.query);
+    const folded = exact >= 0 ? exact : items.findIndex((row) => row.name.toLowerCase() === trigger.query.toLowerCase());
+    return folded >= 0 ? folded : 0;
+  }, [firstActive, items, trigger]);
   const boundedActive =
-    activeIndex !== null && activeIndex >= 0 && activeIndex < items.length ? activeIndex : firstActive && items.length > 0 ? 0 : null;
+    activeIndex !== null && activeIndex >= 0 && activeIndex < items.length ? activeIndex : defaultActive;
 
   const readCaret = useCallback(() => {
     const el = textareaRef.current;
