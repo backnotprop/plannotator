@@ -12,21 +12,21 @@ import type { InboxEventHandlers, SettingsModel } from './api';
 
 export type InboxCapabilities = Parameters<NonNullable<InboxEventHandlers['onCapabilities']>>[0];
 
-type CapabilitySettings = Pick<SettingsModel, 'board' | 'steps' | 'bro' | 'float_drafts' | 'mark_read_warning' | 'code_review' | 'shape' | 'system' | 'chapter_diagrams' | 'scheduled_threads' | 'plans'>;
+type CapabilitySettings = Pick<SettingsModel, 'board' | 'steps' | 'bro' | 'float_drafts' | 'mark_read_warning' | 'code_review' | 'system' | 'chapter_diagrams' | 'scheduled_threads' | 'plans'>;
 
 /** True when the frame names any switch (an empty one: the window reads the settings again instead). */
 export function namesCapability(capabilities: InboxCapabilities): boolean {
-  return Boolean(capabilities.board || capabilities.steps || capabilities.bro || capabilities.float_drafts || capabilities.mark_read_warning || capabilities.split_view || capabilities.code_review || capabilities.shape || capabilities.system || capabilities.chapter_diagrams || capabilities.scheduled_threads || capabilities.plans);
+  return Boolean(capabilities.board || capabilities.steps || capabilities.bro || capabilities.float_drafts || capabilities.mark_read_warning || capabilities.split_view || capabilities.code_review || capabilities.system || capabilities.chapter_diagrams || capabilities.scheduled_threads || capabilities.plans);
 }
 
 export function withCapabilities<S extends CapabilitySettings>(current: S, capabilities: InboxCapabilities): S {
-  const { board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: codeReview, shape, system, chapter_diagrams: chapterDiagrams, scheduled_threads: scheduled, plans } = capabilities;
-  return { ...current, ...(board ? { board } : {}), ...(steps ? { steps } : {}), ...(bro ? { bro } : {}), ...(floatDrafts ? { float_drafts: floatDrafts } : {}), ...(markReadWarning ? { mark_read_warning: markReadWarning } : {}), ...(splitView ? { split_view: splitView } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(shape ? { shape } : {}), ...(system ? { system } : {}), ...(chapterDiagrams ? { chapter_diagrams: chapterDiagrams } : {}), ...(scheduled ? { scheduled_threads: { ...current.scheduled_threads, on: scheduled.on } } : {}), ...(plans ? { plans } : {}) };
+  const { board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: codeReview, system, chapter_diagrams: chapterDiagrams, scheduled_threads: scheduled, plans } = capabilities;
+  return { ...current, ...(board ? { board } : {}), ...(steps ? { steps } : {}), ...(bro ? { bro } : {}), ...(floatDrafts ? { float_drafts: floatDrafts } : {}), ...(markReadWarning ? { mark_read_warning: markReadWarning } : {}), ...(splitView ? { split_view: splitView } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(system ? { system } : {}), ...(chapterDiagrams ? { chapter_diagrams: chapterDiagrams } : {}), ...(scheduled ? { scheduled_threads: { ...current.scheduled_threads, on: scheduled.on } } : {}), ...(plans ? { plans } : {}) };
 }
 
 export function capabilityListener(setSettings: Dispatch<SetStateAction<SettingsModel | null>>, refresh: () => Promise<unknown>) {
   return (capabilities: InboxCapabilities) => {
-    if (capabilities.code_review || capabilities.shape || capabilities.scheduled_threads) reloadSkillCatalog();
+    if (capabilities.code_review || capabilities.scheduled_threads) reloadSkillCatalog();
     if (namesCapability(capabilities)) setSettings((current) => current ? withCapabilities(current, capabilities) : current);
     else void refresh();
   };

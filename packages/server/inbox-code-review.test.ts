@@ -321,18 +321,18 @@ describe("the skills catalog", () => {
   const catalog = async (codeReview: boolean, discovered: { name: string; root: string; description: string }[]) =>
     ((await inboxSkillCatalog(codeReview, () => discovered as never).json()) as { skills: { name: string; root: string; humanOnly?: boolean }[] }).skills;
 
-  test("off: no review skill; on: the offered review skills after /picture-it, review-guide left out", async () => {
+  test("off: no review skill; on: the offered review skills after /picture-it and /diagram, review-guide left out", async () => {
     const own = [{ name: "deploy", root: "agents-project", description: "Ship it" }];
     const w = await world();
     const offList = ((await (await fetch(`${w.base}/api/inbox/skills`)).json()) as { skills: { root: string }[] }).skills;
-    expect((offList as { name: string; root: string }[]).filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it"]);
+    expect((offList as { name: string; root: string }[]).filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it", "diagram"]);
     await w.setCodeReview(true);
     const onList = ((await (await fetch(`${w.base}/api/inbox/skills`)).json()) as { skills: { name: string; root: string }[] }).skills;
-    expect(onList.filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it", ...INBOX_REVIEW_SKILL_NAMES]);
+    expect(onList.filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it", "diagram", ...INBOX_REVIEW_SKILL_NAMES]);
     expect(onList.some((s) => s.name === "review-guide")).toBe(false);
 
     const on = await catalog(true, own);
-    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:picture-it", "plannotator:review-curate", "plannotator:review-walkthrough", "plannotator:review-recheck", "agents-project:deploy"]);
+    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:picture-it", "plannotator:diagram", "plannotator:review-curate", "plannotator:review-walkthrough", "plannotator:review-recheck", "agents-project:deploy"]);
     expect(on[0]!.humanOnly).toBe(true);
   });
 

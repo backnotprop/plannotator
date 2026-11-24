@@ -12,7 +12,7 @@ test("Inbox offers diagram authoring on a fresh install and sends the bundled in
   expect(skills.filter((skill: ReferenceSkill) => skill.name === "diagram")).toMatchObject([
     { root: "plannotator", humanOnly: true },
   ]);
-  const switches = { codeReview: false, shape: false, routines: false, diagrams: false };
+  const switches = { codeReview: false, routines: false, diagrams: false };
   const message = inboxSkillsBlockFor(["diagram"], switches, sources);
   expect(message).toContain("BEGIN SKILL INSTRUCTIONS: diagram");
   expect(message).toContain("plannotator diagram render");

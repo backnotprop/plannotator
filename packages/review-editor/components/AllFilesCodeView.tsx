@@ -25,6 +25,7 @@ import type {
   ConventionalDecoration,
   ConventionalLabel,
   DiffAnnotationMetadata,
+  ImageAttachment,
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
@@ -333,7 +334,8 @@ export interface AllFilesCodeViewProps {
   onExplainAnnotation?: (id: string) => void;
   agentFindingSources?: ReadonlySet<string>;
   // Header actions (P3). Mirror AllFilesDiffView's header surface.
-  onAddFileCommentForFile?: (filePath: string, text: string) => void;
+  /** A file's comment box: its words and what was attached (pictures, files). */
+  onAddFileCommentForFile?: (filePath: string, text: string, images?: ImageAttachment[]) => void;
   viewedFiles?: Set<string>;
   onToggleViewed?: (filePath: string) => void;
   /** Chrome preference (#1277): false hides the header Viewed buttons; the `v`
@@ -512,7 +514,7 @@ export interface AllFilesCodeViewProps {
   askOnly?: boolean;
   /**
    * A host's choices for selected lines before the comment box (the Inbox's
-   * code review: Comment · Ask · Show me). Absent: a selection opens the
+   * code review: Comment · Ask). Absent: a selection opens the
    * comment box at once, as always.
    */
   selectionActions?: DiffSelectionActions;
@@ -3083,6 +3085,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
               'F', a.id, a.text ?? '', a.source ?? '', a.author ?? '',
               a.reviewProfileLabel ?? '', a.conventionalLabel ?? '',
               (a.decorations ?? []).join(','), a.createdAt ?? 0, a.reasoning ?? '',
+              (a.images ?? []).map((image) => image.path),
             ])
           : JSON.stringify([
               a.id, a.lineEnd, a.side, a.type,
@@ -4633,8 +4636,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           contextText={fileCommentAnchor.filePath.split('/').pop() || fileCommentAnchor.filePath}
           isGlobal={false}
           draftKey={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${fileCommentAnchor.filePath}`}
-          onSubmit={(text) => {
-            onAddFileCommentForFile(fileCommentAnchor.filePath, text);
+          onSubmit={(text, images) => {
+            onAddFileCommentForFile(fileCommentAnchor.filePath, text, images);
             setFileCommentAnchor(null);
           }}
           onClose={() => setFileCommentAnchor(null)}

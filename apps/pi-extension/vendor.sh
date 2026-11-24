@@ -51,26 +51,6 @@ printf '// @generated — DO NOT EDIT. Source: @plannotator/sem-jiff src/grammar
 sed -i.bak -e "s|from ['\"]@plannotator/sem-jiff/opinions['\"]|from './sem-diff-opinions.ts'|g" -e "s|from ['\"]@plannotator/sem-jiff/candidate['\"]|from './sem-diff-candidate.ts'|g" generated/sem-diff-opinion.ts && rm -f generated/sem-diff-opinion.ts.bak
 sed -i.bak -e "s|from ['\"]@plannotator/sem-jiff/grammars['\"]|from './sem-diff-grammars.ts'|g" generated/sem-diff-assets.ts && rm -f generated/sem-diff-assets.ts.bak
 
-# Shape (the living board): the format (core/shape), the store and the route
-# core Pi's Shape routes mount (server/serverShape.ts). The store keys a shape's
-# project like the Inbox does (shared/inbox/project-key).
-mkdir -p generated/shape generated/inbox
-printf '// @generated — DO NOT EDIT. Source: packages/core/ulid.ts\n' | cat - ../../packages/core/ulid.ts > generated/ulid.ts
-printf '// @generated — DO NOT EDIT. Source: packages/core/shape.ts\n' | cat - ../../packages/core/shape.ts \
-  | sed -e "s|from ['\"]\./guide['\"]|from '../guide.ts'|g" -e "s|from ['\"]\./ulid['\"]|from '../ulid.ts'|g" \
-    -e "s|from ['\"]\./shape-scene['\"]|from './shape-scene.ts'|g" \
-  > generated/shape/core.ts
-# A board's scenes (core/shape checks them; shape-scene reads core/shape's types).
-printf '// @generated — DO NOT EDIT. Source: packages/core/shape-scene.ts\n' | cat - ../../packages/core/shape-scene.ts \
-  | sed "s|from ['\"]\./shape['\"]|from './core.ts'|g" > generated/shape/shape-scene.ts
-printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/format.ts\n' | cat - ../../packages/shared/shape/format.ts \
-  | sed "s|from ['\"]@plannotator/core/shape['\"]|from './core.ts'|g" > generated/shape/format.ts
-# One line each (not a loop): tests/parity/vendor-parity.test.ts reads these paths to match Pi's imports.
-printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/store.ts\n' | cat - ../../packages/shared/shape/store.ts > "generated/shape/store.ts"
-printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/routes.ts\n' | cat - ../../packages/shared/shape/routes.ts > "generated/shape/routes.ts"
-printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/project-key.ts\n' | cat - ../../packages/shared/inbox/project-key.ts \
-  | sed "s|from ['\"]@plannotator/core/project['\"]|from '../project.ts'|g" > generated/inbox/project-key.ts
-
 # The Plannotator Inbox connection (plannotator_inbox and the reply wake):
 # the pure contract and the node-runtime link the OpenCode plugin uses too.
 # agent-link imports ./connection, ../loopback-proxy (vendored flat above) and

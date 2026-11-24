@@ -29,10 +29,10 @@
  * the policy allows, never as a fallback. Same-origin is the Inbox's global
  * POST guard; the stale-tab guard is checked here.
  *
- * A referenced file (Shape's references, a review's diff headers; while Code
+ * A referenced file (a review's diff headers; while Code
  * review is on) is not a record, so its route takes a project-relative path and
  * a scope, never a root: `thread` (with `message`, the message's own project
- * first; with `from: "root"` for a diff's path), `shape`, or `repo` (a PR page: `host/owner/repo`, every clone here).
+ * first; with `from: "root"` for a diff's path), or `repo` (a PR page: `host/owner/repo`, every clone here).
  * The server finds the roots and `checkInboxProjectFile` holds the path to them.
  * A path out of the project is refused at launch and reads as not found.
  *
@@ -67,7 +67,7 @@ import { INBOX_MESSAGE_IMAGE_CSP } from "@plannotator/shared/inbox/message-image
 import { isShapeProjectPath } from "@plannotator/core/shape";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { isLinkedWorktree } from "@plannotator/shared/shape/store";
+import { isLinkedWorktree } from "@plannotator/shared/linked-worktree";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
   currentPlatform,
@@ -129,8 +129,6 @@ export interface InboxOpenInRouteContext {
   launcher: InboxOpenInLauncher;
   /** The Settings → Capabilities switch a referenced file's route sits behind. */
   codeReviewOn: () => boolean;
-  /** A shape's project folder, or null when there is no such shape (or Shape is off). */
-  shapeRoot: (id: string) => string | null;
   /** The folders of every project on a repository (`host/owner/repo`, lowercased). */
   repoRoots: (repo: string) => string[];
   /** The pull requests a thread owns, the latest hand-over first. */
@@ -172,7 +170,6 @@ function realpathOrNull(path: string): string | null {
 interface FileScope {
   thread?: unknown;
   message?: unknown;
-  shape?: unknown;
   repo?: unknown;
   /** A PR page: the pull request whose version of a file its hover shows. */
   pull?: unknown;
@@ -265,7 +262,7 @@ function kindOfName(name: string): string {
 }
 
 export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
-  const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots, threadPulls, pullFile } = context;
+  const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, repoRoots, threadPulls, pullFile } = context;
   const givenHome = context.home ?? homedir();
   const home = realpathOrNull(givenHome) ?? givenHome;
   // The home folder as given and at its realpath (`/home` -> `/var/home`), so either spelling of `~/.plannotator` is
@@ -278,17 +275,13 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   const refusedHere = (path: string): boolean => secretOrSystem(path) || isPlannotatorState(path, dataDirs);
 
   /**
-   * Where a scope's path may be, in the order to try. A shape's or a repository's path starts at its root, and so does
+   * Where a scope's path may be, in the order to try. A repository's path starts at its root, and so does
    * a diff's (`from: "root"`). A message's link is as the agent wrote it, so it starts in the checkout the agent wrote
    * from: at its folder (`base_path`), then at that checkout's top. Other projects come after, except that an agent in a
    * linked worktree never falls back to the main checkout: that copy is not the agent's file. An absolute path says
    * which of these it means.
    */
   const placesOf = (scope: FileScope, named: string): InboxProjectFilePlace[] => {
-    if (typeof scope.shape === "string") {
-      const root = shapeRoot(scope.shape);
-      return root ? [{ root, relative: named }] : [];
-    }
     if (typeof scope.repo === "string") return repoRoots(scope.repo.toLowerCase()).map((root) => ({ root, relative: named }));
     if (typeof scope.thread !== "string") return [];
     const first = store.message(scope.thread);
@@ -326,7 +319,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
       const url = new URL(req.url);
       if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
       const params = url.searchParams;
-      const scope = { thread: params.get("thread"), message: params.get("message"), shape: params.get("shape"), repo: params.get("repo"), from: params.get("from") };
+      const scope = { thread: params.get("thread"), message: params.get("message"), repo: params.get("repo"), from: params.get("from") };
       const file = await checkInboxProjectFile(placesOf(scope, params.get("path") ?? ""));
       return json(file.ok ? { found: true, path: file.path, kind: file.kind } : { found: false });
     }
@@ -355,7 +348,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     const url = new URL(req.url);
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
     const params = url.searchParams;
-    const scope: FileScope = { thread: params.get("thread"), message: params.get("message"), shape: params.get("shape"), repo: params.get("repo"), pull: params.get("pull"), from: params.get("from") };
+    const scope: FileScope = { thread: params.get("thread"), message: params.get("message"), repo: params.get("repo"), pull: params.get("pull"), from: params.get("from") };
     const named = params.get("path") ?? "";
     const places = placesOf(scope, named);
     const pulls = typeof scope.pull === "string" ? [scope.pull] : typeof scope.thread === "string" ? threadPulls(scope.thread) : [];

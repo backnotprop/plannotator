@@ -5021,7 +5021,7 @@
     },
     {
       "id": "messages-110",
-      "title": "Add: \"You added <agent> to this thread\" above the reply; later replies go to it too",
+      "title": "Add: \"You added <agent> to this thread\" above the reply; a later reply reaches it only when the reply box names it",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -9169,9 +9169,7 @@
     {
       "id": "files-142",
       "title": "Show me: agent draws a board that opens over the review; a part click jumps to its code; corner card brings it back",
-      "surface": [
-        "frame:shapes"
-      ],
+      "surface": [],
       "flows": [],
       "mobile": "later",
       "why": "L-off: needs Shape on at the computer; an agent-drawn board over the review",
@@ -17952,10 +17950,7 @@
     {
       "id": "window-only-shapes",
       "title": "Window endpoints under shapes with no door route",
-      "surface": [
-        "window:/api/shapes",
-        "window:/api/shapes/*"
-      ],
+      "surface": [],
       "flows": [],
       "mobile": "later",
       "why": "L-nodoor: the phone reaches these only once a door route is added for them (shapes).",
@@ -19993,7 +19988,6 @@
         "setting:board",
         "setting:code_review",
         "setting:scheduled_threads",
-        "setting:shape",
         "setting:steps",
         "setting:system"
       ],

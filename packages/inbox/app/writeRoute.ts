@@ -7,7 +7,7 @@ import { pushScreen, whileWritingRoute } from '../history';
 import { withFullMark, type FullMark } from '../fullScreenOrigin';
 import { settingsHash } from '../settingsRoute';
 import { boardFilterHash } from '../board/model';
-import { writeShapeReviewAt } from '../shape/review';
+import { writeReviewAt } from './reviewAt';
 import { readRoute, type Route } from './route';
 import { viewScopeHash } from '../pulls/viewScope';
 
@@ -20,7 +20,6 @@ export function hashOf(route: Route): string {
   else if (route.page === 'artifacts') hash = route.pinned ? 'artifacts=pinned' : 'artifacts';
   else if (route.page === 'plans') hash = plansHash(route);
   else if (route.page === 'scheduled') hash = route.scheduled ? `routine=${encodeURIComponent(route.scheduled)}${route.routineRuns ? '&runs' : ''}` : 'routines';
-  else if (route.page === 'shapes') hash = route.shape ? `shapes&shape=${encodeURIComponent(route.shape)}` : 'shapes';
   else if (route.page === 'board')
     hash =
       (route.board && route.board !== 'lanes' ? `board=${route.board}` : 'board') +
@@ -78,8 +77,7 @@ export function hashOf(route: Route): string {
       if (route.ref.lineEnd) params.set('to', String(route.ref.lineEnd));
     }
     if (route.thread && route.guide) params.set('guide', route.guide);
-    if (route.thread && route.guide) writeShapeReviewAt(params, route.guideAt);
-    if (route.thread && route.shape) params.set('shape', route.shape);
+    if (route.thread && route.guide) writeReviewAt(params, route.guideAt);
     // A thread opened from a Board card: its way back is the card (`&card=crd_…`).
     if (route.thread && route.card) params.set('card', route.card);
     if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);

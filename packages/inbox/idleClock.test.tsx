@@ -4,8 +4,8 @@
  *
  * What regresses: idle coming without the full quiet length, or input (a pointer move, a key, a scroll, a touch) not
  * starting the count again; idle while the tab is hidden or the window blurred, or the count carrying over a hidden
- * spell; idle while a field has focus, a dialog (modal or not), menu, popover, the Ask AI window, a Shape board or the
- * annotation toolbar is open, or the page says it is busy; an open disclosure (a Smart group's band, a sidebar section:
+ * spell; idle while a field has focus, a dialog (modal or not), menu, popover, the Ask AI window or the annotation
+ * toolbar is open, or the page says it is busy; an open disclosure (a Smart group's band, a sidebar section:
  * `aria-expanded` with no popup) keeping idle away (review of #2916, finding 1); a clock that is off still counting.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -151,7 +151,6 @@ describe.skipIf(!hasDom)('the idle clock', () => {
     ['a popover (its trigger expanded)', () => popoverTrigger()],
     ['a non-modal dialog (a comment list, a confirm)', () => element('div', 'role', 'dialog')],
     ['the Ask AI window', () => element('div', 'data-chat-window', '')],
-    ['a Shape board over the thread', () => element('main', 'data-shape-open', '')],
     ['the annotation toolbar', () => Object.assign(document.createElement('div'), { className: 'annotation-toolbar' })],
   ];
   for (const [what, make] of overlays) {

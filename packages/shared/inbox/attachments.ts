@@ -535,7 +535,7 @@ export interface InboxProjectFilePlace {
 export type InboxProjectFile = { ok: true; path: string; kind: InboxAttachmentKind } | { ok: false; code: "missing" | "refused" };
 
 /**
- * A file a reference names, relative to a project (Shape's references, a review's diff headers), for "Open in":
+ * A file a reference names, relative to a project (a review's diff headers), for "Open in":
  * the attachment rules with the project in place of a record. The name is a plain project path, the file's realpath
  * stays inside the root (a symlink out of it is refused), it is a regular file, and neither its own name nor its
  * target's is of the dotenv family. The kind comes from its name and first bytes, as a send decides it, so the same

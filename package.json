@@ -42,7 +42,6 @@
     "package:vscode": "bun run --cwd apps/vscode-extension package",
     "check:release-version": "node scripts/check-release-version.mjs",
     "check:sibling-deps": "bun scripts/check-sibling-deps.ts",
-    "gen:skills": "bun scripts/gen-skill-sections.ts",
     "test": "bun test",
     "test:sandbox": "bun scripts/test-sandbox.ts",
     "postinstall": "bun apps/guides-show/build/sync-manifest.ts --if-missing && bun run --cwd packages/diagrams build",

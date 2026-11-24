@@ -13,7 +13,6 @@ import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
 import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } from '@plannotator/core/inbox-system';
 import type { SystemModel } from '@plannotator/system';
-import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
@@ -406,8 +405,6 @@ export interface SettingsModel {
   mark_read_warning?: { on: boolean };
   /** Code review (config.json `inboxCodeReview`, approval "inbox-code-review-direction"): off unless the person turned it on. Absent from an older Inbox (off then). */
   code_review?: { on: boolean };
-  /** Shape (Settings → Capabilities): the boards agents draw. Absent from an older Inbox. */
-  shape?: { on: boolean };
   /**
    * System (config.json `inboxSystem`, approval "system-inbox"): its switch, present only while Code review is on (the
    * Settings row shows only then). Whether System shows is `systemShown()` (system/gate.ts).
@@ -1311,7 +1308,6 @@ export const inboxApi = {
   saveMarkReadWarning: (on: boolean) => post<{ mark_read_warning: { on: boolean } }>(inboxUrl('/settings'), { mark_read_warning: { on } }),
   /** Code review on or off (Settings → Capabilities, approval "inbox-code-review-direction"): every window hears `event: capabilities`. */
   saveCodeReview: (on: boolean) => post<{ code_review: { on: boolean } }>(inboxUrl('/settings'), { code_review: { on } }),
-  saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
   /** System on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
   saveSystem: (on: boolean) => post<{ system?: { on: boolean } }>(inboxUrl('/settings'), { system: { on } }),
   /** Chapter diagrams on or off (Settings → Capabilities, under Code review): every window hears `event: capabilities`. */
@@ -1323,16 +1319,6 @@ export const inboxApi = {
   /** System's setup dialog (System on only): the projects found on this Mac with a git remote, and one project's save. */
   systemSetup: () => get<SystemSetupAnswer>(inboxUrl('/system/setup')),
   saveSystemSetup: (input: SystemSetupInput) => post<{ setup: SystemSetup }>(inboxUrl('/system/setup'), { ...input }),
-  // Shape (packages/server/shape-routes.ts): this computer's boards only, never another machine's.
-  shapes: (signal?: AbortSignal) => get<{ shapes: InboxShapeSummary[] }>('/api/shapes?preview=1', signal),
-  /** Where a board's kept picture loads from. */
-  shapeFileUrl: (id: string, src: string) => `/api/shapes/${encodeURIComponent(id)}/files/${encodeURIComponent(src.replace(/^files\//, ''))}`,
-  shape: (id: string, n?: number) => get<ShapeLoadedWire>(`/api/shapes/${encodeURIComponent(id)}${n ? `?n=${n}` : ''}`),
-  shapeNote: (id: string, input: Record<string, unknown>) => post<{ note: ShapeNote }>(`/api/shapes/${encodeURIComponent(id)}/notes`, input),
-  shapeAnswer: (id: string, input: { re: string; text: string; from: { host: string; id: string } }) => post<{ note: ShapeNote }>(`/api/shapes/${encodeURIComponent(id)}/answer`, input),
-  shapeSeen: (id: string, n: number) => post<{ seen: number | null }>(`/api/shapes/${encodeURIComponent(id)}/seen`, { n }),
-  shapeCodeFile: (id: string, path: string) => get<{ content: string }>(`/api/shapes/${encodeURIComponent(id)}/code/file?path=${encodeURIComponent(path)}`),
-  shapeCodeHover: (id: string, request: Record<string, unknown>) => post<unknown>(`/api/shapes/${encodeURIComponent(id)}/code/hover`, request),
   /**
    * A thread's steps, each session's list with its presence now (approval "inbox-thread-steps"). A linked
    * machine's thread has none here (its read is not forwarded), and an Inbox older than steps answers 404: both
@@ -2022,8 +2008,8 @@ export const inboxApi = {
   /** Ask AI (packages/server/inbox-ask.ts): the chat list, one thread's chat, a question, and what the window saw. */
   askChats: () => get<{ chats: InboxAskChat[] }>(inboxUrl('/ask')),
   askRead: (threadId: string) => get<InboxAskModel>(inboxUrl(`/threads/${threadId}/ask`)),
-  askSend: (threadId: string, turnId: string, question: string, showMe?: InboxShowMeAsk, source?: string) =>
-    post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question, ...(showMe ?? {}), ...(source ? { source } : {}) }),
+  askSend: (threadId: string, turnId: string, question: string, source?: string) =>
+    post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question, ...(source ? { source } : {}) }),
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
@@ -2043,20 +2029,9 @@ export interface InboxAskTurnWire {
   answered_at?: string;
   stopped?: boolean;
   failure?: 'gone' | 'taken_over' | 'failed';
-  /** A Show me (code review in the Inbox): the agent was asked for a Shape of these lines of a review. */
+  /** An older Inbox's Show me, as it was stored: the Ask window shows it as the person asked it (`askShownQuestion`). */
   kind?: 'show_me';
   show_me?: InboxShowMeTarget;
-  /** Show me again: the board it asked to bring up to date. */
-  again_shape?: string;
-  /** The board this Show me made, once it has one. */
-  shape?: string;
-}
-
-/** What a Show me sends beside its question on `POST …/ask`. */
-export interface InboxShowMeAsk {
-  kind: 'show_me';
-  show_me: InboxShowMeTarget;
-  again_shape?: string;
 }
 
 export interface InboxAskConversationWire {
@@ -2146,31 +2121,4 @@ interface LinkedPageBase {
 
 export type LinkedPageView = LinkedPageBase & ({ html: string } | { html: null; text: string });
 
-// ───────────────────────────── Shape ─────────────────────────────
-
-/** One board in the list (packages/shared/shape/store.ts `ShapeSummary`), with its latest Picture for the grid. */
-export interface InboxShapeSummary {
-  id: string;
-  title: string;
-  project: { name: string; root: string };
-  thread: string | null;
-  state: 'active' | 'finished';
-  updated: string;
-  latest: number;
-  seen: number | null;
-  changed: boolean;
-  drawing: boolean;
-  waiting: number;
-  session: { host: string; id: string } | null;
-  preview?: { picture: ShapeDrawnView | null; refs: ShapeRef[] } | null;
-}
-
-/** `GET /api/shapes/:id`. */
-export interface ShapeLoadedWire {
-  shape: ShapeRecord;
-  version: ShapeVersion;
-  seen: number | null;
-  notes: ShapeNote[];
-  session: { state: 'live' | 'busy' | 'gone'; agent: string };
-}
 

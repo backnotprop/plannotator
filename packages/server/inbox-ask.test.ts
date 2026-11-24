@@ -260,6 +260,10 @@ describe("the conversation file", () => {
       { turn_id: "turn-0001", question: "Why?", passage: 7 },
       { turn_id: "turn-0001", question: "Why?", source: 7 },
       { turn_id: "turn-0001", question: "Why?", source: "x".repeat(INBOX_ASK_TEXT_MAX + 1) },
+      // An older window's Show me (gone): refused, so no request to draw reaches an agent.
+      { turn_id: "turn-0001", question: "Show me", kind: "show_me" },
+      { turn_id: "turn-0001", question: "Show me", show_me: { review: null, file: "a.ts", lines: [1, 2], round: null, words: "x" } },
+      { turn_id: "turn-0001", question: "Show me again", again_shape: "shp_01J8ZK3TQ4VW7Y9A2B5C6D8E0F" },
     ]) {
       expect((await fromWindow(server, askPath(thread_id), body)).status).toBe(422);
     }
