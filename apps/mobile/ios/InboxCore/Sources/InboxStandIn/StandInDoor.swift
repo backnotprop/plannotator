@@ -88,6 +88,8 @@ public actor StandInDoor {
     unread.insert(thread.threadId)
   }
   public func setOptions(_ change: @Sendable (inout Options) -> Void) { change(&options) }
+  /// The door forgets the keys it answered (its log of them ends): a write sent again is applied again.
+  public func forgetKeys() { replays = [:] }
   public func clearCalls() { calls = [] }
   /// The thread is gone from the computer (deleted there): every read of it is `404 thread_not_found`.
   public func removeThread(_ id: ThreadID) { threads.removeAll { $0.threadId == id } }
@@ -144,7 +146,12 @@ public actor StandInDoor {
     }
     if route == "POST markups" { return keepDrawing(call) }
     if route == "POST uploads" { return keepUpload(call) }
-    return post(call, route: route)
+    let answer = post(call, route: route)
+    if call.path.hasSuffix("/take-back"), state.lostTakeBacks > 0 {
+      state.lostTakeBacks -= 1
+      throw URLError(.networkConnectionLost)
+    }
+    return answer
   }
 
   private func get(_ call: DoorCall) -> DoorAnswerBytes {
@@ -511,8 +518,8 @@ public actor StandInDoor {
       let now = StandInData.iso(Date())
       let written = InboxMessageWire(
         seq: seq, id: replyID, projectId: asked.projectId, threadId: asked.threadId, replyTo: message.rawValue, author: InboxAuthor(kind: .person),
-        body: [words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, feedback].filter { !$0.isEmpty }.joined(separator: "\n\n"), createdAt: now,
-        delivery: InboxDelivery(state: "queued", host: asked.author.host ?? "", session: asked.author.session ?? "", at: now))
+        // No `delivery`: the Inbox writes one only once the agent has the reply.
+        body: [words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, feedback].filter { !$0.isEmpty }.joined(separator: "\n\n"), createdAt: now)
       var quoted = written
       if !tagged.tags.isEmpty { quoted.tags = tagged.tags }
       // The quote, as the Inbox keeps it on the reply, and the lead it writes in front of the words for the agent

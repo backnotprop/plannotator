@@ -74,11 +74,22 @@ public enum Reactions {
     return reaction.label.flatMap { $0.isEmpty ? nil : $0 } ?? "Reacted"
   }
 
+  /// Each emoji's name as the window says it (`emojiRow`), from the window's own list (`Words.emojiNameLines`).
+  static let names: [String: String] = {
+    var out: [String: String] = [:]
+    for line in Words.emojiNameLines.split(separator: "\n") {
+      guard let tab = line.firstIndex(of: "\t") else { continue }
+      let emoji = String(line[..<tab])
+      if out[emoji] == nil { out[emoji] = String(line[line.index(after: tab)...]) }
+    }
+    return out
+  }()
+
+  /// `emojiName`: an emoji's own name ("unicorn face"); one the window's list does not have is "emoji".
+  public static func name(_ emoji: String) -> String { names[emoji] ?? "emoji" }
+
   /// `reactionSpeech`: "Reacted with <the emoji's name>", for a reaction that shows its emoji alone.
-  public static func speech(_ emoji: String) -> String {
-    let name = emoji.unicodeScalars.first.flatMap { $0.properties.name }.map { $0.lowercased() } ?? emoji
-    return "Reacted with \(name)"
-  }
+  public static func speech(_ emoji: String) -> String { "Reacted with \(name(emoji))" }
 
   /// The reaction a tray pick sends: 👍 is Looks good (null), another emoji itself.
   public static func reaction(for emoji: String) -> DoorAckBodyReaction? {

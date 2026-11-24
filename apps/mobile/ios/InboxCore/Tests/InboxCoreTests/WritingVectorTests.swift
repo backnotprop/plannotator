@@ -138,4 +138,13 @@ final class WritingVectorTests: XCTestCase {
       XCTAssertEqual(TakeBackRule.offered(messages[at], in: messages), try XCTUnwrap(item.at("offered").flag), name)
     }
   }
+
+  func testAReactionIsSpokenByTheWindowsNameForItsEmoji() throws {
+    let cases = try Contract.json(suite).at("speech").items
+    XCTAssertGreaterThanOrEqual(cases.count, 6)
+    for item in cases {
+      let emoji = try item.at("emoji").str()
+      XCTAssertEqual(Reactions.speech(emoji), try item.at("said").str(), emoji)
+    }
+  }
 }

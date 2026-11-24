@@ -10,12 +10,31 @@ import UIKit
 final class TakeBackState {
   var busy: MessageID?
   var refusal: (id: MessageID, line: String)?
+  /// The line under a reply still waiting on the phone that was not taken back (it was already on its way).
+  var heldRefusal: (id: String, line: String)?
   var note: String?
+
+  /// Take back on a reply that waits on the phone: true when its words went back to the box.
+  func takeHeld(_ session: InboxSession, write: String, name: String) -> Bool {
+    guard busy == nil else { return false }
+    refusal = nil
+    heldRefusal = nil
+    note = nil
+    switch session.takeBackHeld(write, name: name) {
+    case .taken?: return true
+    case .refused(let line)?:
+      heldRefusal = (write, line)
+      AccessibilityNotification.Announcement(line).post()
+      return false
+    case nil: return false
+    }
+  }
 
   func take(_ session: InboxSession, thread: ThreadID, message: MessageID, name: String) {
     guard busy == nil else { return }
     busy = message
     refusal = nil
+    heldRefusal = nil
     note = nil
     Task {
       let outcome = await session.takeBack(thread, message: message, name: name)
@@ -159,7 +178,12 @@ struct LooksGoodButton: View {
     Task {
       let outcome = await session.react(id, message: message.id, on: !back, reaction: back ? nil : pick)
       busy = false
-      if case .refused(let words) = outcome { tell(words) }
+      switch outcome {
+      case .done: break
+      case .refused(let words): tell(words)
+      // No answer: the window's toast for an Inbox that did not answer.
+      case .failed: tell(ActionWords.unreachable)
+      }
     }
   }
 

@@ -13,12 +13,8 @@ public enum TakeBackRule {
     messages.contains { other in ((other.questions ?? []) + (other.actions ?? [])).contains { $0.sentReplyId == message.id.rawValue } }
   }
 
-  /// The Inbox writes `delivery` only once the agent has the message (its state is always `delivered`); the stand-in
-  /// computer also writes the line states a phone draws ("queued", "saved") there, which are not a delivery.
-  static func delivered(_ delivery: InboxDelivery?) -> Bool {
-    guard let delivery else { return false }
-    return delivery.state == "delivered" || !["queued", "saved", "sending"].contains(delivery.state)
-  }
+  /// The Inbox writes `delivery` only once the agent has the message: any `delivery` is one, as the window reads it.
+  static func delivered(_ delivery: InboxDelivery?) -> Bool { delivery != nil }
 
   /// `takeBackOffered`: the person's own message, which no agent has (not delivered, not read by one, no tagged agent
   /// has it), and which is words and files only. A thread's first message only when it is the only one.
@@ -47,6 +43,48 @@ public enum TakeBackRule {
 
   /// The note under the reply box once it was taken back.
   public static func note(_ name: String) -> String { "Taken back. \(name) never got it. Send it again when it's ready." }
+
+  private static func blank(_ text: String) -> Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+  /// `joined` (packages/server/inbox-take-back.ts): the taken-back words and a draft's words, one blank line apart,
+  /// the taken-back first; either alone when the other has none.
+  static func joined(_ taken: String, _ kept: String?) -> String {
+    if !blank(taken), let kept, !blank(kept) { return "\(taken)\n\n\(kept)" }
+    return !blank(taken) ? taken : (kept ?? taken)
+  }
+
+  /// The taken-back reply's own words, out of the computer's draft after Take back (`body`, which is `joined` of them
+  /// and the draft the computer kept before, `kept`). Nil when the body is not made of that draft: it changed on the
+  /// computer in between.
+  static func takenWords(_ body: String, kept: String?) -> String? {
+    guard let kept, !blank(kept) else { return body }
+    if body == kept { return "" }
+    let tail = Array("\n\n\(kept)".unicodeScalars)
+    let scalars = Array(body.unicodeScalars)
+    guard scalars.count > tail.count, Array(scalars.suffix(tail.count)) == tail else { return nil }
+    var out = String.UnicodeScalarView()
+    out.append(contentsOf: scalars.dropLast(tail.count))
+    return String(out)
+  }
+
+  /// The reply box's words after Take back. The window saves its box to the computer first (`settle`), so the
+  /// computer joins the reply's words with exactly what the box held. The phone does not save its box there, so it
+  /// joins them itself: `box`, the words in the phone's box; `kept`, the computer's draft as it was before; `body`,
+  /// the computer's draft after; `fromKept`, the box's words began as that draft (changed or not on the phone since).
+  /// Then the box's words stand in for that draft, as the window's would. Otherwise the computer's words stay too,
+  /// and the box's follow them unless the body already holds them. No word of the box is ever lost.
+  public static func refill(body: String, kept: String?, box: String, fromKept: Bool) -> String {
+    if fromKept, let taken = takenWords(body, kept: kept) { return joined(taken, box) }
+    let mine = box.trimmingCharacters(in: .whitespacesAndNewlines)
+    return mine.isEmpty || body.contains(mine) ? body : "\(body)\n\n\(box)"
+  }
+}
+
+/// One Take back of one message, kept across its retries: the same idempotency key, so a retry after a lost answer
+/// gets the computer's first answer again, and the computer's draft as it was before the first try.
+struct TakeBackAttempt {
+  var key: String
+  var kept: InboxReplyDraft?
 }
 
 /// What came of Take back.
@@ -70,18 +108,33 @@ extension InboxSession {
   }
 
   /// Take the reply back (`POST messages/:id/take-back`). The computer writes the words, files and quote into the
-  /// thread's reply draft there; the phone puts them in its own reply box (the words first, then any it kept), and a
-  /// Send of them clears the computer's draft. Nothing is queued: with the computer away, it says so and changes nothing.
+  /// thread's reply draft there; the phone puts them in its own reply box with the words already there, and a Send
+  /// of them clears the computer's draft. Nothing is queued: with the computer away, it says so and changes nothing.
+  /// A try with no answer keeps its key for the next, and an answer with no draft (the reply was taken back already,
+  /// by an earlier try) is followed by a read of the computer's draft, as the window always reads it again.
   public func takeBack(_ id: ThreadID, message: MessageID, name: String) async -> TakeBackOutcome {
     if client == nil { _ = await connect() }
     guard let client else { return .refused(TakeBackRule.refusal(nil, name: name)) }
+    if draftBook.takingBack[message] == nil {
+      // The computer's draft as it is now: the words it joins with the reply's.
+      await readComputerDraft(id)
+      draftBook.takingBack[message] = TakeBackAttempt(key: UUID().uuidString, kept: computerDraft(id))
+    }
+    guard let attempt = draftBook.takingBack[message] else { return .refused(TakeBackRule.refusal(nil, name: name)) }
     do {
-      let answer = try await client.post(Door.postMessageTakeBack(message: message), DoorKeyBody(idempotencyKey: UUID().uuidString), as: DoorTakeBackAnswer.self)
-      if let draft = answer.draft { takenBack(id, draft, message: answer.message) }
+      let answer = try await client.post(Door.postMessageTakeBack(message: message), DoorKeyBody(idempotencyKey: attempt.key), as: DoorTakeBackAnswer.self)
+      draftBook.takingBack[message] = nil
+      var draft = answer.draft
+      if draft == nil {
+        await readComputerDraft(id)
+        draft = computerDraft(id)
+      }
+      if let draft { takenBack(id, draft, kept: attempt.kept, message: answer.message) }
       await readThread(id)
       await readList()
       return .taken
     } catch let failure as DoorFailure {
+      if failure.isDefinite { draftBook.takingBack[message] = nil }
       note(failure)
       return .refused(TakeBackRule.refusal(failure, name: name))
     } catch {
@@ -89,34 +142,45 @@ extension InboxSession {
     }
   }
 
-  /// The computer's reply draft after Take back, into the phone's: the computer already joined its words with the draft
-  /// it kept (the one this phone's box started from, when it did), so they replace the box's words then; words this
-  /// phone kept on its own follow them. Its files (already uploads on the computer) and its quote come back, and the
-  /// agents the reply tagged, while their `@` stands in the words.
-  func takenBack(_ id: ThreadID, _ draft: InboxReplyDraft, message: InboxMessageWire) {
+  /// The computer's reply draft after Take back, into the phone's: its words joined with the box's
+  /// (`TakeBackRule.refill`), its files (already uploads on the computer) and its quote, and the agents the reply
+  /// tagged, while their `@` stands in the words.
+  func takenBack(_ id: ThreadID, _ draft: InboxReplyDraft, kept: InboxReplyDraft?, message: InboxMessageWire) {
     draftBook.computer[id] = .some(draft)
     let local = draftBook.local[id]
-    let mine = (local?.words ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    let words = local?.base != nil || mine.isEmpty || draft.body.contains(mine) ? draft.body : "\(draft.body)\n\n\(local?.words ?? "")"
-    changeDraft(id) { kept in
-      kept.words = words
-      let have = Set((kept.files ?? []).compactMap(\.upload))
+    let started = local?.base ?? draftBook.base[id]
+    let words = TakeBackRule.refill(body: draft.body, kept: kept?.body, box: local?.words ?? "", fromKept: started != nil && started == kept?.updatedAt)
+    changeDraft(id) { box in
+      box.words = words
+      let have = Set((box.files ?? []).compactMap(\.upload))
       let back = (draft.files ?? []).filter { !have.contains($0.uploadId.rawValue) }.map { file in
         DraftFile(id: "taken-\(file.uploadId.rawValue)", name: file.name, size: file.size, type: file.mediaType ?? "", upload: file.uploadId.rawValue, kind: file.kind.rawValue)
       }
-      kept.files = back + (kept.files ?? [])
-      if kept.quote == nil, let quote = draft.quote { kept.quote = DraftQuote(of: MessageID(quote.of), words: quote.words) }
+      box.files = back + (box.files ?? [])
+      if box.quote == nil, let quote = draft.quote { box.quote = DraftQuote(of: MessageID(quote.of), words: quote.words) }
       let tags = (message.tags ?? []).filter { $0.handedAway != true }.map { DraftTag(session: $0.session, host: $0.host, label: $0.label ?? TagRules.agentName($0.host, $0.name)) }
-      kept.tags = tags + (kept.tags ?? [])
+      box.tags = TagRules.standing(tags + (box.tags ?? []), words: words)
     }
     // Sending these words clears the computer's draft (`clear_draft`).
     draftBook.base[id] = draft.updatedAt
-    if var kept = draftBook.local[id] {
-      kept.base = draft.updatedAt
-      draftBook.local[id] = kept
+    if var now = draftBook.local[id] {
+      now.base = draft.updatedAt
+      draftBook.local[id] = now
       keepDrafts()
     }
     refilled[id] = words
+  }
+
+  /// Take back on a reply that waits on the phone (its `HeldWrite.id`): nothing has left the phone, so its words,
+  /// files, quote and tags go back to the box (`cancelHeld`). One already on its way to the computer is not taken
+  /// back here: it is refused as the computer's Take back is when there is no answer, and offered there once it
+  /// lands. Nil: no such reply waits any more.
+  public func takeBackHeld(_ write: String, name: String) -> TakeBackOutcome? {
+    switch cancelHeld(write) {
+    case .cancelled: return .taken
+    case .onItsWay: return .refused(TakeBackRule.refusal(nil, name: name))
+    case .notHeld: return nil
+    }
   }
 
   /// The words Take back put in the reply box, handed once to the box, which shows them in place of its own.

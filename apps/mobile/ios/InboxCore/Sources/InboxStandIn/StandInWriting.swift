@@ -158,7 +158,7 @@ extension StandInDoor {
     let thread = threads[place.thread]
     let message = thread.messages[place.message]
     guard message.author.kind == .person else { return refuse(422, "cannot_take_back", "Only your own reply or message can be taken back.") }
-    if let delivery = message.delivery, delivery.state == "delivered" {
+    if let delivery = message.delivery {
       return refuse(409, "agent_has_it", "The agent already has this message.", extra: ["by": .string("delivered"), "session": .string(delivery.session), "host": .string(delivery.host)])
     }
     if state.agentHas.contains(id) {
@@ -199,4 +199,7 @@ extension StandInDoor {
 
   /// The agent picks up this reply: Take back is refused from now on (`agent_has_it`).
   public func agentTakes(_ id: MessageID) { state.agentHas.insert(id) }
+
+  /// The next `count` Take back answers are lost on the way back: the reply is taken back, and the phone hears nothing.
+  public func loseTakeBackAnswers(_ count: Int) { state.lostTakeBacks = count }
 }

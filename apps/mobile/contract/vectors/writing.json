@@ -1252,5 +1252,43 @@
       "at": 1,
       "offered": true
     }
+  ],
+  "speech": [
+    {
+      "emoji": "👍",
+      "said": "Reacted with thumbs up"
+    },
+    {
+      "emoji": "❤️",
+      "said": "Reacted with heavy heart"
+    },
+    {
+      "emoji": "❤",
+      "said": "Reacted with emoji"
+    },
+    {
+      "emoji": "🚀",
+      "said": "Reacted with rocket"
+    },
+    {
+      "emoji": "🦄",
+      "said": "Reacted with unicorn face"
+    },
+    {
+      "emoji": "🇫🇷",
+      "said": "Reacted with emoji"
+    },
+    {
+      "emoji": "👍🏽",
+      "said": "Reacted with emoji"
+    },
+    {
+      "emoji": "🫠",
+      "said": "Reacted with melting face"
+    },
+    {
+      "emoji": "🏳️‍🌈",
+      "said": "Reacted with rainbow flag"
+    }
   ]
 }

@@ -68,6 +68,24 @@ final class WritingTwoTests: XCTestCase {
     XCTAssertNil(body(reply)["tags"], "the @Pi token is gone, and the owner is never a tag")
   }
 
+  func testATagWhoseTokenWasDeletedStaysGoneWhenTheWordsAreTypedAgain() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.retry)
+    _ = try await tagPi(session, in: StandInData.retry)
+    // The token is deleted, then "@Pi" is typed again by hand: it is words now, not a tag (as in the window).
+    session.keepDraft(StandInData.retry, words: "Ask ")
+    session.keepDraft(StandInData.retry, words: "Ask @Pi raise the timeout")
+    XCTAssertNil(session.draft(StandInData.retry)?.tags)
+    await door.clearCalls()
+    let got = await session.send(thread: StandInData.retry, words: "Ask @Pi raise the timeout")
+    XCTAssertTrue(got)
+    let sentCalls = await replies(door)
+    let reply = try XCTUnwrap(sentCalls.last)
+    XCTAssertNil(body(reply)["tags"])
+  }
+
   func testAReplyRefusedForATagGivesTheWordsAndTheTagBack() async throws {
     let door = StandInDoor()
     let session = await pairedSession(door: door)
@@ -141,6 +159,108 @@ final class WritingTwoTests: XCTestCase {
     XCTAssertEqual(body(again)["quote"]?["of"], .string(first.rawValue))
   }
 
+  // MARK: Take back and the words in the box
+
+  func testTakeBackJoinsTheReplysWordsWithTheBoxAsTheWindowWould() {
+    // The box began as the computer's draft "foo", untouched: the computer's own join is the window's.
+    XCTAssertEqual(TakeBackRule.refill(body: "R\n\nfoo", kept: "foo", box: "foo", fromKept: true), "R\n\nfoo")
+    // Changed on the phone: the phone's words stand in for the draft they began as.
+    XCTAssertEqual(TakeBackRule.refill(body: "R\n\nfoo", kept: "foo", box: "foo bar", fromKept: true), "R\n\nfoo bar")
+    // Emptied on the phone: the reply's words alone, as the window's emptied box would make it.
+    XCTAssertEqual(TakeBackRule.refill(body: "R\n\nfoo", kept: "foo", box: "", fromKept: true), "R")
+    // A reply of files only: the box's words, unchanged.
+    XCTAssertEqual(TakeBackRule.refill(body: "foo", kept: "foo", box: "foo bar", fromKept: true), "foo bar")
+    // The computer had no words: the reply's, then the box's.
+    XCTAssertEqual(TakeBackRule.refill(body: "R", kept: nil, box: "mine", fromKept: false), "R\n\nmine")
+    // Words of the phone's own, beside a draft on the computer: nothing of either is lost, and nothing twice.
+    XCTAssertEqual(TakeBackRule.refill(body: "R\n\nfoo", kept: "foo", box: "mine", fromKept: false), "R\n\nfoo\n\nmine")
+    XCTAssertEqual(TakeBackRule.refill(body: "R\n\nfoo", kept: "foo", box: "foo", fromKept: false), "R\n\nfoo")
+    // The computer's draft changed after the box began from it: its new words stay, the box's follow.
+    XCTAssertEqual(TakeBackRule.refill(body: "R\n\nfoo, changed", kept: "foo", box: "foo bar", fromKept: true), "R\n\nfoo, changed\n\nfoo bar")
+  }
+
+  /// A reply sent with an empty box, then a draft on the computer that the box opens with.
+  private func sentThenDraft(_ door: StandInDoor, _ session: InboxSession, draft: String = "foo") async throws -> MessageID {
+    await session.start()
+    await session.open(StandInData.retry)
+    let got = await session.send(thread: StandInData.retry, words: "R")
+    XCTAssertTrue(got)
+    let sent = try XCTUnwrap(session.thread(StandInData.retry)?.thread.messages.last).id
+    await door.setDraft(StandInData.retry, body: draft)
+    let opening = await session.openDraft(StandInData.retry)
+    XCTAssertEqual(opening.words, draft)
+    session.keepDraft(StandInData.retry, words: draft)
+    return sent
+  }
+
+  func testTakeBackKeepsTheWordsChangedOnThePhone() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    let sent = try await sentThenDraft(door, session)
+    session.keepDraft(StandInData.retry, words: "foo bar")
+    let outcome = await session.takeBack(StandInData.retry, message: sent, name: "Claude Code")
+    XCTAssertEqual(outcome, .taken)
+    XCTAssertEqual(session.takeRefilledWords(StandInData.retry), "R\n\nfoo bar", "the phone's \"bar\" is kept")
+    XCTAssertEqual(session.draft(StandInData.retry)?.words, "R\n\nfoo bar")
+    // The Send that clears the computer's draft carries every word.
+    await door.clearCalls()
+    let base = session.computerDraft(StandInData.retry)?.updatedAt
+    let again = await session.send(thread: StandInData.retry, words: "R\n\nfoo bar", clearDraft: base)
+    XCTAssertTrue(again)
+    let sentCalls = await replies(door)
+    let reply = try XCTUnwrap(sentCalls.last)
+    XCTAssertEqual(body(reply)["words"], .string("R\n\nfoo bar"))
+  }
+
+  func testATakeBackRetriedAfterALostAnswerUsesItsKeyAgainAndFillsTheBox() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    let sent = try await sentThenDraft(door, session)
+    session.keepDraft(StandInData.retry, words: "foo bar")
+    await door.loseTakeBackAnswers(1)
+    await door.clearCalls()
+    let lost = await session.takeBack(StandInData.retry, message: sent, name: "Claude Code")
+    XCTAssertEqual(lost, .refused("It was not taken back. Try again."))
+    XCTAssertNil(session.takeRefilledWords(StandInData.retry))
+    let retried = await session.takeBack(StandInData.retry, message: sent, name: "Claude Code")
+    XCTAssertEqual(retried, .taken)
+    let keys = await door.calls.filter { $0.path.hasSuffix("/take-back") }.map { body($0)["idempotency_key"] }
+    XCTAssertEqual(keys.count, 2)
+    XCTAssertEqual(keys.first, keys.last, "one key for the whole Take back")
+    XCTAssertEqual(session.takeRefilledWords(StandInData.retry), "R\n\nfoo bar")
+  }
+
+  func testATakeBackAnsweredWithNoDraftReadsTheComputersDraft() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    let sent = try await sentThenDraft(door, session)
+    session.keepDraft(StandInData.retry, words: "foo bar")
+    await door.loseTakeBackAnswers(1)
+    _ = await session.takeBack(StandInData.retry, message: sent, name: "Claude Code")
+    // The door's log of keys ended: the retry is answered as a reply already taken back, with no draft.
+    await door.forgetKeys()
+    let retried = await session.takeBack(StandInData.retry, message: sent, name: "Claude Code")
+    XCTAssertEqual(retried, .taken)
+    XCTAssertEqual(session.takeRefilledWords(StandInData.retry), "R\n\nfoo bar", "filled from the computer's draft, read again")
+  }
+
+  func testTakeBackOnAReplyAlreadyOnItsWaySaysItWasNotTakenBack() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.docs)
+    await door.setOffline(true)
+    _ = await session.send(thread: StandInData.docs, words: "Later")
+    let held = try XCTUnwrap(session.held.first { $0.kind == .reply })
+    session.book.inFlight.insert(held.id)
+    XCTAssertEqual(session.takeBackHeld(held.id, name: "Pi"), .refused("It was not taken back. Try again."))
+    XCTAssertTrue(session.held.contains { $0.id == held.id }, "it still goes")
+    XCTAssertNil(session.takeReturnedWords(StandInData.docs))
+    session.book.inFlight.remove(held.id)
+    XCTAssertEqual(session.takeBackHeld(held.id, name: "Pi"), .taken)
+    XCTAssertEqual(session.takeReturnedWords(StandInData.docs), "Later")
+  }
+
   func testTakeBackSaysWhyWhenTheAgentHasItAndChangesNothing() async throws {
     let door = StandInDoor()
     let session = await pairedSession(door: door)
@@ -161,11 +281,14 @@ final class WritingTwoTests: XCTestCase {
     let session = await pairedSession(door: door)
     await session.start()
     await session.open(StandInData.upload)
-    // The stand-in's person reply here waits ("queued" is a line, not a delivery): offered.
+    // The stand-in's person reply here waits (no `delivery`: no agent has it): offered.
     let waiting = try XCTUnwrap(session.thread(StandInData.upload)?.thread.messages.last)
     XCTAssertTrue(session.takeBackOffered(StandInData.upload, waiting))
     var delivered = waiting
     delivered.delivery = InboxDelivery(state: "delivered", host: "codex", session: "ses_store", at: "2026-11-23T10:00:00.000Z")
+    XCTAssertFalse(TakeBackRule.offered(delivered, in: [delivered]))
+    // Any `delivery` is one, as the window reads it, whatever its state says.
+    delivered.delivery?.state = "queued"
     XCTAssertFalse(TakeBackRule.offered(delivered, in: [delivered]))
     let lone = InboxMessageWire(id: MessageID("msg_L"), projectId: ProjectID("p"), threadId: ThreadID("msg_L"), author: InboxAuthor(kind: .person), body: "Hi", createdAt: "2026-11-23T10:00:00.000Z")
     XCTAssertTrue(TakeBackRule.offered(lone, in: [lone]), "the window offers it")

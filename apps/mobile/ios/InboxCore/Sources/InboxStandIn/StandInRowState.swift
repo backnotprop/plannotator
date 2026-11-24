@@ -53,6 +53,8 @@ struct StandInState {
   /// Replies taken back, by id (they left their thread), and replies an agent already has.
   var takenBack: [MessageID: InboxMessageWire] = [:]
   var agentHas: Set<MessageID> = []
+  /// How many Take back answers are still to be lost on the way back (`loseTakeBackAnswers`).
+  var lostTakeBacks = 0
   /// Drawings kept (`inbox/markups/<sha256>.png`), by file name.
   var markups: [String: Data] = [:]
   /// Files the phone sent up and no Send named yet (StandInCompose.swift), the live sessions when set, the threads

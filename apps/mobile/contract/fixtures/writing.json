@@ -1,5 +1,5 @@
 {
-  "about": "Invented input for the writing suite (scripts/mobile/vectors-writing.ts): who the reply box can tag with @, what a pick writes, which tags a draft still holds, who a sent reply's tags name, the line under a 👍 Looks good, and which of the person's messages Take back is offered on. No real names, keys or tokens.",
+  "about": "Invented input for the writing suite (scripts/mobile/vectors-writing.ts): who the reply box can tag with @, what a pick writes, which tags a draft still holds, who a sent reply's tags name, the line under a 👍 Looks good, what a screen reader says for a reaction's emoji, and which of the person's messages Take back is offered on. No real names, keys or tokens.",
   "taggable": [
     {
       "name": "one owner, one other agent, one reader",
@@ -840,5 +840,16 @@
       ],
       "at": 1
     }
+  ],
+  "speech": [
+    "👍",
+    "❤️",
+    "❤",
+    "🚀",
+    "🦄",
+    "🇫🇷",
+    "👍🏽",
+    "🫠",
+    "🏳️‍🌈"
   ]
 }

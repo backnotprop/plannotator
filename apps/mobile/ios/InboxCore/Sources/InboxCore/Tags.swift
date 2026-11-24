@@ -157,6 +157,17 @@ public enum TagRules {
     }.map { labels[$0] }
   }
 
+  /// The tags whose `@` token the words still hold (`survivingMentions`), in the order picked, each session once.
+  public static func standing(_ tags: [DraftTag], words: String) -> [DraftTag] {
+    var left = surviving(words, labels: tags.map(\.label))
+    var seen: Set<String> = []
+    return tags.filter { tag in
+      guard let index = left.firstIndex(of: tag.label), seen.insert(tag.session).inserted else { return false }
+      left.remove(at: index)
+      return true
+    }
+  }
+
   /// `mentionMatches` for agents (`matchDetail: false`): never one already tagged, each once, the label holding the query.
   public static func matches(_ options: [TagOption], trigger: MentionTrigger, tagged: Set<String>) -> [TagOption] {
     var seen: Set<String> = []
@@ -305,16 +316,7 @@ extension InboxSession {
   }
 
   /// The tags the reply's words still hold, in the order picked, each once.
-  public func standingTags(_ id: ThreadID, words: String) -> [DraftTag] {
-    let tags = draftBook.local[id]?.tags ?? []
-    var left = TagRules.surviving(words, labels: tags.map(\.label))
-    var seen: Set<String> = []
-    return tags.filter { tag in
-      guard let index = left.firstIndex(of: tag.label), seen.insert(tag.session).inserted else { return false }
-      left.remove(at: index)
-      return true
-    }
-  }
+  public func standingTags(_ id: ThreadID, words: String) -> [DraftTag] { TagRules.standing(draftBook.local[id]?.tags ?? [], words: words) }
 
   /// A pick in the `@` list: the words with its token in them, and the tag kept with the draft, in one change.
   public func pickTag(_ id: ThreadID, words: String, option: TagOption) {

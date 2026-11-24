@@ -14,6 +14,8 @@
  * - `ackPillLine` (packages/inbox/thread/ackLine.ts): the line under a 👍, its session's connection not known (the
  *   phone reads none).
  * - `takeBackOffered` (packages/inbox/takeBack.ts): which of the person's messages Take back is offered on.
+ * - `reactionSpeech` (packages/inbox/components/ReactionTray.tsx): what a screen reader says for a reaction that
+ *   shows its emoji alone, by the emoji's name in the window's own list (`emojiRow`).
  *
  * scripts/mobile/vectors.ts writes vectors/writing.json from it.
  */
@@ -22,6 +24,7 @@ import type { TaggableModel } from '../../packages/inbox/api';
 import { tagDeliveryLine, tagName, tagOptions, tagPickedWords, tagsToSend } from '../../packages/inbox/tags';
 import { ackPillLine } from '../../packages/inbox/thread/ackLine';
 import { takeBackOffered } from '../../packages/inbox/takeBack';
+import { reactionSpeech } from '../../packages/inbox/components/ReactionTray';
 import { applyMentionPick, mentionTrigger, sanitizeMentionLabel, survivingMentions, type MentionPerson } from '../../packages/ui/utils/mentions';
 import { readRepoText } from './lib';
 
@@ -36,6 +39,7 @@ type Fixture = {
   tagLines: { name: string; tag: InboxTag }[];
   acks: { agent: string; wakes: boolean; ack: InboxAck }[];
   takeBack: { name: string; threads: [string, Record<string, unknown>?][]; at: number }[];
+  speech: string[];
 };
 
 /** The time words, marked: the phone's own go where `T(…)` stands. */
@@ -68,5 +72,6 @@ export function writingVectors(about: string): unknown {
     const messages = input.threads.map(([kind, extra], i) => ({ id: `msg_T${i}`, thread_id: 'msg_T0', author: kind === 'person' ? { kind: 'person' } : { kind: 'agent', host: 'pi', session: 'ses_a' }, body: 'words', ...(extra ?? {}) }) as unknown as InboxMessageWire);
     return { ...input, offered: takeBackOffered(messages[input.at]!, messages.length === 1, messages) };
   });
-  return { about, time: 'T(<iso>)', taggable, triggers, picks, surviving, tagNames, tagLines, acks, takeBack };
+  const speech = fixture.speech.map((emoji) => ({ emoji, said: reactionSpeech({ emoji }) }));
+  return { about, time: 'T(<iso>)', taggable, triggers, picks, surviving, tagNames, tagLines, acks, takeBack, speech };
 }

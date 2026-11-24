@@ -17,7 +17,7 @@ public struct LocalDraft: Codable, Hashable, Sendable {
   /// the quote line is what shows the person where the words go, so with no quote there is no aim.
   public var aim: String?
   /// The agents the person tagged with `@` (Tags.swift), in the order picked. A tag whose `@` token the words no
-  /// longer holds does not count (`TagRules.standing`); a Send of the words spends them all.
+  /// longer hold is dropped as the person types (`TagRules.standing`); a Send of the words spends them all.
   public var tags: [DraftTag]?
 
   public init(words: String, editedAt: Date, base: String? = nil, files: [DraftFile]? = nil, quote: DraftQuote? = nil, aim: String? = nil, tags: [DraftTag]? = nil) {
@@ -120,6 +120,8 @@ struct DraftBook {
   var soon: Task<Void, Never>?
   /// Who each thread's reply can tag with `@`, as last read (`GET threads/:id/taggable`), and when.
   var taggable: [ThreadID: (at: Date, answer: DoorTaggableAnswer)] = [:]
+  /// Take back tries with no answer yet, by message (TakeBack.swift): the next try reuses each one's key.
+  var takingBack: [MessageID: TakeBackAttempt] = [:]
 }
 
 private struct KeptDrafts: Codable {
@@ -199,7 +201,12 @@ extension InboxSession {
   public func keepDraft(_ thread: ThreadID, words: String, now: Date = Date()) {
     if let kept = draftBook.local[thread], kept.words == words { return }
     if words.isEmpty, draftBook.local[thread] == nil { return }
-    changeDraft(thread, now: now, typing: true) { $0.words = words }
+    changeDraft(thread, now: now, typing: true) { draft in
+      draft.words = words
+      // A tag whose `@` the words lost is dropped for good, as in the window (`useMentionAutocomplete`): typing the
+      // same `@` again by hand does not bring it back.
+      if let tags = draft.tags { draft.tags = TagRules.standing(tags, words: words) }
+    }
   }
 
   /// Change a thread's draft on the phone and keep it at once (`typing`: once the typing pauses).

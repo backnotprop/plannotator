@@ -253,9 +253,11 @@ struct ThreadScreen: View {
             Divider().overlay(Token.border).padding(.vertical, Space.card)
             // A reply that is only comments on files says how many it carries; under its words, a line for each.
             let lines = HeldReply.lines(session.heldCommentList(write), files: session.attachments(thread.threadId))
-            HeldReply(words: (write.words ?? "").isEmpty && lines.isEmpty ? CountWords.comments(session.heldComments(write)) : write.words ?? "", to: MessageView.addressee(of: write.message.map { MessageID($0) }, in: thread), computer: session.computer.name, comments: lines) {
-              // Nothing has left the phone: Take back puts its words, files, quote and tags back in the box.
-              if session.cancelHeld(write.id) == .cancelled { composing = true }
+            let to = MessageView.addressee(of: write.message.map { MessageID($0) }, in: thread)
+            HeldReply(words: (write.words ?? "").isEmpty && lines.isEmpty ? CountWords.comments(session.heldComments(write)) : write.words ?? "", to: to, computer: session.computer.name, comments: lines, refusal: takeBack.heldRefusal?.id == write.id ? takeBack.heldRefusal?.line : nil) {
+              // Nothing has left the phone: Take back puts its words, files, quote and tags back in the box. One on its
+              // way to the computer now says so under it, as a refused Take back does.
+              if takeBack.takeHeld(session, write: write.id, name: to ?? PhoneWords.anAgent) { composing = true }
             }
           }
         }
@@ -950,6 +952,8 @@ struct HeldReply: View {
   /// The "Will send when … is back." line. Off where the away banner right above already says it (a new message
   /// waiting in the list).
   var saysWhen = true
+  /// Why Take back did not take it back (it was already on its way to the computer).
+  var refusal: String?
   /// Take back: nothing has left the phone yet (nil where it cannot be).
   var takeBack: (() -> Void)?
 
@@ -996,6 +1000,9 @@ struct HeldReply: View {
           VStack(alignment: .leading, spacing: 0) { whenLine; if let takeBack { TakeBackButton(busy: false, press: takeBack).padding(.leading, -Space.close) } }
         }
         .padding(.vertical, takeBack == nil ? 0 : -Space.close)
+      }
+      if let refusal {
+        Text(refusal).font(TextRole.meta).foregroundStyle(Token.destructive).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("take-back-refused")
       }
     }
   }
