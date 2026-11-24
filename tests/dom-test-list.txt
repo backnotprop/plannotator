@@ -175,6 +175,7 @@ packages/inbox/multiAgentNames.test.tsx
 packages/inbox/movedTo.test.tsx
 packages/inbox/archivedQuestionCard.test.tsx
 packages/inbox/replyRecipient.test.tsx
+packages/inbox/removeAgent.test.tsx
 packages/inbox/replyFollow.test.tsx
 packages/inbox/replyFollowVoice.test.tsx
 packages/inbox/replyQuote.test.tsx
@@ -733,6 +734,7 @@ packages/inbox/pulls/pullRisk.test.tsx
 packages/inbox/pulls/riskAlreadyRanked.test.tsx
 packages/inbox/pulls/riskWaitingDialog.test.tsx
 packages/inbox/pulls/riskBarsCard.test.tsx
+packages/inbox/pulls/riskBarsHead.test.tsx
 packages/inbox/guide/pullChangesTreeRisk.test.tsx
 packages/review-editor/components/hostLineMarks.test.ts
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx

@@ -115,7 +115,7 @@ export function guideNotes(snapshot: Pick<GuideSnapshot, 'guide'>, files: readon
   return out;
 }
 
-/** A high-risk judgment's places on the PR's diff (the diff that was judged). Medium and low mark nothing. */
+/** A high-risk judgment's places on the PR's diff (the diff that was judged): the ones counted and stepped. A medium one's draw only the risk bars (pulls/riskBars.ts); low marks nothing. */
 export function riskNotes(judgment: InboxPullRiskJudgment | null | undefined, files: readonly NoteFile[]): ContextNote[] {
   if (!judgment || judgment.level !== 'high') return [];
   return (judgment.where ?? [])

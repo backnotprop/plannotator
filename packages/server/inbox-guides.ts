@@ -70,7 +70,7 @@ import { buildAuthoredGuideSnapshot } from "./guide/guide-cli";
 import { mediaNotShownText } from "./inbox-media-not-shown";
 import { composeGuideMethodology } from "./guide/guide-review";
 import { SEND_ROUTING_FIELDS, antigravityHandsOver, replyNextStepText, senderWakes, t3WokenOnlyWhileRunning, guarded, imagesNotShownText, noStakesText, recommendedInLabelText,
-  callerWorkingFolder, namingLine, ok, sendAgentMessage, sendProject, type InboxMcpContext } from "./inbox-mcp";
+  callerWorkingFolder, namingLine, ok, removedFromThreadText, sendAgentMessage, sendProject, type InboxMcpContext } from "./inbox-mcp";
 
 /** How to read the diff to send as `patch` (Workspaces' local-diff steps, for this machine). */
 export const GUIDE_DIFF_STEPS =
@@ -727,7 +727,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
         const guide = context.store.message(String(sent.structured.message_id))?.guide ?? described.ref;
         return ok(
           // The link ends its line: a terminal links up to the next space, so a `).` after it would be part of the link.
-          `${sent.replayed ? "Already sent" : "Sent"} the ${guide.review ? "review" : "guided review"} "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox, thread ${sent.structured.thread_id}: ${sent.structured.url}\n${`${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}`.trimStart()}${imagesNotShownText(sent.imagesNotShown)}${mediaNotShownText(sent.mediaNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck)}${questionOpenersWithTextText(sent.questionOpenersWithText)}${inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined)}`,
+          `${sent.replayed ? "Already sent" : "Sent"} the ${guide.review ? "review" : "guided review"} "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox, thread ${sent.structured.thread_id}: ${sent.structured.url}\n${`${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}`.trimStart()}${imagesNotShownText(sent.imagesNotShown)}${mediaNotShownText(sent.mediaNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck)}${questionOpenersWithTextText(sent.questionOpenersWithText)}${inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined)}${removedFromThreadText(context.store, sent.structured, input.agent_session)}`,
           { ...sent.structured, guide },
         );
       }),

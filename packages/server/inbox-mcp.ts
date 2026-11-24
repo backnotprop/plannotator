@@ -1097,6 +1097,22 @@ export async function sendAgentMessage(
 }
 
 /**
+ * The one line a removed agent's post carries (approval "inbox-remove-agent-from-thread", the words approved): the
+ * person removed it from the thread, so it is told nothing at the time; its own post lands and it stays out.
+ */
+export const INBOX_REMOVED_FROM_THREAD_TEXT = "You were removed from this thread. Your message is posted, but the person's replies come to you only if they write to you again.";
+
+/**
+ * That line, on a line of its own, on the sender's first post into a thread it is out of since the person removed it
+ * (once per removal: its later posts there carry nothing); "" otherwise.
+ */
+export function removedFromThreadText(store: InboxStore, structured: Record<string, unknown>, session: string | undefined): string {
+  const who = session?.trim();
+  if (!who || structured.new_thread === true) return "";
+  return store.firstPostSinceRemoval(String(structured.thread_id), who, String(structured.message_id)) ? `\n${INBOX_REMOVED_FROM_THREAD_TEXT}` : "";
+}
+
+/**
  * ", superseding 1 earlier question", ", superseding 1 earlier action item", or
  * ", superseding 2 earlier questions and 1 action item", from the superseded ids
  * (`<message id>/<key>`; an action item's key starts with `a-`). "" for none.
@@ -1382,6 +1398,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           prototypesNotFramedText(sent.notFramed),
           questionOpenersWithTextText(sent.questionOpenersWithText),
           inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined),
+          removedFromThreadText(store, sent.structured, input.agent_session),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
         hints.push(askedRefsText(String(sent.structured.message_id), sent.asked));

@@ -21,6 +21,7 @@ import { recipientNames } from '../thread/recipientNames';
 import { AgentMark, AgentPill } from './AgentPill';
 import { BottomSheet } from './BottomSheet';
 import { SheetLine, SheetRow } from './SheetRow';
+import { SwipeToRemove } from './SwipeToRemove';
 
 
 const AtSign = () => (
@@ -37,6 +38,7 @@ export function PhoneReplyRecipient({
   onOnly,
   onToggle,
   onTagAnother,
+  onRemove,
   section,
   labels,
   folderOf,
@@ -53,6 +55,8 @@ export function PhoneReplyRecipient({
   onToggle?: (row: RecipientRow) => void;
   /** The last row, "Tag another agent". Absent: no such row. */
   onTagAnother?: () => void;
+  /** Remove a row's agent from the thread (a row with `removable`): its row swipes left over "Remove". */
+  onRemove?: (row: RecipientRow) => void;
   /** The thread's pane: the sheet is drawn in it. */
   section: HTMLElement | null;
   /** Each session's title, where it has one. */
@@ -119,7 +123,7 @@ export function PhoneReplyRecipient({
             }
             const title = titleOf(row);
             const named = names.get(row.session) ?? { name: title ?? row.label, detail: undefined };
-            return (
+            const sheetRow = (
               <SheetRow
                 key={row.session}
                 host={row.host}
@@ -154,6 +158,14 @@ export function PhoneReplyRecipient({
                   )
                 }
               />
+            );
+            // An agent the person can remove from the thread: its row slides left over "Remove" (SwipeToRemove.tsx).
+            return row.removable && onRemove ? (
+              <SwipeToRemove key={row.session} session={row.session} onRemove={() => onRemove(row)}>
+                {sheetRow}
+              </SwipeToRemove>
+            ) : (
+              sheetRow
             );
           })}
           {onTagAnother && (
