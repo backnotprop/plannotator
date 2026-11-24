@@ -10,6 +10,7 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type RefObject } from 'react';
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import type { OpenQuestionsDecide } from '../components/OpenQuestions';
+import { fadeIn, placeOf, restorePlace, useDecidesWhole, type ThreadPlace } from './wholeWindow';
 import { DECIDE_ENTRY_MIN, back, decideEntryLabel, decideQueue, decideReasked, decideTally, goToStep, next, putOff, startSitting, stepIndex, syncSitting, type DecideTally, type PendingAnswers, type Sitting } from './queue';
 
 const kept = new Map<string, Sitting>();
@@ -74,8 +75,8 @@ export function useDecide({
   const move = useRef<DecideMove>('next');
   /** The thread's Send went, since the Send step's Send was pressed. */
   const went = useRef(false);
-  /** Where the thread was scrolled on the way in (`at`), and where it goes once decision mode is put away (`to`). */
-  const place = useRef<{ thread: string; at: number; to: number | 'end' | null } | null>(null);
+  /** Where the thread was on the way in (`at`), and where it goes once decision mode is put away (`to`). */
+  const place = useRef<{ thread: string; at: ThreadPlace; to: 'back' | 'end' | null } | null>(null);
   const byId = new Map(messages.map((m) => [m.id, m]));
   const reasked = decideReasked(messages);
   const tally = (id: string): DecideTally => {
@@ -100,6 +101,13 @@ export function useDecide({
     [threadId],
   );
   const deciding = on && sitting !== null && openIn === threadId;
+  // The whole window while it shows (wholeWindow.ts), with a short fade in, and the thread's a short fade back.
+  useDecidesWhole(threadId, deciding);
+  const shownBefore = useRef(deciding);
+  useLayoutEffect(() => {
+    if (shownBefore.current !== deciding) fadeIn(body?.current?.closest('section'), deciding);
+    shownBefore.current = deciding;
+  }, [deciding]);
   // Put away: the thread goes back where the person left it ("‹ Thread", Escape), or to its end after a Send.
   useLayoutEffect(() => {
     const was = place.current;
@@ -107,7 +115,8 @@ export function useDecide({
     place.current = null;
     const el = body?.current;
     if (!el || was.thread !== threadId) return;
-    el.scrollTop = was.to === 'end' ? el.scrollHeight : was.to;
+    if (was.to === 'end') el.scrollTop = el.scrollHeight;
+    else restorePlace(el, was.at);
   });
   const atSend = deciding && sitting?.current === null;
   // The Send step shows the words the Send carries: a draft kept with the box closed opens in it, files and all (the
@@ -136,13 +145,13 @@ export function useDecide({
   };
   const open = (from: Sitting) => {
     move.current = 'next';
-    place.current = { thread: threadId, at: body?.current?.scrollTop ?? 0, to: null };
+    place.current = { thread: threadId, at: body?.current ? placeOf(body.current) : { at: 0, anchor: null, offset: 0 }, to: null };
     write({ ...from, fromSend: false });
     setOpenIn(threadId);
   };
   /** Put away, the sitting kept or ended: the thread's scroll goes to `to` once it shows again. */
   const putAway = (to: 'back' | 'end') => {
-    if (place.current) place.current = { ...place.current, to: to === 'end' ? 'end' : place.current.at };
+    if (place.current) place.current = { ...place.current, to };
     setOpenIn(null);
   };
   const finish = () => {

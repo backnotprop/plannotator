@@ -14,6 +14,7 @@ import { measureRoom, paneRects, usePaneDrop } from './paneDrop';
 import { landAfterPaneClose, liveHost, quietDigest, quietHost, sameDigest, withPaneClose, type ThreadPanesHost } from './paneHosts';
 import { createPaneKeeper, PaneDock, PaneKeeperContext } from './paneKeeper';
 import { PaneMenuContext, type PaneMenu } from './PaneMenu';
+import { useDecidingWhole } from '../decisions/wholeWindow';
 import type { WindowPanes } from './useRoutePanes';
 
 export { paneRoute } from './paneHosts';
@@ -59,19 +60,23 @@ export function ThreadPanes({ windowPanes, held, host }: ThreadPanesProps) {
   const { panes, layout } = windowPanes;
   const { route } = host;
   const engine = windowPanes.allowed && !host.phone && !host.stack.thread && !host.fromCard && route.page === 'inbox' && !route.reviews && !route.full && !!layout.root;
-  const roomHidden = useRoomHidden(layout, engine && !host.fileOpen, (ids) => host.showToast(roomShrankToast(ids.flatMap((id) => layout.threads[id] ?? []), host.rowOf)));
+  // A file beside the active pane, or decision mode in it (it takes the whole window, decisions/wholeWindow.ts): the
+  // other panes wait off the page, and come back as they were.
+  const deciding = useDecidingWhole(route.page === 'inbox' ? route.thread : null);
+  const alone = host.fileOpen || deciding;
+  const roomHidden = useRoomHidden(layout, engine && !alone, (ids) => host.showToast(roomShrankToast(ids.flatMap((id) => layout.threads[id] ?? []), host.rowOf)));
   const ids = useMemo(() => L.panesOf(layout.root).map((pane) => pane.id), [layout.root]);
   const shownAlone = (panes.panes.find((entry) => entry.id === panes.active) ?? panes.panes[0]!).id;
-  // Off the page: beside a file every pane but the active one; in today's one slot, every pane but the one it shows.
+  // Off the page: beside a file or deciding every pane but the active one; in today's one slot, every pane but the one it shows.
   const hidden = useMemo(
-    () => (!engine ? new Set(ids.filter((id) => id !== shownAlone)) : host.fileOpen ? new Set(ids.filter((id) => id !== layout.active)) : stillAside(roomHidden, ids, layout.active)),
-    [engine, host.fileOpen, ids, layout.active, roomHidden, shownAlone],
+    () => (!engine ? new Set(ids.filter((id) => id !== shownAlone)) : alone ? new Set(ids.filter((id) => id !== layout.active)) : stillAside(roomHidden, ids, layout.active)),
+    [engine, alone, ids, layout.active, roomHidden, shownAlone],
   );
   // A pane off the page reads nothing until it is back (paneReads.ts `park`). Without the switch none is.
   useEffect(() => host.paneReads.park(windowPanes.allowed ? hidden : new Set()), [host.paneReads, hidden, windowPanes.allowed]);
   const multi = engine && ids.length - hidden.size > 1;
   const title = useCallback((id: L.PaneId) => titleOf(host, windowPanes.layout.threads[id]), [host, windowPanes]);
-  usePaneDrop({ enabled: engine && !host.fileOpen, multi, windowPanes, title, holdSidebar: (columns) => host.holdSidebarIfTight(columns) });
+  usePaneDrop({ enabled: engine && !alone, multi, windowPanes, title, holdSidebar: (columns) => host.holdSidebarIfTight(columns) });
   const [keeper] = useState(createPaneKeeper);
   keeper.live.current = { active: layout.active, onFocus: windowPanes.focus, engine, title };
   const idsKey = ids.join('\u0000');

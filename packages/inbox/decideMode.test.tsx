@@ -15,9 +15,10 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import { parseInboxActionBlocks } from '@plannotator/core/inbox-actions';
-import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxReplyDraft, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAttachmentState, InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxReplyDraft, InboxThread } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { threadDeciding } from './shortcuts/guards';
+import { threadWhole, useDecidingWhole } from './decisions/wholeWindow';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -131,6 +132,25 @@ let draftSaves: Record<string, unknown>[] = [];
 let replyFails = false;
 /** The Inbox refuses every reply because a question it answers was replaced (the Send stops on the thread's guard). */
 let replyReplaced = false;
+/** The files the thread's messages attached (none unless a test attaches one). */
+let files: InboxAttachmentState[] = [];
+/** A picture the first message attached, as a person opens it from the message. */
+const picture = (): InboxAttachmentState =>
+  ({
+    id: 'att_picture',
+    name: 'drawer-b.png',
+    path: '/work/harbor/design/drawer-b.png',
+    kind: 'image',
+    named_path: null,
+    sent_sha256: 'a'.repeat(64),
+    size: 100,
+    sent_at: '2026-11-24T10:15:00.000Z',
+    sent_mtime: '2026-11-24T10:15:00.000Z',
+    message_id: mid(1),
+    changed_since_sent: false,
+    unavailable: null,
+    current: { sha256: 'a'.repeat(64), size: 100, mtime: '2026-11-24T10:15:00.000Z' },
+  }) as InboxAttachmentState;
 const UPLOAD = { upload_id: 'upl_notes', name: 'notes.txt', size: 12, kind: 'text', sha256: 'a'.repeat(64), created_at: '2026-11-24T09:00:00.000Z' } as const;
 
 function serve() {
@@ -173,7 +193,7 @@ function serve() {
       writes.push(`reply ${decodeURIComponent(reply[1]!)} ${String(body.words ?? '')}`.trim());
       return Response.json({ message_id: decodeURIComponent(reply[1]!), questions: [], reply: { id: `${T}_r${writes.length}` }, replayed: false });
     }
-    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
+    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: files, annotations: [] });
     if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [] });
     return Response.json({});
   }) as typeof fetch;
@@ -189,6 +209,7 @@ beforeEach(() => {
   draftSaves = [];
   replyFails = false;
   replyReplaced = false;
+  files = [];
   serve();
 });
 
@@ -211,7 +232,7 @@ function otherThread(): InboxThread {
 
 /** A file or picture opened beside the thread (the route's `file`), as a press on a message's picture does. */
 let openFile: ((file: React.ComponentProps<typeof ThreadPane>['file']) => void) | null = null;
-function Live({ decisionMode }: { decisionMode: boolean }) {
+function Live({ decisionMode, threadAlone = false }: { decisionMode: boolean; threadAlone?: boolean }) {
   const [messages, setMessages] = React.useState(served);
   const [which, setWhich] = React.useState<'a' | 'b'>('a');
   const [file, setFile] = React.useState<React.ComponentProps<typeof ThreadPane>['file']>(null);
@@ -237,12 +258,52 @@ function Live({ decisionMode }: { decisionMode: boolean }) {
       // A read of the thread again: what the stub Inbox holds now (an action item's mark lands this way).
       onChanged={async () => setMessages(served)}
       onClose={() => {}}
+      threadAlone={threadAlone}
       file={file}
       onOpenFile={(next) => setFile(next)}
       onOpenGuide={() => {}}
     />
   );
 }
+
+/**
+ * The window around the pane, as App draws it: the thread takes the whole window (App.tsx `full`, `threadWhole`) when
+ * the person put it in full screen or decision mode shows in it; then the sidebar and the list hide and the pane is
+ * told it is alone (`threadAlone`, its `data-full`). `full`: the person's own full screen; `phone`: a phone's window.
+ */
+let windowWas = { full: false, phone: false };
+function Window() {
+  const deciding = useDecidingWhole(mid(1));
+  const full = threadWhole({ threadFull: windowWas.full, deciding, thread: true, phone: windowWas.phone, fromCard: false, stacked: false });
+  return (
+    <div data-window="" data-thread-full={full ? '' : undefined}>
+      <nav data-window-sidebar="" hidden={full} />
+      <div data-window-list="" hidden={full} />
+      <Live decisionMode threadAlone={full} />
+    </div>
+  );
+}
+
+async function renderWindow(was: typeof windowWas) {
+  windowWas = was;
+  served = sample();
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(<Window />);
+  });
+  await settle();
+}
+
+/** What the window shows around the thread: its sidebar, its list, whether the pane has the whole window, which thread. */
+const layout = () => ({
+  sidebar: !$('[data-window-sidebar]')!.hidden,
+  list: !$('[data-window-list]')!.hidden,
+  whole: $('section.ib-pane')!.hasAttribute('data-full'),
+  thread: $('section.ib-pane')!.getAttribute('data-thread-id'),
+});
 
 async function settle() {
   await act(async () => {
@@ -643,4 +704,61 @@ test.skipIf(!hasDom)('another thread in the pane and back: the thread shows with
   expect(shown().length).toBe(3);
   await openList();
   expect(wayIn()!.textContent).toMatch(/^Resume · /);
+});
+
+test.skipIf(!hasDom)('decision mode takes the whole window: the sidebar and the list hide while it shows, and leaving gives the layout back as it was', async () => {
+  await renderWindow({ full: false, phone: false });
+  const before = layout();
+  expect(before).toEqual({ sidebar: true, list: true, whole: false, thread: mid(1) });
+  await decide();
+  expect(layout()).toEqual({ sidebar: false, list: false, whole: true, thread: mid(1) });
+  // The frame spans the window: its bar and steps lead the pane, its foot ends it, and the message is drawn in the
+  // pane's own body (the thread's reading column, centred by the window's stylesheet).
+  const section = $('section.ib-pane')!;
+  expect(['[data-decide-head]', '[data-decide-steps]', '[data-decide-foot]'].map((s) => section.querySelector(`:scope > ${s}`) !== null)).toEqual([true, true, true]);
+  expect(section.querySelector('.ib-pbody[data-deciding]')).not.toBeNull();
+  await press($('[data-decide-next]')!);
+  await press($('[data-decide-leave]')!);
+  expect($('[data-decide-head]')).toBeNull();
+  expect(layout()).toEqual(before);
+  // Escape leaves too, with the same layout back.
+  await openList();
+  await press(wayIn()!);
+  await until(() => !!$('[data-decide-head]'), 'decision mode again');
+  expect(layout().whole).toBe(true);
+  await act(async () => void $('[data-decide-head]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  await settle();
+  expect(layout()).toEqual(before);
+});
+
+test.skipIf(!hasDom)('the person\'s own full screen stays on after decision mode, and a phone, already whole, is left as it is', async () => {
+  await renderWindow({ full: true, phone: false });
+  const before = layout();
+  expect(before).toEqual({ sidebar: false, list: false, whole: true, thread: mid(1) });
+  await decide();
+  expect(layout()).toEqual(before);
+  await press($('[data-decide-leave]')!);
+  expect(layout()).toEqual(before);
+  act(() => root!.unmount());
+  host!.remove();
+  await renderWindow({ full: false, phone: true });
+  const phone = layout();
+  await decide();
+  expect(layout()).toEqual(phone);
+});
+
+test.skipIf(!hasDom)('a file opened from a message while deciding shows beside the frame, and closing it returns to the frame across the window', async () => {
+  files = [picture()];
+  await renderWindow({ full: false, phone: false });
+  await decide();
+  await press($('[data-decide-next]')!);
+  const step = current();
+  act(() => openFile!({ id: 'att_picture', version: 'current', focus: null }));
+  await settle();
+  // Beside the file the pane narrows as a thread's does, still deciding, and the window stays the thread's.
+  const section = $('section.ib-pane')!;
+  expect({ beside: section.classList.contains('ib-withfile'), deciding: !!$('[data-decide-head]'), sidebar: layout().sidebar, list: layout().list }).toEqual({ beside: true, deciding: true, sidebar: false, list: false });
+  act(() => openFile!(null));
+  await settle();
+  expect({ beside: section.classList.contains('ib-withfile'), deciding: !!$('[data-decide-head]'), step: current(), ...layout() }).toEqual({ beside: false, deciding: true, step, sidebar: false, list: false, whole: true, thread: mid(1) });
 });

@@ -4,7 +4,9 @@
  * agents ask through `plannotator inbox mcp` (scripts/inbox-sim.ts), one shim per agent session.
  *
  * On by default, with a switch in Settings → Capabilities. Its one way in is the first row of a thread's open
- * questions. It shows one agent message at a time, drawn with the thread's own cards; answers are the thread's draft;
+ * questions. It takes the whole window (the sidebar and the list hide, as for the thread's full screen; leaving gives
+ * the layout back as it was), and a file a message attached opens beside it, as beside a thread. It shows one agent
+ * message at a time, in one centred column, drawn with the thread's own cards; answers are the thread's draft;
  * Later moves a message to the end; leaving with "‹ Thread" sends nothing and the way in reads Resume; the Send step
  * lists every answer, a row opens its message, a box takes the person's words, and ONE Send sends one reply to each
  * agent session (the words ride the reply to the agent who wrote last). Desktop (Chromium, 1440 by 900) and a phone
@@ -113,16 +115,51 @@ const currentStep = (page: Page) => pane(page).locator('[data-decide-step][aria-
 /** The messages on screen (decision mode shows one, or none on the Send step). */
 const shown = (page: Page) => pane(page).locator('.ib-pbody > [data-message-article]:visible');
 
-/** The way in: the thread, its open-questions list, then its first row. */
-async function decideIn(page: Page, threadId: string, label: RegExp | string): Promise<void> {
+/** What the window shows around the thread: the sidebar's state, whether the list shows and where it is scrolled, the open thread. */
+async function windowLayout(page: Page): Promise<{ sidebar: string | null; list: boolean; listScroll: number | null; thread: string | null }> {
+  return page.evaluate(() => {
+    const list = document.querySelector('.ib-listcol');
+    const box = list?.getBoundingClientRect();
+    return {
+      sidebar: document.querySelector('.ib-sb')?.getAttribute('data-state') ?? null,
+      list: !!list && !!box && box.width > 0 && getComputedStyle(list).visibility !== 'hidden',
+      listScroll: document.querySelector('.ib-listcol .ib-lbody')?.scrollTop ?? null,
+      thread: new URLSearchParams(location.hash.slice(1)).get('thread'),
+    };
+  });
+}
+
+/**
+ * Decision mode has the whole window: the sidebar and the list are hidden (the thread's full screen), the pane spans
+ * the window, the bar, the steps and the foot span the pane, and a message reads in one centred column (860 px).
+ */
+async function expectWholeWindow(page: Page): Promise<void> {
+  await expect(page.locator('.pn-inbox[data-thread-full]')).toHaveCount(1);
+  await expect.poll(async () => (await windowLayout(page)).sidebar).not.toBe('expanded');
+  expect((await windowLayout(page)).list).toBe(false);
+  const width = page.viewportSize()!.width;
+  const box = async (selector: string) => (await page.locator(selector).first().boundingBox())!;
+  await expect.poll(async () => (await box('section.ib-pane')).width).toBeGreaterThan(width - 40);
+  for (const part of ['[data-decide-head]', '[data-decide-steps]', '[data-decide-foot]']) expect((await box(part)).width, part).toBeGreaterThan(width - 40);
+  if ((await shown(page).count()) === 1) {
+    const message = await box('.ib-pbody > [data-message-article]:visible');
+    expect(message.width).toBeLessThanOrEqual(860);
+    expect(Math.abs(message.x + message.width / 2 - width / 2)).toBeLessThanOrEqual(24);
+  }
+}
+
+/** The way in: the thread, its open-questions list, then its first row. Gives back the window's layout before it. */
+async function decideIn(page: Page, threadId: string, label: RegExp | string): Promise<Awaited<ReturnType<typeof windowLayout>>> {
   await page.goto(`${world.url}#thread=${threadId}`);
   const button = pane(page).locator('[data-open-questions]');
   await expect(button).toBeVisible();
   if (!(await page.locator('[data-open-questions-list]').isVisible())) await button.click();
   const row = page.locator('[data-thread-decide]');
   await expect(row).toHaveText(label);
+  const before = await windowLayout(page);
   await row.click();
   await expect(pane(page).locator('[data-decide-head]')).toBeVisible();
+  return before;
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -174,7 +211,7 @@ test('on by default: the switch in Settings → Capabilities, the way in from th
   );
   ids.thread = first.thread_id;
   ids.stopped = first.message_id;
-  const picture = await codex.send({ project_path: world.billing, reply_to: first.message_id, body: `B tested best on small phones.\n\n${q('Ship drawer B to all of checkout?', ['Yes, ship B', 'No, keep A'], ['![Drawer B](design/drawer-b.png)', '', 'Holds up: the 4.2 release'])}` }, { wakes: true });
+  const picture = await codex.send({ project_path: world.billing, reply_to: first.message_id, body: `B tested best on small phones.\n\n${q('Ship drawer B to all of checkout?', ['Yes, ship B', 'No, keep A'], ['![Drawer B](design/drawer-b.png)', '', 'Holds up: the 4.2 release'])}`, attachments: ['design/drawer-b.png'] }, { wakes: true });
   ids.picture = picture.message_id;
   const action = await claude.send(
     {
@@ -227,7 +264,10 @@ test('on by default: the switch in Settings → Capabilities, the way in from th
 
 test('one message at a time with the thread\'s own cards; Later moves it to the end; leaving sends nothing and offers Resume', async () => {
   const { page } = world;
-  await decideIn(page, ids.thread, 'Decide 5 one at a time');
+  const before = await decideIn(page, ids.thread, 'Decide 5 one at a time');
+  expect(before).toMatchObject({ sidebar: 'expanded', list: true, thread: ids.thread });
+  // The whole window: the sidebar and the list are hidden while it shows (the shots below are of the whole window).
+  await expectWholeWindow(page);
   // Stopped first, then Holds up, then the thread's order; Send last.
   await expect(steps(page)).toHaveCount(4);
   expect(await steps(page).evaluateAll((els) => els.map((el) => el.getAttribute('data-decide-step')))).toEqual([ids.stopped, ids.picture, ids.action, 'send']);
@@ -250,7 +290,26 @@ test('one message at a time with the thread\'s own cards; Later moves it to the 
   // Codex's picture question: Later puts it after the last message.
   await expect(shown(page)).toHaveAttribute('data-message-article', ids.picture);
   await expect(shown(page).locator('img').first()).toBeVisible();
+  await expectWholeWindow(page);
   await shot(page, '05-message-picture');
+
+  // The file the message attached opens beside the decide frame, as a file opens beside a thread (Side by side when it
+  // opened full screen); closing it comes back to the frame across the window, on the same message.
+  await shown(page).locator('.ib-att-t').first().click();
+  await page.locator('[data-attachment-pane]').waitFor();
+  const sideBySide = page.locator('.ib-view.ib-full').getByRole('button', { name: 'Side by side' });
+  if (await sideBySide.isVisible()) await sideBySide.click();
+  await expect(page.locator('.ib-view:not(.ib-full) .ib-vbody')).toBeVisible();
+  await expect(page.locator('section.ib-pane.ib-withfile [data-decide-head]')).toBeVisible();
+  await expect(page.locator('section.ib-pane.ib-withfile [data-decide-foot]')).toBeVisible();
+  expect((await windowLayout(page)).sidebar).not.toBe('expanded');
+  expect((await windowLayout(page)).list).toBe(false);
+  await shot(page, '05c-picture-beside');
+  await page.locator('.ib-view').getByRole('button', { name: /^Close drawer-b/ }).click();
+  await expect(page.locator('.ib-view')).toHaveCount(0);
+  await expect(page.locator('section.ib-pane.ib-withfile')).toHaveCount(0);
+  await expect(currentStep(page)).toHaveAttribute('data-decide-step', ids.picture);
+  await expectWholeWindow(page);
   await pane(page).locator('[data-decide-later]').click();
   expect(await steps(page).evaluateAll((els) => els.map((el) => el.getAttribute('data-decide-step')))).toEqual([ids.stopped, ids.action, ids.picture, 'send']);
   await expect(currentStep(page)).toHaveAttribute('data-decide-step', ids.action);
@@ -267,6 +326,9 @@ test('one message at a time with the thread\'s own cards; Later moves it to the 
   await pane(page).locator('[data-decide-leave]').click();
   await expect(pane(page).locator('[data-decide-head]')).toHaveCount(0);
   await expect(pane(page).locator('.ib-phead')).toBeVisible();
+  // The window as the person had it: the sidebar, the list where it was, the same thread open.
+  await expect(page.locator('.pn-inbox[data-thread-full]')).toHaveCount(0);
+  await expect.poll(() => windowLayout(page)).toEqual(before);
   expect(await personReplies(ids.thread)).toEqual([]);
   await shot(page, '07-left-thread');
   // The picks stay in the thread, as its draft: the open questions say so (the thread may fold the first message).
@@ -288,6 +350,7 @@ test('one message at a time with the thread\'s own cards; Later moves it to the 
   await expect(pane(page).locator('[data-decide-head]')).toHaveCount(0);
   await expect(pane(page).locator('.ib-phead')).toBeVisible();
   expect(page.url()).toContain(`thread=${ids.thread}`);
+  await expect.poll(() => windowLayout(page)).toEqual(before);
   if (!(await page.locator('[data-open-questions-list]').isVisible())) await pane(page).locator('[data-open-questions]').click();
   await expect(page.locator('[data-thread-decide]')).toHaveText('Resume · 1 of 3 messages left');
   await page.locator('[data-thread-decide]').click();
@@ -323,6 +386,10 @@ test('the Send step: every answer, a row back to its message, the person\'s word
   expect(await personReplies(ids.thread)).toEqual([]);
   await pane(page).locator('[data-decide-send-button]').click();
   await expect(pane(page).locator('[data-decide-head]')).toHaveCount(0);
+  // The window gives the layout back after Send too: the sidebar and the list beside the thread.
+  await expect(page.locator('.pn-inbox[data-thread-full]')).toHaveCount(0);
+  await expect.poll(async () => (await windowLayout(page)).list).toBe(true);
+  expect((await windowLayout(page)).sidebar).toBe('expanded');
 
   // One reply to each agent session: Claude Code's carries both its messages' answers, its action item and the words.
   await expect.poll(async () => (await personReplies(ids.thread)).length, { timeout: 20_000 }).toBe(2);
@@ -368,6 +435,8 @@ test('a phone (WebKit, iPhone 15): the way in, a message, answered, Later, the b
       await snap('01-way-in');
       await page.locator('[data-thread-decide]').tap();
       await expect(pane(page).locator('[data-decide-count]')).toHaveText('1 of 2');
+      // A phone shows the thread alone already: its window is as it was (no desktop full screen around it).
+      await expect(page.locator('.pn-inbox[data-thread-full]')).toHaveCount(0);
       await expect(shown(page)).toHaveAttribute('data-message-article', refunds.message_id);
       for (const target of await pane(page).locator('[data-decide-foot] .ib-btn:visible').all()) {
         const b = await target.boundingBox();

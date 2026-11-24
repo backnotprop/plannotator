@@ -6819,8 +6819,13 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 }
 
 /* ───────────── Decision mode (approval "inbox-decision-mode-one-send", 2026-11-24; decisions/DecideFrame.tsx) ─────────────
-   Inside the thread's own pane: one agent message at a time, drawn by the thread (every card feature), framed by a bar,
-   a row of steps (one per message, then Send) and a foot. Every colour is a theme token, light and dark. */
+   The thread's own pane, given the whole window as its full screen is (decisions/wholeWindow.ts, `data-thread-full`):
+   one agent message at a time, drawn by the thread (every card feature), framed by a bar, a row of steps (one per
+   message, then Send) and a foot. Every colour is a theme token, light and dark. */
+/* The bar, the steps and the foot span the window; the message reads in one centred column, as drawn (860 px). A file
+   open beside it narrows the pane as it narrows a thread's. */
+.pn-inbox[data-thread-full] .ib-pane:not(.ib-withfile) .ib-pbody[data-deciding] { padding-inline: max(30px, calc((100% - 860px) / 2)); }
+.pn-inbox[data-thread-full] .ib-pane:not(.ib-withfile) .dm-foot { padding-inline: 30px; }
 .pn-inbox .ib-phead[hidden] { display: none !important; }
 .dm-head { gap: 10px; }
 .dm-title { flex: 1; min-width: 0; margin: 0; display: flex; align-items: baseline; gap: 8px; font-size: var(--ib-fs-14, 14px); font-weight: 600; white-space: nowrap; overflow: hidden; }

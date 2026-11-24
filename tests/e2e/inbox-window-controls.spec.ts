@@ -427,16 +427,25 @@ test('the tour bar and Decision mode, with the variables set: clear of the butto
   await page.locator('[data-tour-exit="exit"]').click();
   await page.locator('[data-tour-bar]').waitFor({ state: 'detached' });
 
-  await openRoute(page, world, `#thread=${world.questions}`, 'collapsed');
+  // With the sidebar open: decision mode takes the whole window as the thread's full screen does (the sidebar and the
+  // list hide), so its head holds the left edge and clears the buttons' width, as a thread alone there does; it sits on
+  // the buttons' line, and every control in it clicks. Leaving gives the sidebar back.
+  await openRoute(page, world, `#thread=${world.questions}`, 'open');
   await setControls(page);
+  expect(await page.locator('.ib-sb').getAttribute('data-state')).toBe('expanded');
   await page.locator('section.ib-pane [data-open-questions]').click();
   await page.locator('[data-thread-decide]').click();
-  // Decision mode is drawn in the thread pane, in the thread head's place: on the buttons' line, as that head is, and
-  // every control in it clicks.
   await page.locator('[data-decide-head]').waitFor();
+  await page.locator('.pn-inbox[data-thread-full]').waitFor();
+  await page.waitForTimeout(700);
+  expect(await page.locator('.ib-sb').getAttribute('data-state')).not.toBe('expanded');
+  expect(await firstContentLeft(page, '[data-decide-head]')).toBeGreaterThanOrEqual(W);
   expect((await boxOf(page, '[data-decide-head]')).centre).toBe(parseFloat(await centerY(page)));
   expect((await controlsThatDrag(page)).dragging).toEqual([]);
+  await shot(page, 'decision-mode-whole-window');
   await page.locator('[data-decide-leave]').click();
+  await page.locator('.pn-inbox[data-thread-full]').waitFor({ state: 'detached' });
+  await expect.poll(() => page.locator('.ib-sb').getAttribute('data-state')).toBe('expanded');
 
   // At a phone's width the thread holds the edge: the head's content clears the buttons, as the thread head's does,
   // and its foot stays in the window.

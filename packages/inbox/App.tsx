@@ -37,6 +37,7 @@ import { useSettingsSaves } from './data/actions/settings';
 import { useListShown } from './app/useListView';
 import { useListTags } from './app/useListTags';
 import { useSnoozeBack } from './app/useSnoozeBack';
+import { threadWhole, useDecidingWhole } from './decisions/wholeWindow';
 import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
 import { TIP_DELAY_MS } from './components/Tip';
@@ -2003,7 +2004,7 @@ function Inbox() {
       // An open file owns Escape (the HTML viewer's ladder, the composers), as do a field, the Ask AI window (not on the
       // ladder), words selected in a message (their toolbar) and anything in the thread that used it first (the reply's
       // choice at Send goes back to the reply). Decision mode's Escape stands down for the same (threadEscapeTaken).
-      if (event.key !== 'Escape' || !routeRef.current.thread || threadEscapeTaken(event, !!routeRef.current.file)) return;
+      if (event.key !== 'Escape' || !routeRef.current.thread || threadEscapeTaken(event, !!routeRef.current.file) || threadDeciding(routeRef.current.thread)) return;
       // An open guided review closes first, back to its thread; then the Artifacts view, back to the messages
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
       // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
@@ -2341,18 +2342,18 @@ function Inbox() {
   // A window too narrow for two panes (an iPad in portrait, a narrow desktop window): the pane on top covers the one under it (stack.ts).
   // The docked sidebar folded on screen for room, the person's choice unchanged (‹ Inbox from a file, leaving full screen, Open to the side): panes/sidebarHold.ts.
   const { held: sidebarHeld, setHeld: setSidebarHeld, holdIfTight: holdSidebarIfTight } = useSidebarHold(rootRef, routeRef, route, windowPanes.columns, sidebarOpen);
-  // The thread in full screen (a click on the list column's edge, or Enter on it): the sidebar and the list hide, without
-  // writing the person's sidebar choice. A reading mode: it stays on when the person opens another thread (search, a
-  // notification, a pin), and ends when no thread is open, with "‹ Inbox", Escape or ⌘B. A stacked window never counts
-  // as full screen (`full` below), so widening it again returns to full screen.
+  // The thread in full screen (the list column's edge, a click or Enter): the sidebar and the list hide, the sidebar choice
+  // unwritten. It stays on when another thread opens (search, a notification, a pin), and ends when none is open, with "‹ Inbox",
+  // Escape or ⌘B. A stacked window never counts (`full` below). Decision mode takes the window the same way (wholeWindow.ts).
   const [threadFull, setThreadFull] = useState(false);
+  const decidingWhole = useDecidingWhole(route.page === 'inbox' ? route.thread : null);
   useEffect(() => {
     if (!route.thread) setThreadFull(false);
   }, [route.thread]);
   sidebarHeldNow.current = sidebarHeld;
   // Full screen changes the sidebar's and the list's room without a route change: measured again too. Several thread
   // panes give way to one before the list is covered (panes/layoutRoom.ts), so only one thread's room counts here.
-  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull]);
+  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull, decidingWhole]);
   // The thread panel view (threadPanel.ts): the list stays at its short width and the thread's pane stays drawn with
   // no thread open. Off by default, and never on a phone or in a window that stacks.
   const [threadPanelOn, setThreadPanelOn] = useThreadPanel();
@@ -4581,8 +4582,8 @@ function Inbox() {
   // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
-  // The thread in full screen: only on a desktop thread beside the list (not a phone, a stacked window or a card's).
-  const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
+  // The thread in full screen: a desktop thread beside the list (not a phone's, a stacked window's or a card's), or deciding.
+  const full = threadWhole({ threadFull, deciding: decidingWhole, thread: route.page === 'inbox' && !!route.thread, phone, fromCard: !!fromCard, stacked: stack.thread });
   // The Sidebar tip (sidebarTip.ts): once, beside the docked sidebar, at the reveals' calm moment. A desktop only.
   // Outside the line, and behind it: never on a load where the star ask is armed or another reveal showed, is
   // claiming or is open (it lets one that shares its moment go first, and stands down unclaimed).
@@ -4606,7 +4607,7 @@ function Inbox() {
   // The tip claimed or up: the load arms nothing else meanwhile and reads the line again (`lineBusy`), as a dialog's claim does.
   const sidebarTipBusy = sidebarTip.stage === 'claimed' || sidebarTip.stage === 'open';
   useEffect(() => setLineTipBusy(sidebarTipBusy), [sidebarTipBusy]);
-  threadFullRef.current = full;
+  threadFullRef.current = full && !decidingWhole; // Deciding, G I leaves nothing: the layout comes back when decision mode ends.
   // Every way out of full screen (‹ Inbox, Escape, ⌘B): the sidebar and the list come back as the window has room.
   const leaveFull = () => {
     holdSidebarIfTight();
@@ -5576,11 +5577,9 @@ function Inbox() {
             return;
           }
           // ⌘B in full screen leaves it (the sidebar and the list come back) and keeps the person's stored choice. Not
-          // while a file is open from it: closing the file comes back to the thread in full screen.
-          if (next && full && !fileOpen) {
-            leaveFull();
-            return;
-          }
+          // while a file is open from it: closing the file comes back to the thread in full screen. Deciding, it does nothing.
+          if (decidingWhole) return;
+          if (next && full && !fileOpen) return void leaveFull();
           setSidebarHeld(false);
           changeSidebar(next);
         }}
