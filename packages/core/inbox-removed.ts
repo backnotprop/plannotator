@@ -46,12 +46,14 @@ export interface RemovalMessage {
   tidy?: unknown;
   scheduled_run?: { run?: number } | null;
   scheduled_change?: unknown;
+  ship_note?: unknown;
 }
 
 /** One of the Inbox's own notes (core `isInboxNote`'s rule, read here without importing the types module). */
 function isNote(message: RemovalMessage): boolean {
   return (
     (message.set_aside?.length ?? 0) > 0 ||
+    !!message.ship_note ||
     !!message.moved_note ||
     (!!message.scheduled_run && message.scheduled_run.run === undefined) ||
     (message.reopened?.length ?? 0) > 0 ||

@@ -444,3 +444,5 @@ export function TidyNote({ run, agent, time, fullWhen }: { run?: string; agent: 
 
 /** What a Combine left where it was, in the same quiet note style (CombineLeftNote.tsx). */
 export { CombineLeftNote } from './CombineLeftNote';
+/** Ship's note to the shipping agent, in the same quiet note style (pulls/ShipNote.tsx). */
+export { ShipNote } from '../pulls/ShipNote';

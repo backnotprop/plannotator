@@ -8,7 +8,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import type { InboxEvent, SettingsModel } from '../api';
-import { linkedMachinesWith, onLinkedMachines } from '../inboxUrl';
+import { linkedMachinesWith, onLinkedMachines, onLinkedMachinesListed } from '../inboxUrl';
 import { scheduledApi, setRoutineRowReader, type RoutineComputer } from './client';
 
 /** The mark a linked computer's list carries when its routines can be read and changed from here. */
@@ -98,10 +98,13 @@ export function setScheduledOn(next: boolean | null): void {
   }
 }
 
-// A linked computer that takes routines, named for the first time: its routines are read in.
-onLinkedMachines(() => {
+// A linked computer that takes routines, named for the first time: its routines are read in. A first read that failed
+// (nothing read yet) is tried again on the next merged list, which names the same computers and so changes nothing.
+const readFirst = () => {
   if (wanted() && listeners.size > 0 && snap.rows === null && !reading) void readScheduled();
-});
+};
+onLinkedMachines(readFirst);
+onLinkedMachinesListed(readFirst);
 
 /** A run under way: its end writes no store line, only the launch's run line moving (`event: deliveries`). */
 const anyRunning = () => !!snap.rows?.some((row) => row.state === 'running');

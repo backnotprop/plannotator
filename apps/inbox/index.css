@@ -59,6 +59,8 @@
 @import "../../packages/inbox/pulls/pullThread.css";
 /* Reviews' "On this computer" +: its heading's control and picker (packages/inbox/pulls/OpenLocalPicker.tsx). */
 @import "../../packages/inbox/pulls/openLocal.css";
+/* Ship: a Reviews row's ship mode, its menu and its log (packages/inbox/pulls/ShipRow.tsx, ShipMenu.tsx, ShipLog.tsx). */
+@import "../../packages/inbox/pulls/ship.css";
 /* Plans (packages/inbox/plans/). */
 @import "../../packages/inbox/plans/plans.css";
 @import "../../packages/inbox/grid/grid.css";

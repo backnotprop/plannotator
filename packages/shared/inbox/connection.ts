@@ -1430,6 +1430,13 @@ export interface InboxReplyCommand {
    */
   moved?: true
   /**
+   * With `moved`, the notice's own first line in place of
+   * INBOX_MOVED_WAKE_INSTRUCTION: Ship's note to the shipping agent says it
+   * is about the pull request it ships and is to be acted on. One line; a
+   * connection that does not know it words the notice the moved way.
+   */
+  notice?: string
+  /**
    * On a reply handed to a session the person tagged with `@` that does not
    * own the thread (approval "inbox-tag-agents"): the owning session's agent,
    * named from its host (`Claude Code`). The wake takes
@@ -2152,6 +2159,7 @@ export function inboxWakeText(
     ack_of?: string
     ack_reaction?: unknown
     moved?: unknown
+    notice?: unknown
     tagged?: { owner?: unknown } | null
     also_tagged?: unknown
     added?: unknown
@@ -2178,11 +2186,13 @@ export function inboxWakeText(
     const thread = wakeThreadId(command.thread_id)
     return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of, command.ack_reaction)}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
-  // The note that this session's questions moved: a notice, never a reply to answer in the archived thread.
+  // The note that this session's questions moved: a notice, never a reply to answer in the archived thread. Ship's
+  // note carries its own first line (`notice`).
   if (command.moved === true) {
     const movedSubject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a message'
     const thread = wakeThreadId(command.thread_id)
-    return `Plannotator Inbox: ${movedSubject} (${command.id})\n${INBOX_MOVED_WAKE_INSTRUCTION}\n\n${command.body}${thread ? `\n\n[thread ${thread}]` : ''}`
+    const notice = typeof command.notice === 'string' && command.notice.trim() !== '' && command.notice.length <= 300 && !/[\r\n]/.test(command.notice) ? command.notice.trim() : INBOX_MOVED_WAKE_INSTRUCTION
+    return `Plannotator Inbox: ${movedSubject} (${command.id})\n${notice}\n\n${command.body}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
   // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line;
   // with none there yet and the person's answers in this reply, the line that says when to start one.
