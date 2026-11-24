@@ -951,6 +951,42 @@
       "relay": true
     },
     {
+      "name": "POST threads/:id/remove-agent",
+      "method": "POST",
+      "path": "threads/{thread}/remove-agent",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadRemoveAgent",
+      "window": "/api/inbox/threads/{thread}/remove-agent",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/remove-agent/undo",
+      "method": "POST",
+      "path": "threads/{thread}/remove-agent/undo",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadRemoveAgentUndo",
+      "window": "/api/inbox/threads/{thread}/remove-agent/undo",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST messages/:id/actions/:id",
       "method": "POST",
       "path": "messages/{message}/actions/{action}",

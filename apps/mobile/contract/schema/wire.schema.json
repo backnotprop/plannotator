@@ -4337,6 +4337,19 @@
             }
           ]
         },
+        "removed": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/InboxRemoval"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "idempotency_key": {
           "anyOf": [
             {
@@ -5798,6 +5811,48 @@
       ],
       "x-open": true,
       "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxRemoval": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "at": {
+          "type": "string"
+        },
+        "after": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "session",
+        "at",
+        "after"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-removed.ts"
     },
     "InboxReplyDraft": {
       "type": "object",

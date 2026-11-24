@@ -5043,7 +5043,7 @@
     },
     {
       "id": "messages-110",
-      "title": "Add: \"You added <agent> to this thread\" above the reply; a later reply reaches it only when the reply box names it",
+      "title": "Add: \"You added <agent> to this thread\" above the reply; later replies go to it too",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -22159,6 +22159,146 @@
       }
     },
     {
+      "id": "undecided-door-post-threads-id-remove-agent",
+      "title": "door:POST threads/:id/remove-agent",
+      "surface": [
+        "door:POST threads/:id/remove-agent"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Remove an agent from a thread (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: the door takes the route for the web phone sheet's swipe and for a linked machine whose list names `remove-agent` in `marks`.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-remove-agent-undo",
+      "title": "door:POST threads/:id/remove-agent/undo",
+      "surface": [
+        "door:POST threads/:id/remove-agent/undo"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The toast's Undo of a Remove (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: the door takes the route for the web phone sheet and for a linked machine whose list names `remove-agent` in `marks`.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-remove-agent",
+      "title": "window:/api/inbox/threads/:id/remove-agent",
+      "surface": [
+        "window:/api/inbox/threads/:id/remove-agent"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The window's Remove on a \"to\" picker row (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now; the phone reaches it through the door route of the same name.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-remove-agent-undo",
+      "title": "window:/api/inbox/threads/:id/remove-agent/undo",
+      "surface": [
+        "window:/api/inbox/threads/:id/remove-agent/undo"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The window's Undo of a Remove (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now; the phone reaches it through the door route of the same name.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-removed",
+      "title": "field:InboxMessageWire.removed",
+      "surface": [
+        "field:InboxMessageWire.removed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "The thread's removals, on its root (approval \"inbox-remove-agent-from-thread\"). The iPhone app does not build it now: it does not draw \"You removed <name> from this thread\", and it may still offer a removed agent as a recipient; writing to it brings it back, as on the computer.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-after",
+      "title": "field:InboxRemoval.after",
+      "surface": [
+        "field:InboxRemoval.after"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the last message before it, where the line is drawn. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-at",
+      "title": "field:InboxRemoval.at",
+      "surface": [
+        "field:InboxRemoval.at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): when the person removed the agent. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-host",
+      "title": "field:InboxRemoval.host",
+      "surface": [
+        "field:InboxRemoval.host"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's host. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-name",
+      "title": "field:InboxRemoval.name",
+      "surface": [
+        "field:InboxRemoval.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's name, for the line. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxremoval-session",
+      "title": "field:InboxRemoval.session",
+      "surface": [
+        "field:InboxRemoval.session"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "Part of a thread's removal (InboxMessageWire.removed): the removed agent's session. The iPhone app does not build it now.",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-door-get-taggable-agents",
       "title": "door:GET taggable-agents",
       "surface": [
@@ -22166,7 +22306,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "Tag an agent on another computer (inbox-far-tags.ts): a linked machine's token only, never the phones' allowlist. The app reads far agents through `threads/:id/taggable`, which this feeds.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22180,7 +22320,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "Tag an agent on another computer: a tagged session's answer from its own computer, a linked machine's token only. Nothing for the app to build.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22194,7 +22334,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "Tag an agent on another computer: the agent's computer says the wake was handed, a linked machine's token only. Nothing for the app to build.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22208,7 +22348,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "Tag an agent on another computer: the thread's computer hands the agent's computer a wake, a linked machine's token only. Nothing for the app to build.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22222,7 +22362,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "A reply's `to` that is a session on another linked computer (a hand-off to a far agent). The app keeps it as it came.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"
@@ -22236,7 +22376,7 @@
       ],
       "flows": [],
       "mobile": "undecided",
-      "why": "",
+      "why": "A tag naming another linked computer's session. For the app to tag a far agent it sends back the taggable row's `machine` on the tag and shows `machine_name` beside the row.",
       "since": "2026-11-24",
       "ios": {
         "state": "not-started"

@@ -6,6 +6,7 @@
  */
 
 import { isInboxPermissionSession } from "./inbox-permission";
+import { inboxRemovedNow, type RemovalMessage } from "./inbox-removed";
 import type { InboxT3WaitReason } from "./inbox-t3";
 
 /**
@@ -248,7 +249,9 @@ type WordsAuthorMessage = { author: { kind: string; host?: string | null; sessio
  * person answered its own questions or action items in the draft) or no session wrote. Null when none is left.
  */
 export function inboxWordsDefault<M extends WordsAuthorMessage>(messages: readonly M[], answersItself: (message: M) => boolean): M | null {
-  const agents = messages.filter((m) => m.author.kind === "agent" && !isInboxPermissionSession(m.author.session) && !m.scheduled_change);
+  // An agent the person removed from the thread is never the default (inbox-removed.ts): its messages are passed over.
+  const out = inboxRemovedNow(messages as unknown as readonly RemovalMessage[]);
+  const agents = messages.filter((m) => m.author.kind === "agent" && !isInboxPermissionSession(m.author.session) && !m.scheduled_change && !(m.author.session && out.has(m.author.session)));
   const latest = agents.at(-1);
   if (!latest) return null;
   if (!inboxSessionlessSend(latest) || answersItself(latest)) return latest;

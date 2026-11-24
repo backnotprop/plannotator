@@ -78,7 +78,7 @@ export function createInboxTagsRoute(options: {
 
   /** The thread's owner now: the session it was last handed to, else its latest agent writer, else the session a thread the person started is addressed to. */
   // A hand-off (approval "inbox-tag-handoff") makes its new owner the owner, whoever writes after it.
-  const ownerOf = (threadId: string): { host: string | null; session: string } | null => (store.thread(threadId) ? store.threadOwner(threadId) : null);
+  const ownerOf = (threadId: string): { host: string | null; session: string } | null => (store.thread(threadId) ? store.threadOwner(threadId, (session) => live.askerLive(session)) : null);
 
   const taggable = (threadId: string, withLabels = false): { owner: { host: string | null; session: string } | null; sessions: InboxTaggableSession[] } => {
     const thread = store.thread(threadId);
