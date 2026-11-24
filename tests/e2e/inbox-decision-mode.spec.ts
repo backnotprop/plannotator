@@ -278,7 +278,12 @@ test('one message at a time with the thread\'s own cards; Later moves it to the 
   await page.locator('[data-thread-decide]').click();
   await expect(currentStep(page)).toHaveAttribute('data-decide-step', ids.action);
   // Escape puts decision mode away to the thread (the thread stays open); the way back in still reads Resume.
-  await shown(page).getByRole('radio', { name: /^Yes, a draft/ }).focus();
+  // Pressed with focus where decision mode puts it, on the message, once the open-questions list has closed: Escape
+  // from a choice's native radio (an input) stands down, as the thread's own Escape does (`threadEscapeTaken`), and an
+  // open list closes first.
+  await expect(page.locator('[data-open-questions-list]')).toHaveCount(0);
+  await shown(page).focus();
+  await expect(shown(page)).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(pane(page).locator('[data-decide-head]')).toHaveCount(0);
   await expect(pane(page).locator('.ib-phead')).toBeVisible();
