@@ -79,6 +79,10 @@ export interface DecisionCardProps {
   onPick: (key: string, answer: QuestionAnswer | null, pointer: boolean) => void;
   /** An action item's Done, or Can't do it with the reason. */
   onAction: (mark: { outcome: 'done' | 'cant'; note?: string }) => void;
+  /** The reason under "Can't do it…", a draft the dialog keeps (reasonDrafts.ts): '' when none. */
+  reason?: string;
+  /** The person typed the reason. */
+  onReason?: (text: string) => void;
   /** "Open the thread", or an attached file that is not a picture: decision mode tucks into its pill meanwhile. */
   onOpenThread: (fileId?: string) => void;
   /** A file the message names, opened beside the thread as from the thread's card. */
@@ -105,8 +109,13 @@ export function DecisionCard(props: DecisionCardProps) {
   const promptId = useId();
   const promptRef = useRef<HTMLHeadingElement>(null);
   const articleRef = useRef<HTMLElement>(null);
-  const [field, setField] = useState<'none' | 'cant'>('none');
-  const [reason, setReason] = useState('');
+  const reason = props.reason ?? '';
+  const [field, setField] = useState<'none' | 'cant'>(reason.trim() ? 'cant' : 'none');
+  // A reason saved earlier (read back as the card shows) opens its field, the words in it.
+  const hasReason = reason.trim() !== '';
+  useEffect(() => {
+    if (hasReason) setField('cant');
+  }, [hasReason]);
   const locked = props.sent === true || props.sending === true;
   /** Pressed with a pointer since the last key: a pick by a click or a tap moves the queue on, one by the keyboard does not. */
   const pointer = useRef(false);
@@ -292,9 +301,10 @@ export function DecisionCard(props: DecisionCardProps) {
                   <label className="ib-dm-flabel" htmlFor={`${promptId}-cant`}>
                     Why can&apos;t you? {name} gets this word for word.
                   </label>
-                  <textarea id={`${promptId}-cant`} className="ib-dm-ta" rows={2} value={reason} onChange={(event) => setReason(event.target.value)} autoFocus />
-                  <button type="button" className="ib-btn ib-pri ib-sm" disabled={!reason.trim()} onClick={() => props.onAction({ outcome: 'cant', note: reason.trim() })}>
-                    Send
+                  <textarea id={`${promptId}-cant`} className="ib-dm-ta" rows={2} value={reason} onChange={(event) => props.onReason?.(event.target.value)} autoFocus />
+                  {/* Save, not Send: the mark waits in the draft with the reason until the dialog's Send. */}
+                  <button type="button" className="ib-btn ib-pri ib-sm" data-decision-cant-save="" disabled={!reason.trim()} onClick={() => props.onAction({ outcome: 'cant', note: reason.trim() })}>
+                    Save
                   </button>
                 </div>
               )}

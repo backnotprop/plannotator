@@ -34,9 +34,13 @@ import { registerReloadFlush } from '../stalePage';
 import { Tip } from '../components/Tip';
 import { inboxMessageImageUrl } from '../images';
 import { choiceName } from '../optionSets';
-import { isTypedChange, TYPED_ANSWER_SAVE_MS } from '../typedAnswers';
 import type { FileRef } from '../fileRefs';
 import { usePickSave } from '../data/actions/picks';
+import { useInboxQueryClient } from '../data/client';
+import { changeThread } from '../data/queries/thread';
+import { usePageLeave } from '../pageLeave';
+import { createDecisionSaves, withPendingAnswers } from './saves';
+import { useReasonDrafts } from './reasonDrafts';
 import { DecisionCard, attachmentPictureUrl, type CardBody, type CardPicture } from './DecisionCard';
 import { DecisionPrototype, useSittingThread } from './sittingThread';
 import {
@@ -100,12 +104,27 @@ export interface DecisionModeProps {
   onClose: () => void;
   /** Tells the pill how many are left. */
   onLeft?: (left: number) => void;
+  /**
+   * Something went wrong while the dialog is closed or tucked away (a Send still on its way, an answer's save): the
+   * window says so in its toast, the thread one press away.
+   */
+  onAway?: (notice: DecisionAwayNotice) => void;
+}
+
+/** What the window tells about a sitting it no longer shows. */
+export interface DecisionAwayNotice {
+  kind: 'send' | 'save';
+  threadId: string;
+  /** The thread's subject, when known. */
+  subject: string | null;
 }
 
 interface UndoEntry {
   id: string;
   kind: 'pick' | 'action' | 'later';
   before: QuestionAnswer | null;
+  /** A Can't do it's reason: Undo puts it back under the card as its draft. */
+  note?: string;
   /** When it was done (an action item's Done can be undone only inside its window). */
   at: number;
 }
@@ -134,11 +153,6 @@ function answersOf(target: SendTarget): string[] {
 /** The decision id of one of `answersOf`'s entries. */
 function answerIdOf(entry: string): string {
   return entry.slice(2).replace(/@\d+$/, '');
-}
-
-/** The agent replaced the question while the pick was on its way: the swap shows it, no error. Any other refusal is shown. */
-function isSuperseded(error: unknown): boolean {
-  return error instanceof InboxApiError && error.code === 'question_superseded';
 }
 
 /** A pick that answers a pick-one question at once (a choice, or Skip): the queue moves on when a click made it. */
@@ -185,20 +199,25 @@ export function DecisionMode(props: DecisionModeProps) {
   const [lightbox, setLightbox] = useState<{ pictures: CardPicture[]; index: number } | null>(null);
   /** The question whose prototypes are open over the dialog (`<message id>/<key>`). */
   const [proto, setProto] = useState<{ messageId: string; key: string } | null>(null);
+  /** An action item's marks on their way, in order (a pick's answers go through `saves`). */
   const pickChain = useRef<Promise<void>>(Promise.resolve());
+  /** Each decision's revision as the projection last said. */
   const revisions = useRef(new Map<string, number>());
-  /** Decisions whose pick is on its way to the server. */
+  /** Action items whose mark is on its way to the server. */
   const pendingPicks = useRef(new Set<string>());
-  /** Answers given here and not yet saved (drawn at once; the saved copy replaces them). */
-  const [pending, setPending] = useState<ReadonlyMap<string, QuestionAnswer | null>>(new Map());
-  const pendingRef = useRef(pending);
-  pendingRef.current = pending;
-  /** Words typed and waiting for their pause, by decision id: the save they run. */
-  const typed = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; save: () => void }>());
   const fieldOpenRef = useRef<(() => boolean) | null>(null);
   const escapedAt = useRef(0);
   const reduced = prefersReducedMotion();
   const pickSave = usePickSave();
+  const pickSaveRef = useRef(pickSave);
+  pickSaveRef.current = pickSave;
+  const client = useInboxQueryClient();
+  const propsRef = useRef(props);
+  propsRef.current = props;
+  /** The dialog is gone (closed) or tucked into its pill: what goes wrong now is told by the window's toast. */
+  const goneRef = useRef(false);
+  const awayRef = useRef(!props.open);
+  awayRef.current = goneRef.current || !props.open;
 
   // The sitting's thread, as the thread pane holds it: the card draws its message from there.
   const threadIdRef = useRef<string | null>(null);
@@ -207,31 +226,89 @@ export function DecisionMode(props: DecisionModeProps) {
   const heldRef = useRef(held);
   heldRef.current = held;
   const messageOf = (id: string): InboxMessageWire | undefined => held?.thread.messages.find((m) => m.id === id);
+  /** The thread of the sitting, for the window's toast. */
+  const away = (kind: 'send' | 'save') => {
+    const threadId = threadIdRef.current;
+    if (threadId) propsRef.current.onAway?.({ kind, threadId, subject: heldRef.current?.thread.subject ?? propsRef.current.scope ?? null });
+  };
+
+  /** Answers given here and not yet saved (drawn at once; the saved copy replaces them). Kept when a save fails. */
+  const [pending, setPending] = useState<ReadonlyMap<string, QuestionAnswer | null>>(new Map());
+  // The thread's own save machinery (saves.ts): typed words after their pause, one save at a time, conflicts saved over.
+  const [saves] = useState(() =>
+    createDecisionSaves({
+      pick: (save) => pickSaveRef.current.mutateAsync(save),
+      known: (id) => {
+        const slash = id.indexOf('/');
+        const onThread = heldRef.current?.thread.messages.find((m) => m.id === id.slice(0, slash))?.questions?.find((q) => q.key === id.slice(slash + 1));
+        return Math.max(revisions.current.get(id) ?? 0, queueRef.current.cache.get(id)?.question.revision ?? 0, onThread?.revision ?? 0);
+      },
+      onPending: (next) => {
+        if (!goneRef.current) setPending(next);
+      },
+      onSaved: (id, questions) => {
+        const saved = questions.find((q) => `${q.message_id}/${q.key}` === id);
+        if (!saved) return;
+        revisions.current.set(id, saved.revision);
+        setQueue((current) => {
+          const known = current.cache.get(id);
+          return known ? { ...current, cache: new Map(current.cache).set(id, { ...known, question: saved }) } : current;
+        });
+      },
+      onFailed: (_id, message) => {
+        if (awayRef.current) away('save');
+        else setError(message);
+      },
+      onChanged: () => propsRef.current.refresh(),
+    }),
+  );
+  /** The reasons typed under "Can't do it…", drafts like every answer (reasonDrafts.ts). */
+  const { reasons, texts: reasonTexts } = useReasonDrafts((message) => {
+    if (awayRef.current) away('save');
+    else setError(message);
+  });
+  /** The answers not saved yet go into the held thread: the thread card shows the dialog's latest words at once. */
+  const showPendingInThread = useCallback(() => {
+    const threadId = threadIdRef.current;
+    if (threadId) changeThread(client, threadId, (model) => withPendingAnswers(model, saves.pending()));
+  }, [client, saves]);
 
   /** Typed words waiting for their pause are saved now (a click, Send, a move, the dialog closing). */
   const flushTyped = useCallback(() => {
-    const waiting = [...typed.current.values()];
-    typed.current.clear();
-    for (const entry of waiting) {
-      clearTimeout(entry.timer);
-      entry.save();
-    }
-  }, []);
-  // The stale page notice's Reload (stalePage.ts) waits for the picks on their way, the typed ones first.
+    saves.flush();
+    reasons.flush();
+  }, [saves, reasons]);
+  // The stale page notice's Reload (stalePage.ts) waits for every save; one not saved stops the reload (false).
   useEffect(
     () =>
       registerReloadFlush(async () => {
-        flushTyped();
+        const saved = await Promise.all([saves.settled(), reasons.settled()]);
         for (let seen = pickChain.current; ; seen = pickChain.current) {
           await seen;
           if (seen === pickChain.current) break;
         }
-        return true;
+        return saved.every(Boolean);
       }),
-    [flushTyped],
+    [saves, reasons],
   );
-  // The dialog going (closed, or the window left decision mode) saves the words still waiting.
-  useEffect(() => () => flushTyped(), [flushTyped]);
+  // The page hiding or going (a reload, a closed tab, a phone switching apps): the words in their pause go now.
+  usePageLeave(() => {
+    saves.leave();
+    reasons.leave();
+  });
+  // The dialog going (closed, or the window left decision mode): the words still waiting are saved, the thread card
+  // shows what is still on its way, and an answer not saved goes again (a failure now is told by the window's toast).
+  useEffect(() => {
+    goneRef.current = false;
+    return () => {
+      goneRef.current = true;
+      awayRef.current = true;
+      saves.flush();
+      showPendingInThread();
+      void saves.settled();
+      void reasons.settled();
+    };
+  }, [saves, reasons, showPendingInThread]);
 
   // ── The dialog itself: a native modal <dialog>, shown while open. ──
   useLayoutEffect(() => {
@@ -245,10 +322,12 @@ export function DecisionMode(props: DecisionModeProps) {
       }
     } else if (!props.open && dialog.open) dialog.close();
   }, [props.open]);
-  // Tucked into the pill, the words waiting are saved (the thread behind shows them as its draft).
+  // Tucked into the pill, the words waiting are saved (the thread behind shows them as its draft, at once).
   useEffect(() => {
-    if (!props.open) flushTyped();
-  }, [props.open, flushTyped]);
+    if (props.open) return;
+    flushTyped();
+    showPendingInThread();
+  }, [props.open, flushTyped, showPendingInThread]);
 
   // ── The projection folded in. ──
   useEffect(() => {
@@ -258,7 +337,8 @@ export function DecisionMode(props: DecisionModeProps) {
     const shown = queueRef.current.current;
     if (shown && !props.decisions.some((d) => d.id === shown) && !queueRef.current.gone.has(shown) && !isHandled(queueRef.current, shown)) void checkGone(shown);
     setQueue((current) => {
-      let next = mergeDecisions(current, props.decisions!, sentIdsRef.current, pendingPicks.current);
+      // An answer not saved yet (on its way, or refused and kept) keeps its card as the person left it.
+      let next = mergeDecisions(current, props.decisions!, sentIdsRef.current, new Set([...pendingPicks.current, ...saves.pending().keys()]));
       for (const d of props.decisions!) revisions.current.set(d.id, Math.max(revisions.current.get(d.id) ?? 0, d.question.revision));
       const nonce = props.startNonce ?? 0;
       if (props.start && appliedStart.current !== nonce && next.order.includes(props.start)) {
@@ -429,15 +509,32 @@ export function DecisionMode(props: DecisionModeProps) {
   const sendableKeys = groupKeys(queue).filter((key) => freshPicks(queue, key, carried.get(key)).length > 0);
   const answeredCount = sendableKeys.reduce((n, key) => n + freshPicks(queue, key, carried.get(key)).length, 0);
   const sendingAny = inFlightKeys.size > 0;
-  /** The Send button: what is answered goes, one reply per agent; what is not stays open. */
-  const sendAnswered = async () => {
-    flushTyped();
+  /**
+   * Send these groups. Every answer on the cards is saved first (the thread's rounds, pickQueue.ts `forSend`): one that
+   * cannot be saved sends nothing and says so, never a reply without an answer the person can see. Closed or tucked
+   * away meanwhile, a failure is told by the window's toast.
+   */
+  const sendGroups = async (keys: readonly string[]) => {
     setError(null);
-    const keys = sendableKeys;
-    const results = await Promise.all(keys.map((key) => sendGroup(key)));
+    const release = await saves.forSend();
+    if (!release) {
+      if (awayRef.current) away('send');
+      else setError('An answer was not saved, so nothing was sent.');
+      return;
+    }
+    let results: SendResult[];
+    try {
+      results = await Promise.all(keys.map((key) => sendGroup(key)));
+    } finally {
+      release();
+    }
     const failed = results.filter((r) => r === 'failed').length;
-    if (failed > 0) setError(`${failed === 1 ? 'A reply was' : `${formatCount(failed)} replies were`} not sent. Your answers wait as drafts in the thread.`);
+    if (failed === 0) return;
+    if (awayRef.current) away('send');
+    else setError(`${failed === 1 ? 'A reply was' : `${formatCount(failed)} replies were`} not sent. Your answers wait as drafts in the thread.`);
   };
+  /** The Send button: what is answered goes, one reply per agent; what is not stays open. */
+  const sendAnswered = () => sendGroups(sendableKeys);
 
   // ── After a Send: is the agent working on it? (its connection, every 3 s while open) ──
   useEffect(() => {
@@ -487,74 +584,26 @@ export function DecisionMode(props: DecisionModeProps) {
     );
   };
 
-  /** Save one answer as the thread's draft (the picks route, in order; the thread's copy follows its answer). */
-  const savePick = (id: string, answer: QuestionAnswer | null) => {
-    const decision = queueRef.current.cache.get(id);
-    if (!decision) return;
-    // Optimistic: the card is handled now; the saved copy replaces it.
+  /** The card is handled (or open again) now, as the person answered; the saved copy replaces it. */
+  const drawAnswer = (id: string, answer: QuestionAnswer | null) => {
+    setError(null);
     setQueue((current) => {
-      const known = current.cache.get(id) ?? decision;
+      const known = current.cache.get(id);
+      if (!known) return current;
       const cache = new Map(current.cache).set(id, { ...known, question: { ...known.question, state: answer ? 'picked' : 'open', answer } });
       return { ...current, cache, later: answer ? new Set([...current.later].filter((l) => l !== id)) : current.later };
     });
-    setError(null);
-    pendingPicks.current.add(id);
-    pickChain.current = pickChain.current.then(async () => {
-      const onThread = heldRef.current?.thread.messages.find((m) => m.id === decision.message.id)?.questions?.find((q) => q.key === decision.question.key);
-      const revision = Math.max(revisions.current.get(id) ?? 0, queueRef.current.cache.get(id)?.question.revision ?? 0, onThread?.revision ?? 0);
-      try {
-        const result = await pickSave.mutateAsync({ messageId: decision.message.id, key: decision.question.key, revision, answer });
-        const saved = result.questions.find((q) => q.key === decision.question.key);
-        if (saved) {
-          revisions.current.set(id, saved.revision);
-          setQueue((current) => {
-            const known = current.cache.get(id);
-            return known ? { ...current, cache: new Map(current.cache).set(id, { ...known, question: saved }) } : current;
-          });
-        }
-      } catch (cause) {
-        if (!isSuperseded(cause)) setError(cause instanceof InboxApiError ? cause.message : 'The pick was not saved.');
-        props.refresh();
-      } finally {
-        pendingPicks.current.delete(id);
-        setPending((current) => {
-          if (!current.has(id) || current.get(id) !== answer) return current;
-          const next = new Map(current);
-          next.delete(id);
-          return next;
-        });
-      }
-    });
   };
 
-  /** A change on a question card (its draft): typed words wait for their pause, a click saves at once. */
+  /** A change on a question card (its draft): typed words wait for their pause, a click saves at once (saves.ts). */
   const changeAnswer = (decision: InboxDecision, key: string, answer: QuestionAnswer | null, pointer: boolean) => {
     const id = `${decision.message.id}/${key}`;
     if (id !== decision.id || sendingNow(decision)) return;
     const onThread = messageOf(decision.message.id)?.questions?.find((q) => q.key === key);
-    const before = pendingRef.current.has(id) ? (pendingRef.current.get(id) ?? null) : (onThread?.answer ?? decision.question.answer ?? null);
-    setPending((current) => new Map(current).set(id, answer));
-    if (isTypedChange(before, answer, onThread?.suggested_text ?? decision.question.suggested_text)) {
-      const waiting = typed.current.get(id);
-      if (waiting) clearTimeout(waiting.timer);
-      const save = () => savePick(id, pendingRef.current.has(id) ? (pendingRef.current.get(id) ?? null) : answer);
-      typed.current.set(id, {
-        save,
-        timer: setTimeout(() => {
-          typed.current.delete(id);
-          save();
-        }, TYPED_ANSWER_SAVE_MS),
-      });
-      return;
-    }
-    const waiting = typed.current.get(id);
-    if (waiting) {
-      clearTimeout(waiting.timer);
-      typed.current.delete(id);
-    }
-    flushTyped();
+    const { before, typed } = saves.change(id, answer, onThread?.answer ?? decision.question.answer ?? null, onThread?.suggested_text ?? decision.question.suggested_text);
+    drawAnswer(id, answer);
+    if (typed) return;
     setUndo((stack) => [...stack, { id, kind: 'pick', before, at: Date.now() }]);
-    savePick(id, answer);
     // A pick-one choice or a Skip by a click or a tap answers the card: the next one rises, as before.
     if (pointer && settlesAtOnce(decision, before, answer)) land(id, answer!, answerWords(answer));
   };
@@ -564,7 +613,7 @@ export function DecisionMode(props: DecisionModeProps) {
     const decision = queueRef.current.cache.get(id);
     if (!decision) return;
     flushTyped();
-    setUndo((stack) => [...stack, { id, kind: 'action', before: null, at: Date.now() }]);
+    setUndo((stack) => [...stack, { id, kind: 'action', before: null, at: Date.now(), ...(mark.note ? { note: mark.note } : {}) }]);
     setQueue((current) => {
       const cache = new Map(current.cache);
       cache.set(id, { ...decision, question: { ...decision.question, state: 'picked' } });
@@ -574,6 +623,11 @@ export function DecisionMode(props: DecisionModeProps) {
     pickChain.current = pickChain.current.then(async () => {
       try {
         await inboxApi.markAction(decision.message.id, decision.question.key, mark, true);
+        // The reason now waits as the mark's note: its own draft goes (Undo puts it back). Not saved, it stays.
+        if (mark.outcome === 'cant' && reasons.text(id)) {
+          reasons.type(decision.thread.id, id, '');
+          reasons.flush();
+        }
       } catch (cause) {
         setError(cause instanceof InboxApiError ? cause.message : 'That was not saved.');
         props.refresh();
@@ -615,6 +669,11 @@ export function DecisionMode(props: DecisionModeProps) {
       pickChain.current = pickChain.current.then(async () => {
         try {
           await inboxApi.markAction(decision.message.id, decision.question.key, null, true);
+          // A Can't do it taken back: its reason is the card's draft again, never lost with the mark.
+          if (entry!.note && !reasons.text(entry!.id)) {
+            reasons.type(decision.thread.id, entry!.id, entry!.note);
+            reasons.flush();
+          }
           setQueue((current) => {
             const cache = new Map(current.cache);
             const known = cache.get(entry!.id) ?? decision;
@@ -634,8 +693,8 @@ export function DecisionMode(props: DecisionModeProps) {
       return;
     }
     if (entry!.kind === 'pick') {
-      setPending((current) => new Map(current).set(entry!.id, entry!.before));
-      savePick(entry!.id, entry!.before);
+      saves.put(entry!.id, entry!.before);
+      drawAnswer(entry!.id, entry!.before);
     }
     if (entry!.kind === 'later') setQueue((current) => ({ ...current, later: new Set([...current.later].filter((l) => l !== entry!.id)) }));
     setStamp(null);
@@ -671,6 +730,13 @@ export function DecisionMode(props: DecisionModeProps) {
   // A replacement on its way is still a decision: the end screen waits for it.
   const done = loaded && queue.current === null && !swapPending;
   const sendingCard = current !== null && sentAnswer === null && (sends.get(groupKeyOf(current))?.kind === 'sending' || inFlightKeys.has(groupKeyOf(current)));
+  // An action item's card shows: its reason saved earlier (this dialog, a dialog before, another window) comes back.
+  const actionOnScreen = current && isActionDecision(current) ? current : null;
+  useEffect(() => {
+    if (actionOnScreen) reasons.load(actionOnScreen.thread.id, actionOnScreen.id);
+    // Once per card shown.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionOnScreen?.id, reasons]);
 
   /** The card's message from the thread, with the thread's answers (its drafts) and the ones on their way. */
   const cardBody = (decision: InboxDecision): CardBody | null => {
@@ -764,7 +830,7 @@ export function DecisionMode(props: DecisionModeProps) {
         rows={props.rows}
         busy={busy}
         queue={queue}
-        onSendNow={(key) => void sendGroup(key)}
+        onSendNow={(key) => void sendGroups([key])}
         onOpenThread={(key) => {
           const first = queue.cache.get(groupIds(queue, key)[0]!);
           if (first) props.onTuck(first.thread.id);
@@ -811,6 +877,8 @@ export function DecisionMode(props: DecisionModeProps) {
               }
               onPick={(key, answer, pointer) => changeAnswer(current, key, answer, pointer)}
               onAction={(mark) => act(current.id, mark)}
+              reason={reasonTexts.get(current.id) ?? ''}
+              onReason={(text) => reasons.type(current.thread.id, current.id, text)}
               onOpenThread={(fileId) => {
                 flushTyped();
                 props.onTuck(current.thread.id, fileId, fileId ? undefined : { messageId: current.message.id, key: current.question.key });

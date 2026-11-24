@@ -1698,8 +1698,8 @@ export const inboxApi = {
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
   replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
   commentDraft: (threadId: string, key: string) => get<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft', `key=${encodeURIComponent(key)}`)),
-  saveCommentDraft: (threadId: string, body: { key: string; text: string; images: readonly ImageRef[]; base: string | null; force?: boolean }) =>
-    post<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft'), body),
+  saveCommentDraft: (threadId: string, body: { key: string; text: string; images: readonly ImageRef[]; base: string | null; force?: boolean }, init: { keepalive?: boolean } = {}) =>
+    post<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft'), body, init),
   deleteCommentDraft: (threadId: string, key: string) => post<{ ok: true; deleted: boolean }>(threadUrl(threadId, '/comment-draft/delete'), { key }),
   /** Save (compare-and-set on `base`, the `updated_at` last read; null to create); an empty body deletes it. */
   /**
