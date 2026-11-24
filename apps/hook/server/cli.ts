@@ -254,11 +254,10 @@ export function formatTopLevelHelp(options: { board?: boolean; scheduled?: boole
  *
  * `t3` (the T3 Code connection) was the last one to launch. Today:
  * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
- * runs; `codex-hook`, Codex's PostToolUse hook, which only Codex runs;
- * `system`, System's drawing commands, until the Inbox's
+ * runs; `system`, System's drawing commands, until the Inbox's
  * System surfaces ship; and `plans`, Plans' switch and list, until its screens ship.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "codex-hook", "system", "plans"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "system", "plans"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -317,7 +316,8 @@ export const ROUTINE_COMMAND_USAGE = [
   "A routine is a saved prompt that an agent on this computer runs on a schedule. The",
   "Plannotator Inbox starts each run and keeps every run in the routine's own thread,",
   "where the person reads it and replies.",
-  "Routines must be on in the Inbox (Settings → Capabilities); only the person turns them on.",
+  "Routines must be on in the Inbox: Settings → Capabilities, or plannotator inbox capability",
+  "routines on when the person asks. While they are off, tell the person; turn them on only if they say yes.",
   "",
   "- Make one only when the person asks for work that runs on its own, on a schedule.",
   "  Use the schedule they asked for; never make one up.",
@@ -808,6 +808,7 @@ export const INBOX_COMMAND_USAGE = [
   INBOX_ROWS_USAGE_LINE,
   "  plannotator inbox icon set <file> --request <id> [--json]",
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+  "  plannotator inbox capability [<capability> on|off] [--computer <name>] [--thread <id>]",
   "  plannotator inbox pulls ls|add|rm [--session <id>] <thread> [<ref>... | --all]",
   "  plannotator inbox export-decisions --thread <id> [--format md|html] [--out <file>] [--pr <ref>]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
@@ -1224,13 +1225,6 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "",
     "Internal: the Claude Bash hook of the opt-in T3 Code connection and its",
     "settings helper (install.sh --with-t3 / --without-t3). Agents never run it.",
-  ].join("\n"),
-  "codex-hook": [
-    "Usage:",
-    "  plannotator codex-hook",
-    "",
-    "Internal: Codex's PostToolUse hook for the experimental codex-steer switch",
-    "(the installer writes it into Codex's hooks.json). Agents never run it.",
   ].join("\n"),
 };
 

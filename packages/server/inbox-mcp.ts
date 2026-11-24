@@ -68,7 +68,7 @@ import type { ProjectHostOf } from "./inbox-thread-pulls";
 import { applyAgentPriority, priorityLine, PRIORITY_FIELD } from "./inbox-mcp-priority";
 import { BRANCH_FIELD, branchReportOf, checkBranchSend, planBranchSend, type BranchSendPlan, type InboxBranchMcpContext } from "./inbox-mcp-branch";
 import { inboxBranchReportedLine, inboxBranchSameLine } from "@plannotator/core/inbox-branch-reports";
-import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
+import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpContext, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
 export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps", "routine"] as const;
 
@@ -364,6 +364,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
   pulls?: InboxPullsMcpLive;
   /** The host of a project's git remote, for a short `group/project!45` (inbox-thread-pulls.ts `parseProjectPullRefs`). Absent: gitlab.com. */
   projectHost?: ProjectHostOf;
+  /** Ship: the shipping agent's `thread_pulls` `ship` (inbox-mcp-pulls.ts). */
+  shipStep?: InboxPullsMcpContext["shipStep"];
   /**
    * What this Inbox already knows of a project's PRs, read with no forge call (inbox-mcp-hints.ts): for the attach
    * hint's `owner/repo#12` and bare `#12`. Absent: only a PR's URL and a short `group/project!45` count. Its `lookUp`

@@ -14,10 +14,12 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
-import { act } from 'react';
+import { afterEach, beforeEach, describe, expect, setSystemTime, spyOn, test } from 'bun:test';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClientProvider } from '@tanstack/react-query';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import type { ArchivedModel } from './api';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
@@ -28,6 +30,11 @@ const { TITLE_FILTER_LABEL, TITLE_FILTER_NONE, TITLE_FILTER_PLACEHOLDER } = awai
 const { resetTitleFilterForTests } = await import('./listTitleFilterStore');
 const { resetScheduledForTests } = await import('./scheduled/store');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+const { useArchivedGroup } = await import('./data/actions/archivedGroup');
+const { createInboxQueryClient } = await import('./data/client');
+const { inboxApi } = await import('./api');
+const { adoptShowArchived, resetShowArchivedForTests } = await import('./showArchived');
+const { useShowLight } = await import('./showLight');
 
 const NOW = new Date(2026, 10, 5, 15, 0, 0);
 const stored = new Map<string, string>();
@@ -119,6 +126,74 @@ function Harness({ list = LIST, place = 'inbox' }: Look) {
       onOpen={() => {}}
       empty={none ? <ListFilterEmpty onClear={() => setPicks(clearedFrom(picks, false))} /> : null}
       listFilter={{ rows: list.flatMap((s) => s.threads), scoped: false, names: new Map(), filter: picks, onChange: setPicks, place }}
+    />
+  );
+}
+
+/** The list with its Archived group (data/actions/archivedGroup.ts), the Inbox's answers stood in. */
+function ArchivedHarness() {
+  const [picks, setPicks] = useListFilter();
+  const { host: archived } = useArchivedGroup({
+    project: null,
+    merged: false,
+    filter: (rows) => rows,
+    showToast: () => {},
+    showError: () => {},
+    afterWrite: async () => {},
+    archive: async () => {},
+    go: () => {},
+    refreshList: async () => {},
+  });
+  return (
+    <InboxList
+      title="Inbox"
+      path={null}
+      sections={LIST}
+      sort={{ epoch: 1, keep: null }}
+      filtered={false}
+      narrow={false}
+      phone={false}
+      selectedThreadId={null}
+      notice={null}
+      onShowNew={() => {}}
+      onOpen={() => {}}
+      archived={archived}
+      tidy={{ surface: 'list', scope: null, plan: null, run: null, start: async () => null, refresh: () => {} }}
+      listFilter={{ rows: LIST.flatMap((s) => s.threads), scoped: false, names: new Map(), filter: picks, onChange: setPicks, place: 'inbox' }}
+    />
+  );
+}
+
+/** Two held rows: one the words "page" keep, one they do not. */
+const NEWS = [row('deploy', 'Page deploy notes', 'web', 'codex', 'new'), row('cron', 'Cron schedule tidy', 'api', 'codex', 'new')];
+const NEWS_IDS = NEWS.map((r) => r.thread_id);
+
+/** App.tsx's held news: the bar's Show brings the held rows into the list and lights them (showLight.ts), the pill counts the ones out of view. */
+function NewsHarness() {
+  const [picks, setPicks] = useListFilter();
+  const [list, setList] = useState(LIST);
+  const [held, setHeld] = useState(true);
+  const light = useShowLight();
+  return (
+    <InboxList
+      title="Inbox"
+      path={null}
+      sections={list}
+      sort={{ epoch: 1, keep: null }}
+      filtered={false}
+      narrow={false}
+      phone={false}
+      selectedThreadId={null}
+      notice={held ? { count: NEWS.length } : null}
+      onShowNew={() => {
+        setList(sections({ ...Object.fromEntries(LIST.map((s) => [s.id, s.threads])), new: [...LIST.find((s) => s.id === 'new')!.threads, ...NEWS] }));
+        setHeld(false);
+        light.light(new Set(NEWS_IDS), 0, document.querySelector<HTMLElement>('.ib-lbody'));
+      }}
+      unseenNew={light.unseen}
+      onGoNew={light.go}
+      onOpen={() => {}}
+      listFilter={{ rows: list.flatMap((s) => s.threads), scoped: false, names: new Map(), filter: picks, onChange: setPicks, place: 'inbox' }}
     />
   );
 }
@@ -368,6 +443,89 @@ describe.skipIf(!hasDom)('Filter by typing', () => {
     expect(el.querySelector('.ib-lbody [data-title-filter-none]') === null).toBe(true);
     await typeKeys(field()!, 'billing nothing');
     expect(el.querySelector('.ib-lbody [data-title-filter-none]')!.textContent).toBe(TITLE_FILTER_NONE);
+  });
+
+  test('"No threads match" stays away while only a row of the open Archived group matches', async () => {
+    const archivedRow = { ...row('old', 'Billing archive sweep', 'api', 'codex', 'quiet'), resolved_at: new Date(NOW.getTime() - 86_400_000).toISOString() } as InboxListRow;
+    const spy = spyOn(inboxApi, 'archived').mockImplementation(
+      async (input = {}) => ({ serverSession: 's', cursor: 1, project: null, projects: [], total: 1, offset: 0, limit: input.limit ?? 50, threads: [archivedRow] }) as ArchivedModel,
+    );
+    resetShowArchivedForTests();
+    try {
+      const client = createInboxQueryClient();
+      host = document.createElement('div');
+      host.className = 'pn-inbox';
+      document.body.append(host);
+      root = createRoot(host);
+      act(() => {
+        root!.render(
+          <QueryClientProvider client={client}>
+            <SidebarProvider>
+              <ArchivedHarness />
+            </SidebarProvider>
+          </QueryClientProvider>,
+        );
+      });
+      adoptShowArchived({ on: true, rev: 1 });
+      await settle();
+      await click(document.querySelector<HTMLElement>('[data-archived-group] .ib-band')!);
+      await settle();
+      const el = host;
+      await openField();
+      await typeKeys(field()!, 'billing');
+      // No live row holds "billing"; the Archived group's row does, and it is drawn.
+      expect(rowIds(el)).toEqual(['old']);
+      expect(el.querySelector('.ib-lbody [data-title-filter-none]') === null).toBe(true);
+      await typeKeys(field()!, 'billing nothing');
+      expect(el.querySelector('.ib-lbody [data-title-filter-none]')!.textContent).toBe(TITLE_FILTER_NONE);
+    } finally {
+      spy.mockRestore();
+      resetShowArchivedForTests();
+    }
+  });
+
+  test('"N new · Show" with words typed: Show brings in only the new rows the words keep, and the pill counts only those', async () => {
+    const realRect = HTMLElement.prototype.getBoundingClientRect;
+    const realRects = HTMLElement.prototype.getClientRects;
+    // The list shows 0 to 600; the rows Show brings in land below it, every other row in view.
+    const box = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 100, width: 100, x: 0, y: top, toJSON() {} }) as DOMRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      const id = this.getAttribute('data-thread-id');
+      return id === null ? box(0, 600) : box(NEWS_IDS.includes(id) ? 900 : 100, 40);
+    };
+    HTMLElement.prototype.getClientRects = function (this: HTMLElement) {
+      return (this.isConnected ? [this.getBoundingClientRect()] : []) as unknown as DOMRectList;
+    };
+    try {
+      host = document.createElement('div');
+      host.className = 'pn-inbox';
+      document.body.append(host);
+      root = createRoot(host);
+      act(() => {
+        root!.render(
+          <SidebarProvider>
+            <NewsHarness />
+          </SidebarProvider>,
+        );
+      });
+      const el = host;
+      await openField();
+      await typeKeys(field()!, 'page');
+      expect(rowIds(el)).toEqual(['trash', 'search', 'history']);
+      // The words stay on the bar's Show: the held rows come in under them.
+      await click(el.querySelector<HTMLElement>('[data-inbox-notice]')!);
+      await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 20))));
+      await settle();
+      expect(field()!.value).toBe('page');
+      expect(rowIds(el)).toEqual(['trash', 'search', 'history', 'deploy']);
+      // One row came in below the view: the pill says one, not the two Show brought.
+      const pill = el.querySelector<HTMLElement>('[data-list-new-pill]')!;
+      expect(pill.hasAttribute('data-off')).toBe(false);
+      expect(pill.textContent).toBe('1 new');
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = realRect;
+      HTMLElement.prototype.getClientRects = realRects;
+    }
   });
 
   test('a screen reader hears how many threads match once typing pauses, in the field\'s polite status; nothing shows', async () => {

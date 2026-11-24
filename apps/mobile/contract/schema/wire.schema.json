@@ -4466,6 +4466,27 @@
             "type": "string"
           }
         },
+        "ship_note": {
+          "type": "object",
+          "properties": {
+            "ship": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "stop",
+                "watch"
+              ],
+              "x-open": true
+            }
+          },
+          "required": [
+            "ship",
+            "kind"
+          ],
+          "additionalProperties": true
+        },
         "moved_note": {
           "anyOf": [
             {

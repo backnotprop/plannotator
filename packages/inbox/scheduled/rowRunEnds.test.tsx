@@ -73,7 +73,8 @@ function inbox(rows: InboxScheduledRow[]) {
   const server = { rows, reads: 0 };
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if (path === '/api/inbox/scheduled' && (init?.method ?? 'GET') === 'GET') {
+    // The window's read also asks for the linked computers' routines (`?machines=1`); none are linked here.
+    if (path.split('?')[0] === '/api/inbox/scheduled' && (init?.method ?? 'GET') === 'GET') {
       server.reads += 1;
       return new Response(JSON.stringify({ scheduled: server.rows, launch_on: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }

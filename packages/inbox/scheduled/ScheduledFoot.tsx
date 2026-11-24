@@ -1,7 +1,7 @@
 /**
  * The mark at the right of a routine's Reply row: "Routine · next Mon 9:00 AM · Edit", which opens its
- * editor. A routine is managed on the computer that made it, so on a thread from another linked machine it
- * reads "Routine on <machine>. Manage it there." with no link (no way into a page that has nothing to show).
+ * editor. A linked computer's routine reads and opens the same: the routines' list holds it (the merged read), and its
+ * editor here changes it there.
  */
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { writeRoute } from '../app/writeRoute';
@@ -32,16 +32,10 @@ function LocalFoot({ id }: { id: string }) {
   );
 }
 
-export function ScheduledFoot({ messages, machine }: { messages: readonly InboxMessageWire[]; machine: { name: string } | null }) {
+/** `machine`: the thread's computer when it is a linked one; its routine is in the list by its id, as this one's are. */
+export function ScheduledFoot({ messages }: { messages: readonly InboxMessageWire[]; machine?: { name: string } | null }) {
   let latest: InboxMessageWire | undefined;
   for (let i = messages.length - 1; i >= 0 && !latest; i--) if (messages[i]!.scheduled_run) latest = messages[i];
   if (!latest) return null;
-  if (machine)
-    return (
-      <span className="st-foot-mark st-far" data-scheduled-foot-far="">
-        <Icon name="scheduled" size={14} />
-        <span>Routine on {machine.name}. Manage it there.</span>
-      </span>
-    );
   return <LocalFoot id={latest.scheduled_run!.scheduled_id} />;
 }

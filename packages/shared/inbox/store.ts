@@ -668,12 +668,11 @@ function wakesLater(author: Extract<InboxAuthor, { kind: "agent" }>): author is 
 }
 
 /**
- * A delivery's `into_turn`: for an item the Inbox marked to go in by itself, the connection's report (decided by the
- * server); for any other, true only when the wake itself put it into the running turn (`steered`: a Codex steer).
+ * A delivery's `into_turn`, written only for an item the Inbox marked to go
+ * in by itself (the connection's report, decided by the server).
  */
-function intoTurnOf(by: InboxDeliverNowBy | null | undefined, intoTurn: boolean | undefined, steered?: boolean): { into_turn?: boolean } {
-  if (by === "auto") return typeof intoTurn === "boolean" ? { into_turn: intoTurn } : {};
-  return steered === true ? { into_turn: true } : {};
+function intoTurnOf(by: InboxDeliverNowBy | null | undefined, intoTurn: boolean | undefined): { into_turn?: boolean } {
+  return by === "auto" && typeof intoTurn === "boolean" ? { into_turn: intoTurn } : {};
 }
 
 /** The tag a person's message carries for `session`, or null. */
@@ -3369,6 +3368,42 @@ export class InboxStore {
       notes.push(note);
     }
     return notes;
+  }
+
+  /**
+   * Ship's note to the shipping agent (server inbox-ship.ts): what the watch saw change, or the stop line. A person
+   * note addressed to that session (`to`), a reply to its latest message in the thread (else the root), so it wakes
+   * that session as any reply does and no other. Null when the thread is gone.
+   */
+  tellShip(threadId: string, input: { body: string; to: InboxAddressee | null; ship_note: NonNullable<InboxMessage["ship_note"]> }): InboxMessage | null {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) return null;
+    const members = this.threadMembers.get(threadId) ?? [threadId];
+    let answered: InboxMessage = root;
+    for (let i = members.length - 1; i >= 0; i -= 1) {
+      const m = this.messages.get(members[i]!);
+      if (m && m.author.kind === "agent" && (!input.to || m.author.session === input.to.session)) {
+        answered = m;
+        break;
+      }
+    }
+    const at = this.stamp();
+    const note: InboxMessage = {
+      id: inboxId("msg"),
+      project_id: root.project_id,
+      thread_id: threadId,
+      reply_to: answered.id,
+      author: { kind: "person" },
+      subject: null,
+      body: input.body,
+      created_at: at,
+      resolved_at: null,
+      idempotency_key: null,
+      ...(input.to ? { to: input.to } : {}),
+      ship_note: input.ship_note,
+    };
+    this.appendMessage(note, at);
+    return note;
   }
 
   /** The open threads with a set-aside note due (a question a Mark read closed at least `afterMs` ago, not yet named). */
@@ -7357,7 +7392,7 @@ export class InboxStore {
    * session's delivery marks nothing for the owner, and `markThrough` bounds
    * the owner's mark (a read's delivery, `recordOwnRead`). Idempotent per session.
    */
-  recordDelivery(deliveryId: string, by: { host: string; session: string; intoTurn?: boolean; steered?: boolean; markThrough?: number }): InboxMessage {
+  recordDelivery(deliveryId: string, by: { host: string; session: string; intoTurn?: boolean; markThrough?: number }): InboxMessage {
     const noticeOf = inboxStopNoticeReply(deliveryId);
     const replyId = noticeOf ?? deliveryId;
     const reply = this.messages.get(replyId);
@@ -7374,7 +7409,7 @@ export class InboxStore {
       const delivered: InboxMessage = {
         ...reply,
         tags: reply.tags!.map((t) =>
-          t.session === by.session ? { ...t, delivery: { state: "delivered" as const, host: by.host, session: by.session, at, ...intoTurnOf(t.deliver_now_by, by.intoTurn, by.steered) } } : t,
+          t.session === by.session ? { ...t, delivery: { state: "delivered" as const, host: by.host, session: by.session, at, ...intoTurnOf(t.deliver_now_by, by.intoTurn) } } : t,
         ),
       };
       this.appendMessage(delivered, at);
@@ -7383,7 +7418,7 @@ export class InboxStore {
     if (reply.delivery) return reply;
     const at = this.stamp();
     const { t3_wait: _t3Wait, ...kept } = reply;
-    const delivered: InboxMessage = { ...kept, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn, by.steered) } };
+    const delivered: InboxMessage = { ...kept, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) } };
     this.appendMessage(delivered, at);
     // Up to it, but never past a reply still owed to another session.
     this.markAgentChecked(reply.thread_id, Math.min(this.messageSeq.get(reply.id) ?? 0, by.markThrough ?? Number.POSITIVE_INFINITY), at, by.session);

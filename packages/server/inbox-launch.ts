@@ -690,9 +690,10 @@ export function createInboxLaunch(options: {
 
   /**
    * What waits for `session` from the person, oldest first: never the note that its questions moved (resolve_message's
-   * `moved_to`). That note goes to a session that comes on its own; it never starts or respawns one.
+   * `moved_to`), nor Ship's stop or closed line (`ship_note` `stop`). Those go to a session that comes on its own; they
+   * never start or respawn one. Ship's watch notes do: the agent's job is not done until the PR is merged.
    */
-  const personPending = (session: string): InboxMessage[] => pendingOf(session).filter((m) => !m.moved_note);
+  const personPending = (session: string): InboxMessage[] => pendingOf(session).filter((m) => !m.moved_note && m.ship_note?.kind !== "stop");
 
   /**
    * A turn waits for the session: the root or a reply is not taken yet, or it
@@ -704,7 +705,7 @@ export function createInboxLaunch(options: {
     if (root.to && personPending(root.to.session).length > 0) return true;
     if (memo.busySeen) return false;
     // The note that the session's questions moved is not the person's: the latest is the message before it.
-    const lastId = [...store.threadMessageIds(root.thread_id)].reverse().find((id) => !store.message(id)?.moved_note);
+    const lastId = [...store.threadMessageIds(root.thread_id)].reverse().find((id) => !store.message(id)?.moved_note && store.message(id)?.ship_note?.kind !== "stop");
     const last = lastId ? store.message(lastId) : null;
     // The person's latest, unless it went to another session (re-addressed), or is a routine's skip line or a run that didn't start.
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session) && !(last.scheduled_run && !last.to);
@@ -1978,7 +1979,7 @@ ${result.text}`);
         .threadMessageIds(root.thread_id)
         .map((id) => store.message(id))
         // The person's own words: never the note that the session's questions moved.
-        .filter((m): m is InboxMessage => !!m && m.author.kind === "person" && !m.moved_note && m.delivery?.session === session)
+        .filter((m): m is InboxMessage => !!m && m.author.kind === "person" && !m.moved_note && !m.ship_note && m.delivery?.session === session)
         .at(-1);
       if (!last) throw new InboxError("validation_error", "That launch did not fail.");
       store.sendAgain(last.id, session);
@@ -2462,7 +2463,7 @@ ${result.text}`);
      * reply starts it again (`maybeRespawn`, so a Stop holds across an Inbox restart too), and a deleted launch's
      * session never gets it.
      */
-    async deliver(agent: string, session: string, text: string, intoTurn = false): Promise<LaunchDelivery> {
+    async deliver(agent: string, session: string, text: string): Promise<LaunchDelivery> {
       if (!Object.hasOwn(hosts, agent)) return "queue";
       const host = hosts[agent]!;
       if (!host.deliver) return "queue";
@@ -2473,7 +2474,7 @@ ${result.text}`);
       if (launch.deleted_at || stopping.has(launch.id) || deleting.has(launch.id)) return "hold";
       if (!liveOf(host, root, memoOf(launch)) && !respawning.has(launch.id)) return "hold";
       const controller = new AbortController();
-      const call = host.deliver(launch, text, controller.signal, intoTurn ? { intoTurn: true } : undefined).catch((error: unknown): LaunchDelivery => ({ failed: error instanceof Error ? error.message : String(error) }));
+      const call = host.deliver(launch, text, controller.signal).catch((error: unknown): LaunchDelivery => ({ failed: error instanceof Error ? error.message : String(error) }));
       const one = { controller, done: call };
       const under = delivering.get(launch.id) ?? delivering.set(launch.id, new Set()).get(launch.id)!;
       under.add(one);
@@ -2522,12 +2523,6 @@ ${result.text}`);
     /** Whether a launch of this Inbox (not deleted) owns `session` of `agent`, so its host can take an item. */
     launched(agent: string, session: string): boolean {
       return roots().some((m) => m.launch!.agent === agent && !m.launch!.deleted_at && m.to?.host === agent && m.to.session === session);
-    },
-
-    /** Whether `session`'s host says a turn runs now (its process is up and in a turn), or null when no process of it is up here. */
-    turnRunning(agent: string, session: string): boolean | null {
-      if (!Object.hasOwn(hosts, agent)) return null;
-      return hosts[agent]!.live(session)?.busy ?? null;
     },
 
     /** The launch ended before its agent wrote: it failed, its CLI is gone, or it was stopped or went away (the thread's own line says which). */
