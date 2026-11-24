@@ -85,8 +85,6 @@
     "./pfm-reminder": "./pfm-reminder.ts",
     "./plannotator-tool": "./plannotator-tool.ts",
     "./t3-hook-command": "./t3-hook-command.ts",
-    "./codex-hook-command": "./codex-hook-command.ts",
-    "./inbox/codex-hook-mailbox": "./inbox/codex-hook-mailbox.ts",
     "./t3-workers": "./t3-workers.ts",
     "./worktree": "./worktree.ts",
     "./worktree-pool": "./worktree-pool.ts",

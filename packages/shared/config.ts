@@ -492,13 +492,11 @@ export interface PlannotatorConfig {
    * PLANNOTATOR_EXPERIMENTAL wins over this key. Written by the Inbox's
    * Settings → Capabilities → Experimental through POST /api/inbox/settings
    * `{ experimental: { grid } }`. `grid`: the Inbox's Grid page
-   * (approval "inbox-agent-grid"). `codexSteer` (an Inbox reply into a
-   * running Codex turn, packages/server/inbox-codex-steer.ts) has no Settings
-   * switch yet: config.json or PLANNOTATOR_EXPERIMENTAL only. `decisionMode`:
-   * the old place of Decision mode's switch, now `inboxDecisionMode`; read only
-   * as its fallback (`inboxDecisionModeOn`), never written.
+   * (approval "inbox-agent-grid"). `decisionMode`: the old place of Decision
+   * mode's switch, now `inboxDecisionMode`; read only as its fallback
+   * (`inboxDecisionModeOn`), never written.
    */
-  experimental?: { decisionMode?: boolean; grid?: boolean; codexSteer?: boolean };
+  experimental?: { decisionMode?: boolean; grid?: boolean };
   /**
    * Decision mode (approval "inbox-decision-mode-one-send"): on unless false. On: a thread's open questions offer
    * "Decide", one agent message at a time, every answer sent with one Send. A window feature only: nothing an agent
@@ -2479,7 +2477,6 @@ export function resolveInboxPhones(
  */
 export const EXPERIMENTAL_FEATURES = {
   grid: "grid",
-  "codex-steer": "codexSteer",
 } as const;
 
 export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURES;

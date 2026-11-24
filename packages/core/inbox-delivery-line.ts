@@ -308,7 +308,6 @@ export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
     wait: decision.wait,
     autoAfterMin: decision.autoAfterMin,
     turnEnded: decision.turnEnded,
-    intoRunningTurn: decision.intoRunningTurn,
     now: input.now,
   });
   return {
@@ -340,8 +339,6 @@ export function deliveryText(
     autoAfterMin?: number;
     /** Marked to go in by itself, it went in when the turn ended instead. */
     turnEnded?: boolean;
-    /** The wake steered it into the running turn (a Codex `turn/steer`). */
-    intoRunningTurn?: boolean;
     now?: number;
   },
 ): string {
@@ -352,7 +349,6 @@ export function deliveryText(
       if (words.readBy && words.at) return `Read by ${words.readBy}, ${words.time(words.at)}`;
       const base = words.at ? `Delivered to ${name}, ${words.time(words.at)}` : `Delivered to ${name}`;
       if (words.autoAfterMin !== undefined) return `${base} · ${autoAfterText(words.autoAfterMin)}`;
-      if (words.intoRunningTurn) return `${base} · ${INTO_RUNNING_TURN_TEXT}`;
       return words.turnEnded ? `${base} · ${TURN_ENDED_TEXT}` : base;
     }
     case 'undelivered':
@@ -408,12 +404,6 @@ export const INBOX_STOPPED_REPLY_TEXT = 'Stopped: goes in when you type in that 
 
 /** An item the Inbox marked to go in by itself that waited for the turn to end (its own Ask question held it). */
 export const TURN_ENDED_TEXT = 'went in when its turn ended';
-
-/**
- * A reply the Codex wake handed into the thread's running turn (the hook, a steer), once the thread's rollout showed it
- * there: "Delivered to Codex, 5:12 PM · went into its running turn".
- */
-export const INTO_RUNNING_TURN_TEXT = 'went into its running turn';
 
 /** "went into its turn by itself after 5 min". */
 export function autoAfterText(minutes: number): string {

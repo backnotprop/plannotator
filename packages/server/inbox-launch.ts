@@ -2463,7 +2463,7 @@ ${result.text}`);
      * reply starts it again (`maybeRespawn`, so a Stop holds across an Inbox restart too), and a deleted launch's
      * session never gets it.
      */
-    async deliver(agent: string, session: string, text: string, intoTurn = false): Promise<LaunchDelivery> {
+    async deliver(agent: string, session: string, text: string): Promise<LaunchDelivery> {
       if (!Object.hasOwn(hosts, agent)) return "queue";
       const host = hosts[agent]!;
       if (!host.deliver) return "queue";
@@ -2474,7 +2474,7 @@ ${result.text}`);
       if (launch.deleted_at || stopping.has(launch.id) || deleting.has(launch.id)) return "hold";
       if (!liveOf(host, root, memoOf(launch)) && !respawning.has(launch.id)) return "hold";
       const controller = new AbortController();
-      const call = host.deliver(launch, text, controller.signal, intoTurn ? { intoTurn: true } : undefined).catch((error: unknown): LaunchDelivery => ({ failed: error instanceof Error ? error.message : String(error) }));
+      const call = host.deliver(launch, text, controller.signal).catch((error: unknown): LaunchDelivery => ({ failed: error instanceof Error ? error.message : String(error) }));
       const one = { controller, done: call };
       const under = delivering.get(launch.id) ?? delivering.set(launch.id, new Set()).get(launch.id)!;
       under.add(one);
@@ -2523,12 +2523,6 @@ ${result.text}`);
     /** Whether a launch of this Inbox (not deleted) owns `session` of `agent`, so its host can take an item. */
     launched(agent: string, session: string): boolean {
       return roots().some((m) => m.launch!.agent === agent && !m.launch!.deleted_at && m.to?.host === agent && m.to.session === session);
-    },
-
-    /** Whether `session`'s host says a turn runs now (its process is up and in a turn), or null when no process of it is up here. */
-    turnRunning(agent: string, session: string): boolean | null {
-      if (!Object.hasOwn(hosts, agent)) return null;
-      return hosts[agent]!.live(session)?.busy ?? null;
     },
 
     /** The launch ended before its agent wrote: it failed, its CLI is gone, or it was stopped or went away (the thread's own line says which). */
