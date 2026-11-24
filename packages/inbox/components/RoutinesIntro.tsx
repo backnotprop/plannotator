@@ -54,8 +54,8 @@ export function RoutinesIntro({ phone, onClose, onTurnOn }: { phone: boolean; on
 }
 
 /**
- * The `/create-routine` built-in exists in this build (PR #3601): the window carries its text, as it does `/shape` and
- * the review skills. Asked of the window's own built-ins, not the "/" list, which names it only while Routines are on.
+ * The `/create-routine` built-in exists in this build (PR #3601): the window carries its text, as it does the review
+ * skills. Asked of the window's own built-ins, not the "/" list, which names it only while Routines are on.
  * Until it exists the line is left out, so the dialog never names a command the build does not have.
  */
 export function createRoutineBuiltIn(): boolean {

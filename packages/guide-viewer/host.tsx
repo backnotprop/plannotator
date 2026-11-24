@@ -136,14 +136,13 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   chapterDiagramsFolded?: boolean;
   /**
-   * A picture slot under the title when the guide's overview has no diagram
-   * (the Inbox's code review: "Show me" asks the agent for one). Answering
-   * null (or absent) leaves the guide exactly as it is.
+   * A picture slot under the title when the guide's overview has no diagram.
+   * Answering null (or absent) leaves the guide exactly as it is.
    */
   renderOverviewFigure?: () => React.ReactNode | null;
   /**
-   * The review's own actions on the title's line, ahead of Global comment (GuideView `threadHeading`: the Inbox's
-   * Show me). No other heading draws them. Answering null (or absent) adds nothing.
+   * The review's own actions on the title's line, ahead of Global comment (GuideView `threadHeading`). No other
+   * heading draws them. Answering null (or absent) adds nothing.
    */
   renderHeadActions?: () => React.ReactNode | null;
   /**
@@ -171,8 +170,7 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
   renderSectionFooter?: (index: number) => React.ReactNode | null;
   /**
    * A section card's file column when the chapter has no files in the diff (a
-   * guide written before the change exists: Shape's Code view lists the files
-   * each step plans). Called with the card's index; answering null (or
+   * guide written before the change exists, whose steps plan files). Called with the card's index; answering null (or
    * absent) shows the usual "No chapter files in the current diff".
    */
   renderSectionEmpty?: (index: number) => React.ReactNode | null;

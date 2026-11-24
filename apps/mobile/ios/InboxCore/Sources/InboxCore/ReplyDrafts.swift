@@ -16,18 +16,22 @@ public struct LocalDraft: Codable, Hashable, Sendable {
   /// The agent session ↩ aimed the reply at (`SendPlan.targets(in:aim:)`). Kept only while the draft holds a quote:
   /// the quote line is what shows the person where the words go, so with no quote there is no aim.
   public var aim: String?
+  /// The agents the person tagged with `@` (Tags.swift), in the order picked. A tag whose `@` token the words no
+  /// longer hold is dropped as the person types (`TagRules.standing`); a Send of the words spends them all.
+  public var tags: [DraftTag]?
 
-  public init(words: String, editedAt: Date, base: String? = nil, files: [DraftFile]? = nil, quote: DraftQuote? = nil, aim: String? = nil) {
+  public init(words: String, editedAt: Date, base: String? = nil, files: [DraftFile]? = nil, quote: DraftQuote? = nil, aim: String? = nil, tags: [DraftTag]? = nil) {
     self.words = words
     self.editedAt = editedAt
     self.base = base
     self.files = files
     self.quote = quote
     self.aim = aim
+    self.tags = tags
   }
 
   /// Nothing the person made is in it: it is not kept.
-  public var isEmpty: Bool { words.isEmpty && (files ?? []).isEmpty && quote == nil }
+  public var isEmpty: Bool { words.isEmpty && (files ?? []).isEmpty && quote == nil && (tags ?? []).isEmpty }
 }
 
 /// The message a reply quotes (the window's `quote`, approval "inbox-reply-quote"): the whole message, or the words
@@ -114,6 +118,10 @@ struct DraftBook {
   var base: [ThreadID: String] = [:]
   /// A write of the drafts that waits for the typing to pause.
   var soon: Task<Void, Never>?
+  /// Who each thread's reply can tag with `@`, as last read (`GET threads/:id/taggable`), and when.
+  var taggable: [ThreadID: (at: Date, answer: DoorTaggableAnswer)] = [:]
+  /// Take back tries with no answer yet, by message (TakeBack.swift): the next try reuses each one's key.
+  var takingBack: [MessageID: TakeBackAttempt] = [:]
 }
 
 private struct KeptDrafts: Codable {
@@ -193,7 +201,13 @@ extension InboxSession {
   public func keepDraft(_ thread: ThreadID, words: String, now: Date = Date()) {
     if let kept = draftBook.local[thread], kept.words == words { return }
     if words.isEmpty, draftBook.local[thread] == nil { return }
-    changeDraft(thread, now: now, typing: true) { $0.words = words }
+    changeDraft(thread, now: now, typing: true) { draft in
+      draft.words = words
+      // A tag whose `@` the words lost is dropped for good, as in the window (`useMentionAutocomplete`): typing the
+      // same `@` again by hand does not bring it back. Not on an empty box: Send empties it before the Send reads
+      // the tags, and spends them itself (`forgetDraft`); a box emptied by hand drops them at its next words.
+      if let tags = draft.tags, !words.isEmpty { draft.tags = TagRules.standing(tags, words: words) }
+    }
   }
 
   /// Change a thread's draft on the phone and keep it at once (`typing`: once the typing pauses).
@@ -203,6 +217,7 @@ extension InboxSession {
     if let now { draft.editedAt = now }
     draft.base = draftBook.base[thread]
     if draft.files?.isEmpty == true { draft.files = nil }
+    if draft.tags?.isEmpty == true { draft.tags = nil }
     // An aim lives only with the quote it came with: nothing on screen would say where the words go without it.
     if draft.quote == nil { draft.aim = nil }
     draftBook.local[thread] = draft.isEmpty ? nil : draft
@@ -239,6 +254,7 @@ extension InboxSession {
     if draft.words.trimmingCharacters(in: .whitespacesAndNewlines) == sent { draft.words = "" }
     if quoted { draft.quote = nil }
     if !sent.isEmpty { draft.aim = nil }
+    if draft.words.isEmpty { draft.tags = nil }
     let gone = Set(files.map(\.id))
     draft.files = draft.files?.filter { !gone.contains($0.id) }
     draftBook.base[thread] = nil
@@ -249,8 +265,11 @@ extension InboxSession {
   /// through `returned`). `fresh`: the computer no longer has the uploads it named (`upload_not_found`), so each file
   /// goes up again, under a new key, before the next Send.
   func returnToDraft(_ write: HeldWrite, fresh: Bool) {
-    guard write.kind == .reply, (write.files ?? []).isEmpty == false || write.quote != nil else { return }
+    // The agents the words tagged come back with them.
+    let tags = ((try? JSONDecoder().decode(DoorReplyBody.self, from: write.body))?.tags ?? []).map { DraftTag(session: $0.session, host: $0.host, label: $0.label ?? TagRules.agentName($0.host)) }
+    guard write.kind == .reply, (write.files ?? []).isEmpty == false || write.quote != nil || !tags.isEmpty else { return }
     changeDraft(ThreadID(write.thread)) { draft in
+      draft.tags = tags + (draft.tags ?? [])
       let have = Set((draft.files ?? []).map(\.id))
       draft.files = (write.files ?? []).filter { !have.contains($0.id) }.map { fresh ? $0.again : $0 } + (draft.files ?? [])
       if draft.quote == nil { draft.quote = write.quote }
@@ -292,6 +311,8 @@ extension InboxSession {
     if book.inFlight.contains(id) { return .onItsWay }
     settle(id)
     let thread = ThreadID(write.thread)
+    // Its files, quote and tags go back to the draft with its words.
+    returnToDraft(write, fresh: false)
     if let words = write.words, !words.isEmpty {
       returned[thread] = [returned[thread], words].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
       keepGivenBack()

@@ -22,22 +22,6 @@
       ]
     },
     {
-      "spec": "inbox-show-me.spec.ts",
-      "title": "a busy agent: the box offers the Ask window's choice, never says it draws",
-      "why": "After Send with the fake agent set busy, the Show me box never turns `busy` (15 s then, 20 s now: `toHaveAttribute('data-show-me-box', 'busy')`).",
-      "firstSeen": "2026-11-05",
-      "evidence": [
-        42004602635,
-        42122893618,
-        42137072382,
-        42150235389,
-        42156380448,
-        42176139859,
-        42186760384,
-        42223127512
-      ]
-    },
-    {
       "spec": "inbox-launch-scratch.spec.ts",
       "title": "Delete removes the scratch folder and runs claude purge for it only",
       "why": "The second Delete of the same launch must call no CLI, but the fake has one call more than before it (line 289, `expect(fake.calls()).toHaveLength(callsBefore)`: 12, expected 11).",
