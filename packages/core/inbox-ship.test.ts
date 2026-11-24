@@ -70,14 +70,20 @@ describe("inboxNoticeOf", () => {
 });
 
 describe("shipNewerWins", () => {
-  test("the higher generation wins whatever the clocks say; equal ones are settled by id, the same on both computers", () => {
-    expect(shipNewerWins({ id: "shp_a", generation: 2 }, { id: "shp_z", generation: 1 })).toBe(true);
-    expect(shipNewerWins({ id: "shp_z", generation: 1 }, { id: "shp_a", generation: 2 })).toBe(false);
+  test("the higher generation wins whatever the clocks say; equal ones go to the later press, then by id, the same on both computers", () => {
+    expect(shipNewerWins({ id: "shp_a", generation: 2, started_at: "2026-11-24T10:00:00Z" }, { id: "shp_z", generation: 1, started_at: "2026-11-24T23:00:00Z" })).toBe(true);
+    expect(shipNewerWins({ id: "shp_z", generation: 1, started_at: "2026-11-24T23:00:00Z" }, { id: "shp_a", generation: 2, started_at: "2026-11-24T10:00:00Z" })).toBe(false);
     // A record from before generations is 0.
     expect(shipNewerWins({ id: "shp_a", generation: 1 }, { id: "shp_z" })).toBe(true);
-    const a = { id: "shp_a", generation: 3 };
-    const b = { id: "shp_b", generation: 3 };
+    // Two presses made while the computers were apart: the later press by each one's own time wins, on both.
+    const early = { id: "shp_z", generation: 3, started_at: "2026-11-24T14:00:00Z" };
+    const late = { id: "shp_a", generation: 3, started_at: "2026-11-24T14:05:00Z" };
+    expect([shipNewerWins(late, early), shipNewerWins(early, late)]).toEqual([true, false]);
+    // The same time (or none): by id, still the same on both.
+    const a = { id: "shp_a", generation: 3, started_at: "2026-11-24T14:00:00Z" };
+    const b = { id: "shp_b", generation: 3, started_at: "2026-11-24T14:00:00Z" };
     expect([shipNewerWins(a, b), shipNewerWins(b, a)]).toEqual([false, true]);
+    expect([shipNewerWins({ id: "shp_a", generation: 3 }, { id: "shp_b", generation: 3 }), shipNewerWins({ id: "shp_b", generation: 3 }, { id: "shp_a", generation: 3 })]).toEqual([false, true]);
   });
 });
 

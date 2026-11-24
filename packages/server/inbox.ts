@@ -359,7 +359,7 @@ import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createShipReader } from "./inbox-ship-read";
-import { shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
+import { shipBinds, shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
 import type { InboxShip } from "@plannotator/core/inbox-ship";
 import { inboxNoticeOf } from "@plannotator/core/inbox-ship";
 import { createInboxShipRoutes } from "./inbox-ship-routes";
@@ -5335,6 +5335,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ships,
     read: createShipReader({ run: options.refRunner ?? refCliRunner, listed: shipListedPull }),
     shipper: (ship) => shipShipper(shipAgentDeps, ship),
+    // A new session's ship binds only to its own launch's session or its instruction's delivery's, never a first caller.
+    mayBind: (ship, session) => shipBinds(shipAgentDeps, ship).includes(session),
+    launchOf: (messageId) => store.message(messageId)?.launch?.id ?? null,
     note: (ship, body, kind) => {
       // Only ever to the shipping session: with none known, nobody is told (never the thread's latest agent).
       const to = shipShipper(shipAgentDeps, ship);

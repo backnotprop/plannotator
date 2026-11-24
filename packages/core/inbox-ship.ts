@@ -77,7 +77,10 @@ export interface InboxShipSeen {
    * again. Absent on a record from before: the next read only remembers them.
    */
   comments?: string[];
-  /** A new head nobody logged yet, held one read: the agent may log it as its own push meanwhile (`shipChanges`). */
+  /**
+   * A new head nobody logged yet, held one read: the agent may log it as its own push meanwhile (`shipChanges`). Held
+   * once at most: a read that finds another new head after it tells, holding nothing.
+   */
   held?: string | null;
   /** The agent's steps (`InboxShip.steps`) a read asked after them has covered: more than this, and the next read claims. */
   claimed?: number;
@@ -104,6 +107,16 @@ export interface InboxShip {
   agent: InboxShipAgent;
   /** The message that carried the instruction (a new session's launch is read from it). */
   instruction_id?: string | null;
+  /**
+   * The launch this ship started (a new session), tied when it starts: only the session that launch reports binds the
+   * ship (server `shipShipper`). Absent: no launch, or a record from before (that message's own launch).
+   */
+  launch_id?: string | null;
+  /**
+   * The sessions an earlier ship of this pull request in this thread was given and told to stop (a re-ship to another
+   * session): a `ship` call of theirs gets the stop line, never binds. Absent: none.
+   */
+  stopped_sessions?: string[];
   started_at: string;
   state: InboxShipState;
   /** Stuck's few words. */
@@ -129,37 +142,44 @@ export interface InboxShip {
   steps?: number;
   /**
    * The press's place among the Ships of this pull request on every linked computer: each Ship takes one more than the
-   * highest it knows of, so the last press wins by arrival, never by two computers' clocks (`shipNewerWins`).
+   * highest it knows of, so the last press wins by what each computer had heard; the clocks only break a tie
+   * (`shipNewerWins`).
    * Absent on a record from before: 0.
    */
   generation?: number;
   /**
-   * The session is settled: the person chose a live one, or the shipping session logged a step. A new session's
-   * placeholder is not: its launch's first `ship` call binds it (`watch.step`).
+   * The session is settled: the person chose a live one, or the new session it was given is known. A new session's
+   * placeholder is not: it binds only to the session the instruction was delivered to, or the one its own launch
+   * (`launch_id`) reports (server `shipShipper`), never to whichever session calls `ship` first.
    */
   bound?: boolean;
   log: InboxShipLogEntry[];
 }
 
 /** What a window draws: the record without the watch's memory or the log (`GET /api/inbox/ships`). */
-export type InboxShipView = Omit<InboxShip, "seen" | "fails" | "told" | "log" | "platform" | "instruction_id" | "misses" | "steps" | "generation" | "bound"> & {
+export type InboxShipView = Omit<InboxShip, "seen" | "fails" | "told" | "log" | "platform" | "instruction_id" | "launch_id" | "stopped_sessions" | "misses" | "steps" | "generation" | "bound"> & {
   /** A linked machine's ship (the window fills it from the machine it read). */
   machine?: string;
 };
 
 export const shipView = (ship: InboxShip): InboxShipView => {
-  const { seen: _seen, fails: _fails, told: _told, log: _log, platform: _platform, instruction_id: _instruction, misses: _misses, steps: _steps, generation: _generation, bound: _bound, ...view } = ship;
+  const { seen: _seen, fails: _fails, told: _told, log: _log, platform: _platform, instruction_id: _instruction, launch_id: _launch, stopped_sessions: _stopped, misses: _misses, steps: _steps, generation: _generation, bound: _bound, ...view } = ship;
   return view;
 };
 
 /**
  * Two Ships of one pull request on two computers: whether `other` (told through `ships/newer`) wins over `mine`. The
- * higher generation wins (it was pressed knowing of the other); equal ones (pressed while neither had heard of the
- * other) are settled by id, the same way on both computers. No clock is compared.
+ * higher generation wins (it was pressed knowing of the other). Equal ones were pressed while neither had heard of the
+ * other: only then, as a last resort, the later press by the time each computer recorded wins (two clocks, so a close
+ * call may go to the earlier press), and the same time settles by id. Both computers decide it the same way.
  */
-export function shipNewerWins(other: { id: string; generation: number }, mine: Pick<InboxShip, "id" | "generation">): boolean {
+export function shipNewerWins(other: { id: string; generation: number; started_at?: string | null }, mine: Pick<InboxShip, "id" | "generation"> & { started_at?: string | null }): boolean {
   const own = mine.generation ?? 0;
-  return other.generation > own || (other.generation === own && other.id > mine.id);
+  if (other.generation !== own) return other.generation > own;
+  const theirs = Date.parse(other.started_at ?? "");
+  const ours = Date.parse(mine.started_at ?? "");
+  if (Number.isFinite(theirs) && Number.isFinite(ours) && theirs !== ours) return theirs > ours;
+  return other.id > mine.id;
 }
 
 /**
@@ -208,10 +228,18 @@ export interface InboxShipChange {
 export const INBOX_SHIP_COMMENTS_KEPT = 300;
 
 const ownPush = (told: readonly string[], head: string) => told.some((sha) => head.startsWith(sha) || sha.startsWith(head));
+/**
+ * The last read held a head nobody logged, and this read finds another one: that hold was its one read. Pushes every
+ * read without a log never hold the note back for ever.
+ */
+const holdSpent = (ship: Pick<InboxShip, "seen" | "told">, read: InboxShipRead): boolean => {
+  const held = ship.seen?.held;
+  return !!held && held !== read.head_sha && !ownPush(ship.told, held);
+};
 /** A head that is new since the last read and that the agent has not logged: held one read before it is told. */
 const strangerHead = (ship: Pick<InboxShip, "seen" | "told">, read: InboxShipRead): string | null => {
   const head = read.head_sha;
-  return head && ship.seen?.head_sha && head !== ship.seen.head_sha && !ownPush(ship.told, head) ? head : null;
+  return head && ship.seen?.head_sha && head !== ship.seen.head_sha && !ownPush(ship.told, head) && !holdSpent(ship, read) ? head : null;
 };
 
 /**
@@ -247,8 +275,8 @@ export function shipChanges(ship: Pick<InboxShip, "seen" | "told">, read: InboxS
   const head = read.head_sha;
   // The agent's own push is one it logged (`told`); any other new head wakes it, the person's own push too. A Reviews
   // read can see the agent's push before the agent logs it: a new head is held one read (`strangerHead`), and told
-  // only if it is still nobody's then.
-  if (head && seen.held === head && !ownPush(ship.told, head)) {
+  // only if it is still nobody's then. Another new head after a held one is told at once (`holdSpent`).
+  if (head && !ownPush(ship.told, head) && (seen.held === head || (head !== seen.head_sha && holdSpent(ship, read)))) {
     add({ kind: "new_commit", signature: head, log: "New commit", sha: short(head), line: shipWakeLines.newCommit(short(head)) });
   }
   if (read.failing.length > 0) {

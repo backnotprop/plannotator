@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { InboxShipRead } from "@plannotator/core/inbox-ship";
+import { shipStopLine } from "@plannotator/core/inbox-ship-words";
 import { isInboxNote, type InboxAuthor } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { registerInboxThreadPullsTool, type InboxPullsMcpContext } from "./inbox-mcp-pulls";
@@ -123,17 +124,20 @@ describe("thread_pulls ship", () => {
     expect(textOf(result)).toContain("Nothing is shipping in this thread; nothing was logged.");
   });
 
-  test("a new session's ship is bound by the first ship call from its thread, whatever session id its agent reports", async () => {
-    const w = world(false);
+  test("shipped again to a new session: the first shipper's late call is told to stop and never takes the new ship", async () => {
+    const w = world();
     await settle();
-    const first = await w.call({ thread_id: w.thread, ship: { kind: "step", text: "Reviewed the diff" }, agent_session: "ses_reported", agent_host: "claude-code", agent_name: "Claude Code" });
-    expect(textOf(first)).toContain("Logged in the ship log of https://github.com/harbor/fern-api/pull/614.");
-    expect(w.ships.get(KEY)!.agent.session).toBe("ses_reported");
-    // Its notes go to it now.
-    w.set(green({ checks: "failure", failing: ["lint"] }));
-    await w.watch.tick();
-    expect(w.notes().map((n) => n.to?.session)).toEqual(["ses_reported"]);
-    const late = await w.call({ thread_id: w.thread, ship: { kind: "step", text: "me too" }, agent_session: "ses_ship", agent_host: "claude-code", agent_name: "Claude Code" });
-    expect(textOf(late)).toContain("Another session is shipping this pull request; nothing was logged.");
+    // The person ships it again in the same thread to a new session that has not started yet.
+    const again = w.watch.start({ key: KEY, platform: "github", url: w.ship.url, title: "Receipts", number: 614, repo: "harbor/fern-api", host: "github.com", thread_id: w.thread, project_id: w.ship.project_id, agent: { host: "claude-code", session: "launch:lch_new", name: "Claude Code" } });
+    const late = await w.call({ thread_id: w.thread, ship: { kind: "step", text: "Pushed a fix", sha: "b".repeat(40) }, agent_session: "ses_ship", agent_host: "claude-code", agent_name: "Claude Code" });
+    expect(textOf(late)).toContain(shipStopLine("#614"));
+    expect(textOf(late)).not.toContain("Logged in the ship log");
+    const now = w.ships.get(KEY)!;
+    expect(now.id).toBe(again.id);
+    expect(now.agent.session).toBe("launch:lch_new");
+    expect(now.told).toEqual([]);
+    // The thread's other agent is not told to stop: it was never shipping it.
+    const other = await w.call({ thread_id: w.thread, ship: { kind: "step", text: "me?" }, agent_session: "ses_review", agent_host: "codex", agent_name: "Codex" });
+    expect(textOf(other)).toContain("Another session is shipping this pull request; nothing was logged.");
   });
 });

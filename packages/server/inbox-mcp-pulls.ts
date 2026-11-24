@@ -38,7 +38,7 @@ import {
   INBOX_THREAD_PULLS_REMOVE_DESCRIPTION,
 } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { SHIP_FIELD_DESCRIPTION, SHIP_KIND_DESCRIPTION, SHIP_SHA_DESCRIPTION, SHIP_TEXT_DESCRIPTION } from "@plannotator/core/inbox-ship-words";
+import { SHIP_FIELD_DESCRIPTION, SHIP_KIND_DESCRIPTION, SHIP_SHA_DESCRIPTION, SHIP_TEXT_DESCRIPTION, shipStopLine } from "@plannotator/core/inbox-ship-words";
 import type { InboxShipStep, InboxShipStepResult } from "./inbox-ship-watch";
 import type { InboxStore, InboxThreadPullsChange } from "@plannotator/shared/inbox/store";
 import { sessionWho, shortTime, type SessionNameOf } from "./inbox-mcp-read";
@@ -68,7 +68,8 @@ export interface InboxPullsMcpContext {
   projectHost?: ProjectHostOf;
   /**
    * Ship (inbox-ship-watch.ts): a step the shipping agent logs; `{ other }` when the calling session (`agent_session`)
-   * is not the one shipping it; null when the thread ships nothing. Absent: no Ship.
+   * is not the one shipping it; `{ stopped }` when that session's ship of the thread was stopped (it reads the stop
+   * line); null when the thread ships nothing. Absent: no Ship.
    */
   shipStep?: (threadId: string, step: InboxShipStep, session: string | null) => InboxShipStepResult;
 }
@@ -228,9 +229,11 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
           ? ""
           : shipped && "ship" in shipped
             ? ` Logged in the ship log of ${shipped.ship.url}.`
-            : shipped
-              ? " Another session is shipping this pull request; nothing was logged."
-              : " Nothing is shipping in this thread; nothing was logged.";
+            : shipped && "stopped" in shipped
+              ? ` ${shipStopLine(shipped.stopped)}`
+              : shipped
+                ? " Another session is shipping this pull request; nothing was logged."
+                : " Nothing is shipping in this thread; nothing was logged.";
         // The session has now seen the thread's PRs: the next wake says only what the person changed after this.
         noteSessionRead(store, reader, root, context.now?.() ?? Date.now());
         const lines = threadPullsText(context, root, reader);

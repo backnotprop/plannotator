@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxShip, InboxShipRead } from "@plannotator/core/inbox-ship";
 import type { InboxShipReadResult } from "./inbox-ship-read";
+import { shipBinds, shipShipper } from "./inbox-ship-agent";
 import { createInboxShipStore, INBOX_SHIPS_FILE } from "./inbox-ship-store";
 import { createInboxShipWatch, shipEndedWaiting } from "./inbox-ship-watch";
 
@@ -34,7 +35,18 @@ const green = (over: Partial<InboxShipRead> = {}): InboxShipRead => ({
   ...over,
 });
 
-function world(endedAt: number | null = null, first: InboxShipRead = green(), over: { dir?: string; shipper?: (ship: InboxShip) => { host: string; session: string } | null; bound?: boolean; answers?: { ship: InboxShip; to: string }[] } = {}) {
+function world(
+  endedAt: number | null = null,
+  first: InboxShipRead = green(),
+  over: {
+    dir?: string;
+    shipper?: (ship: InboxShip) => { host: string; session: string } | null;
+    mayBind?: (ship: InboxShip, session: string) => boolean;
+    launchOf?: (messageId: string) => string | null;
+    bound?: boolean;
+    answers?: { ship: InboxShip; to: string }[];
+  } = {},
+) {
   const dir = over.dir ?? mkdtempSync(join(tmpdir(), "ship-watch-"));
   const ships = createInboxShipStore(dir);
   let read: InboxShipReadResult | null = first;
@@ -47,6 +59,8 @@ function world(endedAt: number | null = null, first: InboxShipRead = green(), ov
     read: async () => read,
     note: (ship, body, kind) => notes.push({ body, kind, to: (over.shipper ? over.shipper(ship) : ship.agent)?.session ?? null }),
     ...(over.shipper ? { shipper: over.shipper } : {}),
+    ...(over.mayBind ? { mayBind: over.mayBind } : {}),
+    ...(over.launchOf ? { launchOf: over.launchOf } : {}),
     endedWaiting: () => endedAt,
     onStart: (ship, to) => (to ? over.answers?.push({ ship, to }) : started.push(ship)),
     onChange: () => (changes += 1),
@@ -300,7 +314,11 @@ describe("Ship's watch", () => {
     w.set(green({ checks: "failure", failing: ["lint"] }));
     await w.watch.tick();
     expect(w.notes).toHaveLength(1);
-    expect(w.watch.step("thr_1", { kind: "step", text: "late" }, "ses_1")).toBeNull();
+    // A step it logs after: it is told again to stop, and nothing is logged.
+    expect(w.watch.step("thr_1", { kind: "step", text: "late" }, "ses_1")).toEqual({ stopped: "#614" });
+    expect(w.now().log.at(-1)!.text).toBe("Stopped");
+    // Another session of the thread was never shipping it.
+    expect(w.watch.step("thr_1", { kind: "step", text: "late" }, "ses_reviewer")).toBeNull();
   });
 
   test("a session that ended with a note waiting reads Stuck after ten minutes", async () => {
@@ -348,38 +366,115 @@ describe("Ship's watch", () => {
     expect(w.notes).toHaveLength(1);
   });
 
-  // The shipper as inbox-ship-agent.ts reads it: a bound ship's own session, else the one its launch started.
-  const launched = (session: () => string | null) => (ship: InboxShip) => ({ host: "claude-code", session: (ship.bound ? null : session()) ?? ship.agent.session! });
+  // The thread's messages as the Inbox keeps them, and the shipper as the Inbox reads it (inbox-ship-agent.ts).
+  type Carried = { id: string; author: { kind: "person" }; to?: { host: string; session: string } | null; launch?: { id: string; session?: string | null; session_ref?: string | null } | null; delivery?: { state: "delivered"; host: string; session: string; at: string; read_by?: string | null } | null };
+  const thread = () => {
+    const messages = new Map<string, Carried>();
+    const deps = { message: (id: string) => (messages.get(id) ?? null) as never, threadMessageIds: () => [...messages.keys()] };
+    return {
+      messages,
+      over: {
+        shipper: (ship: InboxShip) => shipShipper(deps, ship),
+        mayBind: (ship: InboxShip, session: string) => shipBinds(deps, ship).includes(session),
+        launchOf: (id: string) => messages.get(id)?.launch?.id ?? null,
+      },
+    };
+  };
+  /** The person ships it again in the same thread, to a new session the reply `msg_ship` launches. */
+  const shipToNew = (w: ReturnType<typeof make>, launchId = "lch_1") => {
+    const { key, platform, url, title, number, repo, host, project_id } = w.ship;
+    return w.watch.start({ key, platform, url, title, number, repo, host, project_id, thread_id: "thr_1", agent: { host: "claude-code", session: `launch:${launchId}`, name: "Claude Code" }, instruction_id: "msg_ship" });
+  };
+  const launchedReply = (launchId = "lch_1"): Carried => ({ id: "msg_ship", author: { kind: "person" }, to: { host: "claude-code", session: `launch:${launchId}` }, launch: { id: launchId, session: null, session_ref: null }, delivery: null });
 
-  test("a new session's notes go to the session its launch started, recorded on the ship, and its calls are its own", async () => {
-    let started: string | null = null;
-    const w = make(null, green(), { shipper: launched(() => started), bound: false });
+  test("shipped again to a new session while the first agent is mid-turn: its late step never takes the new ship", async () => {
+    const t = thread();
+    const w = make(null, green(), t.over);
     await settle();
-    started = "ses_launched";
+    t.messages.set("msg_ship", launchedReply());
+    const again = shipToNew(w);
+    await settle();
+    // ses_1 was shipping it: told to stop.
+    expect(w.notes.map((n) => [n.kind, n.to])).toEqual([["stop", "ses_1"]]);
+    // It logs a step before its stop note arrives: it is told to stop again, and the new ship is not its.
+    expect(w.watch.step("thr_1", { kind: "step", text: "Pushed a fix", sha: FIX1.slice(0, 7) }, "ses_1")).toEqual({ stopped: "#614" });
+    expect(w.now().id).toBe(again.id);
+    expect(w.now().bound).toBeUndefined();
+    expect(w.now().told).toEqual([]);
+    expect(w.now().log.map((e) => e.text)).toEqual(["Started"]);
+    // A check fails before the new session started: the note waits, and goes to nobody else.
     w.set(green({ checks: "failure", failing: ["lint"] }));
     await w.watch.tick();
-    expect(w.now().agent.session).toBe("ses_launched");
-    expect(w.notes.map((n) => n.to)).toEqual(["ses_launched"]);
-    expect(w.watch.step("thr_1", { kind: "step", text: "Fixed lint" }, "ses_launched")).not.toBeNull();
-    // Its first step bound it: no other session's call is its now.
-    expect(w.watch.step("thr_1", { kind: "step", text: "old" }, "ses_1")).toEqual({ other: true });
+    expect(w.notes).toHaveLength(1);
+    // The launch reports its session: the waiting note goes to it.
+    t.messages.set("msg_ship", { ...launchedReply(), to: { host: "claude-code", session: "ses_new" }, launch: { id: "lch_1", session: "ses_new", session_ref: "ref_1" } });
+    await w.watch.tick();
+    expect(w.notes.map((n) => [n.kind, n.to])).toEqual([["stop", "ses_1"], ["watch", "ses_new"]]);
+    expect(w.notes[1]!.body).toContain("lint");
+    expect(w.now().agent.session).toBe("ses_new");
+    expect(w.watch.step("thr_1", { kind: "step", text: "Fixed lint" }, "ses_new")).toMatchObject({ ship: { id: again.id } });
+    expect(w.watch.step("thr_1", { kind: "step", text: "still mine?" }, "ses_1")).toEqual({ stopped: "#614" });
+    expect(w.watch.step("thr_1", { kind: "step", text: "reviewing" }, "ses_reviewer")).toEqual({ other: true });
   });
 
-  test("a launched agent that reports another session id than the one recorded is bound by its first ship call", async () => {
-    let started: string | null = "ses_launch_placeholder";
-    const w = make(null, green(), { shipper: launched(() => started), bound: false });
+  test("a new session's ship binds to the session its own launch reported, and to no other launch's", async () => {
+    const t = thread();
+    const w = make(null, green(), t.over);
     await settle();
-    // The agent's own calls carry its real session id.
-    const first = w.watch.step("thr_1", { kind: "step", text: "Reviewed the diff" }, "ses_real");
-    expect(first && "ship" in first ? first.ship.agent.session : null).toBe("ses_real");
+    t.messages.set("msg_ship", launchedReply());
+    shipToNew(w);
+    await settle();
+    expect(w.now().launch_id).toBe("lch_1");
+    // Nothing reported yet: a call from any session binds nothing.
+    expect(w.watch.step("thr_1", { kind: "step", text: "first" }, "ses_new")).toEqual({ other: true });
+    t.messages.set("msg_ship", { ...launchedReply(), to: { host: "claude-code", session: "ses_new" }, launch: { id: "lch_1", session: "ses_new", session_ref: "ref_1" } });
+    const first = w.watch.step("thr_1", { kind: "step", text: "Reviewed the diff" }, "ses_new");
+    expect(first && "ship" in first ? first.ship.agent.session : null).toBe("ses_new");
     expect(w.now().bound).toBe(true);
-    started = "ses_launch_placeholder";
+    // A launch that is not the one this ship started never binds it.
+    const u = thread();
+    const v = make(null, green(), u.over);
+    await settle();
+    u.messages.set("msg_ship", { ...launchedReply("lch_2"), to: { host: "claude-code", session: "ses_other" }, launch: { id: "lch_2", session: "ses_other", session_ref: "ref_2" } });
+    const { key, platform, url, title, number, repo, host, project_id } = v.ship;
+    v.watch.start({ key, platform, url, title, number, repo, host, project_id, thread_id: "thr_1", agent: { host: "claude-code", session: "launch:lch_1", name: "Claude Code" }, instruction_id: "msg_ship", launch_id: "lch_1" });
+    expect(v.watch.step("thr_1", { kind: "step", text: "mine?" }, "ses_other")).toEqual({ other: true });
+    expect(v.now().bound).toBeUndefined();
+  });
+
+  test("a new session's ship binds to the session its instruction was delivered to, not to another agent's read", async () => {
+    const t = thread();
+    const w = make(null, green(), t.over);
+    await settle();
+    const root: Carried = { id: "msg_ship", author: { kind: "person" }, to: null, launch: null, delivery: null };
+    t.messages.set("msg_ship", root);
+    const { key, platform, url, title, number, repo, host, project_id } = w.ship;
+    w.watch.start({ key, platform, url, title, number, repo, host, project_id, thread_id: "thr_1", agent: { host: "claude-code", session: null, name: null }, instruction_id: "msg_ship" });
+    // Settled by another agent's read: not that session's own.
+    t.messages.set("msg_ship", { ...root, delivery: { state: "delivered", host: "claude-code", session: "ses_reader", at: "2026-11-24T14:20:00Z", read_by: "codex" } });
+    expect(w.watch.step("thr_1", { kind: "step", text: "mine?" }, "ses_reader")).toEqual({ other: true });
+    t.messages.set("msg_ship", { ...root, delivery: { state: "delivered", host: "claude-code", session: "ses_reader", at: "2026-11-24T14:20:00Z" } });
+    expect(w.watch.step("thr_1", { kind: "step", text: "first" }, "ses_someone")).toEqual({ other: true });
+    expect(w.watch.step("thr_1", { kind: "step", text: "Reviewed the diff" }, "ses_reader")).toMatchObject({ ship: { bound: true, agent: { session: "ses_reader" } } });
     w.set(green({ checks: "failure", failing: ["lint"] }));
     await w.watch.tick();
-    // Its notes go to it, and only its calls log.
-    expect(w.notes.map((n) => n.to)).toEqual(["ses_real"]);
-    expect(w.watch.step("thr_1", { kind: "step", text: "late" }, "ses_launch_placeholder")).toEqual({ other: true });
-    expect(w.watch.step("thr_1", { kind: "step", text: "Fixed lint" }, "ses_real")).not.toBeNull();
+    expect(w.notes.at(-1)).toMatchObject({ kind: "watch", to: "ses_reader" });
+  });
+
+  test("pushes the agent never logs hold a 'someone pushed' note back one read per head at most", async () => {
+    const w = make();
+    await settle();
+    const heads = ["1", "2", "3", "4"].map((c) => c.repeat(40));
+    // A new head every read, none logged: the first read holds it, the next tells (the head it finds), and so on.
+    const told: number[] = [];
+    for (const head of heads) {
+      w.set(green({ head_sha: head }));
+      await w.watch.tick();
+      told.push(w.notes.length);
+    }
+    expect(told).toEqual([0, 1, 1, 2]);
+    expect(w.notes[0]!.body).toContain("2222222");
+    expect(w.notes[1]!.body).toContain("4444444");
   });
 
   test("a pull request that can't be read three times in a row reads Stuck with why in the log, and recovers by itself", async () => {
@@ -479,9 +574,11 @@ describe("Ship's watch", () => {
     expect(w.watch.newer({ key: KEY, id: "shp_mini", started_at: "2026-11-24T23:59:00.000Z", generation: 1 }, MINI)).toBeNull();
     expect(w.now().state).toBe("shipping");
     expect(answers.map((a) => [a.ship.id, a.to])).toEqual([[mine.id, "mch_mini"]]);
-    // Two presses that never heard of each other (the same generation) settle the same way on both computers.
-    expect(w.watch.newer({ key: KEY, id: "shp_0", started_at: "2026-11-24T23:59:00.000Z", generation: 2 }, MINI)).toBeNull();
-    expect(w.watch.newer({ key: KEY, id: "shp_zzzzzzzzzzzzzzzzzzzzzzzz", started_at: "2026-11-24T14:00:00.000Z", generation: 2 }, MINI)?.state).toBe("stopped");
+    // Two presses that never heard of each other (the same generation): the later press by each computer's own time
+    // wins, whatever the ids, the same way on both computers. This one was pressed at 14:19 here.
+    expect(w.watch.newer({ key: KEY, id: "shp_zzzzzzzzzzzzzzzzzzzzzzzz", started_at: "2026-11-24T14:00:00.000Z", generation: 2 }, MINI)).toBeNull();
+    expect(w.now().state).toBe("shipping");
+    expect(w.watch.newer({ key: KEY, id: "shp_0", started_at: "2026-11-24T14:25:00.000Z", generation: 2 }, MINI)?.state).toBe("stopped");
   });
 });
 

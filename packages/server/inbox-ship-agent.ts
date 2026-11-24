@@ -3,14 +3,16 @@
  * A thread can hold several agents (a reviewer, a hand-off, a tagged session); every Ship note and the stop line go
  * to the shipping one, only its `thread_pulls` `ship` calls change the ship, and Stuck's "ended" reads its session.
  *
- * A new session (Ship's "New … session" rows) has a placeholder session until its launch starts: it is read from the
- * message that carried the instruction (core `inboxLaunchedSession`), and the watch records it on the ship.
+ * A new session (Ship's "New … session" rows) has a placeholder session until it is known: the session the ship's own
+ * launch (`launch_id`, on the message that carried the instruction) reports (core `inboxLaunchedSession`), or the
+ * session that message was delivered to. The watch then binds the ship to it. No other session ever binds it: not the
+ * thread's other agents, not the one an earlier ship of the thread was given.
  */
 import type { InboxShip } from "@plannotator/core/inbox-ship";
 import { inboxLaunchedSession } from "@plannotator/core/inbox-run-line";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 
-type Message = Pick<InboxMessage, "id" | "author" | "to" | "launch" | "wakes">;
+type Message = Pick<InboxMessage, "id" | "author" | "to" | "launch" | "wakes" | "delivery">;
 
 export interface InboxShipAgentDeps {
   message(id: string): Message | null | undefined;
@@ -21,17 +23,33 @@ export interface InboxShipAgentDeps {
   launchDead?: (threadId: string) => boolean;
 }
 
-type Ship = Pick<InboxShip, "agent" | "instruction_id" | "thread_id" | "bound">;
+type Ship = Pick<InboxShip, "agent" | "instruction_id" | "thread_id" | "bound" | "launch_id">;
+
+/** A session the Inbox made up for a launch that has not started: no agent's. */
+const placeholder = (session: string | null | undefined): boolean => !session || session.startsWith("launch:");
 
 /**
- * The shipping session as it stands; null when Ship named none (nothing is sent to anyone else). A bound ship's is its
- * record's (the person's choice, or the session that logged its steps); else the one its launch started.
+ * The sessions an unbound ship may bind to: the one its own launch reported (the instruction message's launch, the one
+ * tied to the ship), then the one its instruction was delivered to (by that session's own read, not another agent's).
+ * Empty while neither is known.
+ */
+export function shipBinds(deps: Pick<InboxShipAgentDeps, "message">, ship: Ship): string[] {
+  const carried = ship.instruction_id ? deps.message(ship.instruction_id) : null;
+  if (!carried) return [];
+  const tied = carried.launch && (ship.launch_id ?? carried.launch.id) === carried.launch.id;
+  const launched = tied ? inboxLaunchedSession(carried) : null;
+  const delivered = carried.delivery && !carried.delivery.read_by ? carried.delivery.session : null;
+  return [...new Set([launched, delivered].filter((s): s is string => !placeholder(s)))];
+}
+
+/**
+ * The shipping session as it stands; null when none is known yet (nothing is sent to anyone else: its notes wait). A
+ * bound ship's is its record's (the person's choice, or the session it was bound to); else the first of `shipBinds`.
  */
 export function shipShipper(deps: InboxShipAgentDeps, ship: Ship): { host: string; session: string } | null {
   const carried = ship.instruction_id ? deps.message(ship.instruction_id) : null;
-  const launched = !ship.bound && carried?.launch ? inboxLaunchedSession(carried) : null;
-  const session = launched ?? ship.agent.session;
   const host = ship.agent.host ?? carried?.to?.host ?? null;
+  const session = ship.bound ? ship.agent.session : (shipBinds(deps, ship)[0] ?? null);
   return session && host ? { host, session } : null;
 }
 

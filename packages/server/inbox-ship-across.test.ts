@@ -166,12 +166,14 @@ describe("one ship per pull request across computers", () => {
     await ship(mini, "ses_mini");
     studio.awake = true;
     mini.awake = true;
-    // Neither press knew of the other: the same generation, settled by id the same way on both (no clock).
+    // Neither press knew of the other: the same generation. Only then do the press times each computer recorded decide:
+    // the Mini's press, a minute later, goes on, whatever the ids, the same way on both.
+    expect(studio.ships.get(KEY)!.generation).toBe(mini.ships.get(KEY)!.generation);
     await drain(studio);
     await drain(mini);
     await drain(studio);
     expect([active(studio), active(mini)].filter(Boolean)).toHaveLength(1);
-    const winner = studio.ships.get(KEY)!.id > mini.ships.get(KEY)!.id ? studio : mini;
-    expect(active(winner)).toBe(true);
+    expect(active(mini)).toBe(true);
+    expect(studio.stops).toEqual(["ses_studio"]);
   });
 });
