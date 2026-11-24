@@ -21,12 +21,15 @@ export interface InboxShipAgentDeps {
   launchDead?: (threadId: string) => boolean;
 }
 
-type Ship = Pick<InboxShip, "agent" | "instruction_id" | "thread_id">;
+type Ship = Pick<InboxShip, "agent" | "instruction_id" | "thread_id" | "bound">;
 
-/** The shipping session as it stands; null when Ship named none (nothing is sent to anyone else). */
+/**
+ * The shipping session as it stands; null when Ship named none (nothing is sent to anyone else). A bound ship's is its
+ * record's (the person's choice, or the session that logged its steps); else the one its launch started.
+ */
 export function shipShipper(deps: InboxShipAgentDeps, ship: Ship): { host: string; session: string } | null {
   const carried = ship.instruction_id ? deps.message(ship.instruction_id) : null;
-  const launched = carried?.launch ? inboxLaunchedSession(carried) : null;
+  const launched = !ship.bound && carried?.launch ? inboxLaunchedSession(carried) : null;
   const session = launched ?? ship.agent.session;
   const host = ship.agent.host ?? carried?.to?.host ?? null;
   return session && host ? { host, session } : null;

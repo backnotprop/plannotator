@@ -86,11 +86,17 @@ test("a Ship in this thread records the session the instruction went to and the 
 test("a linked computer's word of a newer ship stops the older one here; a window's call is refused", async () => {
   const w = world();
   await w.call("POST", "/api/inbox/ships", { key: KEY, thread_id: "msg_thread", to: { host: "claude-code", session: "ses_1" }, idempotency_key: "k1" });
-  const later = new Date(Date.now() + 60_000).toISOString();
-  expect((await w.call("POST", "/api/inbox/ships/newer", { key: KEY, id: "shp_far", started_at: later })).status).toBe(403);
+  // Pressed on the Mac mini after it heard of this one; its clock is a few minutes behind, which decides nothing.
+  const earlier = new Date(Date.now() - 3 * 60_000).toISOString();
+  expect((await w.call("POST", "/api/inbox/ships/newer", { key: KEY, id: "shp_far", started_at: earlier, generation: 2 })).status).toBe(403);
   expect(w.ships.get(KEY)!.state).toBe("shipping");
   w.from.machine = { id: "ibx_mini", name: "Mac mini" };
-  const res = await w.call("POST", "/api/inbox/ships/newer", { key: KEY, id: "shp_far", started_at: later });
+  // Fields checked: a date, and a whole generation.
+  await expect(w.call("POST", "/api/inbox/ships/newer", { key: KEY, id: "shp_far", started_at: "soon", generation: 2 })).rejects.toMatchObject({ code: "validation_error", details: { field: "started_at" } });
+  await expect(w.call("POST", "/api/inbox/ships/newer", { key: KEY, id: "shp_far", started_at: earlier, generation: 2.5 })).rejects.toMatchObject({ code: "validation_error", details: { field: "generation" } });
+  await expect(w.call("POST", "/api/inbox/ships/newer", { key: KEY, id: "shp_far", started_at: earlier })).rejects.toMatchObject({ code: "validation_error", details: { field: "generation" } });
+  expect(w.ships.get(KEY)!.state).toBe("shipping");
+  const res = await w.call("POST", "/api/inbox/ships/newer", { key: KEY, id: "shp_far", started_at: earlier, generation: 2 });
   expect(res.status).toBe(200);
   expect(w.ships.get(KEY)!.state).toBe("stopped");
   expect(w.ships.get(KEY)!.log.at(-1)!.text).toBe("Stopped: shipping on Mac mini");

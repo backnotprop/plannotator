@@ -38,23 +38,27 @@ afterEach(() => {
 
 const clock = { now: Date.parse("2026-11-24T14:00:00.000Z") };
 
-function computer(name: string, letter: string): Computer {
+/** `skewMs`: how far this computer's clock is off (a Mac mini 3 minutes slow is -180_000). */
+function computer(name: string, letter: string, skewMs = 0): Computer {
   const dir = mkdtempSync(join(tmpdir(), `ship-across-${name.toLowerCase()}-`));
   const c = { name, id: `ibx_${"0".repeat(25)}${letter}`, dir, awake: true, stops: [] as string[], other: null } as unknown as Computer;
-  c.outbox = InboxOutbox.open(join(dir, "data"), () => new Date(clock.now));
+  c.outbox = InboxOutbox.open(join(dir, "data"), () => new Date(clock.now + skewMs));
   c.ships = createInboxShipStore(join(dir, "data"));
+  let answers = 0;
   c.watch = createInboxShipWatch({
     ships: c.ships,
     read: async () => null,
     note: (_ship, _body, kind) => {
       if (kind === "stop") c.stops.push(_ship.agent.session ?? "");
     },
-    // As the Inbox does: every linked computer hears of the ship, through the outbox (held while it is asleep).
-    onStart: (ship) => {
+    // As the Inbox does: every linked computer hears of the ship, through the outbox (held while it is asleep); an
+    // answer goes to the one computer whose older ship's word arrived.
+    onStart: (ship, to) => {
       if (!c.other) return;
-      c.outbox.submit(c.other.id, "ships/newer", { key: ship.key, id: ship.id, started_at: ship.started_at, idempotency_key: `ship-newer-${ship.id}-${c.other.id}` }, null, false, null, true);
+      answers += 1;
+      c.outbox.submit(c.other.id, "ships/newer", { key: ship.key, id: ship.id, started_at: ship.started_at, generation: ship.generation, idempotency_key: `ship-newer-${ship.id}-${c.other.id}${to ? `-${answers}` : ""}` }, null, false, null, true);
     },
-    now: () => clock.now,
+    now: () => clock.now + skewMs,
     everyMs: 60 * 60_000,
   });
   closers.push(() => c.watch.close());
@@ -89,9 +93,9 @@ const drain = (here: Computer) =>
     return { status: res!.status, body: (await res!.json()) as Record<string, unknown> };
   });
 
-function linked() {
+function linked(miniSkewMs = 0) {
   const studio = computer("Studio", "S");
-  const mini = computer("Mac mini", "M");
+  const mini = computer("Mac mini", "M", miniSkewMs);
   studio.other = mini;
   mini.other = studio;
   return { studio, mini };
@@ -123,9 +127,25 @@ describe("one ship per pull request across computers", () => {
     expect(mini.stops).toEqual([]);
   });
 
+  test("a Ship pressed on a computer whose clock is 3 minutes slow stops the older one on the other computer", async () => {
+    const { studio, mini } = linked(-3 * 60_000);
+    await ship(studio, "ses_studio");
+    await drain(studio);
+    // A minute later on the Mac mini, whose clock reads two minutes before the Studio's Ship.
+    await ship(mini, "ses_mini");
+    expect(mini.ships.get(KEY)!.started_at < studio.ships.get(KEY)!.started_at).toBe(true);
+    await drain(mini);
+    await drain(studio);
+    expect(active(studio)).toBe(false);
+    expect(studio.stops).toEqual(["ses_studio"]);
+    expect(active(mini)).toBe(true);
+    expect(mini.stops).toEqual([]);
+  });
+
   test("a computer asleep at the Ship stops its own when it is back, after its Inbox restarted too", async () => {
     const { studio, mini } = linked();
     await ship(studio, "ses_studio");
+    await drain(studio);
     studio.awake = false;
     await ship(mini, "ses_mini");
     await drain(mini);
@@ -138,7 +158,7 @@ describe("one ship per pull request across computers", () => {
     expect(active(mini)).toBe(true);
   });
 
-  test("two Ships made while the computers could not reach each other: once both are back, only the newer goes on", async () => {
+  test("two Ships made while the computers could not reach each other: once both are back, exactly one goes on", async () => {
     const { studio, mini } = linked();
     studio.awake = false;
     mini.awake = false;
@@ -146,9 +166,12 @@ describe("one ship per pull request across computers", () => {
     await ship(mini, "ses_mini");
     studio.awake = true;
     mini.awake = true;
+    // Neither press knew of the other: the same generation, settled by id the same way on both (no clock).
     await drain(studio);
     await drain(mini);
-    expect(active(studio)).toBe(false);
-    expect(active(mini)).toBe(true);
+    await drain(studio);
+    expect([active(studio), active(mini)].filter(Boolean)).toHaveLength(1);
+    const winner = studio.ships.get(KEY)!.id > mini.ships.get(KEY)!.id ? studio : mini;
+    expect(active(winner)).toBe(true);
   });
 });

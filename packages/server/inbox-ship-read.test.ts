@@ -11,7 +11,7 @@ import { createInboxShipRoutes } from "./inbox-ship-routes";
 import { createInboxShipStore } from "./inbox-ship-store";
 import { createInboxShipWatch } from "./inbox-ship-watch";
 
-const answer = (pr: Record<string, unknown>) => JSON.stringify({ data: { repository: { pullRequest: pr } } });
+const answer = (pr: Record<string, unknown>) => JSON.stringify({ data: { viewer: { login: "charlie-dunn" }, repository: { pullRequest: pr } } });
 const base = {
   state: "OPEN",
   isDraft: false,
@@ -39,7 +39,7 @@ const base = {
 };
 
 describe("parseShipPull", () => {
-  test("the facts the watch needs: failing checks by name, who asked for changes, the newest comment whoever wrote it", () => {
+  test("the facts the watch needs: failing checks by name, who asked for changes, every comment with its author, the signed-in login", () => {
     const read = parseShipPull(answer(base))!;
     expect(read.state).toBe("open");
     expect(read.failing).toEqual(["e2e-checkout", "ci/deploy"]);
@@ -47,9 +47,13 @@ describe("parseShipPull", () => {
     expect(read.review).toBe("changes_requested");
     expect(read.reviewer).toBe("ada-novak");
     expect(read.conflicts).toBe(true);
-    // IC_2 is by the signed-in login: it may be the person's own, so it counts (a spare wake beats a missed comment).
-    expect(read.comment).toBe("IC_2");
-    expect(read.commenter).toBe("charlie-dunn");
+    // Oldest first, code comments among them: the watch tells which are news (the signed-in login's may be the agent's).
+    expect(read.comments).toEqual([
+      { id: "IC_1", by: "ada-novak" },
+      { id: "RC_1", by: "bob-tully" },
+      { id: "IC_2", by: "charlie-dunn" },
+    ]);
+    expect(read.viewer).toBe("charlie-dunn");
   });
 
   test("merged, draft and behind", () => {

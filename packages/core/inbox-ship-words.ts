@@ -4,6 +4,7 @@
  * - The instruction: APPROVED by the owner, 2026-11-24, byte for byte. Change nothing in it without the owner.
  * - The `thread_pulls` `ship` field's descriptions and its `--help` line: AGENT WORDS AWAITING OWNER APPROVAL.
  * - The wake lines, the still line, the stop and closed lines: status lines, settled by the coordinator 2026-11-24.
+ * - The notes' wake line (`SHIP_NOTE_WAKE_INSTRUCTION`): PROPOSED, AWAITING OWNER APPROVAL.
  */
 
 /** The person's message when they press Ship; the pull request's facts follow it (`shipMessage`, inbox-ship.ts). Approved 2026-11-24. */
@@ -29,6 +30,12 @@ export const shipWakeLines = {
   newCommit: (sha: string) => `Someone pushed ${sha} to the branch. Pull it before you push again.`,
   ready: () => "Checks pass and nothing is waiting on review. Merge it now.",
 };
+
+/**
+ * The first line of every Ship note's wake (the command's `notice`), in place of the moved note's "Nothing here needs an
+ * answer". PROPOSED, AWAITING OWNER APPROVAL.
+ */
+export const SHIP_NOTE_WAKE_INSTRUCTION = "This is a note from Plannotator Inbox about the pull request you are shipping, not a reply from the person. Act on it; it needs no answer here.";
 
 export const shipStillLine = (pr: string) => `You are still shipping ${pr}.`;
 export const shipStopLine = (pr: string) => `Stop shipping ${pr}. Don't push or merge it; leave it as it is.`;

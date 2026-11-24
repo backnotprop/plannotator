@@ -25,6 +25,9 @@ export interface InboxShipStore {
   put(ship: InboxShip): void;
   /** Change one ship; null when there is none. */
   update(key: string, change: (ship: InboxShip) => InboxShip): InboxShip | null;
+  /** The highest generation of a Ship of this pull request heard of from a linked computer (0: none). */
+  heard(key: string): number;
+  hear(key: string, generation: number): void;
 }
 
 const isShip = (value: unknown): value is InboxShip => {
@@ -39,15 +42,18 @@ export function createInboxShipStore(dataDir: string): InboxShipStore {
   const dir = inboxDir(dataDir);
   const file = join(dir, INBOX_SHIPS_FILE);
   let ships: Map<string, InboxShip> | null = null;
+  // The generations heard of from linked computers, per pull request key (`heard`).
+  let heard = new Map<string, number>();
 
   const load = (): Map<string, InboxShip> => {
     if (ships) return ships;
     ships = new Map();
     if (!existsSync(file)) return ships;
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; ships?: Record<string, unknown> };
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; ships?: Record<string, unknown>; heard?: Record<string, unknown> };
       if (parsed.v !== 1 || !parsed.ships || typeof parsed.ships !== "object") throw new Error("not a ships file");
       for (const [key, value] of Object.entries(parsed.ships)) if (isShip(value)) ships.set(key, value);
+      for (const [key, value] of Object.entries(parsed.heard && typeof parsed.heard === "object" ? parsed.heard : {})) if (Number.isSafeInteger(value) && (value as number) > 0) heard.set(key, value as number);
     } catch {
       try {
         renameSync(file, `${file}.unreadable-${Date.now()}`);
@@ -55,6 +61,7 @@ export function createInboxShipStore(dataDir: string): InboxShipStore {
         // Left where it is.
       }
       ships = new Map();
+      heard = new Map();
     }
     return ships;
   };
@@ -63,11 +70,16 @@ export function createInboxShipStore(dataDir: string): InboxShipStore {
     const map = load();
     // The ended ones beyond the newest kept go; an active ship is never dropped.
     const ended = [...map.values()].filter((ship) => !shipActive(ship)).sort((a, b) => ((a.ended_at ?? a.started_at) < (b.ended_at ?? b.started_at) ? 1 : -1));
-    for (const ship of ended.slice(INBOX_SHIPS_KEPT)) map.delete(ship.key);
+    for (const ship of ended.slice(INBOX_SHIPS_KEPT)) {
+      map.delete(ship.key);
+      if ((ship.generation ?? 0) > (heard.get(ship.key) ?? 0)) heard.set(ship.key, ship.generation!);
+    }
+    // A generation heard of is kept while it is above what this computer's own record of that pull request knows.
+    for (const [key, generation] of heard) if ((map.get(key)?.generation ?? 0) >= generation) heard.delete(key);
     try {
       mkdirSync(dir, { recursive: true });
       const temp = `${file}.${process.pid}.tmp`;
-      writeFileSync(temp, `${JSON.stringify({ v: 1, ships: Object.fromEntries(map) })}\n`, { mode: 0o600 });
+      writeFileSync(temp, `${JSON.stringify({ v: 1, ships: Object.fromEntries(map), ...(heard.size > 0 ? { heard: Object.fromEntries(heard) } : {}) })}\n`, { mode: 0o600 });
       renameSync(temp, file);
     } catch {
       // A read-only folder: the records stay in memory.
@@ -95,6 +107,16 @@ export function createInboxShipStore(dataDir: string): InboxShipStore {
       load().set(key, { ...next, log: shipLogKept(next.log) });
       save();
       return next;
+    },
+    heard: (key) => {
+      load();
+      return heard.get(key) ?? 0;
+    },
+    hear: (key, generation) => {
+      load();
+      if (!Number.isSafeInteger(generation) || generation <= (heard.get(key) ?? 0) || generation <= (load().get(key)?.generation ?? 0)) return;
+      heard.set(key, generation);
+      save();
     },
   };
 }

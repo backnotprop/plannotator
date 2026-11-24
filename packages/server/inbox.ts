@@ -360,6 +360,7 @@ import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHi
 import { createShipReader } from "./inbox-ship-read";
 import { shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
 import type { InboxShip } from "@plannotator/core/inbox-ship";
+import { inboxNoticeOf } from "@plannotator/core/inbox-ship";
 import { createInboxShipRoutes } from "./inbox-ship-routes";
 import { createInboxShipStore } from "./inbox-ship-store";
 import { createInboxShipWatch, shipEndedWaiting } from "./inbox-ship-watch";
@@ -4608,8 +4609,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ...(reply.ack_of ? { ack_of: reply.ack_of, ...(reply.ack_reaction ? { ack_reaction: reply.ack_reaction } : {}) } : {}),
       // The Inbox's note that this session's questions moved to another thread: the wake is a notice with no reply
       // instruction (INBOX_MOVED_WAKE_INSTRUCTION). An older connection words it as a reply. Ship's note to the shipping
-      // agent is the same kind of notice: its own lines say what to do, and nothing in it asks for an answer.
-      ...(reply.moved_note || reply.ship_note ? { moved: true as const } : {}),
+      // agent is the same kind of notice with its own first line (`notice`, SHIP_NOTE_WAKE_INSTRUCTION): it is about the
+      // PR the agent ships, to act on, and asks for no answer (core `inboxNoticeOf`).
+      ...inboxNoticeOf(reply),
       // The person's Re-ask (approval "inbox-reask"): the wake takes INBOX_REASK_INSTRUCTION.
       ...((reply.reask?.length ?? 0) > 0 ? { reask: true } : {}),
       // What the note lists (#2059): the wake names action items only when it lists some.
@@ -5332,10 +5334,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
     endedWaiting: (ship) => shipEndedWaiting(store, ship, (one) => shipSessionEnded(shipAgentDeps, one)),
     // One ship per PR across computers: each linked computer hears of this one, now or when it is back (the outbox),
-    // and stops an older ship of it there.
-    onStart: (ship) => {
-      for (const machine of machines?.linkedIds() ?? []) {
-        const body = { key: ship.key, id: ship.id, started_at: ship.started_at, idempotency_key: `ship-newer-${ship.id}-${machine}` };
+    // and stops an older ship of it there; `to`: the one computer whose older ship's word this one answers.
+    onStart: (ship, to) => {
+      for (const machine of to ? [to] : (machines?.linkedIds() ?? [])) {
+        const body = { key: ship.key, id: ship.id, started_at: ship.started_at, generation: ship.generation ?? 1, idempotency_key: `ship-newer-${ship.id}-${machine}${to ? `-${Date.now()}` : ""}` };
         void machines.holdWrite(machine, "ships/newer", body, null, 0)?.catch(() => {});
       }
     },

@@ -1,7 +1,7 @@
 /** Ship's pure parts (inbox-ship.ts): what a row draws, its words, and the instruction's data fence. */
 import { describe, expect, test } from "bun:test";
-import { INBOX_SHIP_MERGED_SHOWN_MS, shipChanges, shipLook, shipMessage, shipReady, shipRowWords, type InboxShipRead } from "./inbox-ship";
-import { SHIP_INSTRUCTION } from "./inbox-ship-words";
+import { INBOX_SHIP_MERGED_SHOWN_MS, shipChanges, shipLook, shipMessage, shipNewerWins, shipReady, shipRowWords, inboxNoticeOf, type InboxShipRead } from "./inbox-ship";
+import { SHIP_INSTRUCTION, SHIP_NOTE_WAKE_INSTRUCTION } from "./inbox-ship-words";
 
 const read = (over: Partial<InboxShipRead> = {}): InboxShipRead => ({
   state: "open",
@@ -13,8 +13,8 @@ const read = (over: Partial<InboxShipRead> = {}): InboxShipRead => ({
   reviewer: null,
   conflicts: false,
   behind: false,
-  comment: null,
-  commenter: null,
+  comments: [],
+  viewer: null,
   merged_at: null,
   ...over,
 });
@@ -54,9 +54,30 @@ describe("shipChanges and shipReady", () => {
   });
 
   test("conflicts outrank behind: one line about the base, never two", () => {
-    const seen = { head_sha: "a".repeat(40), comment: null, sent: {} };
+    const seen = { head_sha: "a".repeat(40), comments: [], sent: {} };
     const kinds = shipChanges({ seen, told: [] }, read({ conflicts: true, behind: true })).map((c) => c.kind);
     expect(kinds).toEqual(["conflict"]);
+  });
+});
+
+describe("inboxNoticeOf", () => {
+  test("Ship's note wakes as a notice with its own line; the moved note keeps the moved line; a reply is no notice", () => {
+    expect(inboxNoticeOf({ ship_note: { ship: "shp_1", kind: "watch" } })).toEqual({ moved: true, notice: SHIP_NOTE_WAKE_INSTRUCTION });
+    expect(inboxNoticeOf({ ship_note: { ship: "shp_1", kind: "stop" } }).notice).toBe(SHIP_NOTE_WAKE_INSTRUCTION);
+    expect(inboxNoticeOf({ moved_note: { thread_id: "msg_1" } })).toEqual({ moved: true });
+    expect(inboxNoticeOf({})).toEqual({});
+  });
+});
+
+describe("shipNewerWins", () => {
+  test("the higher generation wins whatever the clocks say; equal ones are settled by id, the same on both computers", () => {
+    expect(shipNewerWins({ id: "shp_a", generation: 2 }, { id: "shp_z", generation: 1 })).toBe(true);
+    expect(shipNewerWins({ id: "shp_z", generation: 1 }, { id: "shp_a", generation: 2 })).toBe(false);
+    // A record from before generations is 0.
+    expect(shipNewerWins({ id: "shp_a", generation: 1 }, { id: "shp_z" })).toBe(true);
+    const a = { id: "shp_a", generation: 3 };
+    const b = { id: "shp_b", generation: 3 };
+    expect([shipNewerWins(a, b), shipNewerWins(b, a)]).toEqual([false, true]);
   });
 });
 

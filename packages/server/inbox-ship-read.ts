@@ -18,12 +18,13 @@ import { refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "
 export type InboxShipReadResult = InboxShipRead | { failed: string };
 
 export const SHIP_PULL_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  viewer { login }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       state isDraft mergedAt headRefOid baseRefName reviewDecision mergeable mergeStateStatus
       latestReviews(last: 20) { nodes { state author { login } } }
       comments(last: 30) { nodes { id createdAt author { login } } }
-      reviewThreads(last: 30) { nodes { comments(last: 1) { nodes { id createdAt author { login } } } } }
+      reviewThreads(last: 30) { nodes { comments(last: 5) { nodes { id createdAt author { login } } } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
         __typename
         ... on CheckRun { name conclusion status }
@@ -41,9 +42,11 @@ type Node = { __typename?: string; name?: string; conclusion?: string | null; st
 /** The answer of `SHIP_PULL_QUERY` as the watch reads it; null when it is not one. */
 export function parseShipPull(stdout: string): InboxShipRead | null {
   let pr: Record<string, unknown> | null = null;
+  let viewer: unknown = null;
   try {
-    const data = (JSON.parse(stdout) as { data?: { repository?: { pullRequest?: Record<string, unknown> | null } } }).data;
+    const data = (JSON.parse(stdout) as { data?: { viewer?: { login?: unknown } | null; repository?: { pullRequest?: Record<string, unknown> | null } } }).data;
     pr = data?.repository?.pullRequest ?? null;
+    viewer = data?.viewer?.login ?? null;
   } catch {
     return null;
   }
@@ -68,9 +71,12 @@ export function parseShipPull(stdout: string): InboxShipRead | null {
   type Comment = { id?: string; createdAt?: string; author?: { login?: string } | null };
   const issue = (pr.comments as { nodes?: Comment[] } | undefined)?.nodes ?? [];
   const code = ((pr.reviewThreads as { nodes?: { comments?: { nodes?: Comment[] } }[] } | undefined)?.nodes ?? []).flatMap((t) => t.comments?.nodes ?? []);
-  // The newest comment by anyone: a comment of the signed-in login may be the person's own, never told from the
-  // agent's, and a spare wake is better than a missed review comment.
-  const newest = [...issue, ...code].filter((c) => typeof c.id === "string").sort((a, b) => ((a.createdAt ?? "") < (b.createdAt ?? "") ? 1 : -1))[0];
+  // Every comment read, oldest first, with its author: the watch tells which are news to the agent (core
+  // `shipNewComments`): one by the signed-in login (`viewer`) may be the agent's own.
+  const comments = [...issue, ...code]
+    .filter((c): c is Comment & { id: string } => typeof c.id === "string" && c.id.length > 0)
+    .sort((a, b) => ((a.createdAt ?? "") < (b.createdAt ?? "") ? -1 : (a.createdAt ?? "") > (b.createdAt ?? "") ? 1 : 0))
+    .map((c) => ({ id: c.id, by: text(c.author?.login) }));
   return {
     state,
     head_sha: text(pr.headRefOid),
@@ -81,8 +87,8 @@ export function parseShipPull(stdout: string): InboxShipRead | null {
     reviewer: text(reviews[reviews.length - 1]?.author?.login),
     conflicts: pr.mergeable === "CONFLICTING",
     behind: pr.mergeStateStatus === "BEHIND",
-    comment: newest?.id ?? null,
-    commenter: text(newest?.author?.login),
+    comments,
+    viewer: text(viewer),
     merged_at: text(pr.mergedAt),
   };
 }
@@ -136,8 +142,8 @@ export function shipReadOfPull(pull: Pick<InboxPull, "state" | "head_sha" | "bas
     reviewer: null,
     conflicts: pull.conflicts === true,
     behind: false,
-    comment: null,
-    commenter: null,
+    comments: [],
+    viewer: null,
     merged_at: pull.merged_at,
   };
 }

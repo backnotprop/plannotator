@@ -11,9 +11,10 @@
  *   or an agent on another computer than the review's thread): only the record; its `to`, when a live session, is
  *   who ships it until the thread says otherwise.
  * - `POST /api/inbox/ships/stop` `{ id }`: stop.
- * - `POST /api/inbox/ships/newer` `{ key, id, started_at }`: a linked computer's Inbox (never a window) says it started
- *   shipping this pull request; an older ship of it here stops (`watch.newer`). Sent through the outbox to every linked
- *   computer at each Ship, so an offline one hears it when it is back.
+ * - `POST /api/inbox/ships/newer` `{ key, id, started_at, generation }`: a linked computer's Inbox (never a window) says
+ *   it started shipping this pull request; a ship of it here that loses (`generation`, never the clocks) stops, one that
+ *   wins answers with its own word (`watch.newer`). Sent through the outbox to every linked computer at each Ship, so
+ *   an offline one hears it when it is back.
  *
  * A linked machine reaches them through the door (`machineOnly` rows in inbox-devices.ts), so a window on either
  * computer ships the other's; a phone token gets the door's 404 (the native app has no pull routes).
@@ -97,11 +98,14 @@ export function createInboxShipRoutes(options: InboxShipRoutesOptions) {
       if (!shipForge(pull.platform)) throw new InboxError("pull_not_shippable", "Ship reads GitHub and GitLab pull requests only.", { field: "key" });
       let agent: InboxShipAgent | null;
       let instruction: string | null;
+      // A live session the person chose is settled; a new session (or none named) is bound by its first `ship` call.
+      let bound = false;
       if (body.started === true) {
         // The window's new thread carried the instruction: its first message. The session the window started it with
         // ships it (a new session: the one its launch starts, read from that message), never whoever wrote last.
         const to = toOf(body.to);
         const now = options.threadAgent(threadId);
+        bound = !!to && "session" in to;
         agent = to && "session" in to ? { host: to.host, session: to.session, name: now?.session === to.session ? now.name : null } : now;
         instruction = threadId;
       } else {
@@ -110,6 +114,7 @@ export function createInboxShipRoutes(options: InboxShipRoutesOptions) {
         const idempotencyKey = text(body.idempotency_key, 200);
         if (!idempotencyKey) throw new InboxError("validation_error", "idempotency_key: required.", { field: "idempotency_key" });
         const sent = await options.sendInstruction({ threadId, to, words: shipMessage(pull), idempotencyKey, req });
+        bound = "session" in to;
         agent = sent.agent;
         instruction = sent.message_id;
       }
@@ -125,6 +130,7 @@ export function createInboxShipRoutes(options: InboxShipRoutesOptions) {
         thread_id: threadId,
         project_id: project,
         agent: agent ?? { host: null, session: null, name: null },
+        ...(bound && agent?.session ? { bound: true } : {}),
       });
       return json({ serverSession: options.serverSession, ok: true, ship: shipView(ship) });
     }
@@ -146,8 +152,11 @@ export function createInboxShipRoutes(options: InboxShipRoutesOptions) {
       const key = text(body.key);
       const id = text(body.id, 200);
       const startedAt = text(body.started_at, 64);
-      if (!key || !id || !startedAt) throw new InboxError("validation_error", "key, id and started_at: the ship started there.", { field: "key" });
-      const stopped = options.watch.newer({ key, id, started_at: startedAt }, machine.name);
+      const generation = body.generation;
+      if (!key || !id) throw new InboxError("validation_error", "key and id: the ship started there.", { field: !key ? "key" : "id" });
+      if (!startedAt || !Number.isFinite(Date.parse(startedAt))) throw new InboxError("validation_error", "started_at: when the ship started there, a date.", { field: "started_at" });
+      if (typeof generation !== "number" || !Number.isSafeInteger(generation) || generation < 1) throw new InboxError("validation_error", "generation: the ship's place among this pull request's Ships, a whole number from 1.", { field: "generation" });
+      const stopped = options.watch.newer({ key, id, started_at: startedAt, generation }, { id: machine.id, name: machine.name });
       return json({ serverSession: options.serverSession, ok: true, stopped: stopped ? stopped.id : null });
     }
     // /api/inbox/ships/stop

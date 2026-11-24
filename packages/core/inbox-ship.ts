@@ -7,7 +7,7 @@
  */
 import { inboxPullLabel, inboxPullRefOfKey, type InboxPull, type InboxPullChecks, type InboxPullPlatform, type InboxPullReview } from "./inbox-pulls";
 import { authorOf, forkWords, pullTitleLine, pullUrl, safeBranch } from "./inbox-pull-handoff";
-import { SHIP_INSTRUCTION, shipWakeLines } from "./inbox-ship-words";
+import { SHIP_INSTRUCTION, SHIP_NOTE_WAKE_INSTRUCTION, shipWakeLines } from "./inbox-ship-words";
 
 export type InboxShipState = "shipping" | "stuck" | "merged" | "stopped";
 
@@ -57,20 +57,30 @@ export interface InboxShipRead {
   conflicts: boolean;
   /** GitHub says the branch is behind a base the repository requires it to be up to date with. */
   behind: boolean;
-  /**
-   * The newest comment on the pull request or its code, by id, and its author. Anyone's, the signed-in login's too:
-   * the agent works as the person, so a comment of that login may be the person's own, and a spare wake is better
-   * than a missed review comment.
-   */
-  comment: string | null;
-  commenter: string | null;
+  /** The pull request's newest comments and code comments, by id, and their authors (`shipChanges` reads which are new). */
+  comments: InboxShipComment[];
+  /** The login the forge's CLI is signed in as: the agent's comments are by it, and so may the person's own be. */
+  viewer: string | null;
   merged_at: string | null;
+}
+
+export interface InboxShipComment {
+  id: string;
+  by: string | null;
 }
 
 /** The watch's memory of the last read: what changed is told once (`sent`, a signature per kind). */
 export interface InboxShipSeen {
   head_sha: string | null;
-  comment: string | null;
+  /**
+   * The comments already read (`INBOX_SHIP_COMMENTS_KEPT` newest ids): one wakes the agent once at most, and never
+   * again. Absent on a record from before: the next read only remembers them.
+   */
+  comments?: string[];
+  /** A new head nobody logged yet, held one read: the agent may log it as its own push meanwhile (`shipChanges`). */
+  held?: string | null;
+  /** The agent's steps (`InboxShip.steps`) a read asked after them has covered: more than this, and the next read claims. */
+  claimed?: number;
   sent: Partial<Record<InboxShipLogKind, string>>;
 }
 
@@ -112,19 +122,55 @@ export interface InboxShip {
   fails: Record<string, string[]>;
   /** The commits the agent said it pushed: a new head among them is no stranger's push. */
   told: string[];
+  /**
+   * How many steps the agent has logged. A read asked after a step takes the signed-in login's comments not yet read
+   * as the agent's own, never a wake (`shipChanges` `claim`; `seen.claimed`). Absent: none.
+   */
+  steps?: number;
+  /**
+   * The press's place among the Ships of this pull request on every linked computer: each Ship takes one more than the
+   * highest it knows of, so the last press wins by arrival, never by two computers' clocks (`shipNewerWins`).
+   * Absent on a record from before: 0.
+   */
+  generation?: number;
+  /**
+   * The session is settled: the person chose a live one, or the shipping session logged a step. A new session's
+   * placeholder is not: its launch's first `ship` call binds it (`watch.step`).
+   */
+  bound?: boolean;
   log: InboxShipLogEntry[];
 }
 
 /** What a window draws: the record without the watch's memory or the log (`GET /api/inbox/ships`). */
-export type InboxShipView = Omit<InboxShip, "seen" | "fails" | "told" | "log" | "platform" | "instruction_id" | "misses"> & {
+export type InboxShipView = Omit<InboxShip, "seen" | "fails" | "told" | "log" | "platform" | "instruction_id" | "misses" | "steps" | "generation" | "bound"> & {
   /** A linked machine's ship (the window fills it from the machine it read). */
   machine?: string;
 };
 
 export const shipView = (ship: InboxShip): InboxShipView => {
-  const { seen: _seen, fails: _fails, told: _told, log: _log, platform: _platform, instruction_id: _instruction, misses: _misses, ...view } = ship;
+  const { seen: _seen, fails: _fails, told: _told, log: _log, platform: _platform, instruction_id: _instruction, misses: _misses, steps: _steps, generation: _generation, bound: _bound, ...view } = ship;
   return view;
 };
+
+/**
+ * Two Ships of one pull request on two computers: whether `other` (told through `ships/newer`) wins over `mine`. The
+ * higher generation wins (it was pressed knowing of the other); equal ones (pressed while neither had heard of the
+ * other) are settled by id, the same way on both computers. No clock is compared.
+ */
+export function shipNewerWins(other: { id: string; generation: number }, mine: Pick<InboxShip, "id" | "generation">): boolean {
+  const own = mine.generation ?? 0;
+  return other.generation > own || (other.generation === own && other.id > mine.id);
+}
+
+/**
+ * A reply command's notice fields: the moved note and Ship's note wake as a notice (`moved`), with no reply
+ * instruction; Ship's has its own first line (`notice`, SHIP_NOTE_WAKE_INSTRUCTION), for it asks the agent to act.
+ */
+export function inboxNoticeOf(message: { moved_note?: unknown; ship_note?: unknown }): { moved?: true; notice?: string } {
+  if (message.moved_note) return { moved: true };
+  if (message.ship_note) return { moved: true, notice: SHIP_NOTE_WAKE_INSTRUCTION };
+  return {};
+}
 
 /** A ship's forge: its record's, else its key's (a record from before `platform`). */
 export const shipPlatform = (ship: Pick<InboxShip, "platform" | "key">): InboxPullPlatform => ship.platform ?? inboxPullRefOfKey(ship.key)?.platform ?? "github";
@@ -158,24 +204,51 @@ export interface InboxShipChange {
   line: string | null;
 }
 
+/** The newest comment ids the watch remembers as read. */
+export const INBOX_SHIP_COMMENTS_KEPT = 300;
+
+const ownPush = (told: readonly string[], head: string) => told.some((sha) => head.startsWith(sha) || sha.startsWith(head));
+/** A head that is new since the last read and that the agent has not logged: held one read before it is told. */
+const strangerHead = (ship: Pick<InboxShip, "seen" | "told">, read: InboxShipRead): string | null => {
+  const head = read.head_sha;
+  return head && ship.seen?.head_sha && head !== ship.seen.head_sha && !ownPush(ship.told, head) ? head : null;
+};
+
+/**
+ * The comments of a read that are news to the agent: not read before, and not its own. A comment by the signed-in
+ * login is its own when `claim` (the agent logged a step since the last read: what that login wrote before it is not
+ * news to it). Any other comment, and one of that login no step has claimed (perhaps the person's, by hand), is news
+ * once. Null on a record from before the comments were remembered (only remembered then).
+ */
+export function shipNewComments(seen: Pick<InboxShipSeen, "comments">, read: Pick<InboxShipRead, "comments" | "viewer">, claim: boolean): InboxShipComment[] | null {
+  if (!seen.comments) return null;
+  const known = new Set(seen.comments);
+  return read.comments.filter((c) => !known.has(c.id) && !(claim && read.viewer && c.by === read.viewer));
+}
+
 /**
  * What changed since the watch last read (`ship.seen`). A first read only remembers, so Ship's own instruction is the
  * agent's first turn, never a wake on top of it. Merged and closed end the ship (the caller); `ready` asks the agent to
- * merge, once per head.
+ * merge, once per head. `claim`: the agent logged a step since the last read (`shipNewComments`).
  */
-export function shipChanges(ship: Pick<InboxShip, "seen" | "told">, read: InboxShipRead): InboxShipChange[] {
+export function shipChanges(ship: Pick<InboxShip, "seen" | "told">, read: InboxShipRead, options: { claim?: boolean } = {}): InboxShipChange[] {
   const seen = ship.seen;
   if (read.state === "merged") return [{ kind: "merged", signature: "merged", log: "Merged", line: null }];
   if (read.state === "closed") return [{ kind: "closed", signature: "closed", log: "Closed", line: null }];
   if (!seen) return [];
+  // A new head nobody has logged: this read tells nothing, the next tells all of it in one note (the push too, if it
+  // is still nobody's then), so the agent's own push it logs a moment after never reads as a stranger's.
+  if (strangerHead(ship, read)) return [];
   const sent = seen.sent;
   const out: InboxShipChange[] = [];
   const add = (change: InboxShipChange) => {
     if (sent[change.kind] !== change.signature) out.push(change);
   };
   const head = read.head_sha;
-  // The agent's own push is one it logged (`told`); any other new head wakes it, the person's own push too.
-  if (head && seen.head_sha && head !== seen.head_sha && !ship.told.some((sha) => head.startsWith(sha) || sha.startsWith(head))) {
+  // The agent's own push is one it logged (`told`); any other new head wakes it, the person's own push too. A Reviews
+  // read can see the agent's push before the agent logs it: a new head is held one read (`strangerHead`), and told
+  // only if it is still nobody's then.
+  if (head && seen.held === head && !ownPush(ship.told, head)) {
     add({ kind: "new_commit", signature: head, log: "New commit", sha: short(head), line: shipWakeLines.newCommit(short(head)) });
   }
   if (read.failing.length > 0) {
@@ -186,9 +259,10 @@ export function shipChanges(ship: Pick<InboxShip, "seen" | "told">, read: InboxS
     const who = read.reviewer ?? "A reviewer";
     add({ kind: "changes_requested", signature: `${head}:${who}`, log: `Changes requested by ${who}`, line: shipWakeLines.changesRequested(who) });
   }
-  if (read.comment && read.comment !== seen.comment) {
-    const who = read.commenter ?? "a reviewer";
-    add({ kind: "comments", signature: read.comment, log: `New comments from ${who}`, line: shipWakeLines.comments(who) });
+  const comments = shipNewComments(seen, read, options.claim === true) ?? [];
+  if (comments.length > 0) {
+    const who = names([...new Set(comments.map((c) => c.by ?? "a reviewer"))]);
+    out.push({ kind: "comments", signature: comments.at(-1)!.id, log: `New comments from ${who}`, line: shipWakeLines.comments(who) });
   }
   if (read.conflicts) add({ kind: "conflict", signature: `${head}:conflict`, log: `Conflicts with ${read.base}`, line: shipWakeLines.conflict(read.base) });
   else if (read.behind) add({ kind: "behind", signature: `${head}:behind`, log: `${read.base} moved`, line: shipWakeLines.behind(read.base) });
@@ -201,11 +275,19 @@ export function shipReady(read: InboxShipRead): boolean {
   return read.state === "open" && read.failing.length === 0 && read.checks !== "pending" && read.checks !== "failure" && read.review !== "changes_requested" && read.review !== "review_required" && !read.conflicts && !read.behind;
 }
 
-/** The watch's memory after a read: what it saw, and what it told. */
-export function shipSeenAfter(ship: Pick<InboxShip, "seen">, read: InboxShipRead, told: readonly InboxShipChange[]): InboxShipSeen {
+/**
+ * The watch's memory after a read: what it saw, and what it told. Every comment of the read is read now (told, or the
+ * agent's own), so none wakes it twice; a new head nobody logged is held for the next read.
+ */
+export function shipSeenAfter(ship: Pick<InboxShip, "seen" | "told">, read: InboxShipRead, told: readonly InboxShipChange[], claimed?: number): InboxShipSeen {
   const sent = { ...(ship.seen?.sent ?? {}) };
   for (const change of told) sent[change.kind] = change.signature;
-  return { head_sha: read.head_sha, comment: read.comment ?? ship.seen?.comment ?? null, sent };
+  // A read that holds a new head told nothing: its comments and claim are judged again by the next read.
+  const held = strangerHead(ship, read);
+  const before = ship.seen?.comments;
+  const ids = held && before ? before : [...(before ?? []).filter((id) => !read.comments.some((c) => c.id === id)), ...read.comments.map((c) => c.id)];
+  const covered = Math.max(ship.seen?.claimed ?? 0, held ? 0 : (claimed ?? 0));
+  return { head_sha: read.head_sha, comments: ids.slice(-INBOX_SHIP_COMMENTS_KEPT), held, ...(covered > 0 ? { claimed: covered } : {}), sent };
 }
 
 /** The heads each failing check failed on, with this read's. A check that passes now is forgotten. */

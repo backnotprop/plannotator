@@ -19,9 +19,9 @@ import { createInboxShipStore } from "./inbox-ship-store";
 import { createInboxShipWatch } from "./inbox-ship-watch";
 
 const KEY = "github.com/harbor/fern-api#614";
-const SHIPPER: InboxAuthor = { kind: "agent", host: "claude-code", session: "ses_ship", name: "Claude Code" };
+const SHIPPER: Extract<InboxAuthor, { kind: "agent" }> = { kind: "agent", host: "claude-code", session: "ses_ship", name: "Claude Code" };
 const REVIEWER: InboxAuthor = { kind: "agent", host: "codex", session: "ses_review", name: "Codex" };
-const green = (over: Partial<InboxShipRead> = {}): InboxShipRead => ({ state: "open", head_sha: "a".repeat(40), base: "main", checks: "pending", failing: [], review: null, reviewer: null, conflicts: false, behind: false, comment: null, commenter: null, merged_at: null, ...over });
+const green = (over: Partial<InboxShipRead> = {}): InboxShipRead => ({ state: "open", head_sha: "a".repeat(40), base: "main", checks: "pending", failing: [], review: null, reviewer: null, conflicts: false, behind: false, comments: [], viewer: "ada-novak", merged_at: null, ...over });
 
 type Result = { content: { text: string }[]; isError?: boolean };
 const closers: (() => void)[] = [];
@@ -29,7 +29,7 @@ afterEach(() => {
   for (const close of closers.splice(0)) close();
 });
 
-function world() {
+function world(bound = true) {
   const dir = mkdtempSync(join(tmpdir(), "ship-mcp-"));
   const store = InboxStore.open(dir);
   const project = store.ensureProject({ name: "fern-api", root: "/work/fern-api" });
@@ -51,7 +51,7 @@ function world() {
     everyMs: 60 * 60_000,
   });
   closers.push(() => watch.close());
-  const ship = watch.start({ key: KEY, platform: "github", url: "https://github.com/harbor/fern-api/pull/614", title: "Receipts", number: 614, repo: "harbor/fern-api", host: "github.com", thread_id: thread, project_id: project.id, agent: { host: "claude-code", session: "ses_ship", name: "Claude Code" } });
+  const ship = watch.start({ key: KEY, platform: "github", url: "https://github.com/harbor/fern-api/pull/614", title: "Receipts", number: 614, repo: "harbor/fern-api", host: "github.com", thread_id: thread, project_id: project.id, agent: { host: "claude-code", session: "ses_ship", name: "Claude Code" }, bound });
   const context: InboxPullsMcpContext = { store, shipStep: (threadId, step, session) => watch.step(threadId, step, session) };
   let handler: ((input: Record<string, unknown>) => Promise<Result>) | null = null;
   const fake = { registerTool: (_name: string, _config: unknown, run: typeof handler) => (handler = run) } as unknown as McpServer;
@@ -101,11 +101,11 @@ describe("Ship's notes", () => {
 });
 
 describe("thread_pulls ship", () => {
-  test("the shipping session's call logs a step; another session's changes nothing and is told nothing ships", async () => {
+  test("the shipping session's call logs a step; another session's changes nothing and is told another session ships it", async () => {
     const w = world();
     await settle();
     const other = await w.call({ thread_id: w.thread, ship: { kind: "stuck", text: "not mine", sha: "b".repeat(40) }, agent_session: "ses_review", agent_host: "codex", agent_name: "Codex" });
-    expect(textOf(other)).toContain("Nothing is shipping in this thread; nothing was logged.");
+    expect(textOf(other)).toContain("Another session is shipping this pull request; nothing was logged.");
     expect(w.ships.get(KEY)!.state).toBe("shipping");
     expect(w.ships.get(KEY)!.told).toEqual([]);
     expect(w.ships.get(KEY)!.log.map((e) => e.text)).toEqual(["Started"]);
@@ -113,5 +113,27 @@ describe("thread_pulls ship", () => {
     expect(textOf(own)).toContain("Logged in the ship log of https://github.com/harbor/fern-api/pull/614.");
     expect(w.ships.get(KEY)!.log.at(-1)!.text).toBe("Pushed a fix");
     expect(w.ships.get(KEY)!.told).toEqual(["b".repeat(40)]);
+  });
+
+  test("a thread that ships nothing says so", async () => {
+    const w = world();
+    const project = w.store.message(w.thread)!.project_id;
+    const elsewhere = w.store.sendMessage({ project_id: project, author: SHIPPER, body: "Another thing.", subject: "Docs", wakes: true }).message.id;
+    const result = await w.call({ thread_id: elsewhere, ship: { kind: "step", text: "Pushed" }, agent_session: "ses_ship", agent_host: "claude-code", agent_name: "Claude Code" });
+    expect(textOf(result)).toContain("Nothing is shipping in this thread; nothing was logged.");
+  });
+
+  test("a new session's ship is bound by the first ship call from its thread, whatever session id its agent reports", async () => {
+    const w = world(false);
+    await settle();
+    const first = await w.call({ thread_id: w.thread, ship: { kind: "step", text: "Reviewed the diff" }, agent_session: "ses_reported", agent_host: "claude-code", agent_name: "Claude Code" });
+    expect(textOf(first)).toContain("Logged in the ship log of https://github.com/harbor/fern-api/pull/614.");
+    expect(w.ships.get(KEY)!.agent.session).toBe("ses_reported");
+    // Its notes go to it now.
+    w.set(green({ checks: "failure", failing: ["lint"] }));
+    await w.watch.tick();
+    expect(w.notes().map((n) => n.to?.session)).toEqual(["ses_reported"]);
+    const late = await w.call({ thread_id: w.thread, ship: { kind: "step", text: "me too" }, agent_session: "ses_ship", agent_host: "claude-code", agent_name: "Claude Code" });
+    expect(textOf(late)).toContain("Another session is shipping this pull request; nothing was logged.");
   });
 });

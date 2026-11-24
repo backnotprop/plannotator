@@ -38,9 +38,8 @@ import {
   INBOX_THREAD_PULLS_REMOVE_DESCRIPTION,
 } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import type { InboxShip } from "@plannotator/core/inbox-ship";
 import { SHIP_FIELD_DESCRIPTION, SHIP_KIND_DESCRIPTION, SHIP_SHA_DESCRIPTION, SHIP_TEXT_DESCRIPTION } from "@plannotator/core/inbox-ship-words";
-import type { InboxShipStep } from "./inbox-ship-watch";
+import type { InboxShipStep, InboxShipStepResult } from "./inbox-ship-watch";
 import type { InboxStore, InboxThreadPullsChange } from "@plannotator/shared/inbox/store";
 import { sessionWho, shortTime, type SessionNameOf } from "./inbox-mcp-read";
 import { guarded, okComplete } from "./inbox-mcp-result";
@@ -68,10 +67,10 @@ export interface InboxPullsMcpContext {
   /** For a short `group/project!45` (`parseProjectPullRefs`). Absent: gitlab.com. */
   projectHost?: ProjectHostOf;
   /**
-   * Ship (inbox-ship-watch.ts): a step the shipping agent logs; null when the thread ships nothing, or the calling
-   * session (`agent_session`) is not the one shipping it. Absent: no Ship.
+   * Ship (inbox-ship-watch.ts): a step the shipping agent logs; `{ other }` when the calling session (`agent_session`)
+   * is not the one shipping it; null when the thread ships nothing. Absent: no Ship.
    */
-  shipStep?: (threadId: string, step: InboxShipStep, session: string | null) => InboxShip | null;
+  shipStep?: (threadId: string, step: InboxShipStep, session: string | null) => InboxShipStepResult;
 }
 
 /** The agent a call's filled fields name. */
@@ -223,9 +222,15 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
           change = await changePullsAsAgent(context, { thread_id: root, add, remove, actor: pullsActor(input) });
           changed = pullsChangeText(change);
         }
-        // Ship: the shipping agent's step, in the ship log (nothing when this thread ships nothing, or another session calls).
+        // Ship: the shipping agent's step, in the ship log (nothing when this thread ships nothing, or another session ships it).
         const shipped = input.ship && context.shipStep ? context.shipStep(root, { kind: input.ship.kind, text: input.ship.text, sha: input.ship.sha ?? null }, reader) : null;
-        const logged = input.ship ? (shipped ? ` Logged in the ship log of ${shipped.url}.` : " Nothing is shipping in this thread; nothing was logged.") : "";
+        const logged = !input.ship
+          ? ""
+          : shipped && "ship" in shipped
+            ? ` Logged in the ship log of ${shipped.ship.url}.`
+            : shipped
+              ? " Another session is shipping this pull request; nothing was logged."
+              : " Nothing is shipping in this thread; nothing was logged.";
         // The session has now seen the thread's PRs: the next wake says only what the person changed after this.
         noteSessionRead(store, reader, root, context.now?.() ?? Date.now());
         const lines = threadPullsText(context, root, reader);
