@@ -59,6 +59,8 @@ import { createFarCapabilities } from "./inbox-capabilities-machines";
 import { CAPABILITY_NOTE_FIELD, CAPABILITY_NOTE_MARK } from "./inbox-capability-note";
 import type { SharedReactions } from "./inbox-reactions-shared";
 import { FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE } from "./inbox-far-tags";
+import { createLinkThrough, LINK_THROUGH_ASK_ROUTE, LINK_THROUGH_INTRODUCE_ROUTE, LINK_THROUGH_OFFER_ROUTE, LINK_THROUGH_ROUTES, LINK_THROUGH_WINDOW_ONLY } from "./inbox-link-through";
+import type { LinkThroughView } from "@plannotator/core/inbox-link-through";
 
 /** A far tag's door routes (inbox-far-tags.ts): this Inbox sends them itself; the forward never does. */
 const FAR_TAG_OWN_ROUTES = new Set([FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE, FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE]);
@@ -311,6 +313,8 @@ export interface MachineView {
   message_deletions: boolean;
   /** How far its clock runs ahead of this one's (ms, whole minutes), from its list's `now`; absent within two minutes. Grid reads it. */
   clock_ms?: number;
+  /** This Inbox only: its links not linked to each other, and computers it reaches through a link (inbox-link-through.ts). */
+  link_through?: LinkThroughView;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -504,6 +508,44 @@ export function createInboxMachines(context: InboxMachinesContext) {
   // ...and finds them: its search and read_thread's list ask every linked machine too (inbox-machine-agent-find.ts).
   const agentFind = createMachineAgentFind({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
   const listeners = new Set<(frame: MachineFrame) => void>();
+  /** A linked computer's stream that asked `links=1`: told when this Inbox's links, as its list names them, change. */
+  const linksListeners = new Set<() => void>();
+  let lastLinksWire = "";
+  // Two of this Inbox's links not linked to each other, linked with one click (inbox-link-through.ts).
+  const linkThrough = createLinkThrough({
+    dataDir: context.dataDir,
+    selfId: () => links.selfId,
+    peers: () =>
+      links.list().map((record) => {
+        const peer = peers.get(record.id);
+        return { id: record.id, name: record.name, state: peer?.state ?? "connecting", marks: peer?.list?.marks ?? [], wire: peer?.list?.link_through ?? null, url: record.transport.url };
+      }),
+    request: (machine, route, body, timeoutMs) => {
+      const peer = peers.get(machine);
+      if (!peer) return Promise.reject(new Error("not linked"));
+      return peer.request(route, "", { method: "POST", headers: { "Content-Type": "application/json", [MACHINE_WINDOW_HEADER]: "1" }, body: JSON.stringify(body), timeoutMs });
+    },
+    hold: (via, body) => {
+      const peer = peers.get(via);
+      if (!peer) return;
+      // The person's click, held as this Inbox's own write (never listed as waiting): its row says how it stands.
+      outbox.submit(via, LINK_THROUGH_ASK_ROUTE, body, null, true, null, true);
+      if (peer.state === "online") peer.flush();
+      else peer.poke();
+    },
+    held: () =>
+      links.list().flatMap((record) =>
+        outbox.list(record.id, "pending").flatMap((entry) => (entry.route === LINK_THROUGH_ASK_ROUTE && typeof entry.body.with === "string" ? [{ via: record.id, with: entry.body.with }] : [])),
+      ),
+    link: (input) => link(input),
+    offer: () => offer({}),
+    ownAddress: () => context.door.tailnetAddress(),
+    offerDevice: (secret) => context.door.offerDevice(secret),
+    refresh: async (ids) => {
+      await Promise.all(ids.map((id) => peers.get(id)?.refreshList()));
+    },
+    changed: () => machinesChanged(),
+  });
   /** An offer that published the door: the door comes down when it expires unused. */
   let offerTimer: ReturnType<typeof setTimeout> | null = null;
   /** The door's close after the other machine's `unlink` was answered (UNLINKED_DOOR_CLOSE_MS). */
@@ -539,6 +581,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       marks: [...INBOX_LINKED_MARKS],
       launch: null,
       message_deletions: true,
+      link_through: linkThrough.view(),
     },
     ...links.list().map((link) => {
       const peer = peers.get(link.id);
@@ -568,6 +611,13 @@ export function createInboxMachines(context: InboxMachinesContext) {
   /** Tell the windows when the machines block changed (a state, a name, the waiting count). */
   const machinesChanged = () => {
     armUpdateClock();
+    // The links as this Inbox's list names them to a linked computer: each that asked hears when they move.
+    const wire = JSON.stringify(linkThrough.wire());
+    if (wire !== lastLinksWire) {
+      lastLinksWire = wire;
+      for (const listener of linksListeners) listener();
+    }
+    linkThrough.tick();
     const machines = machinesView();
     const text = JSON.stringify(machines.map(({ since: _since, ...rest }) => rest));
     if (text === lastMachines) return;
@@ -855,6 +905,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (!parsed?.secret || !parsed.tailnet || !parsed.id) return json({ error: "link: a plannotator://link code with an address.", code: "validation_error" }, 422);
     const url = checkTailnetAddress(parsed.tailnet);
     if (!url) return json({ error: "link: its address is not usable.", code: "validation_error" }, 422);
+    // A link code made for an introduction (inbox-link-through.ts) is completed only by the computer it was made for.
+    const wrong = linkThrough.linkBackRefusal(deviceId, parsed.id);
+    if (wrong) {
+      context.door.revokeDevice(deviceId);
+      return json({ error: wrong, code: "introduction_mismatch" }, 403);
+    }
     try {
       const target = await redeem({ kind: "tailnet", url }, parsed);
       const record: InboxLinkRecord = { id: target.id, name: target.name, token: target.token, transport: { kind: "tailnet", url }, device_id: deviceId, linked_at: new Date().toISOString() };
@@ -892,7 +948,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // would hold a write such as a switch on disk. Nothing under `accounts/` either: a linked machine's switch is its own step.
     // `update` has its own route (`/api/inbox/machines/:id/update`), never a held forward.
     // A far tag's own writes (inbox-far-tags.ts) are this Inbox's, never a window's.
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts" || safeDecode(route) === "update" || FAR_TAG_OWN_ROUTES.has(safeDecode(route))) {
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts" || safeDecode(route) === "update" || FAR_TAG_OWN_ROUTES.has(safeDecode(route)) || LINK_THROUGH_ROUTES.has(safeDecode(route))) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
@@ -1327,6 +1383,22 @@ export function createInboxMachines(context: InboxMachinesContext) {
         return json({ error: `${name} did not answer. Nothing may have started.`, code: "machine_offline" }, 503);
       }
     }
+    // Link two computers through a third (inbox-link-through.ts): here two of this Inbox's links (`a`, `c`), or this
+    // Inbox with a computer it reaches through one of its links (`via`, `with`). A click in a window only.
+    if (path === "/api/inbox/machines/link-through") {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      const body = await context.readBody(req);
+      const stale = staleTab(body);
+      if (stale) return stale;
+      if (!isWindowRequest(req, body, context.serverSession)) return json(LINK_THROUGH_WINDOW_ONLY, 403);
+      const id = (value: unknown) => (isInboxId("ibx", value) ? value : null);
+      const via = id(body.via);
+      const withId = id(body.with);
+      const a = id(body.a);
+      const c = id(body.c);
+      const answer = via && withId ? linkThrough.askVia(via, withId) : a && c ? linkThrough.linkHere(a, c) : { status: 422, body: { error: "a and c, or via and with: computers' ids.", code: "validation_error" } };
+      return json({ ...answer.body, link_through: linkThrough.view() }, answer.status);
+    }
     const unlinkMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/unlink$/.exec(path);
     if (path === "/api/inbox/machines/offer" || path === "/api/inbox/machines/link" || unlinkMatch) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -1565,8 +1637,35 @@ export function createInboxMachines(context: InboxMachinesContext) {
     accountsOf,
     linkBack,
     unlinkedBy,
+    /** This Inbox's links as its list names them to a linked computer (`link_through`, mark `link-through`). */
+    linkThroughWire: () => linkThrough.wire(),
+    /** A linked computer's stream asked `links=1`: told when those links move. */
+    onLinks: (listener: () => void) => {
+      linksListeners.add(listener);
+      return () => linksListeners.delete(listener);
+    },
+    /**
+     * The three door routes of linking through a third (inbox-link-through.ts), from a linked computer's token:
+     * `window`, its word that a press in a window there made it (`X-Plannotator-Window`, believed from a machine only).
+     */
+    linkThroughDoor: async (route: string, deviceId: string, window: boolean, body: Record<string, unknown>): Promise<Response> => {
+      const from = links.list().find((l) => l.device_id === deviceId)?.id ?? null;
+      const answer =
+        route === LINK_THROUGH_ASK_ROUTE
+          ? linkThrough.asked(from, window, body)
+          : route === LINK_THROUGH_OFFER_ROUTE
+            ? await linkThrough.offerFor(from, window, body)
+            : route === LINK_THROUGH_INTRODUCE_ROUTE
+              ? await linkThrough.introduce(from, window, body)
+              : { status: 404, body: { error: "Not found", code: "not_found" } };
+      return json(answer.body, answer.status);
+    },
     start,
-    stop,
+    stop: () => {
+      linkThrough.stop();
+      linksListeners.clear();
+      stop();
+    },
   };
 }
 

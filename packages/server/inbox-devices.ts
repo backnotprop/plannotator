@@ -431,6 +431,11 @@ const DOOR_OWN_ROUTES = [
   { method: "POST", route: "far-delivered", grant: "machine", needs: "machines" },
   { method: "POST", route: "link-back", grant: "machine", needs: "machines" },
   { method: "POST", route: "unlink", grant: "machine", needs: "machines" },
+  // Link two computers through a third (inbox-link-through.ts, mark `link-through`): a linked computer asks this one to
+  // broker, a broker asks this one for a link code for another of its links, or hands this one another's code.
+  { method: "POST", route: "link-through-ask", grant: "machine", needs: "machines" },
+  { method: "POST", route: "link-through-offer", grant: "machine", needs: "machines" },
+  { method: "POST", route: "link-through-introduce", grant: "machine", needs: "machines" },
   { method: "GET", route: "update", grant: "machine", needs: "machine_update" },
   { method: "POST", route: "update", grant: "machine", needs: "machine_update" },
 ] as const satisfies readonly { method: "GET" | "POST"; route: string; grant: "phone" | "machine"; needs?: DoorOwnNeeds }[];
@@ -700,6 +705,8 @@ export interface InboxDoorMachines {
   hasLinks: () => boolean;
   /** The linked machine a door device belongs to, or null. */
   machineOfDevice?: (deviceId: string) => { machine: string; name: string } | null;
+  /** Linking through a third (inbox-link-through.ts): one of its three door routes, with the machine's window mark. */
+  linkThroughDoor?: (route: string, deviceId: string, window: boolean, body: Record<string, unknown>) => Promise<Response>;
 }
 
 /** The platform a linked Inbox pairs as. */
@@ -1241,6 +1248,13 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
   };
 
+  /** Linking through a third (inbox-link-through.ts): answered by inbox-machines.ts, an older wiring's unknown route. */
+  const linkThroughOwn = async (req: Request, device: InboxDevice, route: string): Promise<Response> => {
+    const door = context.machines?.()?.linkThroughDoor;
+    if (!door) return routeNotFound(device);
+    return await door(route, device.id, req.headers.get(MACHINE_WINDOW_HEADER) === "1", await context.readBody(req));
+  };
+
   /** A linked machine's own routes (`DOOR_OWN_ROUTES`), each answered only when `hasOwn` says so. */
   const machineOwn: Record<MachineOwnName, (req: Request, url: URL, device: InboxDevice) => Promise<Response>> = {
     // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
@@ -1258,6 +1272,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
     "POST far-delivered": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.delivered) : routeNotFound(device)),
     "POST link-back": async (req, _url, device) => context.machines?.()?.linkBack(device.id, await context.readBody(req)) ?? routeNotFound(device),
     "POST unlink": async (_req, _url, device) => context.machines?.()?.unlinkedBy(device.id) ?? routeNotFound(device),
+    // Who asks is its token's linked computer only; a press in its window, its `X-Plannotator-Window` (a machine's word).
+    "POST link-through-ask": (req, _url, device) => linkThroughOwn(req, device, "link-through-ask"),
+    "POST link-through-offer": (req, _url, device) => linkThroughOwn(req, device, "link-through-offer"),
+    "POST link-through-introduce": (req, _url, device) => linkThroughOwn(req, device, "link-through-introduce"),
     // The body is never read, so a machine cannot name a version or a place to download from.
     "GET update": async (_req, _url, device) => (context.machineUpdate ? json(context.machineUpdate.read()) : routeNotFound(device)),
     "POST update": async (_req, _url, device) => (context.machineUpdate ? json(await context.machineUpdate.start()) : routeNotFound(device)),
