@@ -53,6 +53,7 @@ import { checkTailnetAddress } from "./inbox-transport-tailnet";
 import type { FarArchived } from "./inbox-archived-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
 import { createFarRoutines } from "./inbox-scheduled-machines";
+import { createFarCapabilities } from "./inbox-capabilities-machines";
 
 /** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
 const FAR_ARCHIVED_LIMIT_MAX = 200;
@@ -460,6 +461,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const machineBranches = createMachineBranches({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
   const launchReads = createMachineLaunchReads();
+  /** The person's writes waiting for a linked computer, laid on its routines and switches as they are shown. */
+  const heldOn = (machine: string) => outbox.list(machine, "pending").filter((entry) => !entry.auto);
+  /** Each linked computer's routines (mark `routines`), for the Routines page's merged read (inbox-scheduled-machines.ts). */
+  const farRoutines = createFarRoutines(() => peers.values(), heldOn);
+  /** Each linked computer's Capabilities switches, as it last gave them (inbox-capabilities-machines.ts). */
+  const farCapabilities = createFarCapabilities(heldOn);
   // An agent here reads a linked machine's thread, and saves its files here (inbox-machine-agent-read.ts).
   const agentRead = createMachineAgentRead({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
   // ...and finds them: its search and read_thread's list ask every linked machine too (inbox-machine-agent-find.ts).
@@ -602,6 +609,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     machinePulls.forget(id);
     machineBranches.forget(id);
     launchReads.forget(id);
+    farCapabilities.forget(id);
     const link = links.remove(id);
     if (link?.device_id) context.door.revokeDevice(link.device_id, { oweRefusal: closeDoor === "after_refusal" });
     outbox.dropMachine(id, link?.name ?? null);
@@ -877,6 +885,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const sessionsRead = route === MACHINE_SESSIONS_ROUTE ? launchReads.begin() : null;
       // An attached page's own tab is made here from its door's `view` (inbox-machine-page.ts): no page route there.
       const page = MACHINE_PAGE_ROUTE.exec(route);
+      // Its switches: read now, or the last it gave while it is away, with the person's held turns on them.
+      if (route === "capabilities" && !head) return farCapabilities.read(peer, offline);
       try {
         const answer = await peer.request(page ? `attachments/${page[1]}/view` : route, search, { method: "GET", headers, signal: req.signal });
         if (sessionsRead !== null && answer.ok) void launchReads.keep(machine, sessionsRead, answer.clone(), () => peers.has(machine));
@@ -1313,8 +1323,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const search = `?limit=${Math.min(count, FAR_ARCHIVED_LIMIT_MAX)}${project ? `&project=${encodeURIComponent(project)}` : ""}`;
     return Promise.all([...peers.values()].filter((peer) => !owner || peer.id === owner).map((peer) => peer.archivedPage(search)));
   };
-  /** Each linked computer's routines (mark `routines`), for the Routines page's merged read (inbox-scheduled-machines.ts). */
-  const farRoutines = createFarRoutines(() => peers.values());
   /** Each linked machine's "Show archived" switch as its list last said: a save here goes past the newest. */
   const showArchivedCopies = (): InboxShowArchived[] => [...peers.values()].flatMap((peer) => (peer.list?.show_archived ? [peer.list.show_archived] : []));
   /** A linked machine's card, as its Board last said: the lane marks and a link's site icon are read here for it. */

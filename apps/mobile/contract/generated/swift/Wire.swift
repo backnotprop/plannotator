@@ -12290,7 +12290,7 @@ public enum DoorRoutes {
   /// `POST scheduled/:id/off`: the window's `/api/inbox/scheduled/{routine}/off`.
   public static let postRoutineOff = DoorRoute(name: "POST scheduled/:id/off", method: .post, path: "scheduled/{routine}/off", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST scheduled/:id/run`: the window's `/api/inbox/scheduled/{routine}/run`.
-  public static let postRoutineRun = DoorRoute(name: "POST scheduled/:id/run", method: .post, path: "scheduled/{routine}/run", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postRoutineRun = DoorRoute(name: "POST scheduled/:id/run", method: .post, path: "scheduled/{routine}/run", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `POST scheduled/:id/stop`: the window's `/api/inbox/scheduled/{routine}/stop`.
   public static let postRoutineStop = DoorRoute(name: "POST scheduled/:id/stop", method: .post, path: "scheduled/{routine}/stop", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST scheduled/:id/delete`: the window's `/api/inbox/scheduled/{routine}/delete`.

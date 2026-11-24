@@ -3,12 +3,12 @@
  * `serverSession`. A routine lives and runs on the computer that made it: the list is this computer's and every linked
  * one's (`?machines=1`, each far row with `machine`), and a linked computer's routine is read and changed there,
  * through this Inbox's forward (`inboxUrl(…, machine)`), as its threads are. A write to a computer that is away waits
- * in this Inbox's outbox: the window's waiting toast says so (`onRoutineHeld`), and the row stays as that computer
- * last said until it takes the write.
+ * in this Inbox's outbox: the window's waiting toast says so (`onRoutineHeld`), and the merged read shows the row with
+ * the write on it until that computer takes or refuses it. Run once now is the exception: at the press, or not at all.
  */
 import type { InboxScheduledFolder, InboxScheduledIfMissed, InboxScheduledPreview, InboxScheduledRow, InboxScheduledRunSummary, InboxScheduledSchedule } from '@plannotator/core/inbox-scheduled-types';
-import { apiGet, apiPost, InboxHeldError } from '../api';
-import { inboxUrl, machineOf, rememberMachine } from '../inboxUrl';
+import { apiGet, apiPost, InboxApiError, InboxHeldError } from '../api';
+import { inboxUrl, linkedMachineFacts, machineOf, rememberMachine } from '../inboxUrl';
 import { newUuid } from '../uuid';
 
 declare module '../api' {
@@ -36,7 +36,26 @@ export interface RoutineComputer {
   on: boolean;
   launch_on: boolean;
   away: boolean;
+  /** When it last gave its routines (ISO). Absent from an older Inbox. */
+  read_at?: string;
 }
+
+/** A linked computer's name, as the merged list says it. */
+const nameOf = (machine: string) => linkedMachineFacts(machine)?.name ?? 'The other computer';
+
+/** Run once now on a computer that cannot be reached: it never runs later, and the person is told so where they pressed. */
+async function nowOrNot<T>(id: string, write: Promise<T>): Promise<T> {
+  try {
+    return await write;
+  } catch (cause) {
+    const machine = machineOf(id);
+    if (machine && cause instanceof InboxApiError && cause.code === 'machine_offline') throw new InboxApiError(503, 'machine_offline', `${nameOf(machine)} is away. It didn't run.`);
+    throw cause;
+  }
+}
+
+/** The run a Stop is pressed for: the one the row shows going (its divider's id). */
+export const runShown = (row: Pick<InboxScheduledRow, 'last_run'>): string | undefined => (row.last_run?.outcome === 'running' ? row.last_run.message_id : undefined);
 
 /** One computer's routes: this one's, or a linked one's through the forward. */
 const base = (machine: string | null) => inboxUrl('/scheduled', undefined, machine);
@@ -105,12 +124,13 @@ export const scheduledApi = {
   update: (id: string, fields: Partial<ScheduledFields>, keepalive = false) =>
     heldAs(apiPost<Saved>(one(id), fields, { keepalive }), () => asItStands(id, { ...fields, updated_at: new Date().toISOString() })()),
   turn: (id: string, on: boolean) => heldAs(apiPost<Saved>(one(id, on ? '/on' : '/off'), {}), asItStands(id)),
-  /** `202`: the run's divider; `failed`: why it didn't start (its thread says it too). */
-  run: (id: string) => heldAs(apiPost<Saved & { message_id: string; failed?: string }>(one(id, '/run'), {}), () => {
-    const stands = asItStands(id)();
-    return stands && { ...stands, message_id: '' };
-  }),
-  stop: (id: string) => heldAs(apiPost<Saved>(one(id, '/stop'), {}), asItStands(id)),
+  /**
+   * `202`: the run's divider; `failed`: why it didn't start (its thread says it too). On a linked computer it runs at
+   * the press or not at all: away, it is never held to run later (`machine_offline`, "Studio is away. It didn't run.").
+   */
+  run: (id: string) => nowOrNot(id, apiPost<Saved & { message_id: string; failed?: string }>(one(id, '/run'), {})),
+  /** `run`: the run it was pressed for (its divider's id), so a Stop that waits for an away computer ends that run only. */
+  stop: (id: string, run?: string) => heldAs(apiPost<Saved>(one(id, '/stop'), run ? { run } : {}), asItStands(id)),
   /** `deleted: false`: held for a computer that is away, which deletes it when it is back (the toast says so). */
   remove: (id: string) => heldAs(apiPost<{ deleted: boolean }>(one(id, '/delete'), {}), () => ({ deleted: false })),
   /** A delete's Undo: back as it was. */

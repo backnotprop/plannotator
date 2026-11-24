@@ -14,13 +14,14 @@ import { linkedMachineFacts, machineOf, selfMachineId } from '../inboxUrl';
 import { lastLaunchAgent } from '../compose/model';
 import { SidebarTrigger } from '../shell/sidebar';
 import { InboxApiError } from '../apiError';
-import { onRoutineHeld, scheduledApi } from './client';
+import { onRoutineHeld, runShown, scheduledApi } from './client';
 import { useEditorKey } from './editorKey';
 import { ScheduledEditor } from './ScheduledEditor';
 import type { RoutineTab } from './RoutineTabs';
 import { THIS_COMPUTER, type RoutineHome } from './RunsOn';
 import { ScheduledTable, type RowActs } from './ScheduledTable';
-import { farRoutinesOn, putScheduled, readScheduled, useScheduledPage } from './store';
+import { farRoutinesOn, putScheduled, readScheduled, rowAway, useScheduledPage } from './store';
+import { timeFrom } from './words';
 
 export { useScheduledOn } from './store';
 
@@ -129,10 +130,11 @@ export function ScheduledPage(props: ScheduledPageProps) {
     props.onToast?.({ icon: 'check', lead: 'Routine deleted', phoneLead: 'Deleted', detail: row.name, onUndo: () => void undo() });
   };
   const acts: RowActs = {
-    computer: (row) => (row.machine ? homeOf(row.machine).name : null),
+    computer: (row) => (row.machine ? (rowAway(snap, row) ? `${homeOf(row.machine).name} · away` : homeOf(row.machine).name) : null),
+    away: (row) => rowAway(snap, row),
     open: (row) => props.onOpen(row.id),
     run: (row) => void settle(scheduledApi.run(row.id)),
-    stop: (row) => void settle(scheduledApi.stop(row.id)),
+    stop: (row) => void settle(scheduledApi.stop(row.id, runShown(row))),
     turn: (row, on) => void settle(scheduledApi.turn(row.id, on)),
     remove: (row) => {
       setActError(null);
@@ -206,6 +208,18 @@ export function ScheduledPage(props: ScheduledPageProps) {
                     Turn it on in Settings
                   </button>
                 </p>
+              )}
+              {/* Each linked computer as the last read said it: away (its rows are as it last said), or not starting agents. */}
+              {snap.computers.map((c) =>
+                !c.on ? null : c.away ? (
+                  <p key={c.id} className="st-note" data-scheduled-away={c.id}>
+                    {c.read_at ? `${homeOf(c.id).name} has been away since ${timeFrom(c.read_at)}.` : `${homeOf(c.id).name} is away.`} Its routines are as it last said.
+                  </p>
+                ) : !c.launch_on ? (
+                  <p key={c.id} className="st-note" data-scheduled-far-launch-off={c.id}>
+                    Starting agents is off on {homeOf(c.id).name}, so nothing runs there.
+                  </p>
+                ) : null,
               )}
               {(actError ?? snap.error) && (
                 <p className="ib-error" role="alert">

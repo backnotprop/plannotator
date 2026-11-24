@@ -14,8 +14,9 @@ import { createFarRoutines, farRoutineRows, ROUTINES_MARK, type RoutinesPeer } f
 import { scheduledRoute } from "./inbox-scheduled-routes";
 import type { InboxScheduled } from "./inbox-scheduled";
 import { doorRouteOf } from "./inbox-devices";
-import { doorWriteKind } from "./inbox-outbox";
 import { startsAgentThere } from "./inbox-machines";
+import { withHeld, type HeldRoutineWrite } from "./inbox-scheduled-machines";
+import { capabilitiesWithHeld } from "./inbox-capabilities-machines";
 
 const row = (id: string, name = id): InboxScheduledRow => ({ id, name }) as unknown as InboxScheduledRow;
 
@@ -72,6 +73,52 @@ describe("the merged read's linked computers", () => {
   test("a far answer's rows: only routines with a plain id and a name", () => {
     expect(farRoutineRows("ibx_A", { scheduled: [row("sch_ok"), { id: "sch_../x", name: "bad" }, { id: "sch_noname" }, null] }).map((r) => r.id)).toEqual(["sch_ok"]);
     expect(farRoutineRows("ibx_A", null)).toEqual([]);
+  });
+});
+
+describe("the person's held writes on a linked computer's rows", () => {
+  const full = (id: string, extra: Partial<InboxScheduledRow> = {}) =>
+    ({ id, name: id, enabled: true, state: "on", schedule: { cron: "0 9 * * *", tz: "UTC" }, schedule_words: "Every day at 9:00 AM", next_run: null, updated_at: "2026-11-24T08:00:00.000Z", ...extra }) as unknown as InboxScheduledRow;
+  const write = (route: string, body: Record<string, unknown> = {}): HeldRoutineWrite => ({ route, body, queued_at: "2026-11-24T09:00:00.000Z" });
+
+  test("an edit (and its schedule's words), a turn off, a delete and a bring back show as the person made them, in order", () => {
+    const rows = [full("sch_a"), full("sch_b"), full("sch_c")];
+    const shown = withHeld(
+      rows,
+      [
+        write("scheduled/sch_a", { name: "Evening digest", schedule: { cron: "0 18 * * *", tz: "UTC" }, idempotency_key: "k" }),
+        write("scheduled/sch_b/off"),
+        write("scheduled/sch_c/delete"),
+        write("scheduled/sch_b/delete"),
+        write("scheduled/sch_b/restore"),
+        write("scheduled/sch_gone/off"),
+      ],
+      new Date("2026-11-24T10:00:00Z"),
+    );
+    expect(shown.map((r) => [r.id, r.name, r.state, r.enabled])).toEqual([
+      ["sch_a", "Evening digest", "on", true],
+      ["sch_b", "sch_b", "off", false],
+    ]);
+    expect(shown[0]!.schedule_words).not.toBe("Every day at 9:00 AM");
+    expect(shown[0]!.updated_at).toBe("2026-11-24T09:00:00.000Z");
+  });
+
+  test("taken or refused there (no longer waiting): the row is as that computer said again", async () => {
+    let held: HeldRoutineWrite[] = [write("scheduled/sch_1", { name: "Evening digest" })];
+    const studio = peer("ibx_STUDIO", () => Response.json({ scheduled: [full("sch_1", { name: "Morning digest" })], launch_on: true }));
+    const far = createFarRoutines(() => [studio], () => held);
+    expect((await far.read())[0]!.rows.map((r) => r.name)).toEqual(["Evening digest"]);
+    studio.state = "offline";
+    expect((await far.read()).map((one) => [one.away, one.rows.map((r) => r.name)])).toEqual([[true, ["Evening digest"]]]);
+    held = [];
+    expect((await far.read())[0]!.rows.map((r) => r.name)).toEqual(["Morning digest"]);
+  });
+
+  test("a held switch: shown as turned and named as waiting; other routes left alone", () => {
+    expect(capabilitiesWithHeld({ board: { on: true }, steps: { on: false } }, [write("capabilities", { board: { on: false }, idempotency_key: "k" }), write("scheduled/sch_1/off")])).toEqual({
+      capabilities: { board: { on: false }, steps: { on: false } },
+      held: ["board"],
+    });
   });
 });
 
@@ -134,19 +181,8 @@ describe("the door and the forward", () => {
     expect(doorRouteOf("POST", "scheduled/x/run", true)).toBeNull();
   });
 
-  test("every write is held or sent now by its rule 8 kind; a routine's write is a window's press only", () => {
-    expect(routes.map((route) => [route, doorWriteKind(route)])).toEqual([
-      ["scheduled", "append"],
-      ["scheduled/sch_01J", "set"],
-      ["scheduled/preview", "now"],
-      ["scheduled/sch_01J/on", "set"],
-      ["scheduled/sch_01J/off", "set"],
-      ["scheduled/sch_01J/run", "append"],
-      ["scheduled/sch_01J/stop", "set"],
-      ["scheduled/sch_01J/delete", "set"],
-      ["scheduled/sch_01J/restore", "set"],
-      ["capabilities", "set"],
-    ]);
+  // Which writes wait for an away computer and which are now or not at all: inbox-scheduled-forward.test.ts, through the real forward.
+  test("a routine's write is a window's press only", () => {
     for (const route of routes.filter((r) => r !== "scheduled/preview" && r !== "capabilities")) expect([route, startsAgentThere(route, {})]).toEqual([route, true]);
     expect(startsAgentThere("scheduled/preview", {})).toBe(false);
     expect(startsAgentThere("capabilities", {})).toBe(false);
