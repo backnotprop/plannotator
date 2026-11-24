@@ -89,5 +89,8 @@ describe('event: capabilities', () => {
     expect((hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), off.settings).settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: false });
     // A malformed value is not applied.
     expect((hear(JSON.stringify({ board: { on: false }, decision_mode: { on: 'no' } }), off.settings).settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: false });
+    // The frame carries only `on`: the environment's lock the settings read gave stays (Settings keeps the switch locked).
+    const locked = { ...OFF, decision_mode: { on: false, env: false } } as Held;
+    expect((hear(JSON.stringify({ board: { on: false }, decision_mode: { on: false } }), locked).settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: false, env: false });
   });
 });

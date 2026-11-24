@@ -15,10 +15,11 @@ import { isReaskNote } from '@plannotator/core/inbox-reask';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
 import { formatCount } from '../format';
 
-/** How many decisions a message holds, and how many have an answer or a mark in the draft. */
+/** How many decisions a message holds, how many have an answer or a mark in the draft, and how many are action items. */
 export interface DecideTally {
   total: number;
   answered: number;
+  actions: number;
 }
 
 /** A save on its way, by `<message id>/<key>` (the thread's `pending`): its answer counts as the card shows it. */
@@ -52,15 +53,18 @@ export function decideReasked(messages: readonly InboxMessageWire[]): ReadonlySe
 export function decideTally(message: InboxMessageWire, pending: PendingAnswers = new Map(), reasked: ReadonlySet<string> = new Set()): DecideTally {
   let total = 0;
   let answered = 0;
+  let actions = 0;
   for (const q of decisionsOf(message)) {
     const id = `${message.id}/${q.key}`;
     if (q.state === 'open' && reasked.has(id)) continue;
     if (isAction(q)) {
-      if (q.state === 'open' && inboxQuestionWaitsOnPerson(q)) total += 1;
-      else if (inboxActionInDraft(q)) {
+      const waits = q.state === 'open' && inboxQuestionWaitsOnPerson(q);
+      const marked = !waits && inboxActionInDraft(q);
+      if (waits || marked) {
         total += 1;
-        answered += 1;
+        actions += 1;
       }
+      if (marked) answered += 1;
       continue;
     }
     if (!inboxQuestionWaitsOnPerson(q)) continue;
@@ -68,7 +72,7 @@ export function decideTally(message: InboxMessageWire, pending: PendingAnswers =
     const answer = pending.has(id) ? pending.get(id) : q.answer;
     if (answer && !isQuestionAnswerEmpty(answer)) answered += 1;
   }
-  return { total, answered };
+  return { total, answered, actions };
 }
 
 /**

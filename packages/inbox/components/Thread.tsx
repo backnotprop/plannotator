@@ -4557,7 +4557,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         : null,
     [reuseOffered, resolved, allFiles, box.open, reuseHeld],
   );
-  const dmFrame: DecideFrameProps = { dm, messages: thread.messages, subject: thread.subject ?? thread.thread_name ?? 'Thread', machine: machine?.name ?? null, phone, body: bodyRef, answers: draftAnswers, actions: draftActions, words: replyText, onWords: changeReply, send: () => latestSend.current(), sending, error: lineError && errorLine };
+  const dmFrame: DecideFrameProps = { dm, messages: thread.messages, subject: thread.subject ?? thread.thread_name ?? 'Thread', machine: machine?.name ?? null, phone, body: bodyRef, answers: draftAnswers, actions: draftActions, words: replyText, onWords: changeReply, files: replyFiles.files, onRemoveFile: replyFiles.remove, fileOpen: file !== null || namedFile !== null, send: () => latestSend.current(), sending, error: lineError && errorLine };
   return (
     <CommentPictures thread={thread.thread_id} records={records}>
     <ReuseContext.Provider value={reuseApi}>

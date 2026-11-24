@@ -1,5 +1,5 @@
 {
-  "packages/inbox/App.tsx": 6236,
+  "packages/inbox/App.tsx": 6230,
   "packages/inbox/components/Thread.tsx": 5854,
   "packages/inbox/components/AttachmentPane.tsx": 3142,
   "packages/inbox/api.ts": 2132,

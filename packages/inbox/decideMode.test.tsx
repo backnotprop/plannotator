@@ -129,6 +129,8 @@ let draft: InboxReplyDraft | null = null;
 let draftSaves: Record<string, unknown>[] = [];
 /** The Inbox refuses every reply (a Send that does not go). */
 let replyFails = false;
+/** The Inbox refuses every reply because a question it answers was replaced (the Send stops on the thread's guard). */
+let replyReplaced = false;
 const UPLOAD = { upload_id: 'upl_notes', name: 'notes.txt', size: 12, kind: 'text', sha256: 'a'.repeat(64), created_at: '2026-11-24T09:00:00.000Z' } as const;
 
 function serve() {
@@ -159,6 +161,7 @@ function serve() {
     }
     const reply = path.match(/\/messages\/([^/]+)\/reply$/);
     if (reply && init?.method === 'POST' && replyFails) return Response.json({ error: 'The Inbox could not write the reply.', code: 'write_failed' }, { status: 500 });
+    if (reply && init?.method === 'POST' && replyReplaced) return Response.json({ error: 'A question you answered was replaced.', code: 'question_superseded' }, { status: 409 });
     if (/\/threads\/[^/]+\/draft$/.test(path)) {
       if (init?.method === 'POST') {
         draftSaves.push(body);
@@ -185,6 +188,7 @@ beforeEach(() => {
   draft = null;
   draftSaves = [];
   replyFails = false;
+  replyReplaced = false;
   serve();
 });
 
@@ -205,10 +209,14 @@ function otherThread(): InboxThread {
   return { thread_id: mid(9), project: PROJECT, subject: 'Elsewhere', thread_name: null, resolved_at: null, messages: [message] };
 }
 
+/** A file or picture opened beside the thread (the route's `file`), as a press on a message's picture does. */
+let openFile: ((file: React.ComponentProps<typeof ThreadPane>['file']) => void) | null = null;
 function Live({ decisionMode }: { decisionMode: boolean }) {
   const [messages, setMessages] = React.useState(served);
   const [which, setWhich] = React.useState<'a' | 'b'>('a');
+  const [file, setFile] = React.useState<React.ComponentProps<typeof ThreadPane>['file']>(null);
   showThread = setWhich;
+  openFile = setFile;
   const other = React.useMemo(otherThread, []);
   const thread: InboxThread = which === 'b' ? other : { thread_id: mid(1), project: PROJECT, subject: 'Checkout redesign', thread_name: null, resolved_at: null, messages };
   return (
@@ -229,8 +237,8 @@ function Live({ decisionMode }: { decisionMode: boolean }) {
       // A read of the thread again: what the stub Inbox holds now (an action item's mark lands this way).
       onChanged={async () => setMessages(served)}
       onClose={() => {}}
-      file={null}
-      onOpenFile={() => {}}
+      file={file}
+      onOpenFile={(next) => setFile(next)}
       onOpenGuide={() => {}}
     />
   );
@@ -250,8 +258,8 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-async function render(decisionMode = true) {
-  served = sample();
+async function render(decisionMode = true, messages: () => InboxMessageWire[] = sample) {
+  served = messages();
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -456,7 +464,95 @@ test.skipIf(!hasDom)('the Send step shows the draft the reply box kept when it c
   expect(saved.body).toBe('Kept words from before. And these.');
   // The kept file stays in the draft.
   expect((saved.files_remove as string[] | undefined) ?? []).not.toContain(UPLOAD.upload_id);
+  // The Send carries it, so the step lists it under the words, with the reply box's own tile, and it can go there.
+  const tile = () => $(`[data-decide-send] [data-decide-files] [data-compose-file-name="${UPLOAD.name}"]`);
+  expect(tile()).not.toBeNull();
+  await press(tile()!.querySelector('.ib-cp-fx')!);
+  await until(() => tile() === null, 'the file taken off the Send step');
   expect(writes.filter((w) => w.startsWith('reply'))).toEqual([]);
+});
+
+/** Escape pressed where focus is (the page itself when nothing has it), as a key does: whether the key was used. */
+async function escapeFrom(el: Element) {
+  const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  await act(async () => void el.dispatchEvent(event));
+  await settle();
+  return event.defaultPrevented;
+}
+
+test.skipIf(!hasDom)('Escape with a file or picture open beside the thread is the file\'s: decision mode stays', async () => {
+  await render();
+  await decide();
+  act(() => openFile!({ id: 'att_picture', version: 'current', focus: null }));
+  await settle();
+  // Not used here, so the file viewer's own Escape (the window's last, which skips a used key) closes the picture.
+  const used = await escapeFrom($('[data-decide-head]')!);
+  expect({ used, deciding: !!$('[data-decide-head]') }).toEqual({ used: false, deciding: true });
+  // Closed: the next Escape puts decision mode away again.
+  act(() => openFile!(null));
+  await settle();
+  expect(await escapeFrom($('[data-decide-head]')!)).toBe(true);
+  expect($('[data-decide-head]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('Escape with the prototype window open and focus on the page closes the window, not decision mode', async () => {
+  await render();
+  await decide();
+  // The window opens over decision mode (its key listener after decision mode's, as when a card's Try opens it).
+  const { PrototypeWindow } = await import('./components/PrototypeWindow');
+  const layer = document.createElement('div');
+  document.body.appendChild(layer);
+  const windowRoot = createRoot(layer);
+  let closed = 0;
+  act(() =>
+    windowRoot.render(
+      <PrototypeWindow
+        threadId={mid(1)}
+        options={[{ label: 'A', letter: 'A', lettered: false, recommended: false, page: null }]}
+        start={0}
+        shared={false}
+        picked={[]}
+        readOnly={false}
+        records={[]}
+        attachments={[]}
+        onSaved={() => {}}
+        onPick={() => {}}
+        onClose={() => (closed += 1)}
+      />,
+    ),
+  );
+  (document.activeElement as HTMLElement | null)?.blur();
+  await escapeFrom(document.body);
+  const after = { closed, deciding: !!$('[data-decide-head]') };
+  act(() => windowRoot.unmount());
+  layer.remove();
+  expect(after).toEqual({ closed: 1, deciding: true });
+});
+
+test.skipIf(!hasDom)('a Send the thread stops puts decision mode away each time, the stop already showing included (Resume, Send again)', async () => {
+  await render();
+  await decide();
+  await answerAll();
+  expect(current()).toBe('send');
+  replyReplaced = true;
+  for (const press_ of [1, 2]) {
+    await press($('[data-decide-send-button]')!);
+    await until(() => !$('[data-decide-head]'), `decision mode put away after Send ${press_}`);
+    // The sitting is kept: Resume opens it where it was, on the Send step.
+    await openList();
+    expect(wayIn()!.textContent).toBe('Resume · all answered, not sent yet');
+    await press(wayIn()!);
+    await until(() => !!$('[data-decide-head]'), 'decision mode again');
+    expect(current()).toBe('send');
+  }
+  expect(writes.filter((w) => w.startsWith('reply'))).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the way in counts what it opens: three questions and a permission prompt read "Decide these 3"', async () => {
+  const PERMISSION: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'claude-code', session: 'perm:ses_a', name: null };
+  await render(true, () => [...sample().slice(0, 2), agent(4, PERMISSION, `Allow a command?\n\n${block('Run bun install?')}`)]);
+  await openList();
+  expect(wayIn()!.textContent).toBe('Decide these 3');
 });
 
 test.skipIf(!hasDom)('a Send that did not go keeps the sitting: it stays on the Send step with the thread\'s error', async () => {

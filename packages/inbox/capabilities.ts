@@ -6,7 +6,7 @@
  * its row comes or goes in every open window, and a window on its page goes back to the Inbox. Thread panes too
  * (`split_view`, Settings → General → Appearance): every window, the one that saved it included, turns them on or off.
  * Decision mode too (`decision_mode`, named while it is off and by the save that changed it): every window's Decide
- * row comes or goes at once.
+ * row comes or goes at once; the frame carries only `on`, so what the settings read said of the environment stays.
  */
 import type { InboxEventHandlers, SettingsModel } from './api';
 
@@ -21,5 +21,5 @@ export function namesCapability(capabilities: InboxCapabilities): boolean {
 
 export function withCapabilities<S extends CapabilitySettings>(current: S, capabilities: InboxCapabilities): S {
   const { board, decision_mode: decisionMode, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: codeReview, system, chapter_diagrams: chapterDiagrams, scheduled_threads: scheduled, plans } = capabilities;
-  return { ...current, ...(board ? { board } : {}), ...(decisionMode ? { decision_mode: decisionMode } : {}), ...(steps ? { steps } : {}), ...(bro ? { bro } : {}), ...(floatDrafts ? { float_drafts: floatDrafts } : {}), ...(markReadWarning ? { mark_read_warning: markReadWarning } : {}), ...(splitView ? { split_view: splitView } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(system ? { system } : {}), ...(chapterDiagrams ? { chapter_diagrams: chapterDiagrams } : {}), ...(scheduled ? { scheduled_threads: { ...current.scheduled_threads, on: scheduled.on } } : {}), ...(plans ? { plans } : {}) };
+  return { ...current, ...(board ? { board } : {}), ...(decisionMode ? { decision_mode: { ...current.decision_mode, ...decisionMode } } : {}), ...(steps ? { steps } : {}), ...(bro ? { bro } : {}), ...(floatDrafts ? { float_drafts: floatDrafts } : {}), ...(markReadWarning ? { mark_read_warning: markReadWarning } : {}), ...(splitView ? { split_view: splitView } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(system ? { system } : {}), ...(chapterDiagrams ? { chapter_diagrams: chapterDiagrams } : {}), ...(scheduled ? { scheduled_threads: { ...current.scheduled_threads, on: scheduled.on } } : {}), ...(plans ? { plans } : {}) };
 }

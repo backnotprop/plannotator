@@ -3396,6 +3396,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * `event: capabilities`, as the Board's.
    */
   const decisionModeOn = () => inboxDecisionModeOn(loadConfig());
+  /** Its wire: `env` false while PLANNOTATOR_EXPERIMENTAL turns it off (Settings locks the switch then), else null. */
+  const decisionModeWire = () => ({ on: decisionModeOn(), env: inboxDecisionModeEnvOff() ? (false as const) : null });
   const saveDecisionMode = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "decision_mode: { on: boolean }.", { field: "decision_mode" });
@@ -3405,12 +3407,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (on && inboxDecisionModeEnvOff()) {
       throw new InboxError("experimental_env_decides", "PLANNOTATOR_EXPERIMENTAL is set in this Inbox's environment, so decision mode stays off.", { field: "decision_mode" });
     }
-    if (validateOnly) return { on: decisionModeOn() };
+    if (validateOnly) return decisionModeWire();
     const was = decisionModeOn();
     saveConfig({ inboxDecisionMode: on });
     if (decisionModeOn() !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     if (was !== on) for (const listener of capabilityListeners) listener("decision_mode");
-    return { on };
+    return decisionModeWire();
   };
   /**
    * Experimental features (config.json `experimental`, PLANNOTATOR_EXPERIMENTAL
@@ -4178,8 +4180,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     experimental: experimentalState(),
     /** The Board (config.json `inboxBoard`): off unless the person turned it on. */
     board: { on: boardOn() },
-    /** Decision mode (config.json `inboxDecisionMode`): on unless the person turned it off. */
-    decision_mode: { on: decisionModeOn() },
+    /** Decision mode (config.json `inboxDecisionMode`): on unless the person turned it off; `env` false while PLANNOTATOR_EXPERIMENTAL turns it off. */
+    decision_mode: decisionModeWire(),
     /** Routines (config.json `inboxScheduledThreads`): off unless the person turned them on; absent on Windows. */
     ...scheduledCap.wire(),
     /** Launch (config.json `inboxLaunch`, on unless `enabled` is false; off by default on Windows): Settings → Agents' "Start agents from New message" switch, and while on its full-permissions switch and scratch root. */
@@ -7457,7 +7459,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
-        const decisionMode = body.decision_mode === undefined ? { on: decisionModeOn() } : saveDecisionMode(body.decision_mode);
+        const decisionMode = body.decision_mode === undefined ? decisionModeWire() : saveDecisionMode(body.decision_mode);
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
         const bro = body.bro === undefined ? { on: broOn() } : saveBro(body.bro);
         const agentStatusNow = body.agent_status === undefined ? { on: agentStatus.on() } : agentStatus.save(body.agent_status);

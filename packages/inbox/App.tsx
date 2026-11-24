@@ -111,7 +111,7 @@ import { SearchHost, type SearchLanding } from './components/SearchHost';
 import { onOpenSearchKey } from './search/searchShortcut';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from './shortcuts/thread.shortcuts';
-import { bareKeyAllowed, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, keyboardFocused, keyTarget, modalOpen, singleKeysLive, threadDeciding } from './shortcuts/guards';
+import { bareKeyAllowed, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, keyboardFocused, keyTarget, modalOpen, singleKeysLive, threadDeciding, threadEscapeTaken } from './shortcuts/guards';
 import { appKeyAllowed as appKeyAllowedOn, archiveTarget, newPageKeys, refreshAction, refreshKey, refreshKind } from './keyboard/appKeys';
 import { inboxAppShortcuts } from './shortcuts/app.shortcuts';
 import { ShortcutMap } from './components/ShortcutMap';
@@ -2000,16 +2000,10 @@ function Inbox() {
         closeTo(systemBack);
         return;
       }
-      // An open file owns Escape (the HTML viewer's ladder, the composers).
-      if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return;
-      // Something inside the thread already used this Escape (the reply's choice at Send goes back to the reply).
-      if (event.defaultPrevented) return;
-      const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
-      // The Ask AI window is not on the ladder: Escape in it never closes the thread under it.
-      if (target?.closest?.('[data-chat-window]')) return;
-      // Words selected in a message (approval "inbox-message-comments"): its selection toolbar or label picker owns this Escape.
-      if (selectionToolbarShowing()) return;
+      // An open file owns Escape (the HTML viewer's ladder, the composers), as do a field, the Ask AI window (not on the
+      // ladder), words selected in a message (their toolbar) and anything in the thread that used it first (the reply's
+      // choice at Send goes back to the reply). Decision mode's Escape stands down for the same (threadEscapeTaken).
+      if (event.key !== 'Escape' || !routeRef.current.thread || threadEscapeTaken(event, !!routeRef.current.file)) return;
       // An open guided review closes first, back to its thread; then the Artifacts view, back to the messages
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
       // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).

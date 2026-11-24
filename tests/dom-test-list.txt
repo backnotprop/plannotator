@@ -111,6 +111,7 @@ packages/inbox/threadPulls/ThreadPulls.test.tsx
 packages/inbox/threadSteps.test.tsx
 packages/inbox/panePollsPause.test.tsx
 packages/inbox/decideMode.test.tsx
+packages/inbox/decisionModeSettings.test.tsx
 packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
 packages/inbox/components/stalePageNotice.test.tsx

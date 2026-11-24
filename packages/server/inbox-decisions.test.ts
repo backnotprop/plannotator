@@ -32,7 +32,7 @@ afterEach(async () => {
   else process.env.PLANNOTATOR_EXPERIMENTAL = envBefore.experimental;
 });
 
-type Settings = { decision_mode?: { on: boolean }; experimental?: Record<string, unknown>; board?: { on: boolean } };
+type Settings = { decision_mode?: { on: boolean; env?: false | null }; experimental?: Record<string, unknown>; board?: { on: boolean } };
 type Frame = { board?: { on: boolean }; steps?: { on: boolean }; decision_mode?: { on: boolean } };
 
 /** A fresh Inbox whose config.json is its own (the Inbox reads config through PLANNOTATOR_DATA_DIR). */
@@ -101,7 +101,7 @@ describe("the switch", () => {
   test("on by default: the read says on, it is not an experimental feature, and another switch's event leaves it out", async () => {
     const { server } = await setup();
     const settings = await read(server);
-    expect(settings.decision_mode).toEqual({ on: true });
+    expect(settings.decision_mode).toEqual({ on: true, env: null });
     // An older window reads `experimental.decision_mode.on`: it is kept there too, the real state.
     expect(settings.experimental).toEqual({ decision_mode: { on: true, env: null }, grid: { on: false, env: null } });
     const stream = await windowCapabilities(server);
@@ -116,9 +116,9 @@ describe("the switch", () => {
     const stream = await windowCapabilities(server);
     const off = await post(server, "/api/inbox/settings", { decision_mode: { on: false } });
     expect(off.status).toBe(200);
-    expect(((await off.json()) as Settings).decision_mode).toEqual({ on: false });
+    expect(((await off.json()) as Settings).decision_mode).toEqual({ on: false, env: null });
     expect(saved().inboxDecisionMode).toBe(false);
-    expect((await read(server)).decision_mode).toEqual({ on: false });
+    expect((await read(server)).decision_mode).toEqual({ on: false, env: null });
     await stream.next(1);
     expect(stream.frames[0]!.decision_mode).toEqual({ on: false });
     // While it is off, another switch's frame still carries it, so no window turns it back on by itself.
@@ -127,9 +127,9 @@ describe("the switch", () => {
     expect(stream.frames[1]!.decision_mode).toEqual({ on: false });
 
     const on = await post(server, "/api/inbox/settings", { decision_mode: { on: true } });
-    expect(((await on.json()) as Settings).decision_mode).toEqual({ on: true });
+    expect(((await on.json()) as Settings).decision_mode).toEqual({ on: true, env: null });
     expect(saved().inboxDecisionMode).toBe(true);
-    expect((await read(server)).decision_mode).toEqual({ on: true });
+    expect((await read(server)).decision_mode).toEqual({ on: true, env: null });
     await stream.next(3);
     expect(stream.frames[2]!.decision_mode).toEqual({ on: true });
     // Saving the same state again tells nobody.
@@ -141,9 +141,9 @@ describe("the switch", () => {
 
   test("an old experimental choice is kept: off stays off until the switch is used, and the other experimental keys stay", async () => {
     const { server, saved } = await setup({ experimental: { decisionMode: false, otherFlag: true }, inboxTextSize: 13 });
-    expect((await read(server)).decision_mode).toEqual({ on: false });
+    expect((await read(server)).decision_mode).toEqual({ on: false, env: null });
     expect((await post(server, "/api/inbox/settings", { decision_mode: { on: true } })).status).toBe(200);
-    expect((await read(server)).decision_mode).toEqual({ on: true });
+    expect((await read(server)).decision_mode).toEqual({ on: true, env: null });
     expect(saved()).toMatchObject({ inboxDecisionMode: true, experimental: { decisionMode: false, otherFlag: true }, inboxTextSize: 13 });
   });
 
@@ -154,7 +154,7 @@ describe("the switch", () => {
     expect(off.status).toBe(200);
     expect(((await off.json()) as Settings).experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: false, env: null } });
     expect(saved().inboxDecisionMode).toBe(false);
-    expect((await read(server)).decision_mode).toEqual({ on: false });
+    expect((await read(server)).decision_mode).toEqual({ on: false, env: null });
     await stream.next(1);
     expect(stream.frames[0]!.decision_mode).toEqual({ on: false });
     // With Grid's switch in the same body: both save.
@@ -184,13 +184,14 @@ describe("the switch", () => {
     });
     expect(stale.status).toBe(409);
     expect(readFileSync(join(dataDir, "config.json"), "utf8")).toBe(before);
-    expect((await read(server)).decision_mode).toEqual({ on: false });
+    expect((await read(server)).decision_mode).toEqual({ on: false, env: null });
   });
 
   test("PLANNOTATOR_EXPERIMENTAL=-decision-mode still forces it off; the plain name is ignored", async () => {
     const { server, saved } = await setup();
     process.env.PLANNOTATOR_EXPERIMENTAL = "-decision-mode";
-    expect((await read(server)).decision_mode).toEqual({ on: false });
+    // The read says the environment decides, so Settings locks the switch.
+    expect((await read(server)).decision_mode).toEqual({ on: false, env: false });
     expect((await read(server)).experimental?.decision_mode).toEqual({ on: false, env: false });
     // Turning it on would change nothing: refused, nothing written. Off saves (it is what the person sees).
     const on = await post(server, "/api/inbox/settings", { decision_mode: { on: true } });
@@ -199,9 +200,9 @@ describe("the switch", () => {
     expect(saved().inboxDecisionMode).toBeUndefined();
     expect((await post(server, "/api/inbox/settings", { decision_mode: { on: false } })).status).toBe(200);
     process.env.PLANNOTATOR_EXPERIMENTAL = "decision-mode";
-    expect((await read(server)).decision_mode).toEqual({ on: false });
+    expect((await read(server)).decision_mode).toEqual({ on: false, env: null });
     expect((await post(server, "/api/inbox/settings", { decision_mode: { on: true } })).status).toBe(200);
-    expect((await read(server)).decision_mode).toEqual({ on: true });
+    expect((await read(server)).decision_mode).toEqual({ on: true, env: null });
   });
 
   test("Grid's switch (approval \"inbox-agent-grid\") saves on its own, off by default, and leaves decision mode", async () => {

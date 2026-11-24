@@ -9,7 +9,6 @@
  */
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type RefObject } from 'react';
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
-import { threadOpenQuestions } from '@plannotator/core/inbox-open-questions';
 import type { OpenQuestionsDecide } from '../components/OpenQuestions';
 import { DECIDE_ENTRY_MIN, back, decideEntryLabel, decideQueue, decideReasked, decideTally, goToStep, next, putOff, startSitting, stepIndex, syncSitting, type DecideTally, type PendingAnswers, type Sitting } from './queue';
 
@@ -81,7 +80,7 @@ export function useDecide({
   const reasked = decideReasked(messages);
   const tally = (id: string): DecideTally => {
     const m = byId.get(id);
-    return m ? decideTally(m, pending, reasked) : { total: 0, answered: 0 };
+    return m ? decideTally(m, pending, reasked) : { total: 0, answered: 0, actions: 0 };
   };
   const queue = on ? decideQueue(messages, live, pending) : [];
   const stored = kept.get(threadId) ?? null;
@@ -111,16 +110,19 @@ export function useDecide({
     el.scrollTop = was.to === 'end' ? el.scrollHeight : was.to;
   });
   const atSend = deciding && sitting?.current === null;
-  // The Send step shows the words the Send carries: a draft kept with the box closed opens in it, files and all, so
-  // a word typed there never saves over it and nothing goes that the step did not show.
+  // The Send step shows the words the Send carries: a draft kept with the box closed opens in it, files and all (the
+  // step lists those under the words), so a word typed there never saves over it.
   useLayoutEffect(() => {
     if (atSend && draftKept) openKept?.();
   }, [atSend, draftKept]);
   // A Send that stopped on what only the thread shows: back to the thread, where it is (the sitting kept, Resume).
+  // Every press that stops does, the stop already showing included (Resume, then Send again without resolving it).
   const stoppedBefore = useRef(stopped);
+  const pressed = useRef(false);
   useEffect(() => {
-    if (stopped && !stoppedBefore.current && deciding) putAway('back');
+    if (stopped && deciding && (!stoppedBefore.current || pressed.current)) putAway('back');
     stoppedBefore.current = stopped;
+    pressed.current = false;
   });
   const write = (nextSitting: Sitting | null) => {
     if (nextSitting) kept.set(threadId, nextSitting);
@@ -147,9 +149,10 @@ export function useDecide({
     write(null);
     putAway('end');
   };
-  // Every decision the queue holds (permission prompts and questions about to be asked again are not in it).
+  // Every decision the queue holds (permission prompts and questions about to be asked again are not in it), and how
+  // many of them are questions, from the same set: "Decide these N" when no action item waits among them.
   const count = on ? queue.reduce((n, id) => n + tally(id).total, 0) : 0;
-  const listed = on ? threadOpenQuestions(messages, live).questions.length : 0;
+  const listed = count - (on ? queue.reduce((n, id) => n + tally(id).actions, 0) : 0);
   let entry: OpenQuestionsDecide | null = null;
   // A sitting kept and not on screen is one the person left before Send ("‹ Thread", Escape, another thread, the list).
   if (on && !deciding && sitting) {
@@ -175,7 +178,10 @@ export function useDecide({
     sendAll: async (send) => {
       went.current = false;
       await send();
-      if (went.current) finish();
+      if (went.current) return finish();
+      // Drawn again with the thread's state after this Send: a stop it hit, new or already showing, puts this away.
+      pressed.current = true;
+      redraw();
     },
     sent: () => {
       went.current = true;

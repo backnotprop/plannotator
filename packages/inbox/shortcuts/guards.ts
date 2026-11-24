@@ -100,6 +100,29 @@ export function threadDeciding(threadId: string | null | undefined, doc: Documen
   return doc.querySelector(`section.ib-pane[data-thread-id="${CSS.escape(threadId)}"] [data-decide-head]`) !== null;
 }
 
+/**
+ * The thread's Escape stands down (App's, which closes the thread, and decision mode's, which puts it away): a file
+ * is open beside the thread (its viewer owns Escape), something inside the thread used the key, it came from a text
+ * field or the Ask AI window, or words selected in a message show their toolbar.
+ */
+export function threadEscapeTaken(event: KeyboardEvent, fileOpen: boolean): boolean {
+  if (fileOpen || event.defaultPrevented) return true;
+  const target = event.target as HTMLElement | null;
+  if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return true;
+  return !!target?.closest?.('[data-chat-window]') || selectionToolbarShowing();
+}
+
+/** Open anywhere on the window and closed by Escape first: a menu, a list's popup, a dialog, a sheet, the lightbox, the prototype window. */
+const ESCAPE_COVERS = '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
+
+/** One of `ESCAPE_COVERS` is on screen (a PR description's raw HTML draws none; one put away, `hidden`, is not open). */
+export function escapeCoverOpen(doc: Document | null = typeof document === 'undefined' ? null : document): boolean {
+  for (const el of doc?.querySelectorAll(ESCAPE_COVERS) ?? []) {
+    if (!el.closest(STRANGERS_MARKUP) && !el.closest('[hidden]') && el.getClientRects().length > 0) return true;
+  }
+  return false;
+}
+
 /** The key came from inside a dialog or a popover layer (a composer, the image annotator): it is theirs. A body's raw HTML is no layer. */
 export function inOverlay(target: Element | null): boolean {
   if (target?.closest(STRANGERS_MARKUP)) return false;

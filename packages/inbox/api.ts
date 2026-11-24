@@ -392,8 +392,8 @@ export interface SettingsModel {
   experimental?: InboxExperimentalSettings;
   /** The Board (config.json `inboxBoard`): off unless the person turned it on. Absent from an Inbox before the switch (the Board is then always there). */
   board?: { on: boolean };
-  /** Decision mode (config.json `inboxDecisionMode`, Settings → Capabilities): on unless turned off. Absent from an older Inbox: on. */
-  decision_mode?: { on: boolean };
+  /** Decision mode (config.json `inboxDecisionMode`, Settings → Capabilities): on unless turned off; absent from an older Inbox: on. `env`: false while PLANNOTATOR_EXPERIMENTAL turns it off (its switch locked), else null or absent. */
+  decision_mode?: { on: boolean; env?: false | null };
   /** The list's "Show archived" (config.json `inboxShowArchived`), the same on every linked machine. Absent from an older Inbox. */
   show_archived?: { on: boolean; rev: number };
   /** Thread steps (config.json `inboxSteps`, approval "inbox-thread-steps"): off unless the person turned them on. Absent from an older Inbox (no steps then). */
@@ -1306,7 +1306,7 @@ export const inboxApi = {
   /** The Board on or off (Settings → Capabilities): agents get the card action from their next session. */
   saveBoard: (on: boolean) => post<{ board: { on: boolean } }>(inboxUrl('/settings'), { board: { on } }),
   /** Decision mode on or off (Settings → Capabilities): every window hears `event: capabilities`. */
-  saveDecisionMode: (on: boolean) => post<{ decision_mode: { on: boolean } }>(inboxUrl('/settings'), { decision_mode: { on } }),
+  saveDecisionMode: (on: boolean) => post<{ decision_mode: { on: boolean; env?: false | null } }>(inboxUrl('/settings'), { decision_mode: { on } }),
   /** Thread steps on or off (Settings → Capabilities, approval "inbox-thread-steps"): every window hears `event: capabilities`. */
   saveSteps: (on: boolean) => post<{ steps: { on: boolean } }>(inboxUrl('/settings'), { steps: { on } }),
   saveBro: (on: boolean) => post<{ bro: { on: boolean } }>(inboxUrl('/settings'), { bro: { on } }),

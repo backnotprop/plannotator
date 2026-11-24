@@ -40,10 +40,10 @@ describe('the queue', () => {
     const action = q('act', { kind: 'action' });
     const staged = q('act2', { kind: 'action', state: 'picked', action_result: { outcome: 'done', note: null, at: 'now', by: 'person', staged: true } } as Partial<InboxQuestion>);
     const message = m('m1', [q('a', { state: 'picked', answer }), q('b')], [action, staged]);
-    expect(decideTally(message)).toEqual({ total: 4, answered: 2 });
-    expect(decideTally(message, new Map([['m1/b', answer]]))).toEqual({ total: 4, answered: 3 });
+    expect(decideTally(message)).toEqual({ total: 4, answered: 2, actions: 2 });
+    expect(decideTally(message, new Map([['m1/b', answer]]))).toEqual({ total: 4, answered: 3, actions: 2 });
     // A pick being taken back counts as unanswered at once.
-    expect(decideTally(message, new Map([['m1/a', null]]))).toEqual({ total: 4, answered: 1 });
+    expect(decideTally(message, new Map([['m1/a', null]]))).toEqual({ total: 4, answered: 1, actions: 2 });
     // A message whose only decision is answered in the draft stays in the queue.
     expect(decideQueue([m('m9', [q('z', { state: 'picked', answer })])], live)).toEqual(['m9']);
   });

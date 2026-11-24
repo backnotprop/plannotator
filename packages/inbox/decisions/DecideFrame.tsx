@@ -14,8 +14,8 @@ import { AuthorMark, Icon } from '../icons';
 import { ReplyActions, ReplyAnswers, type ActionRow, type DraftAnswer } from '../components/ReplyAnswers';
 import type { JumpTarget } from '../components/ReplacedQuestion';
 import { useReplyHasWords, useReplyText, type ReplyText } from '../replyText';
-import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
-import { selectionToolbarShowing } from '../selectionToolbar';
+import { escapeCoverOpen, inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen, threadEscapeTaken } from '../shortcuts/guards';
+import { ComposeFileTiles, type ComposeFile } from '../compose/ComposeFiles';
 import { laterOffered, stepIndex } from './queue';
 import type { Decide } from './useDecide';
 
@@ -35,6 +35,11 @@ export interface DecideFrameProps {
   /** The thread's reply box words, and its change (saved as the thread's draft). */
   words: ReplyText;
   onWords: (text: string) => void;
+  /** The files the reply box holds (a kept draft's among them): the Send carries them, so its step lists them, removable. */
+  files: readonly ComposeFile[];
+  onRemoveFile: (key: string) => void;
+  /** A file or picture is open beside the thread (its viewer's Escape closes it first). */
+  fileOpen: boolean;
   /** The thread's own Send (it tells `dm.sent()` when its replies went). */
   send: () => Promise<void>;
   /** The thread's Send is on its way. */
@@ -64,23 +69,26 @@ function leaveFrom(el: HTMLElement | null, dm: Decide) {
 }
 
 /**
- * Escape puts decision mode away, back to the thread (nothing sent, Resume offered), unless something on the page used
- * it first (a field, a menu, a dialog, the prototype window, a selection's toolbar). On the document, so it runs before
- * the window's Escape, which then sees the key used and leaves the thread open.
+ * Escape puts decision mode away, back to the thread (nothing sent, Resume offered), only when nothing else Escape
+ * closes is open: not a file or picture open beside the thread, a field, the Ask AI window or a selection's toolbar
+ * (what stands the thread's own Escape down, `threadEscapeTaken`), nor a dialog, menu, list, sheet, the lightbox or the
+ * prototype window anywhere on the window (`escapeCoverOpen`), wherever focus is. Those close first, each on its own
+ * listener. On the document, so it runs before the window's Escape, which then sees the key used and leaves the
+ * thread open.
  */
-function useEscapeLeaves(ref: RefObject<HTMLElement | null>, dm: Decide) {
-  const latest = useRef(dm);
-  latest.current = dm;
+function useEscapeLeaves(ref: RefObject<HTMLElement | null>, dm: Decide, fileOpen: boolean) {
+  const latest = useRef({ dm, fileOpen });
+  latest.current = { dm, fileOpen };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || isComposingKey(event) || modalOpen() || selectionToolbarShowing()) return;
+      if (event.key !== 'Escape' || isComposingKey(event) || threadEscapeTaken(event, latest.current.fileOpen) || modalOpen() || escapeCoverOpen()) return;
       const from = keyTarget(event);
-      if (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"], [aria-expanded="true"], [data-chat-window]'))) return;
+      if (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[aria-expanded="true"], [data-chat-window]'))) return;
       const pane = ref.current?.closest('section');
       // A key in another pane is that pane's.
       if (from && from !== document.body && from.closest('section.ib-pane') && !pane?.contains(from)) return;
       event.preventDefault();
-      leaveFrom(ref.current, latest.current);
+      leaveFrom(ref.current, latest.current.dm);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -93,7 +101,7 @@ export function DecideHead(p: DecideFrameProps) {
   const at = stepIndex(sitting);
   const atSend = dm.current === null;
   const ref = useRef<HTMLDivElement>(null);
-  useEscapeLeaves(ref, dm);
+  useEscapeLeaves(ref, dm, p.fileOpen);
   // Each step starts at its top, with focus on what it shows (the message, or Send's heading).
   useLayoutEffect(() => {
     p.body.current?.scrollTo({ top: 0 });
@@ -178,13 +186,19 @@ export function DecideHead(p: DecideFrameProps) {
 /**
  * The words box on the Send step: the thread's reply words (its draft), so leaving keeps them in the thread. The
  * thread opens its kept draft into the box as the Send step shows (as Edit draft does), so these are the words the
- * Send carries, and a change keeps the draft's files.
+ * Send carries, and a change keeps the draft's files. Those files show under the words with the reply box's own tiles,
+ * each removable as in the thread: nothing goes that the step does not show.
  */
-function DecideWords({ words, onWords }: { words: ReplyText; onWords: (text: string) => void }) {
+function DecideWords({ words, onWords, files, onRemoveFile }: Pick<DecideFrameProps, 'words' | 'onWords' | 'files' | 'onRemoveFile'>) {
   const text = useReplyText(words);
   return (
     <div className="ib-rbox dm-rbox">
       <textarea className="dm-words" rows={2} placeholder="Add a few words to your reply" aria-label="Your words" value={text} onChange={(event) => onWords(event.target.value)} data-decide-words="" />
+      {files.length > 0 && (
+        <div className="ib-rfiles" data-reply-files="" data-decide-files="">
+          <ComposeFileTiles files={files} onRemove={onRemoveFile} />
+        </div>
+      )}
     </div>
   );
 }
@@ -232,7 +246,7 @@ export function DecideBody(p: DecideFrameProps) {
               </button>
             </div>
           )}
-          <DecideWords words={p.words} onWords={p.onWords} />
+          <DecideWords words={p.words} onWords={p.onWords} files={p.files} onRemoveFile={p.onRemoveFile} />
         </div>
       )}
     </div>
@@ -255,7 +269,7 @@ export function DecideFoot(p: DecideFrameProps) {
   const atSend = dm.current === null;
   const t = dm.current ? dm.tally(dm.current) : null;
   const hasWords = useReplyHasWords(p.words);
-  const nothing = p.answers.length === 0 && p.actions.length === 0 && !hasWords;
+  const nothing = p.answers.length === 0 && p.actions.length === 0 && p.files.length === 0 && !hasWords;
   const status = atSend
     ? p.actions.length > 0
       ? `${plural(p.answers.length, 'answer')}, ${plural(p.actions.length, 'action item')}`

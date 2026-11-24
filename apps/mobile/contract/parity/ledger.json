@@ -6651,11 +6651,11 @@
     },
     {
       "id": "messages-220",
-      "title": "Answer on the card: choices, \"Answer with N\", Use (suggested text), Other…, Add a note, Later, Skip; action items have Open, Copy, Done, Can't do it",
+      "title": "Answer in decision mode on the thread's own question cards, every answer a draft until Send; an action item's Done, Can't do it or Skip waits in the draft; Later moves the whole message to the end, before Send",
       "surface": [],
       "flows": [],
       "mobile": "later",
-      "why": "L-off: decision mode is experimental",
+      "why": "L-off: marked while decision mode was experimental and off; the one-card dialog's own card is gone: decision mode now draws each agent message with the thread's own cards",
       "reason": "L-off",
       "source": "SCOPE 19. Decision mode (experimental, off by default); M:L275, M:L279",
       "ios": {
@@ -6668,7 +6668,7 @@
       "surface": [],
       "flows": [],
       "mobile": "later",
-      "why": "L-off: decision mode is experimental",
+      "why": "L-off: removed from the product: decision mode uses the thread's own card, which has no confirm step for a one-way question",
       "reason": "L-off",
       "source": "SCOPE 19. Decision mode (experimental, off by default); M:L275",
       "ios": {
@@ -6681,7 +6681,7 @@
       "surface": [],
       "flows": [],
       "mobile": "later",
-      "why": "L-off: decision mode is experimental",
+      "why": "L-off: removed from the product: nothing in decision mode sends by itself; it ends with one Send, the thread's own, and the reply then shows in the thread as any reply does",
       "reason": "L-off",
       "source": "SCOPE 19. Decision mode (experimental, off by default); M:L276",
       "ios": {
@@ -6694,7 +6694,7 @@
       "surface": [],
       "flows": [],
       "mobile": "later",
-      "why": "L-off: decision mode is experimental",
+      "why": "L-off: removed from the product: leaving decision mode (‹ Thread or Escape) asks nothing and sends nothing; the answers stay as drafts in the thread",
       "reason": "L-off",
       "source": "SCOPE 19. Decision mode (experimental, off by default); M:L276",
       "ios": {
@@ -6707,7 +6707,7 @@
       "surface": [],
       "flows": [],
       "mobile": "later",
-      "why": "L-off: decision mode is experimental",
+      "why": "L-off: removed from the product: after leaving before Send, the first row of the thread's open questions reads \"Resume · N of M messages left\" (\"Resume · all answered, not sent yet\" when every message is answered)",
       "reason": "L-off",
       "source": "SCOPE 19. Decision mode (experimental, off by default); M:L278, M:L281",
       "ios": {

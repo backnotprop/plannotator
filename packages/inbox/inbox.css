@@ -11240,13 +11240,13 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { unicode-bidi: plaintext; text-align: start; }
 .ib-pfoot .ib-rscroll :is(.ib-ranswer-p, .ib-ranswer-a) { unicode-bidi: plaintext; }
 .ib-pfoot .ib-rscroll .ib-ranswers { margin-inline: 14px; }
-/* Files (D2): compact chips that wrap, the name cut in the middle, the kind and size under it. */
-:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles { padding: 2px 12px 6px; }
-:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0; }
-:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file { flex: 1 1 190px; max-width: 280px; gap: 8px; padding: 4px 2px 4px 6px; border-radius: 9px; }
-:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file .ib-fi { width: 28px; height: 28px; border-radius: 6px; }
-:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file .ib-nm { font-size: var(--ib-fs-12-5, 12.5px); }
-:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file .ib-kd { font-size: var(--ib-fs-11-5, 11.5px); }
+/* Files (D2): compact chips that wrap, the name cut in the middle, the kind and size under it (decision mode's Send step too). */
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard, .dm-rbox) .ib-rfiles { padding: 2px 12px 6px; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard, .dm-rbox) .ib-rfiles .ib-cp-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard, .dm-rbox) .ib-rfiles .ib-cp-file { flex: 1 1 190px; max-width: 280px; gap: 8px; padding: 4px 2px 4px 6px; border-radius: 9px; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard, .dm-rbox) .ib-rfiles .ib-cp-file .ib-fi { width: 28px; height: 28px; border-radius: 6px; }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard, .dm-rbox) .ib-rfiles .ib-cp-file .ib-nm { font-size: var(--ib-fs-12-5, 12.5px); }
+:is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard, .dm-rbox) .ib-rfiles .ib-cp-file .ib-kd { font-size: var(--ib-fs-11-5, 11.5px); }
 /* The close chevron over the region's top right, on its own ground, so words scrolling under it never show through. */
 /* Clear of a classic (always shown) scrollbar on the scroll region: `--ib-rsb` is its width (Thread.tsx), 0 for overlay scrollbars. */
 .pn-inbox .ib-rclose {
@@ -11360,7 +11360,7 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
   .pn-inbox .ib-pfoot .ib-rbox { border-radius: 18px; }
   .ib-rscroll { max-height: max(120px, calc(46dvh - 130px)); }
   .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding: 13px 52px 6px 14px; }
-  :is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard) .ib-rfiles .ib-cp-file { flex-basis: 100%; max-width: none; }
+  :is(.ib-pfoot .ib-rscroll, .ib-imgcompose .ib-ccard, .dm-rbox) .ib-rfiles .ib-cp-file { flex-basis: 100%; max-width: none; }
   .pn-inbox .ib-rclose { top: 4px; right: 4px; width: 44px; height: 44px; }
   .ib-rquote { padding: 12px 52px 0 14px; }
   .ib-rquote-x { width: 32px; height: 32px; margin: -6px -6px 0 0; }

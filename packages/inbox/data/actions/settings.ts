@@ -71,7 +71,7 @@ export function useSettingsSaves(
 
   /** Decision mode (Settings → Capabilities): on unless turned off; every window follows through `event: capabilities`. */
   const toggleDecisionMode = (next: boolean) =>
-    saveSetting((s) => ({ ...s, decision_mode: { on: next } }), () => inboxApi.saveDecisionMode(next), (s, saved) => ({ ...s, decision_mode: saved.decision_mode }));
+    saveSetting((s) => ({ ...s, decision_mode: { ...s.decision_mode, on: next } }), () => inboxApi.saveDecisionMode(next), (s, saved) => ({ ...s, decision_mode: { ...s.decision_mode, ...saved.decision_mode } }));
 
   /** The one experimental switch with a row: Grid (approval "inbox-agent-grid"). */
   const toggleExperimental = (next: boolean, _feature: 'grid' = 'grid') =>

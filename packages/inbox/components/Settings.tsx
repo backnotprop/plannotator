@@ -571,7 +571,7 @@ function CapabilitiesSection({
   steps: { on: boolean } | null;
   onToggleSteps?: (next: boolean) => void;
   /** Decision mode, on unless turned off; null until the settings are read. */
-  decisionMode: { on: boolean } | null;
+  decisionMode: { on: boolean; env?: false | null } | null;
   onToggleDecisionMode?: (next: boolean) => void;
   /** Routines, null where the Inbox has no switch for them. */
   scheduled: { on: boolean; login?: 'added' | 'unavailable' } | null;
@@ -656,11 +656,14 @@ function CapabilitiesSection({
                     Decision mode
                   </span>
                   <span className="ib-desc">
-                    Answer a thread's questions and action items one agent message at a time, from its open questions, and send every answer with one Send. Off, the open questions have no Decide row; answers you picked stay in the thread.
+                    {/* Locked while PLANNOTATOR_EXPERIMENTAL (`-decision-mode`) decides, as Grid's row is: words and switch alike. */}
+                    {decisionMode.env != null
+                      ? 'PLANNOTATOR_EXPERIMENTAL turns it off.'
+                      : "Answer a thread's questions and action items one agent message at a time, from its open questions, and send every answer with one Send. Off, the open questions have no Decide row; answers you picked stay in the thread."}
                   </span>
                 </span>
                 <span className="ib-ctl">
-                  <Switch on={decisionMode.on} labelledBy="ib-decision-mode-label" onClick={() => onToggleDecisionMode(!decisionMode.on)} />
+                  <Switch on={decisionMode.on} labelledBy="ib-decision-mode-label" disabled={decisionMode.env != null} onClick={() => onToggleDecisionMode(!decisionMode.on)} />
                 </span>
               </div>
             )}
