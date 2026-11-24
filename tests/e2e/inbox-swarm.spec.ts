@@ -122,6 +122,8 @@ test.beforeAll(async () => {
     NO_ANON_PING: '1',
     PLANNOTATOR_INBOX_PHONES: '0',
     PLANNOTATOR_EXPERIMENTAL: 'swarm',
+    // The computer's name the status view shows beside each member's project (else the runner's host name).
+    PLANNOTATOR_MACHINE_NAME: "Charlie's Mac",
   };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
@@ -228,6 +230,16 @@ test('the agents join, say what they do and talk; the thread shows the summary r
   await expect(codex.locator('[data-swarm-state]')).toHaveText('idle');
   await expect(codex.locator('[data-swarm-doing]')).toContainText('Finding the refunds that went out short');
   await expect(page.locator('[data-swarm-status] [data-swarm-ghost]')).toContainText('2');
+  // The view is drawn over the message under it, not under its words: what is at each row's name and doing line is the view's.
+  const covered = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-swarm-member] .ib-swarm-nm, [data-swarm-member] [data-swarm-doing]')].map((el) => {
+      const box = el.getBoundingClientRect();
+      const top = document.elementFromPoint(box.left + Math.min(box.width / 2, 40), box.top + box.height / 2);
+      return !!top?.closest('[data-swarm-status]');
+    }),
+  );
+  expect(covered).toEqual([true, true, true, true]);
+  await expect(claude.locator('.ib-swarm-wh')).toHaveText("ledger · Charlie's Mac");
   await shot(page, '03-status-view');
 });
 
@@ -289,6 +301,8 @@ test('a swarm nobody has talked in yet: the empty ghost pane', async ({ page }) 
   await expect(empty).toBeVisible();
   await expect(empty).toContainText('No ghost messages yet');
   await expect(empty).toContainText('When the agents talk to each other, it shows up here.');
+  // The shot once New message's "Sent to" toast has gone by itself (it sits over the pane's Send while it is up).
+  await expect(page.locator('.ib-toast')).toHaveCount(0, { timeout: 20_000 });
   await shot(page, '05-ghost-pane-empty');
 });
 

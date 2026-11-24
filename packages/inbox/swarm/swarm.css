@@ -36,6 +36,9 @@
 .ib-swarm-line[data-off] .ib-swarm-sum { color: var(--muted-foreground); }
 
 /* ── The status view: under the row, over the thread on a computer ── */
+/* Over the messages: each message's Viewer (packages/ui) is `relative z-50` in the thread body's stacking context, so
+   the open row stacks above that (and the 51 of a message's reaction slot), or the words below would draw through it. */
+.ib-swarm-line[data-open] { z-index: 52; }
 .ib-swarm-pop { position: absolute; z-index: 6; left: 0; top: calc(100% + 6px); width: min(560px, calc(100vw - 48px)); box-sizing: border-box; padding: 4px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow, 0 10px 28px -14px color-mix(in oklch, var(--foreground) 45%, transparent)); }
 .ib-swarm-rows { margin: 0; padding: 0; list-style: none; }
 .ib-swarm-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 1px 10px; align-items: center; margin: 0; padding: 8px 10px; }
