@@ -215,6 +215,8 @@ test.skipIf(!hasDom)('merged: everything stays and the header mark says merged, 
   expect($('[data-stub-reader]') === before.reader && $<HTMLTextAreaElement>('[data-stub-comment]')!.value === 'Cap the backoff at').toBe(true);
   expect($('[data-pull-review-title] .ib-refmark')!.getAttribute('data-ref-state')).toBe('merged');
   expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
+  // Its comments stay open with the one being written (the reader not turned read-only); only Post goes.
+  expect(!!$('.ib-vcomments')).toBe(true);
 });
 
 test.skipIf(!hasDom)('hidden in another window: the review closes as Hide does; a PR never seen keeps today’s words', async () => {

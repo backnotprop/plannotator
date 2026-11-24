@@ -39,7 +39,7 @@ import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { patchBlobIds, type DiffFile } from '@plannotator/core/diff-files';
 import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import type { KeptComment } from '../guide/platform-post-types';
-import { inboxPullRepoKey, type InboxPullDiffAnswer, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, inboxPullRepoKey, type InboxPullDiffAnswer, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
@@ -313,6 +313,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   const route = useRoutePull(layerKey, model, !listed);
   const lone = useMemo(() => (route.pull ? loneStack(route.pull) : null), [route.pull]);
   const [said, setSaid] = useState<ReturnType<typeof forgeSaid>>(null);
+  /** The layer whose comments were open here: one that merges or closes keeps them and the one being written (only Post goes). */
+  const commented = useRef<string | null>(null);
   const found = kept?.stack ?? drawnStackWith(stackId, layerKey, model) ?? (lone && model && !hiddenIn(lone, model) ? lone : null);
   const stack = useMemo(() => withForgeState(found, layerKey, listed, said, route.pull), [found, layerKey, listed, said, route.pull]);
   const layer = stack?.layers.find((l) => l.key === layerKey) ?? null;
@@ -720,7 +722,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   };
   // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
   // global comments do.
-  const readerComments = canDecide || canPost ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: saveFromReader, onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
+  if (canDecide || canPost) commented.current = layerKey;
+  const keepComments = !!layer && !inboxPullIsOpen(layer) && (commented.current === layerKey || here.length > 0);
+  const readerComments = canDecide || canPost || keepComments ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: saveFromReader, onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
   // Open in: what is on disk in a clone of this repository, which may not be the PR's version; nothing when no clone holds the file.
   const repoKey = stack ? inboxPullRepoKey(stack.host, stack.repo) : null;

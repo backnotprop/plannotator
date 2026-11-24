@@ -89,6 +89,9 @@ import { createDepartedPulls } from "./inbox-pull-departed";
 import { forgePullState, readForgePull } from "./inbox-pull-forge";
 import { join as joinPath } from "node:path";
 
+/** GitHub's PR as the diff read asks for it around the patch: its head, its description, and its state now. */
+export const INBOX_PULL_NOW_JQ = "{sha: .head.sha, body: .body, state: .state, merged: .merged, merged_at: .merged_at, draft: .draft} | tojson";
+
 /** A host's answer is fresh this long. */
 export const INBOX_PULLS_FRESH_MS = 60_000;
 /** A refresh reads again what is older than this. */
@@ -2003,7 +2006,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         // `tojson`: gh colours an object answer under CLICOLOR_FORCE, whatever NO_COLOR says, and prints a string raw.
         const pullNow = async (): Promise<{ sha: string | null; description: string | null; fork?: GitlabForkProjects | null; state: InboxPullState | null; merged_at: string | null } | null> => {
           const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
-          const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", "{sha: .head.sha, body: .body, state: .state, merged: .merged, merged_at: .merged_at, draft: .draft} | tojson"] : [])]).catch(() => null);
+          const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", INBOX_PULL_NOW_JQ] : [])]).catch(() => null);
           if (!read || read.exitCode !== 0) return null;
           try {
             const answer = obj(JSON.parse(read.stdout));
