@@ -9,8 +9,7 @@
  * a Send, the box closed with no draft (a Discard), or another thread (as a pick always did).
  */
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
-import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
+import { inboxHolderOf, inboxRemovedFrom, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 import type { RecipientRow } from '../replyRecipients';
 import type { ReplyText } from '../replyText';
 import { sameSession, tookOverReply } from '../sendTargets';
@@ -27,14 +26,19 @@ import { activeHandoff } from '../tags';
  */
 export function followedSession(thread: InboxThread, rows: readonly RecipientRow[], fallback: string | null): string | null {
   if (rows.length === 0 || activeHandoff(thread) !== null || tookOverReply(thread) !== null) return fallback;
+  const sessions: string[] = [];
   for (let index = thread.messages.length - 1; index >= 0; index--) {
-    const m = thread.messages[index]!;
-    const session = m.author.kind === 'agent' ? m.author.session : null;
-    if (!session || isInboxPermissionSession(session) || m.scheduled_change) continue;
-    const row = rows.find((r) => r.session === session);
-    if (row && !row.start && row.alone !== false) return session;
+    const session = inboxHolderOf(thread.messages[index]!);
+    if (session && thread.messages[index]!.author.kind === 'agent') sessions.push(session);
   }
-  return fallback;
+  const takes = (session: string) => rows.some((r) => r.session === session && !r.start && r.alone !== false);
+  // The newest writer was removed (approval "inbox-remove-agent-from-thread"): the reply passes to the latest live
+  // agent still in the thread, else the latest (the server's `threadOwner` with `isLive`, the same rule).
+  if (sessions[0] && inboxRemovedFrom(thread.messages, sessions[0])) {
+    const live = sessions.find((s) => takes(s) && rows.some((r) => r.session === s && r.state === 'live'));
+    if (live) return live;
+  }
+  return sessions.find(takes) ?? fallback;
 }
 
 /** The session a message's words reach: its agent's, or the one a person's reply was addressed to. */
