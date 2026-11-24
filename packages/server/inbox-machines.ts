@@ -52,6 +52,10 @@ import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 import type { FarArchived } from "./inbox-archived-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
+import { FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE } from "./inbox-far-tags";
+
+/** A far tag's door routes (inbox-far-tags.ts): this Inbox sends them itself; the forward never does. */
+const FAR_TAG_OWN_ROUTES = new Set([FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE, FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE]);
 
 /** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
 const FAR_ARCHIVED_LIMIT_MAX = 200;
@@ -844,7 +848,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check, and
     // would hold a write such as a switch on disk. Nothing under `accounts/` either: a linked machine's switch is its own step.
     // `update` has its own route (`/api/inbox/machines/:id/update`), never a held forward.
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts" || safeDecode(route) === "update") {
+    // A far tag's own writes (inbox-far-tags.ts) are this Inbox's, never a window's.
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts" || safeDecode(route) === "update" || FAR_TAG_OWN_ROUTES.has(safeDecode(route))) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
@@ -1390,6 +1395,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       else peer.poke();
       return outbox.waitSettled(entry.key, peer.state === "online" ? waitMs : 0);
     },
+    /** Every linked machine's line (a far tag's `@` list, inbox-far-tags.ts). */
+    peerLinks: (): PeerLink[] => [...peers.values()],
     /** A held write of this Inbox's own, by its key: how it stands (null: never held). */
     heldWrite: (key: string): OutboxEntry | null => outbox.get(key),
     /** Take back a held write of this Inbox's own that never left (rule 10: one that left stays), or one past its `send_by`. */

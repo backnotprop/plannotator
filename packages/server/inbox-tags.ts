@@ -53,6 +53,16 @@ export interface InboxTaggableSession {
   owner: boolean;
   /** It wrote in this thread. */
   wrote_thread: boolean;
+  /** A session on another linked computer (inbox-far-tags.ts): that computer's Inbox id and its name here. */
+  machine?: string;
+  machine_name?: string;
+}
+
+/** The far part of the route (inbox-far-tags.ts): each linked computer's agents this Inbox can wake there. */
+export interface InboxTaggableFar {
+  rows: (threadId: string, owner: string | null, writers: ReadonlySet<string>) => Promise<InboxTaggableSession[]>;
+  /** This computer, named as its linked computers name it; null while nothing is linked. */
+  self: () => { id: string; name: string } | null;
 }
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -62,6 +72,7 @@ export function createInboxTagsRoute(options: {
   serverSession: string;
   live: ReturnType<typeof createInboxLiveSessions>;
   json: (body: unknown, status?: number) => Response;
+  far?: InboxTaggableFar;
 }) {
   const { store, live, json } = options;
 
@@ -134,13 +145,52 @@ export function createInboxTagsRoute(options: {
     return { owner, sessions: [...liveRows.map(({ rank: _rank, activity: _activity, ...row }) => row), ...mcpRows] };
   };
 
-  /** The route; null when the path is not it. */
-  const route = (req: Request, path: string): Response | null => {
+  /**
+   * This Inbox's own sessions a linked computer may tag in one of its threads (`GET taggable-agents` on the door,
+   * inbox-far-tags.ts): the live ones whose connection polls here, so this Inbox can hand them that computer's wake.
+   * A session the Inbox wakes itself (Codex, Qwen, T3, Antigravity) reads this store only, so it is not offered.
+   */
+  const liveHere = (): InboxTaggableSession[] =>
+    live
+      .allLive()
+      .filter((entry) => entry.polls)
+      .map((entry) => {
+        const known = entry.root !== null ? store.projectByRoot(entry.root) : null;
+        const project = entry.root !== null ? { id: null, name: known?.name ?? (basename(entry.root) || entry.root), root: null } : null;
+        return {
+          session: entry.session,
+          host: entry.host,
+          kind: "live" as const,
+          name: null,
+          ...(entry.label ? { label: entry.label } : {}),
+          project,
+          started_at: iso(entry.startedAt),
+          last_at: iso(entry.lastSeen),
+          busy: entry.busy,
+          idle_since: entry.idleSince === null ? null : iso(entry.idleSince),
+          taggable: entry.tags,
+          owner: false,
+          wrote_thread: false,
+        };
+      })
+      .sort((a, b) => b.started_at.localeCompare(a.started_at) || a.session.localeCompare(b.session));
+
+  /** The route; null when the path is not it. With linked computers, their agents follow this Inbox's own. */
+  const route = (req: Request, path: string): Response | Promise<Response> | null => {
     const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/taggable$/.exec(path);
     if (!match) return null;
     if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-    return json({ serverSession: options.serverSession, ...syncSection("taggable", () => taggable(match[1]!, true)) });
+    const here = syncSection("taggable", () => taggable(match[1]!, true));
+    const far = options.far;
+    const self = far?.self() ?? null;
+    if (!far || !self) return json({ serverSession: options.serverSession, ...here });
+    const writers = new Set(store.thread(match[1]!)?.messages.flatMap((m) => (m.author.kind === "agent" && m.author.session ? [m.author.session] : [])) ?? []);
+    return far.rows(match[1]!, here.owner?.session ?? null, writers).then((rows) => {
+      const mine = new Set(here.sessions.map((s) => s.session));
+      const farRows = rows.filter((row) => !mine.has(row.session));
+      return json({ serverSession: options.serverSession, ...here, sessions: [...here.sessions, ...farRows], ...(farRows.length > 0 ? { machine: self } : {}) });
+    });
   };
 
-  return { route, taggable, ownerOf };
+  return { route, taggable, ownerOf, liveHere };
 }

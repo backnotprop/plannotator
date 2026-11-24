@@ -213,7 +213,7 @@ import { openBrowser } from "./browser";
 import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
-import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
+import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, sendAgentMessage, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
 import { guideReviewOf, guidePullKey, inboxGuideFileContents, inboxGuideRoute } from "./inbox-guides";
 import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
 import { guideReviewMarkdownImage, pullReviewMarkdownImage } from "./inbox-review-markdown-image";
@@ -375,6 +375,9 @@ import { inboxFarBranchReviewRow } from "@plannotator/core/inbox-branch-reports"
 import { runtime as gitRuntime } from "./git";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
+import { createInboxFarTags, FAR_DELIVERED_ROUTE } from "./inbox-far-tags";
+import { createInboxFarWakes } from "./inbox-far-wakes";
+import { farAgentReply } from "./inbox-mcp-far-reply";
 import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
@@ -1812,6 +1815,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return { projects, unresolved: !settled && projects.length === 0 };
   };
 
+  // Tag an agent on another computer: the wakes a linked computer hands this Inbox's sessions (inbox-far-wakes.ts).
+  const farWakes = createInboxFarWakes({ dataDir });
+
   const mcpContext: InboxMcpContext = {
     store,
     baseUrl: () => baseUrl,
@@ -1876,6 +1882,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readOnMachine: async (ask) => (machines ? machines.readThread(ask) : null),
     filePieceOnMachine: async (args, offset) => (machines ? machines.filePiece(args, offset) : null),
     farThreadMachine: (threadId) => machines?.farThreadMachine(threadId) ?? null,
+    // The answer of a session tagged into a thread on another computer goes there (inbox-mcp-far-reply.ts).
+    farReply: (input, nextStep) =>
+      farAgentReply(
+        {
+          placeOf: (id, session) => {
+            const place = farWakes.placeOf(id);
+            return place && farWakes.wasHanded(place.machine, place.thread_id, session) ? place : null;
+          },
+          nameOf: (machine) => machines?.nameOf(machine) ?? null,
+          holdWrite: (machine, route, body, thread, waitMs) => machines?.holdWrite(machine, route, body, thread, waitMs) ?? null,
+        },
+        input,
+        nextStep,
+      ),
     // search and read_thread's list ask the linked machines too, naming a project by its git remote (inbox-mcp-far-find.ts).
     findOnMachines: () => machines?.agentFind ?? null,
     projectRemoteKey: (root, waitMs) => farRemoteOf(repos, root, waitMs),
@@ -4428,7 +4448,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     messageId: string,
     value: unknown,
   ): { tags: InboxTag[]; handoff?: NonNullable<Parameters<typeof store.sendReply>[1]["handoff"]> } => {
-    const resolved = live.tagTargets(value);
+    // A tag naming a session on another linked computer is resolved against that computer's agents (inbox-far-tags.ts).
+    const resolved = farTags.targets(value, live.tagTargets);
     const list = value as Record<string, unknown>[];
     const modeOf = (session: string) => {
       const mode = list.find((item) => item && item.session === session)?.mode;
@@ -4457,7 +4478,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return {
       tags,
       handoff: {
-        to: { host: target.host!, session: target.session },
+        to: { host: target.host!, session: target.session, ...(target.machine ? { machine: target.machine } : {}) },
         label: target.label ?? null,
         // The former owner reads by its agent and this thread's project in the person's lines ("Claude Code (plannotator)").
         from: owner
@@ -4631,7 +4652,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message) && !t3Handed?.has(item.message.id) && !(t3Thread && t3Wake.holds(item.as, item.message)));
     };
     const commands = (items = handedOut()) => {
-      const list = items.map((item) => replyCommand(item.message, sendNow, item.as));
+      // Then what a linked computer handed it from a thread there (inbox-far-wakes.ts), to a connection that words a tag.
+      const list = [...items.map((item) => replyCommand(item.message, sendNow, item.as)), ...(tags ? farWakes.pendingFor(session).map((wake) => wake.command) : [])];
       // Handed an item for the running turn: an older connection does not poll again until it goes in.
       if (body[INBOX_STEER_POLLS_POLL_FIELD] !== true && list.some((command) => command.now === true)) live.steerHanded(session);
       return list;
@@ -4655,6 +4677,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         done = true;
         clearTimeout(timer);
         unsubscribe();
+        stopFarWakes();
         stopAskWaits();
         req.signal.removeEventListener("abort", finish);
         answered();
@@ -4666,6 +4689,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       });
       const stopAskWaits = ask.onWaits((waiting) => {
         if (waiting === session) finish();
+      });
+      const stopFarWakes = farWakes.onWake((waiting) => {
+        if (waiting === session && tags) finish();
       });
       req.signal.addEventListener("abort", finish);
     });
@@ -4700,6 +4726,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     live.steerDone(session);
     live.tookItem(session);
+    // A wake a linked computer handed it (inbox-far-wakes.ts): marked here, and that computer is told through the outbox.
+    const far = store.message(body.id) ? null : farWakes.delivered(session, body.id);
+    if (far) {
+      void machines?.holdWrite(far.machine, FAR_DELIVERED_ROUTE, { idempotency_key: `far-delivered:${far.reply_id}:${session}`, reply_id: far.reply_id, id: far.command.id, session }, far.thread_id, 0);
+      return json({ ok: true });
+    }
     // An item the Inbox marked to go in by itself: whether it went into the running turn, or waited for the
     // turn to end (the session was seen idle after the mark: its own Ask question held the turn).
     const marked = store.message(body.id);
@@ -4813,6 +4845,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const openCodeSpec = createOpenCodeSpecReader(agentEnvironment);
   const live = createInboxLiveSessions({
     ...(options.sessionsNow ? { now: options.sessionsNow } : {}),
+    // A session tagged in from another computer (inbox-far-tags.ts).
+    farLive: (session) => farTags.lists(session),
     store,
     serverSession,
     resolveRoot: async (path) => (await projectRoots.resolveNamed(path)).root,
@@ -5077,7 +5111,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   }), INBOX_DELIVERY_WATCH_MS);
   (deliveryWatch as { unref?: () => void }).unref?.();
 
-  const tagsRoute = createInboxTagsRoute({ store, serverSession, live, json });
+  // Tag an agent on another computer, this Inbox as the thread's computer (inbox-far-tags.ts).
+  const farTags = createInboxFarTags({
+    store,
+    selfId: () => machines?.selfId ?? null,
+    selfName: () => phones?.machineDoor.computerName() ?? "This computer",
+    peers: () => machines?.peerLinks() ?? [],
+    nameOf: (machine) => machines?.nameOf(machine) ?? null,
+    holdWrite: (machine, route, body, thread, waitMs) => machines?.holdWrite(machine, route, body, thread, waitMs) ?? null,
+    heldWrite: (key) => machines?.heldWrite(key) ?? null,
+    commandFor: (reply, session) => replyCommand(reply, false, session),
+    sendAs: async (input) => {
+      const parent = store.message(input.reply_to);
+      const project = parent ? store.project(parent.project_id) : null;
+      if (!project) throw new InboxError("message_not_found", `No message ${input.reply_to}.`);
+      const { machine, machine_name, session, host, name, ...rest } = input;
+      const sent = await sendAgentMessage(mcpContext, project, { ...rest, agent_session: session, ...(host ? { agent_host: host } : {}), ...(name ? { agent_name: name } : {}), agent_machine: { id: machine, name: machine_name } }, undefined, true);
+      return { message_id: String(sent.structured.message_id), thread_id: String(sent.structured.thread_id), replayed: sent.replayed };
+    },
+  });
+  const unsubscribeFarTags = store.subscribe((line) => {
+    if (line.kind !== "message" || line.record.author.kind !== "person") return;
+    const record = line.record;
+    queueMicrotask(() => farTags.onPersonMessage(record));
+  });
+  const tagsRoute = createInboxTagsRoute({ store, serverSession, live, json, far: farTags });
   const stepsRoute = createInboxStepsRoute({ store, serverSession, live, stepsOn, json });
 
   // Launch: compose starts Claude Code, Pi or Codex in a project, behind `inboxLaunch.enabled`, on unless false (packages/server/inbox-launch.ts).
@@ -8263,7 +8321,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const newMessage = await live.route(req, path, (body) => sentFromOf(req, via, body));
       if (newMessage) return newMessage;
       // Tags (approval "inbox-tag-agents"): who the person can tag with `@` (packages/server/inbox-tags.ts).
-      const taggable = tagsRoute.route(req, path);
+      const taggable = await tagsRoute.route(req, path);
       if (taggable) return taggable;
       // Run on a `:::run` block and Save on a `:::secret` block (inbox-run-routes.ts): the person's press only.
       const ran = await runRoutes.route(req, path);
@@ -8473,6 +8531,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         search: (url) => agentSearchDoorAnswer({ store, searchIndex: search.index, remoteOf: (root, waitMs) => farRemoteOf(repos, root, waitMs) }, url),
         threads: (url) => agentThreadsDoorAnswer({ store, remoteOf: (root, waitMs) => farRemoteOf(repos, root, waitMs) }, url),
       },
+      // Tag an agent on another computer (inbox-far-tags.ts): this Inbox's agents for that computer's `@` list, a wake
+      // for one of them (kept until it polls, inbox-far-wakes.ts), and that computer's sessions' answers and deliveries here.
+      farTags: {
+        agents: () => json({ sessions: tagsRoute.liveHere() }),
+        wake: (machine, body) => farWakes.receive(machine, body, (threadId) => threadPageUrl(baseUrl, threadId)),
+        reply: (machine, body) => farTags.agentReply(machine, body),
+        delivered: (machine, body) => farTags.delivered(machine, body),
+      },
       machineUpdate: {
         read: () => updates.machineRead(),
         start: () => updates.machineStart(),
@@ -8616,6 +8682,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     clearInterval(deliveryWatch);
     clearInterval(autoSendWatch);
     unsubscribeWaits();
+    unsubscribeFarTags();
     scheduled.stop();
     launch.stop();
     rex.close();

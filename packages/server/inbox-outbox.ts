@@ -287,6 +287,11 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // Show in Rex for an agent on another machine (inbox-rex-far.ts): a press that moves Rex's app now; held for later it
   // would move it when nobody asked.
   "POST rex/show": "now",
+  // Tag an agent on another computer (inbox-far-tags.ts), each sent by the Inbox itself, never the person and never
+  // through the forward: a wake kept once per reply and session, an answer written under its idempotency key, a delivery.
+  "POST far-wake": "set",
+  "POST agent-reply": "append",
+  "POST far-delivered": "set",
   "POST link-back": "set",
   "POST unlink": "set",
   // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.

@@ -673,7 +673,7 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
   const out: InboxTag[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new InboxError("validation_error", "tags: each one { host, session, wakes }.", { field: "tags" });
-    const { host, session, name, wakes, label, joined } = entry as Record<string, unknown>;
+    const { host, session, name, wakes, label, joined, machine } = entry as Record<string, unknown>;
     if (!isInboxTagSessionId(host, session)) {
       throw new InboxError("validation_error", "tags: each session an id.", { field: "tags" });
     }
@@ -685,6 +685,10 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
     if (label !== undefined && label !== null && (typeof label !== "string" || label.length > 120 || /[\u0000-\u001f\u007f]/.test(label))) {
       throw new InboxError("validation_error", "tags: label a short line.", { field: "tags" });
     }
+    // A session on another linked computer (inbox-far-tags.ts): that computer's Inbox id.
+    if (machine !== undefined && (typeof machine !== "string" || !/^ibx_[0-9A-HJKMNP-TV-Z]{26}$/.test(machine))) {
+      throw new InboxError("validation_error", "tags: machine an ibx_ id.", { field: "tags" });
+    }
     if (session === owner || out.some((tag) => tag.session === session)) continue;
     out.push({
       host: host as string | null,
@@ -694,6 +698,7 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
       wakes,
       // "Add instead": the session joins the thread (a member: a later reply reaches it when the box names it).
       ...(joined === true ? { joined: true } : {}),
+      ...(typeof machine === "string" ? { machine } : {}),
     });
   }
   return out;
@@ -3793,6 +3798,31 @@ export class InboxStore {
     return out;
   }
 
+  /**
+   * The sessions a thread names on another linked computer (packages/server/inbox-far-tags.ts), each with that
+   * computer's Inbox id: a far tag, a hand-off to a far session, a message a far session wrote here. A session the
+   * thread names from two computers is left out (no computer may answer for another's session).
+   */
+  farSessions(threadId: string): Map<string, { machine: string; host: string | null }> {
+    const out = new Map<string, { machine: string; host: string | null }>();
+    const clash = new Set<string>();
+    const add = (session: string | null | undefined, machine: string | undefined, host: string | null | undefined) => {
+      if (!session || !machine) return;
+      const known = out.get(session);
+      if (known && known.machine !== machine) clash.add(session);
+      else if (!known) out.set(session, { machine, host: host ?? null });
+    };
+    for (const message of this.threadMessages(threadId)) {
+      if (message.author.kind === "agent") add(message.author.session, message.author.machine, message.author.host);
+      else {
+        for (const tag of message.tags ?? []) add(tag.session, tag.machine, tag.host);
+        add(message.to?.session, message.to?.machine, message.to?.host);
+      }
+    }
+    for (const session of clash) out.delete(session);
+    return out;
+  }
+
   /** Hand-offs still inside their Undo window (or that a stop interrupted). */
   handoffsPending(): number {
     let count = 0;
@@ -5382,7 +5412,7 @@ export class InboxStore {
       created_at: at,
       resolved_at: null,
       idempotency_key: key,
-      ...(to ? { to: { host: to.host, session: to.session } } : {}),
+      ...(to ? { to: { host: to.host, session: to.session, ...(to.machine ? { machine: to.machine } : {}) } } : {}),
       ...(to && input.took_over ? { took_over: true } : {}),
       ...(input.to && input.launch ? { launch: input.launch } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),

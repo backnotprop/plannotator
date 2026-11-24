@@ -216,6 +216,7 @@ packages/inbox/takeBack.test.tsx
 packages/inbox/sendWaitsForComments.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
+packages/inbox/tagPickerComputers.test.tsx
 packages/inbox/threadSessionsHeader.test.tsx
 packages/inbox/taterMark.test.tsx
 packages/inbox/restartWarning.test.tsx

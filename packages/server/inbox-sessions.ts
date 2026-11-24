@@ -402,6 +402,8 @@ export function createInboxLiveSessions(options: {
    * session never "ends" for want of a poll: only `dead` ends it.
    */
   wakeOnlyStatus?: (session: string) => "alive" | "dead" | null;
+  /** A session on another linked computer, live there as that computer last said (inbox-far-tags.ts). */
+  farLive?: (session: string) => boolean;
   pollsItself?: (session: string) => boolean;
   /** The items of a session the Inbox wakes itself that may not have reached it (a `codex queue` that ran out of time). */
   uncertainItemsOf?: (session: string) => string[];
@@ -840,6 +842,8 @@ export function createInboxLiveSessions(options: {
    * (`InboxMessage.wakes`).
    */
   const askerLive = (session: string): boolean => {
+    // A session tagged in from another computer is there while that computer lists it (its wake waits there).
+    if (!sessions.has(session) && options.farLive?.(session)) return true;
     // A session the Inbox wakes itself (Codex) is there until its thread is known to be gone.
     const wakeOnly = options.wakeOnlyStatus?.(session) ?? null;
     if (wakeOnly !== null) return wakeOnly === "alive";
@@ -953,12 +957,15 @@ export function createInboxLiveSessions(options: {
     tags: boolean;
     sendNow: boolean;
     label: string | null;
+    /** Its connection polls this Inbox (false: a session the Inbox wakes itself, Codex, Qwen, T3, Antigravity). */
+    polls: boolean;
   }[] => {
     const out = [];
     for (const [session, entry] of sessions) {
       if (!isLive(entry)) continue;
       out.push({
         session,
+        polls: entry.wakeOnly === undefined,
         host: entry.host,
         root: entry.root,
         startedAt: entry.startedAt,

@@ -616,6 +616,11 @@ export type AgentSendInput = {
   agent_session?: string;
   agent_name?: string;
   agent_host?: string;
+  /**
+   * Not a tool field: a session on another linked computer writing here (inbox-far-tags.ts), that computer's id and
+   * name. Its paths are that computer's, so nothing in its body is read from this disk.
+   */
+  agent_machine?: { id: string; name: string | null };
 };
 
 /** The project a send lands in: reply_to's, else the one at project_path. */
@@ -922,7 +927,7 @@ export async function sendAgentMessage(
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
   // Pictures sent as bytes go first, so each is taken now: their bytes are not on disk for a later read to find.
   const fromBytes = uploaded && uploaded.pictures.size > 0 ? [...uploaded.pictures.keys()] : null;
-  const captured = bodyShowsLocalImages(input.body)
+  const captured = !input.agent_machine && bodyShowsLocalImages(input.body)
     ? await captureInboxInlineImages(store.dir, {
         body: input.body,
         root: project.root,
@@ -958,6 +963,7 @@ export async function sendAgentMessage(
         host: input.agent_host?.trim() || null,
         session: input.agent_session?.trim() || null,
         name: inboxStoredAgentName(input.agent_name),
+        ...(input.agent_machine ? { machine: input.agent_machine.id, ...(input.agent_machine.name ? { machine_name: input.agent_machine.name } : {}) } : {}),
       },
       body: input.body,
       subject: input.subject ?? null,
@@ -1303,6 +1309,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         let pullRefs = input.pulls ? checkPullRefs(input.pulls, "pulls") : [];
         const branchInput = (input as { branch?: unknown }).branch;
         const branchField = branchInput === undefined ? null : checkBranchSend(context, branchInput);
+        // A thread on another computer that tagged this session there: the answer goes there (inbox-mcp-far-reply.ts).
+        const farSent = input.reply_to && !store.message(ownMessageId(store, input.reply_to)) && context.farReply ? await context.farReply(input, async () => replyNextStepText(await senderWakes(context, ctx, input), input.agent_host)) : null;
+        if (farSent) return ok(farSent.text, farSent.structured);
         let project = await sendProject(context, input);
         // A branch report: its own project and thread, and a head already reported sends nothing.
         let branchPlan: BranchSendPlan | null = null;

@@ -152,11 +152,22 @@ export function TagPicker({
       ) : (
         mentionGroups(menu.items).map((run) => {
           const headingId = `${id}-group-${run.start}`;
+          // A heading that only repeats its first row's name ("Pi" over "Pi") is not drawn: the group keeps it as its name.
+          const first = run.people[0];
+          const repeats = !!first && (byId.get(first.id)?.name ?? first.label) === run.group;
           return (
-            <div key={`${run.group}-${run.start}`} className="ib-tg-group" role="group" aria-labelledby={headingId} data-tag-group={run.group}>
-              <div className="ib-tg-gh" id={headingId}>
-                {run.group}
-              </div>
+            <div
+              key={`${run.group}-${run.start}`}
+              className="ib-tg-group"
+              role="group"
+              {...(repeats ? { 'aria-label': run.group } : { 'aria-labelledby': headingId })}
+              data-tag-group={run.group}
+            >
+              {!repeats && (
+                <div className="ib-tg-gh" id={headingId}>
+                  {run.group}
+                </div>
+              )}
               {run.people.map((person, offset) => {
                 const index = run.start + offset;
                 const option = byId.get(person.id);
