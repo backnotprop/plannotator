@@ -78,7 +78,7 @@ export const INBOX_RECORD_VERSION = 1 as const;
 
 // ─────────────────────────────── Ids ───────────────────────────────
 
-// The id clock lives in ./ulid (Shape uses it too, without the Inbox types).
+// The id clock lives in ./ulid.
 export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 
@@ -1015,8 +1015,9 @@ export interface InboxTag {
   read_at?: string | null;
   /**
    * "Add instead" (approval "inbox-tag-handoff", A2): the person added this
-   * session to the thread. It works alongside the owner, and every later
-   * reply of the person's in the thread goes to it too (the store tags it
+   * session to the thread. It works alongside the owner and stays a member
+   * (the reply box offers it); a later reply reaches it only when the box
+   * names it (through 0.29.3 the store tagged every later reply to it
    * again). Absent: an Ask, today's tag (this one message only).
    */
   joined?: boolean;

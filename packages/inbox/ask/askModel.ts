@@ -62,9 +62,10 @@ export interface AskLiveText {
 }
 
 /**
- * A turn's question as the person reads it. A Show me (code review) sent the
- * agent its request for a Shape; the person sees what they asked: "Show me on
- * retry-worker.ts lines 16–18", and their words.
+ * A turn's question as the person reads it. An older Inbox's Show me (kept in
+ * old conversations; nothing asks one now) sent the agent a long request; the
+ * person sees what they asked: "Show me on retry-worker.ts lines 16–18", and
+ * their words.
  */
 export function askShownQuestion(turn: Pick<InboxAskTurnWire, 'question' | 'kind' | 'show_me'>): string {
   if (turn.kind !== 'show_me' || !turn.show_me) return turn.question;

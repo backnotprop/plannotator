@@ -40,12 +40,11 @@ import type { UpdateCheckFailing } from '../api';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
-import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ScheduledNav } from '../scheduled/ScheduledNav';
 import { PlansNav } from '../plans/PlansNav';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
   /** Plans: the row second under Inbox, only while Plans is on (config.json `inboxPlans`); no row, menu item or Customize entry while off. */
   onPlans?: () => void;
   /**
@@ -67,12 +66,6 @@ export interface SidebarProps {
    */
   onPulls?: () => void;
   pullsCount?: number;
-  /**
-   * Shape (approval "shape-inbox-placement"): the row directly under Board (under Inbox with the Board off),
-   * given only while Shape is on and there are 3 or more boards. `shapeChanged`: the boards changed since you looked.
-   */
-  onShape?: () => void;
-  shapeChanged?: number;
   projectId: string | null;
   /** The machine the list shows (a machine's filter, its caption in Agents), or null for every machine. */
   machineId?: string | null;
@@ -439,7 +432,6 @@ export function Sidebar(props: SidebarProps) {
     plans: Boolean(props.onPlans),
     scheduled: Boolean(props.onScheduled),
     reviews: Boolean(props.onPulls),
-    shape: Boolean(props.onShape),
     // The Usage row decides itself whether it shows (components/Usage.tsx); the menu offers it only where `cswap` is.
     usage: Boolean(props.onUsage),
     search: Boolean(props.onSearch),
@@ -567,26 +559,6 @@ export function Sidebar(props: SidebarProps) {
         return <PlansNav on={props.page === 'plans' && !props.projectId} onClick={pick(() => props.onPlans?.())} pick={pick} phone={phone} />;
       case 'scheduled':
         return <ScheduledNav on={props.page === 'scheduled'} onClick={pick(() => props.onScheduled?.())} />;
-      case 'shape':
-        return (
-        <button
-          type="button"
-          className={`ib-nav${props.page === 'shapes' ? ' ib-on' : ''}`}
-          onClick={pick(() => props.onShape?.())}
-          aria-current={props.page === 'shapes' ? 'page' : undefined}
-          data-shape-nav=""
-        >
-          <span className="ib-pebble-ico" aria-hidden="true">
-            <Pebble alive={false} size={18} />
-          </span>
-          Shape
-          {(props.shapeChanged ?? 0) > 0 && (
-            <span className="ib-n" aria-label={`${props.shapeChanged} changed since you looked`}>
-              {formatCount(props.shapeChanged ?? 0)}
-            </span>
-          )}
-        </button>
-        );
       case 'reviews':
         return (
         <button

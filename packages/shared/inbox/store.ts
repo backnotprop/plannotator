@@ -692,7 +692,7 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
       ...(typeof name === "string" && name ? { name } : {}),
       ...(typeof label === "string" && label.trim() ? { label: label.trim() } : {}),
       wakes,
-      // "Add instead": the session joins the thread (later replies go to it too).
+      // "Add instead": the session joins the thread (a member: a later reply reaches it when the box names it).
       ...(joined === true ? { joined: true } : {}),
     });
   }
@@ -714,7 +714,7 @@ function handoffActive(message: InboxMessage): boolean {
 /** The most ids one send may supersede. */
 export const INBOX_SUPERSEDES_MAX = 100;
 
-// `<name>-<6 hex of the root>`: in project-key.ts, so the Shape store files under the same keys without loading this store.
+// `<name>-<6 hex of the root>`: in project-key.ts, which other modules read without loading this store.
 export { inboxProjectKey };
 
 /**
@@ -2208,8 +2208,9 @@ export class InboxStore {
    * person; and a wake that is the session's first sight of the thread
    * (tagged, added, handed the thread, a reply sent on from an ended session,
    * words moved from another session), where the subject is what places it.
-   * A session added to the thread gets the person's later replies as tags too:
-   * those are plain replies, only the one that added it is a first sight.
+   * A later reply carrying an added session's joined tag again (Add once more,
+   * or a reply written through 0.29.3, when every later reply was tagged so)
+   * is a plain reply to it: only the one that added it is a first sight.
    * An action report is a reply: it reaches the agent as one, in the same words.
    */
   private plainReplyFor(message: InboxMessage, session: string | null): boolean {
@@ -3781,8 +3782,8 @@ export class InboxStore {
 
   /**
    * The sessions the person added to a thread ("Add instead"): each joined
-   * tag of the person's messages, once, as a tag a later reply carries again
-   * (no delivery, no Send now, no read).
+   * tag of the person's messages, once (no delivery, no Send now, no read).
+   * Members only: a later reply reaches one when the reply box names it.
    */
   addedSessions(threadId: string): InboxTag[] {
     const out: InboxTag[] = [];
@@ -5367,15 +5368,12 @@ export class InboxStore {
       handoff?.from && handoff.from.wakes && handoff.from.session !== recipient && !typed.some((t) => t.session === handoff.from!.session)
         ? [{ host: handoff.from.host, session: handoff.from.session, ...(handoff.from.label ? { label: handoff.from.label } : {}), wakes: true, handed_away: true }]
         : [];
-    // The sessions the person added to this thread ("Add instead") get every later reply that carries
-    // the person's words or files too, tagged again; never the reply's owner or the former owner.
-    const carriesWords = words.trim() !== "" || attachments.length > 0;
-    const members = carriesWords
-      ? this.addedSessions(message.thread_id).filter(
-          (m) => m.session !== recipient && m.session !== handoff?.from?.session && !typed.some((t) => t.session === m.session),
-        )
-      : [];
-    const tags = [...typed, ...members, ...notice];
+    // A reply goes to exactly the agents the reply box names (the owner, 2026-11-23: "every time I send a reply
+    // now, it goes to both agents, even though it has a single agent selector"): its recipient and the sessions
+    // it tags. A session the person added to the thread ("Add instead") stays a member (the box offers it, and it
+    // reads the thread when it next looks), but a later reply reaches it only when the box names it. Through
+    // 0.29.3 every later reply carrying words or files was tagged again to each added session.
+    const tags = [...typed, ...notice];
     if (composed.stillOpen && body.startsWith(composed.stillOpen, stillOpenAt)) this.stillOpenWritten.set(replyId, { line: composed.stillOpen, at: stillOpenAt });
     const reply: InboxMessage = {
       id: replyId,
