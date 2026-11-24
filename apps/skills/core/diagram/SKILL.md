@@ -175,6 +175,14 @@ Arguments must be in the exact order `render <input> -o <output>` (or `--output`
 - **Exit `1` with layout diagnostics:** valid spec, **the SVG was written** for inspection, and each layout problem was printed to stderr.
 - **Exit `1` with invalid JSON, schema/limit error, or bad arguments:** fails before rendering; **no new SVG is written**, and the error is printed to stderr.
 
+To inspect measured panel bounds when adjusting placement (with `@plannotator/diagrams` installed locally):
+
+```bash
+node --input-type=module -e 'import { readFileSync } from "node:fs"; import { renderDiagram } from "@plannotator/diagrams"; const { parts } = await renderDiagram(JSON.parse(readFileSync("my-diagram.diagram.json", "utf8"))); console.table(parts.filter(p => p.kind === "panel").map(({ id, x, y, w, h }) => ({ id, x, y, w, h })));'
+```
+
+Reported `x` and `y` include the renderer's outer canvas translation and `w` is measured—use the differences between panels (and their measured `w`/`h`) to calculate how far to move them.
+
 Iterate until exit `0`:
 - **Port facing away:** set `"start"` / `"end"` explicitly (e.g. `"bottom"` / `"top"` or `"auto"`) or add `"lane": "top" | "bottom"`.
 - **Line crosses a panel:** rearrange columns/stacks, route via `"lane": "top" | "bottom"`, or specify `via_x` / `via_y`.
