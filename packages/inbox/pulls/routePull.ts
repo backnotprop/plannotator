@@ -14,8 +14,14 @@ import { inboxPullIsOpen, type InboxPull, type InboxPullDiffAnswer, type InboxPu
 import { get } from '../api';
 import { pullUrl } from './pullMachines';
 
-/** The server's copy of one PR, listed or not (`pull` null: none it may read). */
-export const readRoutePull = (key: string, signal?: AbortSignal) => get<{ pull: InboxPull | null }>(pullUrl('/pulls/pull', key), signal);
+/**
+ * The server's copy of one PR, listed or not (`pull` null: none it may read). `unreadable`: the forge did not answer
+ * (offline, down), which says nothing of the PR; `pull` is then the copy the server kept, if any.
+ */
+export const readRoutePull = (key: string, signal?: AbortSignal) => get<{ pull: InboxPull | null; unreadable?: true }>(pullUrl('/pulls/pull', key), signal);
+
+/** The page's one line while the forge does not answer: what shows is its last read. */
+export const unreadWords = (forge: string) => `${forge} didn't answer; showing its last read.`;
 
 /** One PR as a stack of its own. */
 export function loneStack(pull: InboxPull): InboxPullStack {
@@ -31,27 +37,49 @@ export function itemOf(stack: InboxPullStack, key: string): InboxPullItem {
 /**
  * The PR the address names when no stack the list draws holds it (`wanted`): the raw list's copy, else the server's
  * (asked once per PR). `asking` while that read is out, so the page says it is reading, not that the PR is gone.
+ * `unread` while the forge does not answer (or the Inbox could not be reached): the copy the page has stays, never
+ * "gone", and it is asked again when the window gets its focus back or the browser is back online.
  */
-export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'> | null, wanted: boolean): { pull: InboxPull | null; asking: boolean } {
+export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'> | null, wanted: boolean): { pull: InboxPull | null; asking: boolean; unread: boolean } {
   const raw = useMemo(() => (wanted && model ? (model.pulls.find((p) => p.key === key) ?? null) : null), [wanted, model, key]);
-  const [got, setGot] = useState<{ key: string; pull: InboxPull | null } | null>(null);
+  /** `read`: the forge answered; `unread`: it did not (the server said so); `failed`: the Inbox could not be reached. */
+  const [got, setGot] = useState<{ key: string; pull: InboxPull | null; as: 'read' | 'unread' | 'failed' } | null>(null);
+  const [retry, setRetry] = useState(0);
   // Asked once each time the list stops naming it (or the page opens so): not on every list read.
   const ask = wanted && !!model;
   useEffect(() => {
     if (!ask) return;
     const controller = new AbortController();
+    // A read that found nothing new keeps the copy this page has: an unanswered read never says "gone".
+    const unanswered = (pull: InboxPull | null, as: 'unread' | 'failed') => setGot((was) => ({ key, pull: pull ?? (was?.key === key ? was.pull : null), as }));
     readRoutePull(key, controller.signal)
       .then((answer) => {
-        if (!controller.signal.aborted) setGot({ key, pull: answer.pull });
+        if (controller.signal.aborted) return;
+        if (answer.unreadable) unanswered(answer.pull, 'unread');
+        else setGot({ key, pull: answer.pull, as: 'read' });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setGot({ key, pull: null });
+        if (!controller.signal.aborted) unanswered(null, 'failed');
       });
     return () => controller.abort();
-  }, [ask, key]);
+  }, [ask, key, retry]);
+  const mine = ask && got?.key === key ? got : null;
+  const unread = mine?.as === 'unread';
+  const unanswered = !!mine && mine.as !== 'read';
+  useEffect(() => {
+    if (!unanswered) return;
+    const askAgain = () => setRetry((n) => n + 1);
+    window.addEventListener('focus', askAgain);
+    window.addEventListener('online', askAgain);
+    return () => {
+      window.removeEventListener('focus', askAgain);
+      window.removeEventListener('online', askAgain);
+    };
+  }, [unanswered]);
   const fetched = got?.key === key ? got.pull : null;
-  // The forge's read is newer than the raw list's for a PR no stack holds (its state, its head).
-  return { pull: wanted ? (fetched ?? raw) : null, asking: wanted && !!model && got?.key !== key };
+  // The forge's read is newer than the raw list's for a PR no stack holds (its state, its head). An unanswered read
+  // with no copy at all reads as still reading, never as gone.
+  return { pull: wanted ? (fetched ?? raw) : null, asking: wanted && !!model && (got?.key !== key || (got.as !== 'read' && !fetched && !raw)), unread };
 }
 
 /** What the forge said of this PR at the diff's read: only merged or closed. */

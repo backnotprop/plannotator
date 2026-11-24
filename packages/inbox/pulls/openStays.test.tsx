@@ -13,7 +13,10 @@
  *  - a reload (or a restart of the Inbox) on a PR the list no longer names: the page must reopen on it, its diff and
  *    state there (the raw list's copy, else the server's read of it: routePull.ts), and a layer opened from a held
  *    stack's page must open on that stack;
- *  - a PR merged or closed elsewhere (the forge says so at the diff's read, or the server's read) still marked open.
+ *  - a PR merged or closed elsewhere (the forge says so at the diff's read, or the server's read) still marked open;
+ *  - the forge not answering (offline, down) read as "gone": the page must stay as last read with one line saying so,
+ *    and ask again when the window gets its focus back or the browser is back online;
+ *  - a merged PR reloaded with only a kept draft comment turning read-only.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -32,10 +35,11 @@ if (hasDom) {
   mock.module('#guide-reader', () => ({
     PullChangesTree,
     // The reader: what the person is writing in it and where they scrolled are its own, so they last as long as it does.
-    default: function Reader() {
+    default: function Reader({ comments }: { comments?: unknown }) {
       const [words, setWords] = useState('');
       return (
-        <div data-stub-reader="" style={{ overflow: 'auto', height: 100 }}>
+        // `data-stub-takes-comments`: the reader was given the comments (it draws them and takes new ones), not read-only.
+        <div data-stub-reader="" data-stub-takes-comments={comments ? 'yes' : 'no'} style={{ overflow: 'auto', height: 100 }}>
           <textarea data-stub-comment="" value={words} onChange={(event) => setWords(event.target.value)} />
         </div>
       );
@@ -71,6 +75,9 @@ let savedFetch: typeof fetch;
 /** What the forge says now: the diff read's state, and the server's read of one PR (`/pulls/pull`) by key. */
 let forgeState: Record<string, 'merged' | 'closed'> = {};
 let serverPull: Record<string, InboxPull> = {};
+/** The forge does not answer the server's read of one PR (`unreadable`); `pullReads`: how many times the page asked. */
+let forgeQuiet = false;
+let pullReads = 0;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -79,6 +86,8 @@ beforeEach(() => {
   forgetPullThreadStarts();
   forgeState = {};
   serverPull = {};
+  forgeQuiet = false;
+  pullReads = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     if (init?.method === 'POST') return Response.json({ ok: true });
@@ -88,7 +97,10 @@ beforeEach(() => {
       const patch = 'diff --git a/src/retry.ts b/src/retry.ts\n--- a/src/retry.ts\n+++ b/src/retry.ts\n@@ -12 +12 @@\n-a\n+b\n';
       return Response.json({ serverSession: 's', key, scope: 'layer', base: 'main', head: 'y', patch, head_sha: SHA, state: forgeState[key] ?? 'open', merged_at: null });
     }
-    if (url.pathname.endsWith('/pulls/pull')) return Response.json({ serverSession: 's', pull: serverPull[url.searchParams.get('key')!] ?? null });
+    if (url.pathname.endsWith('/pulls/pull')) {
+      pullReads += 1;
+      return Response.json({ serverSession: 's', pull: serverPull[url.searchParams.get('key')!] ?? null, ...(forgeQuiet ? { unreadable: true } : {}) });
+    }
     if (url.pathname.endsWith('/api/inbox/sessions')) {
       return Response.json({
         serverSession: 's',
@@ -206,6 +218,63 @@ test.skipIf(!hasDom)('a reload on a merged PR no stack holds reopens its page: t
   expect(!!$('[data-stub-reader]')).toBe(true);
   expect($('[data-pull-review-title] .ib-refmark')!.getAttribute('data-ref-state')).toBe('merged');
   expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
+});
+
+const refState = () => $('[data-pull-review-title] .ib-refmark')!.getAttribute('data-ref-state');
+async function fire(event: 'focus' | 'online') {
+  await act(async () => window.dispatchEvent(new Event(event)));
+  await settle();
+}
+
+test.skipIf(!hasDom)('the forge not answering: the page stays as last read with one line, asked again on focus and back online', async () => {
+  const before = await openDiff(theirs);
+  // GitHub down for longer than the sign-in keep: the list stops naming it, and the server's read of it gets no answer.
+  forgeQuiet = true;
+  serverPull[theirs.key] = { ...theirs, checks: null };
+  await act(async () => read(without(theirs.key)));
+  await settle();
+  expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
+  expect($('[data-stub-reader]') === before.reader && $<HTMLTextAreaElement>('[data-stub-comment]')!.value === 'Cap the backoff at').toBe(true);
+  expect(document.querySelectorAll('[data-pull-review-unread]').length).toBe(1);
+  expect($('[data-pull-review-unread]')!.textContent).toContain('GitHub');
+  const asked = pullReads;
+  await fire('focus');
+  expect(pullReads).toBe(asked + 1);
+  await fire('online');
+  expect(pullReads).toBe(asked + 2);
+  // GitHub answers again: merged. The line goes, the header says so, and a focus asks no more.
+  forgeQuiet = false;
+  serverPull[theirs.key] = { ...theirs, state: 'merged', checks: null };
+  await fire('focus');
+  expect(!!$('[data-pull-review-unread]')).toBe(false);
+  expect(refState()).toBe('merged');
+  const answered = pullReads;
+  await fire('focus');
+  expect(pullReads).toBe(answered);
+});
+
+test.skipIf(!hasDom)('a reload while the forge does not answer reopens the page on the server’s kept copy, with the line', async () => {
+  forgeQuiet = true;
+  serverPull[theirs.key] = { ...theirs, checks: null };
+  mount(<PullReview model={without(theirs.key)} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+  for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+  await settle();
+  expect(!!$('[data-stub-reader]')).toBe(true);
+  expect(!!$('[data-pull-review-unread]')).toBe(true);
+  expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
+});
+
+test.skipIf(!hasDom)('a reload on a merged PR whose only comment is a kept draft: the reader still takes comments, never read-only', async () => {
+  // Written here before the merge, not posted, on lines the diff no longer shows as they were.
+  const draft = { id: 'c_draft', type: 'comment', scope: 'line', filePath: 'src/retry.ts', lineStart: 12, lineEnd: 12, side: 'new', text: 'Cap the backoff at 30 s', createdAt: 1, outdated: true };
+  window.localStorage.setItem(`plannotator-inbox-pull-review:${theirs.key}:layer:${SHA}`, JSON.stringify({ comments: [draft], viewed: [] }));
+  serverPull[theirs.key] = { ...theirs, state: 'merged', checks: null };
+  mount(<PullReview model={without(theirs.key)} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+  for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+  await settle();
+  expect(refState()).toBe('merged');
+  expect($('[data-stub-reader]')!.getAttribute('data-stub-takes-comments')).toBe('yes');
+  expect(document.body.textContent!.includes('Cap the backoff at 30 s')).toBe(true);
 });
 
 test.skipIf(!hasDom)('merged: everything stays and the header mark says merged, the mark it has everywhere', async () => {

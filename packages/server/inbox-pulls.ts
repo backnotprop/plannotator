@@ -86,7 +86,7 @@ import { killGitTree, runtime as gitRuntime, trackIsolatedGitGroup } from "./git
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readCliHosts, refCliRunner, refErrorOf, refRunnerKill, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 import { cliAnsweredPlainly, createSignedKeep } from "./inbox-pull-signed-keep";
 import { createDepartedPulls } from "./inbox-pull-departed";
-import { forgePullState, readForgePull } from "./inbox-pull-forge";
+import { type ForgePullRead, forgePullState, readForgePull } from "./inbox-pull-forge";
 import { join as joinPath } from "node:path";
 
 /** GitHub's PR as the diff read asks for it around the patch: its head, its description, and its state now. */
@@ -792,9 +792,10 @@ export interface InboxPulls {
   /**
    * One PR for a page open on it, listed or not: the list's copy while it names it, else the forge's answer now (a
    * merged or closed PR is still readable there), else the copy kept when it left the list. Only a PR of a repository
-   * the lists show, or one kept; never one the person hid. Null when none. Never throws.
+   * the lists show, or one kept; never one the person hid. `pull` null when none. `unreadable` when the forge did not
+   * answer (offline, down, signed out): that says nothing of the PR, and `pull` is the copy kept, if any. Never throws.
    */
-  pull(key: string): Promise<InboxPull | null>;
+  pull(key: string): Promise<ForgePullRead>;
   /** The copy of a PR kept since it left the list (`pull`'s or a list's), for an action on it: it is no longer open. */
   held(key: string): InboxPull | null;
   /**
@@ -1188,7 +1189,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const departed = createDepartedPulls({ now, hidden: options.hidden, ...(options.dir ? { file: joinPath(options.dir, "pull-departed.json") } : {}) });
   const departedWide = createDepartedPulls({ now, hidden: options.hidden, ...(options.dir ? { file: joinPath(options.dir, "pull-departed-wide.json") } : {}) });
   /** The forge's answer for one PR (`pull`), for a short while: a page and its reload ask once. */
-  const forgeReads = new Map<string, { at: number; pull: Promise<InboxPull | null> }>();
+  const forgeReads = new Map<string, { at: number; pull: Promise<ForgePullRead> }>();
   const findKnown = (key: string): InboxPull | undefined => known.get(key) ?? knownWide.get(key);
   /** The stack a listed PR is a layer of, from the list that names it (Reviews' first, as `findKnown`). */
   const stackOf = (pull: InboxPull) => {
@@ -1646,16 +1647,16 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       for (const { state, own } of asked) listed.push(...mergeListedPulls(own.answer?.pulls ?? [], state.others.answer?.pulls ?? [], wanted, everywhere));
       const pulls = withMergedHere(listed);
       // What this read no longer names stays readable for a page still open on it (inbox-pull-departed.ts).
-      const askedHosts = new Set(asked.map((a) => a.host));
+      // A host not asked this time (its sign-in check failed) drops none of them: only their age does.
       if (everywhere) {
         const before = knownWide;
         knownWide = new Map(pulls.map((p) => [p.key, p]));
-        departedWide.note(before, knownWide, askedHosts);
+        departedWide.note(before, knownWide);
         lastWideRepos = new Set(pulls.map((p) => inboxPullRepoKey(p.host, p.repo)));
       } else {
         const before = known;
         known = new Map(pulls.map((p) => [p.key, p]));
-        departed.note(before, known, askedHosts);
+        departed.note(before, known);
         lastRepos = wanted;
       }
       // Only the people this list names (a PR's author, its reviewers, who approved it): the window may ask for their
@@ -1833,27 +1834,32 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     readHead: (key) => readHeads.get(key) ?? null,
     held: (key) => (findKnown(key) ? null : (departedOf(key) ?? null)),
     async pull(key) {
-      if (options.hidden?.(key)) return null;
+      if (options.hidden?.(key)) return { pull: null };
       const listed = findKnown(key);
-      if (listed) return listedRepo(listed) ? listed : null;
+      if (listed) return { pull: listedRepo(listed) ? listed : null };
       const was = departedOf(key) ?? null;
       const parsed = /^([^/#]+)\/([^#]+)#(\d+)$/.exec(key);
-      if (!parsed) return was;
+      if (!parsed) return { pull: was };
       const [, host, repo, number] = parsed as unknown as [string, string, string, string];
       const repoKey = inboxPullRepoKey(host, repo);
-      if (!was && !lastRepos.has(repoKey) && !lastWideRepos.has(repoKey)) return null;
+      if (!was && !lastRepos.has(repoKey) && !lastWideRepos.has(repoKey)) return { pull: null };
+      // The forge not answering is not "not yours": the copy kept (or none) with `unreadable`, so the page stays.
+      const answer = (read: ForgePullRead): ForgePullRead => (read.unreadable ? { pull: was, unreadable: true } : { pull: read.pull ?? was });
       const hit = forgeReads.get(key);
-      if (hit && now() - hit.at < INBOX_PULLS_REFRESH_MS) return (await hit.pull) ?? was;
+      if (hit && now() - hit.at < INBOX_PULLS_REFRESH_MS) return answer(await hit.pull);
       const platform = was?.platform ?? [...known.values(), ...knownWide.values()].find((p) => p.host === host)?.platform ?? (hosts.get(host)?.cli === "glab" ? "gitlab" : "github");
       const cli: RefCli = hosts.get(host)?.cli ?? (platform === "github" ? "gh" : "glab");
-      const reading = readForgePull(run, cli, platform, host, repo, Number(number), was).then((fresh) => {
+      const entry = { at: now(), pull: Promise.resolve<ForgePullRead>({ pull: null }) };
+      entry.pull = readForgePull(run, cli, platform, host, repo, Number(number), was).then((read) => {
         // Kept as one that left, so its diff, details and files read too (after a restart as well).
-        if (fresh && !options.hidden?.(key)) (lastRepos.has(repoKey) ? departed : departedWide).put(fresh);
-        return fresh;
+        if (read.pull && !options.hidden?.(key)) (lastRepos.has(repoKey) ? departed : departedWide).put(read.pull);
+        // A forge that did not answer is asked again at the page's next ask (a focus, back online), not held here.
+        if (read.unreadable && forgeReads.get(key) === entry) forgeReads.delete(key);
+        return read;
       });
-      forgeReads.set(key, { at: now(), pull: reading });
+      forgeReads.set(key, entry);
       while (forgeReads.size > 50) forgeReads.delete(forgeReads.keys().next().value!);
-      return (await reading) ?? was;
+      return answer(await entry.pull);
     },
     async file(key, path, repos) {
       // The PR may have moved since the last read of the list: its head is what the code is read at.

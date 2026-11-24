@@ -6,21 +6,23 @@
  * What regresses:
  *  - a PR that left the list (someone else merged it) answering its diff or details with `404 pull_unknown`, so the
  *    open page loses what it reads next;
- *  - that PR coming back into the list, or still served once hidden, once its host is really signed out, past its
- *    age or past the count;
+ *  - that PR coming back into the list, or still served once hidden, past its age or past the count;
  *  - a `gh auth status` that fails for a moment (its token not checked: the Mac just woke) dropping the host's PRs
- *    and the open page's reads; a real sign-out (no login left for the host) not dropping them at once, or a host
- *    kept through failed checks for ever;
+ *    and the open page's reads; a real sign-out (no login left for the host) not taking them off the list at once,
+ *    or a host kept through failed checks for ever;
+ *  - a restart while offline, or a forge down for longer than the sign-in keep, erasing the saved PRs (the open page
+ *    says "gone"); a forge that did not answer read as "not yours" (`pull`), or a failed read held as an answer;
  *  - a reload or a restart of this Inbox losing a PR that left the list (the page it had open says "no longer in the
  *    list"), or a PR no list keeps any more not read from the forge by number; the forge's merged or closed state not
  *    reaching the page; an action on a PR that left the list answered "not in the list".
  */
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInboxPulls, INBOX_PULLS_FRESH_MS, InboxPullsError } from "./inbox-pulls";
 import { INBOX_PULLS_DEPARTED_MAX, INBOX_PULLS_DEPARTED_MS } from "./inbox-pull-departed";
+import { pullMissingAnswer } from "./inbox-pull-missing";
 import { INBOX_PULLS_SIGNED_KEEP_MS } from "./inbox-pull-signed-keep";
 import type { RefRunner } from "./ref-cards";
 
@@ -65,14 +67,20 @@ function forge() {
     merged: new Set<number>(),
     auth: { stdout: SIGNED_IN, stderr: "", exitCode: 0 },
     authChecks: 0,
+    /** The forge does not answer (offline): every read fails, the sign-in check too. */
+    down: false,
+    /** PRs the forge says it has no such of (`HTTP 404`). */
+    missing: new Set<number>(),
     calls: [] as string[][],
     run: (async (cli, args) => {
       f.calls.push([cli, ...args]);
       if (cli === "glab") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
       if (args[0] === "auth") {
         f.authChecks += 1;
-        return f.auth;
+        return f.down ? { stdout: "", stderr: "error connecting to api.github.com", exitCode: 1 } : f.auth;
       }
+      if (f.down) return { stdout: "", stderr: "error connecting to api.github.com\ncheck your internet connection", exitCode: 1 };
+      if (args.includes("--jq") && f.missing.has(Number(args[3]!.split("/").at(-1)))) return { stdout: "", stderr: "gh: Not Found (HTTP 404)", exitCode: 1 };
       if (args.includes("graphql")) {
         if (args.some((a) => a.startsWith("query=query InboxPullsOthers"))) return { stdout: JSON.stringify({ data: { viewer: { login: "dana" }, others0: { issueCount: 0, nodes: [] } } }), stderr: "", exitCode: 0 };
         return { stdout: JSON.stringify({ data: { viewer: { login: "dana" }, requested: { nodes: f.listed.map(ghPull) }, authored: { nodes: [] }, merged: { nodes: [] } } }), stderr: "", exitCode: 0 };
@@ -166,7 +174,7 @@ test("never once its project is removed, though its host is still read", async (
   expect(await diffOf(pulls, keyOf(880))).toBe("pull_unknown");
 });
 
-test("a failed sign-in check keeps the host's PRs; a real sign-out drops them at once", async () => {
+test("a failed sign-in check keeps the host's PRs listed; a real sign-out takes them off the list at once", async () => {
   let now = 1_000_000;
   const f = forge();
   const pulls = createInboxPulls({ run: f.run, now: () => now });
@@ -202,8 +210,80 @@ test("a failed sign-in check keeps the host's PRs; a real sign-out drops them at
   const out = await pulls.list(repos, { refresh: true });
   expect(out.pulls).toEqual([]);
   expect(out.unsigned).toEqual(["github.com"]);
-  // And its PRs are not read for an open page either: the host is not asked any more.
-  expect(await diffOf(pulls, keyOf(880))).toBe("pull_unknown");
+  // A page open on one of them keeps it (only its age drops it): a read for it goes on, never "not in the list".
+  expect(pulls.held(keyOf(880))?.number).toBe(880);
+  expect(await diffOf(pulls, keyOf(880))).not.toBe("pull_unknown");
+});
+
+/** The PR numbers saved on disk as kept since they left. */
+const savedNumbers = (dir: string): number[] => (JSON.parse(readFileSync(join(dir, "pull-departed.json"), "utf8")) as { pulls: { pull: { number: number } }[] }).pulls.map((e) => e.pull.number).sort();
+
+test("a restart while offline, or a forge down past the sign-in keep, keeps every saved PR; only the age drops one", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-pull-departed-"));
+  try {
+    let now = 1_000_000;
+    const f = forge();
+    const first = createInboxPulls({ run: f.run, now: () => now, dir });
+    await first.list(repos);
+    f.listed = [880];
+    now += INBOX_PULLS_FRESH_MS;
+    await first.list(repos, { refresh: true });
+    expect(savedNumbers(dir)).toEqual([881]);
+
+    // Restarted offline: the first sign-in check fails, with no good check on record. The host is not asked.
+    f.down = true;
+    const offline = createInboxPulls({ run: f.run, now: () => now, dir });
+    expect((await offline.list(repos)).unsigned).toEqual(["github.com"]);
+    expect(savedNumbers(dir)).toEqual([881]);
+    expect(offline.held(keyOf(881))?.number).toBe(881);
+
+    // Back online, both listed; then the forge is down for longer than the sign-in keep.
+    f.down = false;
+    f.listed = [880, 881];
+    const online = createInboxPulls({ run: f.run, now: () => now, dir });
+    expect((await online.list(repos)).pulls).toHaveLength(2);
+    f.down = true;
+    now += INBOX_PULLS_SIGNED_KEEP_MS + 6 * 60_000;
+    expect((await online.list(repos, { refresh: true })).unsigned).toEqual(["github.com"]);
+    expect(online.held(keyOf(880))?.number).toBe(880);
+    expect(online.held(keyOf(881))?.number).toBe(881);
+    expect(savedNumbers(dir)).toEqual([880, 881]);
+    // Another restart, still offline: still kept.
+    const again = createInboxPulls({ run: f.run, now: () => now, dir });
+    await again.list(repos);
+    expect(again.held(keyOf(880))?.number).toBe(880);
+    // Past their age: gone.
+    now += INBOX_PULLS_DEPARTED_MS + 1;
+    expect(again.held(keyOf(880))).toBeNull();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pull() tells a forge that did not answer from a PR that is not yours or not there", async () => {
+  let now = 1_000_000;
+  const f = forge();
+  const pulls = createInboxPulls({ run: f.run, now: () => now });
+  await pulls.list(repos);
+  f.listed = [880];
+  now += INBOX_PULLS_FRESH_MS;
+  await pulls.list(repos, { refresh: true });
+  // The forge goes quiet: #881 (kept since it left) answers its kept copy, flagged; #777 (never kept) answers none, flagged.
+  f.down = true;
+  expect(await pulls.pull(keyOf(881))).toMatchObject({ pull: { number: 881 }, unreadable: true });
+  expect(await pulls.pull(keyOf(777))).toEqual({ pull: null, unreadable: true });
+  // Not yours (a repository no list shows) is never "unreadable", and never asked of the forge.
+  const asked = f.calls.length;
+  expect(await pulls.pull("github.com/elsewhere/other#5")).toEqual({ pull: null });
+  expect(f.calls.length).toBe(asked);
+  // A failed read is not held: the next ask goes to the forge again, and reads it once it answers.
+  f.down = false;
+  f.merged.add(777);
+  expect(await pulls.pull(keyOf(777))).toMatchObject({ pull: { number: 777, state: "merged" } });
+  expect((await pulls.pull(keyOf(777))).unreadable).toBeUndefined();
+  // The forge answering that it has no such PR is not "unreadable".
+  f.missing.add(778);
+  expect(await pulls.pull(keyOf(778))).toEqual({ pull: null });
 });
 
 test("a restart keeps a PR that left the list readable, and one no list kept is read from the forge, merged", async () => {
@@ -226,19 +306,33 @@ test("a restart keeps a PR that left the list readable, and one no list kept is 
     expect(after.held(keyOf(881))?.number).toBe(881);
     expect(after.find(keyOf(881))).toBeNull();
     // The page asks for it: the forge's answer, merged.
-    expect((await after.pull(keyOf(881)))?.state).toBe("merged");
+    expect((await after.pull(keyOf(881))).pull?.state).toBe("merged");
     // A PR of a project's repository that no list ever named (merged before this Inbox read it): read by number.
     f.merged.add(777);
     const read = await after.pull(keyOf(777));
-    expect(read).toMatchObject({ number: 777, state: "merged", checks: null });
+    expect(read.pull).toMatchObject({ number: 777, state: "merged", checks: null });
     expect(await diffOf(after, keyOf(777))).toBe("read");
     expect((await after.list(repos)).pulls.map((p) => p.number)).toEqual([880]);
     // Never one of a repository no list shows.
-    expect(await after.pull("github.com/elsewhere/other#5")).toBeNull();
+    expect((await after.pull("github.com/elsewhere/other#5")).pull).toBeNull();
     expect(f.calls.some((c) => c.join(" ").includes("elsewhere/other"))).toBe(false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("an action on a PR that left the list answers 409 pull_closed; one never listed, 404 pull_unknown", async () => {
+  let now = 1_000_000;
+  const f = forge();
+  const pulls = createInboxPulls({ run: f.run, now: () => now });
+  await pulls.list(repos);
+  f.listed = [880];
+  now += INBOX_PULLS_FRESH_MS;
+  await pulls.list(repos, { refresh: true });
+  const [closed, closedStatus] = pullMissingAnswer(pulls, keyOf(881));
+  expect([closed.code, closedStatus]).toEqual(["pull_closed", 409]);
+  const [unknown, unknownStatus] = pullMissingAnswer(pulls, keyOf(999));
+  expect([unknown.code, unknownStatus]).toEqual(["pull_unknown", 404]);
 });
 
 test("a diff read says the PR's state as the forge has it now", async () => {

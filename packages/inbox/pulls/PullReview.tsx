@@ -92,7 +92,7 @@ import { liveView } from '../prs/stackRange';
 import { lookedBefore, markLooked, useLooked } from '../prs/looked';
 import { RailScopeRows } from './RailScopeRows';
 import { drawnStackWith, hiddenIn, useKeptStack } from './keptStack';
-import { forgeSaid, loneStack, useRoutePull, withForgeState } from './routePull';
+import { forgeSaid, loneStack, unreadWords, useRoutePull, withForgeState } from './routePull';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The file rail's width: dragged and kept. */
@@ -313,8 +313,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   const route = useRoutePull(layerKey, model, !listed);
   const lone = useMemo(() => (route.pull ? loneStack(route.pull) : null), [route.pull]);
   const [said, setSaid] = useState<ReturnType<typeof forgeSaid>>(null);
-  /** The layer whose comments were open here: one that merges or closes keeps them and the one being written (only Post goes). */
-  const commented = useRef<string | null>(null);
   const found = kept?.stack ?? drawnStackWith(stackId, layerKey, model) ?? (lone && model && !hiddenIn(lone, model) ? lone : null);
   const stack = useMemo(() => withForgeState(found, layerKey, listed, said, route.pull), [found, layerKey, listed, said, route.pull]);
   const layer = stack?.layers.find((l) => l.key === layerKey) ?? null;
@@ -722,8 +720,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   };
   // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
   // global comments do.
-  if (canDecide || canPost) commented.current = layerKey;
-  const keepComments = !!layer && !inboxPullIsOpen(layer) && (commented.current === layerKey || here.length > 0);
+  // A layer that merged or closed keeps its comments, the one being written and a draft kept since (a reload too):
+  // only Post goes.
+  const keepComments = !!layer && !inboxPullIsOpen(layer);
   const readerComments = canDecide || canPost || keepComments ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: saveFromReader, onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
   // Open in: what is on disk in a clone of this repository, which may not be the PR's version; nothing when no clone holds the file.
@@ -897,6 +896,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
 
   const readOnlyParts: Words = layer.mine ? ['No review thread yet'] : layer.author ? ['by ', person(layer.author)] : ['by a deleted account'];
   const readOnlyWords = wordsText(readOnlyParts);
+  // The forge not answering for a PR no list names: the page stays as last read, with one line saying so.
+  const unreadNote = route.unread && (
+    <p className="ib-prr-note" data-pull-review-unread="">
+      {unreadWords(forgeName(layer))}
+    </p>
+  );
   const readOnlyNote = !canDecide && !posted && !diffError && (
     <Tip cut content={readOnlyWords}>
       <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
@@ -999,7 +1004,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
           </button>
         )}
         {!judged && riskFailure && <RiskMark failed={riskFailure} />}
-        {!phone && readOnlyNote}
+        {unreadNote || (!phone && readOnlyNote)}
         {!phone && <DetailsButton open={detailsOpen} data={details.data} onToggle={toggleDetails} />}
         <span className="ib-sp" />
         {/* Every review header's diff controls (approval diff-controls-headers), in the bar as in a thread's review: one

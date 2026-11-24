@@ -352,6 +352,7 @@ import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { pullMissingAnswer } from "./inbox-pull-missing";
 import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
@@ -6451,9 +6452,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (path === "/api/inbox/pulls/pull") {
           const key = url.searchParams.get("key") ?? "";
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
-          const pull = await pulls.pull(key);
+          const { pull, unreadable } = await pulls.pull(key);
           if (pull) pullAvatars.allow(pull.host, pulls.avatarUrls(pull.host));
-          return json({ serverSession, pull });
+          // `unreadable`: the forge did not answer, which says nothing of the PR; the page keeps what it shows.
+          return json({ serverSession, pull, ...(unreadable ? { unreadable: true } : {}) });
         }
         if (path === "/api/inbox/pulls/details") {
           const key = url.searchParams.get("key") ?? "";
@@ -6806,7 +6808,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         for (const key of keys as string[]) {
           const pull = pulls.find(key);
           if (pull && pull.mine) theirs = false;
-          if (!pull) return pulls.held(key) ? json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409) : json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+          if (!pull) return json(...pullMissingAnswer(pulls, key));
           if (!(projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? []).includes(projectId)) {
             const field = validateOnly ? "project_id" : "thread_id";
             throw new InboxError("validation_error", `${field}: ${validateOnly ? "a project" : "a thread in a project"} of that pull request's repository.`, { field });
@@ -6852,7 +6854,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const unlisted = !pulls.find(key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
         const pull = pulls.find(key) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
         if (!pull && unlisted) return json({ error: "Couldn't check that link. Try again.", code: "pull_unknown" }, 404);
-        if (!pull) return pulls.held(key) ? json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409) : json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (!pull) return json(...pullMissingAnswer(pulls, key));
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         // Pinned to the commit the person read: the list's head, or the head of the patch they read (the list can be a
         // minute behind the forge). On GitHub also an older commit of this PR, as GitHub takes a review there and marks
@@ -6923,7 +6925,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // After a restart the list may not have been read yet: read it once, as the review route does.
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
         const pull = pulls.find(key);
-        if (!pull) return pulls.held(key) ? json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409) : json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (!pull) return json(...pullMissingAnswer(pulls, key));
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         const result = await mergePull(options.refRunner ?? refCliRunner, pull, seen);
         if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_merge_failed" ? 502 : 409);
@@ -6962,7 +6964,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
           if (!reopen && !pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
           const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
-          if (!pull) return pulls.held(key) ? [{ error: "That pull request is no longer open.", code: "pull_closed" }, 409] : [{ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404];
+          if (!pull) return pullMissingAnswer(pulls, key);
           if (!reopen && !inboxPullIsOpen(pull)) return [{ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409];
           const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
           if (!result.ok) return [{ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409];

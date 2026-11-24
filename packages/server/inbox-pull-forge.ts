@@ -71,16 +71,27 @@ export function forgePullOf(platform: InboxPullPlatform, host: string, repo: str
   };
 }
 
-/** Read one PR from the forge: null when the CLI fails or answers something else. */
-export async function readForgePull(run: RefRunner, cli: RefCli, platform: InboxPullPlatform, host: string, repo: string, number: number, was: InboxPull | null): Promise<InboxPull | null> {
+/**
+ * What a read of one PR found: the PR; none (`pull` null: the forge answered that it has no such PR); or `unreadable`
+ * (the forge did not answer: offline, signed out, down, an answer that is not a PR), which says nothing of the PR.
+ */
+export type ForgePullRead = { pull: InboxPull | null; unreadable?: true };
+
+/** The forge said it has no such PR (gh's and glab's `HTTP 404` / `404 Not Found`). */
+const saysNotFound = (text: string): boolean => /\b404\b/.test(text);
+
+/** Read one PR from the forge. */
+export async function readForgePull(run: RefRunner, cli: RefCli, platform: InboxPullPlatform, host: string, repo: string, number: number, was: InboxPull | null): Promise<ForgePullRead> {
   const slash = repo.indexOf("/");
-  if (slash <= 0) return null;
+  if (slash <= 0) return { pull: null };
   const endpoint = platform === "github" ? `repos/${repo}/pulls/${number}` : `projects/${encodeURIComponent(repo)}/merge_requests/${number}`;
   const read = await run(cli, ["api", "--hostname", host, endpoint, ...(platform === "github" ? ["--jq", FORGE_PULL_JQ] : [])]).catch(() => null);
-  if (!read || read.exitCode !== 0) return null;
+  if (!read) return { pull: null, unreadable: true };
+  if (read.exitCode !== 0) return saysNotFound(`${read.stderr}\n${read.stdout}`) ? { pull: null } : { pull: null, unreadable: true };
   try {
-    return forgePullOf(platform, host, repo, number, obj(JSON.parse(read.stdout)), was);
+    const pull = forgePullOf(platform, host, repo, number, obj(JSON.parse(read.stdout)), was);
+    return pull ? { pull } : { pull: null, unreadable: true };
   } catch {
-    return null;
+    return { pull: null, unreadable: true };
   }
 }

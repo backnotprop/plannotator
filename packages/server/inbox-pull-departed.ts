@@ -5,8 +5,9 @@
  * It is never listed again: only those reads take it (`InboxPulls` `readable`).
  *
  * Bounds: at most `INBOX_PULLS_DEPARTED_MAX` PRs, each for `INBOX_PULLS_DEPARTED_MS` from when it left; a PR listed
- * again leaves this map. Never kept: a PR of a host the next list did not ask (no CLI here signed in to it any more),
- * or one the person hid (`hidden`, asked at each read; a hidden repository counts). The repository rule (a project
+ * again leaves this map. A host the next list did not ask (its sign-in check failed, or no CLI here is signed in to
+ * it any more) keeps its PRs: a restart while offline once dropped them all, and the open page said "gone". Never
+ * kept: one the person hid (`hidden`, asked at each read; a hidden repository counts). The repository rule (a project
  * removed) is the caller's, as for a listed PR.
  *
  * With a `file` (under the Inbox's data folder, 0600) the map is kept on disk too, so a page reopened after a reload
@@ -20,8 +21,11 @@ export const INBOX_PULLS_DEPARTED_MAX = 50;
 export const INBOX_PULLS_DEPARTED_MS = 12 * 60 * 60_000;
 
 export interface DepartedPulls {
-  /** A list read replaced `before` with `after`, having asked `asked` (lowercased hosts). */
-  note(before: ReadonlyMap<string, InboxPull>, after: ReadonlyMap<string, InboxPull>, asked: ReadonlySet<string>): void;
+  /**
+   * A list read replaced `before` with `after`. A host it could not ask (its sign-in check failed: offline, a Mac that
+   * just woke, a forge down for longer than the sign-in keep) drops nothing: only the age and the count do.
+   */
+  note(before: ReadonlyMap<string, InboxPull>, after: ReadonlyMap<string, InboxPull>): void;
   get(key: string): InboxPull | undefined;
   /** A PR read from the forge for a page open on it (`InboxPulls.pull`): kept, or its copy replaced, as one that left. */
   put(pull: InboxPull): void;
@@ -75,16 +79,15 @@ export function createDepartedPulls(options: { now: () => number; hidden?: (key:
       while (kept.size > INBOX_PULLS_DEPARTED_MAX) kept.delete(kept.keys().next().value!);
       save();
     },
-    note(before, after, asked) {
+    note(before, after) {
       const at = options.now();
       for (const key of after.keys()) kept.delete(key);
       for (const [key, pull] of before) {
-        if (after.has(key) || !asked.has(pull.host.toLowerCase())) continue;
+        if (after.has(key)) continue;
         // Newest last: the bound drops the oldest first.
         kept.delete(key);
         kept.set(key, { pull, at });
       }
-      for (const [key, entry] of kept) if (!asked.has(entry.pull.host.toLowerCase())) kept.delete(key);
       while (kept.size > INBOX_PULLS_DEPARTED_MAX) kept.delete(kept.keys().next().value!);
       save();
     },
