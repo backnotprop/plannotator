@@ -6,14 +6,11 @@ export const DIAGRAM_SKILL = {
 
 Design and author a structured diagram as a \`.diagram.json\` specification and render it to SVG with \`@plannotator/diagrams\`. The renderer measures typography, sizes panels, routes connectors, and checks geometry—reporting overlaps, crossings, ports facing away, and label collisions so you can refine the drawing until it renders cleanly.
 
-## 1. Design the diagram before writing JSON
+## 1. Ground the content, then choose your own form
 
-Start from the reader's question, not a fixed template:
+Decide for yourself what viewpoint, composition, level of detail, emphasis, and omissions best answer the reader's request using the primitives below.
 
-- **Identify the core visual relationship:** Is the subject a pipeline, a feedback loop, a hub-and-spoke ecosystem, a layered architecture, a side-by-side comparison, a state machine, a spatial topology, or an annotated UI walkthrough? Let the subject dictate the structure—do not force every diagram into a left-to-right sequence, a fixed number of stages, or a mandatory error branch.
-- **Choose viewpoint and emphasis:** Pick one clear level of abstraction that answers the question. Use panel \`tone\`, \`status\`, \`step\` badges, \`groups\`, \`note\`, or \`tag\` deliberately to establish visual hierarchy rather than treating every box identically.
-- **Keep boxes scannable:** Put short titles and scannable labels on the canvas; move nuance into \`sub\`, \`footer\`, structured \`card\` rows, addressable \`sections\`, and \`refs\`.
-- **Ground evidence when files exist:** When documenting an existing codebase or repository, read real source, config, or doc files first and cite real symbols, project-relative paths, and 1-based line numbers—never invent them. When illustrating a conceptual or proposed system from a user's brief with no repo files, omit file \`refs\` (or link only real URLs).
+- **Verify real references:** When drawing from an existing codebase or repository, read the actual source, config, or doc files first and cite real symbols, project-relative paths, and 1-based line numbers—never invent them. When drawing from a brief with no repo files, omit file \`refs\` (or include only real URLs).
 
 ## 2. Create or locate the \`.diagram.json\` file
 
@@ -37,15 +34,15 @@ Validation is strict: **unknown keys anywhere throw a \`TypeError\`** naming the
 
 ### Layouts (choose exactly one)
 
-Pick the layout that best fits the topology of your subject:
+A diagram combines one outer layout of panels with optional \`groups\` (enclosing any subset of panels), \`links\` (connecting any pair of panels or a panel to itself), top-level framing chrome, and \`theme\` styling.
 
-- **\`columns\`** — Left-to-right columns of single panels or vertical stacks (\`Panel | Panel[]\`). Best for pipelines, layered architectures, comparisons, or branching flows.
-  - Controls: \`gap\` (column spacing, default \`72\`), \`row_gap\` (vertical stack spacing, default \`28\`), \`valign\` (\`"top" | "center" | "bottom"\`, default \`"center"\`).
+- **\`columns\`** — Places entries left to right; each entry is a single panel or a vertical stack (\`Panel | Panel[]\`). Panels stacked in the same column expand to match the widest panel in that column.
+  - Controls: \`gap\` (horizontal spacing between columns, default \`72\`), \`row_gap\` (vertical spacing inside a stack, default \`28\`), \`valign\` (\`"top" | "center" | "bottom"\`, default \`"center"\`—vertical alignment of shorter columns against the tallest).
   - Shape: \`{ "columns": [panelA, [panelB1, panelB2], panelC] }\`
-- **\`ring\`** — Two or more panels arranged around an ellipse, with optional **\`center\`** (\`Panel[]\`) stacked inside the ring. Best for cycles, feedback loops, lifecycles, ecosystems, or hub-and-spoke topologies.
-  - Controls: \`start_angle\` (degrees for \`ring[0]\`, default \`-90\` = top), \`gap\`, \`row_gap\`.
-  - Shape: \`{ "ring": [panelA, panelB, panelC], "center": [hubPanel], "start_angle": -90 }\`
-- **\`panels\`** — Free 2D placement (\`Panel[]\`, ≥1 panel) where **every** panel sets numeric \`x\` and \`y\`. Best for spatial maps, grids, asymmetric compositions, or non-standard layouts. (\`x\` and \`y\` are forbidden in \`columns\` and \`ring\`.)
+- **\`ring\`** — Places ≥2 panels around an ellipse whose radius expands automatically to satisfy \`gap\`, starting at \`start_angle\` degrees for \`ring[0]\` (default \`-90\`, top) and stepping clockwise around 360°. Optional **\`center\`** (\`Panel[]\`) stacks one or more panels centered inside the ellipse.
+  - Controls: \`start_angle\` (degrees, default \`-90\`), \`gap\`, \`row_gap\`.
+  - Shape: \`{ "ring": [panelA, panelB, panelC], "center": [centerPanel], "start_angle": -90 }\`
+- **\`panels\`** — Places ≥1 panels at explicit 2D coordinates; **every** panel must provide numeric \`x\` and \`y\`. (\`x\` and \`y\` are forbidden in \`columns\` and \`ring\`.)
   - Shape: \`{ "panels": [{ "id": "a", "title": "A", "x": 0, "y": 0 }, { "id": "b", "title": "B", "x": 320, "y": 140 }] }\`
 
 ### Top-level framing and metadata
@@ -72,7 +69,7 @@ Every panel has \`title\` (required) and supports:
   - **Text:** \`"Short note"\` or \`{ "text": "Short note" }\` (auto-wrapped).
   - **Tile grid:** \`["Item A", { "label": "Item B", "sub": "Detail", "status": "trial" }]\` or \`{ "tiles": [...], "cols": 2, "label": "Heading" }\`.
   - **Key-value card:** \`{ "card": { "title": "Spec", "intro": "Optional lead-in", "rows": [["Key", "Value"]] } }\`.
-  - **Side-by-side row:** \`{ "row": [section1, section2] }\` — place any sections horizontally (e.g. a card beside a mini-graph, or two visuals side by side).
+  - **Side-by-side row:** \`{ "row": [section1, section2] }\` — arranges any list of sections horizontally across the panel width, nesting any other section forms (including addressable wrappers, cards, graphs, tiles, text, or images).
   - **Mini node graph:** \`{ "graph": { "nodes": { "a": "Start", "b": "End" }, "at": { "a": [0, 0], "b": [1, 0] }, "links": [["a", "b", "optional label"]] } }\` — compact sub-diagram on a relative grid (\`col × 132\`, \`row × 58\`; no self-loops inside \`graph\`).
   - **Embedded image:** \`{ "image": { "src": "data:image/png;base64,...", "alt": "Description", "width": 480, "height": 300 } }\` — PNG or JPEG base64 data URL (see image helper below).
   - **Addressable section wrapper:** \`{ "id": "unique-id", "title": "Readable title", "refs": [...], "content": <any section> }\` — wraps any section so readers can click it, inspect \`refs\`, and pin comments directly to it. Section \`id\`s must be unique across the whole diagram.
@@ -188,6 +185,8 @@ Iterate until exit \`0\`:
 - **Overlap or panels too close:** separate coordinates in \`panels\` mode, or adjust \`groups\` so each group encloses only its own members without partial overlaps.
 - **Inner \`graph\` collision or extent error:** adjust \`[col, row]\` spacing in \`graph.at\`, reduce panel/label width, or split self-loops into a panel with a return lane.
 
+Once rendering exits \`0\`, check that the result actually communicates what the reader needs—diagnostics verify geometry, not clarity. Inspect the rendered \`.svg\` (or \`renderDiagram(spec).description\`) to confirm it directly answers the request, labels and embedded images are readable without crowding or ambiguity, and nothing essential is missing or obscured.
+
 ## 5. Revise from pinned feedback
 
 Review feedback identifies parts by kind, title, and id (for example, \`Diagram panel API (api)\`, \`Diagram section Preview (preview)\`, \`Diagram group Storage (storage)\`, \`Diagram link Sync (sync)\`).
@@ -202,7 +201,7 @@ When revising:
 
 Interactive source navigation (\`refs\`), hover summaries, and pinned comments live in the editable \`.diagram.json\` when opened in Plannotator. The rendered \`.svg\` is a static image without clickable file anchors—always keep and share the \`.diagram.json\` alongside any standalone \`.svg\`.
 
-- **Plannotator Inbox thread:** Reply to the triggering message with \`reply_to\` set to its message ID and include the \`.diagram.json\` path in \`attachments\`. Inbox renders it inline with pan/zoom, clickable \`refs\`, pinned comments, and Ask AI, and groups revisions by its top-level \`"id"\`.
+- **Plannotator Inbox thread:** Reply to the triggering message with \`reply_to\` set to its message ID and include the \`.diagram.json\` path in \`attachments\`. Inbox renders it inline with pan/zoom, clickable \`refs\`, pinned comments, and Ask AI, and groups revisions of the same drawing by its top-level \`"id"\` and source file.
 - **Plannotator Markdown plan or document:** Link the \`.diagram.json\` file for a live diagram, or paste a \`\`\`\` \`\`\`plannotator-diagram \`\`\`\` fenced code block containing the JSON for a frozen snapshot.
 - **Local interactive review (Plannotator CLI):** Run \`plannotator annotate my-diagram.diagram.json\` to open the review UI and collect the reader's pinned comments.
 - **Standalone / outside Plannotator:** Return paths to both the \`.diagram.json\` source and the rendered \`.svg\` (or embed the SVG where requested), along with a concise summary of what the diagram shows and any intentional simplifications. Note to the reader that clickable \`refs\` live in the \`.diagram.json\` for Plannotator rather than inside the static \`.svg\`.`,
