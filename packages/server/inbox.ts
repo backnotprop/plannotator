@@ -213,7 +213,7 @@ import { openBrowser } from "./browser";
 import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
-import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, sendAgentMessage, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
+import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
 import { guideReviewOf, guidePullKey, inboxGuideFileContents, inboxGuideRoute } from "./inbox-guides";
 import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
 import { guideReviewMarkdownImage, pullReviewMarkdownImage } from "./inbox-review-markdown-image";
@@ -376,8 +376,9 @@ import { runtime as gitRuntime } from "./git";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxFarTags, FAR_DELIVERED_ROUTE } from "./inbox-far-tags";
+import { farSendMessage } from "./inbox-far-send";
 import { createInboxFarWakes } from "./inbox-far-wakes";
-import { farAgentReply } from "./inbox-mcp-far-reply";
+import { farAgentReply, farReplyDeps } from "./inbox-mcp-far-reply";
 import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
@@ -1885,20 +1886,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readOnMachine: async (ask) => (machines ? machines.readThread(ask) : null),
     filePieceOnMachine: async (args, offset) => (machines ? machines.filePiece(args, offset) : null),
     farThreadMachine: (threadId) => machines?.farThreadMachine(threadId) ?? null,
-    // The answer of a session tagged into a thread on another computer goes there (inbox-mcp-far-reply.ts).
-    farReply: (input, nextStep) =>
-      farAgentReply(
-        {
-          placeOf: (id, session) => {
-            const place = farWakes.placeOf(id);
-            return place && farWakes.wasHanded(place.machine, place.thread_id, session) ? place : null;
-          },
-          nameOf: (machine) => machines?.nameOf(machine) ?? null,
-          holdWrite: (machine, route, body, thread, waitMs) => machines?.holdWrite(machine, route, body, thread, waitMs) ?? null,
-        },
-        input,
-        nextStep,
-      ),
+    // A send into a thread on another computer goes there, and runs there (inbox-mcp-far-reply.ts).
+    farReply: (input, nextStep, working) => (machines ? farAgentReply(farReplyDeps(machines, farWakes, store.dir), input, nextStep, working) : Promise.resolve(null)),
     // search and read_thread's list ask the linked machines too, naming a project by its git remote (inbox-mcp-far-find.ts).
     findOnMachines: () => machines?.agentFind ?? null,
     projectRemoteKey: (root, waitMs) => farRemoteOf(repos, root, waitMs),
@@ -4850,6 +4839,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.sessionsNow ? { now: options.sessionsNow } : {}),
     // A session tagged in from another computer (inbox-far-tags.ts).
     farLive: (session) => farTags.lists(session),
+    farConnection: (session) => farTags.connectionOf(session),
     store,
     serverSession,
     resolveRoot: async (path) => (await projectRoots.resolveNamed(path)).root,
@@ -5123,15 +5113,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     nameOf: (machine) => machines?.nameOf(machine) ?? null,
     holdWrite: (machine, route, body, thread, waitMs) => machines?.holdWrite(machine, route, body, thread, waitMs) ?? null,
     heldWrite: (key) => machines?.heldWrite(key) ?? null,
-    commandFor: (reply, session) => replyCommand(reply, false, session),
-    sendAs: async (input) => {
-      const parent = store.message(input.reply_to);
-      const project = parent ? store.project(parent.project_id) : null;
-      if (!project) throw new InboxError("message_not_found", `No message ${input.reply_to}.`);
-      const { machine, machine_name, session, host, name, ...rest } = input;
-      const sent = await sendAgentMessage(mcpContext, project, { ...rest, agent_session: session, ...(host ? { agent_host: host } : {}), ...(name ? { agent_name: name } : {}), agent_machine: { id: machine, name: machine_name } }, undefined, true);
-      return { message_id: String(sent.structured.message_id), thread_id: String(sent.structured.thread_id), replayed: sent.replayed };
-    },
+    commandFor: (reply, session, now) => replyCommand(reply, now, session),
+    sendAs: (input) => farSendMessage(mcpContext, input),
+    ownSession: (session) => live.allLive().some((entry) => entry.session === session),
   });
   const unsubscribeFarTags = store.subscribe((line) => {
     if (line.kind !== "message" || line.record.author.kind !== "person") return;

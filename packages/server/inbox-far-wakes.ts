@@ -17,7 +17,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_SESSION_ID_PATTERN, isInboxId } from "@plannotator/core/inbox-types";
-import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
+import type { InboxReplyCommand, InboxWakeContext, InboxWakeReplyingTo } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 
 /** One wake a linked machine handed this Inbox for one of its sessions. */
@@ -32,6 +32,8 @@ export interface FarWake {
   command: InboxReplyCommand;
   received_at: string;
   delivered_at: string | null;
+  /** Taken back on the thread's computer before the session took it. */
+  withdrawn?: true;
 }
 
 /** The most a far wake's body may be: what an outbox entry holds (256 KB) bounds it there already. */
@@ -77,6 +79,37 @@ export function farWakeCommand(raw: unknown, ids: { reply_id: string; thread_id:
   if (named(c.redirected_from)) out.redirected_from = named(c.redirected_from)!;
   if (flag(c.continues_thread)) out.continues_thread = true;
   if (flag(c.new_thread)) out.new_thread = true;
+  // Send now on the thread's computer: this Inbox hands it into the running turn, as its own Send now.
+  if (flag(c.now)) out.now = true;
+  const context = farWakeContext(c.context);
+  if (context) out.context = context;
+  return out;
+}
+
+const count = (value: unknown): number | null => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null);
+const isoTime = (value: unknown): string | null => (typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value)) ? value : null);
+
+/** The wake's details line as the thread's computer counted it, each field checked; null when it does not read. */
+function farWakeContext(raw: unknown): InboxWakeContext | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const c = raw as Record<string, unknown>;
+  const messages = count(c.messages);
+  const questions = count(c.open_questions);
+  const actions = count(c.open_actions);
+  if (messages === null || questions === null || actions === null) return null;
+  const out: InboxWakeContext = { messages, open_questions: questions, open_actions: actions };
+  if (isoTime(c.last_agent_at)) out.last_agent_at = isoTime(c.last_agent_at)!;
+  const to = c.replying_to as Record<string, unknown> | undefined;
+  if (to && typeof to === "object" && isInboxId("msg", to.id) && isoTime(to.at)) {
+    const replying: InboxWakeReplyingTo = { id: to.id, at: isoTime(to.at)! };
+    if (shortLine(to.quote, 400)) replying.quote = shortLine(to.quote, 400)!;
+    if (count(to.questions) !== null) replying.questions = count(to.questions)!;
+    if (count(to.actions) !== null) replying.actions = count(to.actions)!;
+    out.replying_to = replying;
+  }
+  const line = typeof c.still_open_line === "string" && c.still_open_line.length <= 2_000 ? c.still_open_line : null;
+  const at = count(c.still_open_at);
+  if (line !== null && at !== null) Object.assign(out, { still_open_line: line, still_open_at: at });
   return out;
 }
 
@@ -116,11 +149,18 @@ export function createInboxFarWakes(options: { dataDir: string; now?: () => Date
     if (!isInboxId("msg", reply_id) || !isInboxId("msg", thread_id)) throw new InboxError("validation_error", "reply_id and thread_id: message ids.", { field: "reply_id" });
     if (typeof session !== "string" || !INBOX_SESSION_ID_PATTERN.test(session)) throw new InboxError("validation_error", "session: a session id.", { field: "session" });
     if (host !== null && host !== undefined && (typeof host !== "string" || host.length > 64)) throw new InboxError("validation_error", "host: a string.", { field: "host" });
+    const key = keyOf(machine, reply_id, session);
+    const known = wakes.get(key);
+    // Taken back on the thread's computer before the session took it: it is not handed.
+    if (body.withdrawn === true) {
+      if (known && !known.delivered_at) save({ ...known, delivered_at: now().toISOString(), withdrawn: true });
+      return { kept: false };
+    }
     const command = farWakeCommand(body.command, { reply_id, thread_id }, threadUrl(thread_id));
     if (!command) throw new InboxError("validation_error", "command: a reply's wake.", { field: "command" });
-    const key = keyOf(machine, reply_id, session);
-    if (wakes.has(key)) return { kept: false };
-    save({ v: 1, machine, reply_id, thread_id, session, host: typeof host === "string" ? host : null, command, received_at: now().toISOString(), delivered_at: null });
+    // The same wake again (a retried push) is kept once; a newer one before the session took it (Send now) replaces it.
+    if (known && (known.delivered_at || body.replaces !== true)) return { kept: false };
+    save({ v: 1, machine, reply_id, thread_id, session, host: typeof host === "string" ? host : null, command, received_at: known?.received_at ?? now().toISOString(), delivered_at: null });
     for (const listener of listeners) listener(session);
     return { kept: true };
   };
@@ -146,16 +186,11 @@ export function createInboxFarWakes(options: { dataDir: string; now?: () => Date
     return null;
   };
 
-  /** Whether `session` was handed a wake from that machine's thread (it may answer there). */
-  const wasHanded = (machine: string, threadId: string, session: string): boolean =>
-    [...wakes.values()].some((w) => w.machine === machine && w.thread_id === threadId && w.session === session);
-
   return {
     receive,
     pendingFor,
     delivered,
     placeOf,
-    wasHanded,
     /** Called with the session a new wake waits for (a held poll answers at once). */
     onWake: (listener: (session: string) => void) => {
       listeners.add(listener);

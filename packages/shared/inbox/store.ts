@@ -3913,6 +3913,26 @@ export class InboxStore {
     return out;
   }
 
+  /**
+   * Where this store knows `session`: "here" when it wrote here as this computer's own (no `machine`), else the
+   * linked computer its messages, tags or addressing name (the first seen), else null.
+   */
+  sessionMachine(session: string): string | null {
+    let found: string | null = null;
+    for (const message of this.messages.values()) {
+      if (message.author.kind === "agent") {
+        if (message.author.session === session) {
+          if (!message.author.machine) return "here";
+          found ??= message.author.machine;
+        }
+        continue;
+      }
+      for (const tag of message.tags ?? []) if (tag.session === session && tag.machine) found ??= tag.machine;
+      if (message.to?.session === session && message.to.machine) found ??= message.to.machine;
+    }
+    return found;
+  }
+
   /** Hand-offs still inside their Undo window (or that a stop interrupted). */
   handoffsPending(): number {
     let count = 0;

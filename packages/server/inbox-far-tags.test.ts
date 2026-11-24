@@ -85,9 +85,11 @@ function studio(peers: PeerLink[]) {
     }),
     sendAs: async (input) => {
       sentAs.push(input);
-      const sent = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: input.host, session: input.session, name: null, machine: input.machine, machine_name: input.machine_name ?? undefined }, body: input.body, reply_to: input.reply_to, idempotency_key: input.idempotency_key, wakes: true });
-      return { message_id: sent.message.id, thread_id: sent.message.thread_id, replayed: false };
+      const { body, reply_to, idempotency_key } = input.args as { body: string; reply_to: string; idempotency_key: string };
+      const sent = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: input.host, session: input.session, name: null, machine: input.machine, machine_name: input.machine_name ?? undefined }, body, reply_to, idempotency_key, wakes: true });
+      return { text: "Sent.", structured: { message_id: sent.message.id, thread_id: sent.message.thread_id } };
     },
+    ownSession: (session) => session === "ses_live_here",
   });
   return { store, project, asked, far, held, sentAs };
 }
@@ -179,17 +181,30 @@ describe("the wake, on the agent's own computer", () => {
     expect(pending.map((w) => w.command)).toEqual([expect.objectContaining({ id: reply.id, tagged: { owner: "Claude Code" }, url: url(asked.thread_id) })]);
     expect(laptopWakes.pendingFor("ses_someone_else")).toEqual([]);
     expect(laptopWakes.placeOf(reply.id)).toEqual({ machine: STUDIO, thread_id: asked.thread_id });
-    expect(laptopWakes.wasHanded(STUDIO, asked.thread_id, FAR)).toBe(true);
-    expect(laptopWakes.wasHanded(STUDIO, asked.thread_id, "ses_someone_else")).toBe(false);
     // Delivered: no longer handed, kept across a restart.
     expect(laptopWakes.delivered(FAR, reply.id)?.delivered_at).toBeTruthy();
     expect(laptopWakes.pendingFor(FAR)).toEqual([]);
   });
 
-  test("a wake keeps only the fields a tag's wake words: never Send now, a Tidy or a far link", () => {
+  test("a wake keeps the fields a reply's wake words, Send now and the details line included; never a Tidy or a far link", () => {
     const ids = { reply_id: "msg_01JZ0000000000000000000001", thread_id: "msg_01JZ0000000000000000000000" };
-    const cmd = farWakeCommand({ type: "reply", id: ids.reply_id, thread_id: ids.thread_id, reply_to: null, subject: "S", body: "B", url: "http://far/", now: true, tidy: true, added: true, tagged: { owner: "Pi" } }, ids, "http://here/#thread");
-    expect(cmd).toEqual({ type: "reply", id: ids.reply_id, thread_id: ids.thread_id, reply_to: null, subject: "S", body: "B", url: "http://here/#thread", tagged: { owner: "Pi" }, added: true });
+    const context = { messages: 4, open_questions: 1, open_actions: 0, last_agent_at: "2026-11-24T09:00:00.000Z", replying_to: { id: MSG(3), at: "2026-11-24T08:00:00.000Z", quote: "Should the retry queue", questions: 1, evil: "x" }, hostile: "\u001b[31m" };
+    const cmd = farWakeCommand({ type: "reply", id: ids.reply_id, thread_id: ids.thread_id, reply_to: null, subject: "S", body: "B", url: "http://far/", now: true, tidy: true, added: true, tagged: { owner: "Pi" }, context }, ids, "http://here/#thread");
+    expect(cmd).toEqual({
+      type: "reply",
+      id: ids.reply_id,
+      thread_id: ids.thread_id,
+      reply_to: null,
+      subject: "S",
+      body: "B",
+      url: "http://here/#thread",
+      tagged: { owner: "Pi" },
+      added: true,
+      now: true,
+      context: { messages: 4, open_questions: 1, open_actions: 0, last_agent_at: "2026-11-24T09:00:00.000Z", replying_to: { id: MSG(3), at: "2026-11-24T08:00:00.000Z", quote: "Should the retry queue", questions: 1 } },
+    });
+    // A details line that does not count is left out, the wake kept.
+    expect(farWakeCommand({ type: "reply", id: ids.reply_id, thread_id: ids.thread_id, body: "B", context: { messages: -1 } }, ids, "u")?.context).toBeUndefined();
     expect(farWakeCommand({ type: "reply", id: "msg_01JZ0000000000000000000009", thread_id: ids.thread_id, body: "B" }, ids, "u")).toBeNull();
     expect(farWakeCommand({ type: "tidy", id: ids.reply_id, thread_id: ids.thread_id, body: "B" }, ids, "u")).toBeNull();
   });
@@ -204,19 +219,28 @@ describe("the wake, on the agent's own computer", () => {
 });
 
 describe("the tagged agent's answer, written on the thread's computer", () => {
-  test("only as a session the thread names on the computer that sends it; then a reply to it is sent there too", async () => {
+  test("any session of the sending computer writes, tagged or not; never as this computer's own or another computer's; a reply to it is sent there", async () => {
     const laptop = peer(LAPTOP, agentsAnswer([laptopAgent]));
     const { far, store, asked, held, sentAs } = studio([laptop.link]);
     await far.rows(asked.thread_id, null, new Set());
     const tag = far.targets([{ session: FAR, machine: LAPTOP }], () => [])[0]!;
     const reply = store.sendReply(asked.id, { idempotency_key: "k3", words: "Laptop agent: check.", tags: [tag] }).reply;
-    // Another computer cannot write as it, nor can the Laptop write as a session the thread does not name there.
-    await expect(far.agentReply(OTHER, { reply_to: reply.id, session: FAR, body: "x", idempotency_key: "a" })).rejects.toMatchObject({ code: "not_your_session" });
-    await expect(far.agentReply(LAPTOP, { reply_to: reply.id, session: OWNER.session, body: "x", idempotency_key: "a" })).rejects.toMatchObject({ code: "not_your_session" });
-    await expect(far.agentReply(LAPTOP, { reply_to: MSG(99), session: FAR, body: "x", idempotency_key: "a" })).rejects.toMatchObject({ code: "message_not_found" });
-    const answer = await far.agentReply(LAPTOP, { reply_to: reply.id, session: FAR, body: "The order holds.", idempotency_key: "a1", name: "Claude Code" });
-    expect(sentAs[0]).toMatchObject({ machine: LAPTOP, machine_name: "Laptop", session: FAR, host: "claude-code", reply_to: reply.id, body: "The order holds." });
-    const written = store.message(answer.message_id)!;
+    const args = (more: Record<string, unknown>) => ({ body: "x", idempotency_key: "a", reply_to: reply.id, ...more });
+    // Another computer cannot write as the Laptop's session; the Laptop cannot write as this computer's own.
+    await expect(far.agentReply(OTHER, { session: FAR, args: args({}) })).rejects.toMatchObject({ code: "not_your_session" });
+    await expect(far.agentReply(LAPTOP, { session: OWNER.session, args: args({}) })).rejects.toMatchObject({ code: "not_your_session" });
+    await expect(far.agentReply(LAPTOP, { session: "ses_live_here", args: args({}) })).rejects.toMatchObject({ code: "not_your_session" });
+    await expect(far.agentReply(LAPTOP, { session: FAR, args: args({ reply_to: MSG(99) }) })).rejects.toMatchObject({ code: "message_not_found" });
+    // A Laptop session nobody tagged writes in the thread as a local agent may, its thread id as reply_to.
+    const untagged = await far.agentReply(LAPTOP, { session: "ses_laptop_other", host: "pi", args: args({ reply_to: asked.thread_id, body: "Seen it.", idempotency_key: "u1" }) });
+    expect(store.message(String(untagged.structured.message_id))!.author).toMatchObject({ session: "ses_laptop_other", machine: LAPTOP });
+    // Every send_message field goes to the tool; the other computer's paths do not.
+    const answer = await far.agentReply(LAPTOP, { session: FAR, name: "Claude Code", args: args({ body: "The order holds.", idempotency_key: "a1", steps: [{ title: "Ship" }], pulls: ["acme/api#4"], priority: true, thread: "Queue", attachments: ["upl_1"], branch: { name: "fix", head: "abc" }, project_path: "/laptop/web" }) });
+    expect(sentAs.at(-1)).toMatchObject({ machine: LAPTOP, machine_name: "Laptop", session: FAR, host: "claude-code", name: "Claude Code" });
+    expect(sentAs.at(-1)!.args).toEqual({ body: "The order holds.", idempotency_key: "a1", reply_to: reply.id, steps: [{ title: "Ship" }], pulls: ["acme/api#4"], priority: true, thread: "Queue", attachments: ["upl_1"], branch: { name: "fix", head: "abc" } });
+    // Now the Laptop's session it is: another computer still cannot write as it.
+    await expect(far.agentReply(OTHER, { session: "ses_laptop_other", args: args({}) })).rejects.toMatchObject({ code: "not_your_session" });
+    const written = store.message(String(answer.structured.message_id))!;
     expect(written.author).toMatchObject({ kind: "agent", session: FAR, machine: LAPTOP, machine_name: "Laptop" });
     // The person answers the far agent's message: its wake goes to the Laptop.
     const later = store.sendReply(written.id, { idempotency_key: "k4", words: "Good, ship it." }).reply;
@@ -228,30 +252,78 @@ describe("the tagged agent's answer, written on the thread's computer", () => {
   });
 
   test("on the agent's computer: sent through the outbox, held while the thread's computer is away, other far threads untouched", async () => {
-    const ids = { machine: STUDIO, thread_id: "msg_01JZ0000000000000000000000" };
+    const ids = { machine: STUDIO, thread_id: MSG(0) };
     const sent: Record<string, unknown>[] = [];
+    const uploaded: { name: string; path: string }[] = [];
     let state: OutboxEntry["state"] = "delivered";
+    let online = true;
+    const folder = temp("laptop-work");
+    await Bun.write(join(folder, "notes.md"), "# Notes\n");
+    await Bun.write(join(folder, "shot.png"), new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
     const deps = {
-      placeOf: (id: string, session: string) => (id === "msg_01JZ0000000000000000000001" && session === FAR ? ids : null),
+      placeOf: async (id: string) => (id === MSG(1) || id === MSG(0) ? ids : null),
       nameOf: () => "Studio",
+      online: () => online,
       holdWrite: (_m: string, route: string, body: Record<string, unknown>) => {
         sent.push({ route, ...body });
-        return Promise.resolve({ state, answer: { message_id: "msg_01JZ0000000000000000000002", thread_id: ids.thread_id } } as unknown as OutboxEntry);
+        return Promise.resolve({ state, answer: { text: "Sent to the Plannotator Inbox (thread X).", structured: { message_id: MSG(2), thread_id: ids.thread_id } } } as unknown as OutboxEntry);
       },
+      readFiles: async (paths: string[], base: string | undefined) => paths.map((path) => ({ name: path.split("/").at(-1)!, sent_sha256: `sha-${path}`, base }) as never),
+      blobOf: (attachment: { sent_sha256: string }) => `/blobs/${attachment.sent_sha256}`,
+      upload: async (_machine: string, name: string, path: string) => (uploaded.push({ name, path }), `upl_${uploaded.length}`),
     };
     const next = async () => "NEXT";
-    const done = await farAgentReply(deps, { body: "The order holds.", reply_to: "msg_01JZ0000000000000000000001", agent_session: FAR }, next);
-    expect(sent[0]).toMatchObject({ route: FAR_AGENT_REPLY_ROUTE, reply_to: "msg_01JZ0000000000000000000001", session: FAR, body: "The order holds." });
-    expect(done!.text).toBe(`Sent to the Plannotator Inbox (thread ${ids.thread_id}, on Studio). NEXT`);
+    // Any session here, tagged or not: that computer's own answer comes back as it is, with the computer.
+    const done = await farAgentReply(deps, { body: "The order holds.", reply_to: MSG(1), agent_session: "ses_any", agent_host: "pi", project_path: "/laptop/web", steps: [{ title: "Ship" }] }, next, undefined);
+    expect(sent[0]).toMatchObject({ route: FAR_AGENT_REPLY_ROUTE, session: "ses_any", host: "pi", args: { body: "The order holds.", reply_to: MSG(1), steps: [{ title: "Ship" }] } });
+    expect((sent[0]!.args as Record<string, unknown>).project_path).toBeUndefined();
+    expect(done).toEqual({ text: "Sent to the Plannotator Inbox (thread X).", structured: { message_id: MSG(2), thread_id: ids.thread_id, machine: { id: STUDIO, name: "Studio" } } });
+    // Files and the pictures the body shows from this disk: read here, sent there, the send naming the uploads.
+    await farAgentReply(deps, { body: "See ![shot](shot.png).", reply_to: MSG(1), agent_session: FAR, attachments: ["notes.md"] }, next, folder);
+    expect(uploaded.map((u) => u.name)).toEqual(["notes.md", "shot.png"]);
+    expect((sent.at(-1)!.args as Record<string, unknown>).attachments).toEqual(["upl_1", "upl_2"]);
+    // The thread's computer away: words without files wait for it; files are refused, nothing sent.
     state = "queued";
-    const waiting = await farAgentReply(deps, { body: "x", reply_to: "msg_01JZ0000000000000000000001", agent_session: FAR }, next);
+    const waiting = await farAgentReply(deps, { body: "x", reply_to: MSG(1), agent_session: FAR }, next, undefined);
     expect(waiting!.structured).toMatchObject({ held: true });
     expect(waiting!.text).toStartWith("Waiting for Studio:");
-    // Not a thread that handed this session a wake: the send goes on as before (refused there in its own words).
-    expect(await farAgentReply(deps, { body: "x", reply_to: "msg_01JZ0000000000000000000001", agent_session: "ses_other" }, next)).toBeNull();
-    // Files cannot go yet: refused with words, nothing sent.
+    online = false;
     const before = sent.length;
-    await expect(farAgentReply(deps, { body: "x", reply_to: "msg_01JZ0000000000000000000001", agent_session: FAR, attachments: ["a.png"] }, next)).rejects.toMatchObject({ code: "not_across_computers" });
+    await expect(farAgentReply(deps, { body: "x", reply_to: MSG(1), agent_session: FAR, attachments: ["notes.md"] }, next, folder)).rejects.toMatchObject({ code: "machine_offline" });
     expect(sent.length).toBe(before);
+    // Its refusal there is the agent's refusal here.
+    online = true;
+    state = "refused";
+    deps.holdWrite = (_m, route, body) => (sent.push({ route, ...body }), Promise.resolve({ state, answer: { code: "steps_off", error: "Steps are off." } } as unknown as OutboxEntry));
+    await expect(farAgentReply(deps, { body: "x", reply_to: MSG(1), agent_session: FAR }, next, undefined)).rejects.toMatchObject({ code: "steps_off", message: "Steps are off." });
+    // Not a far thread: the send goes on here.
+    expect(await farAgentReply(deps, { body: "x", reply_to: MSG(7), agent_session: FAR }, next, undefined)).toBeNull();
+  });
+
+  test("Take back and Send now on the thread's computer reach the wake on the agent's", async () => {
+    const laptop = peer(LAPTOP, agentsAnswer([laptopAgent]));
+    const { far, store, asked, held } = studio([laptop.link]);
+    await far.rows(asked.thread_id, null, new Set());
+    const tag = far.targets([{ session: FAR, machine: LAPTOP }], () => [])[0]!;
+    const url = () => "u";
+    const laptopWakes = createInboxFarWakes({ dataDir: temp("laptop-change") });
+    // Send now: the wake there is replaced with one that goes into the running turn.
+    const first = store.sendReply(asked.id, { idempotency_key: "n1", words: "Now please.", tags: [tag] }).reply;
+    far.onPersonMessage(first);
+    laptopWakes.receive(STUDIO, held.at(-1)!.body, url);
+    const now = store.requestDeliverNow(first.id, FAR);
+    far.onPersonMessage(now);
+    expect(held.at(-1)!.body).toMatchObject({ reply_id: first.id, replaces: true });
+    laptopWakes.receive(STUDIO, held.at(-1)!.body, url);
+    expect(laptopWakes.pendingFor(FAR)).toHaveLength(1);
+    // Take back before the agent took it: the wake there is not handed.
+    const second = store.sendReply(asked.id, { idempotency_key: "t1", words: "Never mind.", tags: [tag] }).reply;
+    far.onPersonMessage(second);
+    laptopWakes.receive(STUDIO, held.at(-1)!.body, url);
+    expect(laptopWakes.pendingFor(FAR).map((w) => w.reply_id)).toEqual([first.id, second.id]);
+    far.onPersonMessage(store.takeBack(second.id));
+    expect(held.at(-1)!.body).toMatchObject({ reply_id: second.id, withdrawn: true });
+    laptopWakes.receive(STUDIO, held.at(-1)!.body, url);
+    expect(laptopWakes.pendingFor(FAR).map((w) => w.reply_id)).toEqual([first.id]);
   });
 });

@@ -1,72 +1,141 @@
 /**
- * Tag an agent on another linked computer (inbox-far-tags.ts): the tagged agent's answer, from its own computer.
- * send_message with `reply_to` a message of a thread on another computer that handed this session a wake there
- * (inbox-far-wakes.ts) goes to that computer's door (`POST agent-reply`), as this Inbox's own held write: at once
- * while it is online, and when it is back otherwise. That computer writes it as this session, with this computer
- * named. Any other far `reply_to` is refused as before (`thread_on_other_machine`, inbox-mcp.ts).
+ * An agent here writes into a thread on another linked computer (inbox-far-tags.ts is that computer's side). Any
+ * session here may, as it may write in any thread it can read here: send_message with `reply_to` a message or thread
+ * of a linked computer goes to that computer's door (`POST agent-reply`), as this Inbox's own held write, at once
+ * while it is online and when it is back otherwise. That computer runs its own send_message as this session, with
+ * this computer named, so every field works as there: steps, PRs, Priority, a thread name, a branch report.
  *
- * The words and the fields about them go; what lives on this computer's disk or in that thread's state does not yet:
- * files (attachments), steps, PRs, a branch, Priority and a thread name are refused with words, nothing sent.
+ * What lives on this disk is read here and sent along: each attached file and each picture the body shows from this
+ * disk is read by this Inbox's own file rules and sent to that computer's `uploads` route (as a window's reply on
+ * another computer sends its files), and a branch report gets its head and remote from this computer's git.
  */
 
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
+import type { InboxAttachment } from "@plannotator/core/inbox-types";
+import { planAgentBodyPictures } from "@plannotator/shared/inbox/agent-pictures";
+import { inboxBlobPath, recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { OutboxEntry } from "./inbox-outbox";
+import type { PeerLink } from "./inbox-peer-link";
 import { FAR_AGENT_REPLY_ROUTE } from "./inbox-far-tags";
 
 /** How long send_message waits for the other computer's answer while it is online. */
 const FAR_REPLY_WAIT_MS = 6_000;
 
 export interface FarReplyDeps {
-  /** The far thread a wake this session was handed belongs to, by a message id or thread id of it. */
-  placeOf: (id: string, session: string) => { machine: string; thread_id: string } | null;
+  /** The linked computer whose thread `id` (a message or thread id) is, and that thread; null: none (the send goes on as before). */
+  placeOf: (id: string) => Promise<{ machine: string; thread_id: string } | null>;
   nameOf: (machine: string) => string | null;
+  online: (machine: string) => boolean;
   holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number) => Promise<OutboxEntry | null> | null;
+  /** Files on this disk, read by this Inbox's attachment rules (no folder, no dotenv file, it must exist). */
+  readFiles: (paths: string[], base: string | undefined) => Promise<InboxAttachment[]>;
+  /** This Inbox's own copy of a file it read (its blob). */
+  blobOf: (attachment: InboxAttachment) => string;
+  /** One file sent to that computer's `uploads` route: its upload id there. */
+  upload: (machine: string, name: string, path: string) => Promise<string>;
 }
 
-/** The send's fields that cannot cross to another computer's thread yet. */
-const NOT_ACROSS = ["attachments", "steps", "pulls", "branch", "priority", "thread"] as const;
+/** What this file needs of the linked machines (inbox-machines.ts) and of the wakes this Inbox was handed (inbox-far-wakes.ts). */
+interface FarReplyMachines {
+  peerLinks: () => readonly PeerLink[];
+  nameOf: (machine: string) => string | null;
+  holdWrite: FarReplyDeps["holdWrite"];
+  readThread: (ask: { thread_id?: string; message_id?: string; limit?: number }) => Promise<{ machine: string; answer: { thread_id: string } } | null>;
+}
+
+/** The deps over this Inbox's linked machines: where a far id is (a wake's, a listed thread's, else asked), and its files sent there. */
+export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: string) => { machine: string; thread_id: string } | null }, storeDir: string): FarReplyDeps {
+  const peer = (machine: string) => machines.peerLinks().find((p) => p.id === machine) ?? null;
+  return {
+    placeOf: async (id) => {
+      const handed = wakes.placeOf(id);
+      if (handed) return handed;
+      const listed = machines.peerLinks().find((p) => p.list?.rows.some((row) => row.thread_id === id));
+      if (listed) return { machine: listed.id, thread_id: id };
+      // A message id alone: the computer that holds it says which thread (the far read's own ask).
+      const found = await machines.readThread({ message_id: id.replace(/-stop$/, ""), limit: 1 });
+      return found ? { machine: found.machine, thread_id: found.answer.thread_id } : null;
+    },
+    nameOf: machines.nameOf,
+    online: (machine) => peer(machine)?.state === "online",
+    holdWrite: machines.holdWrite,
+    readFiles: (paths, base) => recordInboxAttachments(storeDir, paths, { base: base ?? "/", at: new Date().toISOString() }),
+    blobOf: (attachment) => inboxBlobPath(storeDir, attachment.sent_sha256),
+    upload: async (machine, name, path) => {
+      const link = peer(machine);
+      if (!link) throw new InboxError("machine_offline", FAR_REPLY_WORDS.filesAway(machines.nameOf(machine) ?? "the other computer"));
+      const response = await link.request("uploads", `?name=${encodeURIComponent(name)}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: Bun.file(path), timeoutMs: 60_000 });
+      const answer = (await response.json().catch(() => ({}))) as { upload?: { upload_id?: unknown }; code?: unknown; error?: unknown };
+      if (!response.ok || typeof answer.upload?.upload_id !== "string") {
+        throw new InboxError(typeof answer.code === "string" ? answer.code : "upload_failed", typeof answer.error === "string" ? answer.error : `${name} could not be sent to ${machines.nameOf(machine) ?? "the other computer"}.`);
+      }
+      return answer.upload.upload_id;
+    },
+  };
+}
 
 /**
  * The result lines (plain status, DRAFT). One place, so a change is one edit.
  */
 export const FAR_REPLY_WORDS = {
-  sent: (replayed: boolean, thread: string, machine: string) => `${replayed ? "Already sent" : "Sent"} to the Plannotator Inbox (thread ${thread}, on ${machine}).`,
   held: (thread: string, machine: string) => `Waiting for ${machine}: your message goes into thread ${thread} when ${machine} is back.`,
-  notAcross: (fields: readonly string[], machine: string) =>
-    `${fields.join(", ")}: not taken by a message into a thread on ${machine} yet. Nothing was sent; send it without ${fields.length === 1 ? "it" : "them"}.`,
+  filesAway: (machine: string) => `${machine} cannot be reached now, and files go to it only while it is online. Nothing was sent: send it again when ${machine} is back, or without the files.`,
 };
+
+/** A branch report's head and remote, read from this computer's git where the agent works, when it did not name them. */
+function branchHere(value: unknown, folder: string | undefined): unknown {
+  if (!value || typeof value !== "object" || !folder) return value;
+  const branch = { ...(value as Record<string, unknown>) };
+  const git = (...args: string[]) => {
+    const run = spawnSync("git", ["-C", folder, ...args], { encoding: "utf8", timeout: 5_000 });
+    return run.status === 0 ? run.stdout.trim() : "";
+  };
+  if (typeof branch.head !== "string" && typeof branch.name === "string") {
+    const head = git("rev-parse", "--verify", "--quiet", `${branch.name}^{commit}`);
+    if (head) branch.head = head;
+  }
+  if (typeof branch.remote_url !== "string") {
+    const remote = git("remote", "get-url", "origin");
+    if (remote) branch.remote_url = remote;
+  }
+  return branch;
+}
 
 export async function farAgentReply(
   deps: FarReplyDeps,
-  input: Record<string, unknown> & { body: string; reply_to?: string; subject?: string; idempotency_key?: string; agent_session?: string; agent_name?: string },
+  input: Record<string, unknown> & { body: string; reply_to?: string; idempotency_key?: string; agent_session?: string; agent_name?: string; agent_host?: string; project_path?: string },
   nextStep: () => Promise<string>,
+  workingFolder: string | undefined,
 ): Promise<{ text: string; structured: Record<string, unknown> } | null> {
   const replyTo = input.reply_to?.trim();
   const session = input.agent_session?.trim();
   if (!replyTo || !session) return null;
-  const place = deps.placeOf(replyTo, session);
+  const place = await deps.placeOf(replyTo);
   if (!place) return null;
   const name = deps.nameOf(place.machine) ?? "the other computer";
-  const unsent = NOT_ACROSS.filter((field) => {
-    const value = input[field];
-    return value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0) && !(typeof value === "string" && value.trim() === "");
-  });
-  if (unsent.length > 0) throw new InboxError("not_across_computers", FAR_REPLY_WORDS.notAcross(unsent, name));
+  const here = workingFolder && isAbsolute(workingFolder) ? workingFolder : input.project_path && isAbsolute(input.project_path) ? input.project_path : undefined;
+  // Files and the pictures the body shows from this disk: read here, sent there, named as the body names them.
+  const given = Array.isArray(input.attachments) ? (input.attachments as unknown[]).filter((item): item is string => typeof item === "string") : [];
+  const pictures = here ? planAgentBodyPictures(input.body, given, here, (path) => existsSync(path) && statSync(path).isFile()) : { body: input.body, files: [] };
+  const files = [...given.map((path) => ({ path, name: null as string | null })), ...pictures.files.map((file) => ({ path: file.path, name: file.name as string | null }))];
+  const uploads: string[] = [];
+  if (files.length > 0) {
+    if (!deps.online(place.machine)) throw new InboxError("machine_offline", FAR_REPLY_WORDS.filesAway(name));
+    const read = await deps.readFiles(files.map((file) => file.path), here);
+    for (const [i, attachment] of read.entries()) uploads.push(await deps.upload(place.machine, files[i]!.name ?? attachment.name, deps.blobOf(attachment)));
+  }
   const key = input.idempotency_key?.trim() || `far-reply:${randomUUID()}`;
+  const { agent_session: _session, agent_name: _name, agent_host: _host, project_path: _path, ...rest } = input;
+  const args: Record<string, unknown> = { ...rest, body: pictures.body, reply_to: replyTo, idempotency_key: key, ...(uploads.length > 0 ? { attachments: uploads } : {}) };
+  if (args.branch !== undefined) args.branch = branchHere(args.branch, here);
   const held = deps.holdWrite(
     place.machine,
     FAR_AGENT_REPLY_ROUTE,
-    {
-      idempotency_key: key,
-      reply_to: replyTo,
-      session,
-      body: input.body,
-      ...(input.agent_name ? { name: input.agent_name } : {}),
-      ...(input.subject ? { subject: input.subject } : {}),
-      ...(Array.isArray(input.supersedes) ? { supersedes: input.supersedes } : {}),
-      ...(Array.isArray(input.done) ? { done: input.done } : {}),
-    },
+    { idempotency_key: key, session, ...(input.agent_host ? { host: input.agent_host } : {}), ...(input.agent_name ? { name: input.agent_name } : {}), args },
     place.thread_id,
     FAR_REPLY_WAIT_MS,
   );
@@ -74,12 +143,10 @@ export async function farAgentReply(
   const entry = await held;
   const machine = { id: place.machine, name };
   if (entry?.state === "delivered") {
-    const answer = (entry.answer ?? {}) as { message_id?: unknown; thread_id?: unknown; replayed?: unknown };
-    const thread = typeof answer.thread_id === "string" ? answer.thread_id : place.thread_id;
-    return {
-      text: `${FAR_REPLY_WORDS.sent(answer.replayed === true, thread, name)} ${await nextStep()}`,
-      structured: { thread_id: thread, ...(typeof answer.message_id === "string" ? { message_id: answer.message_id } : {}), machine },
-    };
+    // That computer's own send_message answer: its words and its fields, as a local send's.
+    const answer = (entry.answer ?? {}) as { text?: unknown; structured?: unknown };
+    const structured = answer.structured && typeof answer.structured === "object" ? (answer.structured as Record<string, unknown>) : {};
+    return { text: typeof answer.text === "string" ? answer.text : `${await nextStep()}`, structured: { ...structured, machine } };
   }
   if (entry && (entry.state === "refused" || entry.state === "dropped" || entry.state === "cancelled")) {
     const answer = (entry.answer ?? {}) as { code?: unknown; error?: unknown };

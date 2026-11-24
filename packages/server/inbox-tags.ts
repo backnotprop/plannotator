@@ -53,6 +53,8 @@ export interface InboxTaggableSession {
   owner: boolean;
   /** It wrote in this thread. */
   wrote_thread: boolean;
+  /** Its connection takes Send now (a reply into the running turn): in a far computer's list (`taggable-agents`) only. */
+  send_now?: boolean;
   /** A session on another linked computer (inbox-far-tags.ts): that computer's Inbox id and its name here. */
   machine?: string;
   machine_name?: string;
@@ -169,6 +171,7 @@ export function createInboxTagsRoute(options: {
           busy: entry.busy,
           idle_since: entry.idleSince === null ? null : iso(entry.idleSince),
           taggable: entry.tags,
+          ...(entry.sendNow ? { send_now: true } : {}),
           owner: false,
           wrote_thread: false,
         };

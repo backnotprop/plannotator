@@ -49,10 +49,12 @@ export interface FarTagsDeps {
   nameOf: (machine: string) => string | null;
   holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number) => Promise<OutboxEntry | null> | null;
   heldWrite: (key: string) => OutboxEntry | null;
-  /** The wake this Inbox would hand `session` for `reply` if it polled here (inbox.ts `replyCommand`). */
-  commandFor: (reply: InboxMessage, session: string) => InboxReplyCommand;
-  /** An agent's message written here as a far session (inbox-mcp.ts `sendAgentMessage`). */
-  sendAs: (input: FarReplyInput) => Promise<{ message_id: string; thread_id: string; replayed: boolean }>;
+  /** The wake this Inbox would hand `session` for `reply` if it polled here (inbox.ts `replyCommand`); `now`: its Send now. */
+  commandFor: (reply: InboxMessage, session: string, now: boolean) => InboxReplyCommand;
+  /** An agent's send_message run here as a far session, the tool's own answer (inbox-far-send.ts). */
+  sendAs: (input: FarReplyInput) => Promise<{ text: string; structured: Record<string, unknown> }>;
+  /** Whether `session` is one of this computer's own (live here, or it wrote here with no other computer). */
+  ownSession: (session: string) => boolean;
   now?: () => number;
 }
 
@@ -62,21 +64,15 @@ export interface FarReplyInput {
   session: string;
   host: string | null;
   name: string | null;
-  reply_to: string;
-  body: string;
-  subject?: string;
-  supersedes?: string[];
-  done?: string[];
-  idempotency_key: string;
+  /** send_message's own arguments, as the agent gave them there (its files as upload ids here). */
+  args: Record<string, unknown>;
 }
+
+/** The send_message fields a far answer carries (its paths are the other computer's: `project_path` stays there). */
+const FAR_SEND_FIELDS = ["body", "subject", "thread", "reply_to", "idempotency_key", "attachments", "supersedes", "done", "priority", "pulls", "steps", "branch"] as const;
 
 const isMachineId = (value: unknown): value is string => typeof value === "string" && /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/.test(value);
 const shortText = (value: unknown, max: number): string | null => (typeof value === "string" && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value) ? value : null);
-const idList = (value: unknown, field: string): string[] | undefined => {
-  if (value === undefined || value === null) return undefined;
-  if (!Array.isArray(value) || value.length > 100 || !value.every((id) => typeof id === "string" && id.length <= 200)) throw new InboxError("validation_error", `${field}: a list of ids.`, { field });
-  return value as string[];
-};
 
 /** One computer's agents as its door sent them, each row checked. */
 export function farAgentRows(raw: unknown): InboxTaggableSession[] {
@@ -102,6 +98,7 @@ export function farAgentRows(raw: unknown): InboxTaggableSession[] {
       busy: typeof s.busy === "boolean" ? s.busy : null,
       idle_since: time(s.idle_since),
       taggable: s.taggable === true,
+      ...(s.send_now === true ? { send_now: true } : {}),
       owner: false,
       wrote_thread: false,
     });
@@ -207,6 +204,22 @@ export function createInboxFarTags(deps: FarTagsDeps) {
     if (record.author.kind !== "person") return;
     const members = store.farSessions(record.thread_id);
     for (const [session, member] of members) {
+      // This reply's own change after its wake went: taken back (not handed there), or Send now (into the running turn).
+      const first = deps.heldWrite(farWakeKey(record.id, session));
+      if (first && store.isFor(record, session)) {
+        const tag = store.isOwner(record, session) ? null : (record.tags?.find((t) => t.session === session) ?? null);
+        const nowAt = tag ? tag.deliver_now_at : record.deliver_now_at;
+        const change = record.taken_back_at ? "taken" : nowAt ? `now:${nowAt}` : null;
+        const key = change ? `${farWakeKey(record.id, session)}:${change}` : null;
+        if (key && !deps.heldWrite(key)) {
+          try {
+            const body = record.taken_back_at ? { withdrawn: true } : { replaces: true, command: deps.commandFor(record, session, true) };
+            void deps.holdWrite(member.machine, FAR_WAKE_ROUTE, { idempotency_key: key, reply_id: record.id, thread_id: record.thread_id, session, host: member.host, ...body }, record.thread_id, 0);
+          } catch {
+            // The computer was unlinked: nothing waits there for it.
+          }
+        }
+      }
       let owed: InboxMessage[];
       try {
         owed = store.pendingReplies(session, { tags: true });
@@ -217,7 +230,7 @@ export function createInboxFarTags(deps: FarTagsDeps) {
         const key = farWakeKey(reply.id, session);
         if (deps.heldWrite(key)) continue;
         try {
-          const command = deps.commandFor(reply, session);
+          const command = deps.commandFor(reply, session, false);
           void deps.holdWrite(member.machine, FAR_WAKE_ROUTE, { idempotency_key: key, reply_id: reply.id, thread_id: reply.thread_id, session, host: member.host, command }, reply.thread_id, 0);
         } catch {
           // Too big to hold, or the computer was unlinked: the wake waits for the next message here.
@@ -226,48 +239,48 @@ export function createInboxFarTags(deps: FarTagsDeps) {
     }
   };
 
-  /** The far session `session` of `machine` in the thread of message `id`, or a refusal. */
-  const memberOf = (machine: string, id: unknown, session: unknown) => {
-    if (!isInboxId("msg", id)) throw new InboxError("validation_error", "reply_to: a message id.", { field: "reply_to" });
+  /**
+   * Whether `machine`'s token may write as `session` in the thread of `message`: any session of that computer may, as
+   * any agent here may write in a thread it can read. Refused only when the session is not that computer's: one of
+   * this computer's own, or one this Inbox knows on another computer.
+   */
+  const asSession = (machine: string, message: InboxMessage, session: unknown): { host: string | null } => {
     if (typeof session !== "string" || !INBOX_SESSION_ID_PATTERN.test(session)) throw new InboxError("validation_error", "session: a session id.", { field: "session" });
-    const message = store.message(id);
-    if (!message) throw new InboxError("message_not_found", `No message ${id}.`);
     const member = store.farSessions(message.thread_id).get(session);
-    if (!member || member.machine !== machine) {
-      throw new InboxError("not_your_session", "This thread does not name that session on your computer: only a session tagged into it from there writes in it.");
+    const elsewhere = store.sessionMachine(session);
+    if (deps.ownSession(session) || (member && member.machine !== machine) || (elsewhere !== null && elsewhere !== machine)) {
+      throw new InboxError("not_your_session", "That session is not one of your computer's: nothing was written.");
     }
-    return { message, member };
+    return { host: member?.host ?? null };
   };
 
-  /** `POST agent-reply` from `machine`: its session's answer, written here as that session. */
+  const messageOf = (id: unknown, field: string): InboxMessage => {
+    if (!isInboxId("msg", id)) throw new InboxError("validation_error", `${field}: a message id.`, { field });
+    const message = store.message(id);
+    if (!message) throw new InboxError("message_not_found", `No message ${id}.`);
+    return message;
+  };
+
+  /** `POST agent-reply` from `machine`: its session's send_message into a thread here, run here as that session. */
   const agentReply = async (machine: string, body: Record<string, unknown>) => {
-    const { member } = memberOf(machine, body.reply_to, body.session);
-    if (typeof body.body !== "string" || body.body.trim() === "" || body.body.length > FAR_REPLY_BODY_MAX) throw new InboxError("validation_error", "body: the message's words.", { field: "body" });
-    const key = shortText(body.idempotency_key, 200);
-    if (!key) throw new InboxError("validation_error", "idempotency_key: required.", { field: "idempotency_key" });
-    const subject = body.subject === undefined || body.subject === null ? undefined : shortText(body.subject, 500);
-    if (subject === null) throw new InboxError("validation_error", "subject: one line.", { field: "subject" });
-    return deps.sendAs({
-      machine,
-      machine_name: deps.nameOf(machine),
-      session: body.session as string,
-      host: member.host,
-      name: shortText(body.name, 80),
-      reply_to: body.reply_to as string,
-      body: body.body,
-      ...(subject ? { subject } : {}),
-      ...(idList(body.supersedes, "supersedes") ? { supersedes: idList(body.supersedes, "supersedes") } : {}),
-      ...(idList(body.done, "done") ? { done: idList(body.done, "done") } : {}),
-      idempotency_key: key,
-    });
+    const raw = body.args && typeof body.args === "object" && !Array.isArray(body.args) ? (body.args as Record<string, unknown>) : null;
+    if (!raw) throw new InboxError("validation_error", "args: send_message's arguments.", { field: "args" });
+    // A thread id, a message id or a stop notice's id, as reply_to takes them here.
+    const replyTo = typeof raw.reply_to === "string" ? raw.reply_to.trim().replace(/-stop$/, "") : null;
+    const { host } = asSession(machine, messageOf(replyTo, "reply_to"), body.session);
+    if (typeof raw.body !== "string" || raw.body.length > FAR_REPLY_BODY_MAX) throw new InboxError("validation_error", "body: the message's words.", { field: "body" });
+    if (!shortText(raw.idempotency_key, 200)) throw new InboxError("validation_error", "idempotency_key: required.", { field: "idempotency_key" });
+    const args = Object.fromEntries(FAR_SEND_FIELDS.flatMap((field) => (raw[field] === undefined ? [] : [[field, raw[field]]])));
+    return deps.sendAs({ machine, machine_name: deps.nameOf(machine), session: body.session as string, host: shortText(body.host, 64) ?? host, name: shortText(body.name, 80), args });
   };
 
   /** `POST far-delivered` from `machine`: its session took the wake of `reply_id`. */
   const delivered = (machine: string, body: Record<string, unknown>) => {
-    const { message, member } = memberOf(machine, body.reply_id, body.session);
+    const message = messageOf(body.reply_id, "reply_id");
+    const { host } = asSession(machine, message, body.session);
     // A hand-off's notice to the former owner is delivered by its own id (`<reply>-stop`).
     const id = body.id === `${message.id}-stop` ? body.id : message.id;
-    const reply = store.recordDelivery(id, { host: member.host ?? "agent", session: body.session as string });
+    const reply = store.recordDelivery(id, { host: host ?? "agent", session: body.session as string });
     return { ok: true, delivered: true, reply_id: reply.id };
   };
 
@@ -280,7 +293,16 @@ export function createInboxFarTags(deps: FarTagsDeps) {
   /** Whether a linked computer's agents, as last read, list `session` (it is live there). */
   const lists = (session: string): boolean => [...agents.values()].some((entry) => entry.rows.some((row) => row.session === session));
 
-  return { rows, targets, onPersonMessage, agentReply, delivered, self, lists };
+  /** A far session's connection as its computer last said (busy, and whether it takes Send now), for Send now here. */
+  const connectionOf = (session: string): { busy: boolean | null; send_now: boolean } | null => {
+    for (const entry of agents.values()) {
+      const row = entry.rows.find((r) => r.session === session);
+      if (row) return { busy: row.busy, send_now: row.send_now === true };
+    }
+    return null;
+  };
+
+  return { rows, targets, onPersonMessage, agentReply, delivered, self, lists, connectionOf };
 }
 
 export type InboxFarTags = ReturnType<typeof createInboxFarTags>;
