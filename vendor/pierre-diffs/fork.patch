@@ -1,12 +1,12 @@
 diff --git a/packages/diffs/package.json b/packages/diffs/package.json
-index be0fba76..fe242632 100644
+index be0fba76..9a97c924 100644
 --- a/packages/diffs/package.json
 +++ b/packages/diffs/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "@pierre/diffs",
 -  "version": "1.7.0-beta.3",
-+  "version": "1.7.0-beta.3-sem.6",
++  "version": "1.7.0-beta.3-sem.7",
    "license": "apache-2.0",
    "files": [
      "dist",
@@ -155,6 +155,274 @@ index 79f7703b..10185460 100644
        row.lineNumber,
        row.altLineNumber,
        row.lineIndexText
+diff --git a/packages/diffs/src/managers/InteractionManager.ts b/packages/diffs/src/managers/InteractionManager.ts
+index 2ed8c725..b481fc6e 100644
+--- a/packages/diffs/src/managers/InteractionManager.ts
++++ b/packages/diffs/src/managers/InteractionManager.ts
+@@ -131,12 +131,82 @@ interface SelectionRenderState {
+ }
+
+ interface LineRenderColumn {
+-  content: HTMLElement;
+-  gutter: HTMLElement;
++  rows: CodeRow[];
+   renderEditorActiveLine: boolean;
+   renderSelectedLines: boolean;
+ }
+
++/** One row of a code column: its gutter cell and its content cell. */
++interface CodeRow {
++  gutter: HTMLElement;
++  content: HTMLElement;
++}
++
++// Attributes that mark a row the layout drew, in either column.
++const CODE_ROW_ATTRIBUTES = [
++  'data-line-index',
++  'data-gutter-buffer',
++  'data-content-buffer',
++  'data-separator',
++  'data-line-annotation',
++  'data-semantic-fold',
++  'data-no-newline',
++  'data-merge-conflict-actions',
++];
++
++function isCodeRow(element: Element): element is HTMLElement {
++  return (
++    element instanceof HTMLElement &&
++    CODE_ROW_ATTRIBUTES.some((attribute) => element.hasAttribute(attribute))
++  );
++}
++
++/**
++ * Pairs a code column's gutter cells with its content cells, row by row. A
++ * node the layout did not draw (one a browser extension put there, say) is
++ * skipped. Returns undefined when the rows cannot be paired: a different
++ * number of rows, or a pair whose line indexes differ.
++ */
++function pairCodeRows(
++  gutter: Element,
++  content: Element
++): CodeRow[] | undefined {
++  const rows: CodeRow[] = [];
++  if (gutter.children.length === content.children.length) {
++    for (let i = 0; i < content.children.length; i++) {
++      const gutterElement = gutter.children[i];
++      const contentElement = content.children[i];
++      if (
++        gutterElement instanceof HTMLElement &&
++        contentElement instanceof HTMLElement
++      ) {
++        rows.push({ gutter: gutterElement, content: contentElement });
++      }
++    }
++    return rows;
++  }
++  const gutterRows = Array.from(gutter.children).filter(isCodeRow);
++  const contentRows = Array.from(content.children).filter(isCodeRow);
++  if (gutterRows.length !== contentRows.length) {
++    return undefined;
++  }
++  for (let i = 0; i < contentRows.length; i++) {
++    const gutterElement = gutterRows[i];
++    const contentElement = contentRows[i];
++    const gutterIndex = gutterElement.getAttribute('data-line-index');
++    const contentIndex = contentElement.getAttribute('data-line-index');
++    if (
++      gutterIndex != null &&
++      contentIndex != null &&
++      gutterIndex !== contentIndex
++    ) {
++      return undefined;
++    }
++    rows.push({ gutter: gutterElement, content: contentElement });
++  }
++  return rows;
++}
++
+ /** The top and bottom selected content rows of one code column. */
+ export interface SelectedRowEdges {
+   first: HTMLElement;
+@@ -1726,33 +1796,27 @@ export class InteractionManager<TMode extends InteractionManagerMode> {
+
+   // Resolve a desired line range before touching the last successful DOM
+   // state, so a transient line-index mismatch leaves that rendering intact and
+-  // dirty.
++  // dirty. Undefined when there is no range, or when its lines have no rows
++  // (a line in a collapsed gap of a partial diff, say).
+   private resolveLineRenderRange(
+     state: LineRenderState,
+-    split: boolean,
+-    source: 'selected-lines' | 'editor-active-line'
++    split: boolean
+   ): { start: number; end: number } | undefined {
+     if (state.range == null) {
+       return undefined;
+     }
+-    const rowRange = this.getIndexesFromSelection(state.range, split);
+-    if (rowRange == null) {
+-      console.error({ rowRange, range: state.range });
+-      throw new Error(
+-        `InteractionManager.renderSelection: No valid ${source} rowRange`
+-      );
+-    }
+-    return rowRange;
++    return this.getIndexesFromSelection(state.range, split);
+   }
+
+   // Validate every code column that will receive changed attributes before
+-  // clearing either channel's previous rendering.
++  // clearing either channel's previous rendering. Undefined when a column's
++  // rows cannot be paired, so nothing is drawn.
+   private getLineRenderColumns(
+     selectedLines: LineRenderState | undefined,
+     selectedRowRange: { start: number; end: number } | undefined,
+     editorActiveLine: LineRenderState | undefined,
+     editorRowRange: { start: number; end: number } | undefined
+-  ): LineRenderColumn[] {
++  ): LineRenderColumn[] | undefined {
+     if (
+       this.pre == null ||
+       (selectedRowRange == null && editorRowRange == null)
+@@ -1793,23 +1857,24 @@ export class InteractionManager<TMode extends InteractionManagerMode> {
+         continue;
+       }
+
+-      const [gutter, content] = code.children;
+-      if (
+-        !(gutter instanceof HTMLElement) ||
+-        !(content instanceof HTMLElement)
+-      ) {
+-        throw new Error(
+-          'InteractionManager.renderSelection: missing gutter or content element'
+-        );
++      let gutter: Element | undefined;
++      let content: Element | undefined;
++      for (const child of code.children) {
++        if (gutter == null && child.hasAttribute('data-gutter')) {
++          gutter = child;
++        } else if (content == null && child.hasAttribute('data-content')) {
++          content = child;
++        }
+       }
+-      if (content.children.length !== gutter.children.length) {
+-        throw new Error(
+-          'InteractionManager.renderSelection: gutter and content children dont match, something is wrong'
+-        );
++      const rows =
++        gutter == null || content == null
++          ? undefined
++          : pairCodeRows(gutter, content);
++      if (rows == null) {
++        return undefined;
+       }
+       columns.push({
+-        content,
+-        gutter,
++        rows,
+         renderEditorActiveLine,
+         renderSelectedLines,
+       });
+@@ -1858,20 +1923,32 @@ export class InteractionManager<TMode extends InteractionManagerMode> {
+     const split = this.pre.getAttribute('data-diff-type') === 'split';
+     const selectedRowRange = !selectedLinesChanged
+       ? undefined
+-      : this.resolveLineRenderRange(selectedLines, split, 'selected-lines');
++      : this.resolveLineRenderRange(selectedLines, split);
+     const editorRowRange = !editorActiveLineChanged
+       ? undefined
+-      : this.resolveLineRenderRange(
+-          editorActiveLine,
+-          split,
+-          'editor-active-line'
+-        );
++      : this.resolveLineRenderRange(editorActiveLine, split);
++    // A range whose lines have no rows, or rows that cannot be paired, is not
++    // drawn: the last rendering stays, and the changed channels stay dirty so
++    // a later render draws them.
++    if (
++      (selectedLinesChanged &&
++        selectedLines.range != null &&
++        selectedRowRange == null) ||
++      (editorActiveLineChanged &&
++        editorActiveLine.range != null &&
++        editorRowRange == null)
++    ) {
++      return false;
++    }
+     const columns = this.getLineRenderColumns(
+       selectedLinesChanged ? selectedLines : undefined,
+       selectedRowRange,
+       editorActiveLineChanged ? editorActiveLine : undefined,
+       editorRowRange
+     );
++    if (columns == null) {
++      return false;
++    }
+     const selectedLinesComplete =
+       selectedLines.range == null ||
+       columns.some((column) => column.renderSelectedLines);
+@@ -1903,23 +1980,15 @@ export class InteractionManager<TMode extends InteractionManagerMode> {
+     const selectedIsSingle = selectedFirst === selectedLast;
+     const editorLineIndex = editorRowRange?.start;
+     for (const column of columns) {
+-      const { content, gutter, renderEditorActiveLine, renderSelectedLines } =
+-        column;
++      const { rows, renderEditorActiveLine, renderSelectedLines } = column;
+       const finalLineIndex = Math.max(
+         renderSelectedLines ? (selectedLast ?? -Infinity) : -Infinity,
+         renderEditorActiveLine ? (editorLineIndex ?? -Infinity) : -Infinity
+       );
+       let edges: SelectedRowEdges | undefined;
+-      const len = content.children.length;
++      const len = rows.length;
+       for (let i = 0; i < len; i++) {
+-        const contentElement = content.children[i];
+-        const gutterElement = gutter.children[i];
+-        if (
+-          !(contentElement instanceof HTMLElement) ||
+-          !(gutterElement instanceof HTMLElement)
+-        ) {
+-          continue;
+-        }
++        const { content: contentElement, gutter: gutterElement } = rows[i];
+
+         // A closed semantic fold's row and a gap each stand in for a range of
+         // the view's rows. The fold's row is selected when the selection
+@@ -1987,15 +2056,11 @@ export class InteractionManager<TMode extends InteractionManagerMode> {
+             this.markSelected(contentElement, attributeValue);
+             edges ??= { first: contentElement, last: contentElement };
+             edges.last = contentElement;
++            const next = rows[i + 1];
+             if (
+-              gutterElement.nextSibling instanceof HTMLElement &&
+-              contentElement.nextSibling instanceof HTMLElement &&
+-              (contentElement.nextSibling.hasAttribute(
+-                'data-line-annotation'
+-              ) ||
+-                contentElement.nextSibling.hasAttribute(
+-                  'data-merge-conflict-actions'
+-                ))
++              next != null &&
++              (next.content.hasAttribute('data-line-annotation') ||
++                next.content.hasAttribute('data-merge-conflict-actions'))
+             ) {
+               if (selectedIsSingle) {
+                 attributeValue = 'last';
+@@ -2005,9 +2070,9 @@ export class InteractionManager<TMode extends InteractionManagerMode> {
+               } else if (lineIndex === selectedLast) {
+                 this.markSelected(contentElement, '');
+               }
+-              this.markSelected(contentElement.nextSibling, attributeValue);
+-              edges.last = contentElement.nextSibling;
+-              this.markSelected(gutterElement.nextSibling, attributeValue);
++              this.markSelected(next.content, attributeValue);
++              edges.last = next.content;
++              this.markSelected(next.gutter, attributeValue);
+             }
+           }
+         }
 diff --git a/packages/diffs/src/renderers/DiffHunksRenderer.ts b/packages/diffs/src/renderers/DiffHunksRenderer.ts
 index f4dbfccf..0509c04b 100644
 --- a/packages/diffs/src/renderers/DiffHunksRenderer.ts
