@@ -56,6 +56,7 @@ export function drawMessageHead(d: MessageHeadData) {
       newest={d.copy}
       message={message}
       takeBackOf={() => acts.current.takeBackOf(message)}
+      live={d.live}
       head={(more) => (
         <div className="ib-fline ib-is-open" data-open-head="" data-revealed={revealed ? '' : undefined}>
           {!one && (
