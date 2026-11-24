@@ -37,6 +37,7 @@ import { useSettingsSaves } from './data/actions/settings';
 import { useListShown } from './app/useListView';
 import { useListTags } from './app/useListTags';
 import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
+import { decideAwayToast, tuckDecide } from './app/decideTuck';
 import { useSnoozeBack } from './app/useSnoozeBack';
 import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
@@ -5051,7 +5052,8 @@ function Inbox() {
         context={context}
         error={settingsError}
         onToggleTool={toggleTool}
-        onToggleExperimental={(next, feature) => void toggleExperimental(next, feature)} onToggleDecisionMode={(next) => void toggleDecisionMode(next)}
+        onToggleExperimental={(next, feature) => void toggleExperimental(next, feature)}
+        onToggleDecisionMode={(next) => void toggleDecisionMode(next)}
         onToggleCookieHost={(next) => void toggleCookieHost(next)}
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
@@ -6228,21 +6230,9 @@ function Inbox() {
           refresh={refreshDecisions}
           subscribeQuestions={subscribeQuestions}
           onLeft={setDecideLeft}
-          onTuck={(threadId, fileId, question) => {
-            setDecide((current) => (current ? { ...current, tucked: true, file: fileId !== undefined } : current));
-            if (question && !fileId) {
-              // A card's "Open the thread" (approval "inbox-decide-thread-only"): the dialog closes into its pill and
-              // the thread (already behind it) lands on that question, its prompt focused. The same thread replaces
-              // the entry, as a search result's landing does, so Back never stops on the same thread twice.
-              decideLanding.current = { messageId: question.messageId, questionKey: question.key };
-              searchLanding.current = null;
-              const now = routeRef.current;
-              const same = now.page === 'inbox' && now.thread === threadId && !now.file && !now.guide;
-              writeRoute({ page: 'inbox', project: same ? now.project : null, thread: threadId, msg: question.messageId }, same ? { replace: true } : {});
-              return;
-            }
-            writeRoute({ page: 'inbox', project: null, thread: threadId, file: typeof fileId === 'string' ? { id: fileId, version: 'current', focus: null } : null, ...(fileId && typeof fileId !== 'string' ? { ref: fileId } : {}) });
-          }}
+          onTuck={(threadId, fileId, question) => tuckDecide({ setDecide, routeRef, decideLanding, searchLanding }, threadId, fileId, question)}
+          // A Send or a save that fails once the dialog is closed or tucked away: the window's toast says so.
+          onAway={(notice) => showToast(decideAwayToast(notice))}
           onClose={closeDecide}
         />
       )}
