@@ -10,7 +10,9 @@
  * computer (on or off), or two choices that disagree turning off what one of them uses; a choice with no time beating a
  * recorded flip; a switch an env var forces given as a flip, or a far flip turning it; a flip made right after taking
  * a far one losing to it on a slower clock; the person's flip made while a take waits turned back or its time lost; a
- * far time years ahead stored as it is, so a flip here stamps an unsafe time that reads as none; a take telling the
+ * switch at its untouched default on one computer taken by another (a choice made up there, which in a chain of three
+ * overrode the person's off); a computer whose clock runs days ahead, or a time near 2^53, undoing a later click on
+ * another computer on every read (writing and telling each time), or carried into the stamp of that click; a take telling the
  * linked computers when nothing changed, or not telling them when it copied only a time (a third computer never
  * hears); an older Plannotator's list taken (it keeps its own); this Inbox not asking for the event that says a flip
  * was made.
@@ -20,7 +22,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_CAPABILITY_SET_KEYS, type InboxCapabilitySetKey } from "@plannotator/core/inbox-types";
-import { CAPABILITY_FLIP_AHEAD_MS, CAPABILITY_SET_MARK, capabilitySetKeysIn, compareCapabilityFlips, createCapabilitySet, readCapabilitySet, type CapabilitySet } from "./inbox-capability-set";
+import { CAPABILITY_FLIP_AHEAD_MS, CAPABILITY_SET_MARK, capabilityFlipWins, capabilitySetKeysIn, compareCapabilityFlips, createCapabilitySet, readCapabilitySet, type CapabilitySet } from "./inbox-capability-set";
 import { createInboxMachines } from "./inbox-machines";
 import { InboxLinks } from "./inbox-links";
 
@@ -43,7 +45,7 @@ function computer(
   const chosen = new Set<InboxCapabilitySetKey>(Object.keys(start) as InboxCapabilitySetKey[]);
   let config: Record<string, unknown> | undefined;
   const applied: string[] = [];
-  const state = { clock: options.clock ?? 1_000, told: 0 };
+  const state = { clock: options.clock ?? 1_000, told: 0, writes: 0 };
   let release = () => {};
   const set = createCapabilitySet({
     switches: Object.fromEntries(
@@ -66,7 +68,10 @@ function computer(
     ) as never,
     times: () => config,
     // As saveConfig merges `inboxCapabilityFlips`: key by key.
-    saveTimes: (times) => void (config = { ...config, ...structuredClone(times) }),
+    saveTimes: (times) => {
+      state.writes++;
+      config = { ...config, ...structuredClone(times) };
+    },
     self: () => id,
     now: () => state.clock,
   });
@@ -186,7 +191,24 @@ describe("one set of switches across linked computers", () => {
     const a = { on: true, at: 1_000, by: LAPTOP };
     const b = { on: false, at: 1_000, by: STUDIO };
     expect([compareCapabilityFlips(b, a) > 0, compareCapabilityFlips(a, b) < 0]).toEqual([true, true]);
-    expect(compareCapabilityFlips({ on: true, at: null, by: null }, { on: false, at: null, by: null })).toBeGreaterThan(0);
+    // A switch at its untouched default there is never taken, even over one at its default here.
+    expect(capabilityFlipWins({ on: true, at: null, by: null }, { on: false, at: null, by: null })).toBe(false);
+  });
+
+  test("a switch at its untouched default is never taken: in a chain of three, the person's off stands on every computer", async () => {
+    // Chapter diagrams: at its default on Laptop (on) and on Studio (another version: off); Mini's person turned it off.
+    const laptop = computer(LAPTOP, {}, { defaults: ["chapter_diagrams"] });
+    const studio = computer(STUDIO);
+    const mini = computer(MINI, { chapter_diagrams: false });
+    // Studio reads Laptop: nothing is turned or written, and Studio still gives it as never flipped.
+    await studio.set.take(laptop.set.wire());
+    expect([studio.applied, studio.flips(), studio.state.told, studio.set.wire().chapter_diagrams]).toEqual([[], undefined, 0, { on: false, at: null, by: null }]);
+    // Linked in a chain, Laptop to Studio to Mini, in either order of reading.
+    for (let round = 0; round < 3; round++) {
+      await meet(laptop, studio);
+      await meet(mini, studio);
+    }
+    expect([laptop.on.chapter_diagrams, studio.on.chapter_diagrams, mini.on.chapter_diagrams, mini.applied]).toEqual([false, false, false, []]);
   });
 
   test("a flip made right after taking a far one stands over it, though this computer's clock is behind", async () => {
@@ -264,23 +286,66 @@ describe("one set of switches across linked computers", () => {
     expect([laptop.on.bro, laptop.on.board]).toEqual([false, true]);
   });
 
-  test("a far time past a day ahead is read as a day ahead: the switch is taken, and a flip here is stamped a safe time past it", async () => {
+  test("a computer whose clock runs two days ahead: its flip is taken once, a later click here wins and stays, and reads after it change nothing", async () => {
+    const DAY = CAPABILITY_FLIP_AHEAD_MS;
+    const T = 100 * DAY;
+    for (const value of [true, false]) {
+      // Laptop's clock is right; Studio's runs two days ahead. Laptop's person chose the other way before flips were kept.
+      const laptop = computer(LAPTOP, { steps: !value }, { clock: T });
+      const studio = computer(STUDIO, {}, { clock: T + 2 * DAY });
+      studio.flip("steps", value);
+      await laptop.set.take(studio.set.wire());
+      expect([value, laptop.on.steps, laptop.applied, laptop.state.told]).toEqual([value, value, [`steps ${value}`], 1]);
+      // Stored as it came: Laptop gives Studio's time on unchanged.
+      expect(laptop.set.wire().steps).toEqual({ on: value, at: T + 2 * DAY, by: STUDIO });
+      // The person turns it back on Laptop: stamped by Laptop's clock, not carried past Studio's far time.
+      laptop.flip("steps", !value, T + 1_000);
+      expect(laptop.set.wire().steps).toEqual({ on: !value, at: T + 1_000, by: LAPTOP });
+      // Studio keeps its own flip: by its clock, Laptop's is two days older.
+      await studio.set.take(laptop.set.wire());
+      expect(studio.on.steps).toBe(value);
+      // Laptop reads Studio's list again and again: the click stands, and nothing is written or told.
+      const { writes, told } = laptop.state;
+      for (let read = 0; read < 5; read++) {
+        laptop.state.clock += 60_000;
+        await laptop.set.take(studio.set.wire());
+      }
+      expect([laptop.on.steps, laptop.applied.length, laptop.state.writes - writes, laptop.state.told - told]).toEqual([!value, 1, 0, 0]);
+      // Once Studio's time is within a day of Laptop's clock it is trusted, taken once, and the two agree from then on.
+      laptop.state.clock = T + DAY;
+      studio.state.clock = T + 3 * DAY;
+      await meet(laptop, studio);
+      const settled = [laptop.state.writes, laptop.state.told, studio.state.writes, studio.state.told];
+      await meet(laptop, studio);
+      expect([laptop.on.steps, studio.on.steps]).toEqual([value, value]);
+      expect([laptop.state.writes, laptop.state.told, studio.state.writes, studio.state.told]).toEqual(settled);
+    }
+  });
+
+  test("a far time near 2^53 is not trusted: taken once as a choice at 0, a later click here wins and stays, and the far side takes it", async () => {
     const studio = computer(STUDIO, {}, { clock: 1_000 });
-    await studio.set.take({ grid: { on: true, at: Number.MAX_SAFE_INTEGER, by: LAPTOP } });
-    expect([studio.on.grid, studio.set.wire().grid]).toEqual([true, { on: true, at: 1_000 + CAPABILITY_FLIP_AHEAD_MS, by: LAPTOP }]);
+    const far: CapabilitySet = { grid: { on: true, at: Number.MAX_SAFE_INTEGER, by: LAPTOP } };
+    await studio.set.take(far);
+    expect([studio.on.grid, studio.set.wire().grid, studio.state.told]).toEqual([true, { on: true, at: Number.MAX_SAFE_INTEGER, by: LAPTOP }, 1]);
     studio.flip("grid", false, 2_000);
-    const mine = studio.set.wire().grid!;
-    expect([mine.on, mine.by, Number.isSafeInteger(mine.at), mine.at! > 1_000 + CAPABILITY_FLIP_AHEAD_MS]).toEqual([false, STUDIO, true, true]);
-    // Given to a computer whose clock agrees, that flip is taken there.
-    const laptop = computer(LAPTOP, { grid: true }, { clock: 2_000 });
+    expect(studio.set.wire().grid).toEqual({ on: false, at: 2_000, by: STUDIO });
+    const { writes, told } = studio.state;
+    for (let read = 0; read < 5; read++) {
+      studio.state.clock += 1_000;
+      await studio.set.take(far);
+    }
+    expect([studio.on.grid, studio.applied.length, studio.state.writes - writes, studio.state.told - told]).toEqual([false, 1, 0, 0]);
+    // The computer that kept that time as its own does not trust it either: it takes Studio's flip, and a click there
+    // is stamped by its clock, never pinned past it.
+    const laptop = computer(LAPTOP, {}, { clock: 1_000 });
+    laptop.flip("grid", true, Number.MAX_SAFE_INTEGER);
+    laptop.state.clock = 3_000;
     await laptop.set.take(studio.set.wire());
     expect(laptop.on.grid).toBe(false);
-    // A time already kept far ahead (from before this) is read as a day ahead too, and a flip stamps a safe time.
-    const mini = computer(MINI, {}, { clock: 1_000 });
-    mini.flip("steps", true, Number.MAX_SAFE_INTEGER);
-    mini.state.clock = 1_000;
-    mini.flip("steps", false);
-    expect(mini.set.wire().steps).toEqual({ on: false, at: 1_000 + CAPABILITY_FLIP_AHEAD_MS + 1, by: MINI });
+    laptop.flip("grid", true);
+    expect(laptop.set.wire().grid).toEqual({ on: true, at: 3_000, by: LAPTOP });
+    await studio.set.take(laptop.set.wire());
+    expect(studio.on.grid).toBe(true);
   });
 
   test("a switch that cannot be saved here keeps its state and its flip until the next read", async () => {

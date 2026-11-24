@@ -37,8 +37,18 @@ export function scheduledSwitch(deps: {
   };
   const wire = (): { scheduled_threads?: { on: boolean; login?: "added" | "unavailable" } } =>
     supported ? { scheduled_threads: { on: on(), ...(on() && login ? { login } : {}) } } : {};
-  /** The login item follows the switch: added while on, removed when it goes off. */
-  const syncLogin = async (): Promise<void> => {
+  /**
+   * The login item follows the switch: added while on, removed when it goes off. One at a time, each reading the switch
+   * when it starts, so two turns close together (a linked computer's flip taken as the person turns it here) end as the
+   * switch is: an add that finishes late never leaves a login item behind a remove.
+   */
+  let syncing: Promise<void> = Promise.resolve();
+  const syncLogin = (): Promise<void> => {
+    const run = syncing.then(syncLoginNow);
+    syncing = run.catch(() => {});
+    return run;
+  };
+  const syncLoginNow = async (): Promise<void> => {
     try {
       if (on()) login = await deps.login.add();
       else {
