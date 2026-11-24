@@ -10,6 +10,7 @@ Design and author a structured diagram as a \`.diagram.json\` specification and 
 
 Decide for yourself what viewpoint, composition, level of detail, emphasis, and omissions best answer the reader's request using the primitives below.
 
+- **Start from the library's visual language, and depart only with intent:** \`@plannotator/diagrams\` ships with tactile architectural defaults—subtle 3D lids, beveled tiles, blueprint mini-graphs, structured cards, dashed boundary groups, and host-adaptive colors—that work well out of the box. Prefer structured visual blocks (\`tiles\`, \`card\`, \`graph\`, \`row\`, \`groups\`, \`footer\`, \`steps\`) that show components, boundaries, and concrete data at a glance instead of prose paragraphs. Adjust \`theme\` relief, typography, or custom \`tones\` only when that choice carries a real distinction or makes the finished drawing clearer to read.
 - **Verify real references:** When drawing from an existing codebase or repository, read the actual source, config, or doc files first and cite real symbols, project-relative paths, and 1-based line numbers—never invent them. When drawing from a brief with no repo files, omit file \`refs\` (or include only real URLs).
 
 ## 2. Create or locate the \`.diagram.json\` file
@@ -34,7 +35,7 @@ Validation is strict: **unknown keys anywhere throw a \`TypeError\`** naming the
 
 ### Layouts (choose exactly one)
 
-A diagram combines one outer layout of panels with optional \`groups\` (enclosing any subset of panels), \`links\` (connecting any pair of panels or a panel to itself), top-level framing chrome, and \`theme\` styling.
+A diagram combines one outer layout of panels with optional \`groups\` (enclosing any subset of panels), \`links\` (connecting any pair of panels or a panel to itself), top-level framing chrome, and \`theme\` styling. Prefer automatic layouts (\`columns\` or \`ring\`) whenever they fit—they handle panel measurement, alignment, and spacing cleanly; use explicit \`panels\` when custom 2D coordinates are genuinely needed. When the reader needs to trace a directional flow, keep the primary path moving cleanly (typically left-to-right or top-to-bottom) rather than doubling back unnecessarily—reserving rings, deliberate folds, and return paths for subjects that genuinely call for them—and make supporting panels' relationship to the main path clear (through proximity, containment, or a labelled control link when warranted) instead of leaving them ambiguously adrift.
 
 - **\`columns\`** — Places entries left to right; each entry is a single panel or a vertical stack (\`Panel | Panel[]\`). Panels stacked in the same column expand to match the widest panel in that column.
   - Controls: \`gap\` (horizontal spacing between columns, default \`72\`), \`row_gap\` (vertical spacing inside a stack, default \`28\`), \`valign\` (\`"top" | "center" | "bottom"\`, default \`"center"\`—vertical alignment of shorter columns against the tallest).
@@ -61,24 +62,24 @@ A diagram combines one outer layout of panels with optional \`groups\` (enclosin
 ### Panels and composable sections
 
 Every panel has \`title\` (required) and supports:
-- Identity & framing: unique \`id\` (strongly recommended), \`sub\` (header subtitle and interactive hover summary), \`step\` (positive integer circle badge), \`footer\` (bottom strip; supports \`\\n\` and bold \`Key: value\` prefixes), \`width\` (positive minimum width in px), \`refs\`.
+- Identity & framing: unique \`id\` (strongly recommended), \`sub\` (header subtitle and interactive hover summary), \`step\` (positive integer circle badge), \`footer\` (bottom metadata strip; supports \`\\n\` and bold \`Key: value\` prefixes such as ownership, counts, or invariants), \`width\` (positive minimum width in px), \`refs\`.
 - Visual emphasis:
-  - \`tone\`: \`"default"\`, \`"neutral"\`, \`"accent"\`, \`"dark"\`, custom key in \`theme.tones\`, or any 6-digit hex \`"#rrggbb"\` (header text contrast adjusts automatically).
+  - \`tone\`: \`"default"\`, \`"neutral"\`, \`"accent"\`, \`"dark"\`, custom key in \`theme.tones\`, or any 6-digit hex \`"#rrggbb"\` (header text contrast adjusts automatically). Use tones with discipline: keep most panels \`"default"\` or \`"neutral"\` so status fills, tiles, and badges carry the signal, reserving \`"accent"\`, \`"dark"\`, or a small set of named \`theme.tones\` for genuine focal emphasis or a meaningful distinction across parts of the diagram.
   - \`status\`: \`"live"\` (default), \`"building"\`, \`"trial"\`, \`"planned"\`, \`"retiring"\`, or custom key in \`theme.statuses\`.
-- Body content: shorthand \`tiles\` (with optional \`cols\` default ≤3 and \`label\`, both valid only when \`tiles\` is set) and/or an ordered \`sections\` array mixing any of these section forms:
-  - **Text:** \`"Short note"\` or \`{ "text": "Short note" }\` (auto-wrapped).
-  - **Tile grid:** \`["Item A", { "label": "Item B", "sub": "Detail", "status": "trial" }]\` or \`{ "tiles": [...], "cols": 2, "label": "Heading" }\`.
-  - **Key-value card:** \`{ "card": { "title": "Spec", "intro": "Optional lead-in", "rows": [["Key", "Value"]] } }\`.
-  - **Side-by-side row:** \`{ "row": [section1, section2] }\` — arranges any list of sections horizontally across the panel width, nesting any other section forms (including addressable wrappers, cards, graphs, tiles, text, or images).
-  - **Mini node graph:** \`{ "graph": { "nodes": { "a": "Start", "b": "End" }, "at": { "a": [0, 0], "b": [1, 0] }, "links": [["a", "b", "optional label"]] } }\` — compact sub-diagram on a relative grid (\`col × 132\`, \`row × 58\`; no self-loops inside \`graph\`).
+- Body content: shorthand \`tiles\` (with optional \`cols\` default ≤3 and \`label\`, both valid only when \`tiles\` is set) and/or an ordered \`sections\` array. Prefer structured visual blocks that encode real components, relationships, and concrete examples over walls of prose:
+  - **Tile grid:** \`["Item A", { "label": "Item B", "sub": "Detail", "status": "trial" }]\` or \`{ "tiles": [...], "cols": 2, "label": "Heading" }\` — beveled 3D tiles for discrete sub-components, inputs, outputs, or capabilities; multiple labelled grids can stack inside one panel, and individual tiles carry their own \`status\` styling.
+  - **Mini node graph:** \`{ "graph": { "nodes": { "a": "Start", "b": "End" }, "at": { "a": [0, 0], "b": [1, 0] }, "links": [["a", "b", "optional label"]] } }\` — a blueprint-grid sub-diagram inside a panel (\`col × 132\`, \`row × 58\`; no self-loops inside \`graph\`) for internal entities, states, or sub-relationships.
+  - **Key-value card:** \`{ "card": { "title": "Spec", "intro": "Optional lead-in", "rows": [["Key", "Value"]] } }\` — structured table for concrete specimens, record fields, metrics, or contracts.
+  - **Side-by-side row:** \`{ "row": [section1, section2] }\` — arranges any list of sections horizontally across the panel width, nesting any other section forms (including addressable wrappers, graphs, cards, tiles, images, or text).
   - **Embedded image:** \`{ "image": { "src": "data:image/png;base64,...", "alt": "Description", "width": 480, "height": 300 } }\` — PNG or JPEG base64 data URL (see image helper below).
   - **Addressable section wrapper:** \`{ "id": "unique-id", "title": "Readable title", "refs": [...], "content": <any section> }\` — wraps any section so readers can click it, inspect \`refs\`, and pin comments directly to it. Section \`id\`s must be unique across the whole diagram.
+  - **Text:** \`"Short note"\` or \`{ "text": "Short note" }\` (auto-wrapped) — use sparingly for a brief caption or caveat when a structured block does not fit; avoid multi-sentence paragraphs inside panels.
 
 ### Boundaries (\`groups\`)
 
-Group related panels inside a dashed boundary:
+Group panels that share ownership, lifecycle, trust boundary, or domain inside a dashed container instead of repeating the same qualifier text on separate boxes:
 \`{ "id": "boundary-id", "label": "Boundary name", "members": ["panel-a", "panel-b"], "sub": "Optional summary", "refs": [...] }\`
-Full nesting (one group wholly inside another) is supported; partially overlapping groups or enclosing non-member panels is reported as a layout problem.
+Full nesting (one group wholly inside another) is supported; partially overlapping groups or enclosing non-member panels is reported as a layout problem. Each group adds ~20 px of outer padding around its members, so leave extra gap when a labelled link crosses between groups.
 
 ### Connections and routing (\`links\`)
 
@@ -99,7 +100,7 @@ Allowed on panels, addressable sections, groups, and links:
 
 ### Theme and styling knobs (\`theme\`)
 
-**Default rule:** Leave \`theme.paper\`, \`theme.ink\`, and default palette colors unset unless the user asks for a fixed custom palette—omitting them lets Plannotator adapt the drawing automatically to light, dark, and custom host themes.
+**Default rule:** Start with \`theme\` unset—the default palette adapts automatically to Plannotator's light, dark, and custom host themes, and the default geometry (\`lid: 9\`, \`depth: 4\`, typography, and padding) is already calibrated as one cohesive visual language. Avoid stripping relief or tweaking sizes out of habit; depart from defaults when your design has a clear reason—for example, defining semantic \`theme.tones\` to separate distinct realms, dialing \`lid\`/\`depth\` lighter for a crisper schematic register, or raising font sizes (\`body\`, \`small\`, \`tile\`) when a wide overview needs stronger legibility at reading size. When customizing, override only the specific keys you need and leave canvas/surface colors (\`paper\`, \`ink\`, \`panel_fill\`, etc.) unset unless a fixed palette is required, so the diagram still adapts to the host theme.
 
 When custom styling or domain semantics are needed, every color must be 6-digit hex (\`#rrggbb\`):
 - **Custom semantic registries** (merged with built-ins):
@@ -107,8 +108,8 @@ When custom styling or domain semantics are needed, every color must be 6-digit 
   - \`theme.statuses\`: \`{ "blocked": { "label": "Blocked", "stroke": "#B42318", "fill": "#FEF0EE", "dash": "dashed" } }\` (\`dash\` is \`"dotted" | "dashed" | null\`)
   - \`theme.link_labels\`: \`{ "async": "Asynchronous event" }\`
 - **Surface, text, and chrome colors:** \`paper\`, \`ink\`, \`muted\`, \`faint\`, \`line\`, \`panel_fill\`, \`panel_stroke\`, \`tile_fill\`, \`tile_stroke\`, \`header_text\`, \`header_sub\`, \`header_text_on_dark\`, \`header_sub_on_dark\`, \`group_fill\`, \`group_stroke\`, \`note_fill\`, \`note_stroke\`, \`tag_color\`, \`badge_fill\` (\`#rrggbb | null\`), \`badge_text\` (\`#rrggbb | null\`), \`graph_fill\`, \`graph_grid\`, \`graph_line\`.
-- **Geometry & typography measurements** (nonnegative numbers):
-  - 3D bevels: \`lid\` (default \`9\`), \`depth\` (default \`4\`) — set both to \`0\` for flat panels and tiles.
+- **Geometry & typography measurements** (nonnegative numbers; defaults shown):
+  - 3D relief: \`lid\` (\`9\`), \`depth\` (\`4\`).
   - Spacing & sizing: \`pad\` (\`12\`), \`tile_gap\` (\`8\`), \`section_gap\` (\`12\`), \`tile_h\` (\`30\`), \`line_h\` (\`14.5\`), \`header_h\` (\`36\`), \`header_h_sub\` (\`50\`), \`panel_min_w\` (\`200\`), \`tile_max_w\` (\`230\`), \`radius\` (\`6\`), \`col_gap\` (\`72\`), \`row_gap\` (\`28\`), \`min_gap\` (\`16\`), \`margin\` (\`40\`).
   - Font sizes: \`title\` (\`26\`), \`subtitle\` (\`13.5\`), \`legend\` (\`12\`), \`panel_title\` (\`14.5\`), \`panel_sub\` (\`11\`), \`tile\` (\`12\`), \`tile_sub\` (\`10.5\`), \`body\` (\`11\`), \`small\` (\`10.5\`), \`min_text\` (\`10\`).
 
@@ -170,13 +171,13 @@ Arguments must be in the exact order \`render <input> -o <output>\` (or \`--outp
 - **Exit \`1\` with layout diagnostics:** valid spec, **the SVG was written** for inspection, and each layout problem was printed to stderr.
 - **Exit \`1\` with invalid JSON, schema/limit error, or bad arguments:** fails before rendering; **no new SVG is written**, and the error is printed to stderr.
 
-To inspect measured panel bounds when adjusting placement (with \`@plannotator/diagrams\` installed locally):
+To inspect measured panel bounds, group boxes, and link \`labelBox\` clearances when adjusting placement (with \`@plannotator/diagrams\` installed locally):
 
 \`\`\`bash
-node --input-type=module -e 'import { readFileSync } from "node:fs"; import { renderDiagram } from "@plannotator/diagrams"; const { parts } = await renderDiagram(JSON.parse(readFileSync("my-diagram.diagram.json", "utf8"))); console.table(parts.filter(p => p.kind === "panel").map(({ id, x, y, w, h }) => ({ id, x, y, w, h })));'
+node --input-type=module -e 'import { readFileSync } from "node:fs"; import { renderDiagram } from "@plannotator/diagrams"; const { parts } = await renderDiagram(JSON.parse(readFileSync("my-diagram.diagram.json", "utf8"))); console.table(parts.filter(p => p.kind === "panel" || p.kind === "group" || (p.kind === "link" && p.labelBox)).map(p => { const b = p.kind === "link" ? p.labelBox : p; return { kind: p.kind, id: p.id, x: +b.x.toFixed(1), y: +b.y.toFixed(1), w: +b.w.toFixed(1), h: +b.h.toFixed(1) }; }));'
 \`\`\`
 
-Reported \`x\` and \`y\` include the renderer's outer canvas translation and \`w\` is measured—use the differences between panels (and their measured \`w\`/\`h\`) to calculate how far to move them.
+Reported \`x\` and \`y\` include the renderer's outer canvas translation and \`w\`/\`h\` are measured—compare panel edges, group borders, and each link's \`labelBox\` to calculate exact gaps and verify pill clearance without guessing.
 
 Iterate until exit \`0\`:
 - **Port facing away:** set \`"start"\` / \`"end"\` explicitly (e.g. \`"bottom"\` / \`"top"\` or \`"auto"\`) or add \`"lane": "top" | "bottom"\`.
@@ -185,7 +186,7 @@ Iterate until exit \`0\`:
 - **Overlap or panels too close:** separate coordinates in \`panels\` mode, or adjust \`groups\` so each group encloses only its own members without partial overlaps.
 - **Inner \`graph\` collision or extent error:** adjust \`[col, row]\` spacing in \`graph.at\`, reduce panel/label width, or split self-loops into a panel with a return lane.
 
-**Visual check (exit \`0\` checks geometry, not communication):** After a clean render, look at the actual rendered picture at its intended reading size (rasterize the \`.svg\` to PNG if your image viewer needs raster input). Ask whether the main spatial and semantic relationships read at a glance without reading every label—checking focal hierarchy, overall proportions and dead whitespace, panel alignment, tangled line crossings (the renderer checks line-against-panel crossings, not line-against-line crossings), and whether labels and embedded images stay legible—then do a deliberate polish pass if anything feels flat, cramped, or unclear. If your environment cannot view images, inspect the measured canvas \`width\`/\`height\` and panel bounds above alongside \`renderDiagram(spec).description\` to catch lopsided proportions, misaligned placements, or missing structure.
+**Visual check (exit \`0\` checks geometry, not communication):** After a clean render, look at the actual rendered picture at its intended reading size (rasterize the \`.svg\` to PNG if your image viewer needs raster input). Trace the reader's primary paths—and any failure, fallback, or boundary crossings from the request—directly across the image to verify that any directional path reads cleanly without awkward detours or ambiguously adrift panels, that no key hop or boundary was silently dropped, and that critical hops stay visually distinct rather than cramped inside a tiny sub-block. Check focal hierarchy, overall proportions and dead whitespace, panel alignment, tangled line crossings (the renderer checks line-against-panel crossings, not line-against-line crossings), cramped link labels (every label pill should sit on visible line shaft with breathing room from panels, arrowheads, and dashed group borders), whether structured primitives (\`tiles\`, \`card\`, \`graph\`, \`groups\`) would communicate better than prose, and whether overview text and embedded images remain comfortably legible without zooming in—then do a deliberate polish pass (including targeted font-size, tone, gap, or layout adjustments) if anything feels monotonous, cramped, or hard to trace. If your environment cannot view images, inspect the measured canvas \`width\`/\`height\` and bounds table above alongside \`renderDiagram(spec).description\` to catch lopsided proportions, cramped labels, misaligned placements, or missing paths.
 
 ## 5. Revise from pinned feedback
 
