@@ -4522,7 +4522,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const copyHost: CopyMenuHost = {
     thread,
     phone,
-    onToast,
+    onToast, onChanged,
     linkOf: linkOf ?? ((messageId) => threadLink(thread.thread_id, null, window.location.origin, messageId)),
   };
   const newestCopyHost = useRef(copyHost);

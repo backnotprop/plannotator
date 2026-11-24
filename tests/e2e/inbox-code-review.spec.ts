@@ -213,9 +213,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-inbox-code-review-e2e-');
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
-  // Code review's one-time offer (approval "code-review-offer-card") was already answered: it is never shown for now
-  // (CODE_REVIEW_OFFER_SHOWN), and should that change it must not open over this spec's flow. Its own test is
-  // packages/inbox/codeReviewOffer.test.tsx.
+  // Code review's one-time offer (approval "inbox-code-review-offer") was already answered: it must not open over this
+  // spec's flow. Its own tests are packages/inbox/codeReviewOffer.test.tsx and inbox-code-review-offer.spec.ts.
   const configFile = join(dataDir, 'config.json');
   const config = JSON.parse(readFileSync(configFile, 'utf8')) as Record<string, unknown>;
   writeFileSync(configFile, JSON.stringify({ ...config, inboxReveals: { ...E2E_GROUP_TIP_SEEN, code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));

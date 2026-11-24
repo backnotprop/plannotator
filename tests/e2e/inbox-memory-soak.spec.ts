@@ -102,13 +102,38 @@ const FRAME_TIMEOUT_MS = 5_000;
 /** A sent message must be on screen within this time. */
 const RESPONSE_TIMEOUT_MS = 15_000;
 
-/** Records every long task (startTime, duration) from the page's first script. */
+/**
+ * Records every long task (startTime, duration) from the page's first script, and the long animation frames
+ * (`long-animation-frame`) over 250 ms: where the time of the longest went (the scripts that ran, what started
+ * each, the style and layout they forced, and the frame's own style and layout), printed for the slowest.
+ */
 const LONG_TASK_RECORDER = `(() => {
-  const soak = (window.__soak = { long: [] });
+  const soak = (window.__soak = { long: [], frames: [], acts: [] });
   try {
     new PerformanceObserver((list) => {
       for (const e of list.getEntries()) soak.long.push([e.startTime, e.duration]);
     }).observe({ type: 'longtask', buffered: true });
+  } catch {}
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) {
+        if (e.duration < 250) continue;
+        soak.frames.push({
+          start: Math.round(e.startTime),
+          duration: Math.round(e.duration),
+          render: Math.round(e.startTime + e.duration - e.renderStart),
+          styleLayout: e.styleAndLayoutStart ? Math.round(e.startTime + e.duration - e.styleAndLayoutStart) : 0,
+          scripts: e.scripts.map((s) => ({
+            invoker: s.invoker,
+            type: s.invokerType,
+            fn: s.sourceFunctionName,
+            at: s.sourceCharPosition,
+            duration: Math.round(s.duration),
+            forced: Math.round(s.forcedStyleAndLayoutDuration),
+          })),
+        });
+      }
+    }).observe({ type: 'long-animation-frame', buffered: true });
   } catch {}
 })();`;
 
@@ -178,6 +203,8 @@ test('the window keeps its memory flat and keeps answering through a long run of
     const gcWindows: [number, number][] = [];
     const responses: number[] = [];
     const frames: number[] = [];
+    /** How long each Show press ran in the click itself (its render and commit), after the warm-up. */
+    const showClicks: number[] = [];
 
     const noAgentNote = async () => {
       expect(await p.evaluate<boolean>(`!!document.querySelector('[data-dialog="agent-note"]')`), 'the "Tell your agents" dialog appeared').toBe(false);
@@ -234,6 +261,7 @@ test('the window keeps its memory flat and keeps answering through a long run of
         '```',
       ];
       if (i % 7 === 3) lines.push('', ':::question', `Ship part ${k + 1} now, or wait for review?`, '', '- [ ] Ship it', '- [ ] Wait for review', ':::');
+      await p.evaluate(`void window.__soak.acts?.push([performance.now(), 'send ${i + 1}'])`);
       const sent = await agents[i % 3]!.send({
         project_path: projects[i % 3]!,
         thread: `soak-${k}`,
@@ -258,7 +286,10 @@ test('the window keeps its memory flat and keeps answering through a long run of
       }
       if (i % 10 === 9) {
         // The person keeps up with the rest: Show brings in every held reply.
-        await p.evaluate(`void document.querySelector('[data-inbox-notice]')?.click()`);
+        const showMs = await p.evaluate<number>(
+          `(() => { const t = performance.now(); window.__soak.acts.push([t, 'show after ${i + 1}']); document.querySelector('[data-inbox-notice]')?.click(); return performance.now() - t; })()`,
+        );
+        showClicks.push(Math.round(showMs));
         await frame(`after message ${i + 1}`);
       }
       const done = i + 1;
@@ -293,6 +324,15 @@ test('the window keeps its memory flat and keeps answering through a long run of
       samples,
     };
     console.log(`soak summary ${JSON.stringify({ ...summary, samples: undefined })}`);
+    // Where the slowest frames went: script by script, and the frame's own style and layout.
+    const slowFrames = (await p.evaluate<{ start: number; duration: number }[]>('window.__soak.frames')).filter((f) => f.start >= soakStart);
+    const acts = await p.evaluate<[number, string][]>('window.__soak.acts');
+    const actBefore = (t: number) => acts.filter(([at]) => at <= t + 5).pop();
+    for (const f of [...slowFrames].sort((a, b) => b.duration - a.duration).slice(0, 5)) {
+      const act = actBefore(f.start);
+      console.log(`soak slow frame ${JSON.stringify({ after: act ? `${act[1]} +${Math.round(f.start - act[0])} ms` : null, ...f })}`);
+    }
+    console.log(`soak show clicks ${JSON.stringify(showClicks)}`);
     writeFileSync(join(proofDir, 'samples.json'), `${JSON.stringify(summary, null, 2)}\n`);
 
     expect(opened.heapMB, `JS heap right after the window opened (MB); ceiling ${OPEN_CEILING_MB}`).toBeLessThanOrEqual(OPEN_CEILING_MB);

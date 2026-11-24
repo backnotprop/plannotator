@@ -8,10 +8,12 @@
  *  - off: the read and a Checklist save's `event: capabilities` carry Code review off and no Shape;
  *  - on (with an old `inboxShape: true`): turning Code review off answers `{ on: false }` and tells every window, then
  *    the next read still carries Code review (off); a save of `shape` alone is not a setting;
- *  - a release build: Code review's switch is there and off, and Code review's one-time offer is never next
- *    (`CODE_REVIEW_OFFER_SHOWN`: the owner chose the switch without the offer).
+ *  - a release build: Code review's switch is there and off, and Code review's one-time offer is next for someone who
+ *    used an earlier Inbox while Code review was never decided (`CODE_REVIEW_OFFER_SHOWN`, shown again from the release
+ *    after 2026-11-23), never once it is on, never for a fresh install.
  *
- * What regresses: a person on a release build not finding Code review's switch, or being shown the offer; the owner
+ * What regresses: a person on a release build not finding Code review's switch, or being shown the offer with Code
+ * review on, or as a fresh install; the owner
  * (on) losing the row; a shown switch that cannot be turned off; an old `inboxShape` bringing a Shape row back.
  */
 import { afterEach, expect, test } from "bun:test";
@@ -135,16 +137,24 @@ test("on, with an old inboxShape: true: Code review's row is there and turns off
   expect("shape" in after).toBe(false);
 });
 
-test("a release build: the Code review switch is there and off, no Shape switch, and Code review's offer is never next", async () => {
+test("a release build: the Code review switch is there and off, no Shape switch, and Code review's offer is next only for someone who used an earlier Inbox while Code review was never decided", async () => {
+  // Someone who used an earlier Inbox (a setting its page wrote, inbox.ts `inboxUsedBefore`): the offer is theirs.
+  const earlier = { updateCheck: false, inboxNotifications: { dismissed: true } };
   for (const version of ["0.28.50", "0.30.0"]) {
-    const off = await (await world({ updateCheck: false }, version)).read();
+    const off = await (await world(earlier, version)).read();
     expect(off.code_review).toEqual({ on: false });
     expect("shape" in off).toBe(false);
     expect(off.reveal).toBeDefined();
-    expect(off.reveal!.next).not.toBe("code_review");
+    expect(off.reveal!.next).toBe("code_review");
 
-    const on = await (await world({ updateCheck: false, inboxCodeReview: true, inboxShape: true }, version)).read();
+    // A fresh install: the switch is there, the offer never is.
+    const fresh = await (await world({ updateCheck: false }, version)).read();
+    expect(fresh.code_review).toEqual({ on: false });
+    expect(fresh.reveal!.next).not.toBe("code_review");
+
+    const on = await (await world({ ...earlier, inboxCodeReview: true, inboxShape: true }, version)).read();
     expect(on.code_review).toEqual({ on: true });
     expect("shape" in on).toBe(false);
+    expect(on.reveal!.next).not.toBe("code_review");
   }
 });
