@@ -459,7 +459,8 @@ export interface PlannotatorConfig {
   /**
    * When the person last flipped each Settings → Capabilities switch (`board`, `steps`, …, `grid`; ms since 1970) and
    * on which Inbox (`ibx_…`): the newer flip wins on every linked computer (packages/server/inbox-capability-set.ts).
-   * A switch with no entry was never flipped since this was kept. The switches themselves stay in their own keys.
+   * A switch with no entry was never flipped since this was kept. The switches themselves stay in their own keys. A
+   * save names only the switches it stamps: the others are kept (saveConfig merges it key by key).
    */
   inboxCapabilityFlips?: Record<string, { at: number; by: string | null }>;
   /**
@@ -1697,7 +1698,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
     const plain = (value: unknown): value is Record<string, unknown> =>
       !!value && typeof value === "object" && !Array.isArray(value);
     const merged: Record<string, unknown> = { ...current, ...partial };
-    const nested = (key: "experimental" | "diffOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch") => {
+    const nested = (key: "experimental" | "diffOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch" | "inboxCapabilityFlips") => {
       const cur = (current as Record<string, unknown>)[key];
       const par = (partial as Record<string, unknown>)[key];
       if (par === undefined) {
@@ -1710,7 +1711,8 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
       }
       merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
     };
-    for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch"] as const) nested(key);
+    // `inboxCapabilityFlips` too: a switch's flip time saved never drops another's saved meanwhile.
+    for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch", "inboxCapabilityFlips"] as const) nested(key);
     // Machine state named by the save goes to state.json only (MACHINE_STATE_KEYS): config.json's copy, if any, is
     // kept as it is, for other machines and older versions that read it.
     const stateRead = readState();
@@ -2510,9 +2512,14 @@ export function resolveExperimental(
 ): boolean {
   const fromEnv = parseExperimentalEnv(name, env);
   if (fromEnv !== undefined) return fromEnv;
+  return savedExperimental(config, name) ?? false;
+}
+
+/** The person's saved choice for an experimental feature (config.json `experimental`), or undefined at its default. */
+export function savedExperimental(config: PlannotatorConfig, name: ExperimentalFeature): boolean | undefined {
   const saved = config.experimental;
-  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return false;
-  return parseConfigBoolean((saved as Record<string, unknown>)[EXPERIMENTAL_FEATURES[name]]) ?? false;
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return undefined;
+  return parseConfigBoolean((saved as Record<string, unknown>)[EXPERIMENTAL_FEATURES[name]]);
 }
 
 /** The PLANNOTATOR_INBOX_TAILSCALE override, or undefined when it does not decide. */

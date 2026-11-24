@@ -7,8 +7,7 @@
  * cloud agent's through the agent door's `route` (inbox-agent-routes.ts).
  *
  * A turn here is a flip like the person's own, so every linked computer takes it (inbox-capability-set.ts): there is
- * no computer to name. `computer`, which named one before the switches were one set, is accepted for one release and
- * ignored, and the answer says so.
+ * no computer to name.
  *
  * Only the switches a person sees there (core `INBOX_CAPABILITY_AGENT_SWITCHES`: a hidden one, as System is, is not
  * offered). A turn posts one line for the person, as the agent, on this computer only: in the thread it names, else in
@@ -47,8 +46,6 @@ export interface InboxCapabilityContext {
 export interface InboxCapabilityAsk {
   capability?: string;
   on?: boolean;
-  /** Before the switches were one set, a linked computer's name: ignored, and said so (one release). */
-  computer?: string;
   thread_id?: string;
   project_path?: string;
   /** The agent's project by id (a paired cloud agent's own, as the agent door names it), in place of `project_path`. */
@@ -61,9 +58,6 @@ export interface InboxCapabilityAnswer {
   text: string;
   structured: Record<string, unknown>;
 }
-
-/** Said after the answer when an agent still names a computer. */
-export const CAPABILITY_COMPUTER_IGNORED = "--computer was ignored: each switch is now one setting for all your linked computers.";
 
 const switchOf = (id: string) => INBOX_CAPABILITY_SWITCHES.find((s) => s.agent === id)!;
 
@@ -97,7 +91,7 @@ export function capabilityLineText(name: string, on: boolean): string {
   return `Turned ${on ? "on" : "off"} ${name}.`;
 }
 
-const ASK_FIELDS = ["capability", "on", "computer", "thread_id", "project_path", "project_id", "by"];
+const ASK_FIELDS = ["capability", "on", "thread_id", "project_path", "project_id", "by"];
 const text = (value: unknown, field: string): string | undefined => {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw new InboxError("validation_error", `${field}: a string.`, { field });
@@ -117,7 +111,6 @@ export function capabilityAskOf(body: Record<string, unknown>): InboxCapabilityA
   return {
     ...(capability !== undefined ? { capability } : {}),
     ...(typeof body.on === "boolean" ? { on: body.on } : {}),
-    ...(text(body.computer, "computer") !== undefined ? { computer: body.computer as string } : {}),
     ...(text(body.thread_id, "thread_id") !== undefined ? { thread_id: body.thread_id as string } : {}),
     ...(text(body.project_path, "project_path") !== undefined ? { project_path: body.project_path as string } : {}),
     ...(text(body.project_id, "project_id") !== undefined ? { project_id: body.project_id as string } : {}),
@@ -127,9 +120,7 @@ export function capabilityAskOf(body: Record<string, unknown>): InboxCapabilityA
 
 /** List the switches, or turn one: the answer, or an InboxError with the refusal. */
 export async function capabilityAnswer(caps: InboxCapabilityContext, input: InboxCapabilityAsk): Promise<InboxCapabilityAnswer> {
-  // A computer named (a command from before the one set): the answer is this computer's, which is every linked one's.
-  const ignored = input.computer?.trim() ? ` ${CAPABILITY_COMPUTER_IGNORED}` : "";
-  const done = (words: string, structured: Record<string, unknown>): InboxCapabilityAnswer => ({ text: `${words}${ignored}`, structured });
+  const done = (words: string, structured: Record<string, unknown>): InboxCapabilityAnswer => ({ text: words, structured });
   if (input.on === undefined) {
     if (input.capability) throw new InboxError("validation_error", "on: true or false, to turn it; leave capability out to list them.", { field: "on" });
     return done(listLine("On this computer", caps.here()), { capabilities: shown(caps.here()) });
@@ -152,7 +143,7 @@ export async function capabilityAnswer(caps: InboxCapabilityContext, input: Inbo
   const after = await caps.set(key, on);
   // One line, here: a linked computer that takes the flip posts none.
   const told = await caps.tell(by, threadId, project, capabilityLineText(name, on));
-  return done(`Turned ${state} ${name} on this computer.${told ? ` The person sees it in thread ${told}.` : NO_CHANGE_LINE}${on ? servesLine(key) : ""}`, { capabilities: shown(after) });
+  return done(`Turned ${state} ${name}.${told ? ` The person sees it in thread ${told}.` : NO_CHANGE_LINE}${on ? servesLine(key) : ""}`, { capabilities: shown(after) });
 }
 
 const STATUS: Record<string, number> = { validation_error: 422, not_offered: 409 };
@@ -171,9 +162,7 @@ export async function capabilityRoute(req: Request, url: URL, caps: InboxCapabil
   }
   if (req.method !== "GET" && req.method !== "POST") return Response.json({ error: "Use GET or POST." }, { status: 405 });
   try {
-    // `?computer=`: from a command before the one set, ignored (said so in the answer).
-    const computer = url.searchParams.get("computer");
-    const ask = req.method === "GET" ? (computer ? { computer } : {}) : capabilityAskOf(await readBody(req));
+    const ask = req.method === "GET" ? {} : capabilityAskOf(await readBody(req));
     const answer = await capabilityAnswer(caps, ask);
     return Response.json({ text: answer.text, ...answer.structured });
   } catch (error) {

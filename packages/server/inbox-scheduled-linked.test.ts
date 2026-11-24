@@ -8,8 +8,8 @@
  * all; A's merged list without B's routine or its computer; an on, a run or an edit from A not taking effect on B; a bare
  * call through the forward changing a routine (only a window's press does, as here); B asleep: its routine dropped from
  * A's list instead of kept as last known, or a turn off lost instead of held and applied when B is back; a linked
- * computer's switch read (an older computer's group) exposing other settings; an agent's `--computer`, from before the
- * switches were one set, refused instead of ignored with its note.
+ * computer's switch read (an older computer's group) exposing other settings; an agent's `computer`, gone with the one
+ * set, still taken.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -19,7 +19,6 @@ import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { waitFor } from "../../tests/helpers/inbox-world";
 import { startInboxServer } from "./inbox";
-import { CAPABILITY_COMPUTER_IGNORED } from "./inbox-capability-agent";
 
 type Json = Record<string, any>;
 
@@ -155,22 +154,25 @@ describe("routines and capability switches across linked computers", () => {
       // row says "running" until that run ends, turned off or not.
       await waitFor("the held turn off on B", async () => ((await get(b.port, `/api/inbox/scheduled/${id}`)).scheduled as Json).enabled === false, 45_000);
 
-      // An agent on A, asked by the person, still names B (`plannotator inbox capability … --computer B`, from before
-      // the one set): taken and ignored, said so; the switch turns on A, which every linked computer then takes
-      // (both Inboxes read one config.json here, so the e2e proves that part); one line for the person, on A.
+      // An agent on A, asked by the person (`plannotator inbox capability checklist on`): the switch turns on A, which
+      // every linked computer then takes (both Inboxes read one config.json here, so the e2e proves that part); one
+      // line for the person, on A. A `computer` (gone with the one set) is refused.
       await waitFor("B back on A", async () => ((await get(a.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === bId)?.state === "online", 30_000);
       const bName = ((await get(a.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === bId)!.name as string;
       const folder = join(root, "work");
       mkdirSync(folder, { recursive: true });
-      const agentTurn = await fetch(`${at(a.port)}/api/inbox/capability`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ by: { session: "ses_ada", host: "claude-code", name: "Claude Code" }, project_path: folder, capability: "checklist", on: true, computer: bName }),
-      });
+      const agentAsk = (extra: Json) =>
+        fetch(`${at(a.port)}/api/inbox/capability`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ by: { session: "ses_ada", host: "claude-code", name: "Claude Code" }, project_path: folder, capability: "checklist", on: true, ...extra }),
+        });
+      expect((await agentAsk({ computer: bName })).status).toBe(422);
+      expect((await get(a.port, "/api/inbox/settings")).steps.on).toBe(false);
+      const agentTurn = await agentAsk({});
       expect(agentTurn.status).toBe(200);
       const text = ((await agentTurn.json()) as { text: string }).text;
-      expect(text).toStartWith("Turned on Checklist on this computer. The person sees it in thread ");
-      expect(text).toEndWith(` ${CAPABILITY_COMPUTER_IGNORED}`);
+      expect(text).toStartWith("Turned on Checklist. The person sees it in thread ");
       expect((await get(a.port, "/api/inbox/settings")).steps.on).toBe(true);
       const lineId = /thread (msg_[^\s.]+)\./.exec(text)![1]!;
       expect((a.store.message(lineId)?.body ?? "")).toBe("Turned on Checklist.");

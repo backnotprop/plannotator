@@ -127,6 +127,7 @@ import {
   parseAutoUpdateEnv,
   parseExperimentalEnv,
   resolveExperimental,
+  savedExperimental,
   parseInboxToolEnv,
   parseUpdateCheckEnv,
   resolveAutoUpdate,
@@ -5426,21 +5427,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   scheduled.sync();
   if (scheduledCap.on()) void scheduledCap.syncLogin();
   // One set of Capabilities switches across linked computers (inbox-capability-set.ts): a switch an env var, the build
-  // or a test decides here is not shared. Taking a flip turns it as its Settings row does.
+  // or a test decides here is not shared. Taking a flip turns it as its Settings row does. `chosen`: its own key is
+  // set (a choice from before flips were kept counts as a flip at time 0; an untouched default as none).
   const experimentalFree = (feature: "decision-mode" | "grid") => parseExperimentalEnv(feature) === undefined;
+  const chosen = (read: (config: PlannotatorConfig) => unknown) => () => typeof read(loadConfig()) === "boolean";
   const capabilitySet = createCapabilitySet({
     switches: {
-      board: { on: boardOn, shared: () => INBOX_CARD_ACTION_ON && options.board === undefined, apply: (on) => saveBoard({ on }) },
-      steps: { on: stepsOn, shared: () => options.steps === undefined, apply: (on) => saveSteps({ on }) },
-      scheduled_threads: { on: scheduledCap.on, shared: () => options.scheduled === undefined && scheduledCap.wire().scheduled_threads !== undefined, apply: (on) => scheduledCap.answer({ scheduled_threads: { on } }) },
-      code_review: { on: codeReviewOn, shared: () => options.codeReview === undefined, apply: (on) => saveCodeReview({ on }) },
-      chapter_diagrams: { on: chapterDiagramsOn, shared: () => options.chapterDiagrams === undefined, apply: (on) => saveChapterDiagrams({ on }) },
-      bro: { on: broOn, shared: () => true, apply: (on) => saveBro({ on }) },
-      float_drafts: { on: floatDraftsOn, shared: () => true, apply: (on) => saveFloatDrafts({ on }) },
-      decision_mode: { on: decisionModeOn, shared: () => experimentalFree("decision-mode"), apply: (on) => saveExperimental({ decision_mode: on }) },
-      grid: { on: gridOn, shared: () => experimentalFree("grid"), apply: (on) => saveExperimental({ grid: on }) },
+      board: { on: boardOn, chosen: chosen((c) => c.inboxBoard), shared: () => INBOX_CARD_ACTION_ON && options.board === undefined, apply: (on) => saveBoard({ on }) },
+      steps: { on: stepsOn, chosen: chosen((c) => c.inboxSteps), shared: () => options.steps === undefined, apply: (on) => saveSteps({ on }) },
+      scheduled_threads: { on: scheduledCap.on, chosen: chosen((c) => c.inboxScheduledThreads), shared: () => options.scheduled === undefined && scheduledCap.wire().scheduled_threads !== undefined, apply: (on) => scheduledCap.answer({ scheduled_threads: { on } }) },
+      code_review: { on: codeReviewOn, chosen: chosen((c) => c.inboxCodeReview), shared: () => options.codeReview === undefined, apply: (on) => saveCodeReview({ on }) },
+      chapter_diagrams: { on: chapterDiagramsOn, chosen: chosen((c) => c.inboxChapterDiagrams), shared: () => options.chapterDiagrams === undefined, apply: (on) => saveChapterDiagrams({ on }) },
+      bro: { on: broOn, chosen: chosen((c) => c.inboxBro), shared: () => true, apply: (on) => saveBro({ on }) },
+      float_drafts: { on: floatDraftsOn, chosen: chosen((c) => c.inboxFloatDrafts), shared: () => true, apply: (on) => saveFloatDrafts({ on }) },
+      decision_mode: { on: decisionModeOn, chosen: chosen((c) => savedExperimental(c, "decision-mode")), shared: () => experimentalFree("decision-mode"), apply: (on) => saveExperimental({ decision_mode: on }) },
+      grid: { on: gridOn, chosen: chosen((c) => savedExperimental(c, "grid")), shared: () => experimentalFree("grid"), apply: (on) => saveExperimental({ grid: on }) },
     },
     times: () => loadConfig().inboxCapabilityFlips,
+    // Key by key under the config lock (saveConfig merges it), so a stamp saved meanwhile is never lost.
     saveTimes: (times) => void saveConfig({ inboxCapabilityFlips: times }),
     self: () => machines?.selfId ?? null,
   });
@@ -7572,13 +7576,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const splitView = body.split_view === undefined ? { on: splitViewOn() } : saveSplitView(body.split_view);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const systemAnswer = { ...system.answer(body), ...answerInboxCapabilities(capabilities, body) };
-        const scheduledAnswer = await scheduledCap.answer(body);
         // Present while Code review is on, and always to the save that set it.
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
+        // The person's flips, stamped now, before Routines' wait for the login item: every linked computer takes them,
+        // and a linked computer's older flip read during that wait never undoes them (inbox-capability-set.ts).
+        capabilitySet.flipped(capabilitySetKeysIn(body));
+        const scheduledAnswer = await scheduledCap.answer(body);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        // The person's flips, stamped now: every linked computer takes them (inbox-capability-set.ts).
-        capabilitySet.flipped(capabilitySetKeysIn(body));
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
         return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }

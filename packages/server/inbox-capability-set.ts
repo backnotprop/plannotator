@@ -6,10 +6,12 @@
  * Each switch keeps its own config.json key as before; besides it this Inbox keeps when the person last flipped it
  * and on which Inbox (config.json `inboxCapabilityFlips`). Its list gives every shared switch to a linked computer
  * (`capability_set`, to a machine's token only, mark `capability-set`), and each Inbox takes a flip it reads there that
- * is newer than its own (`capabilityFlipWins`): a recorded time beats none, then the later time, then the higher Inbox
- * id. Two switches neither side ever flipped since this was kept (first contact, settings from before it) settle on ON,
- * so nothing in use on one computer silently goes away. A computer away gets the flip when it is back, and two that
- * both flipped while apart settle on the newer flip, because each reads the other's list when they meet again.
+ * is newer than its own (`capabilityFlipWins`): the later time, then the higher Inbox id, then on. A switch whose own
+ * key is set but has no recorded flip (the person chose it before this was kept) counts as a flip at time 0, and one
+ * at its untouched default as never flipped, so a choice always beats a default, either way; two choices with no
+ * recorded time settle on ON, so nothing in use on one computer silently goes away. A computer away gets the flip
+ * when it is back, and two that both flipped while apart settle on the newer flip, because each reads the other's
+ * list when they meet again.
  *
  * A switch an env var, the build or a test decides here (`shared` false) is neither given nor taken: it stays as that
  * decides, its row locked as before. Taking a flip turns the switch the way the person's row does (every window
@@ -20,7 +22,10 @@ import { INBOX_CAPABILITY_SET_KEYS, type InboxCapabilitySetKey } from "@plannota
 /** The mark a linked computer's list says it keeps the one set with. Without it, a computer keeps its own switches. */
 export const CAPABILITY_SET_MARK = "capability-set";
 
-/** One switch as an Inbox gives it: its state, and the person's last flip of it (null: never flipped since this was kept). */
+/**
+ * One switch as an Inbox gives it: its state, and the person's last flip of it. `at` 0: chosen before flips were kept
+ * (its key is set, no time recorded); null: at its untouched default, never flipped.
+ */
 export interface CapabilityFlip {
   on: boolean;
   at: number | null;
@@ -29,6 +34,9 @@ export interface CapabilityFlip {
 
 export type CapabilitySet = Partial<Record<InboxCapabilitySetKey, CapabilityFlip>>;
 export type CapabilityFlipTimes = Partial<Record<InboxCapabilitySetKey, { at: number; by: string | null }>>;
+
+/** How far past this computer's clock a flip's time is believed: a later one is read as this much ahead. */
+export const CAPABILITY_FLIP_AHEAD_MS = 24 * 60 * 60 * 1000;
 
 const INBOX_ID = /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/;
 const isTime = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -60,8 +68,8 @@ export function readCapabilitySet(value: unknown): CapabilitySet | null {
 }
 
 /**
- * Which flip stands, the same answer on either computer: a recorded time beats none; then the later time; then the
- * higher Inbox id; then on. Above 0: `a` stands over `b`.
+ * Which flip stands, the same answer on either computer: a flip beats never flipped; then the later time (a recorded
+ * time beats a choice at 0); then the higher Inbox id; then on. Above 0: `a` stands over `b`.
  */
 export function compareCapabilityFlips(a: CapabilityFlip, b: CapabilityFlip): number {
   if ((a.at === null) !== (b.at === null)) return a.at === null ? -1 : 1;
@@ -79,6 +87,8 @@ export const capabilityFlipWins = (far: CapabilityFlip, here: CapabilityFlip): b
 export interface CapabilitySetSwitch {
   /** Its state now. */
   on: () => boolean;
+  /** Its own config.json key is set (the person chose it, perhaps before flips were kept); false at its untouched default. */
+  chosen: () => boolean;
   /** Offered here and decided by the person (no env var, build or test decides it): only then given and taken. */
   shared: () => boolean;
   /** Turns it as the person's row does (every window follows); a save that fails throws. */
@@ -89,6 +99,7 @@ export interface CapabilitySetHost {
   switches: Record<InboxCapabilitySetKey, CapabilitySetSwitch>;
   /** config.json `inboxCapabilityFlips` as it is now. */
   times: () => unknown;
+  /** Merges these entries into `inboxCapabilityFlips`, key by key under the config lock: the others are kept. */
   saveTimes: (times: CapabilityFlipTimes) => void;
   /** This Inbox's id (`ibx_…`), or null. */
   self: () => string | null;
@@ -104,8 +115,16 @@ export function capabilitySetKeysIn(body: Record<string, unknown>): InboxCapabil
 export function createCapabilitySet(host: CapabilitySetHost) {
   const listeners = new Set<() => void>();
   const now = host.now ?? Date.now;
-  const times = () => readCapabilityFlipTimes(host.times());
-  const flipOf = (key: InboxCapabilitySetKey, held: CapabilityFlipTimes): CapabilityFlip => ({ on: host.switches[key].on(), at: held[key]?.at ?? null, by: held[key]?.by ?? null });
+  /** A time past a day ahead of this clock (a linked computer's clock far ahead, or a bad list) is read as a day ahead. */
+  const believed = (at: number) => Math.min(at, now() + CAPABILITY_FLIP_AHEAD_MS, Number.MAX_SAFE_INTEGER);
+  const times = (): CapabilityFlipTimes => readCapabilityFlipTimes(host.times());
+  /** This switch as given, from the flip times read now: a time recorded, else 0 when its key is set, else never. */
+  const flipOf = (key: InboxCapabilitySetKey): CapabilityFlip => {
+    const kept = times()[key];
+    const one = host.switches[key];
+    if (kept) return { on: one.on(), at: kept.at, by: kept.by };
+    return { on: one.on(), at: one.chosen() ? 0 : null, by: null };
+  };
   const tell = () => {
     for (const listener of listeners) listener();
   };
@@ -114,9 +133,8 @@ export function createCapabilitySet(host: CapabilitySetHost) {
   return {
     /** What this Inbox gives its linked computers: every switch it shares, with the person's last flip. */
     wire(): CapabilitySet {
-      const held = times();
       const out: CapabilitySet = {};
-      for (const key of INBOX_CAPABILITY_SET_KEYS) if (host.switches[key].shared()) out[key] = flipOf(key, held);
+      for (const key of INBOX_CAPABILITY_SET_KEYS) if (host.switches[key].shared()) out[key] = flipOf(key);
       return out;
     },
     /**
@@ -129,23 +147,26 @@ export function createCapabilitySet(host: CapabilitySetHost) {
       const held = times();
       const at = now();
       const by = idOf(host.self());
-      for (const key of shared) held[key] = { at: Math.max(at, (held[key]?.at ?? -1) + 1), by };
-      host.saveTimes(held);
+      const stamped: CapabilityFlipTimes = {};
+      // Past the flip held (one kept far ahead, from before far times were believed only a day ahead, counts as a day
+      // ahead), and always a safe integer, so it is never read back as no flip.
+      for (const key of shared) stamped[key] = { at: Math.min(Math.max(at, (held[key] ? believed(held[key]!.at) : -1) + 1), Number.MAX_SAFE_INTEGER), by };
+      host.saveTimes(stamped);
       tell();
     },
     /** A linked computer's set: each flip newer than this one's is taken. Resolves to the switches it turned. */
     take(far: CapabilitySet): Promise<InboxCapabilitySetKey[]> {
       const run = taking.then(async () => {
-        const held = times();
         const turned: InboxCapabilitySetKey[] = [];
-        let stamped = false;
+        let stored = false;
         for (const key of INBOX_CAPABILITY_SET_KEYS) {
-          const flip = far[key];
+          const given = far[key];
           const one = host.switches[key];
-          if (!flip || !one.shared()) continue;
-          const here = flipOf(key, held);
-          if (!capabilityFlipWins(flip, here)) continue;
-          if (flip.on !== here.on) {
+          if (!given || !one.shared()) continue;
+          const flip: CapabilityFlip = given.at === null ? given : { ...given, at: believed(given.at) };
+          // Read again for each switch: the person may have flipped one here while an earlier one waited.
+          if (!capabilityFlipWins(flip, flipOf(key))) continue;
+          if (flip.on !== one.on()) {
             try {
               await one.apply(flip.on);
             } catch {
@@ -154,16 +175,17 @@ export function createCapabilitySet(host: CapabilitySetHost) {
             }
             if (one.on() !== flip.on) continue;
             turned.push(key);
+            // Flipped here while that waited: the person's flip stands, with its own time.
+            if (!capabilityFlipWins(flip, flipOf(key))) continue;
           }
-          // A first contact's ON is taken with no time: neither side flipped it yet.
+          // A switch at its untouched default on both sides is taken with no time: neither person flipped it.
           if (flip.at !== null) {
-            held[key] = { at: flip.at, by: flip.by };
-            stamped = true;
+            host.saveTimes({ [key]: { at: flip.at, by: flip.by } });
+            stored = true;
           }
         }
-        if (stamped) host.saveTimes(held);
-        // The other linked computers read this list again, so a flip goes on to a third one.
-        if (turned.length > 0) tell();
+        // The other linked computers read this list again, so a flip, or only its time, goes on to a third one.
+        if (turned.length > 0 || stored) tell();
         return turned;
       });
       taking = run.catch(() => {});

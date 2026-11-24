@@ -1,14 +1,14 @@
 /**
  * `plannotator inbox capability` on the Inbox's side (inbox-capability-agent.ts) against a stand-in context: no Inbox
  * runs. What regresses: a turn not taking; the person's line posted twice, posted for a turn that changed nothing, or
- * not said when it had nowhere to go; a `--computer` from before the one set refused, or turning anything but this
- * computer's switch, or not said to be ignored; the route taking a field it should refuse; a paired cloud agent's turn
+ * not said when it had nowhere to go; the result saying a turn was this computer's only (every linked computer takes
+ * it); a `computer` (gone with the one set) still taken; the route taking a field it should refuse; a paired cloud agent's turn
  * through the door not named as that agent, or naming someone else; the answer naming a switch by a name the command
  * does not take; the route answering another site's page or a request through a device door.
  */
 import { describe, expect, test } from "bun:test";
 import type { InboxCapabilitySwitches, InboxCapabilitySwitchKey } from "@plannotator/core/inbox-types";
-import { capabilityAskOf, capabilityLineText, capabilityRoute, CAPABILITY_COMPUTER_IGNORED, type InboxCapabilityContext } from "./inbox-capability-agent";
+import { capabilityAskOf, capabilityLineText, capabilityRoute, type InboxCapabilityContext } from "./inbox-capability-agent";
 import { inboxAgentRouteAction } from "./inbox-agent-routes";
 
 type Result = { isError?: boolean; content: { text: string }[]; structuredContent?: Record<string, unknown> };
@@ -50,7 +50,7 @@ describe("plannotator inbox capability, on the Inbox's side", () => {
     const turned = await w.call({ capability: "routines", on: true, thread_id: "msg_work" });
     expect(turned.isError).toBeFalsy();
     // This session's tools were listed with Routines off: the result says where the action is, and what works now.
-    expect(turned.content[0]!.text).toBe(`Turned on Routines on this computer. The person sees it in thread msg_work. ${SHELL_NOW}`);
+    expect(turned.content[0]!.text).toBe(`Turned on Routines. The person sees it in thread msg_work. ${SHELL_NOW}`);
     expect(w.here.scheduled_threads).toEqual({ on: true });
     expect(w.lines).toEqual([{ thread: "msg_work", project: null, body: "Turned on Routines.", by: "Claude Code" }]);
     // The same turn again changes nothing and posts nothing, and still says why this session may have no routine action.
@@ -58,7 +58,7 @@ describe("plannotator inbox capability, on the Inbox's side", () => {
     expect(again.content[0]!.text).toBe(`Routines was already on (this computer). Nothing changed. ${SHELL_NOW}`);
     expect([w.lines.length, w.turns]).toEqual([1, ["here scheduled_threads true"]]);
     // A switch that serves no action, or a turn off, says nothing of a next session.
-    expect((await w.call({ capability: "bro_mode", on: true })).content[0]!.text).toBe("Turned on Bro mode on this computer. The person sees it in thread msg_new.");
+    expect((await w.call({ capability: "bro_mode", on: true })).content[0]!.text).toBe("Turned on Bro mode. The person sees it in thread msg_new.");
   });
 
   test("lists each one and whether it is on; a capability not offered here is refused", async () => {
@@ -90,21 +90,15 @@ describe("plannotator inbox capability, on the Inbox's side", () => {
   test("with no thread and no project there is nowhere to post: the result says so", async () => {
     const w = world();
     const turned = await w.call({ capability: "board", on: true, project_path: undefined, by: { session: "ses_ada", host: "claude-code", name: "Claude Code" } });
-    expect(turned.content[0]!.text).toStartWith("Turned on Board on this computer. There was no thread to post a line for the person in");
+    expect(turned.content[0]!.text).toStartWith("Turned on Board. There was no thread to post a line for the person in");
     expect(w.lines).toEqual([]);
   });
 
-  test("`computer` from before the one set: accepted, ignored, and said so; the turn is this computer's, with one line", async () => {
+  test("`computer` is not taken: refused, nothing turns and nothing is told", async () => {
     const w = world();
-    const turned = await w.call({ capability: "routines", on: true, computer: "Studio", thread_id: "msg_work" });
-    expect(turned.isError).toBeFalsy();
-    expect(turned.content[0]!.text).toBe(`Turned on Routines on this computer. The person sees it in thread msg_work. ${SHELL_NOW} ${CAPABILITY_COMPUTER_IGNORED}`);
-    expect([w.turns, w.lines.map((line) => line.body)]).toEqual([["here scheduled_threads true"], ["Turned on Routines."]]);
-    // A list and an "already" say it too; with no computer named, nothing is said of it.
-    expect((await w.call({ computer: "Mini" })).content[0]!.text).toBe(`On this computer: board off, checklist off, routines on, bro_mode off. ${CAPABILITY_COMPUTER_IGNORED}`);
-    expect((await w.call({ capability: "board", on: false, computer: "Studio" })).content[0]!.text).toBe(`Board was already off (this computer). Nothing changed. ${CAPABILITY_COMPUTER_IGNORED}`);
-    expect((await w.call({})).content[0]!.text).not.toContain("--computer");
-    expect(w.lines).toHaveLength(1);
+    const refused = await w.call({ capability: "routines", on: true, computer: "Studio", thread_id: "msg_work" });
+    expect([refused.isError, refused.content[0]!.text]).toEqual([true, "validation_error: computer: not taken here."]);
+    expect([w.turns, w.lines]).toEqual([[], []]);
   });
 
   test("the person's line: which way, which capability", () => {
@@ -126,11 +120,10 @@ describe("plannotator inbox capability, on the Inbox's side", () => {
     for (const name of here) expect([name, (await w.call({ capability: name, on: true })).isError ?? false]).toEqual([name, false]);
   });
 
-  test("a list by GET; a `?computer=` is ignored and said so", async () => {
+  test("a list by GET", async () => {
     const w = world();
     const get = async (query: string) => (await (await capabilityRoute(new Request(`http://127.0.0.1/api/inbox/capability${query}`), new URL(`http://127.0.0.1/api/inbox/capability${query}`), w.context, async () => ({})))!.json()) as Record<string, unknown>;
     expect((await get("")).text).toBe("On this computer: board off, checklist off, routines off, bro_mode off.");
-    expect((await get("?computer=Studio")).text).toBe(`On this computer: board off, checklist off, routines off, bro_mode off. ${CAPABILITY_COMPUTER_IGNORED}`);
     expect(w.turns).toEqual([]);
   });
 });
@@ -179,7 +172,7 @@ describe("a paired cloud agent's turn, through the agent door's route", () => {
     const door = handled();
     await inboxAgentRouteAction(door.handle, by, "route", { method: "POST", path: "/api/inbox/capability", body: { capability: "routines", on: true, thread_id: "msg_1" } });
     expect(door.seen).toEqual([{ method: "POST", path: "/api/inbox/capability", body: { capability: "routines", on: true, thread_id: "msg_1", by: { host: "codex-cloud", session: "ses_cloud", name: "Codex Cloud" }, project_id: "prj_cloud" } }]);
-    for (const field of ["by", "project_path", "project_id"]) {
+    for (const field of ["by", "project_path", "project_id", "computer"]) {
       await expect(inboxAgentRouteAction(door.handle, by, "route", { method: "POST", path: "/api/inbox/capability", body: { capability: "routines", on: true, [field]: "x" } })).rejects.toThrow(`body: ${field}: not taken here`);
     }
     expect(door.seen).toHaveLength(1);
@@ -189,5 +182,8 @@ describe("a paired cloud agent's turn, through the agent door's route", () => {
     const door = handled();
     await inboxAgentRouteAction(door.handle, by, "route", { method: "GET", path: "/api/inbox/capability" });
     expect(door.seen.map((one) => [one.method, one.path])).toEqual([["GET", "/api/inbox/capability"]]);
+    // A computer named in the read (gone with the one set) is not carried.
+    await expect(inboxAgentRouteAction(door.handle, by, "route", { method: "GET", path: "/api/inbox/capability?computer=Studio" })).rejects.toThrow("method, path:");
+    expect(door.seen).toHaveLength(1);
   });
 });

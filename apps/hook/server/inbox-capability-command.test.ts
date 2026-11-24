@@ -1,22 +1,22 @@
 /**
  * `plannotator inbox capability` (inbox-capability-command.ts): what it asks the Inbox, and its help. No Inbox runs:
  * a stand-in for the Inbox's route. What regresses: a turn sent the wrong way or as someone else; a typo turning
- * something on; bad usage starting the Inbox; the Inbox's answer (the line it posted, its note on an ignored
- * `--computer`) not reaching stdout whole; a `--computer` from before the one set refused as bad usage; a refusal
+ * something on; bad usage starting the Inbox; the Inbox's answer (the line it posted) not reaching stdout whole; a
+ * `--computer` (gone with the one set: a turn applies on every linked computer) still taken and sent; a refusal
  * printed as a result; an Inbox too old for the command not said so; the help losing the rule that a turn is the
  * person's request, or still offering `--computer`.
  */
 import { expect, test } from "bun:test";
 import { INBOX_CAPABILITY_USAGE, parseCapabilityCommand, runInboxCapabilityCommand } from "./inbox-capability-command";
 
-test("a turn is the capability and on, with the computer and the thread; nothing is a list", () => {
-  expect(parseCapabilityCommand(["routines", "on", "--computer", "Studio", "--thread", "msg_1"])).toEqual({ ok: true, call: { capability: "routines", on: true, computer: "Studio", thread_id: "msg_1" }, session: null });
+test("a turn is the capability and on, with the thread; nothing is a list", () => {
+  expect(parseCapabilityCommand(["routines", "on", "--thread", "msg_1"])).toEqual({ ok: true, call: { capability: "routines", on: true, thread_id: "msg_1" }, session: null });
   expect(parseCapabilityCommand(["board", "off", "--session", "ses_1"])).toEqual({ ok: true, call: { capability: "board", on: false }, session: "ses_1" });
-  expect(parseCapabilityCommand(["--computer", "Studio"])).toEqual({ ok: true, call: { computer: "Studio" }, session: null });
+  expect(parseCapabilityCommand([])).toEqual({ ok: true, call: {}, session: null });
 });
 
-test("a capability it does not know, a state that is not on or off, or a lone name is bad usage", () => {
-  for (const argv of [["routine", "on"], ["routines", "yes"], ["routines"], ["routines", "on", "--computer"], ["routines", "on", "--force"]]) {
+test("a capability it does not know, a state that is not on or off, a lone name, or a `--computer` is bad usage", () => {
+  for (const argv of [["routine", "on"], ["routines", "yes"], ["routines"], ["routines", "on", "--computer", "Studio"], ["--computer", "Studio"], ["routines", "on", "--force"]]) {
     expect([argv, parseCapabilityCommand(argv).ok]).toEqual([argv, false]);
   }
 });
@@ -46,7 +46,7 @@ function inbox(answer: (path: string, body: Record<string, unknown> | null) => {
 }
 
 test("a turn is a POST as this shell's session, in its folder; the Inbox's answer is stdout, the line it posted included", async () => {
-  const text = "Turned on Routines on this computer. The person sees it in thread msg_1.";
+  const text = "Turned on Routines. The person sees it in thread msg_1.";
   const w = inbox(() => ({ status: 200, json: { text, capabilities: { routines: { on: true } } } }));
   expect(await runInboxCapabilityCommand(["routines", "on", "--thread", "msg_1"], w.deps)).toBe(0);
   expect(w.asked).toHaveLength(1);
@@ -55,16 +55,15 @@ test("a turn is a POST as this shell's session, in its folder; the Inbox's answe
   expect(JSON.parse(w.out.join(""))).toEqual({ text, capabilities: { routines: { on: true } } });
 });
 
-test("a list is a read; `--computer` from before the one set is still taken (one release), and the Inbox's note reaches stdout", async () => {
-  const text = "On this computer: board on. --computer was ignored: each switch is now one setting for all your linked computers.";
+test("a list is a read with nothing after the route; a `--computer` asks the Inbox nothing", async () => {
+  const text = "On this computer: board on.";
   const w = inbox(() => ({ status: 200, json: { text, capabilities: { board: { on: true } } } }));
-  expect(await runInboxCapabilityCommand(["--computer", "Studio Mini"], w.deps)).toBe(0);
-  expect(w.asked).toEqual([{ method: "GET", path: "/api/inbox/capability?computer=Studio%20Mini", body: null }]);
+  expect(await runInboxCapabilityCommand([], w.deps)).toBe(0);
+  expect(w.asked).toEqual([{ method: "GET", path: "/api/inbox/capability", body: null }]);
   expect(JSON.parse(w.out.join(""))).toEqual({ text, capabilities: { board: { on: true } } });
-  // A turn with it is a turn, not bad usage.
-  const turn = inbox(() => ({ status: 200, json: { text: "Turned on Board on this computer." } }));
-  expect(await runInboxCapabilityCommand(["board", "on", "--computer", "Studio"], turn.deps)).toBe(0);
-  expect(turn.asked[0]).toMatchObject({ method: "POST", path: "/api/inbox/capability", body: { capability: "board", on: true, computer: "Studio" } });
+  const named = inbox(() => ({ status: 200, json: { text } }));
+  expect(await runInboxCapabilityCommand(["board", "on", "--computer", "Studio"], named.deps)).toBe(2);
+  expect([named.asked, named.started()]).toEqual([[], 0]);
 });
 
 test("a refusal is `<code>: <message>` on stderr, exit 1, nothing on stdout", async () => {

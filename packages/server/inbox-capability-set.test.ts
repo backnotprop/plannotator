@@ -6,46 +6,67 @@
  *
  * What regresses: a flip on one computer not applied on the other, or the older flip winning; a computer that was away
  * keeping its old switch when it is back; two computers that both flipped while apart settling on different answers;
- * first contact (no flip recorded on either side) turning off what one of them uses; a computer with no recorded flip
- * beating one that has one; a switch an env var forces given as a flip, or a far flip turning it; a flip made right
- * after taking a far one losing to it on a slower clock; a take telling the linked computers when nothing changed; an
- * older Plannotator's list taken (it keeps its own); this Inbox not asking for the event that says a flip was made.
+ * first contact (no flip recorded on either side): an untouched default beating the person's choice on the other
+ * computer (on or off), or two choices that disagree turning off what one of them uses; a choice with no time beating a
+ * recorded flip; a switch an env var forces given as a flip, or a far flip turning it; a flip made right after taking
+ * a far one losing to it on a slower clock; the person's flip made while a take waits turned back or its time lost; a
+ * far time years ahead stored as it is, so a flip here stamps an unsafe time that reads as none; a take telling the
+ * linked computers when nothing changed, or not telling them when it copied only a time (a third computer never
+ * hears); an older Plannotator's list taken (it keeps its own); this Inbox not asking for the event that says a flip
+ * was made.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_CAPABILITY_SET_KEYS, type InboxCapabilitySetKey } from "@plannotator/core/inbox-types";
-import { CAPABILITY_SET_MARK, capabilitySetKeysIn, compareCapabilityFlips, createCapabilitySet, readCapabilitySet, type CapabilitySet } from "./inbox-capability-set";
+import { CAPABILITY_FLIP_AHEAD_MS, CAPABILITY_SET_MARK, capabilitySetKeysIn, compareCapabilityFlips, createCapabilitySet, readCapabilitySet, type CapabilitySet } from "./inbox-capability-set";
 import { createInboxMachines } from "./inbox-machines";
 import { InboxLinks } from "./inbox-links";
 
 const LAPTOP = `ibx_${"0".repeat(25)}1`;
 const STUDIO = `ibx_${"0".repeat(25)}2`;
+const MINI = `ibx_${"0".repeat(25)}3`;
 
-/** One computer: its switches, its config.json flips, its clock, what it turned and how often it told its links. */
-function computer(id: string, start: Partial<Record<InboxCapabilitySetKey, boolean>> = {}, options: { forced?: InboxCapabilitySetKey[]; clock?: number; failing?: InboxCapabilitySetKey[] } = {}) {
-  const on = Object.fromEntries(INBOX_CAPABILITY_SET_KEYS.map((key) => [key, start[key] ?? false])) as Record<InboxCapabilitySetKey, boolean>;
-  let config: unknown;
+/**
+ * One computer: its switches, its config.json flips, its clock, what it turned and how often it told its links.
+ * `start`: switches the person chose before flips were kept (their keys set); `defaults`: switches at an untouched
+ * default that is on (Chapter diagrams); every other switch is at its untouched default, off. `slow`: switches whose
+ * save waits (Routines' login item) until `release()`.
+ */
+function computer(
+  id: string,
+  start: Partial<Record<InboxCapabilitySetKey, boolean>> = {},
+  options: { forced?: InboxCapabilitySetKey[]; clock?: number; failing?: InboxCapabilitySetKey[]; defaults?: InboxCapabilitySetKey[]; slow?: InboxCapabilitySetKey[] } = {},
+) {
+  const on = Object.fromEntries(INBOX_CAPABILITY_SET_KEYS.map((key) => [key, start[key] ?? options.defaults?.includes(key) ?? false])) as Record<InboxCapabilitySetKey, boolean>;
+  const chosen = new Set<InboxCapabilitySetKey>(Object.keys(start) as InboxCapabilitySetKey[]);
+  let config: Record<string, unknown> | undefined;
   const applied: string[] = [];
   const state = { clock: options.clock ?? 1_000, told: 0 };
+  let release = () => {};
   const set = createCapabilitySet({
     switches: Object.fromEntries(
       INBOX_CAPABILITY_SET_KEYS.map((key) => [
         key,
         {
           on: () => on[key],
+          chosen: () => chosen.has(key),
           shared: () => !options.forced?.includes(key),
           apply: (value: boolean) => {
             if (options.failing?.includes(key)) throw new Error("config.json could not be saved");
             applied.push(`${key} ${value}`);
             on[key] = value;
+            chosen.add(key);
+            // Saved at once, as Routines' switch is; then the wait for its login item.
+            if (options.slow?.includes(key)) return new Promise<void>((resolve) => (release = resolve));
           },
         },
       ]),
     ) as never,
     times: () => config,
-    saveTimes: (times) => void (config = structuredClone(times)),
+    // As saveConfig merges `inboxCapabilityFlips`: key by key.
+    saveTimes: (times) => void (config = { ...config, ...structuredClone(times) }),
     self: () => id,
     now: () => state.clock,
   });
@@ -56,10 +77,12 @@ function computer(id: string, start: Partial<Record<InboxCapabilitySetKey, boole
     applied,
     state,
     flips: () => config,
+    release: () => release(),
     /** The person's row: the switch saves, then the settings route stamps the flip. */
     flip(key: InboxCapabilitySetKey, value: boolean, at = state.clock) {
       state.clock = at;
       on[key] = value;
+      chosen.add(key);
       set.flipped([key]);
     },
   };
@@ -114,15 +137,41 @@ describe("one set of switches across linked computers", () => {
     }
   });
 
-  test("first contact, neither side ever flipped it: on wins, so nothing in use on one computer goes away", async () => {
+  test("first contact, a switch chosen on one side and at its default on the other: the choice wins, on or off", async () => {
+    for (const order of ["laptop first", "studio first"]) {
+      // Laptop's person turned Chapter diagrams off and Routines on before flips were kept; Studio's never touched them
+      // (Chapter diagrams is on by default).
+      const laptop = computer(LAPTOP, { chapter_diagrams: false, scheduled_threads: true });
+      const studio = computer(STUDIO, {}, { defaults: ["chapter_diagrams"] });
+      // Both sides tell a choice (0) from an untouched default (null) across the wire.
+      expect([laptop.set.wire().chapter_diagrams, studio.set.wire().chapter_diagrams]).toEqual([{ on: false, at: 0, by: null }, { on: true, at: null, by: null }]);
+      if (order === "laptop first") await meet(laptop, studio);
+      else await meet(studio, laptop);
+      expect([order, laptop.on.chapter_diagrams, studio.on.chapter_diagrams, laptop.on.scheduled_threads, studio.on.scheduled_threads]).toEqual([order, false, false, true, true]);
+      expect(laptop.applied).toEqual([]);
+      // Nobody flipped anything since: no time is recorded on either side.
+      expect([laptop.flips(), studio.flips()]).toEqual([undefined, undefined]);
+    }
+  });
+
+  test("first contact, two choices that disagree with no flip time: on wins, so nothing in use on one computer goes away", async () => {
     const laptop = computer(LAPTOP, { scheduled_threads: true, grid: true });
-    const studio = computer(STUDIO, { bro: true });
+    const studio = computer(STUDIO, { bro: true, scheduled_threads: false, grid: false });
     await meet(laptop, studio);
     for (const key of ["scheduled_threads", "grid", "bro"] as const) expect([key, laptop.on[key], studio.on[key]]).toEqual([key, true, true]);
     expect([laptop.on.board, studio.on.board]).toEqual([false, false]);
-    // Taken with no time: neither person flipped it.
-    expect(studio.set.wire().scheduled_threads).toEqual({ on: true, at: null, by: null });
+    // Neither person flipped it since: a choice, with no time.
+    expect(studio.set.wire().scheduled_threads).toEqual({ on: true, at: 0, by: null });
     expect(studio.flips()).toBeUndefined();
+  });
+
+  test("a recorded flip beats a choice with no time, either way", async () => {
+    const laptop = computer(LAPTOP, { steps: true, bro: false });
+    const studio = computer(STUDIO);
+    studio.flip("steps", false, 500);
+    studio.flip("bro", true, 500);
+    await meet(laptop, studio);
+    expect([laptop.on.steps, studio.on.steps, laptop.on.bro, studio.on.bro]).toEqual([false, false, true, true]);
   });
 
   test("a side with a recorded flip beats a side without, even off over on", async () => {
@@ -177,6 +226,63 @@ describe("one set of switches across linked computers", () => {
     expect([laptop.state.told, studio.state.told]).toEqual([1, 1]);
   });
 
+  test("a time copied with nothing to turn is told too, so a third computer hears it; the next exchange sends nothing", async () => {
+    const laptop = computer(LAPTOP);
+    const studio = computer(STUDIO, { bro: true });
+    const mini = computer(MINI, { bro: true });
+    laptop.flip("bro", true, 1_000);
+    // Studio, linked to both, already had it on: only the time is stored, and its links are told.
+    await studio.set.take(laptop.set.wire());
+    expect([studio.applied, studio.set.wire().bro, studio.state.told]).toEqual([[], { on: true, at: 1_000, by: LAPTOP }, 1]);
+    // Mini, linked to Studio only, reads Studio's list on that event and takes the time.
+    await mini.set.take(studio.set.wire());
+    expect([mini.set.wire().bro, mini.state.told]).toEqual([{ on: true, at: 1_000, by: LAPTOP }, 1]);
+    // Every exchange after that compares equal: nothing is stored or told, so nothing loops.
+    const told = [laptop.state.told, studio.state.told, mini.state.told];
+    for (const [a, b] of [[laptop, studio], [studio, mini], [mini, studio], [studio, laptop]] as const) await a.set.take(b.set.wire());
+    expect([laptop.state.told, studio.state.told, mini.state.told]).toEqual(told);
+  });
+
+  test("the person's flip here while a take waits (Routines' login item) stands: not turned back, its time kept", async () => {
+    const laptop = computer(LAPTOP);
+    const studio = computer(STUDIO, { bro: true }, { slow: ["scheduled_threads"] });
+    studio.flip("board", false, 500);
+    laptop.flip("scheduled_threads", true, 1_000);
+    laptop.flip("bro", true, 1_000);
+    const taking = studio.set.take(laptop.set.wire());
+    await Bun.sleep(5);
+    expect(studio.applied).toEqual(["scheduled_threads true"]);
+    // Meanwhile, in Studio's Settings: Bro mode off, Board on.
+    studio.flip("bro", false, 2_000);
+    studio.flip("board", true, 2_000);
+    studio.release();
+    await taking;
+    expect([studio.on.scheduled_threads, studio.on.bro, studio.on.board]).toEqual([true, false, true]);
+    expect(studio.flips()).toEqual({ board: { at: 2_000, by: STUDIO }, bro: { at: 2_000, by: STUDIO }, scheduled_threads: { at: 1_000, by: LAPTOP } });
+    // And the person's flips go on to Laptop.
+    await laptop.set.take(studio.set.wire());
+    expect([laptop.on.bro, laptop.on.board]).toEqual([false, true]);
+  });
+
+  test("a far time past a day ahead is read as a day ahead: the switch is taken, and a flip here is stamped a safe time past it", async () => {
+    const studio = computer(STUDIO, {}, { clock: 1_000 });
+    await studio.set.take({ grid: { on: true, at: Number.MAX_SAFE_INTEGER, by: LAPTOP } });
+    expect([studio.on.grid, studio.set.wire().grid]).toEqual([true, { on: true, at: 1_000 + CAPABILITY_FLIP_AHEAD_MS, by: LAPTOP }]);
+    studio.flip("grid", false, 2_000);
+    const mine = studio.set.wire().grid!;
+    expect([mine.on, mine.by, Number.isSafeInteger(mine.at), mine.at! > 1_000 + CAPABILITY_FLIP_AHEAD_MS]).toEqual([false, STUDIO, true, true]);
+    // Given to a computer whose clock agrees, that flip is taken there.
+    const laptop = computer(LAPTOP, { grid: true }, { clock: 2_000 });
+    await laptop.set.take(studio.set.wire());
+    expect(laptop.on.grid).toBe(false);
+    // A time already kept far ahead (from before this) is read as a day ahead too, and a flip stamps a safe time.
+    const mini = computer(MINI, {}, { clock: 1_000 });
+    mini.flip("steps", true, Number.MAX_SAFE_INTEGER);
+    mini.state.clock = 1_000;
+    mini.flip("steps", false);
+    expect(mini.set.wire().steps).toEqual({ on: false, at: 1_000 + CAPABILITY_FLIP_AHEAD_MS + 1, by: MINI });
+  });
+
   test("a switch that cannot be saved here keeps its state and its flip until the next read", async () => {
     const laptop = computer(LAPTOP);
     const studio = computer(STUDIO, {}, { failing: ["board"] });
@@ -192,8 +298,10 @@ describe("one set of switches across linked computers", () => {
   });
 
   test("a linked computer's set is read by name: an unknown switch, a bad time or a foreign id is dropped", () => {
-    expect(readCapabilitySet({ board: { on: true, at: 5, by: STUDIO }, steps: { on: "yes" }, plans: { on: true }, bro: { on: false, at: -1, by: STUDIO }, grid: { on: true, at: 7, by: "laptop" } })).toEqual({
+    expect(readCapabilitySet({ board: { on: true, at: 5, by: STUDIO }, steps: { on: "yes" }, plans: { on: true }, bro: { on: false, at: -1, by: STUDIO }, grid: { on: true, at: 7, by: "laptop" }, float_drafts: { on: false, at: 0, by: null } })).toEqual({
       board: { on: true, at: 5, by: STUDIO },
+      // A choice made before flips were kept stays one across the wire.
+      float_drafts: { on: false, at: 0, by: null },
       bro: { on: false, at: null, by: null },
       grid: { on: true, at: 7, by: null },
     });
