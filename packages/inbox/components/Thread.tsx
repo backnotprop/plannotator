@@ -131,6 +131,9 @@ import { sendFailure } from '../sendFailure';
 import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
 import { replyRecipientList } from '../thread/recipientList';
+import { removeAgentAction } from '../thread/removeAgent';
+import { threadMovesOf, type ThreadMove } from '../thread/threadMoves';
+import { ThreadMoveLine } from '../parts/ThreadMoveLine';
 import { followedSession, useReplyAim, wordsHeldAt, wordsSession } from '../thread/replyAim';
 import { isStartRow, replyStartOf } from '../thread/replyStart';
 import { useReplyLaunchBlock } from '../data/replyLaunch';
@@ -1124,8 +1127,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** Sessions a Send was refused for as not live any more (the race): ended in the list from then on. */
   const [rcptGone, setRcptGone] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const rcptAgents = useMemo(
-    (): RecipientRow[] => (pillActive ? replyRecipientList({ participants, thread, askerEnded, asking, live, taggable, gone: rcptGone, rcptDefault, start: replyStart, givenNameOf: (session) => givenName(agentNames, session) }) : []),
-    [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault, replyStart, agentNames],
+    (): RecipientRow[] => (pillActive ? replyRecipientList({ participants, thread, askerEnded, asking, live, taggable, gone: rcptGone, rcptDefault, start: replyStart, givenNameOf: (session) => givenName(agentNames, session), removeOn: !machine || (machine.marks ?? []).includes('remove-agent') }) : []),
+    [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault, replyStart, agentNames, machine],
   );
   /** Whether a session can be the first recipient (a typed tag's, not in the list, is live). */
   const rcptAlone = (id: string) => rcptAgents.find((r) => r.session === id)?.alone !== false;
@@ -3653,22 +3656,17 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       await onChanged();
     }
   };
-  // The lines that say a thread moved (approval "inbox-tag-handoff"), above the reply that moved it:
-  // a hand-off not taken back, and the sessions a reply added for the first time.
-  const threadMoves = new Map<string, { kind: 'handoff' | 'added'; names: string; host: string | null }>();
-  {
-    const joined = new Set<string>();
-    for (const m of thread.messages) {
-      if (m.author.kind !== 'person') continue;
-      if (m.handoff && !m.handoff.undone_at && m.to) threadMoves.set(m.id, { kind: 'handoff', names: givenName(agentNames, m.to.session) ?? handoffName(m), host: m.to.host });
-      const added = messageTags(m).filter((t) => t.joined && !joined.has(t.session));
-      for (const t of added) joined.add(t.session);
-      if (added.length > 0 && !threadMoves.has(m.id)) {
-        // The given name, else the header's name, else the tag's label, else the agent.
-        threadMoves.set(m.id, { kind: 'added', names: namesList(added.map((t) => givenName(agentNames, t.session) ?? sessionNames.get(t.session) ?? (t.label || agentName({ kind: 'agent', host: t.host, name: t.name ?? null })))), host: added[0]!.host });
-      }
-    }
-  }
+  // The lines that say who the thread is with now (thread/threadMoves.ts): a hand-off not taken back and the sessions a
+  // reply added, above that reply, and an agent the person removed. The given name, else the header's (a removed one's
+  // title), else the tag's label or the agent.
+  const threadMoves = threadMovesOf(thread, (session, fallback, kind) => givenName(agentNames, session) ?? (kind === 'handoff' ? null : (sessionNames.get(session) ?? (kind === 'removed' ? labelOf(sessionLabels, session) : null))) ?? fallback);
+  const moveLine = (move: ThreadMove, message?: InboxMessageWire) => {
+    const handoff = move.kind === 'handoff' && message ? message : null;
+    const mine = !!handoff && handoffUndo?.id === handoff.id;
+    const undo = handoff ? { busy: mine && handoffUndo!.busy, error: mine ? handoffUndo!.error : null, onUndo: () => void undoHandoff(handoff.id) } : null;
+    const key = move.kind === 'removed' ? `removed-${move.session}-${move.at}` : `move-${message?.id}`;
+    return <ThreadMoveLine key={key} move={move} time={whenTime(move.at ?? message?.created_at ?? '')} quiet={sessions.length > 1} held={!!handoff && !handoff.handoff?.settled_at} undo={undo} />;
+  };
 
   const waitingHoldsUp = [...new Set(lastAgent.questions?.filter((q) => q.state === 'open').flatMap((q) => q.holds_up) ?? [])];
   const [holdsOpen, setHoldsOpen] = useState(false);
@@ -4151,6 +4149,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
   };
   // The reply's recipient control: a phone's in the box's row, a computer's the field's lead (parts/ReplyRecipientControl).
+  const rcptFolderOf = (session: string) => sessionFolder(session, thread, taggable) ?? thread.project.name;
   const rcptPill = !pillActive ? null : (
     <ReplyRecipientControl
       phone={phone}
@@ -4161,9 +4160,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       onOnly={onlyRecipient}
       onToggle={toggleReplyRecipient}
       onTagAnother={tagAnother}
+      onRemove={removeAgentAction({ threadId: thread.thread_id, onToast, changed: onChanged, labels: sessionLabels, folderOf: rcptFolderOf, rows: rcptAgents, picked: rcptPicked, aim: aimReply, field: () => textRef.current })}
       section={sectionRef.current}
       labels={sessionLabels}
-      folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name}
+      folderOf={rcptFolderOf}
     />
   );
   const routeChoice = asking ? (
@@ -4907,45 +4907,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           }
           if (run >= 0) before.push(foldBand(run));
           if (hiddenNow.has(message.id)) return before;
-          const move = threadMoves.get(message.id);
-          if (move) {
-            const held = move.kind === 'handoff' && !message.handoff?.settled_at;
-            const quietAdd = move.kind === 'added' && sessions.length > 1;
-            before.push(
-              <div className="ib-tmove" key={`move-${message.id}`} data-thread-move={move.kind} data-held={held ? '' : undefined} data-quiet={quietAdd ? '' : undefined}>
-                {/* Added to a thread of several: "You added Retry worker · 4:20 PM", the header's names, no icon or mark. */}
-                {!quietAdd && <Icon name={move.kind === 'handoff' ? 'forward' : 'plus'} size={14} />}
-                <span className="ib-tmove-t">
-                  {move.kind === 'handoff' ? 'You handed this thread to ' : 'You added '}
-                  {!quietAdd && <HostMark host={move.host} />}
-                  <b>{move.names}</b>
-                  {move.kind === 'added' && !quietAdd ? ' to this thread' : ''}
-                  <span className="ib-tmove-tm"> · {whenTime(message.created_at)}</span>
-                </span>
-                {held && (
-                  <>
-                    <span className="ib-tmove-sep" aria-hidden="true">
-                      ·
-                    </span>
-                    <button
-                      type="button"
-                      className="ib-tmove-undo"
-                      data-handoff-undo=""
-                      disabled={handoffUndo?.id === message.id && handoffUndo.busy}
-                      onClick={() => void undoHandoff(message.id)}
-                    >
-                      Undo
-                    </button>
-                  </>
-                )}
-                {handoffUndo?.id === message.id && handoffUndo.error && (
-                  <span className="ib-error" role="alert">
-                    {handoffUndo.error}
-                  </span>
-                )}
-              </div>,
-            );
-          }
+          for (const move of threadMoves.byMessage.get(message.id) ?? []) before.push(moveLine(move, message));
           const isAgent = message.author.kind === 'agent';
           // A named session's message keeps its agent's name and adds the session's after it, quieter (issue #2450,
           // owner's decision 2026-11-04): "Claude Code · Fix login redirect", the whole label on hover and to a
@@ -5339,6 +5301,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           );
           return before;
         })}
+        {threadMoves.end.map((move) => moveLine(move))}
         {reviewView && <ReviewViewNote view={reviewView} />}
         {/* Linked machines: what the person sent here that the thread's machine has not taken yet (HeldWrites.tsx). */}
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />

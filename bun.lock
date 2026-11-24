@@ -305,6 +305,16 @@
         "typescript": "~5.8.2",
       },
     },
+    "packages/diagrams": {
+      "name": "@plannotator/diagrams",
+      "version": "0.1.0",
+      "bin": {
+        "plannotator-diagrams": "./bin/plannotator-diagrams.js",
+      },
+      "devDependencies": {
+        "typescript": "7.0.2",
+      },
+    },
     "packages/editor": {
       "name": "@plannotator/editor",
       "version": "0.0.1",
@@ -1215,6 +1225,8 @@
     "@plannotator/cline": ["@plannotator/cline@workspace:apps/cline-plugin"],
 
     "@plannotator/core": ["@plannotator/core@workspace:packages/core"],
+
+    "@plannotator/diagrams": ["@plannotator/diagrams@workspace:packages/diagrams"],
 
     "@plannotator/dsh": ["@plannotator/dsh@workspace:apps/dsh-plugin"],
 

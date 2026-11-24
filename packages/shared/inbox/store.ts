@@ -112,6 +112,11 @@ import {
   inboxDefaultSkip,
   inboxSessionlessSend,
   inboxWordsDefault,
+  inboxRemovedNow,
+  inboxCanRemove,
+  inboxFirstPostSinceRemoval,
+  inboxHolderOf,
+  type InboxRemoval,
   inboxDeliveryState,
   type InboxDeliveryConnection,
   type InboxDeliveryDecision,
@@ -3760,23 +3765,99 @@ export class InboxStore {
    * today's rule (the latest agent writer, or a session that took over
    * from an ended one since, else the session a thread the person started is
    * addressed to). Null when there is none.
+   *
+   * `isLive`: a thread whose newest writer the person removed passes to the latest live agent still in it, else the
+   * latest (the window's `followedSession`, the same rule).
    */
-  threadOwner(threadId: string): { host: string | null; session: string } | null {
+  threadOwner(threadId: string, isLive?: (session: string) => boolean): { host: string | null; session: string } | null {
     const messages = this.threadMessages(threadId);
+    // An agent the person removed never owns the thread (inbox-removed.ts): it passes to the latest agent still in it.
+    const removed = inboxRemovedNow(messages);
+    const kept = (session: string) => !removed.has(session);
+    if (isLive && removed.size > 0) {
+      const writers = messages.flatMap((m) => {
+        const session = m.author.kind === "agent" ? inboxHolderOf(m) : null;
+        return session && m.author.kind === "agent" ? [{ host: m.author.host ?? null, session }] : [];
+      });
+      const newest = writers.at(-1)?.session;
+      if (newest && removed.has(newest) && !messages.some((m) => handoffActive(m) || m.took_over)) {
+        const live = [...writers].reverse().find((w) => kept(w.session) && isLive(w.session));
+        if (live) return live;
+      }
+    }
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]!;
-      if (handoffActive(message)) return { host: message.to!.host, session: message.to!.session };
+      if (handoffActive(message)) {
+        if (kept(message.to!.session)) return { host: message.to!.host, session: message.to!.session };
+        break;
+      }
       if (message.took_over) break;
     }
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]!;
       // A permission prompt (launch, `perm:…`) is not its session's words, as in the window's `wordsMessage`.
       // An agent's routine change line (`scheduled_change`) is a note, not its words: it takes no thread.
-      if (message.author.kind === "agent" && message.author.session && !isInboxPermissionSession(message.author.session) && !message.scheduled_change) return { host: message.author.host ?? null, session: message.author.session };
-      if (message.took_over && message.to) return { host: message.to.host, session: message.to.session };
+      // One rule with `inboxCanRemove` (`inboxHolderOf`).
+      if (message.author.kind === "agent") {
+        const holder = inboxHolderOf(message);
+        if (holder && kept(holder)) return { host: message.author.host ?? null, session: holder };
+      }
+      if (message.took_over && message.to && kept(message.to.session)) return { host: message.to.host, session: message.to.session };
     }
     const root = messages[0];
-    return root?.to ? { host: root.to.host, session: root.to.session } : null;
+    if (root?.to && kept(root.to.session)) return { host: root.to.host, session: root.to.session };
+    // The agents that wrote, or the thread was addressed to, are all removed: the latest session a reply went to.
+    if (removed.size === 0) return null;
+    const to = [...messages].reverse().find((message) => message.author.kind === "person" && message.to && kept(message.to.session))?.to;
+    return to ? { host: to.host, session: to.session } : null;
+  }
+
+  /** The sessions out of a thread now (approval "inbox-remove-agent-from-thread"), each with the removal that stands. */
+  removedFrom(threadId: string): ReadonlyMap<string, InboxRemoval> {
+    return inboxRemovedNow(this.threadMessages(threadId));
+  }
+
+  /** Whether `messageId` is `session`'s first post in the thread since the removal that stands (the line goes once). */
+  firstPostSinceRemoval(threadId: string, session: string, messageId: string): boolean {
+    if ((this.messages.get(threadId)?.removed?.length ?? 0) === 0) return false;
+    return inboxFirstPostSinceRemoval(this.threadMessages(threadId), session, messageId);
+  }
+
+  /**
+   * The person removes one of a thread's agents (approval "inbox-remove-agent-from-thread"): an entry on the root's
+   * `removed`. It gets no later reply or wake from the thread and leaves its participants, until the person writes to
+   * it again; its past messages, and what was already sent to it, stay. Refused for a session that is not in the
+   * thread (`not_in_thread`) and for the last agent that could take the person's reply (`last_agent`). A second press
+   * for a session already out writes nothing.
+   */
+  removeFromThread(threadId: string, session: string): { removal: InboxRemoval; root: InboxMessage } {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== root.id) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const messages = this.threadMessages(threadId);
+    const standing = inboxRemovedNow(messages).get(session);
+    if (standing) return { removal: standing, root };
+    const member = this.participantsOf(messages).find((p) => p.session === session);
+    if (!member) throw new InboxError("not_in_thread", "That agent is not in this thread.", { field: "session" });
+    if (!inboxCanRemove(messages, session)) throw new InboxError("last_agent", "It is the last agent in this thread, so it stays.", { field: "session" });
+    const at = this.stamp();
+    const removal: InboxRemoval = { host: member.host, session, ...(member.name ? { name: member.name } : {}), at, after: messages.at(-1)!.id };
+    const next: InboxMessage = { ...root, removed: [...(root.removed ?? []), removal] };
+    this.appendMessage(next, at);
+    return { removal, root: next };
+  }
+
+  /** Undo of a Remove: the session's latest removal goes, so the thread is as it was before the press. */
+  undoRemoveFromThread(threadId: string, session: string): InboxMessage {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== root.id) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const list = root.removed ?? [];
+    const last = list.map((removal) => removal.session).lastIndexOf(session);
+    if (last < 0) return root;
+    const at = this.stamp();
+    const kept = list.filter((_, index) => index !== last);
+    const next: InboxMessage = { ...root, removed: kept.length > 0 ? kept : null };
+    this.appendMessage(next, at);
+    return next;
   }
 
   /**
@@ -3786,10 +3867,13 @@ export class InboxStore {
    */
   addedSessions(threadId: string): InboxTag[] {
     const out: InboxTag[] = [];
-    for (const message of this.threadMessages(threadId)) {
+    const messages = this.threadMessages(threadId);
+    // One the person removed since is no longer a member (inbox-removed.ts).
+    const removed = inboxRemovedNow(messages);
+    for (const message of messages) {
       if (message.author.kind !== "person") continue;
       for (const tag of message.tags ?? []) {
-        if (!tag.joined || out.some((t) => t.session === tag.session)) continue;
+        if (!tag.joined || removed.has(tag.session) || out.some((t) => t.session === tag.session)) continue;
         out.push({ host: tag.host, session: tag.session, ...(tag.name ? { name: tag.name } : {}), ...(tag.label ? { label: tag.label } : {}), wakes: tag.wakes, joined: true });
       }
     }
@@ -7094,6 +7178,13 @@ export class InboxStore {
   private pendingFor(message: InboxMessage, session: string, options: { tags?: boolean }): boolean {
     // A hand-off inside its Undo window goes to nobody yet.
     if (handoffHeld(message) || message.taken_back_at) return false;
+    // The Inbox's own notes (a Mark read's set-aside note, a 👍's) written after the person removed the session from
+    // the thread wait while it stays out: only the person writing to it brings it back (inbox-removed.ts).
+    // Only a thread someone was removed from is read again (its root's `removed`); every other note skips it.
+    if (isInboxNote(message) && (this.messages.get(message.thread_id)?.removed?.length ?? 0) > 0) {
+      const removal = this.removedFrom(message.thread_id).get(session);
+      if (removal && message.created_at >= removal.at) return false;
+    }
     // A scheduled run's divider goes to its own run's session only; a skip line, or a run that didn't start, to none.
     if (message.scheduled_run && message.to?.session !== session) return false;
     const owner = this.isOwner(message, session);
@@ -7375,6 +7466,13 @@ export class InboxStore {
    * wrote, and every session the person tagged. For the overlapping marks.
    */
   participantsOf(messages: readonly InboxMessage[]): InboxParticipant[] {
+    // An agent the person removed from the thread is not in it (inbox-removed.ts), until they write to it again.
+    const removed = inboxRemovedNow(messages);
+    return this.everyParticipantOf(messages).filter((p) => !removed.has(p.session));
+  }
+
+  /** `participantsOf` with the removed agents too: every session the thread ever involved. */
+  private everyParticipantOf(messages: readonly InboxMessage[]): InboxParticipant[] {
     const out: InboxParticipant[] = [];
     const add = (host: string | null, session: string | null | undefined, name?: string | null) => {
       if (!session || out.some((p) => p.session === session)) return;
