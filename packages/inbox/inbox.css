@@ -512,8 +512,9 @@ button.ib-mut { border-radius: 6px; }
   .pn-inbox .ib-side-sec:hover svg.ib-side-sec-chev { visibility: visible; }
   .ib-side-sec:hover .ib-n { opacity: 0; }
 }
-/* One rule for every section: a header sits 2 px under a closed section with no row left, and 12 px (8 on a phone) under rows, so closed headers read as an even stack and an open section's rows stay with their header. */
-.ib-sidescroll > [data-closed]:empty + :is(.ib-side-sec, .ib-secrow) { margin-top: 2px; }
+/* One rule for every section: a header sits 2 px under a closed section with no row left, and 12 px (8 on a phone) under rows, so closed headers read as an even stack and an open section's rows stay with their header.
+   Each section is a block of its own (Sidebar.tsx sheetSection), so the rule reads the block above. A phone's sheet keeps its own 8 px. */
+.ib-side:not(.ib-sb-sheet-in > .ib-side) .ib-sidescroll > .ib-sheet-sec:has(> [data-closed]:empty) + :is(.ib-sheet-sec, .ib-agentsec) > .ib-secrow { margin-top: 2px; }
 /* The order of Projects: beside the chevron, a sibling of the header so it stays one button; the row keeps the header's hover while the pointer is on it.
    The header's margin is the row's, so the row is exactly the header and hovers only where a click opens or closes. */
 .ib-secrow { position: relative; margin-top: 12px; }
@@ -534,8 +535,20 @@ button.ib-mut { border-radius: 6px; }
 /* Pinned and Projects share one scroll area (approval "inbox-pinned-threads": no limit on pins, so a long
    Pinned section scrolls with the projects instead of pushing them and the foot off the window). */
 .ib-sidescroll { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; }
-/* A scroller clips sideways too: room for the selected row's ring and soft shadow (--ib-cur-shadow), taken back from the sides so nothing moves. */
-.ib-sidescroll { padding: 2px 3px 3px; margin: -2px -3px -3px; }
+/* A scroller clips sideways too: room for the selected row's ring and soft shadow (--ib-cur-shadow), taken back from the
+   sides so nothing moves. The room reaches the sidebar's sides, so a stuck heading's ground and hairline do too. The top
+   needs none: a section's heading comes first, 12 px down. */
+.ib-sidescroll { padding: 0 10px 3px; margin: 0 -10px -3px; }
+/* Each section's heading stays at the top of the scroll while its own rows pass under it, and the next heading pushes it
+   off (approval "inbox-sidebar-sticky-headings"; a phone's sheet the same). On the sidebar's ground, edge to edge, so no
+   row shows through; a hairline under it only while it is stuck (data-stuck, components/stickyHeadings.ts). */
+.pn-inbox .ib-sidescroll .ib-secrow { position: sticky; top: 0; z-index: 2; }
+.pn-inbox .ib-sidescroll .ib-secrow::before { content: ""; position: absolute; inset: 0 -10px; z-index: -1; background: var(--ib-ground); }
+.pn-inbox .ib-sidescroll .ib-secrow[data-stuck]::before { box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 70%, transparent); }
+/* The fixed places above the scroll: the same line under them while rows are under them and no heading is stuck
+   (data-edge, set in the same read as data-stuck, so the two lines never show at once). Takes no room. */
+.ib-side:not(.ib-sb-sheet-in > .ib-side) .ib-sidescroll::before { content: ""; position: sticky; top: 0; z-index: 3; flex: none; height: 1px; margin: 0 -10px -1px; }
+.ib-side:not(.ib-sb-sheet-in > .ib-side) .ib-sidescroll[data-edge]::before { background: color-mix(in oklch, var(--border) 70%, transparent); }
 .ib-sidescroll > * { flex-shrink: 0; }
 /* Only that scroll area gives up height when there are many projects or pins: Inbox and the foot keep theirs
    (they shrank from 32 to 20 px past about 17 projects). It fades at its foot while there is more to scroll. */
@@ -12629,10 +12642,9 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 /* The one scroll: edge to edge, so a stuck heading's hairline and the scrollbar reach the sheet's sides. */
 .pn-inbox .ib-sb-sheet-in .ib-sidescroll { flex: 1 1 auto; min-height: 0; margin: 0 -10px; padding: 0 10px 12px; overscroll-behavior: contain; mask-image: none; }
 .ib-sheet-sec { display: flex; flex-direction: column; flex: none; }
-/* A heading: sticks to the top of the scroll while its own section passes under it. Its fold area is everything left
+/* A heading: sticks to the top of the scroll while its own section passes under it (the rules by .ib-sidescroll above). Its fold area is everything left
    of its own buttons (Add agent, Add machine, the projects' order), which are in the row, never over it. */
-.pn-inbox .ib-sb-sheet-in .ib-sidescroll .ib-secrow { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; flex: none; margin: 8px -10px 0; padding: 0 6px 0 10px; background: var(--ib-ground); }
-.pn-inbox .ib-sb-sheet-in .ib-sidescroll .ib-secrow[data-stuck] { box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 70%, transparent); }
+.pn-inbox .ib-sb-sheet-in .ib-sidescroll .ib-secrow { display: flex; align-items: center; flex: none; margin: 8px -10px 0; padding: 0 6px 0 10px; }
 .pn-inbox .ib-sb-sheet-in .ib-secrow > .ib-side-sec { flex: 1 1 auto; min-width: 0; width: auto; height: auto; min-height: 44px; margin-top: 0; padding: 4px 8px 4px 9px; gap: 8px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
 .pn-inbox .ib-sb-sheet-in .ib-side-sec-l { flex: 0 1 auto; }
 .ib-side-sec-c { flex: none; font-weight: 500; font-variant-numeric: tabular-nums; }
