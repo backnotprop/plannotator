@@ -268,6 +268,7 @@ export function createCodexSteerRoute(options: {
   const now = options.now ?? Date.now;
   const policy = options.policy ?? INBOX_CODEX_BUSY_REPLY;
   const rolloutPaths = new Map<string, string>();
+  const rolloutMisses = new Map<string, number>();
   let hooks: { at: number; installed: boolean } | null = null;
   const hookInstalled = () => {
     if (hooks && now() - hooks.at < HOOKS_TTL_MS) return hooks.installed;
@@ -291,8 +292,15 @@ export function createCodexSteerRoute(options: {
       if (policy !== "steer" || !options.allowed() || !hookInstalled()) return false;
       let path = rolloutPaths.get(thread) ?? null;
       if (!path || !existsSync(path)) {
+        // A thread whose rollout was not found is not looked for again for a minute (the walk reads every day folder).
+        const missed = rolloutMisses.get(thread);
+        if (missed !== undefined && now() - missed < 60_000) return false;
         path = await codexRolloutPath(options.codexHomeDir(), thread, options.likelyFolders(thread));
-        if (!path) return false;
+        if (!path) {
+          rolloutMisses.set(thread, now());
+          return false;
+        }
+        rolloutMisses.delete(thread);
         rolloutPaths.set(thread, path);
       }
       return (await codexRolloutTurn(path, now())) === "running";
