@@ -204,8 +204,9 @@ extension InboxSession {
     changeDraft(thread, now: now, typing: true) { draft in
       draft.words = words
       // A tag whose `@` the words lost is dropped for good, as in the window (`useMentionAutocomplete`): typing the
-      // same `@` again by hand does not bring it back.
-      if let tags = draft.tags { draft.tags = TagRules.standing(tags, words: words) }
+      // same `@` again by hand does not bring it back. Not on an empty box: Send empties it before the Send reads
+      // the tags, and spends them itself (`forgetDraft`); a box emptied by hand drops them at its next words.
+      if let tags = draft.tags, !words.isEmpty { draft.tags = TagRules.standing(tags, words: words) }
     }
   }
 

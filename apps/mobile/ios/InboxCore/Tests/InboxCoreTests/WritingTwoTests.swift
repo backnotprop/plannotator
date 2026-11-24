@@ -86,6 +86,25 @@ final class WritingTwoTests: XCTestCase {
     XCTAssertNil(body(reply)["tags"])
   }
 
+  func testSendEmptyingTheBoxBeforeItReadsTheTagsStillSendsThem() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.retry)
+    _ = try await tagPi(session, in: StandInData.retry)
+    let words = "Ask @Pi raise the timeout"
+    session.keepDraft(StandInData.retry, words: words)
+    // The box empties as Send is pressed, before the Send reads the draft.
+    session.keepDraft(StandInData.retry, words: "")
+    await door.clearCalls()
+    let got = await session.send(thread: StandInData.retry, words: words)
+    XCTAssertTrue(got)
+    let sentCalls = await replies(door)
+    let reply = try XCTUnwrap(sentCalls.last)
+    XCTAssertEqual(body(reply)["tags"]?.items.count, 1)
+    XCTAssertNil(session.draft(StandInData.retry)?.tags, "the Send spent it")
+  }
+
   func testAReplyRefusedForATagGivesTheWordsAndTheTagBack() async throws {
     let door = StandInDoor()
     let session = await pairedSession(door: door)
