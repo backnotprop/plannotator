@@ -38,6 +38,8 @@ import {
   INBOX_THREAD_PULLS_REMOVE_DESCRIPTION,
 } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { SHIP_FIELD_DESCRIPTION, SHIP_KIND_DESCRIPTION, SHIP_SHA_DESCRIPTION, SHIP_TEXT_DESCRIPTION, shipStopLine } from "@plannotator/core/inbox-pull-handoff";
+import type { InboxShipStep, InboxShipStepResult } from "./inbox-ship-watch";
 import type { InboxStore, InboxThreadPullsChange } from "@plannotator/shared/inbox/store";
 import { sessionWho, shortTime, type SessionNameOf } from "./inbox-mcp-read";
 import { guarded, okComplete } from "./inbox-mcp-result";
@@ -64,6 +66,12 @@ export interface InboxPullsMcpContext {
   sessionName?: SessionNameOf;
   /** For a short `group/project!45` (`parseProjectPullRefs`). Absent: gitlab.com. */
   projectHost?: ProjectHostOf;
+  /**
+   * Ship (inbox-ship-watch.ts): a step the shipping agent logs; `{ other }` when the calling session (`agent_session`)
+   * is not the one shipping it; `{ stopped }` when that session's ship of the thread was stopped (it reads the stop
+   * line); null when the thread ships nothing. Absent: no Ship.
+   */
+  shipStep?: (threadId: string, step: InboxShipStep, session: string | null) => InboxShipStepResult;
 }
 
 /** The agent a call's filled fields name. */
@@ -182,6 +190,15 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
           thread_id: z.string().describe("Thread or message id."),
           add: z.array(z.string()).optional().describe(INBOX_THREAD_PULLS_ADD_DESCRIPTION),
           remove: z.array(z.string()).optional().describe(INBOX_THREAD_PULLS_REMOVE_DESCRIPTION),
+          ship: z
+            .object({
+              kind: z.enum(["step", "stuck", "merged"]).describe(SHIP_KIND_DESCRIPTION),
+              text: z.string().describe(SHIP_TEXT_DESCRIPTION),
+              sha: z.string().optional().describe(SHIP_SHA_DESCRIPTION),
+            })
+            .strict()
+            .optional()
+            .describe(SHIP_FIELD_DESCRIPTION),
           project_path: z.string().optional(),
           agent_session: z.string().optional(),
           agent_name: z.string().optional(),
@@ -206,10 +223,21 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
           change = await changePullsAsAgent(context, { thread_id: root, add, remove, actor: pullsActor(input) });
           changed = pullsChangeText(change);
         }
+        // Ship: the shipping agent's step, in the ship log (nothing when this thread ships nothing, or another session ships it).
+        const shipped = input.ship && context.shipStep ? context.shipStep(root, { kind: input.ship.kind, text: input.ship.text, sha: input.ship.sha ?? null }, reader) : null;
+        const logged = !input.ship
+          ? ""
+          : shipped && "ship" in shipped
+            ? ` Logged in the ship log of ${shipped.ship.url}.`
+            : shipped && "stopped" in shipped
+              ? ` ${shipStopLine(shipped.stopped)}`
+              : shipped
+                ? " Another session is shipping this pull request; nothing was logged."
+                : " Nothing is shipping in this thread; nothing was logged.";
         // The session has now seen the thread's PRs: the next wake says only what the person changed after this.
         noteSessionRead(store, reader, root, context.now?.() ?? Date.now());
         const lines = threadPullsText(context, root, reader);
-        const head = `Thread ${root}${changed ? `: ${changed}` : ""}${change ? " Nothing was sent to the person." : ""}`;
+        const head = `Thread ${root}${changed ? `: ${changed}` : ""}${change ? " Nothing was sent to the person." : ""}${logged}`;
         return okComplete([head, ...(lines.length > 0 ? lines : ["No PRs on this thread."])].join("\n"), {
           thread_id: root,
           ...(change ? { changed: change.added.length + change.removed.length > 0 } : {}),

@@ -22663,6 +22663,188 @@
       }
     },
     {
+      "id": "undecided-door-get-ships",
+      "title": "door:GET ships",
+      "surface": [
+        "door:GET ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-ships-log",
+      "title": "door:GET ships/log",
+      "surface": [
+        "door:GET ships/log"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-ships",
+      "title": "door:POST ships",
+      "surface": [
+        "door:POST ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-ships-newer",
+      "title": "door:POST ships/newer",
+      "surface": [
+        "door:POST ships/newer"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-ships-stop",
+      "title": "door:POST ships/stop",
+      "surface": [
+        "door:POST ships/stop"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-ships",
+      "title": "window:/api/inbox/ships",
+      "surface": [
+        "window:/api/inbox/ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-ships-log",
+      "title": "window:/api/inbox/ships/log",
+      "surface": [
+        "window:/api/inbox/ships/log"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-ships-newer",
+      "title": "window:/api/inbox/ships/newer",
+      "surface": [
+        "window:/api/inbox/ships/newer"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-ships-stop",
+      "title": "window:/api/inbox/ships/stop",
+      "surface": [
+        "window:/api/inbox/ships/stop"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-frame-ships",
+      "title": "frame:ships",
+      "surface": [
+        "frame:ships"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-ship-note-kind-stop",
+      "title": "enum:InboxMessageWire.ship_note.kind.stop",
+      "surface": [
+        "enum:InboxMessageWire.ship_note.kind.stop"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxmessagewire-ship-note-kind-watch",
+      "title": "enum:InboxMessageWire.ship_note.kind.watch",
+      "surface": [
+        "enum:InboxMessageWire.ship_note.kind.watch"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-ship-note",
+      "title": "field:InboxMessageWire.ship_note",
+      "surface": [
+        "field:InboxMessageWire.ship_note"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-door-get-capabilities",
       "title": "door:GET capabilities",
       "surface": [
@@ -22849,6 +23031,20 @@
       "title": "window:/api/inbox/capabilities",
       "surface": [
         "window:/api/inbox/capabilities"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-capability",
+      "title": "window:/api/inbox/capability",
+      "surface": [
+        "window:/api/inbox/capability"
       ],
       "flows": [],
       "mobile": "undecided",

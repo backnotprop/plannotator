@@ -232,6 +232,7 @@ packages/inbox/markReadWarningWindow.test.tsx
 packages/inbox/ack.test.tsx
 packages/inbox/reactionLanding.test.ts
 packages/inbox/reactionTray.test.tsx
+packages/inbox/reactionSkillEnter.test.tsx
 packages/inbox/replyHoldTray.test.tsx
 packages/inbox/reactEveryMessage.test.tsx
 packages/inbox/reactFaceSelect.test.tsx
@@ -897,6 +898,8 @@ packages/ui/components/frame/card/card.dom.test.tsx
 packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx
 packages/inbox/pulls/branchReviews.test.tsx
 packages/inbox/pulls/reviewsCompact.test.tsx
+packages/inbox/pulls/shipAcross.test.tsx
+packages/inbox/pulls/shipMode.test.tsx
 packages/review-editor/App.treePanes.test.tsx
 packages/review-editor/components/FileHeader.counts.test.tsx
 packages/inbox/guide/useSemDiffClient.test.tsx

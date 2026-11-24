@@ -337,10 +337,12 @@ export function isInboxNote(message: {
   ack_of?: string | null;
   tidy?: InboxTidyMark | null;
   scheduled_run?: { run?: number } | null;
+  ship_note?: { ship: string } | null;
 }): boolean {
   return (
     message.author.kind === "person" &&
     ((message.set_aside?.length ?? 0) > 0 ||
+      !!message.ship_note ||
       !!message.moved_note ||
       (!!message.scheduled_run && message.scheduled_run.run === undefined) ||
       (message.reopened?.length ?? 0) > 0 ||
@@ -619,6 +621,11 @@ export interface InboxMessage {
    * Absent on every other message.
    */
   set_aside?: string[];
+  /**
+   * On Ship's note to the shipping agent (inbox-ship.ts): what the watch saw change on the pull request, or the stop
+   * line. Stored as the person's message, addressed to that session, so it wakes it like any reply.
+   */
+  ship_note?: { ship: string; kind: "watch" | "stop" };
   /**
    * On the Inbox's note to an agent whose questions another session moved
    * (resolve_message's `moved_to`, the owner 2026-11-21: "The Inbox tells it,
@@ -3461,17 +3468,15 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * the entry's bytes per token (3.7), +142. The `moved_to` field's next draft words: +24 more (15,221 → 15,245 on the
  * same build), +6 tokens, Board on the same. The rule's last sentence (pass the answers on, 2026-11-21): +80 more
  * (15,245 → 15,325), +22 tokens; the description stays 1,948 (2,039 with steps and the Board on).
+ * Ship's `ship` field on `thread_pulls` (approval "inbox-ship-mode", its shorter draft words): CI measured the entry on
+ * Pi at 16,318 bytes with the longer draft (7.7% over 15,151; main alone was 3.6% over by then); the shorter words take
+ * 131 bytes off. Re-measured on the entry as the tool builds it from the default tool list (Pi's request shape), with
+ * main as of 2026-11-24: 16,141 bytes; tokens scaled at the entry's bytes per token (3.7), 4,342. Board on: the
+ * `card` action's measured share (1,929 bytes) on top, 18,070, tokens scaled at its own ratio, 4,932.
  */
-/*
- * The `capability` action, listed whatever is on (its name in `action`, its `capability`, `on` and `computer` fields; no
- * line in the description): measured on the real Pi and OpenCode 2 requests in CI, 16,178 bytes (the entry built from the
- * bundled tool list gives 15,702 with Pi's wrapper without the action, so +476, and main had drifted 3.6% over 15,151).
- * Board on measured by inbox-board-switch.test.ts's request shape in CI at 18,107. Tokens scaled at the entry's bytes per
- * token (3.7), not counted on Pi.
- */
-const INBOX_TOOL_COST_NOW = { bytes: 16178, tokens: 4352 };
+const INBOX_TOOL_COST_NOW = { bytes: 16141, tokens: 4342 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 18107, tokens: 4942 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 18070, tokens: 4932 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
@@ -3699,8 +3704,10 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * read and turned from there (`capabilities`; core inbox-capability-switches.ts). `capability-note`: a switch an agent
  * there turns carries `capability_note` (the agent's name), and this Inbox posts its own line for it
  * (inbox-capability-note.ts in the server).
+ * `ships` (approval "inbox-ship-mode"): its ships are read, started and stopped through its door (`ships`, `ships/log`,
+ * `ships/stop`), so a linked machine's Reviews draws them and offers its agents in Ship's list.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

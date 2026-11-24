@@ -120,7 +120,7 @@ import {
   useEndedSessions, type RouteState
 } from './ReplyRoute';
 import { ReaskNote } from './ReaskNote';
-import { CombineLeftNote, TidyNote } from './Tidy';
+import { CombineLeftNote, ShipNote, TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
@@ -4943,9 +4943,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             }
             return before;
           }
-          // A Tidy note: one quiet line in place of the message.
-          if (message.tidy) {
-            before.push(<TidyNote key={message.id} run={message.tidy.id} agent={message.to ? toName(message, message.to) : 'the agent'} time={time} fullWhen={fullWhen} />);
+          // A Tidy note, or Ship's note to the shipping agent: one quiet line in place of the message, never "You".
+          if (message.tidy || message.ship_note) {
+            before.push(message.ship_note ? <ShipNote key={message.id} kind={message.ship_note.kind} agent={message.to ? toName(message, message.to) : 'the agent'} time={time} fullWhen={fullWhen} /> : <TidyNote key={message.id} run={message.tidy!.id} agent={message.to ? toName(message, message.to) : 'the agent'} time={time} fullWhen={fullWhen} />);
             return before;
           }
           if (message.scheduled_run) {
