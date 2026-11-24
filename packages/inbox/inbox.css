@@ -6839,8 +6839,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .dm-step[aria-current] .dm-step-l, .dm-step:hover .dm-step-l { color: var(--foreground); }
 .dm-step[aria-current] .dm-step-l { font-weight: 500; }
 .pn-inbox .dm-step:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.dm-step-mk { display: inline-flex; width: 14px; height: 14px; }
-.dm-step-mk :is(svg, img, .ib-mk) { width: 14px !important; height: 14px !important; }
+.dm-step-mk { display: inline-flex; width: var(--ib-mark-16); height: var(--ib-mark-16); }
 .dm-step-later { color: var(--muted-foreground); font-weight: 400; }
 .dm-step-send .dm-bar { background: color-mix(in oklch, var(--muted-foreground) 12%, transparent); }
 .dm-step-send[aria-current] .dm-bar { background: var(--foreground); }
@@ -6881,7 +6880,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
   .pn-inbox .dm-acts .dm-next { flex: 1; justify-content: center; }
   .pn-inbox .dm-acts .dm-back { width: 44px; justify-content: center; padding: 0; }
   .dm-send-h { font-size: var(--ib-fs-16, 16px); }
-  .pn-inbox .dm-words { font-size: 16px; }
+  .pn-inbox .dm-words { font-size: var(--ib-fs-16-in, 16px); }
 }
 
 /* ───────────────── The onboarding tour (approval "inbox-onboarding-tour"; tour/) ─────────────────

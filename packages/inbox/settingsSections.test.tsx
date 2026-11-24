@@ -463,8 +463,9 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
   const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-  // Code review shows to everyone, off (the owner, 2026-11-17). The window has no Shape row.
-  expect(rows).toEqual(['Board', 'Checklist', ...SCHEDULED_ROW, 'Code review']);
+  // Code review shows to everyone, off (the owner, 2026-11-17). Decision mode is an ordinary capability now, under
+  // the Checklist. The window has no Shape row.
+  expect(rows).toEqual(['Board', 'Checklist', 'Decision mode', ...SCHEDULED_ROW, 'Code review']);
   // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
   expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
   expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);
@@ -593,7 +594,7 @@ test.skipIf(!hasDom)(
       const el = await renderApp('#settings/capabilities');
       await until(() => switchNamed(el, 'Code review') !== null, 'the Code review switch');
       const rows = [...el.querySelectorAll('[data-settings-capabilities] .ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-      expect(rows).toEqual(['Board', 'Checklist', ...SCHEDULED_ROW, 'Code review']);
+      expect(rows).toEqual(['Board', 'Checklist', 'Decision mode', ...SCHEDULED_ROW, 'Code review']);
       expect(switchNamed(el, 'Shape')).toBeNull();
       expect(el.querySelector('[data-settings-shape]')).toBeNull();
       for (const held of HELD) {
@@ -706,8 +707,13 @@ test.skipIf(!hasDom)('Capabilities: no row for an Inbox with nothing to switch (
   expect(value({ ...off, board: { on: true } })).toBe('Board');
   expect(value({ ...off, decision_mode: { on: true } })).toBe('Decision mode');
   expect(value({ ...off, board: { on: true }, decision_mode: { on: true } })).toBe('2 on');
-  // Decision mode's row is in the main card and the Experimental group is not drawn for it (no Grid, Bro or Float here).
+  // Decision mode's row is in the main card, never in the Experimental group (here holding Grid alone)...
   act(() => root!.render(page('capabilities', false, { ...off, decision_mode: { on: true } })));
+  expect(host.querySelector('[data-settings-capabilities] [data-settings-decision-mode] [role="switch"]')?.getAttribute('aria-checked')).toBe('true');
+  expect(host.querySelector('[data-settings-experimental] [data-settings-grid]')).not.toBeNull();
+  expect(host.querySelector('[data-settings-experimental] [data-settings-decision-mode]')).toBeNull();
+  // ...and with no Grid, Bro or Float here, the Experimental group is not drawn for it.
+  act(() => root!.render(page('capabilities', false, { ...off, experimental: {}, decision_mode: { on: true } })));
   expect(host.querySelector('[data-settings-capabilities] [data-settings-decision-mode] [role="switch"]')?.getAttribute('aria-checked')).toBe('true');
   expect(host.querySelector('[data-settings-experimental]')).toBeNull();
 });

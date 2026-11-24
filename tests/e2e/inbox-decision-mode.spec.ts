@@ -268,10 +268,11 @@ test('one message at a time with the thread\'s own cards; Later moves it to the 
   await expect(pane(page).locator('[data-decide-head]')).toHaveCount(0);
   await expect(pane(page).locator('.ib-phead')).toBeVisible();
   expect(await personReplies(ids.thread)).toEqual([]);
-  // The picks stay in the thread.
-  await expect(pane(page).getByRole('radio', { name: /^Retry with the same key/ })).toBeChecked();
   await shot(page, '07-left-thread');
+  // The picks stay in the thread, as its draft: the open questions say so (the thread may fold the first message).
   if (!(await page.locator('[data-open-questions-list]').isVisible())) await pane(page).locator('[data-open-questions]').click();
+  await expect(page.locator('[data-open-questions-list] .ib-oq-row', { hasText: 'Which way should the worker go' }).locator('.ib-oq-draft')).toContainText('Retry with the same key');
+  await expect(page.locator('[data-open-questions-list] .ib-oq-row', { hasText: 'Page on-call after 5 tries?' }).locator('.ib-oq-draft')).toContainText('Yes, page on-call');
   await expect(page.locator('[data-thread-decide]')).toHaveText('Resume · 1 of 3 messages left');
   await shot(page, '08-resume');
   await page.locator('[data-thread-decide]').click();
