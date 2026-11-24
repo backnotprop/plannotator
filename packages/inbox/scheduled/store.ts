@@ -1,7 +1,8 @@
 /**
  * This machine's routines, read once and shared by the page, the list rows and a thread's foot. Read while
- * the capability is on and something shows them; read again on a `scheduled` record, a run or skip line, and (while
- * the page is open) a launch's run line moving (CONTRACT.md section 4).
+ * the capability is on and something shows them; read again on a `scheduled` record, a run or skip line, a launch's
+ * run line moving while the page is open or a run is under way (a run's end is only that), a reconnect, and the
+ * window shown again while a run is under way (CONTRACT.md section 4).
  */
 import { useEffect, useSyncExternalStore } from 'react';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
@@ -62,16 +63,32 @@ export function setScheduledOn(next: boolean | null): void {
   }
 }
 
-/** From the event stream (eventFrames.ts): `null` is a `deliveries` frame. */
-export function scheduledFrame(event: InboxEvent | null): void {
+/** A run under way: its end writes no store line, only the launch's run line moving (`event: deliveries`). */
+const anyRunning = () => !!snap.rows?.some((row) => row.state === 'running');
+
+/**
+ * From the event stream (eventFrames.ts): `null` is a `deliveries` frame, `'connect'` a (re)connect's `hello`. A run
+ * ending moves only its launch's run line, so `deliveries` reads again while the page is open or a run is under way
+ * (a list row's Running, a thread's foot); a reconnect reads again, as nothing replays a `deliveries` it missed.
+ */
+export function scheduledFrame(event: InboxEvent | null | 'connect'): void {
   if (!on || listeners.size === 0) return;
-  if (event === null ? pages > 0 : event.kind === 'scheduled' || (event.kind === 'message' && !!(event.message.scheduled_run || event.message.scheduled_change))) void readScheduled();
+  if (event === 'connect' || (event === null ? pages > 0 || anyRunning() : event.kind === 'scheduled' || (event.kind === 'message' && !!(event.message.scheduled_run || event.message.scheduled_change)))) void readScheduled();
+}
+
+/** The window shown again (a wake, a tab brought back): a run under way may have ended unheard meanwhile. */
+function onShown() {
+  if (document.visibilityState === 'visible' && on && listeners.size > 0 && (pages > 0 || anyRunning())) void readScheduled();
 }
 
 function subscribe(listener: () => void): () => void {
+  if (listeners.size === 0 && typeof document !== 'undefined') document.addEventListener('visibilitychange', onShown);
   listeners.add(listener);
   if (on && snap.rows === null && !reading) void readScheduled();
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0 && typeof document !== 'undefined') document.removeEventListener('visibilitychange', onShown);
+  };
 }
 const current = () => snap;
 
