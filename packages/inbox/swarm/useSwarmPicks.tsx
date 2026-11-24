@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { HostMark, Icon } from '../icons';
 import { hostLabel, type ComposeTarget } from '../compose/model';
 import { ToPicker } from '../compose/ToPicker';
@@ -6,6 +6,7 @@ import { PhoneToSheet } from '../compose/PhoneToSheet';
 import type { ToMachine } from '../compose/toMachines';
 import { SwarmBadge } from './SwarmBadge';
 import { SWARM_ACROSS_COMPUTERS, swarmCanJoin } from './model';
+import { carriesSwarm, swarmAgentKind, swarmAgentName, swarmWordsFor, type SwarmSkillContext } from './swarmSkillWords';
 import { useSwarmTip } from './useSwarmTip';
 
 /** One more agent in New message's To: the session and the computer it is on (To's machine key). */
@@ -15,35 +16,44 @@ export interface SwarmPick {
 }
 
 /**
- * The other picks in New message's To (docs/agent-guides/inbox-compose.md, "Swarm"). After the first pick a `+` (Add an
- * agent) opens the same picker over the computers whose agents can work in the thread (`swarmCanJoin`), each picked
- * row checked; a pick adds or removes an agent. With a second agent the Swarm badge appears (its entrance), then rests
- * off; a press turns Swarm on, another turns it off. Send carries `tags` (each `{ host, session }`) and `swarm`: one
- * thread with every agent in it, a swarm only while the badge is on.
+ * The other picks in New message's To, and the Swarm badge (docs/agent-guides/inbox-compose.md, "Swarm"). After the
+ * first pick a `+` (Add an agent) opens the same picker over the computers whose agents can work in the thread
+ * (`swarmCanJoin`), each picked row checked; a pick adds or removes an agent. Send carries `tags` (each
+ * `{ host, session }`): one thread with every agent in it.
+ *
+ * The badge is there, quiet, once To has an agent (one agent swarms too: `/swarm`'s one text has it propose the team). A second agent
+ * added, or a new agent being started, plays its Gather once; then it rests off. Its state IS "the words carry the
+ * `/swarm` skill": a press puts `/swarm` in the words or takes it out, and typing `/swarm` turns it on the same way
+ * (swarmSkillWords.ts). The Send pastes the skill's text, filled with `skill`'s agents, and the server makes the
+ * thread a swarm from it.
  *
  * Which computers: `swarmCanJoin` alone says (today the first pick's own: an agent cannot yet be woken for, or reply
  * into, a thread another computer holds; inbox-mcp-far-read.ts `farReplyRefusal`).
  */
 export function useSwarmPicks(input: {
-  /** The first pick in To, if it is a running session; a new session's start counts too (`starting`). */
-  first: { session: string; machineKey: string } | null;
-  starting: boolean;
+  /** The first pick in To, if it is a running session. */
+  first: { session: string; machineKey: string; target: ComposeTarget } | null;
+  /** A new session To starts at Send ("Claude Code", its folder, the computer it starts on). */
+  starting: { name: string; where: string | null; machineKey: string } | null;
   machines: readonly ToMachine[];
   home: string | null;
   phone: boolean;
   host: HTMLElement | null;
   /** Back to the words after a pick. */
   after: () => void;
+  /** The words being written, and how to change them (the badge's press). */
+  words: string;
+  setWords: (change: (words: string) => string) => void;
   /** Agents on other computers can work in the thread (`SWARM_ACROSS_COMPUTERS`; a test sets it). */
   across?: boolean;
 }) {
   const [picks, setPicks] = useState<SwarmPick[]>([]);
-  const [on, setOn] = useState(false);
   const [open, setOpen] = useState(false);
   const firstSession = input.first?.session ?? null;
-  const key = input.first?.machineKey ?? null;
-  const anchor = !!input.first || input.starting;
+  const key = input.first?.machineKey ?? input.starting?.machineKey ?? null;
+  const anchor = !!input.first || !!input.starting;
   const across = input.across ?? SWARM_ACROSS_COMPUTERS;
+  const on = carriesSwarm(input.words);
 
   // The first pick moved (another agent, another computer, or To emptied): picks that can't work in its thread go.
   useEffect(() => {
@@ -53,10 +63,18 @@ export function useSwarmPicks(input: {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firstSession, key, anchor, across]);
-  // Every second agent that arrives again finds the badge resting off.
-  useEffect(() => {
-    if (picks.length === 0) setOn(false);
-  }, [picks.length]);
+
+  // The Gather once for a second agent added, and once for a new agent being started; then the badge rests.
+  const [highlight, setHighlight] = useState(0);
+  const had = useRef({ several: false, starting: false });
+  const several = picks.length > 0;
+  const starting = !!input.starting;
+  // Before paint, so the badge never shows a frame of rest before its Gather.
+  useLayoutEffect(() => {
+    const before = had.current;
+    had.current = { several, starting };
+    if ((several && !before.several) || (starting && !before.starting)) setHighlight((n) => n + 1);
+  }, [several, starting]);
 
   const machines = useMemo(() => {
     const can = input.machines.filter((m) => swarmCanJoin(key, m.key, across));
@@ -85,14 +103,16 @@ export function useSwarmPicks(input: {
       {input.phone && <span>Add an agent</span>}
     </button>
   );
-  const tip = useSwarmTip(picks.length > 0);
-  const badge = picks.length > 0 && (
+  const tip = useSwarmTip(highlight > 0);
+  const badge = anchor && (
     <span className="ib-swarm-end">
       <SwarmBadge
         on={on}
+        appear={false}
+        highlight={highlight}
         onToggle={(next) => {
           tip.close();
-          setOn(next);
+          input.setWords((words) => swarmWordsFor(words, next));
         }}
         tip={tip.node}
       />
@@ -122,6 +142,19 @@ export function useSwarmPicks(input: {
     open && <ToPicker groups={[]} selected={firstSession} checked={checked} home={input.home} phone={false} onPick={toggle} onClose={() => setOpen(false)} machines={machines} opensOn={machines[0]?.key} />
   );
   /** What Send adds to the new thread. */
-  const send = picks.length > 0 ? { tags: picks.map((p) => ({ host: p.target.host, session: p.target.session })), swarm: on } : {};
-  return { row, phoneLine, picker, send, picks, on, machines };
+  const send = picks.length > 0 ? { tags: picks.map((p) => ({ host: p.target.host, session: p.target.session })) } : {};
+
+  /** Who the message goes to, for `/swarm`'s text: each agent by its kind, its folder and (another computer's) where. */
+  const elsewhere = (machineKey: string) => {
+    const m = input.machines.find((x) => x.key === machineKey);
+    return m && !m.self ? m.name : null;
+  };
+  const named = (target: ComposeTarget, machineKey: string) => swarmAgentName(swarmAgentKind(target.host), [target.label ?? target.project.name, elsewhere(machineKey)]);
+  const firstName = input.first
+    ? named(input.first.target, input.first.machineKey)
+    : input.starting
+      ? swarmAgentName(input.starting.name, [input.starting.where, elsewhere(input.starting.machineKey)])
+      : null;
+  const skill: SwarmSkillContext = { agents: [...(firstName ? [firstName] : []), ...picks.map((p) => named(p.target, p.machineKey))] };
+  return { row, phoneLine, picker, send, picks, on, machines, skill };
 }

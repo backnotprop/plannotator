@@ -39,6 +39,7 @@ import {
   type SkillExportContent,
 } from '@plannotator/ui/utils/skillReferences';
 import { INBOX_BUILTIN_SKILL_ROOT, inboxReviewSkill } from '@plannotator/core/inbox-review';
+import type { SwarmSkillContext } from '@plannotator/core/swarm-skill';
 import { inboxApi } from './api';
 import { annotationOf } from './attachments';
 
@@ -81,8 +82,8 @@ export function setReviewSkillsDiagrams(on: boolean): void {
  * window's own text, never read from disk. Undefined for any other skill. A review skill's chapter diagram lines ride
  * `diagrams` (Chapter diagrams).
  */
-export function builtinSkillContent(ref: SkillCatalogEntry, diagrams: boolean = reviewSkillsDiagrams): SkillExportContent | undefined {
-  return inboxBuiltinSkillContent(ref, diagrams);
+export function builtinSkillContent(ref: SkillCatalogEntry, diagrams: boolean = reviewSkillsDiagrams, swarm?: SwarmSkillContext): SkillExportContent | undefined {
+  return inboxBuiltinSkillContent(ref, diagrams, swarm);
 }
 
 /**
@@ -130,6 +131,8 @@ export async function inboxSkillsBlock(
   sources: InboxSkillSources = windowSources,
   /** Which catalog entries count here (`inboxSkillFilter`); by default no skill that needs a reviewed thread. */
   filter: (entry: SkillCatalogEntry) => boolean = inboxSkillFilter(false),
+  /** Who this Send goes to, for `/swarm`'s text (@plannotator/core/swarm-skill). */
+  swarm?: SwarmSkillContext,
 ): Promise<string> {
   const written = texts.filter((t) => t.trim() !== '');
   if (written.length === 0) return '';
@@ -146,7 +149,7 @@ export async function inboxSkillsBlock(
     refs
       .filter((ref) => ref.humanOnly)
       .map(async (ref) => {
-        const content = builtinSkillContent(ref) ?? (ref.root === 'plannotator' ? undefined : await sources.content(ref.name).catch(() => undefined));
+        const content = builtinSkillContent(ref, reviewSkillsDiagrams, swarm) ?? (ref.root === 'plannotator' ? undefined : await sources.content(ref.name).catch(() => undefined));
         if (content) contents.set(ref.name, content);
       }),
   );

@@ -99,6 +99,7 @@
     "./skill-references-render": "./skill-references-render.ts",
     "./inbox-pull-handoff": "./inbox-pull-handoff.ts",
     "./picture-it-skill": "./picture-it-skill.ts",
+    "./swarm-skill": "./swarm-skill.ts",
     "./picture-it-page": "./picture-it-page.ts",
     "./inbox-reply-draft": "./inbox-reply-draft.ts",
     "./inbox-review": "./inbox-review.ts",

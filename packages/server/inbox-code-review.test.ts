@@ -325,14 +325,14 @@ describe("the skills catalog", () => {
     const own = [{ name: "deploy", root: "agents-project", description: "Ship it" }];
     const w = await world();
     const offList = ((await (await fetch(`${w.base}/api/inbox/skills`)).json()) as { skills: { root: string }[] }).skills;
-    expect((offList as { name: string; root: string }[]).filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it"]);
+    expect((offList as { name: string; root: string }[]).filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it", "swarm"]);
     await w.setCodeReview(true);
     const onList = ((await (await fetch(`${w.base}/api/inbox/skills`)).json()) as { skills: { name: string; root: string }[] }).skills;
-    expect(onList.filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it", ...INBOX_REVIEW_SKILL_NAMES]);
+    expect(onList.filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it", "swarm", ...INBOX_REVIEW_SKILL_NAMES]);
     expect(onList.some((s) => s.name === "review-guide")).toBe(false);
 
     const on = await catalog(true, own);
-    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:picture-it", "plannotator:review-curate", "plannotator:review-walkthrough", "plannotator:review-recheck", "agents-project:deploy"]);
+    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:picture-it", "plannotator:swarm", "plannotator:review-curate", "plannotator:review-walkthrough", "plannotator:review-recheck", "agents-project:deploy"]);
     expect(on[0]!.humanOnly).toBe(true);
   });
 

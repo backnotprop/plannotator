@@ -16,7 +16,6 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import { InboxSwarms } from "@plannotator/shared/inbox/swarms";
 import { registerInboxSwarmTool, type InboxSwarmMcpContext } from "./inbox-mcp-swarm";
 import { createInboxSwarmView } from "./inbox-swarm-view";
-import { agentMessage, messageText } from "./inbox-mcp-read";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -40,7 +39,7 @@ function world(options: { groups?: () => InboxAgentsGroup[]; far?: (id: string) 
   const swarms = new InboxSwarms(store.dir);
   const project = store.ensureProject({ name: "billing", root: "/work/billing" });
   const tags = [{ host: "pi", session: "ses_pi", wakes: true }] as unknown as InboxTag[];
-  const root = store.startPersonThread({ project_id: project.id, body: "Split the retry work between you.", to: { host: "claude-code", session: "ses_cc" }, idempotency_key: "k-1", tags, swarm: true }).message;
+  const root = store.startPersonThread({ project_id: project.id, body: "Split the retry work between you.", to: { host: "claude-code", session: "ses_cc" }, idempotency_key: "k-1", tags }).message;
   swarms.setOn(root.thread_id, true);
   const reply = store.sendMessage({ project_id: project.id, author: CLAUDE, body: "On it.", reply_to: root.id }).message;
   const view = createInboxSwarmView({ store, swarms, agents: options.groups, selfMachine: () => "ibx_self", machineName: options.machineName });
@@ -137,22 +136,5 @@ describe("the swarm view", () => {
     const members = w.view.swarmViewOf(w.root.thread_id)!.members;
     expect(members.map((m) => m.session)).toEqual(["ses_cc", "ses_pi", "ses_cx"]);
     expect(members[2]!.doing?.text).toBe("Watching the deploy");
-  });
-});
-
-describe("read_thread of a swarm thread's first message", () => {
-  test("carries the swarm block naming the other agents for the reader, and a reply carries none", () => {
-    const w = world();
-    const thread = w.store.thread(w.root.thread_id)!;
-    const root = thread.messages.find((m) => m.id === w.root.id)!;
-    const asClaude = agentMessage(root, "whole", "ses_cc");
-    expect(asClaude.swarm_start).toContain(w.root.thread_id);
-    expect(asClaude.swarm_start).toContain("Pi");
-    expect(asClaude.swarm_start).not.toContain("Claude Code");
-    expect(agentMessage(root, "whole", "ses_pi").swarm_start).toContain("Claude Code");
-    const shown = messageText(asClaude, { previousId: null, previousDate: null, rootId: w.root.id });
-    expect(shown).toContain(asClaude.swarm_start!);
-    const reply = thread.messages.find((m) => m.id === w.reply.id)!;
-    expect(agentMessage(reply, "whole", "ses_pi").swarm_start).toBeUndefined();
   });
 });

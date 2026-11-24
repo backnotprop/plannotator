@@ -2,10 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { SWARM_GATHER_MS, SWARM_SETTLE_AT_MS, SWARM_SETTLE_MS, swarmGather, swarmMotionStop, swarmReducedMotion, swarmRegather } from './swarmBadgeMotion';
 
 /**
- * The Swarm badge (docs/agent-guides/inbox-compose.md, "Swarm"): a toggle. In New message it appears once To holds a
- * second agent, with the Gather (the icon's dots fly in and form the badge, stars spark out), then rests OFF until the
- * person turns it on (the owner, 2026-11-24: "it appears, then rests off until I turn it on"). On, small stars drift
- * around it. A swarm thread turned off shows it too, quiet, with no entrance.
+ * The Swarm badge (docs/agent-guides/inbox-compose.md, "Swarm"): a toggle whose state is "these words carry the
+ * `/swarm` skill" (swarmSkillWords.ts). In New message it is there, quiet, once To holds an agent; a second agent added
+ * or a new agent being started plays the Gather once (the icon's dots fly in and form the badge, stars spark out), then
+ * it rests OFF until the person turns it on (the owner, 2026-11-24: "it appears, then rests off until I turn it on").
+ * On, small stars drift around it. The reply box has it too, quiet; a swarm thread turned off shows it on its line.
  *
  * The badge's look and motion are this file's markup constants (the icon's dots, the particles, the stars),
  * swarmBadgeMotion.ts and swarmBadge.css: the designer's later round replaces those three, nothing else.
@@ -61,12 +62,18 @@ export function SwarmBadge({
   on,
   onToggle,
   appear = true,
+  highlight = 0,
   tip,
 }: {
   on: boolean;
   onToggle?: (on: boolean) => void;
-  /** Play the Gather when it first appears (New message); false: simply there (a thread's line). */
+  /** Play the Gather when it first appears; false: simply there, quiet (New message with one agent, a thread's line). */
   appear?: boolean;
+  /**
+   * Each new value plays the Gather once, then the badge rests as `on` says (New message: a second agent added, or a
+   * new agent being started). 0: none yet.
+   */
+  highlight?: number;
   /** The first-time card at the badge (useSwarmTip), hung under it while shown. */
   tip?: ReactNode;
 }) {
@@ -77,9 +84,20 @@ export function SwarmBadge({
   const [settling, setSettling] = useState(false);
   const gathering = useRef(look === 'on' && !on);
   const was = useRef(on);
+  const mounted = useRef(false);
 
   useLayoutEffect(() => {
-    if (!appear || !slot.current) return;
+    const first = !mounted.current;
+    mounted.current = true;
+    if ((first ? !appear : highlight === 0) || !slot.current) return;
+    if (!first) {
+      // A highlight: on for a moment, whatever `on` says, then it settles back (reduced motion: no motion, no change).
+      if (swarmReducedMotion()) return;
+      gathering.current = !was.current;
+      setSettling(false);
+      setRest(false);
+      setLook('on');
+    }
     swarmGather(slot.current);
     const rested = setTimeout(() => setRest(true), SWARM_GATHER_MS);
     if (!gathering.current) return () => clearTimeout(rested);
@@ -96,9 +114,9 @@ export function SwarmBadge({
       clearTimeout(settled);
       if (slot.current) swarmMotionStop(slot.current);
     };
-    // Once, when it appears.
+    // When it appears, and again for each highlight.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [highlight]);
 
   useEffect(() => {
     if (on === was.current) return;

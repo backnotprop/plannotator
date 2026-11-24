@@ -34,7 +34,6 @@ const root: InboxMessageWire = {
   idempotency_key: 'k1',
   to: { host: 'claude-code', session: 'ses_a' },
   started_by_person: true,
-  swarm: true,
   tags: [
     { host: 'codex', session: 'ses_b', wakes: true },
     { host: 'pi', session: 'ses_c', wakes: true },

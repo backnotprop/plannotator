@@ -4785,10 +4785,6 @@
           "type": "boolean",
           "const": true
         },
-        "swarm": {
-          "type": "boolean",
-          "const": true
-        },
         "decision_ask": {
           "type": "boolean",
           "const": true

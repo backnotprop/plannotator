@@ -917,3 +917,4 @@ packages/inbox/commentBoxFiles.test.tsx
 packages/inbox/commentRowFiles.test.tsx
 packages/inbox/swarm/swarmPicks.test.tsx
 packages/inbox/swarm/swarmLine.test.tsx
+packages/inbox/swarm/swarmReply.test.tsx

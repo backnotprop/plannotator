@@ -1,6 +1,7 @@
 /**
  * Swarm mode: every word an agent reads about it, in one place (the owner's to approve; PR "Swarm mode, slice 1").
- * The `swarm` action's line and field descriptions, its result, and the block a swarm's first message carries.
+ * The `swarm` action's line and field descriptions and its result. What a swarm's agents are told to do is the
+ * built-in `/swarm` skill's text (@plannotator/core/swarm-skill), in the message itself.
  */
 
 import type { InboxSwarmMember } from "@plannotator/core/inbox-swarm";
@@ -16,16 +17,6 @@ export const INBOX_SWARM_FIELD_DESCRIPTIONS = {
 
 /** A hosted Inbox that refused the call for rate (HTTP 429): a plain result, never an error. */
 export const INBOX_SWARM_BUSY_TEXT = "swarm_busy: Not saved just now: too many calls. Nothing is wrong; try again in a minute.";
-
-/** What a swarm thread's first message carries after its words, for each agent it goes to. */
-export function inboxSwarmStartBlock(threadId: string, others: readonly string[]): string {
-  const with_ = others.length === 0 ? "to other agents" : `to you and to ${others.length === 1 ? others[0] : `${others.slice(0, -1).join(", ")} and ${others[others.length - 1]}`}`;
-  return [
-    "[Swarm]",
-    `The person sent this ${with_} together, as a swarm: each of you sees what the others are doing. Say what you are doing in one line with your Inbox swarm action (thread_id ${threadId}, doing) when you start and when it changes; call it without doing to see the others.`,
-    "[/Swarm]",
-  ].join("\n");
-}
 
 const isoTime = (iso: string) => iso.replace(/\.\d+Z$/, "Z");
 

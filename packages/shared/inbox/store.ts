@@ -7794,8 +7794,6 @@ export class InboxStore {
      * of these, each with its own delivery, as a reply's tags are. `to`'s own session is never one of them.
      */
     tags?: InboxTag[];
-    /** New message's Swarm badge was on at Send: the root carries `swarm` (the swarm block for each agent). Only `true` sets it. */
-    swarm?: unknown;
     /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
     launch?: InboxLaunchRecord;
     review_live?: InboxReviewLive;
@@ -7845,7 +7843,7 @@ export class InboxStore {
       ...(input.rows_ask === true ? { rows_ask: true as const } : {}),
       ...(() => {
         const tags = (input.tags ?? []).filter((tag, i, all) => tag.session !== input.to!.session && all.findIndex((t) => t.session === tag.session) === i);
-        return tags.length > 0 ? { tags, ...(input.swarm === true ? { swarm: true as const } : {}) } : {};
+        return tags.length > 0 ? { tags } : {};
       })(),
       ...(input.launch ? { launch: input.launch } : {}),
       ...(input.review_live ? { review_live: input.review_live } : {}),

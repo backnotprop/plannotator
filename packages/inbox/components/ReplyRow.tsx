@@ -34,6 +34,7 @@ export function ReplyRow({
   fold,
   onFold,
   fitKey,
+  swarm = null,
 }: {
   phone: boolean;
   /** The open questions stay open with this Send (the skip chip's quieter look). */
@@ -63,6 +64,8 @@ export function ReplyRow({
   onFold: (fold: boolean) => void;
   /** Changes whenever the chips' words do. */
   fitKey: string;
+  /** The Swarm badge (swarm/SwarmReplyBadge.tsx): after the tools on a computer, after Skills on a phone. */
+  swarm?: ReactNode;
 }) {
   const midRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
@@ -119,6 +122,7 @@ export function ReplyRow({
           <div className="ib-rlayer">
             {clip}
             {skills}
+            {swarm}
             {pill}
             {files}
             {hint && (
@@ -141,6 +145,7 @@ export function ReplyRow({
         {clip}
         {skills}
         {mic}
+        {swarm}
       </div>
       <div className="ib-rmid" ref={midRef} data-fold={fold ? '' : undefined} data-hint={hint ? '' : undefined}>
         <div

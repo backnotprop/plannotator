@@ -22399,9 +22399,7 @@
     {
       "id": "undecided-field-inboxmessagewire-swarm",
       "title": "field:InboxMessageWire.swarm",
-      "surface": [
-        "field:InboxMessageWire.swarm"
-      ],
+      "surface": [],
       "flows": [],
       "mobile": "undecided",
       "why": "",

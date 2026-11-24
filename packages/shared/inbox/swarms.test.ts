@@ -80,8 +80,7 @@ describe("a New message to several agents", () => {
 
   test("one thread: every agent is in it and each is handed the first message", () => {
     const { store, project } = open();
-    const { message } = store.startPersonThread({ project_id: project.id, body: "Fix the rounding.", to: { host: "claude-code", session: "ses_a" }, idempotency_key: "k1", tags, swarm: true });
-    expect(message.swarm).toBe(true);
+    const { message } = store.startPersonThread({ project_id: project.id, body: "Fix the rounding.", to: { host: "claude-code", session: "ses_a" }, idempotency_key: "k1", tags });
     expect(store.participantsOf([message]).map((p) => p.session)).toEqual(["ses_a", "ses_b", "ses_c"]);
     for (const session of ["ses_a", "ses_b", "ses_c"]) expect(store.pendingReplies(session).map((m) => m.id)).toEqual([message.id]);
     // One agent's delivery settles it for that agent only.
@@ -90,10 +89,9 @@ describe("a New message to several agents", () => {
     expect(store.pendingReplies("ses_c").map((m) => m.id)).toEqual([message.id]);
   });
 
-  test("the addressee is never also a tag, and a lone pick is no swarm", () => {
+  test("the addressee is never also a tag", () => {
     const { store, project } = open();
-    const { message } = store.startPersonThread({ project_id: project.id, body: "Fix it.", to: { host: "claude-code", session: "ses_a" }, idempotency_key: "k2", tags: [{ host: "claude-code", session: "ses_a", wakes: true }], swarm: true });
+    const { message } = store.startPersonThread({ project_id: project.id, body: "Fix it.", to: { host: "claude-code", session: "ses_a" }, idempotency_key: "k2", tags: [{ host: "claude-code", session: "ses_a", wakes: true }] });
     expect(message.tags).toBeUndefined();
-    expect(message.swarm).toBeUndefined();
   });
 });

@@ -50,7 +50,6 @@ import { inboxSearchBodyText, inboxSearchReplyText } from "@plannotator/shared/i
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_TIDY_WITHDRAWN_HOST } from "@plannotator/shared/inbox/tidy";
 import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
-import { inboxSwarmStartFor } from "@plannotator/shared/inbox/swarm-start";
 import { reviewAnchorBlock, reviewAnchorPlace } from "@plannotator/core/review-threads";
 import type { AgentFile } from "./inbox-agent-files";
 import { inboxMessageForReader, type InboxSentFromReader } from "./inbox-sent-from-reader";
@@ -164,8 +163,6 @@ export interface AgentMessage {
   rows_ask?: true;
   /** With `board_request`: the cards in flight that link this thread already (not done, not dropped), for `messageText`. */
   board_cards?: { id: string; title: string }[];
-  /** A swarm thread's root (`InboxMessage.swarm`): the swarm block for the reader (`inboxSwarmStartFor`), after the body in `messageText`. */
-  swarm_start?: string;
   /** `inboxViewingLine`, on a reply sent from full screen's floating box. `body` stays the person's words. */
   viewing?: string;
   /** `inboxSentFromLine`, on a message the person wrote away from this computer. `body` stays the person's words. */
@@ -521,7 +518,6 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(message.board_request === true ? { board_request: true as const } : {}),
     ...(message.decision_ask === true ? { decision_ask: true as const } : {}),
     ...(message.rows_ask === true ? { rows_ask: true as const } : {}),
-    ...(inboxSwarmStartFor(message, caller) ? { swarm_start: inboxSwarmStartFor(message, caller) } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
     ...(inboxSentFromLine(message) ? { sent_from: inboxSentFromLine(message) } : {}),
     ...(message.review_anchor ? { review_comment: reviewCommentText(message) } : {}),
@@ -905,7 +901,6 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
   }
   if (message.decision_ask) lines.push("", INBOX_DECISION_ASK_BLOCK);
   if (message.rows_ask) lines.push("", INBOX_ROWS_ASK_BLOCK);
-  if (message.swarm_start) lines.push("", message.swarm_start);
   return lines.join("\n");
 }
 

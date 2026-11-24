@@ -882,12 +882,6 @@ export interface InboxMessage {
    */
   board_request?: true;
   /**
-   * On the root of a thread the person started with several agents and New message's Swarm badge on: what each agent
-   * receives for this message carries the swarm block (`inboxSwarmStartBlock`, packages/shared/inbox/swarm-words.ts)
-   * after it. Whether swarm is on now is the thread's `swarm` (inbox/swarms.json). Absent on every other message.
-   */
-  swarm?: true;
-  /**
    * On the root of a thread the person started from Settings -> Decision data's Ask. The body stays as typed; what
    * the agent receives for this message (the delivered turn, read_thread) carries `INBOX_DECISION_ASK_BLOCK` after it.
    * Absent on every other message.

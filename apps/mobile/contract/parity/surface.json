@@ -1293,7 +1293,6 @@
       "InboxMessageWire.subject",
       "InboxMessageWire.subject_question",
       "InboxMessageWire.supersedes",
-      "InboxMessageWire.swarm",
       "InboxMessageWire.t3_wait",
       "InboxMessageWire.tags",
       "InboxMessageWire.taken_back_at",

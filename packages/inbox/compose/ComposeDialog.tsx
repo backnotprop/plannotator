@@ -810,7 +810,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           : localReviewMessage({ changes: reviewChanges, project: reviewProject?.name ?? null, branch: reviewWork.branch, base: reviewWork.base, words: body, ask: box.ask });
       // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
       if (boxPull && sendProject) await inboxApi.pullOwnerCheck(pulls!.keys, sendProject);
-      const skills = transport ? null : await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE);
+      const skills = transport ? null : await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE, undefined, undefined, swarm.skill);
       const machine = start ? start.machine : targetOn;
       const input: StartThreadInput = {
         to: start
@@ -1373,7 +1373,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otherMachines, there.machines, there.reads, linkedSessions, selfView?.name, home, groups, toStart?.launch, model?.launch, lastSent]);
   const toOpensOn = targetOn ?? start?.machine ?? HERE;
-  const swarm = useSwarmPicks({ first: target ? { session: target.session, machineKey: toOpensOn } : null, starting: !!start, machines: toMachines, home, phone, host: dialogRef.current, after: afterPicker });
+  const swarm = useSwarmPicks({ first: target ? { session: target.session, machineKey: toOpensOn, target } : null, starting: start ? { name: start.name, where: start.scratch ? null : start.project.name, machineKey: start.machine ?? HERE } : null, machines: toMachines, home, phone, host: dialogRef.current, after: afterPicker, words: body, setWords: setBody });
 
   const reviewRows = box && (
     <ReviewRows

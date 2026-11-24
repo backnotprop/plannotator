@@ -151,6 +151,7 @@ import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX, PACKED_ASS
 import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { InboxSwarms } from "@plannotator/shared/inbox/swarms";
+import { watchSwarmStarts } from "@plannotator/shared/inbox/swarm-start";
 import { createInboxSwarmView } from "./inbox-swarm-view";
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
@@ -1475,6 +1476,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullOwners = createInboxPullLinks(dataDir);
   // Swarm threads (inbox/swarms.json; packages/shared/inbox/swarms.ts): the person's switch and each agent's line.
   const swarms = new InboxSwarms(inboxDir(dataDir));
+  // A person's message carrying the `/swarm` skill (a New message or a reply; from this window, the phone or a linked
+  // computer's forward) makes its thread a swarm: the one rule, swarm-start.ts.
+  const unsubscribeSwarmStart = watchSwarmStarts(store, swarms);
   // A swarm thread's view (inbox-swarm-view.ts): its agents found in the agents list the window reads, linked computers' too.
   const swarmView = createInboxSwarmView({
     store,
@@ -4570,7 +4574,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         thread_id: reply.thread_id,
         reply_to: reply.reply_to,
         subject,
-        body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply), tag.session),
+        body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply)),
         url: threadPageUrl(baseUrl, reply.thread_id),
         tagged: { owner: hostAgentName(store.recipientOf(reply)?.host) },
         // Added to the thread ("Add instead"): it works alongside the owner.
@@ -4604,7 +4608,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       thread_id: reply.thread_id,
       reply_to: reply.reply_to,
       subject,
-      body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply), reply.to?.session ?? null),
+      body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply)),
       url: threadPageUrl(baseUrl, reply.thread_id),
       ...(redirected ? { redirected_from: redirected } : {}),
       // A thread the person started: the wake says so (INBOX_NEW_THREAD_INSTRUCTION).
@@ -5377,7 +5381,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody: (req) => readBody(req),
     json,
     boardOn,
-    onSwarmStart: (threadId) => void swarms.setOn(threadId, true),
     onReviewStart: (threadId, review, where) => {
       const start = codeReviewOn() ? inboxReviewStartOf(review, where) : null;
       if (!start) return;
@@ -8676,6 +8679,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launch.stop();
     rex.close();
     unsubscribeLaunchTip();
+    unsubscribeSwarmStart();
     unsubscribeAgentWork();
     // Every `:::run` still running stops with the Inbox: no command outlives it.
     runRoutes.stop();

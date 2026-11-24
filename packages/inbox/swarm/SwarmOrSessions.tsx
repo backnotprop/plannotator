@@ -6,6 +6,9 @@ import { ThreadSessions, type ThreadSessionsProps } from '../components/ThreadSe
 import { SwarmLine } from './SwarmLine';
 import { swarmApi } from './swarmApi';
 
+// The reply box's badge, from the one module Thread.tsx reads swarm from.
+export { SwarmReplyBadge, swarmReplySkill } from './SwarmReplyBadge';
+
 const NO_NAMES: ReadonlyMap<string, string> = new Map();
 
 /**

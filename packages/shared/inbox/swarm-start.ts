@@ -1,37 +1,28 @@
 /**
- * Swarm mode: the block a swarm thread's first message carries for each agent it goes to (`inboxSwarmStartBlock`,
- * ./swarm-words), after its words, in the wake (./uploads `inboxBodyForAgent`) and in read_thread. Only on the root
- * of a thread the person sent with New message's Swarm badge on (`InboxMessage.swarm`).
+ * Swarm mode's ONE rule for "this message makes its thread a swarm" (docs/agent-guides/inbox-compose.md, "Swarm"):
+ * a person's message, a New message or a reply alike, whose skills block names the built-in `/swarm` skill
+ * (@plannotator/core/swarm-skill). The Swarm badge only puts `/swarm` in the words; the window pastes the skill's
+ * text into the body at Send, so the agents read what to do in the message itself, with no other block. The server
+ * reads this on every person message its store writes (inbox.ts), so a message from this window, the phone, or a
+ * linked computer's forward to the computer holding the thread turns swarm on there.
  */
 
-import { inboxAgentName } from "@plannotator/core/inbox-types";
-import { inboxSwarmStartBlock } from "./swarm-words";
+import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
+import { SWARM_SKILL } from "@plannotator/core/swarm-skill";
+import type { InboxListener } from "./store";
 
-interface Addressee {
-  host: string | null;
-  session: string;
+export function inboxMessageStartsSwarm(message: { author: { kind: string }; body: string; thread_id?: string }): boolean {
+  if (message.author.kind !== "person" || !message.thread_id) return false;
+  return splitInboxSkillsBlock(message.body)?.skills.some((skill) => skill.name === SWARM_SKILL.name) ?? false;
 }
 
 /**
- * Whether a person's message starts a swarm in its thread: the ONE rule the server (inbox-compose.ts, which turns
- * swarm on for the thread) and the agents' texts (the start block below) both read. Today: the root of a New message
- * sent with the Swarm badge on (`InboxMessage.swarm`). If swarm becomes a built-in `/swarm` skill (PLAN.md, "If swarm
- * is a skill"), a message whose skills block names it starts one too, here and nowhere else.
+ * Every message the store writes from now on that starts a swarm turns swarm on for its thread. Only when the message is
+ * written (its line's time is its own `created_at`): a later rewrite of it (seen, delivered, an ack) never turns on
+ * again a swarm the person turned off. Returns the unsubscribe.
  */
-export function inboxMessageStartsSwarm(message: { id?: string; thread_id?: string; swarm?: true }): boolean {
-  return message.swarm === true && !!message.thread_id && (message.id === undefined || message.id === message.thread_id);
-}
-
-/**
- * The block for `reader` (a session; the root's other agents are named by their host's name), or "" when the message
- * is no swarm root. With no reader known, every agent the root goes to is named.
- */
-export function inboxSwarmStartFor(
-  message: { id?: string; thread_id?: string; swarm?: true; to?: Addressee | null; tags?: readonly Addressee[] | null },
-  reader: string | null = null,
-): string {
-  if (!inboxMessageStartsSwarm(message) || !message.thread_id) return "";
-  const agents = [...(message.to ? [message.to] : []), ...(message.tags ?? [])];
-  const others = agents.filter((agent) => !reader || agent.session !== reader).map((agent) => inboxAgentName({ kind: "agent", host: agent.host }));
-  return inboxSwarmStartBlock(message.thread_id, others);
+export function watchSwarmStarts(store: { subscribe(listener: InboxListener): () => void }, swarms: { setOn(threadId: string, on: boolean): unknown }): () => void {
+  return store.subscribe((line) => {
+    if (line.kind === "message" && line.at === line.record.created_at && inboxMessageStartsSwarm(line.record)) swarms.setOn(line.record.thread_id, true);
+  });
 }

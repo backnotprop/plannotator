@@ -12,6 +12,7 @@ import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, splitInboxSki
 import type { SkillCatalogEntry, SkillExportContent } from '@plannotator/ui/utils/skillReferences';
 import { CREATE_ROUTINE_SKILL } from '@plannotator/core/create-routine-skill';
 import { PICTURE_IT_SKILL } from '@plannotator/core/picture-it-skill';
+import { SWARM_SKILL, SWARM_TASKS_AND_GHOST_THREAD, swarmSkill, swarmSkillBody } from '@plannotator/core/swarm-skill';
 import { INBOX_BUILTIN_SKILL_ROOT } from '@plannotator/core/inbox-review';
 import { builtinSkillContent, composeInboxSkillsBlock, inboxSkillReferences, inboxSkillsBlock, INBOX_SKILL_INSTRUCTIONS_BUDGET, withSkillsBlock } from './skills';
 import { replyWords } from './folding';
@@ -339,5 +340,37 @@ describe('/picture-it, the built-in every thread lists', () => {
 
   test('the text is the window\'s own, not a folder read', () => {
     expect(builtinSkillContent(entry)).toEqual({ content: PICTURE_IT_SKILL.body, truncated: false, dir: '', path: '' });
+  });
+});
+
+describe('/swarm, the Swarm badge\'s skill', () => {
+  const entry: SkillCatalogEntry = { name: SWARM_SKILL.name, root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true, description: SWARM_SKILL.description };
+  const swarmSources = { catalog: async () => [entry, ...CATALOG], content: async () => READBACK };
+  const words = 'Split the refunds work. /swarm ';
+
+  test('one text for every Send: to one agent, to several, or with no one named, the whole skill rides the message', async () => {
+    const several = await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE, swarmSources, undefined, { agents: ['Claude Code (ledger)', 'Codex (ledger · Studio Mac)'] });
+    const one = await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE, swarmSources, undefined, { agents: ['Claude Code (ledger)'] });
+    expect(several).toBe(one);
+    expect(await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE, swarmSources)).toBe(one);
+    expect(one).toContain(SWARM_SKILL.body.trim());
+    expect(swarmSkill('picture-it', { agents: ['Codex'] })).toBeUndefined();
+  });
+
+  test('while the task list and the ghost thread are not built, the text sends agents to neither', () => {
+    expect(SWARM_TASKS_AND_GHOST_THREAD).toBe(false);
+    const shipped = swarmSkillBody();
+    expect(shipped).toBe(SWARM_SKILL.body);
+    expect(shipped).not.toMatch(/task list|ghost thread/i);
+    // Switched on (the slice that ships both), both are named.
+    expect(swarmSkillBody(true)).toMatch(/Task list/);
+    expect(swarmSkillBody(true)).toMatch(/Ghost thread/);
+  });
+
+  test('the block names swarm, so the server makes the thread a swarm from it, and the window still folds it', async () => {
+    const block = await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE, swarmSources);
+    const split = splitInboxSkillsBlock(withSkillsBlock(words, block))!;
+    expect(split.before).toBe(words.trim());
+    expect(split.skills.map((s) => s.name)).toEqual(['swarm']);
   });
 });

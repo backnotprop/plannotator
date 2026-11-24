@@ -1,7 +1,6 @@
 /**
- * Swarm mode as every connection carries it. The failures these guard: the swarm block missing from what an agent
- * receives for a swarm thread's first message (or naming the reader as one of the others, or riding a plain thread);
- * the contract's copies of the swarm words drifting from swarm-words.ts (the contract imports nothing); a hosted
+ * Swarm mode as every connection carries it. The failures these guard: the `/swarm` skill's text cut from, or a block
+ * added after it in, what an agent receives for the message that carries it; the contract's copies of the swarm words drifting from swarm-words.ts (the contract imports nothing); a hosted
  * Inbox's 429 for `swarm` reaching the agent as an error; a look classed as a write (it would wait at the relay); and
  * the bundled agent tool losing the action or passing Claude Code's 2,048 characters.
  */
@@ -9,33 +8,22 @@ import { describe, expect, test } from "bun:test";
 import { INBOX_DEFAULT_TOOLS } from "../../../apps/hook/hooks/mod/inbox-default-tools";
 import { isInboxAgentWrite } from "./agent-relay-client";
 import { INBOX_AGENT_ACTION_LEADS, INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_SWARM_BUSY_RESULT_TEXT, inboxAgentTool, inboxToolResultText, mcpAnswerOfResponse } from "./connection";
-import { INBOX_SWARM_ACTION_LINE, INBOX_SWARM_BUSY_TEXT, INBOX_SWARM_FIELD_DESCRIPTIONS, inboxSwarmStartBlock } from "./swarm-words";
+import { INBOX_SWARM_ACTION_LINE, INBOX_SWARM_BUSY_TEXT, INBOX_SWARM_FIELD_DESCRIPTIONS } from "./swarm-words";
+import { INBOX_BUILTIN_SKILL_ROOT } from "@plannotator/core/inbox-review";
+import { composeInboxSkillsBlock } from "@plannotator/core/inbox-skills-compose";
+import { INBOX_MESSAGE_SKILL_AUDIENCE } from "@plannotator/core/skill-reference-block";
+import { SWARM_SKILL, swarmSkill } from "@plannotator/core/swarm-skill";
 import { inboxBodyForAgent } from "./uploads";
 
-const ROOT = {
-  id: "msg_01K7SWARMROOT000000000000",
-  thread_id: "msg_01K7SWARMROOT000000000000",
-  body: "Split the retry work between you.",
-  swarm: true as const,
-  to: { host: "claude-code", session: "ses_cc" },
-  tags: [
-    { host: "pi", session: "ses_pi" },
-    { host: "codex", session: "ses_cx" },
-  ],
-};
-
-describe("the swarm block", () => {
-  test("each agent a swarm root goes to reads it after the words, naming the others and not itself", () => {
-    const forPi = inboxBodyForAgent(ROOT, [], null, "ses_pi");
-    expect(forPi).toBe(`${ROOT.body}\n\n${inboxSwarmStartBlock(ROOT.thread_id, ["Claude Code", "Codex"])}`);
-    expect(inboxBodyForAgent(ROOT, [], null, "ses_cc")).toBe(`${ROOT.body}\n\n${inboxSwarmStartBlock(ROOT.thread_id, ["Pi", "Codex"])}`);
-  });
-
-  test("with no reader known it names every agent of the root; a plain root and a reply carry none", () => {
-    expect(inboxBodyForAgent(ROOT)).toBe(`${ROOT.body}\n\n${inboxSwarmStartBlock(ROOT.thread_id, ["Claude Code", "Pi", "Codex"])}`);
-    const { swarm: _off, ...plain } = ROOT;
-    expect(inboxBodyForAgent(plain, [], null, "ses_pi")).toBe(ROOT.body);
-    expect(inboxBodyForAgent({ ...ROOT, id: "msg_01K7SWARMREPLY00000000000" }, [], null, "ses_pi")).toBe(ROOT.body);
+describe("the /swarm skill reaches each agent in the message itself", () => {
+  test("what an agent receives is the person's words with the skill's text, whole, and nothing added after it", () => {
+    const ref = { name: SWARM_SKILL.name, root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true };
+    const text = swarmSkill(ref.name, { agents: ["Claude Code (billing)", "Pi (billing)"] })!.body;
+    const block = composeInboxSkillsBlock([ref], new Map([[ref.name, { content: text, truncated: false, dir: "", path: "" }]]), INBOX_MESSAGE_SKILL_AUDIENCE);
+    const body = `Split the retry work between you.\n\n${block}`;
+    const message = { id: "msg_01K7SWARMROOT000000000000", thread_id: "msg_01K7SWARMROOT000000000000", body };
+    expect(inboxBodyForAgent(message)).toBe(body);
+    expect(inboxBodyForAgent(message)).toContain(text.trim());
   });
 });
 

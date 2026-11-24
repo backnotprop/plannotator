@@ -37,7 +37,6 @@ import { inboxCommentDraftUploadIds } from "@plannotator/shared/inbox/comment-dr
 import { homedir } from "node:os";
 import { basename } from "node:path";
 import { inboxHasUnsent, inboxRowArchived } from "@plannotator/shared/inbox/list";
-import { inboxMessageStartsSwarm } from "@plannotator/shared/inbox/swarm-start";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import type { InboxReplyDraftRow } from "@plannotator/core/inbox-types";
 import type { InboxComposeProject, InboxComposeSession, InboxDraft, InboxDraftStatus, InboxLaunchFrom, InboxMessage, InboxProject, InboxSentFrom } from "@plannotator/core/inbox-types";
@@ -96,8 +95,6 @@ export function createInboxCompose(options: {
   boardOn?: () => boolean;
   /** A New review on local changes started this thread (`review` on a Send): its row shows from now on. */
   onReviewStart?: (threadId: string, review: unknown, where: { host: string; project_id: string; at: string }) => void;
-  /** A Send with several agents and the Swarm badge on wrote its thread: swarm goes on for it (inbox/swarms.json). */
-  onSwarmStart?: (threadId: string) => void;
   /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
   machine?: () => string;
   /** Uploads something else keeps for later (a Combine's files copied from a linked computer): the sweep leaves them. */
@@ -254,8 +251,8 @@ export function createInboxCompose(options: {
         decision_ask: body.decision_ask === true,
         // Settings -> Rows' ask box: the agent also receives how to change the rows (INBOX_ROWS_ASK_BLOCK).
         rows_ask: body.rows_ask === true,
-        // New message's other picks (one thread, every agent in it) and its Swarm badge: `swarmPicks` checked them first.
-        ...(picks.length > 0 ? { tags: picks, swarm: body.swarm === true } : {}),
+        // New message's other picks: one thread, every agent in it (a swarm when the words carry `/swarm`, swarm-start.ts).
+        ...(picks.length > 0 ? { tags: picks } : {}),
         ...(prepared ? { launch: prepared.launch } : {}),
         sent_from: sentFrom,
       });
@@ -275,7 +272,6 @@ export function createInboxCompose(options: {
       sent?.(result.message);
       if (body.review) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
       if (prepared) options.launch!.begin(result.message);
-      if (inboxMessageStartsSwarm(result.message)) options.onSwarmStart?.(result.message.thread_id);
     }
     // Sent: the uploads are attachments now, and the draft it came from is done.
     removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));

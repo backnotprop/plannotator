@@ -18,7 +18,7 @@ import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../schedu
 import { useMessageRefRepos } from '../messageRefRepo';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { outboxLine } from '../machines';
-import { SwarmOrSessions } from '../swarm/SwarmOrSessions';
+import { SwarmOrSessions, SwarmReplyBadge, swarmReplySkill } from '../swarm/SwarmOrSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
@@ -3268,7 +3268,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         const { target, own } = part;
         const last = index === parts.length - 1;
         const annotationsFeedback = own.length > 0 ? await buildFeedback(own) : '';
-        const skills = await inboxSkillsBlock([last ? words : '', ...annotationSkillTexts(own)], INBOX_REPLY_SKILL_AUDIENCE, undefined, skillFilter);
+        const skills = await inboxSkillsBlock([last ? words : '', ...annotationSkillTexts(own)], INBOX_REPLY_SKILL_AUDIENCE, undefined, skillFilter, swarmReplySkill(sessions, thread.project.name));
         const feedback = withSkillsBlock(annotationsFeedback, skills);
         // The agents tagged anywhere in this Send ride the last reply (a tag in a file comment sends the whole reply).
         const tags = sendTags.get(part.key) ?? [];
@@ -5517,7 +5517,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 keepOpen={keepOpen}
                 fold={replyFold}
                 onFold={setReplyFold}
-                fitKey={replyFitKey}
+                fitKey={replyFitKey} swarm={<SwarmReplyBadge text={replyText} onChange={(words) => changeReply(words)} swarmOn={!!thread.swarm?.on} />}
                 send={
                   routeChoiceOpen ? null : (
                   // No tooltip: a button that says Send needs none, and ⌘↵ is named only to assistive technology
