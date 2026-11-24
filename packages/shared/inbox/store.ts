@@ -7084,6 +7084,12 @@ export class InboxStore {
     const markups = this.markupsOf((record) => record.thread_id === threadId);
     this.keepDecisionLines((question) => messageIds.has(question.message_id));
     this.releaseScheduledThreads((id) => id === threadId);
+    // Its ghost thread (Swarm) goes with it: a ghost thread is reached only through its parent, so one left behind is
+    // words nobody can open or delete. Its swarm record is the parent's (`thread_id`) and goes in the parent's delete.
+    for (const [ghost, parent] of this.ghostParents) {
+      if (parent !== threadId || !this.messages.has(ghost)) continue;
+      this.log.deleteThread(project, ghost, new Set(this.threadMembers.get(ghost) ?? []), this.seq);
+    }
     this.log.deleteThread(project, threadId, messageIds, this.seq);
     this.reload(markups);
   }

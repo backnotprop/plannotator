@@ -180,3 +180,24 @@ test("a swarm and its ghost thread read back after a restart", () => {
   expect(again.listRow(ghost)).toBeNull();
   expect(again.pendingReplies("ses_codex").map((m) => m.id)).toEqual([said.message.id]);
 });
+
+test("deleting a thread deletes its ghost thread and its swarm record with it, now and after a restart", () => {
+  const { store, thread, ghost, open } = world();
+  joinSwarm(store, thread, CLAUDE);
+  joinSwarm(store, thread, CODEX);
+  const said = saySwarm(store, thread, CLAUDE, "The endpoint takes a date now.");
+  // Another thread's swarm stays.
+  const other = store.sendMessage({ project_id: store.message(thread)!.project_id, author: AGENT, body: "Docs search.", subject: "Docs" }).message.id;
+  const otherGhost = startSwarm(store, other).ghost_id!;
+  store.deleteThread(thread);
+  for (const reader of [store, open()]) {
+    expect(reader.message(thread)).toBeNull();
+    expect(reader.message(ghost)).toBeNull();
+    expect(reader.message(said.message.id)).toBeNull();
+    expect(reader.swarmOf(thread)).toBeNull();
+    expect(reader.ghostParentOf(ghost)).toBeNull();
+    expect(reader.pendingReplies("ses_codex")).toEqual([]);
+    expect(reader.swarmOf(other)?.ghost_id).toBe(otherGhost);
+    expect(reader.ghostParentOf(otherGhost)).toBe(other);
+  }
+});
