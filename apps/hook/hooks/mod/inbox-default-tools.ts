@@ -425,7 +425,6 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
             "routines",
             "code_review",
             "chapter_diagrams",
-            "system",
             "bro_mode",
             "float_drafts"
           ]

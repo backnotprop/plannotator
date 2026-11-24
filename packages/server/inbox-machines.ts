@@ -315,7 +315,14 @@ export interface MachineCapabilitiesAnswer {
   machine: string;
   name: string;
   switches: InboxCapabilitySwitches | null;
+  /** The words for a turn that waits for it ("Waiting for Studio: …"). */
   held: string | null;
+  /** A read: when it is away, when it last gave its switches (ISO); null when they were read now. */
+  awaySince?: string | null;
+  /** A read: the switches turned here that wait for it (shown as turned in `switches`). */
+  pending?: string[];
+  /** A held turn: resolves once that computer has settled it, with its refusal's words when it did not take it. */
+  settled?: Promise<{ taken: boolean; why: string | null }>;
 }
 
 /** What a held write says, by its machine's state: the same words as the window's `heldWords` (packages/inbox/api.ts). A revoked machine is forgotten as it is revoked, so it never holds one here. */
@@ -1099,16 +1106,35 @@ export function createInboxMachines(context: InboxMachinesContext) {
       ? new Request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idempotency_key: `agent-${crypto.randomUUID()}`, [change.key]: { on: change.on } }) })
       : new Request(url, { method: "GET" });
     const response = await forward(asked, url, machine, route, "local");
-    const body = (await response.json().catch(() => ({}))) as { capabilities?: unknown; code?: unknown; error?: unknown; machine?: { state?: string } | null; outbox?: OutboxView };
+    const body = (await response.json().catch(() => ({}))) as { capabilities?: unknown; away?: unknown; read_at?: unknown; held?: unknown; code?: unknown; error?: unknown; machine?: { state?: string } | null; outbox?: OutboxView };
     if (response.status === 202) {
       const state = body.outbox?.state;
-      if (state === "queued" || state === "sending") return { machine, name, switches: null, held: machineHeldWords(name, body.machine?.state ?? null) };
+      if ((state === "queued" || state === "sending") && body.outbox) return { machine, name, switches: null, held: machineHeldWords(name, body.machine?.state ?? null), settled: heldSettled(body.outbox.key) };
       const why = (body.outbox?.answer as { error?: unknown } | null | undefined)?.error;
       throw new InboxError("not_delivered", typeof why === "string" && why ? why : `Not delivered to ${name}.`);
     }
     if (!response.ok) throw new InboxError(typeof body.code === "string" ? body.code : "machine_refused", typeof body.error === "string" ? body.error : `${name} refused it.`);
-    return { machine, name, switches: inboxCapabilitySwitchesOf(change ? body : body.capabilities), held: null };
+    if (change) return { machine, name, switches: inboxCapabilitySwitchesOf(body), held: null };
+    // A read while it is away is the last it gave (inbox-capabilities-machines.ts): said so, with the turns that wait for it.
+    const pending = Array.isArray(body.held) ? body.held.filter((key): key is string => typeof key === "string") : [];
+    return { machine, name, switches: inboxCapabilitySwitchesOf(body.capabilities), held: null, awaySince: body.away === true && typeof body.read_at === "string" ? body.read_at : null, pending };
   };
+
+  /** A held write's end, however long it waits: taken, or not (refused, given up, dropped, cancelled) with its words. */
+  const heldSettled = (key: string): Promise<{ taken: boolean; why: string | null }> =>
+    new Promise((resolve) => {
+      const done = (entry: OutboxEntry) => {
+        const why = (entry.answer as { error?: unknown } | null)?.error;
+        resolve({ taken: entry.state === "delivered", why: typeof why === "string" && why ? why : null });
+      };
+      const now = outbox.get(key);
+      if (now && now.state !== "queued" && now.state !== "sending") return done(now);
+      const off = outbox.onChange(({ entry }) => {
+        if (entry.key !== key || entry.state === "queued" || entry.state === "sending") return;
+        off();
+        done(entry);
+      });
+    });
 
   // ── A linked machine's accounts (Settings → Accounts, the Usage peek) ──
 

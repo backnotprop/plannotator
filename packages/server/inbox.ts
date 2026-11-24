@@ -224,7 +224,7 @@ import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-g
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
-import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
+import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, inboxScheduledOffText, type InboxScheduled } from "./inbox-scheduled";
 import { createRoutineGrants, sendRecipients } from "./inbox-routine-grants";
 import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
 import { execLoginCommand, inboxLoginItem, type InboxLoginItem } from "./inbox-scheduled-login";
@@ -1897,14 +1897,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       },
       there: async (computer, change) => (machines ? machines.capabilitiesOn(computer, change) : null),
       linked: () => machines?.linkedNames() ?? [],
-      tell: async (by, threadId, projectPath, body) => {
+      // `project`: the agent's own project, by the lookup of the door it came through (a paired agent's is the door's).
+      tell: async (by, threadId, project, body) => {
         const author = { kind: "agent" as const, host: by.host, session: by.session, name: by.name };
         const thread = threadId ? store.message(threadId) : null;
         // The Inbox's own kind of note: no sound (`launch_note`).
         if (thread) return store.sendMessage({ author, body, launch_note: true, project_id: thread.project_id, reply_to: store.threadMessageIds(thread.thread_id).at(-1) ?? thread.thread_id }).message.thread_id;
-        if (!projectPath) return null;
-        const project = await resolveProject(projectPath).catch(() => null);
-        return project ? store.sendMessage({ author, body, launch_note: true, project_id: project.id, subject: body }).message.thread_id : null;
+        const projectId = await project();
+        return projectId && store.project(projectId) ? store.sendMessage({ author, body, launch_note: true, project_id: projectId, subject: body }).message.thread_id : null;
       },
     },
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
@@ -4770,7 +4770,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           : call.params?.name === "steps" && !stepsOn()
             ? INBOX_STEPS_OFF_TEXT
             : call.params?.name === "routine" && !scheduledCap.on()
-              ? INBOX_SCHEDULED_OFF_TEXT
+              ? inboxScheduledOffText(scheduledCap.wire().scheduled_threads !== undefined)
               : null;
     return text ? json({ jsonrpc: "2.0", id: call.id, result: { content: [{ type: "text", text }], isError: true } }) : null;
   };

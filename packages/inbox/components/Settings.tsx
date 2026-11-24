@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { KeyboardSettings } from './KeyboardSettings';
-import { INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
+import { INBOX_SYSTEM_SWITCH_SHOWN, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
 import { SoundRow, Switch } from './SoundRow';
 import { LinkedCapabilities } from './LinkedCapabilities';
@@ -524,10 +524,11 @@ function GeneralSection({
 /**
  * Whether Settings → Capabilities offers the System switch to everyone (approval "system-inbox", addendum 2026-11-08:
  * in 0.29 System stays off and hidden; it turns on only by config.json `inboxSystem: true`, for testing). False: the
- * row shows only while System is already on, so a tester who turned it on in config.json can turn it off here. Set it
+ * row shows only while System is already on, so a tester who turned it on in config.json can turn it off here. It is
+ * core's `INBOX_SYSTEM_SWITCH_SHOWN`, which also decides whether agents get System (the `capability` tool): set that
  * to true when System is announced.
  */
-export const SYSTEM_SETTINGS_ROW_VISIBLE = false;
+export const SYSTEM_SETTINGS_ROW_VISIBLE: boolean = INBOX_SYSTEM_SWITCH_SHOWN;
 
 /**
  * Capabilities (the owner, 2026-10-27): the switches that turn a whole

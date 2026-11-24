@@ -17,10 +17,24 @@ export const INBOX_CAPABILITY_SWITCHES = [
 
 export type InboxCapabilitySwitchKey = (typeof INBOX_CAPABILITY_SWITCHES)[number]["key"];
 
-/** The `capability` tool's names for them (docs/agent-guides/inbox-machines.md): the Settings row's name, in snake case. */
-export const INBOX_CAPABILITY_AGENT_IDS = INBOX_CAPABILITY_SWITCHES.map((s) => s.agent) as [(typeof INBOX_CAPABILITY_SWITCHES)[number]["agent"], ...(typeof INBOX_CAPABILITY_SWITCHES)[number]["agent"][]];
+/**
+ * Whether Settings → Capabilities offers the System switch to everyone (approval "system-inbox", addendum 2026-11-08:
+ * in 0.29 System stays off and hidden; it turns on only by config.json `inboxSystem: true`, for testing). The Settings
+ * page's `SYSTEM_SETTINGS_ROW_VISIBLE` is this, and agents get System only when it is true. Set it to true when System
+ * is announced.
+ */
+export const INBOX_SYSTEM_SWITCH_SHOWN: boolean = false;
+
+/**
+ * The switches an agent may list and turn: exactly those a person sees in Settings → Capabilities, Experimental
+ * included. A hidden one (System, while `INBOX_SYSTEM_SWITCH_SHOWN` is false) is not among them.
+ */
+export const INBOX_CAPABILITY_AGENT_SWITCHES = INBOX_CAPABILITY_SWITCHES.filter((s) => s.key !== "system" || INBOX_SYSTEM_SWITCH_SHOWN);
 
 export type InboxCapabilityAgentId = (typeof INBOX_CAPABILITY_SWITCHES)[number]["agent"];
+
+/** The `capability` tool's names for them (docs/agent-guides/inbox-machines.md): the Settings row's name, in snake case. */
+export const INBOX_CAPABILITY_AGENT_IDS = INBOX_CAPABILITY_AGENT_SWITCHES.map((s) => s.agent) as [InboxCapabilityAgentId, ...InboxCapabilityAgentId[]];
 
 /** `GET /api/inbox/capabilities`: each switch this Inbox offers now, and whether it is on. One it does not offer is absent. */
 export type InboxCapabilitySwitches = Partial<Record<InboxCapabilitySwitchKey, { on: boolean }>>;
