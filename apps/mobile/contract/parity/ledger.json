@@ -2849,7 +2849,7 @@
       "why": "Thread foot bar",
       "source": "SCOPE Q. Thread view: reading, question cards, the foot, Send; L349",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -3083,6 +3083,9 @@
       "title": "Take back: pull an unsent-to-agent message back into the reply draft (button beside Send now and in the message ⋯ menu); refusal line when too late",
       "surface": [
         "door:POST messages/:id/take-back",
+        "field:DoorTakeBackAnswer.compose",
+        "field:DoorTakeBackAnswer.draft",
+        "field:DoorTakeBackAnswer.message",
         "field:InboxMessageWire.read_by_agent",
         "window:/api/inbox/messages/:id/take-back"
       ],
@@ -3091,7 +3094,7 @@
       "why": "Take back",
       "source": "SCOPE Q. Thread view: reading, question cards, the foot, Send; L362",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -4985,6 +4988,24 @@
       "title": "Type `@` to tag another agent session: grouped list (owner first \"Owns this thread\", others, \"Reads the Inbox, not woken\")",
       "surface": [
         "door:GET threads/:id/taggable",
+        "enum:DoorTaggableSession.kind.live",
+        "enum:DoorTaggableSession.kind.mcp",
+        "field:DoorTaggableAnswer.owner",
+        "field:DoorTaggableAnswer.serverSession",
+        "field:DoorTaggableAnswer.sessions",
+        "field:DoorTaggableSession.busy",
+        "field:DoorTaggableSession.host",
+        "field:DoorTaggableSession.idle_since",
+        "field:DoorTaggableSession.kind",
+        "field:DoorTaggableSession.label",
+        "field:DoorTaggableSession.last_at",
+        "field:DoorTaggableSession.name",
+        "field:DoorTaggableSession.owner",
+        "field:DoorTaggableSession.project",
+        "field:DoorTaggableSession.session",
+        "field:DoorTaggableSession.started_at",
+        "field:DoorTaggableSession.taggable",
+        "field:DoorTaggableSession.wrote_thread",
         "window:/api/inbox/threads/:id/taggable"
       ],
       "flows": [],
@@ -4992,7 +5013,8 @@
       "why": "List above the keyboard",
       "source": "SCOPE 10. Who gets the reply: recipient pill, @ tags, hand-off, ended sessions; C:L111, C:L170, C:L171, C:L175, C:L176",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "5427388e7ffe4359"
       }
     },
     {
@@ -5004,7 +5026,7 @@
       "why": "",
       "source": "SCOPE 10. Who gets the reply: recipient pill, @ tags, hand-off, ended sessions; C:L173, C:L176",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -5021,7 +5043,7 @@
     },
     {
       "id": "messages-110",
-      "title": "Add: \"You added <agent> to this thread\" above the reply; later replies go to it too",
+      "title": "Add: \"You added <agent> to this thread\" above the reply; a later reply reaches it only when the reply box names it",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -5366,7 +5388,8 @@
       "why": "",
       "source": "SCOPE 11. Delivery lines and states; C:L178",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e2e8dc64c03b9a99"
       }
     },
     {
@@ -5395,7 +5418,8 @@
       "why": "",
       "source": "SCOPE 11. Delivery lines and states; C:L174",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "0329ea7bec4696b3"
       }
     },
     {
@@ -5444,6 +5468,11 @@
       "title": "Press \"Looks good\" (thumbs-up): thread goes to Quiet and after 10 s the agent is told",
       "surface": [
         "door:POST messages/:id/ack",
+        "field:DoorAckAnswer.message",
+        "field:DoorAckAnswer.thread",
+        "field:DoorAckBody.ack",
+        "field:DoorAckBody.idempotency_key",
+        "field:DoorAckBody.reaction",
         "field:InboxAck.reaction",
         "field:InboxListRow.ack",
         "field:InboxMessageWire.ack",
@@ -5454,7 +5483,8 @@
       "why": "Looks good button",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L75, M:L76, M:L77, M:L80",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "df7a8acd51d62fc5"
       }
     },
     {
@@ -5466,7 +5496,8 @@
       "why": "",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L76, M:L77, M:L286",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -5478,7 +5509,8 @@
       "why": "Tap again; no Z key",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L77, M:L78, M:L79",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -5493,7 +5525,8 @@
       "why": "",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L79",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "46705f7503f14f85"
       }
     },
     {
@@ -5505,7 +5538,8 @@
       "why": "",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L78",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -5532,7 +5566,7 @@
       "why": "Long-press opens the tray",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L84",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -5571,7 +5605,8 @@
       "why": "",
       "source": "SCOPE 12. Reactions (thumbs-up and the tray); M:L85, M:L87",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -9169,9 +9204,7 @@
     {
       "id": "files-142",
       "title": "Show me: agent draws a board that opens over the review; a part click jumps to its code; corner card brings it back",
-      "surface": [
-        "frame:shapes"
-      ],
+      "surface": [],
       "flows": [],
       "mobile": "later",
       "why": "L-off: needs Shape on at the computer; an agent-drawn board over the review",
@@ -11404,7 +11437,7 @@
       "why": "",
       "source": "SCOPE 8. Agents: connections, settings and status in a thread; N214, N288, N294",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -14466,7 +14499,8 @@
       "why": "Cancel on the held line",
       "source": "SCOPE 1. Inventory; M:45, M:121",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "16ee6eee3ac38e79"
       }
     },
     {
@@ -17952,10 +17986,7 @@
     {
       "id": "window-only-shapes",
       "title": "Window endpoints under shapes with no door route",
-      "surface": [
-        "window:/api/shapes",
-        "window:/api/shapes/*"
-      ],
+      "surface": [],
       "flows": [],
       "mobile": "later",
       "why": "L-nodoor: the phone reaches these only once a door route is added for them (shapes).",
@@ -19128,7 +19159,8 @@
       "decoded": true,
       "source": "seed: no SCOPE row names it",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "9d85254e9028637d"
       }
     },
     {
@@ -19993,7 +20025,6 @@
         "setting:board",
         "setting:code_review",
         "setting:scheduled_threads",
-        "setting:shape",
         "setting:steps",
         "setting:system"
       ],
@@ -22104,6 +22135,20 @@
       "title": "window:/api/inbox/pulls/package-changes",
       "surface": [
         "window:/api/inbox/pulls/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-23",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-reviews-local-refs",
+      "title": "window:/api/inbox/reviews/local/refs",
+      "surface": [
+        "window:/api/inbox/reviews/local/refs"
       ],
       "flows": [],
       "mobile": "undecided",

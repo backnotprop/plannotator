@@ -99,10 +99,10 @@ export function localWorkGit(runtime: ReviewGitRuntime): ReviewGitRuntime {
   return git;
 }
 
-const isFolder = async (root: string) => (await stat(root).catch(() => null))?.isDirectory() === true;
+export const isFolder = async (root: string) => (await stat(root).catch(() => null))?.isDirectory() === true;
 
 /** The repository a folder is in: its top folder and its common git folder (shared by its worktrees). Null: none here. */
-async function repoOf(git: ReviewGitRuntime, root: string): Promise<{ top: string; common: string } | null> {
+export async function repoOf(git: ReviewGitRuntime, root: string): Promise<{ top: string; common: string } | null> {
   if (!(await isFolder(root))) return null;
   const answer = await git.runGit(["rev-parse", "--is-inside-work-tree", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], { cwd: root }).catch(() => null);
   if (answer?.stderr === OFFLINE_GIT_TOO_OLD) throw new Error(OFFLINE_GIT_TOO_OLD);
@@ -112,7 +112,7 @@ async function repoOf(git: ReviewGitRuntime, root: string): Promise<{ top: strin
 }
 
 /** The branch checked out in a folder, its short commit id when detached, null with no commit and no branch. */
-async function checkedOut(git: ReviewGitRuntime, top: string): Promise<string | null> {
+export async function checkedOut(git: ReviewGitRuntime, top: string): Promise<string | null> {
   const head = await git.runGit(["symbolic-ref", "-q", "--short", "HEAD"], { cwd: top });
   if (head.exitCode === 0 && head.stdout.trim()) return head.stdout.trim();
   const sha = await git.runGit(["rev-parse", "--verify", "--quiet", "--short", "HEAD"], { cwd: top });
@@ -164,7 +164,7 @@ export interface InboxLocalWorkOptions {
 }
 
 /** `jobs` run `LOCAL_WORK_PARALLEL` at a time. */
-async function inTurn(jobs: readonly (() => Promise<void>)[]): Promise<void> {
+export async function inTurn(jobs: readonly (() => Promise<void>)[]): Promise<void> {
   let next = 0;
   await Promise.all(
     Array.from({ length: Math.min(LOCAL_WORK_PARALLEL, jobs.length) }, async () => {
@@ -317,7 +317,7 @@ export function createInboxLocalWork(options: InboxLocalWorkOptions) {
  * per new file): each read through the capped reader at what is left of `BRANCH_DIFF_MAX_BYTES` (stopped there, never
  * held whole), and once they have read past it (`over`), no further `git diff` starts. Other commands as they were.
  */
-function cappedDiffGit(git: ReviewGitRuntime): { git: ReviewGitRuntime; over: () => boolean } {
+export function cappedDiffGit(git: ReviewGitRuntime): { git: ReviewGitRuntime; over: () => boolean } {
   let read = 0;
   const over = () => read > BRANCH_DIFF_MAX_BYTES;
   const tooLarge = { stdout: "", stderr: "This diff is too large to read here.", exitCode: 1 };
