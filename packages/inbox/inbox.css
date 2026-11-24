@@ -12218,6 +12218,32 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-lflt-range-act { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .ib-lflt-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
 .ib-lflt-empty b { margin-bottom: 0; }
+/* Filter by typing (TitleFilter.tsx): a thin field under the list's header, the filter menu's own find field, its line
+   as wide as the group bands. Opened from the menu it eases in, pushing the list down by its own height only. */
+.ib-tflt { flex: none; display: grid; grid-template-rows: 1fr; }
+.ib-tflt[data-enter] { animation: ib-tflt-in 200ms cubic-bezier(0.32, 0.72, 0, 1); }
+@keyframes ib-tflt-in { from { grid-template-rows: 0fr; } }
+/* The menu's row on its way to the field (titleFilterMotion.ts), over the menu as it leaves. */
+.ib-tflt-ghost { position: fixed; left: 0; top: 0; z-index: 81; display: flex; align-items: center; gap: 8px; padding: 0 2px 0 8px; box-sizing: border-box; overflow: hidden; pointer-events: none; color: var(--muted-foreground); }
+.ib-tflt-ghost > svg.ib-ic { width: 15px; height: 15px; flex: none; }
+.ib-tflt-gw { position: relative; flex: 1; min-width: 0; height: 20px; }
+.ib-tflt-gw > span { position: absolute; left: 0; top: 0; line-height: 20px; white-space: nowrap; }
+.ib-tflt-gl { color: var(--foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-tflt-gp { font-size: var(--ib-fs-14, 14px); }
+.ib-tflt-gline { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: color-mix(in oklch, var(--primary) 60%, transparent); transform-origin: 0 0; }
+.ib-tflt-in { min-height: 0; overflow: hidden; padding: 0 10px 4px; }
+.pn-inbox .ib-tflt .ib-lflt-find input { height: 32px; font-size: var(--ib-fs-14, 14px); }
+@media (pointer: coarse) { .pn-inbox .ib-tflt .ib-lflt-find input { font-size: var(--ib-fs-16-in, 16px); } }
+@media (prefers-reduced-motion: reduce) { .ib-tflt[data-enter] { animation: none; } }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A phone: a thumb's height, 16px so iOS does not zoom, the × a 40px target. */
+  .ib-tflt-in { padding: 2px 16px 6px; }
+  .ib-tflt .ib-lflt-find { gap: 10px; padding: 0 0 0 2px; }
+  .ib-tflt .ib-lflt-find > svg.ib-ic { width: 18px; height: 18px; }
+  .pn-inbox .ib-tflt .ib-lflt-find input { height: 40px; font-size: var(--ib-fs-16-in, 16px); }
+  .ib-tflt .ib-lflt-clear { width: 40px; height: 40px; margin-right: -8px; }
+  .ib-tflt .ib-lflt-clear > svg.ib-ic { width: 18px; height: 18px; }
+}
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox .ib-lflt { width: 44px; height: 44px; border-radius: 8px; color: var(--foreground); }
   .pn-inbox .ib-lflt:hover, .pn-inbox .ib-lflt[data-popup-open] { background: none; }
