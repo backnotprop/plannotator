@@ -148,6 +148,7 @@ public actor StandInDoor {
   }
 
   private func get(_ call: DoorCall) -> DoorAnswerBytes {
+    settleAcks()
     let parts = call.path.split(separator: "/").map(String.init)
     switch parts.count {
     case 1 where parts[0] == "health": return health()
@@ -480,6 +481,9 @@ public actor StandInDoor {
       }
       let quotePlan = quoteLead(fields["quote"], thread: at.thread, to: asked, words: words)
       if case .refused(let answer) = quotePlan { return answer }
+      // The agents it tags (`tagTargets`): checked before anything is written.
+      let tagged = replyTags(fields, thread: asked.threadId, owner: asked.author.session)
+      if let refusal = tagged.refusal { return refusal }
       seq += 1
       counter += 1
       let replyID = MessageID("msg_STANDINREPLY\(counter)")
@@ -510,6 +514,7 @@ public actor StandInDoor {
         body: [words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, feedback].filter { !$0.isEmpty }.joined(separator: "\n\n"), createdAt: now,
         delivery: InboxDelivery(state: "queued", host: asked.author.host ?? "", session: asked.author.session ?? "", at: now))
       var quoted = written
+      if !tagged.tags.isEmpty { quoted.tags = tagged.tags }
       // The quote, as the Inbox keeps it on the reply, and the lead it writes in front of the words for the agent
       // (store.ts `planQuote`): checked before anything is written, and none on a reply without the person's words.
       if case .lead(let quote, let lead) = quotePlan {
