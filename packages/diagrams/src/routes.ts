@@ -83,6 +83,21 @@ function shape(e: Edge) {
 function pointInside([x,y]:Point,b:Box,pad:number) {
     return x>b.x-pad && x<b.x+b.w+pad && y>b.y-pad && y<b.y+b.h+pad;
 }
+// The group interior can contain labels. Reserve the outline, including its rounded corners.
+function touchesGroupOutline(box: Box, group: Group, radius: number) {
+    if (separation(box, group) > 1) return false;
+    const r = Math.min(radius, group.w / 2, group.h / 2);
+    const left = group.x + r, right = group.x + group.w - r;
+    const top = group.y + r, bottom = group.y + group.h - r;
+    // A rounded rectangle is the rectangle between its corner centers expanded by r.
+    const nearest = Math.hypot(Math.max(left - box.x - box.w, box.x - right, 0),
+        Math.max(top - box.y - box.h, box.y - bottom, 0));
+    const farthest = Math.hypot(Math.max(left - box.x, box.x + box.w - right, 0),
+        Math.max(top - box.y, box.y + box.h - bottom, 0));
+    // The group and label strokes together extend approximately one pixel.
+    return nearest <= r + 1 && farthest >= Math.max(0, r - 1);
+}
+
 export function route(c:Painter,s:DiagramSpec,panels:Placed[],groups:Group[]) {
     const ids=new Map(panels.map(p=>[p.id,p])),bounds=extent(panels), lanes={top:0,bottom:0};
     const edges:Edge[]=(s.links||[]).map(link=>{
@@ -113,6 +128,10 @@ export function route(c:Painter,s:DiagramSpec,panels:Placed[],groups:Group[]) {
     const lines=edges.map(shape);
     const obstacles=[...panels.map(p=>({box:p,name:"'"+p.id+"'"})),...groups.map(g=>({box:g.titleBox,name:"the title of group '"+g.label+"'"}))];
     const lineName=(l:Edge)=>`line '${l.a.id}' -> '${l.b.id}'`;
+    const arrowheads = lines.map(line => ({
+        name: "the arrowhead of " + lineName(line),
+        box: extent(arrowVertices(line.tip, line.direction).map(([x, y]) => ({x, y, w: 0, h: 0}))),
+    }));
     for (const l of lines) {
         const name=lineName(l);
         if (l.vx===undefined && l.vy===undefined) {
@@ -130,11 +149,19 @@ export function route(c:Painter,s:DiagramSpec,panels:Placed[],groups:Group[]) {
         const coversBox=(box:Box)=>obstacles.some(o=>separation(o.box,box)<0);
         const hitsLine=(box:Box,other:typeof l)=>l!==other && separation(other.bounds,box)<2 &&
             other.samples.some(pt=>pointInside(pt,box,2));
-        const box=boxes.find(b=>!coversBox(b) && !lines.some(other=>hitsLine(b,other)));
-        l.labelBox=box||boxes[0];
-        if (!box) {
-            const covered=obstacles.filter(o=>separation(o.box,boxes[0])<0).map(o=>o.name);
-            for (const other of lines) if (hitsLine(boxes[0],other)) covered.push(lineName(other));
+        const clearsExisting = (box: Box) => !coversBox(box) && !lines.some(other => hitsLine(box, other));
+        const preferred = boxes.find(box => clearsExisting(box) &&
+            !groups.some(group => touchesGroupOutline(box, group, c.t.radius + 4)) &&
+            !arrowheads.some(arrow => separation(arrow.box, box) <= 1));
+        // If the caption cannot fit, keep a position that clears the panels and routes when possible.
+        const selected = preferred ?? boxes.find(clearsExisting) ?? boxes[0];
+        l.labelBox = selected;
+        if (!preferred) {
+            const covered = obstacles.filter(o => separation(o.box, selected) < 0).map(o => o.name);
+            for (const other of lines) if (hitsLine(selected, other)) covered.push(lineName(other));
+            for (const group of groups) if (touchesGroupOutline(selected, group, c.t.radius + 4))
+                covered.push("the border of group '" + group.label + "'");
+            for (const arrow of arrowheads) if (separation(arrow.box, selected) <= 1) covered.push(arrow.name);
             for (const part of covered)
                 c.report(`the label '${l.label}' on ${name} sits on ${part}. Widen the gap or move the line.`);
         }
