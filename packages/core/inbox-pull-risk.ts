@@ -17,17 +17,24 @@ export interface InboxPullRiskJudgment {
   /** One sentence: what in the diff decided it. Written by an agent that read untrusted text: shown as plain text only. */
   why: string;
   /**
-   * A high judgment's places in the diff (context notes, approval "inbox-context-notes"): the lines that decided it,
-   * the most important first, each inside one hunk of the diff that was judged. Only a high judgment has them; absent
-   * on every other, and on a high one whose agent named none. Readers that do not know them show the judgment as before.
+   * A high or medium judgment's places in the diff (context notes, approval "inbox-context-notes"; the risk bars,
+   * approval "review-risk-bars"): the lines that decided it, the most important first, each inside one hunk of the diff
+   * that was judged. A low judgment never has them; they are absent on one whose agent named none, and on a medium one
+   * judged before medium named places. Readers that do not know them show the judgment as before.
    */
   where?: InboxPullRiskPlace[];
+  /**
+   * The head commit it was judged at, stamped by the server that kept it (never written by the agent). A window holds
+   * an answer across a failed read: it draws a judgment's places only on a diff at this head. Absent from a server
+   * from before it: such a judgment shows as before.
+   */
+  head?: string;
 }
 
 /** The most places one judgment marks. */
 export const INBOX_PULL_RISK_PLACES_MAX = 5;
 
-/** One place a high-risk judgment marks in the diff it judged. Written by an agent that read untrusted text: plain text only. */
+/** One place a high- or medium-risk judgment marks in the diff it judged. Written by an agent that read untrusted text: plain text only. */
 export interface InboxPullRiskPlace {
   /** The file's path as the diff names it. */
   file: string;

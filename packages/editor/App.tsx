@@ -140,7 +140,8 @@ import { useAgentToolSetting } from '@plannotator/ui/hooks/useAgentToolSetting';
 import { useLatchedTrue } from '@plannotator/ui/hooks/useLatchedTrue';
 import { buildDefaultPrompt, draftAnnotationsToSend, useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { askScopeFromContext as askScopeFromContextFor } from './askScope';
-import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
+import { getPlanMaxWidth, getUIPreferences, type UIPreferences } from '@plannotator/ui/utils/uiPreferences';
+import { goalSetupMaxWidth } from './goalSetupWidth';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
 import { getInputMethod, refreshInputMethodStamp, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
 import { getHtmlChromeState, mergeHtmlChromeState, saveHtmlChromeState, shouldRestoreHtmlChrome } from '@plannotator/ui/utils/htmlChrome';
@@ -385,7 +386,8 @@ import { configurePlannotatorUI } from '@plannotator/ui/configure';
 // copies rich text, and on a touch screen the toolbar sits below the selection
 // (clear of iOS's edit menu), inside the screen, with thumb-sized buttons;
 // @plannotator/ui hosts keep both unchanged unless they opt in.
-configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
+// A click on a #12 or a pasted PR / issue URL in the text opens its card pinned (utils/refCardClick).
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true, refCardClick: true });
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -7102,10 +7104,8 @@ const App: React.FC = () => {
           : []),
       ];
 
-  const planMaxWidth = useMemo(() => {
-    const widths: Record<PlanWidth, number> = { compact: 832, default: 1040, wide: 1280 };
-    return widths[uiPrefs.planWidth] ?? 832;
-  }, [uiPrefs.planWidth]);
+  // Wide has no cap: the document fills the space between the side panels.
+  const planMaxWidth = useMemo(() => getPlanMaxWidth(uiPrefs.planWidth), [uiPrefs.planWidth]);
   const annotateReaderMaxWidth = canUseWideMode && wideModeType === 'wide' ? null : planMaxWidth;
   const agentTerminalPanel = shouldRenderAgentTerminal && agentTerminalCapability ? (
     <div
@@ -7886,7 +7886,7 @@ const App: React.FC = () => {
                   <GoalSetupSurface
                     ref={goalSetupSurfaceRef}
                     bundle={goalSetupBundle}
-                    maxWidth={planMaxWidth}
+                    maxWidth={goalSetupMaxWidth(uiPrefs.planWidth)}
                     onActionStateChange={setGoalSetupAction}
                     onSubmitted={() => setSubmitted('approved')}
                   />

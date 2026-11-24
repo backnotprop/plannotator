@@ -14,7 +14,7 @@
  *  - a route pattern (`/^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/`),
  *    an exact route with its parameters as `:id`, and each alternative of a
  *    group of plain words its own route;
- *  - a prefix a module takes whole (`path.startsWith("/api/shapes/")`), a
+ *  - a prefix a module takes whole (`path.startsWith("/api/inbox/scheduled/")`), a
  *    family `<prefix>/*`, listed only when no exact route is read under it:
  *    the module splits the rest itself, and those routes are not read.
  * Methods are not read: the chain decides them in many ways (an early 405, a
@@ -38,6 +38,7 @@ export function readSource(path: string): string {
 export const ROUTE_FILES = [
   'packages/server/inbox.ts',
   'packages/ai/endpoints.ts',
+  'packages/server/inbox-acted.ts',
   'packages/server/inbox-agent-door.ts',
   'packages/server/inbox-agent-faces.ts',
   'packages/server/inbox-agent-icons.ts',
@@ -91,7 +92,6 @@ export const ROUTE_FILES = [
   'packages/shared/inbox/debug-log.ts',
   'packages/shared/plans/routes.ts',
   'packages/shared/sem-diff-assets.ts',
-  'packages/shared/shape/routes.ts',
 ] as const;
 
 /** A path is a route of the Inbox when it starts with one of these. */

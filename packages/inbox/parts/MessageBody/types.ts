@@ -51,6 +51,8 @@ export interface MessageBodyProps {
    */
   onOpenOptionSet?: (key: string, image: InboxInlineImage, choice: number) => void;
   readOnly: boolean;
+  /** The thread's questions moved to another thread (its root's `moved_to`): a card the archive closed reads "Closed". */
+  movedThread?: boolean;
   answers: ReadonlyMap<string, QuestionAnswer>;
   onPick: (key: string, answer: QuestionAnswer | null) => void;
   footerFor: (key: string) => string | null;

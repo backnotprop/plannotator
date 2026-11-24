@@ -56,7 +56,7 @@ interface ToolbarHostProps {
   aiHistoryMessages?: AIChatEntry[];
   /** Selected lines can only be asked about (no comments): the toolbar is the Ask box. */
   askOnly?: boolean;
-  /** A host's choices before the comment box (Comment · Ask · Show me). Absent: the comment box opens at once. */
+  /** A host's choices before the comment box (Comment · Ask). Absent: the comment box opens at once. */
   selectionActions?: DiffSelectionActions;
 }
 
@@ -183,15 +183,9 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
         toolbarRef={toolbar.toolbarRef}
         position={toolbar.toolbarState.position}
         range={toolbar.toolbarState.range}
-        // A picture is of the code as it is now: Show me only when both ends are on the new side (added or unchanged lines).
-        actions={
-          toolbar.toolbarState.range.side === 'deletions' || (toolbar.toolbarState.range.endSide ?? toolbar.toolbarState.range.side) === 'deletions'
-            ? { ...selectionActions, onShowMe: undefined }
-            : selectionActions
-        }
+        actions={selectionActions}
         onComment={toolbar.chooseComment}
         onAsk={() => takeSelection(selectionActions.onAsk)}
-        onShowMe={() => takeSelection(selectionActions.onShowMe)}
       />
     );
   }

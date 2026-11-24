@@ -17,8 +17,11 @@ import { expect, test, type Page } from '@playwright/test';
 import { buildDiagramUiBundle, clickEveryLabelElement, NAVIGATING_LABELS, openDiagramPage } from './diagram-ui-bundle';
 
 let bundle = '';
+/** The switch as shipped: Pele draws what it can, Mermaid the rest. */
+let shipped = '';
 test.beforeAll(() => {
   bundle = buildDiagramUiBundle();
+  shipped = buildDiagramUiBundle({ engine: 'pele-where-safe' });
 });
 
 const flow = (label: string) => `flowchart LR\n  A["${label}"] --> B[ok]`;
@@ -109,6 +112,19 @@ test('a click anywhere in a label never navigates the tab or submits a form', as
     const r = await render(page, flow(label));
     expect(r.ok, `${label}: ${r.message}`).toBe(true);
     expect(await clickEveryLabelElement(page), label).toBeGreaterThan(0);
+    await page.waitForTimeout(250);
+    expect([label, page.url(), navigations, requests.filter((x) => x.startsWith('document '))]).toEqual([label, start, [], []]);
+  }
+});
+
+test('as shipped (Pele where it can, Mermaid the rest), a click anywhere in a label never navigates the tab or submits a form', async ({ page }) => {
+  const { requests, navigations } = await openDiagramPage(page, shipped);
+  const start = page.url();
+  for (const label of NAVIGATING_LABELS) {
+    const r = await render(page, flow(label));
+    expect(r.ok, `${label}: ${r.message}`).toBe(true);
+    expect(await page.locator('#host > svg').getAttribute('class'), label).toContain('pele');
+    expect(await clickEveryLabelElement(page, '#host foreignObject *, #host text, #host tspan'), label).toBeGreaterThan(0);
     await page.waitForTimeout(250);
     expect([label, page.url(), navigations, requests.filter((x) => x.startsWith('document '))]).toEqual([label, start, [], []]);
   }

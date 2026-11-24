@@ -5,7 +5,6 @@ import { INBOX_CARD_COLUMNS, INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIAT
 import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inbox/connection";
 import { INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
-import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
 import { LOCKFILE_NAMES, SYSTEM_COMMANDS, SYSTEM_TICK_INTERVAL_SECONDS, TEST_FOLDERS } from "@plannotator/system/commands";
 
@@ -255,10 +254,10 @@ export function formatTopLevelHelp(options: { board?: boolean; scheduled?: boole
  *
  * `t3` (the T3 Code connection) was the last one to launch. Today:
  * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
- * runs; `shape`; `system`, System's drawing commands, until the Inbox's
+ * runs; `system`, System's drawing commands, until the Inbox's
  * System surfaces ship; and `plans`, Plans' switch and list, until its screens ship.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape", "system", "plans"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "system", "plans"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -496,14 +495,6 @@ export const ROUTINE_OP_USAGE: Record<RoutineOp, string> = {
 
 /** `plannotator plans …` (plans-command.ts): Plans' switch and list. Unreleased (HIDDEN_SUBCOMMANDS): the usage line only. */
 export const PLANS_COMMAND_USAGE = ["Usage:", "  plannotator plans [off | list]"].join("\n");
-
-/**
- * `plannotator shape …` (shape-command.ts): an agent's side of Shape.
- * Unreleased (HIDDEN_SUBCOMMANDS). Built from the one source of Shape's agent
- * text (packages/core/shape-skill.ts): the welcome and the commands, then the
- * drawing guide the Inbox's `/shape` skill ends with too.
- */
-export const SHAPE_COMMAND_USAGE = `${SHAPE_HELP_INTRO}\n\n${SHAPE_GUIDE}`.trimEnd();
 
 /**
  * `plannotator feedback` (feedback-command.ts): sends the person's feedback
@@ -1045,7 +1036,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Usage:",
     "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [--json] [DIRECTORY | PR_URL]",
     "",
-    "Review local VCS changes or a GitHub, GitLab or Bitbucket Cloud pull request in the browser.",
+    "Review local VCS changes or a GitHub, GitLab, Bitbucket Cloud or Forgejo / Gitea pull request in the browser.",
     "",
     "Options:",
     "  --git         Force git as the VCS (skip auto-detection)",
@@ -1075,7 +1066,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "                is printed either way; an agent host that only logs a bare Approve",
     "                (the Claude Code mod) delivers it as a message.",
     "  --json        Emit one decision/message JSON record instead of plaintext",
-    "  PR_URL        GitHub PR, GitLab MR or Bitbucket Cloud PR URL to review",
+    "  PR_URL        GitHub PR, GitLab MR, Bitbucket Cloud PR or Forgejo / Gitea PR URL to review",
     "  DIRECTORY     Review a repo, worktree, or multi-repo workspace at this path",
     "                Relative to the invoking directory; quote paths containing spaces.",
     "",
@@ -1222,7 +1213,6 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
   routine: ROUTINE_COMMAND_USAGE,
-  shape: SHAPE_COMMAND_USAGE,
   plans: PLANS_COMMAND_USAGE,
   feedback: FEEDBACK_COMMAND_USAGE,
   system: SYSTEM_COMMAND_USAGE,

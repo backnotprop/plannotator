@@ -36,7 +36,8 @@ export type DiagramFamily =
   | 'requirement'
   // A sequence diagram. Mermaid gives its parts classes, not ids, so the
   // ids are ours: an actor is its `name`, a message is `msg-<n>`, a note
-  // `note-<n>`, a loop/alt/opt frame `frame-<n>`, each by document order.
+  // `note-<n>`, each by document order, and a loop/alt/opt frame
+  // `frame-<n>` in drawing order (by where it ends: a nested frame first).
   | 'sequence'
   | 'other'
   // A Graphviz graph: the id is the DOT node name.
@@ -196,7 +197,11 @@ export function lineMentions(line: string, token: string): boolean {
  * with the optional activation `+` / `-` on the receiver. */
 const SEQUENCE_MESSAGE = /^\s*[^\s:][^:]*?\s*(?:<<)?--?(?:>>|>|x|\))\s*[+-]?\s*[^:]+:/u;
 const SEQUENCE_NOTE = /^\s*note\s+(?:left\s+of|right\s+of|over)\b/iu;
-const SEQUENCE_FRAME = /^\s*(?:loop|alt|opt|par|critical|break|rect)\b/iu;
+/** A statement that opens a block closed by `end`: a frame (`par_over` is a
+ * `par` both engines draw), or a `rect` background or a `box` around
+ * participants, which close with `end` too but are no frame. */
+const SEQUENCE_FRAME = /^\s*(?:loop|alt|opt|par_over|par|critical|break|rect|box)\b/iu;
+const SEQUENCE_UNNUMBERED_BLOCK = /^\s*(?:rect|box)\b/iu;
 
 /** The n-th (1-based) line that matches, as a line range. */
 function nthMatchingLine(lines: readonly string[], pattern: RegExp, n: number): readonly [number, number] | null {
@@ -205,6 +210,30 @@ function nthMatchingLine(lines: readonly string[], pattern: RegExp, n: number): 
     if (!pattern.test(lines[i] ?? '')) continue;
     seen += 1;
     if (seen === n) return [i + 1, i + 1];
+  }
+  return null;
+}
+
+/**
+ * The line that opens the n-th (1-based) frame, frames numbered as both
+ * engines draw them: a frame is drawn when its `end` is reached, so a frame
+ * nested in another comes BEFORE the one around it; a `rect` or a `box` (a
+ * background, not a frame) takes no number.
+ */
+function nthFrameLine(lines: readonly string[], n: number): readonly [number, number] | null {
+  const open: Array<{ readonly line: number; readonly rect: boolean }> = [];
+  let seen = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    if (SEQUENCE_FRAME.test(line)) {
+      open.push({ line: i + 1, rect: SEQUENCE_UNNUMBERED_BLOCK.test(line) });
+      continue;
+    }
+    if (!/^\s*end\s*$/iu.test(line)) continue;
+    const frame = open.pop();
+    if (frame === undefined || frame.rect) continue;
+    seen += 1;
+    if (seen === n) return [frame.line, frame.line];
   }
   return null;
 }
@@ -240,8 +269,8 @@ export function diagramSourceLine(
     // sequence diagram sit in that same order in the text.
     const ordinal = /^(msg|note|frame)-(\d+)$/u.exec(target.id);
     if (ordinal !== null) {
-      const pattern = ordinal[1] === 'msg' ? SEQUENCE_MESSAGE : ordinal[1] === 'note' ? SEQUENCE_NOTE : SEQUENCE_FRAME;
-      return nthMatchingLine(lines, pattern, Number(ordinal[2]));
+      if (ordinal[1] === 'frame') return nthFrameLine(lines, Number(ordinal[2]));
+      return nthMatchingLine(lines, ordinal[1] === 'msg' ? SEQUENCE_MESSAGE : SEQUENCE_NOTE, Number(ordinal[2]));
     }
   }
   const matches = (line: string): boolean => {
@@ -258,7 +287,14 @@ export function diagramSourceLine(
     return lineMentions(line, target.id);
   };
   const index = lines.findIndex(matches);
-  return index === -1 ? null : [index + 1, index + 1];
+  if (index === -1) return null;
+  if (target.kind === 'edge' && target.label !== '') {
+    // Two relationships with the same ends (`User --> Order` twice): the
+    // one whose line carries the label, else the first.
+    const labelled = lines.findIndex((line) => matches(line) && line.includes(target.label));
+    if (labelled !== -1) return [labelled + 1, labelled + 1];
+  }
+  return [index + 1, index + 1];
 }
 
 /** The wire shape of one target (no `sourceLine`, no version). */

@@ -233,7 +233,7 @@ describe("a plain reply", () => {
     expect(command).toMatchObject({ id, also_tagged: ["Claude Code"], subject: NAME });
   });
 
-  test("reaches a session added to the thread as a reply, once the reply that added it is past", async () => {
+  test("a later reply that adds the added session again reaches it as a reply, once the reply that added it is past", async () => {
     const { server, client, project } = await setup();
     const sent = await askedUnnamed(client, project);
     await poll(server, OTHER, project);
@@ -243,7 +243,10 @@ describe("a plain reply", () => {
     await delivered(server, OWNER, added);
 
     const answer = await agentSends(client, project, OWNER, "Working.", { reply_to: added });
-    const later = await personReplies(server, answer.message_id, "Keep going.");
+    // A plain reply to the owner reaches the owner alone (the reply goes to the agents the box names).
+    const plain = await personReplies(server, answer.message_id, "Keep going.");
+    expect((await poll(server, OTHER, project)).some((c) => c.id === plain)).toBe(false);
+    const later = await personReplies(server, answer.message_id, "@Claude Code (other) you too.", { tags: [{ ...OTHER_TAG, mode: "add" }] });
     const command = (await poll(server, OTHER, project)).find((c) => c.id === later)!;
     expect(command).toMatchObject({ added: true, subject: null });
     expect(inboxWakeText(command)).not.toContain(SUBJECT);

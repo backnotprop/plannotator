@@ -4,17 +4,24 @@ import React from 'react';
 const Popover = PopoverPrimitive.Root;
 const PopoverTrigger = PopoverPrimitive.Trigger;
 
+/**
+ * `anchor`: an element the content points at other than a Trigger (one the host drew itself, such as a mark inside a
+ * diff's shadow root); the host then holds the Root's `open`. `container`: where it portals (default: the body).
+ */
 const PopoverContent = React.forwardRef<
   HTMLDivElement,
   PopoverPrimitive.Popup.Props &
-    Pick<PopoverPrimitive.Positioner.Props, 'side' | 'sideOffset' | 'align' | 'alignOffset'>
->(({ className, side, align = 'center', sideOffset = 6, alignOffset, children, ...props }, ref) => (
-  <PopoverPrimitive.Portal>
+    Pick<PopoverPrimitive.Positioner.Props, 'side' | 'sideOffset' | 'align' | 'alignOffset' | 'anchor' | 'collisionPadding'> &
+    Pick<PopoverPrimitive.Portal.Props, 'container'>
+>(({ className, side, align = 'center', sideOffset = 6, alignOffset, anchor, collisionPadding, container, children, ...props }, ref) => (
+  <PopoverPrimitive.Portal container={container}>
     <PopoverPrimitive.Positioner
       side={side}
       align={align}
       sideOffset={sideOffset}
       alignOffset={alignOffset}
+      anchor={anchor}
+      collisionPadding={collisionPadding}
       className="isolate z-[100]"
     >
       <PopoverPrimitive.Popup

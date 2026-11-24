@@ -28,6 +28,8 @@ const PULL_HEAD = '803'.padStart(40, '0');
 
 export interface PhoneWorld {
   url: string;
+  /** The scratch repository the agent works in (another thread there: `agent.send`). */
+  project: string;
   thread: string;
   message: string;
   agent: SimAgent;
@@ -166,7 +168,7 @@ export async function startWorld(browser: Browser, guide: object = GUIDE): Promi
   await context.close();
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const review = await agent.submitGuide({ project_path: project, subject: 'Retry a failed charge', guide, patch, body: 'Two files to read.', review: true } as never);
-  return { url, thread: String(review.thread_id), message: String(review.message_id), agent };
+  return { url, project, thread: String(review.thread_id), message: String(review.message_id), agent };
 }
 
 export async function stopWorld(world: PhoneWorld | undefined): Promise<void> {

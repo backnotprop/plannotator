@@ -52,6 +52,9 @@ export * from "./inbox-steps";
 // The Board's initiatives (approval "board-initiatives"), the same way.
 export * from "./inbox-initiatives";
 export * from "./inbox-tag-colours";
+// Removing an agent from a thread (approval "inbox-remove-agent-from-thread"), the same way.
+export * from "./inbox-removed";
+import type { InboxRemoval } from "./inbox-removed";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
@@ -66,6 +69,8 @@ export * from "./inbox-pull-risk";
 export * from "./inbox-reviews";
 // Branch reviews (inbox-branch-reports.ts): an agent reports its branch ready for review.
 export * from "./inbox-branch-reports";
+// Reviews' "On this computer" (inbox-local-work.ts): local work in no pull request, and its diff.
+export * from "./inbox-local-work";
 // A thread's PRs (approval "inbox-pr-binding"), the same way.
 export * from "./inbox-thread-pulls";
 // Every word an agent reads about the list's rows ("tell your agent", Settings → Rows): one file, the owner's words.
@@ -76,7 +81,7 @@ export const INBOX_RECORD_VERSION = 1 as const;
 
 // ─────────────────────────────── Ids ───────────────────────────────
 
-// The id clock lives in ./ulid (Shape uses it too, without the Inbox types).
+// The id clock lives in ./ulid.
 export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 
@@ -327,6 +332,7 @@ export type InboxAuthor =
 export function isInboxNote(message: {
   author: { kind: string };
   set_aside?: readonly string[] | null;
+  moved_note?: { thread_id: string } | null;
   reopened?: readonly string[] | null;
   ack_of?: string | null;
   tidy?: InboxTidyMark | null;
@@ -335,6 +341,7 @@ export function isInboxNote(message: {
   return (
     message.author.kind === "person" &&
     ((message.set_aside?.length ?? 0) > 0 ||
+      !!message.moved_note ||
       (!!message.scheduled_run && message.scheduled_run.run === undefined) ||
       (message.reopened?.length ?? 0) > 0 ||
       (typeof message.ack_of === "string" && message.ack_of !== "") ||
@@ -514,6 +521,25 @@ export interface InboxReplyViewing {
   as_sent?: true;
 }
 
+/** Where an archived thread's questions went (`InboxMessage.moved_to`): the thread and its subject when they moved. */
+export interface InboxMovedTo {
+  thread_id: string;
+  subject: string | null;
+  /**
+   * Served on a thread's root, never stored: `true` while that thread is still open (the archived foot links to
+   * it). Absent when it is archived or gone: the foot then names `subject` without a link.
+   */
+  open?: true;
+  /** Served with `open`: that thread's name now, as the list shows it (its thread name over its subject). */
+  name?: string | null;
+}
+
+/** `InboxMessage.moved_note`: the thread the questions went to, and the question ids (`<message id>/<key>`) it named. */
+export interface InboxMovedNote {
+  thread_id: string;
+  questions: string[];
+}
+
 /**
  * What a Combine left where it was (approval "inbox-combine-across-computers", the owner: "One quiet line on the
  * combined thread naming what stayed or was left out"): each picked thread on a linked computer that stayed open there
@@ -548,6 +574,18 @@ export interface InboxMessage {
   created_at: string;
   /** On a thread's root: when the thread was resolved, or null while open. */
   resolved_at: string | null;
+  /**
+   * On a resolved root: the thread an agent moved this thread's questions to when it archived it
+   * (resolve_message's `moved_to`), with that thread's subject as it was then. The window's archived foot
+   * links to it. Dropped by Unarchive. Absent otherwise and on older records. Additive.
+   */
+  moved_to?: InboxMovedTo | null;
+  /**
+   * On a root: each press of Remove on one of the thread's agents (approval "inbox-remove-agent-from-thread",
+   * `inboxRemovedNow`): the agent is out of the thread until the person writes to it again. The Undo of a press
+   * drops its entry. Absent on every other message and on older records. Additive.
+   */
+  removed?: InboxRemoval[] | null;
   /** The sender's idempotency key, when one was given. */
   idempotency_key: string | null;
   /**
@@ -581,6 +619,14 @@ export interface InboxMessage {
    * Absent on every other message.
    */
   set_aside?: string[];
+  /**
+   * On the Inbox's note to an agent whose questions another session moved
+   * (resolve_message's `moved_to`, the owner 2026-11-21: "The Inbox tells it,
+   * quietly"): the thread they went to and the questions it names. A person
+   * note, a reply to that agent's asking message, delivered like a reply and
+   * never listed in the thread (as the 👍's note). Absent otherwise.
+   */
+  moved_note?: InboxMovedNote | null;
   /**
    * On a person's reopened note: the questions an Undo of Mark read opened
    * again after a set-aside note had named them. Absent on every other message.
@@ -778,7 +824,7 @@ export interface InboxMessage {
    * Absent for a send from the thread's own project (or a project combined
    * with it), and on older records.
    */
-  from_project?: { name: string; root: string } | null;
+  from_project?: { name: string; root: string; repo?: InboxProjectRepo | null } | null;
   /**
    * On an agent's message: it was sent through a connection that wakes its
    * session with the person's reply (the Claude Code mod, Pi, OpenCode 2;
@@ -978,8 +1024,9 @@ export interface InboxTag {
   read_at?: string | null;
   /**
    * "Add instead" (approval "inbox-tag-handoff", A2): the person added this
-   * session to the thread. It works alongside the owner, and every later
-   * reply of the person's in the thread goes to it too (the store tags it
+   * session to the thread. It works alongside the owner and stays a member
+   * (the reply box offers it); a later reply reaches it only when the box
+   * names it (through 0.29.3 the store tagged every later reply to it
    * again). Absent: an Ask, today's tag (this one message only).
    */
   joined?: boolean;
@@ -1475,6 +1522,19 @@ export interface InboxQuestionContract {
   reversible?: { value: false; why: string | null };
   /** `Prototype:` at the block's own indent: one page every option shows (approval "inbox-question-tradeoffs"), as written. */
   prototype?: { target: string; label?: string };
+  /**
+   * The scenario table (core `question-scenarios.ts`): scenarios as rows and the
+   * choices it names as columns. Each column's `choice` is a choice's label;
+   * `rows[].cells` follow `columns`. Absent when the block has none, and on
+   * older records (an older reader ignores it).
+   */
+  scenarios?: InboxQuestionScenarios;
+}
+
+/** A question's scenario table as stored and served (inline markdown, as written). */
+export interface InboxQuestionScenarios {
+  columns: { choice: string; header: string }[];
+  rows: { situation: string; cells: { verdict: string; detail?: string }[] }[];
 }
 
 /** The parsed facts of a question block, kept on its record. */
@@ -1757,6 +1817,7 @@ export interface InboxDecision {
     author: InboxAuthor;
     /** The body's prose before its first block, cut to about 280 characters; null when there is none. */
     excerpt: string | null;
+    repo?: InboxProjectRepo | null;
   };
   /**
    * Pictures and files the decision can show, as references only (bytes come
@@ -1866,6 +1927,9 @@ export const INBOX_SECTIONS: readonly { readonly id: InboxSectionId; readonly la
   { id: "quiet", label: "Quiet" },
 ];
 
+/** How far back the list filter's "Recent activity" reaches (`acted_at`), and how long acted.json keeps a time. */
+export const INBOX_RECENT_ACTIVITY_DAYS = 30;
+
 /**
  * One row of the list: a thread (owner ruling 2026-10-07, "a row is a
  * thread"), with its project as a label and a filter, placed in its section.
@@ -1920,6 +1984,14 @@ export interface InboxListRow extends InboxThreadSummary {
    * reads. Additive: absent from an older Inbox.
    */
   pinned_at?: string | null;
+  /**
+   * When the person last did something in the thread (approval "inbox-recent-activity-filter"; the rule is shared's
+   * inbox/acted.ts): sent something, picked, marked an action item, commented, saved a draft, played a film, or opened
+   * it. The list filter's "Recent activity" keeps and sorts by it. Like `pinned_at`, only on the list model the window
+   * and the phone read, never on anything an agent reads; absent when the person has done nothing there (or from an
+   * older Inbox).
+   */
+  acted_at?: string;
   /**
    * The live tags the thread is in (approval "inbox-thread-tags"), `ini_` ids, oldest tag first; absent when none.
    * Like `pinned_at`, only on the list model the window and the phone read, never on anything an agent reads.
@@ -3313,9 +3385,18 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * Tokens scaled at the entry's bytes per token (3.7), not counted on Pi.
  */
 /* Skip on action items (the action guide's sentence, and the connection's short `body` wording, 2026-11-19): +162 bytes, estimated (not measured), inside the 5%; the constants stay. */
-const INBOX_TOOL_COST_NOW = { bytes: 14522, tokens: 3906 };
+/*
+ * Closing out threads whose questions moved (resolve_message's `moved_to` and its filled `agent_session`,
+ * INBOX_MOVED_TO_RULE on `supersedes`, 4 characters on the resolve_message line, which makes the description 1,948):
+ * +525 bytes on the entry as the tool builds it from the default tool list (14,696 → 15,221), Board on the same +525.
+ * Estimated, not measured on Pi; added here so the skip sentence's 162 and this stay inside the 5%. Tokens scaled at
+ * the entry's bytes per token (3.7), +142. The `moved_to` field's next draft words: +24 more (15,221 → 15,245 on the
+ * same build), +6 tokens, Board on the same. The rule's last sentence (pass the answers on, 2026-11-21): +80 more
+ * (15,245 → 15,325), +22 tokens; the description stays 1,948 (2,039 with steps and the Board on).
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 15151, tokens: 4076 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 16451, tokens: 4492 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 17080, tokens: 4662 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
@@ -3533,9 +3614,10 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * `agent-search`: they search and list this Inbox's threads too (`agent-search`, `agent-threads`; inbox-far-find.ts).
  * `combine-across` (approval "inbox-combine-across-computers"): a Combine here takes picked threads of a linked
  * machine too (read there, archived there through the outbox), so a linked machine's window offers this Inbox's
- * agents for picks on both.
+ * agents for picks on both. `remove-agent` (approval "inbox-remove-agent-from-thread"): an agent of one of its threads
+ * is removed there and put back with Undo (`threads/:id/remove-agent`), so a linked machine's list offers Remove.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

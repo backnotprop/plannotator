@@ -21,6 +21,8 @@ import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { isPersonLook } from './folding';
 import { pageInFront } from './sound';
 import { usePaneScope } from './panes/scope';
+/** The opening look says whether the person chose the thread (recentActs.ts, for Recent activity). */
+export { personOpened } from './recentActs';
 
 /** How long the first lines must stay on screen. */
 export const SEEN_DWELL_MS = 1000;

@@ -632,9 +632,9 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   const controlsBox = (await controls.boundingBox())!;
   expect(controlsBox.x + controlsBox.width).toBeLessThanOrEqual(approveAt);
   expect(controlsBox.y + controlsBox.height).toBeLessThanOrEqual((await body.boundingBox())!.y);
-  // The gear: code review's popover, without Whole file and Hide whitespace.
+  // The gear: code review's popover, with its Whole file (the diffs obey it) and without Hide whitespace.
   await controls.getByRole('button', { name: 'Diff display options' }).click();
-  await expect(page.locator('[data-diff-display-popup]').getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Show moved & renamed code']);
+  await expect(page.locator('[data-diff-display-popup]').getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Whole file', 'Show moved & renamed code']);
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-diff-display-popup]')).toHaveCount(0);
   await expect(pane).toBeVisible();
@@ -817,9 +817,13 @@ test('a phone at 390 px: one row of one height, and the same menu as a desktop h
     await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
     const pane = page.locator('[data-review-message]');
     await expect(pane.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
-    // A phone reads Unified only: no layout to choose, in the bar or on a card.
+    // A phone reads Unified only: no layout to choose, in the bar or on a card. The Diff display gear alone stays, in
+    // the heading's row of the review's own actions, not the bar.
     await expect(pane.locator('[data-diff-style-switch]')).toHaveCount(0);
-    await expect(pane.locator('[data-diff-controls]')).toHaveCount(0);
+    await expect(pane.locator('[data-diff-layout-toggle]')).toHaveCount(0);
+    await expect(pane.locator('[data-diff-controls] button')).toHaveCount(1);
+    await expect(pane.locator('.ib-vhead [data-diff-controls]')).toHaveCount(0);
+    await expect(pane.locator('[data-guide-heading] .gv-tools [data-diff-display-options]')).toBeVisible();
     await expect(pane.locator('select')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 

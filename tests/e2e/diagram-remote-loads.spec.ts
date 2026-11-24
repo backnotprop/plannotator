@@ -31,9 +31,12 @@ import { buildDiagramUiBundle, openDiagramPage } from './diagram-ui-bundle';
 
 let bundle = '';
 let splitBundle = '';
+/** The switch as shipped: Pele draws what it can, Mermaid the rest (a picture-only label, say). */
+let shipped = '';
 test.beforeAll(() => {
   bundle = buildDiagramUiBundle();
   splitBundle = buildDiagramUiBundle({ splitPurify: true });
+  shipped = buildDiagramUiBundle({ engine: 'pele-where-safe' });
 });
 
 /** The page's own origin (fulfilled by the test, nothing leaves the machine). */
@@ -131,6 +134,22 @@ test('off: nothing in a label, a style, a directive or front matter loads from a
     await settle(page);
     expect([name, seen]).toEqual([name, []]);
   }
+});
+
+test('off, as shipped: nothing in a label, a style, a directive or front matter loads from another host, whichever engine draws it', async ({ page }) => {
+  const seen = await open(page, undefined, shipped);
+  await remoteLoads(page, false);
+  const engines = new Set<string>();
+  for (const [name, source] of Object.entries(CLOSED)) {
+    seen.length = 0;
+    const r = await render(page, source);
+    expect([name, r.ok, r.message]).toEqual([name, true, '']);
+    engines.add((await page.locator('#host > svg').getAttribute('class'))?.includes('pele') ? 'pele' : 'mermaid');
+    await settle(page);
+    expect([name, seen]).toEqual([name, []]);
+  }
+  // Both engines drew some of them: the shipped path and its fallback are both covered.
+  expect([...engines].sort()).toEqual(['mermaid', 'pele']);
 });
 
 test("off: Mermaid's own drawing into the live page already holds nothing from another host", async ({ page }) => {
