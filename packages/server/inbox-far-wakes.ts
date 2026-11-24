@@ -186,11 +186,22 @@ export function createInboxFarWakes(options: { dataDir: string; now?: () => Date
     return null;
   };
 
+  /** The wakes of the reply (or its stop notice) `id`, for every session it went to; withdrawn and delivered ones too. */
+  const find = (id: string): FarWake[] => {
+    const reply = id.endsWith("-stop") ? id.slice(0, -"-stop".length) : id;
+    return [...wakes.values()].filter((w) => w.reply_id === reply);
+  };
+
+  /** Every session a wake waits for, with its host. */
+  const waiting = (): FarWake[] => [...wakes.values()].filter((w) => !w.delivered_at);
+
   return {
     receive,
     pendingFor,
     delivered,
     placeOf,
+    find,
+    waiting,
     /** Called with the session a new wake waits for (a held poll answers at once). */
     onWake: (listener: (session: string) => void) => {
       listeners.add(listener);

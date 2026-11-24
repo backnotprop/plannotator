@@ -22,6 +22,7 @@
 import { basename } from "node:path";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { FAR_WOKEN_HOSTS } from "./inbox-far-host-wakes";
 import { syncSection } from "./inbox-perf";
 import type { createInboxLiveSessions } from "./inbox-sessions";
 
@@ -149,13 +150,13 @@ export function createInboxTagsRoute(options: {
 
   /**
    * This Inbox's own sessions a linked computer may tag in one of its threads (`GET taggable-agents` on the door,
-   * inbox-far-tags.ts): the live ones whose connection polls here, so this Inbox can hand them that computer's wake.
-   * A session the Inbox wakes itself (Codex, Qwen, T3, Antigravity) reads this store only, so it is not offered.
+   * inbox-far-tags.ts): the live ones whose connection polls here, and the ones this Inbox wakes itself (Codex, Qwen,
+   * T3, Antigravity: their wakes send a far wake as a local tag, inbox-far-host-wakes.ts), so each gets that computer's wake.
    */
   const liveHere = (): InboxTaggableSession[] =>
     live
       .allLive()
-      .filter((entry) => entry.polls)
+      .filter((entry) => entry.polls || FAR_WOKEN_HOSTS.has(entry.host))
       .map((entry) => {
         const known = entry.root !== null ? store.projectByRoot(entry.root) : null;
         const project = entry.root !== null ? { id: null, name: known?.name ?? (basename(entry.root) || entry.root), root: null } : null;

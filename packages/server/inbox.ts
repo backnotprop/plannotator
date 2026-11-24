@@ -377,7 +377,8 @@ import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plann
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxFarTags, FAR_DELIVERED_ROUTE } from "./inbox-far-tags";
 import { farSendMessage } from "./inbox-far-send";
-import { createInboxFarWakes } from "./inbox-far-wakes";
+import { createInboxFarWakes, type FarWake } from "./inbox-far-wakes";
+import { farWakeItem, farWakeStore } from "./inbox-far-host-wakes";
 import { farAgentReply, farReplyDeps } from "./inbox-mcp-far-reply";
 import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
@@ -1821,6 +1822,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   // Tag an agent on another computer: the wakes a linked computer hands this Inbox's sessions (inbox-far-wakes.ts).
   const farWakes = createInboxFarWakes({ dataDir });
+  /** A session took a far wake: the thread's computer is told through the outbox (`machines` is made further down). */
+  const tellFarDelivered = (far: FarWake, session: string) =>
+    void machines?.holdWrite(far.machine, FAR_DELIVERED_ROUTE, { idempotency_key: `far-delivered:${far.reply_id}:${session}`, reply_id: far.reply_id, id: far.command.id, session }, far.thread_id, 0);
 
   const mcpContext: InboxMcpContext = {
     store,
@@ -4645,7 +4649,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
     const commands = (items = handedOut()) => {
       // Then what a linked computer handed it from a thread there (inbox-far-wakes.ts), to a connection that words a tag.
-      const list = [...items.map((item) => replyCommand(item.message, sendNow, item.as)), ...(tags ? farWakes.pendingFor(session).map((wake) => wake.command) : [])];
+      const list = [...items.map((item) => replyCommand(item.message, sendNow, item.as)), ...(tags ? farWakes.pendingFor(session).flatMap((wake) => (t3Thread && t3Wake.holds(session, farWakeItem(wake)) ? [] : [wake.command])) : [])];
       // Handed an item for the running turn: an older connection does not poll again until it goes in.
       if (body[INBOX_STEER_POLLS_POLL_FIELD] !== true && list.some((command) => command.now === true)) live.steerHanded(session);
       return list;
@@ -4721,7 +4725,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A wake a linked computer handed it (inbox-far-wakes.ts): marked here, and that computer is told through the outbox.
     const far = store.message(body.id) ? null : farWakes.delivered(session, body.id);
     if (far) {
-      void machines?.holdWrite(far.machine, FAR_DELIVERED_ROUTE, { idempotency_key: `far-delivered:${far.reply_id}:${session}`, reply_id: far.reply_id, id: far.command.id, session }, far.thread_id, 0);
+      tellFarDelivered(far, session);
       return json({ ok: true });
     }
     // An item the Inbox marked to go in by itself: whether it went into the running turn, or waited for the
@@ -4894,10 +4898,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Which way each reply to a T3 thread went, one debug-log line each (`t3_route`); the log is made below.
   const t3Routes: { note: ((route: T3Route) => void) | null } = { note: null };
   const noteT3Route = (route: T3Route) => t3Routes.note?.(route);
+  // A linked computer's wake for a session one of these four wakes itself goes the same way as a tag here
+  // (inbox-far-host-wakes.ts): their store holds it as one more item, worded as that computer worded it.
+  const farHosts = farWakeStore(store, farWakes, tellFarDelivered);
+  const wakeCommandOf = (item: InboxMessage, session: string) => farHosts.commandOf(item, session) ?? replyCommand(item, false, session);
   const codexWake = createInboxCodexWake({
-    store,
+    store: farHosts.store,
     environment: agentEnvironment,
-    commandOf: (item, session) => replyCommand(item, false, session),
+    commandOf: wakeCommandOf,
     // A Codex thread the Inbox launched: its host puts the item in as a turn over the app-server it runs (the launch
     // engine is made below; the wake's first look runs after this function's synchronous part, when it exists).
     // Until it exists, a launched thread's item waits (never `codex queue`), and any other goes the queue's way.
@@ -4916,10 +4924,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The Qwen Code wake: the person's items for a running Qwen session go in over Qwen's cross-session
   // messaging, once each, as Plannotator's trusted sender (inbox-qwen-wake.ts, inbox-qwen-trust.ts).
   const qwenWake = createInboxQwenWake({
-    store,
+    store: farHosts.store,
     environment: agentEnvironment,
     dataDir,
-    commandOf: (item, session) => replyCommand(item, false, session),
+    commandOf: wakeCommandOf,
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
     ...options.qwenWake,
@@ -4928,9 +4936,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The Antigravity wake: the person's items for an Antigravity conversation go in through Antigravity's own
   // `agentapi send-message`, once each (inbox-antigravity-wake.ts).
   const antigravityWake = createInboxAntigravityWake({
-    store,
+    store: farHosts.store,
     environment: agentEnvironment,
-    commandOf: (item, session) => replyCommand(item, false, session),
+    commandOf: wakeCommandOf,
     skip: (item) => withdrawnTidy(item),
     ...options.antigravityWake,
   });
@@ -4958,9 +4966,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     probeMs: INBOX_T3_PROBE_MS,
   });
   const t3Wake = createInboxT3Wake({
-    store,
+    store: farHosts.store,
     dataDir,
-    commandOf: (item, session) => replyCommand(item, false, session),
+    commandOf: wakeCommandOf,
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item, session) => withdrawnTidy(item) || t3ModDelivers(item, session),
     local: t3Local,
