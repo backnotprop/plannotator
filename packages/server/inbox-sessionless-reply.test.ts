@@ -22,7 +22,8 @@ import { INBOX_HOST_NAMES, inboxAgentName, type InboxAuthor } from "@plannotator
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { sendTargetsOf } from "../inbox/sendTargets";
 import { rowDeliveryLine } from "../inbox/rowDelivery";
-import { agentAuthor } from "./inbox-mcp-read";
+import { rowAgentName, rowIsScript, rowRecipientName } from "../inbox/scriptAuthor";
+import { agentAuthor, windowedThread, windowedThreadText } from "./inbox-mcp-read";
 import { createInboxLiveSessions, INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 
 const roots: string[] = [];
@@ -219,5 +220,40 @@ describe("a script's post reads \"Script\" in the window, and only there", () =>
     const line = rowDeliveryLine(delivery, () => "7:00 AM");
     expect(line).toContain("Claude Code");
     expect(line).not.toContain("Script");
+  });
+
+  test("a thread a script started that a session took over: its row lists that one session, so the row names it; a script's own thread and a session's own thread list none, as before", async () => {
+    const w = world();
+    await w.poll("ses-ops");
+    const taken = w.script("Disk at 91% on node 3.");
+    w.tool("ses-ops", "I can clear the snapshots.", taken.id);
+    const row = w.row(taken.thread_id);
+    expect(row.participants).toEqual([{ host: "claude-code", session: "ses-ops", name: "Claude Code" }]);
+    expect(rowIsScript(row, row.author)).toBe(false);
+    expect(rowAgentName(row, row.author)).toBe("Claude Code");
+    expect(rowRecipientName(row, row.author)).toBe("Claude Code");
+    const scriptOnly = w.script("Spend check: $412 of $450 this month.");
+    expect(w.row(scriptOnly.thread_id).participants).toBeUndefined();
+    expect(rowAgentName(w.row(scriptOnly.thread_id), scriptOnly.author)).toBe("Script");
+    const own = w.tool("ses-ops", "The nightly sync is green.");
+    expect(w.row(own.thread_id).participants).toBeUndefined();
+  });
+
+  test("read_thread's text, as an agent gets it, never says Script: a script's thread and one a session took over still name the script An agent", async () => {
+    const w = world();
+    await w.poll("ses-ops");
+    const scriptOnly = w.script("Spend check: $412 of $450 this month.");
+    w.reply(scriptOnly.thread_id, "Thanks.");
+    const taken = w.script("Disk at 91% on node 3.");
+    w.tool("ses-ops", "I can clear the snapshots.", taken.id);
+    w.reply(taken.thread_id, "Go ahead.");
+    for (const threadId of [scriptOnly.thread_id, taken.thread_id]) {
+      for (const caller of [null, "ses-ops"]) {
+        const { result, order } = windowedThread(w.store, threadId, { caller }, "http://localhost/#thread");
+        const text = windowedThreadText(result, order);
+        expect(text).toContain("An agent");
+        expect(text).not.toMatch(/\bScript\b/);
+      }
+    }
   });
 });

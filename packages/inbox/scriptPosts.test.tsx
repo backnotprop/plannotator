@@ -6,16 +6,18 @@
  *   - an agent with a session but no known host or name (a stdio shim's `ses_` agent) read as a script;
  *   - an agent's shell the CLI names (Gemini CLI: a name, no session) read as a script;
  *   - a routine's row, or an agent's row beside a script's, changing;
- *   - the reply box's words changing (out of scope: they stay "Reply to An agent").
+ *   - a thread only a script wrote in naming it two ways on one screen (heads "Script", the reply box "An agent");
+ *   - a thread a script started and a session took over showing "Script" (or the terminal) on its row, or a label
+ *     there naming the script while the reply goes to the session.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. The pure parts run without it.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAuthor, InboxListRow, InboxListSection, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAuthor, InboxListRow, InboxListSection, InboxMessageWire, InboxProject, InboxReplyDraftRow, InboxRowDelivery, InboxThread } from '@plannotator/core/inbox-types';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
-import { messageAuthorName, rowIsScript } from './scriptAuthor';
+import { messageAuthorName, rowIsScript, rowRecipientName, threadAskerName } from './scriptAuthor';
 import { rowScriptOf, scriptTip } from './components/RowAgents';
 
 const hasDom = typeof document !== 'undefined';
@@ -41,6 +43,28 @@ describe('who is a script', () => {
     expect(rowIsScript({}, SHIM)).toBe(false);
     expect(scriptTip('Script', rowScriptOf({}, SCRIPT, 'billing-svc'))).toBe('Script in billing-svc');
     expect(scriptTip('Claude Code', rowScriptOf({}, CLAUDE, 'billing-svc'))).toBe('Claude Code');
+  });
+
+  test("a thread only a script wrote in is the script's; one a session wrote in is not", () => {
+    const person = { author: { kind: 'person' } as InboxAuthor };
+    expect(threadAskerName([{ author: SCRIPT }, person, { author: SCRIPT }])).toBe('Script');
+    expect(threadAskerName([{ author: SCRIPT }, { author: CLAUDE }])).not.toBe('Script');
+    expect(threadAskerName([{ author: SHIM }])).toBe('An agent');
+    expect(threadAskerName([{ author: CLAUDE }])).toBe('Claude Code');
+  });
+
+  test("a row names whom a reply goes to: a session that took a script's thread over, the script only where no session takes it, any other row as before", () => {
+    const takenOver = { participants: [{ host: 'claude-code', session: 'ses-api', name: 'Claude Code' }] };
+    const delivery = (d: Partial<InboxRowDelivery>) => ({ kind: 'reply', state: 'saved', reason: 'reads', send_now: false, message_id: 'm', at: null, host: null, name: null, ...d }) as InboxRowDelivery;
+    expect(rowRecipientName(takenOver, SCRIPT)).toBe('Claude Code');
+    expect(rowRecipientName({ ...takenOver, delivery: delivery({ host: 'claude-code', name: 'Claude Code' }) }, SCRIPT)).toBe('Claude Code');
+    // The person answered the script's own post: that reply is the script's.
+    expect(rowRecipientName({ ...takenOver, delivery: delivery({ script: true }) }, SCRIPT)).toBe('Script');
+    expect(rowRecipientName({}, SCRIPT)).toBe('Script');
+    expect(rowRecipientName({ delivery: delivery({ script: true }) }, SCRIPT)).toBe('Script');
+    // An agent's own row: its agent, whatever the delivery says, as before.
+    expect(rowRecipientName({ delivery: delivery({ host: 'pi', name: null }) }, CLAUDE)).toBe('Claude Code');
+    expect(rowRecipientName({}, SHIM)).toBe('An agent');
   });
 });
 
@@ -86,6 +110,16 @@ function row(id: string, author: InboxAuthor, subject: string): InboxListRow {
     unseen: 0,
     sent: null,
   } as unknown as InboxListRow;
+}
+
+/** The Claude Code session that took a script's thread over, as the server lists it (store.ts `listRow`). */
+const TOOK_OVER = [{ host: 'claude-code', session: 'ses-api', name: 'Claude Code' }];
+const SENT = { at: '2026-11-23T07:03:00.000Z', checked_at: null, wakes: true };
+const TO_CLAUDE: InboxRowDelivery = { kind: 'reply', state: 'queued', reason: 'working', send_now: false, message_id: 'msg_3', at: null, host: 'claude-code', name: 'Claude Code' };
+
+/** A row of a thread a script started and that Claude Code session took over. */
+function taken(id: string, over: Partial<InboxListRow>): InboxListRow {
+  return { ...row(id, SCRIPT, 'Disk at 91% on node 3'), message_count: 3, participants: TOOK_OVER, ...over };
 }
 
 let root: Root | null = null;
@@ -160,7 +194,7 @@ describe('drawn', () => {
     expect(rowEl('msg_routine').querySelector('[data-script-mark]')).toBeNull();
   });
 
-  test.skipIf(!hasDom)("a thread a script wrote: the folded and open heads draw the terminal and say Script; the person's reply goes to Script; the reply box's words are unchanged", async () => {
+  test.skipIf(!hasDom)("a thread a script wrote: the folded and open heads draw the terminal and say Script; the person's reply goes to Script; the reply box names Script too", async () => {
     const { ThreadPane } = await import('./components/Thread');
     const t = thread([
       message('msg_1', SCRIPT, 1, 'Nov 22 · $403 of $450 this month (90%).'),
@@ -178,13 +212,71 @@ describe('drawn', () => {
     const reply = el.querySelector('[data-message-article="msg_3"]')!;
     expect(reply.querySelector('.ib-to')!.textContent).toStartWith('to Script');
     expect(el.textContent).toContain('Saved for Script. It sees it when it next reads this thread.');
-    // Out of scope: the reply box names the script's post as before.
+    // One screen, one name: the reply box names the script too.
     const open = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Reply')!;
     act(() => open.click());
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(el.querySelector('textarea')!.getAttribute('aria-label')).toBe('Reply to An agent');
+    expect(el.querySelector('textarea')!.getAttribute('aria-label')).toBe('Reply to Script');
+    expect(el.textContent).not.toContain('An agent');
+  });
+
+  test.skipIf(!hasDom)("a thread a script started that a Claude Code session took over: the script's head still says Script, the session's says Claude Code, and the reply box goes to Claude Code", async () => {
+    const { ThreadPane } = await import('./components/Thread');
+    const t = thread([message('msg_1', SCRIPT, 1, 'Disk at 91% on node 3.'), message('msg_2', CLAUDE, 2, 'I can clear the snapshots.', 'msg_1')]);
+    const el = await draw(<ThreadPane thread={t} {...threadProps} />);
+    const head = (id: string) => el.querySelector(`[data-message-article="${id}"]`)!;
+    expect(head('msg_1').querySelector('.ib-fl-nm')!.textContent).toBe('Script');
+    expect(head('msg_1').querySelector('[data-script-mark]')).not.toBeNull();
+    expect(head('msg_2').querySelector('.ib-fl-nm')!.textContent).toBe('Claude Code');
+    expect(head('msg_2').querySelector('[data-script-mark]')).toBeNull();
+    const open = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Reply')!;
+    act(() => open.click());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(el.querySelector('textarea')!.getAttribute('aria-label')).toBe('Reply to Claude Code');
+  });
+
+  test.skipIf(!hasDom)("a script's row a Claude Code session took over: every row label names Claude Code, and no terminal is drawn on the row", async () => {
+    const { InboxList } = await import('./components/InboxList');
+    const { SidebarProvider } = await import('./shell/sidebar');
+    const { cardOf, rowRecipient, sentWordsOf } = await import('./components/rowParts');
+    const { DraftsPage } = await import('./compose/DraftsPage');
+    const stopped = taken('msg_stop', { section: 'stopped', questions: { open: 1, picked: 0, stopped: true, holds_up: [], prompt: 'Clear the snapshots?', actions: 0 }, waits: [{ message_id: 'msg_2', key: 'q-1', position: 0, prompt: 'Clear the snapshots?', stopped: 'The disk fills tonight.', holds_up: [] }] });
+    const sent = taken('msg_sent', { section: 'sent', last_author: 'person', sent: SENT, delivery: { ...TO_CLAUDE, send_now: true } });
+    const words = taken('msg_words', { section: 'sent', last_author: 'person', sent: SENT });
+    const reask = taken('msg_reask', { section: 'sent', last_author: 'person', sent: SENT, reask_pending: true, delivery: TO_CLAUDE });
+    const quiet = taken('msg_quiet', { section: 'new' });
+    const rows = [stopped, sent, words, reask, quiet];
+    const draft: InboxReplyDraftRow = { ...quiet, unsent: { reply_at: '2026-11-23T07:05:00.000Z', picks: 0, comments: 0 }, reply_preview: 'Go ahead.' };
+    const el = await draw(
+      <SidebarProvider>
+        <InboxList title="Inbox" path={null} sections={[{ id: 'new', label: 'New', threads: rows }] as InboxListSection[]} filtered={false} narrow={false} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} pinned={new Set()} />
+        <div data-test-card="">{cardOf(stopped)}</div>
+        <DraftsPage drafts={[]} error={null} phone={false} replies={[draft]} onOpenReply={() => {}} onOpen={() => {}} onDelete={() => {}} onCompose={() => {}} />
+      </SidebarProvider>,
+    );
+    for (const r of rows) {
+      const rowEl = el.querySelector(`[data-thread-id="${r.thread_id}"]`)!;
+      expect(rowEl.querySelector('[data-row-agents]')!.getAttribute('aria-label')).toBe('Claude Code');
+      expect(rowEl.querySelector('[data-script-mark]')).toBeNull();
+      const labels = [rowEl.textContent ?? '', ...[...rowEl.querySelectorAll('[aria-label]')].map((n) => n.getAttribute('aria-label')!)];
+      expect(labels.filter((l) => /Script|An agent/.test(l))).toEqual([]);
+      // The tooltips' and lines' name (Send now, Mark read, the wait card, the sent and Re-ask lines).
+      expect(rowRecipient(r)).toBe('Claude Code');
+    }
+    expect(sentWordsOf(words)).toContain('Claude Code');
+    expect(sentWordsOf(reask)).toContain('Claude Code');
+    // The badge's hover card: the agent's name and its mark.
+    const card = el.querySelector('[data-test-card]')!;
+    expect(card.textContent).toContain('Claude Code');
+    expect(card.textContent).not.toContain('Script');
+    expect(card.querySelector('[data-script-mark]')).toBeNull();
+    // Drafts: whom the unsent reply goes to.
+    expect(el.querySelector('[data-reply-draft]')!.textContent).toContain('Reply to Claude Code');
+    expect(el.querySelector('[data-reply-draft] [data-script-mark]')).toBeNull();
   });
 
   test.skipIf(!hasDom)('an agent with a session but no known name or host still reads "An agent" with the neutral mark', async () => {

@@ -3,7 +3,7 @@ import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { formatCount } from '../format';
-import { rowAuthorName } from '../scriptAuthor';
+import { rowAgentName, rowWho } from '../scriptAuthor';
 import { AuthorMark, Icon } from '../icons';
 import { fitPills, moreName, pillName, pillWaits, starredPills, type StarredPill } from '../starredPills';
 import { rowAgent, titleOf } from './InboxList';
@@ -393,9 +393,9 @@ function PillTip({ pill }: { pill: StarredPill }) {
         </span>
       )}
       <span className="ib-tip-sub ib-star-tipag" data-pill-tip-agent="">
-        <AuthorMark author={agent} />
+        <AuthorMark author={rowWho(pill.row, agent)} />
         <span>
-          {rowAuthorName(agent)} in <bdi>{pill.project}</bdi>
+          {rowAgentName(pill.row, agent)} in <bdi>{pill.project}</bdi>
         </span>
       </span>
     </span>

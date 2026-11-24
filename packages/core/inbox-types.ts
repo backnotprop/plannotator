@@ -2066,7 +2066,9 @@ export interface InboxListRow extends InboxThreadSummary {
   /**
    * When more than one agent session is in the thread (it wrote there or the
    * person tagged it): all of them, the thread's first agent first, for the
-   * overlapping marks. Absent with one session and from an older Inbox.
+   * overlapping marks. Absent with one session and from an older Inbox, except in a thread a script's post started
+   * (`inboxSessionlessSend`, no session of its own): there one session is listed too, so the row draws the session
+   * that took it over, not the script.
    */
   participants?: InboxParticipant[];
   /**

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { inboxApi, type ArchivedModel } from '../api';
 import { dayWords, formatCount, plural } from '../format';
-import { rowAuthorName } from '../scriptAuthor';
+import { rowAgentName, rowWho } from '../scriptAuthor';
 import { AuthorMark, Icon } from '../icons';
 import { Tip } from './Tip';
 
@@ -46,7 +46,7 @@ function ArchivedRow({ row, busy, onUnarchive }: { row: InboxListRow; busy: bool
   const subject = row.subject ?? '(no subject)';
   return (
     <li className="ib-srow ib-arcrow" data-archived-thread={row.thread_id}>
-      <AuthorMark author={row.author} />
+      <AuthorMark author={rowWho(row, row.author)} />
       <span className="ib-arcinfo">
         <span className="ib-arcsub">
           {row.thread_name && (
@@ -61,7 +61,7 @@ function ArchivedRow({ row, busy, onUnarchive }: { row: InboxListRow; busy: bool
           </Tip>
         </span>
         <span className="ib-d">
-          {rowAuthorName(row.author)} · Archived {row.resolved_at ? dayWords(row.resolved_at) : ''} · {plural(row.message_count, 'message')}
+          {rowAgentName(row, row.author)} · Archived {row.resolved_at ? dayWords(row.resolved_at) : ''} · {plural(row.message_count, 'message')}
         </span>
       </span>
       <span className="ib-r">
