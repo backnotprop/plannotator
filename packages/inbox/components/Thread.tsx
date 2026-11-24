@@ -207,7 +207,7 @@ import { ThreadBarTitle } from '../thread/ThreadBarTitle';
 import { SkipChip } from '../parts/SkipChip';
 import { namedTagOptions, useThreadSessions } from '../thread/useThreadSessions';
 import { measureOpenPlaces } from '../thread/openPlaces';
-import { takeMergedFiles as takeMergedFilesInto, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
+import { takeMergedFiles as takeMergedFilesInto, takeOffered, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
 import { readFeedbackTexts } from '../data/queries/feedbackTexts';
 import { ReplyTextField } from '../parts/ReplyTextField';
 import { ReviewContextLine } from '../thread/ReviewContextLine';
@@ -393,6 +393,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted),
     onWords: (threadId, draft, was) => takeTheirWords.current(threadId, draft, was),
     ownedBox: (threadId) => ownedBox.current(threadId),
+    onOffer: (threadId) => threadId === threadRef.current.thread_id && boxRef.current.open && takeOffered(offerHost(), true),
   });
   const keptWords = (replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '';
   /** Whether a Send carries words: the box's, or (the box closed) those kept as its draft. */
@@ -1539,6 +1540,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (previous !== thread.thread_id && !machineOf(previous)) landLater(previous, replyFiles.detach());
     setPending(new Map());
     setBox({ open: false, text: '' });
+    ownedFor.current = null;
     replyFiles.reset();
     setError(sendErrors.get(thread.thread_id) ?? null);
     sendErrors.delete(thread.thread_id);
@@ -2807,6 +2809,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const earlier = unconfirmed.get(thread.thread_id);
     if (earlier && text.trim() !== earlier.words) forgetUnconfirmed(earlier, text.trim() === '' ? 'emptied' : 'edited');
     if (behind && !boxRef.current.open) restoringRef.current = true;
+    // The person wrote here: from now a draft read with other words waits for their next edit (an untouched box takes it).
+    ownedFor.current = thread.thread_id;
     setBox({ open: true, text });
     // Open now, for the rest of this event: an `openBehind` after it (a paste in full screen's card) keeps these words.
     boxRef.current = liveBox(true);
@@ -4007,22 +4011,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   /** The live-session choice open under the box: it stands in for the box's Send and bin. */
   const routeChoiceOpen = route.open && asking;
-  const restoreDraft = () => {
-    const offered = replyDraft.restoreOffer();
-    if (!offered) return;
-    const { draft } = offered;
-    if (offered.typed) {
-      const typed = replyText.get();
-      const text = draft.body.trim() && typed.trim() ? `${draft.body.trimEnd()}\n\n${typed.trimStart()}` : draft.body.trim() ? draft.body : typed;
-      takeDraftFiles(draftFilesWithMine(draft.files ?? []), text, 'add');
-      changeReply(text, true);
-      focusReplyEnd();
-    } else {
-      setBox({ open: true, text: draft.body });
-      takeDraftFiles(draft.files ?? [], draft.body);
-    }
-    announce('Your saved draft is in the reply.');
-  };
+  const offerHost = () => ({ replyDraft, replyText, setBox, takeDraftFiles, draftFilesWithMine, changeReply, focusReplyEnd, announce });
+  const restoreDraft = () => takeOffered(offerHost());
   /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box. */
   const discardMine = () => {
     const draft = replyDraft.takeTheirs();
@@ -5424,9 +5414,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               {...boxDrop.handlers}
               // A press beside the text (the row of chips under it) puts the caret in the reply.
               onMouseDown={(event) => focusReplyFromBox(event, textRef.current)}
-              onFocus={(event) => {
-                if ((event.target as EventTarget) === textRef.current) ownedFor.current = thread.thread_id;
-              }}
               // A paste that carries files (a screenshot, a copied image) attaches them; text pastes as text.
               onPaste={(event) => {
                 if (replyFiles.paste(event)) setError(null);

@@ -1,0 +1,253 @@
+/**
+ * Assertions compare booleans and strings, never elements: a failed `expect(element)` makes bun print a happy-dom
+ * node, which can take the test process down instead of failing the test.
+ *
+ * The owner's rule for the reply box: "The moment I start typing text, that's a draft." Words typed in a thread's reply
+ * box are never lost, whatever arrives meanwhile:
+ *
+ * - A saved draft that arrives while the box is open (another window or device saved it, or the thread's first read
+ *   answered late): an untouched box takes it; a box the person wrote in offers it (Restore draft), and the box's next
+ *   edit takes it in, the typed words after it, and saves both.
+ *
+ * The thread pane over a scripted Inbox (a stubbed fetch holding drafts with the server's compare-and-set). DOM-gated:
+ * runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
+ */
+import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import type { InboxAuthor, InboxMessageWire, InboxProject, InboxReplyDraft, InboxThread } from '@plannotator/core/inbox-types';
+import type { Signal } from './signal';
+
+const hasDom = typeof document !== 'undefined';
+const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+const { replyDraftUnsaved } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
+const { createSignal } = (hasDom ? await import('./signal') : {}) as typeof import('./signal');
+
+const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-11-02T09:00:00.000Z' };
+const A: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'codex', session: 'ses_a', name: 'Codex' };
+const ONE = 'msg_01M6RF0000000000000000001';
+
+const threadOf = (id: string, subject: string): InboxThread => ({
+  thread_id: id,
+  project: PROJECT,
+  subject,
+  thread_name: null,
+  resolved_at: null,
+  messages: [
+    { id, project_id: PROJECT.id, thread_id: id, reply_to: null, author: A, subject, body: 'The retry loop backs off two, four and eight seconds.', created_at: '2026-11-02T10:01:00.000Z', resolved_at: null, idempotency_key: null } as InboxMessageWire,
+  ],
+});
+
+/** The scripted Inbox's drafts, by thread, and every draft save it took (or refused). */
+let drafts = new Map<string, InboxReplyDraft>();
+let saves: { thread: string; body: string; at: number; status: number }[] = [];
+/** How a draft save is answered instead of the store's own (null: the store's). */
+let saveAnswer: ((thread: string, body: Record<string, unknown>) => Response | Promise<Response>) | null = null;
+/** A draft read held until this resolves (null: answered at once). */
+let readHeld: Promise<void> | null = null;
+let clock = 0;
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+let savedFetch: typeof fetch;
+let signal: Signal;
+
+/** A draft as another window or device saves it (the store's compare-and-set skipped: it is theirs). */
+function saveElsewhere(thread: string, body: string) {
+  clock += 1;
+  drafts.set(thread, { v: 1, thread_id: thread, body, created_at: '2026-11-02T10:10:00.000Z', updated_at: new Date(Date.UTC(2026, 10, 2, 11, 0, clock)).toISOString() });
+}
+
+function storeSave(thread: string, input: Record<string, unknown>): Response {
+  const current = drafts.get(thread) ?? null;
+  const base = (input.base as string | null | undefined) ?? null;
+  // The server's compare-and-set: a base behind the draft is refused unless the draft still holds the words this window saved last.
+  if ((current?.updated_at ?? null) !== base && !(current && typeof input.base_body === 'string' && current.body === input.base_body)) {
+    return Response.json({ error: 'The draft changed.', code: 'draft_conflict', draft: current }, { status: 409 });
+  }
+  const body = String(input.body ?? '');
+  if (body === '') {
+    drafts.delete(thread);
+    return Response.json({ draft: null });
+  }
+  saveElsewhere(thread, body);
+  return Response.json({ draft: drafts.get(thread) });
+}
+
+beforeEach(() => {
+  if (!hasDom) return;
+  drafts = new Map();
+  saves = [];
+  saveAnswer = null;
+  readHeld = null;
+  signal = createSignal();
+  savedFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    const draftPath = /\/threads\/([^/]+)\/draft$/.exec(path.split('?')[0]!);
+    if (draftPath) {
+      const thread = decodeURIComponent(draftPath[1]!);
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        const answer = saveAnswer ? await saveAnswer(thread, body) : storeSave(thread, body);
+        saves.push({ thread, body: String(body.body ?? ''), at: Date.now(), status: answer.status });
+        return answer;
+      }
+      if (readHeld) await readHeld;
+      return Response.json({ serverSession: 's', draft: drafts.get(thread) ?? null });
+    }
+    if (/\/draft\/delete$/.test(path)) return Response.json({ ok: true, deleted: true });
+    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
+    if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [] });
+    return Response.json({});
+  }) as typeof fetch;
+});
+
+afterEach(async () => {
+  if (!hasDom) return;
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+  saveAnswer = null;
+  readHeld = null;
+  for (let i = 0; i < 100 && replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  globalThis.fetch = savedFetch;
+});
+
+async function settle(turns = 4, ms = 20) {
+  for (let i = 0; i < turns; i += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    });
+  }
+}
+
+async function until(check: () => boolean, what: string, ms = 3000) {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    await settle(1, 10);
+  }
+}
+
+function draw(id: string) {
+  root!.render(
+    <div className="pn-inbox">
+      <ThreadPane thread={threadOf(id, id === ONE ? 'Retry worker' : 'Ledger export')} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} draftSignal={signal} />
+    </div>,
+  );
+}
+
+async function open(id = ONE): Promise<HTMLElement> {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    draw(id);
+  });
+  await settle();
+  return host;
+}
+
+const box = (el: HTMLElement) => el.querySelector<HTMLTextAreaElement>('.ib-rbox textarea');
+const offerShown = (el: HTMLElement) => el.querySelector('[data-draft-restore]') !== null;
+
+async function reply(el: HTMLElement) {
+  const button = el.querySelector<HTMLButtonElement>('[data-reply-button]');
+  expect(!!button).toBe(true);
+  await act(async () => button!.click());
+  await settle(2);
+  expect(!!box(el)).toBe(true);
+}
+
+/** Keys typed at the end of the box's words, as a person types them. */
+function typeOn(el: HTMLElement, words: string) {
+  const text = box(el)!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    text.focus();
+    const next = text.value + words;
+    setter.call(text, next);
+    text.setSelectionRange(next.length, next.length);
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+/** The last draft save that landed for the thread, made after `since`. */
+const landedSince = (thread: string, since: number) => saves.filter((s) => s.thread === thread && s.status === 200 && s.at >= since).at(-1)?.body ?? null;
+
+test.skipIf(!hasDom)('another device saves while this box is open and untouched: the box takes its words, and typing on saves both', async () => {
+  const el = await open();
+  await reply(el);
+  saveElsewhere(ONE, 'Words from the iPad.');
+  await act(async () => signal.emit());
+  await until(() => box(el)?.value === 'Words from the iPad.', 'the box takes the saved draft');
+  expect(offerShown(el)).toBe(false);
+  const at = Date.now();
+  typeOn(el, ' And from the Mac.');
+  await until(() => landedSince(ONE, at) !== null, 'a save', 1000);
+  expect(drafts.get(ONE)?.body).toBe('Words from the iPad. And from the Mac.');
+});
+
+test.skipIf(!hasDom)('another device goes on from words typed here: the box offers it, and the next key takes it in and saves both within a second', async () => {
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'Started on the Mac.');
+  await until(() => drafts.get(ONE)?.body === 'Started on the Mac.', 'the first save');
+  saveElsewhere(ONE, 'Started on the Mac. Added on the iPad.');
+  await act(async () => signal.emit());
+  await until(() => offerShown(el), 'the offer');
+  expect(box(el)!.value).toBe('Started on the Mac.');
+  const at = Date.now();
+  typeOn(el, ' More from the Mac.');
+  // The box holds both devices' words at once, and the draft is saved with them.
+  expect(box(el)!.value).toBe('Started on the Mac. Added on the iPad. More from the Mac.');
+  expect(offerShown(el)).toBe(false);
+  await until(() => landedSince(ONE, at) !== null, 'a save', 1000);
+  expect(drafts.get(ONE)?.body).toBe('Started on the Mac. Added on the iPad. More from the Mac.');
+  expect(replyDraftUnsaved()).toBe(false);
+});
+
+test.skipIf(!hasDom)('another device rewrote words typed here: the next key keeps both, its draft first and a blank line, and saves them', async () => {
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'Ship on Friday.');
+  await until(() => drafts.get(ONE)?.body === 'Ship on Friday.', 'the first save');
+  saveElsewhere(ONE, 'Hold the release.');
+  await act(async () => signal.emit());
+  await until(() => offerShown(el), 'the offer');
+  typeOn(el, ' Unless QA passes.');
+  await until(() => drafts.get(ONE)?.body === 'Hold the release.\n\nShip on Friday. Unless QA passes.', 'both saved', 1000);
+  expect(box(el)!.value).toBe('Hold the release.\n\nShip on Friday. Unless QA passes.');
+});
+
+test.skipIf(!hasDom)('the box opened before a slow draft read answers, and the person types: both are saved, the draft first', async () => {
+  saveElsewhere(ONE, 'Words saved yesterday.');
+  let letGo!: () => void;
+  readHeld = new Promise<void>((done) => (letGo = done));
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'Thanks');
+  await settle(2);
+  letGo();
+  const at = Date.now();
+  await until(() => drafts.get(ONE)?.body === 'Words saved yesterday.\n\nThanks', 'both saved', 1500);
+  expect(box(el)!.value).toBe('Words saved yesterday.\n\nThanks');
+  expect(el.querySelector('[data-draft-conflict]') === null).toBe(true);
+  expect(offerShown(el)).toBe(false);
+  // Nothing saved only the typed word over the draft on the way.
+  expect(saves.filter((s) => s.at >= at && s.status === 200).every((s) => s.body.includes('Words saved yesterday.'))).toBe(true);
+});
+
+test.skipIf(!hasDom)('the box opened before a slow draft read answers, untouched: it takes the draft, and typing after saves both', async () => {
+  saveElsewhere(ONE, 'Words saved yesterday.');
+  let letGo!: () => void;
+  readHeld = new Promise<void>((done) => (letGo = done));
+  const el = await open();
+  await reply(el);
+  letGo();
+  await until(() => box(el)?.value === 'Words saved yesterday.', 'the box takes the draft');
+  expect(offerShown(el)).toBe(false);
+  typeOn(el, ' And today.');
+  await until(() => drafts.get(ONE)?.body === 'Words saved yesterday. And today.', 'both saved', 1000);
+});

@@ -135,6 +135,8 @@ export function replyDraftSaveEndedAt(): number {
 const conflictWords = new Map<string, string>();
 const offers = new Map<string, InboxReplyDraft>();
 const offerWords = new Map<string, string>();
+/** Per thread: the box's words when its offer came (what the box and the offered draft may both go on from). */
+const offerFrom = new Map<string, string>();
 /** Threads whose box holds more words than a draft takes: not saved (the restart guard asks). */
 const tooLongThreads = new Set<string>();
 /**
@@ -307,6 +309,12 @@ export interface ReplyDraftOptions {
    */
   onWords?: (threadId: string, draft: InboxReplyDraft, was: string) => ReplyBoxTook;
   ownedBox?: (threadId: string) => { text: string; files: ReplyDraftFiles } | null;
+  /**
+   * A saved draft is offered (Restore draft) and the person edited the box (or had typed before the thread's first read
+   * answered): the box takes the offered draft with its words after it (`restoreOffer`), which saves it. Typing is
+   * always saved: an offer never holds typed words back.
+   */
+  onOffer?: (threadId: string) => void;
 }
 
 /** What the box did with another window's newer words (`onWords`). */
@@ -316,6 +324,8 @@ export type ReplyBoxTook = 'took' | 'hidden' | 'differs';
 interface QueuedSave {
   text: string;
   ops: ReplyDraftFileOps;
+  /** Its words went into an offered draft taken since (`restoreOffer`): the newer save with both carries them. */
+  taken?: boolean;
 }
 
 export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {}) {
@@ -330,6 +340,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   onWordsRef.current = options.onWords;
   const ownedBoxRef = useRef(options.ownedBox);
   ownedBoxRef.current = options.ownedBox;
+  const onOfferRef = useRef(options.onOffer);
+  onOfferRef.current = options.onOffer;
   const readDraft = (target: string) => readStoredDraft(storeRef.current, target);
   const chain = useRef<Promise<void>>(Promise.resolve());
   /** The save waiting for the pause in typing: the words, the box's files (for the long pastes' places) and the changes since the last. */
@@ -464,20 +476,31 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   const show = (target: string, draft: InboxReplyDraft | null) => {
     if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target), failed: refusedThreads.has(target), offer: offers.get(target) ?? null });
   };
-  const ownedChange = (target: string, draft: InboxReplyDraft | null): 'offer' | 'edits' | null => {
+  /**
+   * A draft read while the person's box (`ownedBox`: they typed in it since it opened) holds other words. `offer`: the
+   * box held nothing unsaved, so the draft waits behind Restore draft until the box's next edit takes it in. `typed`:
+   * the thread's first read answered after the person typed (nothing of theirs was saved over it): offered, and taken
+   * in at once. `edits`: unsaved edits over a draft this window knew: the conflict, as ever.
+   */
+  const ownedChange = (target: string, draft: InboxReplyDraft | null, first = false): 'offer' | 'typed' | 'edits' | null => {
     const mine = ownedBoxRef.current?.(target) ?? null;
     if (!mine || !draft || mine.text === draft.body) {
       offers.delete(target);
+      offerFrom.delete(target);
       return null;
     }
-    if (pending.current?.threadId === target || carried.has(target) || replyContentKey(mine.text, mine.files) !== (synced.current.get(target) ?? '')) return 'edits';
+    const edits = pending.current?.threadId === target || carried.has(target) || replyContentKey(mine.text, mine.files) !== (synced.current.get(target) ?? '');
+    const typedFirst = edits && first && !synced.current.has(target) && !!onOfferRef.current;
+    if (edits && !typedFirst) return 'edits';
     adopt(target, draft);
     offers.set(target, draft);
-    return 'offer';
+    offerFrom.set(target, typedFirst ? '' : mine.text);
+    return typedFirst ? 'typed' : 'offer';
   };
   const offerToConflict = (target: string): boolean => {
     if (!offers.has(target)) return false;
     offers.delete(target);
+    offerFrom.delete(target);
     const words = offerWords.get(target);
     offerWords.delete(target);
     if (words !== undefined) setConflict(target, words);
@@ -577,6 +600,11 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         // (which carries the box): nothing to save.
         if (generation !== generationOf(target) || claimed.current.has(target)) {
           leave();
+          return;
+        }
+        // Its words are in the box's newer words now, after the draft it took in: that save carries them.
+        if (save.taken) {
+          handOn();
           return;
         }
         // Waiting on the person's choice after a conflict: the words must not land; the changes wait for Keep mine.
@@ -702,8 +730,10 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         // An older Inbox answers 404 (caught below): no draft.
         const draft = await storeRef.current.read(threadId);
         if (!live) return;
-        if (ownedChange(threadId, draft) === null) adopt(threadId, draft);
+        const change = ownedChange(threadId, draft, true);
+        if (change === null) adopt(threadId, draft);
         setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), offer: offers.get(threadId) ?? null });
+        if (change === 'typed') onOfferRef.current?.(threadId);
       } catch {
         if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId) });
       }
@@ -777,6 +807,12 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       if (tooLongThreads.has(target)) markTooLong(target, false);
       if (offers.has(target)) {
         carry(target, take(target, files, text));
+        // The first edit while a saved draft waits: the box takes it in, these words after it, and that is saved.
+        if (onOfferRef.current && (text.trim() !== '' || files.length > 0)) {
+          offerWords.set(target, text);
+          onOfferRef.current(target);
+          return;
+        }
         if (text.trim() !== '' || files.length > 0) offerWords.set(target, text);
         else offerWords.delete(target);
         unsavedChanged();
@@ -828,6 +864,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     if (offered) {
       offers.delete(target);
       offerWords.delete(target);
+      offerFrom.delete(target);
       takeCarried(target);
       held.current.set(target, []);
       unsavedChanged();
@@ -1070,15 +1107,23 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     quotes.current.set(current.current, value ? { ...value } : null);
   }, []);
 
-  const restoreOffer = useCallback((): { draft: InboxReplyDraft; typed: boolean } | null => {
+  /**
+   * Restore draft, or the box's first edit while the offer stands: the offered draft (null: none), whether words were
+   * typed since it came (`typed`) and the box's words when it came (`from`). A save queued before this carried words the
+   * box now holds after the draft: the save of the box's words does it.
+   */
+  const restoreOffer = useCallback((): { draft: InboxReplyDraft; typed: boolean; from: string } | null => {
     const target = current.current;
     const draft = offers.get(target);
     const typed = offerWords.has(target);
+    const from = offerFrom.get(target) ?? '';
     offers.delete(target);
     offerWords.delete(target);
+    offerFrom.delete(target);
+    if (draft) for (const queuedSave of queuedOf(target)) queuedSave.taken = true;
     unsavedChanged();
     setState((s) => ({ ...s, offer: null }));
-    return draft ? { draft, typed } : null;
+    return draft ? { draft, typed, from } : null;
   }, []);
 
   return { ...state, restoreOffer, save, flush, discard, sent, waiting, claim, release, reload, keepMine, takeTheirs, expectOwnClear, boxTook, heldOf, withMyChanges, settle, aim, quote };

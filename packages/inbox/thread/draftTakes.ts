@@ -33,6 +33,49 @@ export function takeTheirWords(host: DraftTakesHost, threadId: string, draft: In
   return 'took';
 }
 
+/**
+ * The words an offered draft and the box make together, nothing of either lost. Both went on from the words the box held
+ * when the draft came (`from`): the draft, then what was typed here after them. Otherwise the draft, a blank line, then
+ * the box's words.
+ */
+export function offeredWithTyped(offered: string, from: string, typed: string): string {
+  if (from.trim() !== '' && typed.startsWith(from) && offered.startsWith(from)) return offered + typed.slice(from.length);
+  if (!offered.trim()) return typed;
+  return typed.trim() ? `${offered.trimEnd()}\n\n${typed.trimStart()}` : offered;
+}
+
+interface OfferHost {
+  replyDraft: { restoreOffer: () => { draft: InboxReplyDraft; typed: boolean; from: string } | null };
+  replyText: { get: () => string };
+  setBox: (next: { open: boolean; text: string }) => void;
+  takeDraftFiles: (files: readonly InboxDraftFile[], words: string, mode?: 'replace' | 'add') => void;
+  draftFilesWithMine: (files: readonly InboxDraftFile[]) => InboxDraftFile[];
+  changeReply: (text: string, behind?: boolean) => void;
+  focusReplyEnd: () => void;
+  announce: (text: string) => void;
+}
+
+/**
+ * Restore draft (`edited` false), or the box's first edit while the offer stands (`edited`): the offered draft goes in the
+ * box. Words typed since it came go after it (`offeredWithTyped`), and the result is saved.
+ */
+export function takeOffered(host: OfferHost, edited = false): void {
+  const offered = host.replyDraft.restoreOffer();
+  if (!offered) return;
+  const { draft } = offered;
+  if (offered.typed || edited) {
+    const text = offeredWithTyped(draft.body, offered.from, host.replyText.get());
+    host.takeDraftFiles(host.draftFilesWithMine(draft.files ?? []), text, 'add');
+    host.changeReply(text, true);
+    // An edit made in the box keeps focus where it is; Restore draft puts the caret after the words.
+    if (!edited) host.focusReplyEnd();
+  } else {
+    host.setBox({ open: true, text: draft.body });
+    host.takeDraftFiles(draft.files ?? [], draft.body);
+  }
+  host.announce('Your saved draft is in the reply.');
+}
+
 export function takeMergedFiles(host: DraftTakesHost, threadId: string, draft: InboxReplyDraft, wanted: readonly string[]): void {
   const { threadRef, boxRef, replyDraft, replyFiles } = host;
   if (threadId !== threadRef.current.thread_id || !boxRef.current.open) return;
