@@ -110,6 +110,8 @@ import type {
 
 import { newUuid } from './uuid';
 import { annotationBody, trackCommentWrite } from './commentSaves';
+import { InboxHeldError, outboxResult, waitForPinReceipt } from './outboxReceipt';
+export { InboxHeldError, heldWords } from './outboxReceipt';
 
 /**
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
@@ -741,29 +743,6 @@ export async function get<T>(path: string, signal?: AbortSignal, arriving?: (res
   return answer;
 }
 
-/**
- * A write to another machine its Inbox could not confirm yet (linked machines, rule 12): held in this Inbox's
- * outbox (`202`), "Sending…" while that machine is online, "Will send when … is back" while it is not. Never
- * "done": the window waits for the outbox's own frame.
- */
-export class InboxHeldError extends InboxApiError {
-  constructor(
-    readonly outbox: OutboxView,
-    readonly machine: MachineView | null,
-  ) {
-    super(202, 'held', heldWords(machine));
-    this.name = 'InboxHeldError';
-  }
-}
-
-/** What a held write says, by its machine's state. */
-export function heldWords(machine: Pick<MachineView, 'name' | 'state'> | null): string {
-  const name = machine?.name ?? 'the other machine';
-  return machine && machine.state !== 'online' && machine.state !== 'connecting'
-    ? `Waiting for ${name}: this applies when ${name} is back.`
-    : `Sending to ${name}: this applies once ${name} confirms.`;
-}
-
 /** A read that gives no answer in `timeoutMs` (a held connection, a stalled server) fails with this. */
 export class InboxReadTimeout extends Error {
   constructor(readonly timeoutMs: number) {
@@ -925,17 +904,9 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
   if (machine && response.status === 202) {
     const held = (await response.json().catch(() => ({}))) as { outbox?: OutboxView; machine?: MachineView | null };
     if (held.outbox) {
-      const entry = held.outbox;
-      // Still on its way: held. A key sent before and already settled (replayed) says how it ended instead.
-      if (entry.state === 'queued' || entry.state === 'sending') throw new InboxHeldError(entry, held.machine ?? null);
-      if (entry.state === 'delivered') {
-        rememberMachine(idsIn(entry.answer), machine);
-        return entry.answer as T;
-      }
-      if (body.diagram_annotation && entry.state === 'refused' && entry.status === 422) return readJson<T>(Response.json(entry.answer, { status: 422 }));
-      if (entry.state === 'cancelled') throw new InboxApiError(409, 'outbox_cancelled', `Cancelled. It was never sent to ${held.machine?.name ?? 'the other machine'}.`);
-      const why = entry.answer && typeof entry.answer === 'object' ? (entry.answer as { error?: unknown }).error : null;
-      throw new InboxApiError(409, 'not_delivered', typeof why === 'string' && why ? why : `Not delivered to ${held.machine?.name ?? 'the other machine'}.`);
+      const answer = await outboxResult<T>(held.outbox, held.machine ?? null, !!body.diagram_annotation);
+      rememberMachine(idsIn(answer), machine);
+      return answer;
     }
   }
   const answer = await readJson<T>(response);
@@ -943,6 +914,23 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
   // events): any other answer can echo another machine's id (a kept draft names its project).
   if (machine) rememberMachine(idsIn(answer), machine);
   return answer;
+}
+
+/** A native pin keeps its editor open through a held write. Other threads' Sends need not wait for that machine. */
+function saveAnnotationAt(path: string, on: string, annotation: object, target: Record<string, unknown> = {}) {
+  type Saved = { annotation: InboxAnnotationRecord };
+  const body = annotationBody(annotation);
+  const how = { on, id: (annotation as { id?: unknown }).id, annotation };
+  const write = trackCommentWrite(post<Saved>(path, { ...target, ...body }), how);
+  if (!body.diagram_annotation) return write;
+  return write.catch(async cause => {
+    if (!(cause instanceof InboxHeldError)) throw cause;
+    const key = cause.outbox.key;
+    const receipt = await waitForPinReceipt(key, () => get<{ entry: OutboxView }>(inboxUrl(`/outbox/${encodeURIComponent(key)}`)));
+    const saved = await trackCommentWrite(outboxResult<Saved>(receipt, cause.machine, true), how);
+    rememberMachine(idsIn(saved), receipt.machine);
+    return saved;
+  });
 }
 
 /** The thread a message belongs to, for another machine's messages (learned from its thread reads). */
@@ -1523,7 +1511,7 @@ export const inboxApi = {
     trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id, annotation }),
   /** A comment on the text of an agent's message (the words selected), new or edited; removed through `removeAnnotation`. */
   saveMessageAnnotation: (messageId: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), annotationBody(annotation)), { on: messageId, id: (annotation as { id?: unknown }).id, annotation }),
+    saveAnnotationAt(messageUrl(messageId, '/annotations'), messageId, annotation),
   // A question choice's running-app prototype, through the live proxy (packages/server/inbox-live.ts). `probe`: the
   // app is asked first, so a stopped one answers 422 live_not_answering instead of the proxy framing its error.
   liveSite: (threadId: string, siteId: string, probe = false) =>
@@ -1606,7 +1594,7 @@ export const inboxApi = {
   linkedPage: (attachmentId: string, path: string) =>
     get<LinkedPageView>(attachmentUrl(attachmentId, `/linked-page?path=${encodeURIComponent(path)}`)),
   saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, ...annotationBody(annotation) }), { on: attachmentId, id: (annotation as { id?: unknown }).id, annotation }),
+    saveAnnotationAt(inboxUrl('/annotations', undefined, machineOf(attachmentId)), attachmentId, annotation, { attachment_id: attachmentId, version }),
   removeAnnotation: (id: string) =>
     trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}), { on: id, id, remove: true }),
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */

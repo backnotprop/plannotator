@@ -1,9 +1,10 @@
 import { placeNativeNote } from './nativeNotePlacement';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { act } from 'react';
+import { act, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderDiagram, type DiagramSpec } from '@plannotator/diagrams';
 import { NativeDiagramReview, type NativeDiagramReviewProps, type NativeDiagramAnchor, type NativeDiagramAskContext } from './NativeDiagramReview';
+import { NativeDiagramBlock } from './NativeDiagramBlock';
 import { partKey, placeCommentPins } from './nativeDiagramDrawing';
 import { getRefCardTransport, setRefCardTransport } from '../../utils/refCard';
 
@@ -55,31 +56,88 @@ test('a saved note leaves clustered pins, zoom, Ask, and the historical-revision
   }
 });
 
-describe.if(typeof document !== 'undefined')('native diagram review', () => {
+const hasDom = typeof document !== 'undefined';
+describe.if(hasDom)('native diagram review', () => {
   let root: Root;
   let host: HTMLElement;
   afterEach(async () => { if (root) await act(async () => root.unmount()); host?.remove(); });
-  async function show(props: Partial<NativeDiagramReviewProps> = {}) {
+  async function render(element: ReactNode) {
     if (!host?.isConnected) {
       host = document.createElement('div'); document.body.appendChild(host);
       root = createRoot(host);
     }
-    await act(async () => { root.render(<NativeDiagramReview source={source} {...props} />); });
+    await act(async () => { root.render(element); });
   }
-  function button(text: string) {
-    const found = [...host.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === text || b.textContent === text);
-    if (!found) throw new Error(`Missing button "${text}" in ${host.textContent}`);
+  function show(props: Partial<NativeDiagramReviewProps> = {}) {
+    return render(<NativeDiagramReview source={source} {...props} />);
+  }
+  function button(text: string, within: Element = host) {
+    const found = [...within.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === text || b.textContent === text);
+    if (!found) throw new Error(`Missing button "${text}" in ${within.textContent}`);
     return found;
   }
-  async function click(text: string) { await act(async () => button(text).click()); }
-  async function type(text: string) {
-    const input = host.querySelector('textarea')!;
+  async function click(text: string, within?: Element) { await act(async () => button(text, within).click()); }
+  async function type(text: string, within: Element = host) {
+    const input = within.querySelector('textarea')!;
     const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
     await act(async () => { set.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
   }
   function pointer(type: string, target: Element, x: number, y: number) {
     target.dispatchEvent(new PointerEvent(type, { pointerId: 5, pointerType: 'mouse', clientX: x, clientY: y, bubbles: true, button: 0, buttons: type === 'pointerup' ? 0 : 1 }));
   }
+
+  test('an expanded part hands an accepted question or a local file to the editor', async () => {
+    const block = { id: 'block-0', type: 'code' as const, content: source, order: 0, startLine: 1 };
+    let acceptAsk = false;
+    function EditorHost() {
+      const [surface, setSurface] = useState('');
+      return <>
+        <NativeDiagramBlock block={block} annotations={[]}
+          onAskAI={(question, context) => {
+            if (!acceptAsk) return false;
+            setSurface(`${context.text}: ${question}`);
+          }}
+          onOpenFile={ref => setSurface(`${ref.path}:${ref.start}-${ref.end}`)} />
+        {surface && <aside>{surface}</aside>}
+      </>;
+    }
+    await render(<EditorHost />);
+    await click('Expand diagram');
+    const popout = () => document.querySelector('[data-diagram-popout]');
+    const expanded = popout()!;
+    await click('panel Client', expanded);
+    await click('Ask AI', expanded.querySelector('[role=dialog][aria-label=Client]')!);
+    await type('What dispatches the request?', expanded);
+    await click('Send question', expanded);
+    expect(popout()?.querySelector('textarea')?.value).toBe('What dispatches the request?');
+    acceptAsk = true;
+    await click('Send question', expanded);
+    expect(host.querySelector('aside')?.textContent).toBe('Client: What dispatches the request?');
+    expect(document.querySelectorAll('[data-diagram-popout]')).toHaveLength(0);
+
+    await click('Expand diagram');
+    await click('Open file', popout()!);
+    expect(host.querySelector('aside')?.textContent).toBe('src/config.ts:8-12');
+    expect(document.querySelectorAll('[data-diagram-popout]')).toHaveLength(0);
+  });
+
+  test('Escape returns to the same references and keeps the comment draft until Cancel', async () => {
+    await show({ onCreateComment: () => {} });
+    await click('panel Client');
+    await click('Protocol');
+    await click('Comment');
+    await type('Does the client retry?');
+    await act(async () => {
+      host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(host.querySelector('[role=dialog]')?.getAttribute('aria-label')).toBe('Client');
+    expect(host.querySelector('a')?.href).toBe(link.url);
+    await click('Comment');
+    expect(host.querySelector('textarea')?.value).toBe('Does the client retry?');
+    await click('Cancel');
+    await click('Comment');
+    expect(host.querySelector('textarea')?.value).toBe('');
+  });
 
   test('dragging a part pans; a click there pins its real metadata. Comment replaces the card and reopens on the saved pin', async () => {
     const saved: { anchor: NativeDiagramAnchor; text: string }[] = [];

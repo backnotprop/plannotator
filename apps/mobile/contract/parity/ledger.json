@@ -17613,6 +17613,7 @@
       "title": "The window's outbox",
       "surface": [
         "window:/api/inbox/outbox",
+        "window:/api/inbox/outbox/:id",
         "window:/api/inbox/outbox/:id/dismiss"
       ],
       "flows": [],

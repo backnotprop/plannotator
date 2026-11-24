@@ -273,6 +273,7 @@
       "/api/inbox/open-in/file/raw",
       "/api/inbox/open-in/file/view",
       "/api/inbox/outbox",
+      "/api/inbox/outbox/:id",
       "/api/inbox/outbox/:id/cancel",
       "/api/inbox/outbox/:id/dismiss",
       "/api/inbox/pages",

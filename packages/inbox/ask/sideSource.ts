@@ -80,11 +80,14 @@ export function fileSideSource(
 }
 
 type Side = (words: string, source?: string) => void;
-type DiagramAsk = CommentAskAIHandler & { destination?: 'thread' };
+type DiagramAsk = CommentAskAIHandler & { destination?: 'thread'; relatedSurface?: string };
 
 /** Keep a private Side private. When that host is absent the drawer labels its explicit thread send. */
 export function diagramAsk(messageId: string, provenance: (context: CommentAskAIContext) => string, onSide?: Side, reply?: DiagramThreadReply, revision?: string): DiagramAsk | undefined {
-  if (onSide) return (question, context) => onSide(question, [provenance(context), context.detail].filter(Boolean).join('\n'));
+  if (onSide) {
+    const side: CommentAskAIHandler = (question, context) => onSide(question, [provenance(context), context.detail].filter(Boolean).join('\n'));
+    return Object.assign(side, { relatedSurface: '[data-chat-window]' });
+  }
   if (!reply) return undefined;
   const send: CommentAskAIHandler = (question, context) => reply(messageId, question,
     [provenance(context), context.diagramScope].filter(Boolean).join('\n'), revision);

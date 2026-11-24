@@ -1126,6 +1126,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const waiting = links.list().flatMap((l) => (machine && l.id !== machine ? [] : outbox.list(l.id, "pending").filter((e) => !e.auto)));
       return json({ waiting: waiting.map(outboxView), notices: outbox.notices().map(outboxView) });
     }
+    const receipt = /^\/api\/inbox\/outbox\/([^/]+)$/.exec(path);
+    if (receipt && req.method === "GET") {
+      const key = decodePathSegment(receipt[1]!);
+      const entry = key && outbox.get(key);
+      return entry && !entry.auto ? json({ entry: outboxView(entry) }) : json({ error: "No such outbox entry.", code: "not_found" }, 404);
+    }
     // Cancel a write still waiting that never left (a launch held for a machine that is asleep): it is never sent.
     // Any window's, as the write itself was; a held launch only from a window, as the forward took it.
     const cancel = /^\/api\/inbox\/outbox\/([^/]+)\/cancel$/.exec(path);

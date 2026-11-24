@@ -193,7 +193,7 @@ Review feedback identifies parts by kind, title, and id (for example, \`Diagram 
 
 When revising:
 1. Edit the existing \`.diagram.json\` in place.
-2. **Preserve the top-level \`"id"\` and every unchanged part's \`"id"\`**—even when renaming titles/labels, moving panels across columns or layouts, or reordering parallel links. Stable IDs keep pinned comments anchored and group revisions into one logical diagram.
+2. **Preserve the top-level \`"id"\` and every unchanged part's \`"id"\`**—even when renaming titles/labels, moving panels across columns or layouts, or reordering parallel links. Retaining part IDs keeps pinned comments anchored. Editing and reattaching the same source file with the same drawing ID groups revisions into one logical diagram.
 3. Never reuse a deleted part's \`"id"\` for a different concept.
 4. Re-render until exit \`0\` before handing back the revision.
 

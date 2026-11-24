@@ -271,9 +271,8 @@ function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestCommen
     onSelectComment?.(null);
     onSelectPart?.(anchor);
   }
-  function cancelComment() {
+  function leaveCommentEditor() {
     if (!card) return;
-    drafts.current.delete(JSON.stringify(['comment', card.anchor.kind, card.anchor.id, card.commentId]));
     setCard({ ...card, mode: card.commentId ? 'note' : 'references', pinned: true, keyboard: true });
   }
   function startComment() {
@@ -373,12 +372,12 @@ function ReviewSurface({ drawing, parts, comments = NO_COMMENTS, onRequestCommen
       {card && activePart && anchorRect && !asking && <FloatingCard key={partKey(activePart) + (card.commentId ?? '')}
         pinBounds={selectedPin ? pins.map(p => ({ left: p.x - 16, top: p.y - 16, width: 32, height: 32 })) : undefined}
         anchor={anchorRect} host={hostRef.current} mode={card.mode} heading={card.mode === 'references' ? activePart.title : `Comment on ${activePart.title}`}
-        pinned={card.pinned} keyboardOpen={!!card.keyboard} onClose={card.mode === 'write' ? cancelComment : () => close()} onEnter={stopTimers} onLeave={leavePreview}>
+        pinned={card.pinned} keyboardOpen={!!card.keyboard} onClose={card.mode === 'write' ? leaveCommentEditor : () => close()} onEnter={stopTimers} onLeave={leavePreview}>
         {card.mode === 'write' ? <TextEditor key={card.commentId ?? 'new'} initial={drafts.current.get(commentKey) ?? selectedComment?.text ?? ''}
           onChange={value => drafts.current.set(commentKey, value)}
           label={`Comment on ${activePart.title}`} original={selectedComment?.text}
           onSubmit={text => selectedComment ? onEditComment!(selectedComment.id, text) : onCreateComment!(card.anchor, text)}
-          onCancel={cancelComment}
+          onCancel={() => { drafts.current.delete(commentKey); leaveCommentEditor(); }}
           onDone={text => {
             focusSaved.current = { id: selectedComment?.id, previous: new Set(comments.map(c => c.id)), anchor: card.anchor, text };
             drafts.current.delete(commentKey); setNotice(`Comment saved on ${activePart.title}`); close(false);

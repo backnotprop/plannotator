@@ -369,6 +369,8 @@ packages/ui/hooks/useActiveSection.test.tsx
 packages/ui/hooks/useActiveSection.positions.test.tsx
 packages/editor/hooks/useQuestionAnswers.test.tsx
 packages/ui/components/diagram/DiagramViewer.test.tsx
+apps/inbox/queuedDiagramPin.test.tsx
+packages/ui/components/diagram/NativeDiagramReview.test.tsx
 packages/ui/utils/diagramAnchor.test.ts
 packages/ui/utils/diagramAnchorGraphviz.test.ts
 packages/ui/utils/diagramMathLabels.test.ts

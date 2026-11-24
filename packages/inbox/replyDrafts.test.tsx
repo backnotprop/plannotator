@@ -69,7 +69,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-const TESTS = 45;
+const TESTS = 46;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -871,6 +871,32 @@ test.skipIf(!hasDom)('an unconfirmed Send is forgotten when the person leaves: t
   expect(second.path).toContain(asked);
   expect(await personReplies('Yes.')).toHaveLength(2);
 }, 30_000);
+
+test.skipIf(!hasDom)('Send with only a comment on an earlier agent’s message sends one reply to that agent', async () => {
+  await agentSend('I checked the links.', world.waiting);
+  const comment = 'Which pages should the search index cover?';
+  const made = await loopback(
+    `/api/inbox/messages/${world.waiting}/annotations`,
+    'POST',
+    JSON.stringify({ annotation: { id: 'ann-earlier-agent', blockId: 'block-1', startOffset: 0, endOffset: 13, type: 'COMMENT', text: comment, originalText: 'The docs site', createdA: 1 } }),
+  );
+  expect(made.status).toBe(200);
+
+  const el = await renderApp(`#thread=${world.waiting}`);
+  await until(() => el.querySelector('[data-draft-foot]') !== null, 'the comment in the draft');
+  act(() => button(el, 'Edit draft').click());
+  await until(() => box(el)?.value === '', 'the empty reply box');
+  act(() => button(el, 'Send').click());
+  await until(() => box(el) === null, 'the box closed after Send');
+
+  const posts = posted.filter((p) => p.path.endsWith('/reply'));
+  expect(posts.map((p) => p.path)).toEqual([`/api/inbox/messages/${world.waiting}/reply`]);
+  expect(posts[0]!.body.annotation_ids).toEqual(['ann-earlier-agent']);
+  const replies = await personReplies('');
+  expect(replies).toHaveLength(1);
+  expect(replies[0]!.reply_to).toBe(world.waiting);
+  expect(replies[0]!.body).toContain(comment);
+});
 
 test.skipIf(!hasDom)('a Send that goes as two replies keeps its "Sending…" reply until the one with the words lands', async () => {
   const made = await loopback(
