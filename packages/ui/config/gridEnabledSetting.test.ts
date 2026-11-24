@@ -153,4 +153,14 @@ describe('plan look by cookie state', () => {
     markLookAndFeelChoiceResolved();
     expect(load()).toEqual({ grid: true, prompt: null });
   });
+
+  test('no v2 marker but config.json says Grid: Grid once init() runs, and the first-run chooser still asks (decided from the cookies at mount)', () => {
+    const values = installBackend();
+    const store = new ConfigStoreForTest();
+    expect(store.get('gridEnabled')).toBe(false);
+    store.init({ displayOptions: { showGrid: true } });
+    expect(store.get('gridEnabled')).toBe(true);
+    expect(values.get(GRID)).toBe('true');
+    expect(planLookPrompt()).toBe('first-run');
+  });
 });

@@ -250,7 +250,7 @@ export const SLICE_RULES: SliceRule[] = [
       'packages/inbox/data/machineViews*',
       'packages/inbox/cloud/**',
       'packages/server/inbox-scheduled-machines*',
-      'packages/inbox/components/LinkedCapabilities*',
+      'packages/server/inbox-capability-set*',
       'packages/server/inbox-artifacts-merged*',
     ],
     specs: ['inbox-machines.spec.ts', 'inbox-machine-update.spec.ts', 'inbox-phones.spec.ts', 'inbox-accounts*.spec.ts', 'inbox-snooze-machines.spec.ts', 'inbox-machines-agent-read.spec.ts', 'inbox-cloud-*.spec.ts', 'inbox-routines-machines.spec.ts', 'inbox-artifact-pins-machines.spec.ts'],

@@ -25,14 +25,14 @@ import {
 } from "fs";
 import { execSync } from "child_process";
 
-import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig } from '@plannotator/core/config-types';
+import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, DisplayOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig } from '@plannotator/core/config-types';
 import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
 import { isLocalhostSubdomain } from './loopback-host';
 import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
 import { parseAnnotateView, type AnnotateView } from '@plannotator/core/config-types';
-export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
+export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, DisplayOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
 export interface CCLabelConfig {
@@ -170,6 +170,8 @@ function mergeInboxPromptConfig(current: unknown, partial: unknown): PromptConfi
 export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
+  /** The plan / annotate Display settings and the markdown selection mode. */
+  displayOptions?: DisplayOptions;
   /** Saved review defaults for a VCS other than Git (today: `jj`). Unknown keys are kept. */
   reviewDefaults?: ReviewDefaults;
   /** Optional analysis layers used by code review. */
@@ -456,6 +458,13 @@ export interface PlannotatorConfig {
    * linked machine: `rev` counts saves across them, `by` is the machine that saved it. Unset: off.
    */
   inboxShowArchived?: { on: boolean; rev: number; by: string | null };
+  /**
+   * When the person last flipped each Settings → Capabilities switch (`board`, `steps`, …, `grid`; ms since 1970) and
+   * on which Inbox (`ibx_…`): the newer flip wins on every linked computer (packages/server/inbox-capability-set.ts).
+   * A switch with no entry was never flipped since this was kept. The switches themselves stay in their own keys. A
+   * save names only the switches it stamps: the others are kept (saveConfig merges it key by key).
+   */
+  inboxCapabilityFlips?: Record<string, { at: number; by: string | null }>;
   /**
    * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
    * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
@@ -1033,6 +1042,33 @@ export function parsePackageChangesConfig(value: unknown): PlannotatorConfig["pa
     result[key] = input[key] as boolean;
   }
   return Object.keys(result).length > 0 ? result : undefined;
+}
+
+const DISPLAY_OPTION_TYPES = {
+  textSize: "number",
+  fontFamily: "string",
+  showGrid: "boolean",
+  diagramShadow: "number",
+  autoOpenSidebar: "boolean",
+  stickyActions: "boolean",
+  planWidth: "string",
+  taterMode: "boolean",
+  inputMethod: "string",
+} as const satisfies Record<keyof DisplayOptions, "number" | "string" | "boolean">;
+
+/**
+ * Parse `displayOptions`: a plain object, or undefined (the route answers 400).
+ * Only the known keys with the right primitive type are kept; the UI checks
+ * each value against its own choices (shared cannot import packages/ui).
+ */
+export function parseDisplayOptionsConfig(value: unknown): DisplayOptions | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, type] of Object.entries(DISPLAY_OPTION_TYPES)) {
+    if (typeof input[key] === type) result[key] = input[key];
+  }
+  return result as DisplayOptions;
 }
 
 /** PLANNOTATOR_PACKAGE_LOOKUP: `0` / `false` / `off` / `disabled` is a hard off; anything else decides nothing. */
@@ -1691,7 +1727,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
     const plain = (value: unknown): value is Record<string, unknown> =>
       !!value && typeof value === "object" && !Array.isArray(value);
     const merged: Record<string, unknown> = { ...current, ...partial };
-    const nested = (key: "experimental" | "diffOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch") => {
+    const nested = (key: "experimental" | "diffOptions" | "displayOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch" | "inboxCapabilityFlips") => {
       const cur = (current as Record<string, unknown>)[key];
       const par = (partial as Record<string, unknown>)[key];
       if (par === undefined) {
@@ -1704,7 +1740,8 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
       }
       merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
     };
-    for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch"] as const) nested(key);
+    // `inboxCapabilityFlips` too: a switch's flip time saved never drops another's saved meanwhile.
+    for (const key of ["experimental", "diffOptions", "displayOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch", "inboxCapabilityFlips"] as const) nested(key);
     // Machine state named by the save goes to state.json only (MACHINE_STATE_KEYS): config.json's copy, if any, is
     // kept as it is, for other machines and older versions that read it.
     const stateRead = readState();
@@ -1769,6 +1806,7 @@ export function getServerConfig(
 ): {
   displayName?: string;
   diffOptions?: DiffOptions;
+  displayOptions?: DisplayOptions;
   reviewDefaults?: ReviewDefaults;
   theme?: ThemeConfig;
   favicon?: FaviconStyle;
@@ -1802,6 +1840,7 @@ export function getServerConfig(
   return {
     displayName: cfg.displayName,
     diffOptions: cfg.diffOptions,
+    ...displayOptionsAdvert(cfg.displayOptions),
     ...(cfg.reviewDefaults !== undefined && { reviewDefaults: cfg.reviewDefaults }),
     ...(cfg.theme !== undefined && { theme: cfg.theme }),
     ...(isFaviconStyle(cfg.favicon) && { favicon: cfg.favicon }),
@@ -1843,6 +1882,12 @@ export function getServerConfig(
     // Settings' "Open Plannotator at plannotator.localhost" (#2184), only where the server says it is local.
     ...(options.cookieHost === true && { cookieHost: cookieHostState(cfg) }),
   };
+}
+
+/** displayOptions as getServerConfig advertises it: the parsed known keys, left out when none remain. */
+function displayOptionsAdvert(value: unknown): { displayOptions?: DisplayOptions } {
+  const parsed = parseDisplayOptionsConfig(value);
+  return parsed && Object.keys(parsed).length > 0 ? { displayOptions: parsed } : {};
 }
 
 /**
@@ -2504,9 +2549,14 @@ export function resolveExperimental(
 ): boolean {
   const fromEnv = parseExperimentalEnv(name, env);
   if (fromEnv !== undefined) return fromEnv;
+  return savedExperimental(config, name) ?? false;
+}
+
+/** The person's saved choice for an experimental feature (config.json `experimental`), or undefined at its default. */
+export function savedExperimental(config: PlannotatorConfig, name: ExperimentalFeature): boolean | undefined {
   const saved = config.experimental;
-  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return false;
-  return parseConfigBoolean((saved as Record<string, unknown>)[EXPERIMENTAL_FEATURES[name]]) ?? false;
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return undefined;
+  return parseConfigBoolean((saved as Record<string, unknown>)[EXPERIMENTAL_FEATURES[name]]);
 }
 
 /** The PLANNOTATOR_INBOX_TAILSCALE override, or undefined when it does not decide. */
