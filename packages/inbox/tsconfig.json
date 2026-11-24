@@ -26,9 +26,7 @@
       "#surface-guide-reader": ["./guide/surface-reader-module.d.ts"],
       "#search-palette": ["./search/SearchPalette.tsx"],
       // Post to GitHub/GitLab (the review app's dialog); PlatformPost.tsx is checked by tsconfig.guide.json.
-      "#platform-post": ["./guide/platform-post-module.d.ts"],
-      // The board's shape; the board itself is checked by tsconfig.guide.json.
-      "#shape-board": ["./shape/board-module.d.ts"]
+      "#platform-post": ["./guide/platform-post-module.d.ts"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],
@@ -51,7 +49,6 @@
     "guide/ReviewKeys.tsx",
     "guide/reviewWalk.ts",
     "guide/reviewKeys.test.tsx",
-    "shape/ShapeBoard.tsx",
     "guideFeedback.test.ts"
   ]
 }

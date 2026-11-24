@@ -42,7 +42,6 @@ export const INBOX_SIDEBAR_ITEMS = [
   { id: 'plans', label: 'Spaces', place: 'stack', stack: 'top', hideable: true },
   { id: 'board', label: 'Board', place: 'stack', stack: 'top', hideable: true },
   { id: 'scheduled', label: 'Routines', place: 'stack', stack: 'top', hideable: true },
-  { id: 'shape', label: 'Shape', place: 'stack', stack: 'top', hideable: true },
   { id: 'artifacts', label: 'Artifacts', place: 'stack', stack: 'top', hideable: true },
   { id: 'reviews', label: 'Reviews', place: 'stack', stack: 'top', hideable: true },
   { id: 'drafts', label: 'Drafts', place: 'stack', stack: 'top', hideable: true },

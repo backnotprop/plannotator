@@ -3,7 +3,7 @@ import { inboxUrl, machineOf } from './inboxUrl';
 
 /** Where a referenced file's project-relative path starts: the server finds the folder (packages/server/inbox-open-in.ts). */
 /** `from: 'root'`: a diff's path, which starts at the top of the repository wherever the agent stood. */
-export type OpenInFileScope = { thread: string; message?: string; from?: 'root' } | { shape: string } | { repo: string; pull?: string };
+export type OpenInFileScope = { thread: string; message?: string; from?: 'root' } | { repo: string; pull?: string };
 
 /** A referenced file's text for its hover: this computer's, or a pull request's at its head commit (`pull`). */
 export type OpenInFileCode = { found: false } | { found: true; contents: string; pull?: { label: string; platform: 'github' | 'gitlab'; url: string } };

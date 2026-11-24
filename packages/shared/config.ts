@@ -636,16 +636,6 @@ export interface PlannotatorConfig {
    */
   inboxChapterDiagrams?: boolean;
   /**
-   * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
-   * agent draws and keeps current. Off unless the person turns it on. On: the
-   * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape
-   * group in the search, the `/api/shapes` routes and the shape skill in the
-   * reply box's "/" list. Off: none of it, and no agent is told of it. Three
-   * readings, like the Board's: unset (off), `true`, `false`. Written by
-   * Settings → Capabilities (`POST /api/inbox/settings` `{ shape: { on } }`).
-   */
-  inboxShape?: boolean;
-  /**
    * Plans in the Inbox (packages/shared/plans/switch.ts): the plan library of every plan plan review handled. Off
    * unless the person turns it on (`plannotator plans`, or `POST /api/inbox/settings` `{ plans: { on } }` from the
    * window); `plannotator plans off` turns it off and keeps the library. Off: no `/api/plans` route, no import and

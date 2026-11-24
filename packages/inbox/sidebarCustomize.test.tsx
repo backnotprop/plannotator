@@ -81,7 +81,7 @@ function draw(over: Partial<SidebarProps> = {}, drawn?: ReadonlySet<InboxSidebar
     root = createRoot(host);
   }
   const props = { ...BASE, ...over };
-  const items = drawn ?? drawnSidebarItems({ board: Boolean(props.onBoard), reviews: Boolean(props.onPulls), shape: false, usage: false, phone: false });
+  const items = drawn ?? drawnSidebarItems({ board: Boolean(props.onBoard), reviews: Boolean(props.onPulls), usage: false, phone: false });
   act(() =>
     root!.render(
       <SidebarProvider>
@@ -128,7 +128,7 @@ test.skipIf(!hasDom)('the right-click menu: a checkbox per item that hides and i
   draw();
   await rightClick(document.querySelector('[data-board-nav]')!);
   expect(menu()).not.toBeNull();
-  // No Inbox or Settings (they never hide), no Reviews, Shape or Usage (not drawn here).
+  // No Inbox or Settings (they never hide), no Reviews or Usage (not drawn here).
   expect(toggles()).toEqual(['logo', 'search', 'new-message', 'board', 'drafts', 'starred', 'projects', 'copy-prompt', 'feedback', 'shortcuts', 'theme']);
   const boxes = [...document.querySelectorAll('[data-sidebar-toggle]')];
   expect(boxes.every((box) => box.getAttribute('role') === 'menuitemcheckbox' && box.getAttribute('aria-checked') === 'true')).toBe(true);
@@ -388,7 +388,7 @@ test.skipIf(!hasDom)('a layout saved before Agents was an item shows the section
 test.skipIf(!hasDom)('on a phone: the sheet lists Agents, and hidden it is gone from the sidebar there too', async () => {
   window.matchMedia = ((query: string) => ({ media: query, matches: true, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })) as unknown as typeof window.matchMedia;
   await act(async () => setInboxAgents([]));
-  draw({}, drawnSidebarItems({ board: true, reviews: false, shape: false, usage: false, phone: true }));
+  draw({}, drawnSidebarItems({ board: true, reviews: false, usage: false, phone: true }));
   expect(agentsSection()).not.toBeNull();
   await act(async () => openSidebarCustomizer(null));
   expect(panel()!.hasAttribute('data-phone')).toBe(true);
@@ -468,7 +468,7 @@ test.skipIf(!hasDom)('a layout saved before Starred and Projects were items show
 
 test.skipIf(!hasDom)('on a phone: hidden Starred and Projects are gone from the sheet too', async () => {
   window.matchMedia = ((query: string) => ({ media: query, matches: true, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })) as unknown as typeof window.matchMedia;
-  draw(WITH_BOTH, drawnSidebarItems({ board: true, reviews: false, shape: false, usage: false, phone: true }));
+  draw(WITH_BOTH, drawnSidebarItems({ board: true, reviews: false, usage: false, phone: true }));
   expect(starredHeading()).not.toBeNull();
   expect(projectsHeading()).not.toBeNull();
   await act(async () => openSidebarCustomizer(null));

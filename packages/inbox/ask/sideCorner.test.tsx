@@ -14,7 +14,7 @@
  * - a measure (a walk of the page) for every change inside a message's body, which code highlighting makes many
  *   times a second on a long thread, in one pane or in Split view's panes; no circle or cut in Split view, or the cut
  *   on a pane that is not at the window's corner;
- * - the circle and the cut over something else's corner: a Shape board in the thread, a folded file's open panel,
+ * - the circle and the cut over something else's corner: a folded file's open panel,
  *   the floating drafts' pile resting in the window's corner.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -401,22 +401,10 @@ test.skipIf(!hasDom)("split view: the pane at the window's corner is cut, and a 
   expect(right.hasAttribute('data-side-scoop')).toBe(false);
 });
 
-test.skipIf(!hasDom)("something else's in the pane's corner (a board in the thread, a folded file's panel): no circle or cut until it goes; the drafts' pile there never hides it", async () => {
+test.skipIf(!hasDom)("something else's in the pane's corner (a folded file's panel): no circle or cut until it goes; the drafts' pile there never hides it", async () => {
   await show(THREAD);
   await until(() => circleShown(), 'the circle');
   const pane = shell!.querySelector<HTMLElement>('section.ib-pane')!;
-  // A Shape board opened in the thread: its side panel runs to the pane's corner.
-  const board = document.createElement('section');
-  board.className = 'ib-shape-layer pn-shape ib-shape-inthread';
-  pane.appendChild(board);
-  await until(() => !circleShown(), 'no circle over the board');
-  expect(cutPane()).toBeNull();
-  board.hidden = true;
-  board.setAttribute('hidden', '');
-  await until(() => circleShown(), 'the circle back with the board hidden');
-  board.remove();
-  await wait(40);
-  expect(circleShown()).toBe(true);
   // The floating drafts' pile resting in the window's corner (no reply foot on screen): both show, the pile above the
   // circle (floaters.test.tsx), so the circle and the cut stay.
   const pile = document.createElement('div');

@@ -15,7 +15,7 @@
  *   into the review thread. No merge button.
  * - A single open PR opens its launchpad instead (PullLaunchpad.tsx, approval
  *   "pr-launchpad"): one row of buttons (Open the diff, Guided review, Picture
- *   it, Start a thread; its Shape board while Shape is on), a line for each
+ *   it, Start a thread), a line for each
  *   thing made for it, then its details. Starting a review is this view's: the New review box, filled in
  *   with the PR. A Reviews row about one open PR opens it, also once an agent
  *   reviewed that PR (`reviewRowLaunchpad`, the owner's answer, 2026-11-09).
@@ -37,7 +37,7 @@ export { pullsPageAddress } from './localRoute';
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack, type InboxReviewRow } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import { InboxApiError, inboxApi, type InboxShapeSummary, type ProjectFolder } from '../api';
+import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import { Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { RowAgentTiles } from '../components/RowAgents';
@@ -153,9 +153,6 @@ export interface PullsPageProps {
   /** The launchpad's Guided review: that message's guide in its thread. Absent: the thread. */
   onOpenGuide?: (threadId: string, messageId: string) => void;
   onOpenPicture?: (threadId: string, attachmentId: string | null, messageId: string) => void;
-  /** Shape boards by thread (`useInboxShapes` `byThread`); absent or null while Shape is off: the launchpad has no Shape board button. */
-  shapes?: ReadonlyMap<string, InboxShapeSummary> | null;
-  onOpenShape?: (shape: InboxShapeSummary) => void;
   /** System's button and drawing; absent while System does not show. */
   system?: PullsSystem | null;
   /**
@@ -644,14 +641,12 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         start={canStart ? { onStart: (opener) => newReview(opener), onPictureIt: (opener) => newReview(opener, 'picture_it') } : null}
         startThread={canStartPullThread(start, link, projects) ? () => setDrafting(true) : null}
         untiedThread={link ? null : untiedPullThread(start.key)}
-        shapes={props.shapes ?? null}
         risk={riskLines}
         onClose={props.onClose}
         onDiff={() => props.onReview(stack.id, start.key, 'layer')}
         onThread={props.onOpenThread}
         onGuide={(thread, message) => (props.onOpenGuide ? props.onOpenGuide(thread, message) : props.onOpenThread(thread))}
         onPicture={(thread, page) => (props.onOpenPicture ? props.onOpenPicture(thread, page.attachment_id, page.message_id) : props.onOpenThread(thread))}
-        onShape={(shape) => props.onOpenShape?.(shape)}
         onAsked={props.state.reload}
         onHide={hide}
         foot={link?.last && !ended ? <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} /> : null}

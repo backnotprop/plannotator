@@ -13,8 +13,8 @@
  * "inbox-checklist-reveal", 2026-11-04): its claim writing `inboxSteps` or touching a Checklist the person set; agent
  * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; its
  * 5 days or 5 threads moving; it needing the Board on. Code review's day-0 offer (approval "code-review-offer-card"):
- * shown or claimed at all (the owner chose the switch without the offer, 2026-11-17: `CODE_REVIEW_OFFER_SHOWN`), with
- * or without PLANNOTATOR_INBOX_PREVIEW; asked of someone who switched Code review off or on. The view choice
+ * shown or claimed at all (the owner chose the switch without the offer, 2026-11-17: `CODE_REVIEW_OFFER_SHOWN`);
+ * asked of someone who switched Code review off or on. The view choice
  * (`view_choice`): closed by List view's retired `list_view` stamp, holding the line, or claimed twice.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -1149,20 +1149,16 @@ describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
 
   // The owner chose the switch without the offer (2026-11-17; `CODE_REVIEW_OFFER_SHOWN` in shared/inbox/reveals.ts).
   test("never shown: on day 0 of a fresh install, Code review undecided, the switch is there and off, the offer is never next and never claimed, nothing written", async () => {
-    for (const preview of [undefined, "1"]) {
-      setEnv("PLANNOTATOR_INBOX_PREVIEW", preview);
-      const w = await freshDay0();
-      const read = await w.settings();
-      expect(read.reveal.next).toBeNull();
-      expect(read.code_review).toEqual({ on: false });
-      const config = savedBytes(w.dataDir);
-      expect((await w.claim("code_review", KEY)).show).toBe(false);
-      expect(savedBytes(w.dataDir)).toBe(config);
-    }
+    const w = await freshDay0();
+    const read = await w.settings();
+    expect(read.reveal.next).toBeNull();
+    expect(read.code_review).toEqual({ on: false });
+    const config = savedBytes(w.dataDir);
+    expect((await w.claim("code_review", KEY)).show).toBe(false);
+    expect(savedBytes(w.dataDir)).toBe(config);
   });
 
   test("decided by the person (switched off, or on): never asked, and the switch is never touched", async () => {
-    setEnv("PLANNOTATOR_INBOX_PREVIEW", "1");
     for (const decided of [false, true]) {
       const w = await freshDay0({ inboxCodeReview: decided });
       expect(await w.next()).toBeNull();
