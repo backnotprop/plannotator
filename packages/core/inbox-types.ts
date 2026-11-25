@@ -706,6 +706,8 @@ export interface InboxMessage {
    * captured, the first time its thread is read (each record then marked
    * `captured: "on_open"`). Present (possibly empty) once capture ran; absent
    * on a message whose body shows no local image, and on older records.
+   * A read's capture adds the sounds and videos the body plays in place
+   * (kind `video` / `audio`, `captured: "on_open"`), never the send's.
    */
   inline_images?: InboxInlineImage[];
   /**

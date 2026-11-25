@@ -4553,6 +4553,12 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 .ib-body .ib-imgmore > button::before { content: ""; position: absolute; inset: -8px; }
 .ib-body .ib-imgmore[data-open] { height: auto; margin-top: 6px; }
 .ib-body .ib-imgmore[data-open] > button { position: relative; left: auto; bottom: auto; transform: none; box-shadow: none; }
+/* "Open" under a sound or video the text plays (parts/MessageBody/mediaOpen.ts): the viewer, where a comment takes
+   its moment and a frame can be drawn on. The same button as "Show less"; its word from `data-label`. */
+.ib-body .ib-mediaopen { display: block; margin: -2px 0 8px; user-select: none; -webkit-user-select: none; }
+.ib-body .ib-mediaopen > button { position: relative; }
+.ib-body .ib-mediaopen > button::after { content: attr(data-label); }
+.ib-body .ib-mediaopen > button::before { content: ""; position: absolute; inset: -8px; }
 
 /* The thread on a phone (PHONE_QUERY in phone.ts). */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
