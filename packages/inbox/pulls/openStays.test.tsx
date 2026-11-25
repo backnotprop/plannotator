@@ -397,6 +397,32 @@ test.skipIf(!hasDom)('a layer opened from a held stack’s page opens on that st
   expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
 });
 
+test.skipIf(!hasDom)('a page whose copy is the server’s open one asks again at each list read until it says merged, then no more', async () => {
+  // The window's list never named #880 (it has not read since the PR came in): the server's copy, open, is the page's.
+  serverPull[theirs.key] = { ...theirs, checks: null };
+  let model = without(theirs.key);
+  function Page() {
+    const [shown, setShown] = useState(model);
+    read = setShown;
+    return <PullReview model={shown} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />;
+  }
+  mount(<Page />);
+  for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+  await settle();
+  expect(refState()).toBe('open');
+  // Its author merges it; the window reads its list again (still without it).
+  serverPull[theirs.key] = { ...theirs, state: 'merged', checks: null };
+  model = { ...model };
+  await act(async () => read(model));
+  await settle();
+  expect(refState()).toBe('merged');
+  // Merged is final: the next list read asks nothing.
+  const asked = pullReads;
+  await act(async () => read({ ...model }));
+  await settle();
+  expect(pullReads).toBe(asked);
+});
+
 /** A phone's window for `run` (usePhone's media queries), the desktop's again after. */
 async function onPhone(run: () => Promise<void>) {
   const saved = window.matchMedia;

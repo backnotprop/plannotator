@@ -321,6 +321,35 @@ test("a restart keeps a PR that left the list readable, and one no list kept is 
   }
 });
 
+test("one list stops naming a PR while the other's older read still does: pull() asks the forge, merged, not the older open copy", async () => {
+  let now = 1_000_000;
+  const f = forge();
+  // One read answers both lists: the everywhere searches (`everyRequested`) name what Reviews' do.
+  const run: RefRunner = async (cli, args) => {
+    const out = await f.run(cli, args);
+    if (!args.includes("graphql") || args.some((a) => a.startsWith("query=query InboxPullsOthers")) || out.exitCode !== 0) return out;
+    const answer = JSON.parse(out.stdout) as { data: Record<string, unknown> };
+    answer.data.everyRequested = { nodes: f.listed.map(ghPull) };
+    return { ...out, stdout: JSON.stringify(answer) };
+  };
+  const pulls = createInboxPulls({ run, now: () => now });
+  // Reviews' list and the Pull requests page's (everywhere) both name #880 and #881.
+  await pulls.list(repos);
+  expect((await pulls.list(repos, { everywhere: true })).pulls.map((p) => p.number).sort()).toEqual([880, 881]);
+  // #881's author merges it. Reviews' list reads again and no longer names it; the everywhere list has not read since.
+  f.listed = [880];
+  f.merged.add(881);
+  now += INBOX_PULLS_FRESH_MS;
+  await pulls.list(repos, { refresh: true });
+  expect(pulls.find(keyOf(881))?.state).toBe("open");
+  // The page open on it asks for it: the forge's answer.
+  expect((await pulls.pull(keyOf(881))).pull?.state).toBe("merged");
+  // A PR both lists still name is the list's copy, no forge read.
+  const asked = f.calls.length;
+  expect((await pulls.pull(keyOf(880))).pull?.state).toBe("open");
+  expect(f.calls.length).toBe(asked);
+});
+
 test("an action on a PR that left the list answers 409 pull_closed; one never listed, 404 pull_unknown", async () => {
   let now = 1_000_000;
   const f = forge();

@@ -27,7 +27,7 @@
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-review-stays-open.spec.ts`.
  */
-import { expect, test, type BrowserContext, type Page } from './inbox-test';
+import { expect, test, type BrowserContext, type Page, type Response } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -365,15 +365,23 @@ test('a teammate’s PR: merged as the diff reads it, then gone from every list,
   const rail = await review().locator('.ib-rrail').innerText();
 
   // Its author merges it: no search of the person's lists it any more. The page asks the server for it
-  // (GET /api/inbox/pulls/pull), which reads it from the forge by number, merged.
-  const asked = page.waitForResponse((r) => r.url().includes('/api/inbox/pulls/pull?') && r.url().includes(String(THEIRS.number)), { timeout: 150_000 });
+  // (GET /api/inbox/pulls/pull) at the window's next list read, which reads it from the forge by number, merged. (The
+  // window's own list may never have named it: this test changed the forge after the window's last read. The page's
+  // first ask then took the server's listed copy, open, and it asks again at each list read until it says merged.)
+  const answers: Promise<{ pull: { state: string } | null; unreadable?: boolean }>[] = [];
+  const onAnswer = (r: Response) => {
+    if (r.url().includes('/api/inbox/pulls/pull?') && r.url().includes(`%23${THEIRS.number}`)) answers.push(r.json());
+  };
+  page.on('response', onAnswer);
   requested = [LAGGING];
   writeLists();
   forgeHas(THEIRS, 'merged');
   await page.waitForTimeout(FOCUS_READ_MS);
   await expect.poll(async () => (await serverLists()).has(keyOf(THEIRS)), { timeout: 60_000, intervals: [5_000] }).toBe(false);
   await focusUntil(() => markOf().getAttribute('data-ref-state'), 'merged');
-  const answer = (await (await asked).json()) as { pull: { state: string } | null; unreadable?: boolean };
+  page.off('response', onAnswer);
+  expect(answers.length).toBeGreaterThan(0);
+  const answer = await answers[answers.length - 1]!;
   expect(answer.pull?.state).toBe('merged');
   expect(answer.unreadable).toBeUndefined();
   await expect(gone()).toHaveCount(0);

@@ -9,7 +9,7 @@
  * word stands otherwise (GitHub's search lags a merge made here, never the other way). Checks are not shown for a PR
  * the list no longer reads: an old answer would read as current.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { inboxPullIsOpen, type InboxPull, type InboxPullDiffAnswer, type InboxPullItem, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import type { InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import { get } from '../api';
@@ -46,8 +46,18 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
   /** `read`: the forge answered; `unread`: it did not (the server said so); `failed`: the Inbox could not be reached. */
   const [got, setGot] = useState<{ key: string; pull: InboxPull | null; as: 'read' | 'unread' | 'failed' } | null>(null);
   const [retry, setRetry] = useState(0);
-  // Asked once each time the list stops naming it (or the page opens so): not on every list read.
+  // Asked each time the list stops naming it (or the page opens so), and again on each list read while the copy it
+  // has is open or none: the server's copy can be a list's older read (a list that never named it here, or the other
+  // list), and only a new ask learns that it merged. Merged or closed is final: no more asks then.
   const ask = wanted && !!model;
+  const final = got?.key === key && got.as === 'read' && !!got.pull && !inboxPullIsOpen(got.pull);
+  const seen = useRef({ model, ask });
+  useEffect(() => {
+    const was = seen.current;
+    seen.current = { model, ask };
+    // A new list read while it was already asked (not the read that made it asked: that one asks below).
+    if (was.model !== model && was.ask && ask && !final) setRetry((n) => n + 1);
+  }, [model, ask, final]);
   useEffect(() => {
     if (!ask) return;
     const controller = new AbortController();

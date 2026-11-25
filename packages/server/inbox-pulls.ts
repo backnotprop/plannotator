@@ -1836,8 +1836,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     async pull(key) {
       if (options.hidden?.(key)) return { pull: null };
       const listed = findKnown(key);
-      if (listed) return { pull: listedRepo(listed) ? listed : null };
-      const was = departedOf(key) ?? null;
+      // One list stopped naming it while the other still does (Reviews' and the Pull requests page's are read on
+      // their own clocks): the one still naming it may be the older read, so the forge says which is right. Before,
+      // the older list's open copy answered, and the page held on a teammate's PR merged elsewhere never said so.
+      const left = listed ? (departed.get(key) ?? departedWide.get(key)) : undefined;
+      if (listed && (!left || !listedRepo(listed))) return { pull: listedRepo(listed) ? listed : null };
+      const was = departedOf(key) ?? listed ?? null;
       const parsed = /^([^/#]+)\/([^#]+)#(\d+)$/.exec(key);
       if (!parsed) return { pull: was };
       const [, host, repo, number] = parsed as unknown as [string, string, string, string];
