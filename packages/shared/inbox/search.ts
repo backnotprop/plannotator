@@ -54,6 +54,8 @@ import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block
 import {
   displayInboxSubject,
   inboxAgentName,
+  inboxSectionIsNews,
+  inboxSectionWaitsOnPerson,
   isInboxNote,
   type InboxLine,
   type InboxListRow,
@@ -994,7 +996,8 @@ export class InboxSearchIndex {
       if (!facts) return false;
       if (query.status === "archived") return facts.archived;
       if (facts.archived || (threadId !== null && snoozed?.has(threadId))) return false;
-      if (query.status === "waiting") return facts.section === "stopped" || facts.section === "holding" || facts.section === "waiting";
+      if (query.status === "waiting") return inboxSectionWaitsOnPerson(facts.section);
+      if (query.status === "new") return inboxSectionIsNews(facts.section);
       return facts.section === query.status;
     };
     const fromOk = (doc: Doc, facts: ThreadFacts | null): boolean => {

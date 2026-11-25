@@ -14,7 +14,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection, InboxSectionId } from '@plannotator/core/inbox-types';
-import { INBOX_SECTIONS } from '@plannotator/core/inbox-types';
+import { INBOX_LOCAL_SECTIONS } from '@plannotator/core/inbox-types';
 import type { BulkWrites } from '../bulkWrites';
 import { drawnSection, heldNotice, listGroups, settleOwn, shownAfter, waitingCount, type OpenThread } from '../held';
 import { inboxTabCount } from '../tabCount';
@@ -58,7 +58,7 @@ function row(id: string, over: Partial<InboxListRow> = {}): InboxListRow {
 }
 
 /** The read: rows in the sections their own `section` names. */
-const model = (rows: InboxListRow[]) => ({ sections: INBOX_SECTIONS.map(({ id, label }): InboxListSection => ({ id, label, threads: rows.filter((r) => r.section === id) })) });
+const model = (rows: InboxListRow[]) => ({ sections: INBOX_LOCAL_SECTIONS.map(({ id, label }): InboxListSection => ({ id, label, threads: rows.filter((r) => r.section === id) })) });
 
 /** The routine's thread after Run 1, read: Quiet. */
 const read = row('msg_nightly');

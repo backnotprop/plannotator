@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxSectionWaitsOnPerson, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { inboxReviewAnalysisOf, parseInboxReviewAnalysisChange } from "./inbox-review-analysis";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
@@ -2294,7 +2294,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         archived.add(row.thread_id);
         continue;
       }
-      if ((row.section !== "stopped" && row.section !== "holding" && row.section !== "waiting") || inboxRowSnoozed(row, now)) continue;
+      if (!inboxSectionWaitsOnPerson(row.section) || inboxRowSnoozed(row, now)) continue;
       const owner = store.threadOwner(row.thread_id);
       // A thread left out for its hidden PRs is no wait: no count, no "Waiting on you", no rank, and it lists no agent
       // that is not running (an ended one shows ended, with nothing waiting).

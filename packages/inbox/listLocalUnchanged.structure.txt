@@ -1,0 +1,453 @@
+== wide
+<div>
+  <div class="ib-sb-wrapper" data-slot="sidebar-wrapper" style="--sidebar-width: 232px;">
+    <div class="pn-inbox">
+      <section class="ib-listcol ib-fullw ib-lk-small" id="_r_0_">
+        <div class="ib-lhead">
+          <button class="ib-sb-trigger" data-sidebar="trigger" data-slot="sidebar-trigger" type="button">
+            <svg aria-hidden="true" fill="none" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M2 12C2 8.31087 2 6.4663 2.81382 5.15877C3.1149 4.67502 3.48891 4.25427 3.91891 3.91554C5.08116 3 6.72077 3 10 3H14C17.2792 3 18.9188 3 20.0811 3.91554C20.5111 4.25427 20.8851 4.67502 21.1862 5.15877C22 6.4663 22 8.31087 22 12C22 15.6891 22 17.5337 21.1862 18.8412C20.8851 19.325 20.5111 19.7457 20.0811 20.0845C18.9188 21 17.2792 21 14 21H10C6.72077 21 5.08116 21 3.91891 20.0845C3.48891 19.7457 3.1149 19.325 2.81382 18.8412C2 17.5337 2 15.6891 2 12Z" stroke-width="2" stroke="currentColor">
+              <path d="M9.5 3L9.5 21" stroke-linejoin="round" stroke-width="2" stroke="currentColor">
+              <path d="M5 7H6M5 10H6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" stroke="currentColor">
+          <h1 data-base-ui-tooltip-trigger="" dir="auto" id="base-ui-_r_3_">
+        <div class="ib-lnew" data-edge="bottom">
+          <button aria-hidden="true" class="ib-npill" data-list-new-pill="" data-off="" tabindex="-1" type="button">
+            <svg aria-hidden="true" class="ib-ic" data-icon="arrowDown" focusable="false" style="width: 15px; height: 15px;" viewBox="0 0 24 24">
+              <path d="M19.5 13.5 12 21m0 0-7.5-7.5M12 21V3">
+          <span aria-live="polite" class="ib-sr" data-list-new-said="">
+        <div class="ib-lbody">
+          <div class="ib-group" data-section-id="stopped" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_9_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <div class="ib-rw" data-row="t_stopped">
+              <button aria-describedby="_r_a_" class="ib-row ib-u" data-section="stopped" data-thread-id="t_stopped" type="button">
+                <span class="ib-from">
+                  <span class="ib-p" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-ags" data-base-ui-tooltip-trigger="" data-row-agents="1" role="img">
+                    <span aria-hidden="true" class="ib-atiles">
+                      <span class="ib-atile" data-agent-host="claude-code">
+                        <span class="ib-mk">
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                            <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                <span class="ib-subj">
+                  <span class="ib-title" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-pv" data-base-ui-tooltip-trigger="" dir="auto">
+                <span class="ib-cw">
+                <span class="ib-bcol">
+                  <span aria-hidden="true" class="ib-bwords ib-bw-stop" data-base-ui-tooltip-trigger="" data-wait-words="stopped" id="base-ui-_r_c_">
+                <span class="ib-cq">
+                  <span class="ib-badge ib-bicon ib-qn ib-b-stop" data-base-ui-tooltip-trigger="" data-open-count="1" data-wait-step="stop" id="base-ui-_r_e_">
+                    <svg aria-hidden="true" class="ib-ic ib-qbub" data-icon="questionBubble" focusable="false" style="width: 14px; height: 14px;" viewBox="0 0 24 24">
+                      <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01">
+                    <span aria-hidden="true" class="ib-bn">
+                    <span class="ib-sr">
+                <span class="ib-t">
+              <span hidden="" id="_r_a_">
+          <div class="ib-group" data-section-id="holding" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_g_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <div class="ib-rw" data-row="t_holding">
+              <button aria-describedby="_r_h_" class="ib-row ib-u" data-section="holding" data-thread-id="t_holding" type="button">
+                <span class="ib-from">
+                  <span class="ib-p" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-ags" data-base-ui-tooltip-trigger="" data-row-agents="1" role="img">
+                    <span aria-hidden="true" class="ib-atiles">
+                      <span class="ib-atile" data-agent-host="claude-code">
+                        <span class="ib-mk">
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                            <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                <span class="ib-subj">
+                  <span class="ib-title" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-pv" data-base-ui-tooltip-trigger="" dir="auto">
+                <span class="ib-cw">
+                <span class="ib-bcol">
+                  <span aria-hidden="true" class="ib-bwords ib-bw-hold" data-base-ui-tooltip-trigger="" data-wait-words="holds" id="base-ui-_r_j_">
+                <span class="ib-cq">
+                  <span class="ib-badge ib-bicon ib-qn ib-b-hold" data-base-ui-tooltip-trigger="" data-open-count="1" data-wait-step="hold" id="base-ui-_r_l_">
+                    <svg aria-hidden="true" class="ib-ic ib-qbub" data-icon="questionBubble" focusable="false" style="width: 14px; height: 14px;" viewBox="0 0 24 24">
+                      <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01">
+                    <span aria-hidden="true" class="ib-bn">
+                    <span class="ib-sr">
+                <span class="ib-t">
+              <span hidden="" id="_r_h_">
+          <div class="ib-group" data-section-id="waiting" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_n_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <div class="ib-rw" data-row="t_waiting">
+              <button class="ib-row ib-u" data-section="waiting" data-thread-id="t_waiting" type="button">
+                <span class="ib-from">
+                  <span class="ib-p" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-ags" data-base-ui-tooltip-trigger="" data-row-agents="1" role="img">
+                    <span aria-hidden="true" class="ib-atiles">
+                      <span class="ib-atile" data-agent-host="claude-code">
+                        <span class="ib-mk">
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                            <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                <span class="ib-subj">
+                  <span class="ib-title" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-pv" data-base-ui-tooltip-trigger="" dir="auto">
+                <span class="ib-cw">
+                <span class="ib-bcol">
+                <span class="ib-cq">
+                  <span class="ib-c ib-qn" data-base-ui-tooltip-trigger="" data-open-count="1" data-wait-step="open">
+                    <svg aria-hidden="true" class="ib-ic ib-qbub" data-icon="questionBubble" focusable="false" style="width: 14px; height: 14px;" viewBox="0 0 24 24">
+                      <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01">
+                    <span aria-hidden="true" class="ib-bn">
+                    <span class="ib-sr">
+                <span class="ib-t">
+          <div class="ib-group" data-section-id="new" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_q_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <div class="ib-rw" data-row="t_new">
+              <button class="ib-row ib-u" data-section="new" data-thread-id="t_new" type="button">
+                <span class="ib-from">
+                  <span class="ib-p" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-ags" data-base-ui-tooltip-trigger="" data-row-agents="1" role="img">
+                    <span aria-hidden="true" class="ib-atiles">
+                      <span class="ib-atile" data-agent-host="claude-code">
+                        <span class="ib-mk">
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                            <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                <span class="ib-subj">
+                  <span class="ib-title" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-pv" data-base-ui-tooltip-trigger="" dir="auto">
+                <span class="ib-cw">
+                <span class="ib-bcol">
+                <span class="ib-cq">
+                <span class="ib-t">
+          <div class="ib-group" data-section-id="sent" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_t_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <div class="ib-rw" data-row="t_sent">
+              <button class="ib-row ib-sent" data-section="sent" data-thread-id="t_sent" type="button">
+                <span class="ib-from">
+                  <span class="ib-p" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-ags" data-base-ui-tooltip-trigger="" data-row-agents="1" role="img">
+                    <span aria-hidden="true" class="ib-atiles">
+                      <span class="ib-atile" data-agent-host="claude-code">
+                        <span class="ib-mk">
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                            <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                <span class="ib-subj">
+                  <span class="ib-title" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-pv" data-base-ui-tooltip-trigger="" dir="auto">
+                <span class="ib-cw">
+                <span class="ib-bcol">
+                <span class="ib-cq">
+                <span class="ib-t">
+          <div class="ib-group" data-section-id="quiet" role="group">
+            <button aria-expanded="false" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_10_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+        <span aria-live="polite" class="ib-sr" data-held-said="">
+== beside a thread
+<div>
+  <div class="ib-sb-wrapper" data-slot="sidebar-wrapper" style="--sidebar-width: 232px;">
+    <div class="pn-inbox">
+      <section class="ib-listcol ib-narrow ib-resizable ib-lk-small" id="_r_11_" style="width: 380px;">
+        <div class="ib-lhead">
+          <button class="ib-sb-trigger" data-sidebar="trigger" data-slot="sidebar-trigger" type="button">
+            <svg aria-hidden="true" fill="none" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M2 12C2 8.31087 2 6.4663 2.81382 5.15877C3.1149 4.67502 3.48891 4.25427 3.91891 3.91554C5.08116 3 6.72077 3 10 3H14C17.2792 3 18.9188 3 20.0811 3.91554C20.5111 4.25427 20.8851 4.67502 21.1862 5.15877C22 6.4663 22 8.31087 22 12C22 15.6891 22 17.5337 21.1862 18.8412C20.8851 19.325 20.5111 19.7457 20.0811 20.0845C18.9188 21 17.2792 21 14 21H10C6.72077 21 5.08116 21 3.91891 20.0845C3.48891 19.7457 3.1149 19.325 2.81382 18.8412C2 17.5337 2 15.6891 2 12Z" stroke-width="2" stroke="currentColor">
+              <path d="M9.5 3L9.5 21" stroke-linejoin="round" stroke-width="2" stroke="currentColor">
+              <path d="M5 7H6M5 10H6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" stroke="currentColor">
+          <h1 data-base-ui-tooltip-trigger="" dir="auto" id="base-ui-_r_14_">
+        <div class="ib-lnew" data-edge="bottom">
+          <button aria-hidden="true" class="ib-npill" data-list-new-pill="" data-off="" tabindex="-1" type="button">
+            <svg aria-hidden="true" class="ib-ic" data-icon="arrowDown" focusable="false" style="width: 15px; height: 15px;" viewBox="0 0 24 24">
+              <path d="M19.5 13.5 12 21m0 0-7.5-7.5M12 21V3">
+          <span aria-live="polite" class="ib-sr" data-list-new-said="">
+        <div class="ib-lbody">
+          <div class="ib-group" data-section-id="stopped" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_1a_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <div class="ib-rw" data-row="t_stopped">
+              <button aria-describedby="_r_1b_" class="ib-nrow ib-u" data-section="stopped" data-thread-id="t_stopped" type="button">
+                <div class="ib-l1">
+                  <span class="ib-from ib-lead">
+                    <span class="ib-p" data-base-ui-tooltip-trigger="" dir="auto">
+                    <span class="ib-atiles" data-base-ui-tooltip-trigger="" data-row-agents="1" role="img">
+                      <span aria-hidden="true" class="ib-atile" data-agent-host="claude-code">
+                        <span class="ib-mk">
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                            <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                  <span class="ib-t">
+                <div class="ib-l2">
+                  <span class="ib-title" dir="auto">
+                <div class="ib-l3">
+                  <span class="ib-pv" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-badge ib-bicon ib-qn ib-b-stop" data-base-ui-tooltip-trigger="" data-open-count="1" data-wait-step="stop" id="base-ui-_r_1d_">
+                    <svg aria-hidden="true" class="ib-ic ib-qbub" data-icon="questionBubble" focusable="false" style="width: 14px; height: 14px;" viewBox="0 0 24 24">
+                      <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01">
+                    <span aria-hidden="true" class="ib-bn">
+                    <span class="ib-sr">
+              <span hidden="" id="_r_1b_">
+          <div class="ib-group" data-section-id="holding" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_1f_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <div class="ib-rw" data-row="t_holding">
+              <button aria-describedby="_r_1g_" class="ib-nrow ib-u" data-section="holding" data-thread-id="t_holding" type="button">
+                <div class="ib-l1">
+                  <span class="ib-from ib-lead">
+                    <span class="ib-p" data-base-ui-tooltip-trigger="" dir="auto">
+                    <span class="ib-atiles" data-base-ui-tooltip-trigger="" data-row-agents="1" role="img">
+                      <span aria-hidden="true" class="ib-atile" data-agent-host="claude-code">
+                        <span class="ib-mk">
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                            <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                  <span class="ib-t">
+                <div class="ib-l2">
+                  <span class="ib-title" dir="auto">
+                <div class="ib-l3">
+                  <span class="ib-pv" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-badge ib-bicon ib-qn ib-b-hold" data-base-ui-tooltip-trigger="" data-open-count="1" data-wait-step="hold" id="base-ui-_r_1i_">
+                    <svg aria-hidden="true" class="ib-ic ib-qbub" data-icon="questionBubble" focusable="false" style="width: 14px; height: 14px;" viewBox="0 0 24 24">
+                      <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01">
+                    <span aria-hidden="true" class="ib-bn">
+                    <span class="ib-sr">
+              <span hidden="" id="_r_1g_">
+          <div class="ib-group" data-section-id="waiting" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_1k_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <div class="ib-rw" data-row="t_waiting">
+              <button class="ib-nrow ib-u" data-section="waiting" data-thread-id="t_waiting" type="button">
+                <div class="ib-l1">
+                  <span class="ib-from ib-lead">
+                    <span class="ib-p" data-base-ui-tooltip-trigger="" dir="auto">
+                    <span class="ib-atiles" data-base-ui-tooltip-trigger="" data-row-agents="1" role="img">
+                      <span aria-hidden="true" class="ib-atile" data-agent-host="claude-code">
+                        <span class="ib-mk">
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                            <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                  <span class="ib-t">
+                <div class="ib-l2">
+                  <span class="ib-title" dir="auto">
+                <div class="ib-l3">
+                  <span class="ib-pv" data-base-ui-tooltip-trigger="" dir="auto">
+                  <span class="ib-c ib-qn" data-base-ui-tooltip-trigger="" data-open-count="1" data-wait-step="open">
+                    <svg aria-hidden="true" class="ib-ic ib-qbub" data-icon="questionBubble" focusable="false" style="width: 14px; height: 14px;" viewBox="0 0 24 24">
+                      <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01">
+                    <span aria-hidden="true" class="ib-bn">
+                    <span class="ib-sr">
+          <div class="ib-group" data-section-id="new" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_1n_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <div class="ib-rw" data-row="t_new">
+              <button class="ib-nrow ib-u" data-section="new" data-thread-id="t_new" type="button">
+                <div class="ib-l1">
+                  <span class="ib-from ib-lead">
+                    <span class="ib-p" data-base-ui-tooltip-trigger="" dir="auto">
+                    <span class="ib-atiles" data-base-ui-tooltip-trigger="" data-row-agents="1" role="img">
+                      <span aria-hidden="true" class="ib-atile" data-agent-host="claude-code">
+                        <span class="ib-mk">
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                            <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                  <span class="ib-t">
+                <div class="ib-l2">
+                  <span class="ib-title" dir="auto">
+                <div class="ib-l3">
+                  <span class="ib-pv" data-base-ui-tooltip-trigger="" dir="auto">
+          <div class="ib-group" data-section-id="sent" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_1q_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <div class="ib-rw" data-row="t_sent">
+              <button class="ib-nrow ib-sent" data-section="sent" data-thread-id="t_sent" type="button">
+                <div class="ib-l1">
+                  <span class="ib-from ib-lead">
+                    <span class="ib-p" data-base-ui-tooltip-trigger="" dir="auto">
+                    <span class="ib-atiles" data-base-ui-tooltip-trigger="" data-row-agents="1" role="img">
+                      <span aria-hidden="true" class="ib-atile" data-agent-host="claude-code">
+                        <span class="ib-mk">
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                            <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                  <span class="ib-t">
+                <div class="ib-l2">
+                  <span class="ib-title" dir="auto">
+                <div class="ib-l3">
+                  <span class="ib-pv" data-base-ui-tooltip-trigger="" dir="auto">
+          <div class="ib-group" data-section-id="quiet" role="group">
+            <button aria-expanded="false" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" id="base-ui-_r_1t_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+        <span aria-live="polite" class="ib-sr" data-held-said="">
+        <div class="ib-listedge">
+          <div aria-controls="_r_11_" aria-orientation="vertical" aria-valuemax="544" aria-valuemin="380" aria-valuenow="380" class="ib-edge" data-base-ui-tooltip-trigger="" id="base-ui-_r_1v_" role="separator" tabindex="0">
+            <div class="ib-handle">
+              <div class="ib-handle-track" data-resize-track="left">
+              <div class="ib-handle-hit" style="touch-action: none;">
+== phone
+<div>
+  <div class="ib-sb-wrapper" data-slot="sidebar-wrapper" style="--sidebar-width: 232px;">
+    <div class="pn-inbox">
+      <section class="ib-listcol ib-narrow ib-resizable ib-lk-small" id="_r_20_" style="width: 380px;">
+        <div class="ib-lhead">
+          <button class="ib-sb-trigger" data-sidebar="trigger" data-slot="sidebar-trigger" type="button">
+            <svg aria-hidden="true" fill="none" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M2 12C2 8.31087 2 6.4663 2.81382 5.15877C3.1149 4.67502 3.48891 4.25427 3.91891 3.91554C5.08116 3 6.72077 3 10 3H14C17.2792 3 18.9188 3 20.0811 3.91554C20.5111 4.25427 20.8851 4.67502 21.1862 5.15877C22 6.4663 22 8.31087 22 12C22 15.6891 22 17.5337 21.1862 18.8412C20.8851 19.325 20.5111 19.7457 20.0811 20.0845C18.9188 21 17.2792 21 14 21H10C6.72077 21 5.08116 21 3.91891 20.0845C3.48891 19.7457 3.1149 19.325 2.81382 18.8412C2 17.5337 2 15.6891 2 12Z" stroke-width="2" stroke="currentColor">
+              <path d="M9.5 3L9.5 21" stroke-linejoin="round" stroke-width="2" stroke="currentColor">
+              <path d="M5 7H6M5 10H6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" stroke="currentColor">
+          <h1 data-base-ui-tooltip-trigger="" dir="auto" id="base-ui-_r_23_">
+        <div class="ib-lnew" data-edge="bottom">
+          <button aria-hidden="true" class="ib-npill" data-list-new-pill="" data-off="" tabindex="-1" type="button">
+            <svg aria-hidden="true" class="ib-ic" data-icon="arrowDown" focusable="false" style="width: 15px; height: 15px;" viewBox="0 0 24 24">
+              <path d="M19.5 13.5 12 21m0 0-7.5-7.5M12 21V3">
+          <span aria-live="polite" class="ib-sr" data-list-new-said="">
+        <div class="ib-lbody">
+          <div class="ib-group" data-section-id="stopped" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" data-end="" id="base-ui-_r_29_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <button aria-describedby="_r_2a_" class="ib-mrow ib-u" data-section="stopped" data-thread-id="t_stopped" type="button">
+              <span class="ib-m1">
+                <span class="ib-from ib-lead">
+                  <span class="ib-p" dir="auto">
+                  <span class="ib-atiles" data-row-agents="1" role="img">
+                    <span aria-hidden="true" class="ib-atile" data-agent-host="claude-code">
+                      <span class="ib-mk">
+                        <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                          <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                <span class="ib-t">
+              <span class="ib-m2" dir="auto">
+              <span class="ib-m3">
+                <span class="ib-pv" dir="auto">
+                <span class="ib-badge ib-bicon ib-qn ib-b-stop" data-open-count="1" data-wait-step="stop">
+                  <svg aria-hidden="true" class="ib-ic ib-qbub" data-icon="questionBubble" focusable="false" style="width: 14px; height: 14px;" viewBox="0 0 24 24">
+                    <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01">
+                  <span aria-hidden="true" class="ib-bn">
+                  <span class="ib-sr">
+            <span hidden="" id="_r_2a_">
+          <div class="ib-group" data-section-id="holding" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" data-end="" id="base-ui-_r_2c_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <button aria-describedby="_r_2d_" class="ib-mrow ib-u" data-section="holding" data-thread-id="t_holding" type="button">
+              <span class="ib-m1">
+                <span class="ib-from ib-lead">
+                  <span class="ib-p" dir="auto">
+                  <span class="ib-atiles" data-row-agents="1" role="img">
+                    <span aria-hidden="true" class="ib-atile" data-agent-host="claude-code">
+                      <span class="ib-mk">
+                        <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                          <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                <span class="ib-t">
+              <span class="ib-m2" dir="auto">
+              <span class="ib-m3">
+                <span class="ib-pv" dir="auto">
+                <span class="ib-badge ib-bicon ib-qn ib-b-hold" data-open-count="1" data-wait-step="hold">
+                  <svg aria-hidden="true" class="ib-ic ib-qbub" data-icon="questionBubble" focusable="false" style="width: 14px; height: 14px;" viewBox="0 0 24 24">
+                    <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01">
+                  <span aria-hidden="true" class="ib-bn">
+                  <span class="ib-sr">
+            <span hidden="" id="_r_2d_">
+          <div class="ib-group" data-section-id="waiting" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" data-end="" id="base-ui-_r_2f_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <button class="ib-mrow ib-u" data-section="waiting" data-thread-id="t_waiting" type="button">
+              <span class="ib-m1">
+                <span class="ib-from ib-lead">
+                  <span class="ib-p" dir="auto">
+                  <span class="ib-atiles" data-row-agents="1" role="img">
+                    <span aria-hidden="true" class="ib-atile" data-agent-host="claude-code">
+                      <span class="ib-mk">
+                        <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                          <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                <span class="ib-t">
+              <span class="ib-m2" dir="auto">
+              <span class="ib-m3">
+                <span class="ib-pv" dir="auto">
+                <span class="ib-c ib-qn" data-open-count="1" data-wait-step="open">
+                  <svg aria-hidden="true" class="ib-ic ib-qbub" data-icon="questionBubble" focusable="false" style="width: 14px; height: 14px;" viewBox="0 0 24 24">
+                    <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01">
+                  <span aria-hidden="true" class="ib-bn">
+                  <span class="ib-sr">
+          <div class="ib-group" data-section-id="new" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" data-end="" id="base-ui-_r_2i_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <button class="ib-mrow ib-u" data-section="new" data-thread-id="t_new" type="button">
+              <span class="ib-m1">
+                <span class="ib-from ib-lead">
+                  <span class="ib-p" dir="auto">
+                  <span class="ib-atiles" data-row-agents="1" role="img">
+                    <span aria-hidden="true" class="ib-atile" data-agent-host="claude-code">
+                      <span class="ib-mk">
+                        <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                          <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                <span class="ib-t">
+              <span class="ib-m2" dir="auto">
+              <span class="ib-m3">
+                <span class="ib-pv" dir="auto">
+          <div class="ib-group" data-section-id="sent" role="group">
+            <button aria-expanded="true" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" data-end="" id="base-ui-_r_2l_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+            <button class="ib-mrow ib-sent" data-section="sent" data-thread-id="t_sent" type="button">
+              <span class="ib-m1">
+                <span class="ib-from ib-lead">
+                  <span class="ib-p" dir="auto">
+                  <span class="ib-atiles" data-row-agents="1" role="img">
+                    <span aria-hidden="true" class="ib-atile" data-agent-host="claude-code">
+                      <span class="ib-mk">
+                        <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                          <path d="m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z" fill="#d97757">
+                <span class="ib-t">
+              <span class="ib-m2" dir="auto">
+              <span class="ib-m3">
+                <span class="ib-pv" dir="auto">
+          <div class="ib-group" data-section-id="quiet" role="group">
+            <button aria-expanded="false" class="ib-band" type="button">
+              <span class="ib-n">
+              <span class="ib-band-tipat" data-base-ui-tooltip-trigger="" data-end="" id="base-ui-_r_2o_">
+              <svg aria-hidden="true" class="ib-ic ib-band-chev" data-icon="chevR" focusable="false" viewBox="0 0 24 24">
+                <path d="m8.25 4.5 7.5 7.5-7.5 7.5">
+        <span aria-live="polite" class="ib-sr" data-held-said="">
+        <div class="ib-listedge">
+          <div aria-controls="_r_20_" aria-orientation="vertical" aria-valuemax="544" aria-valuemin="380" aria-valuenow="380" class="ib-edge" data-base-ui-tooltip-trigger="" id="base-ui-_r_2q_" role="separator" tabindex="0">
+            <div class="ib-handle">
+              <div class="ib-handle-track" data-resize-track="left">
+              <div class="ib-handle-hit" style="touch-action: none;">

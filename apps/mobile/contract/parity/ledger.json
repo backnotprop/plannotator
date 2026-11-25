@@ -23502,6 +23502,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-enum-inboxlistgroupid-tagged",
+      "title": "enum:InboxListGroupId.tagged",
+      "surface": [
+        "enum:InboxListGroupId.tagged"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsectionid-tagged",
+      "title": "enum:InboxSectionId.tagged",
+      "surface": [
+        "enum:InboxSectionId.tagged"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

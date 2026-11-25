@@ -319,6 +319,8 @@ packages/inbox/sidebarUpdateDot.test.tsx
 packages/inbox/sidebarSections.test.tsx
 packages/inbox/sidebarCustomize.test.tsx
 packages/inbox/listGroups.test.tsx
+packages/inbox/listLocalUnchanged.test.tsx
+packages/inbox/listTaggedSection.test.tsx
 packages/inbox/showOpensGroups.test.tsx
 packages/inbox/listNewPill.test.tsx
 packages/inbox/showLight.test.tsx
