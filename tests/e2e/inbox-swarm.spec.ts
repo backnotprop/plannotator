@@ -147,7 +147,7 @@ test.beforeAll(async () => {
     NO_ANON_PING: '1',
     PLANNOTATOR_INBOX_PHONES: '0',
     // The computer's name the status view shows beside each member's project (else the runner's host name).
-    PLANNOTATOR_MACHINE_NAME: "Charlie's Mac",
+    PLANNOTATOR_MACHINE_NAME: 'Studio',
   };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
@@ -293,7 +293,7 @@ test('the agents join, say what they do and talk; the thread shows the summary r
     }),
   );
   expect(covered).toEqual([true, true, true, true]);
-  await expect(claude.locator('.ib-swarm-wh')).toHaveText("ledger · Charlie's Mac");
+  await expect(claude.locator('.ib-swarm-wh')).toHaveText('ledger · Studio');
   // The Ghost button's and the status view's foot's.
   await expectGhostsUnstretched(page, 2);
   await shot(page, '03-status-view');
@@ -433,7 +433,7 @@ test("the plan: Claude Code's proposal is its first reply in the thread, drawn a
   await expect(drawn.locator('[data-swarm-plan-count]')).toHaveText('3 parts');
   await expect(drawn.locator('[data-swarm-plan-summary]')).toContainText('Work has started.');
   await expect(partOf(page, 'Claude Code').locator('[data-swarm-plan-does]')).toHaveText('Read the export query plan and find the step that takes the time');
-  await expect(partOf(page, 'Claude Code').locator('.ib-sp-wh')).toHaveText("ledger · Charlie's Mac");
+  await expect(partOf(page, 'Claude Code').locator('.ib-sp-wh')).toHaveText('ledger · Studio');
   await expect(partOf(page, 'Explorer')).toHaveAttribute('data-depth', '1');
   await expect(partOf(page, 'Explorer').locator('[data-swarm-plan-joining]')).toHaveText('sub-agent');
   await expect(partOf(page, 'Codex').locator('[data-swarm-plan-joining]')).toHaveText('joining');
