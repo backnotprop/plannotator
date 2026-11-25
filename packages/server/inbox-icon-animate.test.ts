@@ -5,7 +5,8 @@
  * What this catches: a request about a set icon or one of our faces refused, or one about an icon that cannot be shown
  * here (no such set icon, the agent's own mark, Transparent) kept; a hand-back that replaces an agent no longer showing
  * the icon asked about; the way back naming something other than the face it replaced; a set icon's request keeping a
- * made-up upload from the pictures' cap. Projects: a project's hand-back not becoming its picture, landing after the
+ * made-up upload from the pictures' cap. Drawing (`draw`) and projects: a drawn icon not landing on the agent asked
+ * about, or landing after the person picked another; a project's hand-back not becoming its picture, landing after the
  * person changed the picture, skipping the picture's checks, or the windows not told; a request about a project this
  * Inbox does not have kept; a request this Inbox does not keep not asked of the linked machines, or asked again when a
  * linked machine handed it here.
@@ -115,23 +116,46 @@ test("a request about an icon that cannot be shown here is refused and kept nowh
   expect([...w.animate.kept()]).toEqual([`own:${own.icon.id}`]);
 });
 
-test("a project's animation becomes its picture through Set picture's checks, until the person changes the picture", async () => {
+test("Ask an agent to draw it: the drawing becomes the agent's icon, only the agent asked about and only while it shows what it showed", async () => {
   const w = world();
-  const animated = svg("#9333ea");
-  const asked = await w.call("POST", { animate: { icon: "totman", project: PROJECT } });
+  w.show("agent-a", "glass-red");
+  const asked = await w.call("POST", { draw: { agent: "agent-a", sessions: [] } });
   expect(asked.status).toBe(200);
-  const back = await w.call("POST", { request: asked.body.request, picture: dataUrl(animated) });
-  expect(back.body).toMatchObject({ applied: true, icon: hash(animated), target: "project" });
+  const drawn = svg("#2563eb");
+  const back = await w.call("POST", { request: asked.body.request, picture: dataUrl(drawn) });
+  expect(back.body).toMatchObject({ applied: true, icon: hash(drawn), target: "agent" });
+  expect(w.faceOf("agent-a")).toBe(`own:${hash(drawn)}`);
+  // A better version in the same thread replaces it; a drawing is no animation, so it offers no way back.
+  const better = svg("#1d4ed8");
+  expect((await w.call("POST", { request: asked.body.request, picture: dataUrl(better) })).body.applied).toBe(true);
+  expect(w.faceOf("agent-a")).toBe(`own:${hash(better)}`);
+  expect((await w.call("GET")).body.results).toEqual([]);
+
+  // An agent with no face picked, which the person then gives one: the drawing joins the pictures and changes nothing.
+  const none = await w.call("POST", { draw: { agent: "agent-b", sessions: [] } });
+  w.show("agent-b", "totman");
+  const late = await w.call("POST", { request: none.body.request, picture: dataUrl(svg("#059669")) });
+  expect(late.body.applied).toBe(false);
+  expect(w.faceOf("agent-b")).toBe("totman");
+});
+
+test("a project's drawing or animation becomes its picture through Set picture's checks, until the person changes the picture", async () => {
+  const w = world();
+  const drawn = svg("#9333ea");
+  const asked = await w.call("POST", { draw: { project: PROJECT } });
+  expect(asked.status).toBe(200);
+  const back = await w.call("POST", { request: asked.body.request, picture: dataUrl(drawn) });
+  expect(back.body).toMatchObject({ applied: true, icon: hash(drawn), target: "project" });
   const kept = await w.pictures.get({ id: PROJECT, root: "/nowhere" }, { logo: false, github: false, repo: () => null });
-  expect(new TextDecoder().decode(kept!.body)).toBe(animated);
+  expect(new TextDecoder().decode(kept!.body)).toBe(drawn);
   // The windows read the projects again, and the picture joins "Your own…".
   expect(w.changes).toEqual(["project"]);
-  expect(w.icons.read(hash(animated), true)).toBeTruthy();
+  expect(w.icons.read(hash(drawn), true)).toBeTruthy();
   // Again in the same thread: still this request's picture showing, so the better one lands.
   const better = svg("#7e22ce");
   expect((await w.call("POST", { request: asked.body.request, picture: dataUrl(better) })).body.applied).toBe(true);
 
-  // Animate it again on a set icon for the project, then the person sets another picture before the agent is done.
+  // Animate it on a set icon for the project, then the person sets another picture before the agent is done.
   const animate = await w.call("POST", { animate: { icon: "set:dcss/orc", project: PROJECT } });
   expect(animate.status).toBe(200);
   w.pictures.setUpload(PROJECT, new TextEncoder().encode(svg("#000000")));
@@ -147,6 +171,7 @@ test("a project's animation becomes its picture through Set picture's checks, un
 
 test("a request about a project this Inbox does not have is refused; a request it does not keep is asked of the linked machines, once", async () => {
   const w = world();
+  expect((await w.call("POST", { draw: { project: "prj_01JZ00000000000000000000X9" } })).body.code).toBe("project_not_found");
   expect((await w.call("POST", { animate: { icon: "set:dcss/orc", project: "prj_01JZ00000000000000000000X9" } })).body.code).toBe("project_not_found");
   const id = `ia_${"ab".repeat(12)}`;
   expect((await w.call("POST", { request: id, picture: dataUrl(svg("#111111")) })).body.code).toBe("no_request");

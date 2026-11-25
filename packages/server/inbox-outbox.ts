@@ -267,8 +267,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // A project's picture lives on the project's own machine. Sent now from a press in the window, never held: a picture
   // is larger than the outbox holds.
   "POST projects/:id/picture": "now",
-  // A request about a linked machine's project (Animate it): its answer, the request id, goes into the message the
-  // person sends, so it is asked now or not at all.
+  // A request about a linked machine's project (Animate it, Ask an agent to draw it): its answer, the request id, goes
+  // into the message the person sends, so it is asked now or not at all.
   "POST icon-animate": "now",
   // A tag's colour and "Show tag colors" carry the time the person chose, so a held one lands as of then.
   "POST tag-colours": "set",

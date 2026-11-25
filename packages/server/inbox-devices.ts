@@ -262,8 +262,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A project's picture (Set picture…, the icon dialog's Use this icon, Remove picture): a linked machine's window sets
   // it for this Inbox's projects, kept here as a picture set in this Inbox's window is. Phones do not set pictures.
   { method: "POST", route: /^projects\/([^/]+)\/picture$/, window: (m) => `/api/inbox/projects/${m[1]}/picture`, machineOnly: true },
-  // Animate it (inbox-icon-animate.ts): a linked machine's window asks about this Inbox's project, and that
-  // machine's Inbox hands back a picture its agent made for a request kept here.
+  // Animate it and Ask an agent to draw it (inbox-icon-animate.ts): a linked machine's window asks about this Inbox's
+  // project, and that machine's Inbox hands back a picture its agent made for a request kept here.
   { method: "POST", route: /^icon-animate$/, window: () => "/api/inbox/icon-animate", machineOnly: true },
   // A tag's row colour and "Show tag colors" (mark `tag-colours`): a linked machine's window sets them here too, so
   // every machine shows the same colours, and a phone sets them as the window does (its list ⋮ has the switch).

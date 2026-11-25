@@ -1,7 +1,8 @@
 /**
- * `plannotator inbox icon set <file> --request <id>`: an agent hands an animated icon back, after an Inbox message
- * ("Animate it", packages/inbox/agents/animatePrompt.ts) asked it to animate one of the person's agent icons or project
- * pictures. A command and not a tool, as `inbox rows` and `inbox projects` are: tool text costs every session tokens, and this runs seldom.
+ * `plannotator inbox icon set <file> --request <id>`: an agent hands an icon back, after an Inbox message ("Animate it",
+ * packages/inbox/agents/animatePrompt.ts, or "Ask an agent to draw it", drawPrompt.ts) asked it to animate or draw one of
+ * the person's agent icons or project pictures. A command
+ * and not a tool, as `inbox rows` and `inbox projects` are: tool text costs every session tokens, and this runs seldom.
  *
  * A thin client over `POST /api/inbox/icon-animate` on this computer's listener (packages/server/inbox-icon-animate.ts),
  * which keeps the picture through the upload's own checks and changes only the icon the request names. A request kept
@@ -20,13 +21,13 @@ import { writeWholeToStdout } from "./write-whole-stdout";
 export const INBOX_ICON_USAGE = [
   "Usage: plannotator inbox icon set <file> --request <id> [--json]",
   "",
-  "Hand an animated icon back to the person's Plannotator Inbox, after an Inbox message asked you to animate one of",
+  "Hand an icon back to the person's Plannotator Inbox, after an Inbox message asked you to draw or animate one of",
   "their icons (an agent's icon or a project's picture). <file> is your picture: SVG, PNG, GIF, WebP or JPEG, at most",
   "512 KB. <id> is the request id written in that message (it starts with ia_).",
   "",
   "The Inbox shows your picture as that icon in every window at once. It changes only the icon that message asked",
-  "about. The person can go back to an agent's original icon with one click. You can run it again with a better",
-  "version.",
+  "about. After an animation the person can go back to the original with one click. You can run it again with a",
+  "better version.",
 ].join("\n");
 
 /** One request never waits longer: a wedged Inbox must not hang the agent. */

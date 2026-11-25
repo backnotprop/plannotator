@@ -853,7 +853,7 @@ export const INBOX_COMMAND_USAGE = [
   "                                  --tailscale is published again.",
   "  plannotator inbox projects      List the projects, combine one into another, undo a",
   "                                  combine: when the person asks to clean them up.",
-  "  plannotator inbox icon set      Hand back an animated icon, only when an Inbox",
+  "  plannotator inbox icon set      Hand back an icon you drew or animated, only when an Inbox",
   "                                  message asked you to (its request id starts ia_).",
   "  plannotator inbox call          Run one Inbox action from a script: JSON in, one JSON",
   "                                  result on stdout. See 'Scripting the Inbox'.",

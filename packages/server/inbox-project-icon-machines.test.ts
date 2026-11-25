@@ -1,12 +1,12 @@
 /**
  * A project's picture across linked machines, on two real Inboxes linked both ways (docs/agent-guides/inbox-machines.md:
  * every Inbox feature works on a linked machine's project as on this one's). The picture lives on the project's own
- * machine: a window sets it through the forward and that machine's door, and a request to animate it is kept
+ * machine: a window sets it through the forward and that machine's door, and a request to draw or animate it is kept
  * there; an agent on either computer hands the picture back to its own Inbox, which asks the other for a request it
  * does not keep. Starts two Inboxes: CI runs it.
  *
  * What this catches: a picture set from the other computer's window refused at the forward or the door, or kept on
- * the wrong computer; the other computer's list not hearing the change; an animate request about a linked machine's
+ * the wrong computer; the other computer's list not hearing the change; a draw request about a linked machine's
  * project refused or kept here; a hand-back from the other computer's agent lost (`no_request`) or applied to the wrong
  * computer; an agent's or a script's bare call setting a linked machine's picture; either direction working without
  * the other.
@@ -69,7 +69,7 @@ describe("a project's picture across linked machines", () => {
   /** The picture key a window learns from the merged list for a project. */
   const keyOn = async (port: number, project: string) => ((await get(port, "/api/inbox/threads?machines=1")).projects as Json[] | undefined)?.find((p) => p.id === project)?.picture ?? null;
 
-  test("set and animated from either computer, kept on the project's own; a bare call is refused", async () => {
+  test("set and drawn from either computer, kept on the project's own; a bare call is refused", async () => {
     const dataA = scratch("plannotator-project-icon-linked-a-");
     const dataB = scratch("plannotator-project-icon-linked-b-");
     const a = await start(dataA);
@@ -98,22 +98,22 @@ describe("a project's picture across linked machines", () => {
       expect(bare.status).toBe(403);
       expect(await pictureOf(b.port, onB.id)).toBe(blue);
 
-      // Animate it, from A's window, about B's project: the request is kept on B.
-      const asked = await press(a.port, `/api/inbox/m/${bId}/icon-animate`, { animate: { icon: "totman", project: onB.id } });
+      // Ask an agent to draw it, from A's window, about B's project: the request is kept on B.
+      const asked = await press(a.port, `/api/inbox/m/${bId}/icon-animate`, { draw: { project: onB.id } });
       expect(asked.status).toBe(200);
       expect(readFileSync(join(dataB, "inbox", "icon-animate.json"), "utf8")).toContain(asked.body.request);
       // The agent the person picked runs on A: its hand-back reaches A, which asks B.
-      const animatedOnA = svg("#16a34a");
-      const back = await handBack(a.port, asked.body.request, dataUrl(animatedOnA));
+      const drawnOnA = svg("#16a34a");
+      const back = await handBack(a.port, asked.body.request, dataUrl(drawnOnA));
       expect(back).toMatchObject({ status: 200, body: { applied: true, target: "project" } });
-      expect(await pictureOf(b.port, onB.id)).toBe(animatedOnA);
+      expect(await pictureOf(b.port, onB.id)).toBe(drawnOnA);
 
       // And the other way: B's window asks about A's project; an agent on B hands it back to B, which asks A.
-      const other = await press(b.port, `/api/inbox/m/${aId}/icon-animate`, { animate: { icon: "totman", project: onA.id } });
+      const other = await press(b.port, `/api/inbox/m/${aId}/icon-animate`, { draw: { project: onA.id } });
       expect(other.status).toBe(200);
-      const animatedOnB = svg("#dc2626");
-      expect((await handBack(b.port, other.body.request, dataUrl(animatedOnB))).body).toMatchObject({ applied: true, target: "project" });
-      expect(await pictureOf(a.port, onA.id)).toBe(animatedOnB);
+      const drawnOnB = svg("#dc2626");
+      expect((await handBack(b.port, other.body.request, dataUrl(drawnOnB))).body).toMatchObject({ applied: true, target: "project" });
+      expect(await pictureOf(a.port, onA.id)).toBe(drawnOnB);
       await waitFor("A's picture key on B", async () => typeof (await keyOn(b.port, onA.id)) === "number", 15_000);
 
       // Remove picture from B's window on A's project: gone on A.

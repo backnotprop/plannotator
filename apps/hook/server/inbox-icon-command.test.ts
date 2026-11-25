@@ -5,8 +5,8 @@
  * What this catches: the one door agents have to an icon opening wider than asked (a made-up request, another agent
  * showing the same picture, an agent the person moved on from since); a hand-back that skips the upload's checks (a
  * page dressed as an SVG, a file past the cap); the happy path not changing the icon every window reads, or losing the
- * way back to the original. Animating a project's picture: the animation not becoming the picture every window reads,
- * or the agent told it changed an agent's icon.
+ * way back to the original. Drawing a project's picture: the drawing not becoming the picture every window reads, or
+ * the agent told it changed an agent's icon.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -121,12 +121,12 @@ test("the door refuses a made-up request and anything the upload refuses, and ch
   expect(await w.faceOf("agent-a")).toBe(`own:${w.icon}`);
 });
 
-test("an animation asked for a project becomes the picture every window reads", async () => {
+test("a drawing asked for a project becomes the picture every window reads", async () => {
   const w = await world();
   const project = w.server.store.ensureProject({ name: "billing", root: "/work/billing" });
-  const asked = (await w.post("icon-animate", { animate: { icon: "totman", project: project.id } })).request as string;
-  const animated = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0f766e"/><text x="32" y="44" font-size="34" text-anchor="middle" fill="#fff">B</text></svg>';
-  const done = await w.handBack("billing.svg", animated, asked);
+  const asked = (await w.post("icon-animate", { draw: { project: project.id } })).request as string;
+  const drawn = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0f766e"/><text x="32" y="44" font-size="34" text-anchor="middle" fill="#fff">B</text></svg>';
+  const done = await w.handBack("billing.svg", drawn, asked);
   expect(done).toEqual({ code: 0, out: "Done: the project now shows your picture, in every Inbox window.\n", err: "" });
-  expect(await (await fetch(`${w.base}/api/inbox/projects/${project.id}/picture`)).text()).toBe(animated);
+  expect(await (await fetch(`${w.base}/api/inbox/projects/${project.id}/picture`)).text()).toBe(drawn);
 });

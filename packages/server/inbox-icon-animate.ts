@@ -1,15 +1,17 @@
 /**
- * Plannotator Inbox: "Animate it" (the icon dialog, for an agent or a project). The person asks an agent, in a new
- * thread, to animate an icon (their own picture, a set's icon, or one of our faces); the agent hands the result back
- * with `plannotator inbox icon set <file> --request <id>` (apps/hook/server/inbox-icon-command.ts), and that agent's
- * icon, or that project's picture, becomes it in every window. Bun only: the Inbox runs on the Bun server; the Pi
- * server serves no Inbox route.
+ * Plannotator Inbox: "Animate it" and "Ask an agent to draw it" (the icon dialog, for an agent or a project). The person
+ * asks an agent, in a new thread, to animate an icon (their own picture, a set's icon, or one of our faces) or to draw
+ * a new one; the agent hands the result back with `plannotator inbox icon set <file> --request <id>`
+ * (apps/hook/server/inbox-icon-command.ts), and that agent's icon, or that project's picture, becomes it in every
+ * window. Bun only: the Inbox runs on the Bun server; the Pi server serves no Inbox route.
  *
- *   inbox/icon-animate.json   { v: 1, requests: [{ id, agent | project, sessions, icon, shown?, result, result_at?, at }] }, newest last, 0600
+ *   inbox/icon-animate.json   { v: 1, requests: [{ id, kind?, agent | project, sessions, icon, shown?, result, result_at?, at }] }, newest last, 0600
  *
- * `icon` is what was animated: an uploaded picture's hash (`own:<hash>` in the faces), or the face itself for a set's
- * icon (`set:<set>/<icon>`) or one of our faces. `shown` is a project's picture time when asked (null: none set). A
- * result is always an uploaded picture's hash; `result_at` is the project picture's time it set.
+ * `kind` is absent for Animate it and "draw" for a drawing. `icon` is what was animated: an uploaded picture's hash
+ * (`own:<hash>` in the faces), or the face itself for a set's icon (`set:<set>/<icon>`) or one of our faces; null for a
+ * drawing. `shown` is what the target showed when asked, where `icon` does not say it: a drawn agent's face (null: none
+ * picked), a project's picture time (null: none set). A result is always an uploaded picture's hash; `result_at` is the
+ * project picture's time it set.
  *
  * The one door agents have to an icon, and a narrow one: a request names one agent or one project and what it showed,
  * so a hand-back can only replace that icon, and only while it still shows that (or this request's own earlier result:
@@ -19,6 +21,7 @@
  * through Set picture's too (`ProjectPictures.setUpload`, the same sniffing and cap).
  *
  *   POST /api/inbox/icon-animate  `{ animate: { icon, agent, sessions } | { icon, project } }`  a request; `{ request: <id> }`
+ *   POST /api/inbox/icon-animate  `{ draw: { agent, sessions } | { project } }`                 a request; `{ request: <id> }`
  *   POST /api/inbox/icon-animate  `{ request, picture: "data:…;base64,…" }` the hand-back; `{ applied, icon, target }`
  *   GET  /api/inbox/icon-animate                                            `{ results: [{ icon, result }] }` (no ids)
  *
@@ -61,15 +64,17 @@ export const ICON_ANIMATE_WORDS = {
 
 export interface IconAnimateRequest {
   id: string;
+  /** Absent: Animate it. "draw": Ask an agent to draw it. */
+  kind?: "draw";
   /** The agent whose icon it is (its faces key) and the sessions it is; absent for a project's. */
   agent?: string;
   /** The project whose picture it is; absent for an agent's. */
   project?: string;
   sessions: string[];
-  /** What was animated: an uploaded picture's sha256, or the set icon's or our face's id. */
-  icon: string;
-  /** A project's picture time when asked (null: none set); absent for an agent's, where `icon` says what it showed. */
-  shown?: number | null;
+  /** What was animated: an uploaded picture's sha256, or the set icon's or our face's id. Null for a drawing. */
+  icon: string | null;
+  /** What the target showed when asked, where `icon` does not say it: a drawn agent's face, a project's picture time. */
+  shown?: string | number | null;
   /** The last picture handed back for it, once one was. */
   result: string | null;
   /** The project picture's time that result set. */
@@ -80,7 +85,7 @@ export interface IconAnimateRequest {
 const isRequest = (r: IconAnimateRequest): boolean => {
   if (!r || !REQUEST_ID.test(r.id) || !Array.isArray(r.sessions) || typeof r.at !== "number" || !(r.result === null || HASH.test(r.result))) return false;
   if (r.project === undefined ? !isInboxAgentFaceId(r.agent) : !isInboxId("prj", r.project) || r.agent !== undefined) return false;
-  return isAnimatable(r.icon);
+  return r.kind === "draw" ? r.icon === null : r.kind === undefined && isAnimatable(r.icon);
 };
 
 function readRequests(file: string): IconAnimateRequest[] {
@@ -169,6 +174,14 @@ export function createInboxIconAnimate(options: {
     return "project" in target ? keep({ project: target.project, sessions: [], icon: animate.icon, shown: projectShown(target.project) }) : keep({ ...target, icon: animate.icon });
   };
 
+  const askDraw = (body: Record<string, unknown>): Response => {
+    const draw = body.draw as Record<string, unknown> | null;
+    if (!draw || typeof draw !== "object") throw new InboxError("validation_error", "draw: { agent } or { project }.", { field: "draw" });
+    const target = targetOf(draw);
+    if ("project" in target) return keep({ kind: "draw", project: target.project, sessions: [], icon: null, shown: projectShown(target.project) });
+    return keep({ kind: "draw", ...target, icon: null, shown: faces.wire().faces[target.agent]?.face ?? null });
+  };
+
   const handBack = async (body: Record<string, unknown>): Promise<Response> => {
     const id = typeof body.request === "string" ? body.request.trim() : "";
     const index = list().findIndex((r) => r.id === id);
@@ -208,7 +221,8 @@ export function createInboxIconAnimate(options: {
     // Only the agent asked about, and only while it shows what it showed then (or this request's last result).
     const agent = request.agent!;
     const showing = faces.wire().faces[agent]?.face;
-    const applied = showing === shownFace(request.icon) || (request.result !== null && showing === `own:${request.result}`) || showing === `own:${result}`;
+    const before = request.kind === "draw" ? (request.shown ?? null) : shownFace(request.icon!);
+    const applied = (showing ?? null) === before || (request.result !== null && showing === `own:${request.result}`) || showing === `own:${result}`;
     requests[index] = { ...request, result };
     save(requests);
     if (applied && showing !== `own:${result}`) faces.change({ agent, sessions: request.sessions, face: `own:${result}` });
@@ -219,15 +233,17 @@ export function createInboxIconAnimate(options: {
   const route = async (req: Request, url: URL): Promise<Response | null> => {
     if (url.pathname !== INBOX_ICON_ANIMATE_PATH) return null;
     if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
-    if (req.method === "GET") return json({ results: list().flatMap((r) => (r.result ? [{ icon: r.icon, result: r.result }] : [])) });
+    if (req.method === "GET") return json({ results: list().flatMap((r) => (r.result && r.icon !== null ? [{ icon: r.icon, result: r.result }] : [])) });
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
     const body = await options.readBody(req);
     if (checkServerSession(body, options.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-    return body.animate !== undefined ? await ask(body) : await handBack(body);
+    if (body.animate !== undefined) return await ask(body);
+    if (body.draw !== undefined) return askDraw(body);
+    return await handBack(body);
   };
 
   /** The pictures a request still points at: never the ones the cap removes (the original stays one click away). */
-  const kept = (): Set<string> => new Set(list().flatMap((r) => [...(HASH.test(r.icon) ? [`own:${r.icon}`] : []), ...(r.result ? [`own:${r.result}`] : [])]));
+  const kept = (): Set<string> => new Set(list().flatMap((r) => [...(r.icon !== null && HASH.test(r.icon) ? [`own:${r.icon}`] : []), ...(r.result ? [`own:${r.result}`] : [])]));
 
   return { route, kept };
 }
