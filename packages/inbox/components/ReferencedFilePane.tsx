@@ -27,6 +27,7 @@ import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { CopyFileButton } from './CopyFileButton';
 import { ImageAttachmentView } from './ImageAttachmentView';
+import { SkillFilePane } from './SkillFilePane';
 import { VideoAttachmentView } from './VideoAttachmentView';
 import { Tip } from './Tip';
 import type { FileRef } from '../fileRefs';
@@ -74,7 +75,15 @@ function standIn(view: Extract<ReferencedFileView, { found: true }>, messageId: 
   };
 }
 
-export function ReferencedFilePane({
+type ReferencedFilePaneProps = Parameters<typeof ReferencedFile>[0];
+
+/** A file the message names, or (`fileRef.skill`) a skill the person's message used, read only (SkillFilePane). */
+export function ReferencedFilePane(props: ReferencedFilePaneProps) {
+  if (props.fileRef.skill) return <SkillFilePane threadId={props.threadId} name={props.fileRef.path} phone={props.phone} full={props.full} onClose={props.onClose} />;
+  return <ReferencedFile {...props} />;
+}
+
+function ReferencedFile({
   threadId,
   fileRef,
   phone,
