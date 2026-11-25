@@ -19,7 +19,7 @@ import type { SettingValue } from '@plannotator/ui/config';
 import type { InboxDiffOptions } from './api';
 
 /** The settings the Inbox shows and saves. */
-export type InboxDiffSetting = 'diffStyle' | Exclude<DiffDisplaySetting, 'diffHideWhitespace' | 'diffMinimap'>;
+export type InboxDiffSetting = 'diffStyle' | 'diffPowerUp' | Exclude<DiffDisplaySetting, 'diffHideWhitespace' | 'diffMinimap'>;
 type WireKey = keyof InboxDiffOptions;
 
 /** Each setting's name on the wire, and its field in config.json `diffOptions` (what the config store's sync payload carries). */
@@ -34,6 +34,8 @@ const FIELDS: Record<InboxDiffSetting, { wire: WireKey; config: string }> = {
   diffTabSize: { wire: 'tab_size', config: 'tabSize' },
   diffSemantic: { wire: 'semantic', config: 'semantic' },
   diffExpandUnchanged: { wire: 'expand_unchanged', config: 'expandUnchanged' },
+  // Power Up's switch: no control here, but a choice made in code review holds on every address (guide/usePowerUp.ts).
+  diffPowerUp: { wire: 'power_up', config: 'powerUp' },
 };
 const SETTINGS = Object.keys(FIELDS) as InboxDiffSetting[];
 

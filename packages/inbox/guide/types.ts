@@ -83,6 +83,8 @@ export interface GuideReaderProps {
   bare?: boolean;
   /** Bare: Global comment and Split | Unified in this element of the host's (the PR review's strip), not above the files. */
   controlsHost?: HTMLElement | null;
+  /** Power Up's mark in this element of the host's (the PR page's row on a phone) instead of beside Global comment. */
+  powerUpHost?: HTMLElement | null;
   /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */
   fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>;
   /**

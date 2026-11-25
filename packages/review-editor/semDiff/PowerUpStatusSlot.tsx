@@ -50,8 +50,11 @@ export const PowerUpStatusSlot: React.FC<{
   provider: PowerUpConfig['provider'];
   endpoint?: string;
   onRetry: () => void;
-  onSettings: () => void;
-}> = ({ status, provider, endpoint, onRetry, onSettings }) => {
+  /** Opens the host's Power Up settings. Absent (a host with no provider form): the card says where the key is set. */
+  onSettings?: () => void;
+  /** A phone's bar: the face alone, a button whose press opens the same words (and Retry) in the card. */
+  compact?: boolean;
+}> = ({ status, provider, endpoint, onRetry, onSettings, compact = false }) => {
   const model = providerLabel(provider, endpoint);
   const state = statusKind(status);
   const text = statusText(state, status, model);
@@ -62,39 +65,70 @@ export const PowerUpStatusSlot: React.FC<{
     setCard(true);
     setPoke((n) => n + 1);
   };
+  const face = <PowerUpGuy state={state === 'asking' || state === 'unavailable' ? 'grey' : 'alive'} size={16} wakeKey={status.links} poke={poke} />;
+  const retryButton = <button type="button" className="rounded px-1 hover:bg-muted hover:text-foreground" onClick={onRetry}>Retry</button>;
   return (
     <span
-      className="relative flex items-center gap-1.5 px-1.5 text-xs text-muted-foreground"
+      className={`relative flex items-center gap-1.5 text-xs text-muted-foreground${compact ? '' : ' px-1.5'}`}
       data-power-up-status={state}
-      onMouseEnter={wake}
-      onMouseLeave={() => setCard(false)}
-      onFocus={wake}
+      {...(compact
+        ? {}
+        : {
+            onMouseEnter: wake,
+            onMouseLeave: () => setCard(false),
+            onFocus: wake,
+          })}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setCard(false);
       }}
     >
-      <span data-power-up-slot="" tabIndex={0} className="rounded outline-none focus-visible:ring-1 focus-visible:ring-ring">
-        <PowerUpGuy state={state === 'asking' || state === 'unavailable' ? 'grey' : 'alive'} size={16} wakeKey={status.links} poke={poke} />
-      </span>
-      <span>{text}</span>
+      {compact ? (
+        <button
+          type="button"
+          data-power-up-slot=""
+          aria-label={text}
+          aria-expanded={card}
+          className="relative flex h-[30px] min-w-[30px] items-center justify-center rounded outline-none after:absolute after:inset-x-0 after:-inset-y-[7px] after:content-[''] focus-visible:ring-1 focus-visible:ring-ring"
+          onClick={() => (card ? setCard(false) : wake())}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && card) {
+              event.stopPropagation();
+              setCard(false);
+            }
+          }}
+        >
+          {face}
+        </button>
+      ) : (
+        <span data-power-up-slot="" tabIndex={0} className="rounded outline-none focus-visible:ring-1 focus-visible:ring-ring">
+          {face}
+        </span>
+      )}
+      {!compact && <span>{text}</span>}
       {card && (
         <span
-          role="tooltip"
+          role={compact ? 'dialog' : 'tooltip'}
           data-power-up-card=""
           className="absolute right-0 top-full z-50 mt-1 flex w-max flex-col gap-0.5 rounded-md border border-border bg-popover px-2.5 py-2 text-xs text-popover-foreground shadow-md"
         >
+          {compact && <span className="font-medium">{text}</span>}
           <span className="font-medium">{state === 'unavailable' ? 'Power Up is unavailable' : 'Your diffs are powered up'}</span>
           <span className="text-muted-foreground">Second opinion from {model}</span>
           <span className="max-w-64 text-muted-foreground">{title}</span>
-          <button type="button" className="mt-1 self-start text-primary hover:underline" onClick={onSettings}>
-            Power Up settings
-          </button>
+          {onSettings ? (
+            <button type="button" className="mt-1 self-start text-primary hover:underline" onClick={onSettings}>
+              Power Up settings
+            </button>
+          ) : (
+            <span className="mt-1 max-w-64 text-muted-foreground">Model and key: code review's Settings › Semantic diffs</span>
+          )}
+          {compact && state === 'unavailable' && <span className="mt-1 self-start">{retryButton}</span>}
         </span>
       )}
-      {state === 'unavailable' && (
+      {!compact && state === 'unavailable' && (
         <>
-          <button type="button" className="rounded px-1 hover:bg-muted hover:text-foreground" onClick={onRetry}>Retry</button>
-          <button type="button" className="rounded px-1 hover:bg-muted hover:text-foreground" onClick={onSettings}>Settings</button>
+          {retryButton}
+          {onSettings && <button type="button" className="rounded px-1 hover:bg-muted hover:text-foreground" onClick={onSettings}>Settings</button>}
         </>
       )}
     </span>
