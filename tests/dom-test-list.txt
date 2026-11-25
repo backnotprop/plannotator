@@ -4,6 +4,7 @@
 # A test file that skips itself without happy-dom must be listed here
 # (scripts/dom-test-allowlist.test.ts fails otherwise). One path per line;
 # blank lines and lines starting with # are ignored.
+packages/ui/components/sidebar/MessagesBrowser.test.tsx
 packages/ui/markdownEditorFidelity.test.tsx
 packages/ui/annotationDraftPersistence.test.tsx
 packages/ui/codeAnnotationDraftPersistence.test.tsx
