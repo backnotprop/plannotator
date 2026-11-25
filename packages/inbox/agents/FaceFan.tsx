@@ -1,5 +1,6 @@
 import { Popover } from '@base-ui/react/popover';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { isInboxMarkFace } from '@plannotator/core/inbox-types';
 import { tooltipContainerOf } from '@plannotator/ui/components/HostTitle';
 import { HostMark } from '../icons';
 import { agentHostName } from './model';
@@ -43,8 +44,8 @@ export const FAN_TOUCH: Partial<FanOptions> = { pitch: 44, item: 40, inner: 64, 
 export const OWN_CHOICE = 'own';
 /** "Sets": the inner arc's place after it, which opens the icon sets (SetsBody.tsx, AgentIconDialog.tsx). */
 export const SETS_CHOICE = 'sets';
-/** A place in the fan: a face, "Your own…" or "Sets". */
-export type FanChoice = Exclude<AgentFace, `own:${string}` | `set:${string}`> | typeof OWN_CHOICE | typeof SETS_CHOICE;
+/** A place in the fan: a face, "Your own…" or "Sets". Another host's mark (`mark:<host>`) has none: it is a mark, in the own mark's place. */
+export type FanChoice = Exclude<AgentFace, `own:${string}` | `set:${string}` | `mark:${string}`> | typeof OWN_CHOICE | typeof SETS_CHOICE;
 export const OWN_LABEL = 'Your own…';
 export const SETS_LABEL = 'Sets';
 
@@ -102,7 +103,7 @@ export interface FaceFanProps {
 const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sources, onChoose, onOwn, onSets, onMark, onClose }: FaceFanProps) {
-  const chosen: FanChoice = isOwnFace(face) ? OWN_CHOICE : isSetFace(face) ? SETS_CHOICE : face;
+  const chosen: FanChoice = isOwnFace(face) ? OWN_CHOICE : isSetFace(face) ? SETS_CHOICE : isInboxMarkFace(face) ? 'agent' : face;
   // Measured once as it opens: the mark's box and the room the choices keep inside, the window, or the list's pane for
   // a mark in the list (the Agents view's faces: no choice over the sidebar). Nothing is read while the pointer moves.
   // Nothing clips the fan or anything above its plate (agents.css: a clip, a filter or a mask there stops the blur).

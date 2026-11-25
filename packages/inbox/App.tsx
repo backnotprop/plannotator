@@ -67,7 +67,7 @@ import {
   type WhatsNewReleasesModel,
 } from './api';
 import { listReadRefused, readFirstList } from './firstListRead';
-import { adoptRestartedInbox, type RestartHello } from './sessionAdopt';
+import { adoptRestartedInbox, inboxReconnected, type RestartHello } from './sessionAdopt';
 import { newRecordBatch, noteOwnRecord, noteRecord } from './openThreadReads';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { createOwnSaves } from './ownSaves';
@@ -144,6 +144,8 @@ import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
 import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
 import { PlansRoute, usePlansOn } from './plans/PlansPage';
+import { GridRoute, useGridOn } from './grid/GridPage';
+import { pageLinks } from './app/pageLinks';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { ArchivedBlock } from './components/Archived';
@@ -188,7 +190,7 @@ import { snoozeWrites } from './snoozeWrites';
 import { agentWrites, type AgentDeleteAsk } from './agentWrites';
 import { sameSettings, settingsReadAtLoad, takeSettingsAtLoad } from './settingsAtLoad';
 import { restartInbox } from './restartInbox';
-import { errorToast } from './toastError';
+import { ackErrorToast, errorToast } from './toastError';
 import { useBulkWrites } from './components/useCombines';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
@@ -218,8 +220,8 @@ import type { SettingsSection } from './settingsRoute';
 import { hiddenKnownAnswers } from './feedbackKnown';
 import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
-import { ArtifactsWall } from './components/ArtifactsWall';
-import { readArtifactPins } from './artifactPins';
+import { ArtifactsWall, wallRowRoute } from './components/ArtifactsWall';
+import { readArtifactPins, sayArtifactPinHeld } from './artifactPins';
 import { hearAgentFacesEvent, onAgentFaceRefused, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage } from './board/BoardPage';
@@ -1726,8 +1728,8 @@ function Inbox() {
         onConnect: (hello) => {
           // A (re)connect: what happened while the stream was away is not known here; no held thread is drawn from as current.
           staleThreads(queryClient);
-          // The Inbox restarted under this page: when it is provably the same one, writes go on without a reload.
-          if (hello) void adoptAfterRestart(hello);
+          // A restarted Inbox, provably the same one: writes go on without a reload; then unsaved reply drafts save again.
+          void (hello ? adoptAfterRestart(hello) : Promise.resolve()).finally(inboxReconnected);
           // `event: deliveries` carries no record, so the cursor never replays one sent before this connect.
           listAfterEvents(80);
           reportWindow();
@@ -1797,13 +1799,13 @@ function Inbox() {
           setOutbox((current) => new Map(current).set(entry.key, entry));
           // Delivered: the reply is in that machine's thread now; the open thread shows it there.
           if (entry.state === 'delivered') void shownReads.onMachines(new Set([entry.machine]));
-          // Its machine's link went (here, or on that machine): what waited for it was not sent, and its thread is gone
-          // from this list. Said at once; Settings → Machines keeps the words to copy.
-          if (entry.state === 'dropped' && entry.machine_name && entry.notice && !entry.dismissed) {
+          // Its link went (here, or there): what waited was not sent. One toast for all one Unlink dropped; Settings → Machines keeps the words.
+          const lead = `Not sent to ${entry.machine_name}: it is no longer linked.`;
+          if (entry.state === 'dropped' && entry.machine_name && entry.notice && !entry.dismissed && toastNow.current?.lead !== lead) {
             showToast(
               {
                 icon: 'warn',
-                lead: `Not sent to ${entry.machine_name}: it is no longer linked.`,
+                lead,
                 detail: 'Settings → Machines keeps the words.',
                 wrap: true,
               },
@@ -2602,6 +2604,8 @@ function Inbox() {
    * machine takes it, and says so, without the warning.
    */
   const showError = (cause: unknown) => showToast(errorToast(cause, 'The thread did not change.'));
+  // A pin of a linked machine's artifact held for it says so with the clock, as a held star does (artifactPins.ts).
+  useEffect(() => sayArtifactPinHeld(showError));
   // A tray change the server refused (approval "inbox-reaction-tray"): already taken back on screen; the toast says why.
   useEffect(() => {
     onSavedReactionsFailed((cause) => showToast(errorToast(cause, 'Your saved emoji did not change.')));
@@ -2897,7 +2901,7 @@ function Inbox() {
     try {
       await inboxApi.ack(messageId, on, reaction);
     } catch (cause) {
-      showError(cause);
+      showToast(ackErrorToast(cause, messageId));
       await afterWrite();
       return;
     }
@@ -3636,6 +3640,7 @@ function Inbox() {
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
+  const gridOn = useGridOn(settings, refreshList);
 
   const projects = latest?.projects ?? [];
   /**
@@ -5047,7 +5052,7 @@ function Inbox() {
         context={context}
         error={settingsError}
         onToggleTool={toggleTool}
-        onToggleExperimental={(next) => void toggleExperimental(next)}
+        onToggleExperimental={(next, feature) => void toggleExperimental(next, feature)}
         onToggleCookieHost={(next) => void toggleCookieHost(next)}
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
@@ -5323,6 +5328,8 @@ function Inbox() {
     main = <ReviewsOff phone={phone} onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'capabilities' })} />;
   } else if (route.page === 'reviews') {
     main = <div className="ib-listcol" aria-busy="true" />;
+  } else if (route.page === 'grid') {
+    main = <GridRoute on={gridOn} settingsKnown={settings !== null} phone={phone} onOpen={(thread) => go({ page: 'inbox', project: null, thread })} />;
   } else if (route.page === 'plans') {
     main = <PlansRoute route={route} on={plansOn} settingsKnown={settings !== null} phone={phone} projects={projects} />;
   } else if (route.page === 'scheduled') {
@@ -5333,13 +5340,7 @@ function Inbox() {
       <ArtifactsWall
         pinned={route.pinned === true}
         onPinned={(pinned) => writeRoute({ page: 'artifacts', project: null, thread: null, pinned }, { replace: true })}
-        onOpen={(row) =>
-          go(
-            row.attachment
-              ? { page: 'inbox', project: null, thread: row.thread_id, file: { id: row.attachment.id, version: 'current', focus: null } }
-              : { page: 'inbox', project: null, thread: row.thread_id, guide: row.message_id },
-          )
-        }
+        onOpen={(row) => go(wallRowRoute(row))}
         phone={phone}
       />
     );
@@ -5407,7 +5408,7 @@ function Inbox() {
           titleNote={filterTag && listSections ? tagListSummary(listSections.flatMap((section) => section.threads)) : null}
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
           sections={listSections ?? filterShown(listShown ?? shown)}
-          listFilter={{ rows: listFilterRows, scoped: listFilterScoped, names: projectNames, filter: listFilterPicks, onChange: setListFilter }}
+          listFilter={{ rows: listFilterRows, scoped: listFilterScoped, names: projectNames, filter: listFilterPicks, onChange: setListFilter, place: [route.project, route.machine, route.agent, route.tag].join('\n') }}
           sort={listSortShown}
           filtered={filterProject !== null}
           projectNames={projectNames}
@@ -5579,7 +5580,7 @@ function Inbox() {
       {/* The sidebar's Customize panel (approval "inbox-sidebar-customize"): one for the window, beside the sidebar or, on a phone, a bottom sheet. */}
       {!tourOn && (
         <SidebarCustomizer
-          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), plans: plansOn, reviews: Boolean(pullsShown), usage: settings?.cswap === true, phone })}
+          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), plans: plansOn, grid: gridOn, reviews: Boolean(pullsShown), usage: settings?.cswap === true, phone })}
           machines={machines.all.length > 0}
           // Opened from Settings on a desktop, where the sidebar is closed: it opens, so the person sees each change.
           onOpen={() => {
@@ -5703,12 +5704,7 @@ function Inbox() {
             draftsCount={(drafts?.length ?? 0) + replyDrafts.length}
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             onArtifacts={() => leave({ page: 'artifacts', project: null, thread: null })}
-            // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
-            onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
-            onPlans={plansOn ? () => leave({ page: 'plans', project: null, thread: null }) : undefined}
-            onScheduled={scheduledOn ? () => leave({ page: 'scheduled', project: null, thread: null }) : undefined}
-            // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
-            onPulls={pullsShown ? () => leave({ page: 'reviews', project: null, thread: null }) : undefined}
+            {...pageLinks({ board: Boolean(boardEnabled), plans: plansOn, grid: gridOn, scheduled: scheduledOn, reviews: Boolean(pullsShown) }, leave)}
             pullsCount={pullsShown && pulls.reviews ? reviewsOnYou(pulls.reviews) : 0}
             // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
             onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine && !route.agent && !route.tag ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}

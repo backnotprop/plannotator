@@ -8,15 +8,19 @@
  * so any whole pixel counts, and where layout can be read the text's own
  * width (a Range over its contents) is compared with the box's content width.
  */
-export function isTextCut(el: Element | null | undefined, partSelector?: string): boolean {
+export function isTextCut(
+  el: Element | null | undefined,
+  partSelector?: string,
+  axis: 'both' | 'horizontal' = 'both',
+): boolean {
   if (typeof HTMLElement === 'undefined' || !(el instanceof HTMLElement)) return false;
   const part = partSelector ? el.querySelector<HTMLElement>(partSelector) : null;
-  if (part && overflows(part)) return true;
-  return overflows(el);
+  if (part && overflows(part, axis)) return true;
+  return overflows(el, axis);
 }
 
-function overflows(el: HTMLElement): boolean {
-  if (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight + 1) return true;
+function overflows(el: HTMLElement, axis: 'both' | 'horizontal'): boolean {
+  if (el.scrollWidth > el.clientWidth || (axis === 'both' && el.scrollHeight > el.clientHeight + 1)) return true;
   if (el.clientWidth === 0 || typeof document.createRange !== 'function') return false;
   const range = document.createRange();
   range.selectNodeContents(el);

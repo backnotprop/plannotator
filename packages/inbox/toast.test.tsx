@@ -26,6 +26,12 @@ describe('markReadToast: the approved words', () => {
     expect(markReadToast(row({ resolved_at: '2026-10-14T00:00:00Z' }), 'open')).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: 'Goes back to Archived', warn: false });
   });
 
+  test("the open thread while its routine's run goes: it stays in New until the run ends, so no move is promised", () => {
+    expect(markReadToast(row({ scheduled_running: true }), 'open')).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: '“Invoice list layout”', warn: false });
+    // An archived thread's run leaves it archived: it still goes back there.
+    expect(markReadToast(row({ scheduled_running: true, resolved_at: '2026-10-14T00:00:00Z' }), 'open').detail).toBe('Goes back to Archived');
+  });
+
   test('a row with no thread open: where it went, and the subject that says which', () => {
     expect(markReadToast(row(), 'list')).toEqual({ lead: 'Moved to Quiet', detail: '“Invoice list layout”', warn: false });
     expect(markReadToast(row({ resolved_at: '2026-10-14T00:00:00Z' }), 'list')).toEqual({ lead: 'Back in Archived', detail: '“Invoice list layout”', warn: false });

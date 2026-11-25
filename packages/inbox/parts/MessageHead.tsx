@@ -56,6 +56,7 @@ export function drawMessageHead(d: MessageHeadData) {
       newest={d.copy}
       message={message}
       takeBackOf={() => acts.current.takeBackOf(message)}
+      live={d.live}
       head={(more) => (
         <div className="ib-fline ib-is-open" data-open-head="" data-revealed={revealed ? '' : undefined}>
           {!one && (
@@ -80,6 +81,13 @@ export function drawMessageHead(d: MessageHeadData) {
               </span>
             )}
           </Tip>
+          {message.skill_reaction ? (
+            // A skill emoji pressed (approval "inbox-reactions-every-message", item 8): the reply is this one line.
+            <span className="ib-fl-meta ib-fl-skr" data-skill-reaction={message.skill_reaction.skill}>
+              <span className="ib-skr-e">{message.skill_reaction.emoji}</span>
+              <span className="ib-skr-slash">/{message.skill_reaction.skill}</span>
+            </span>
+          ) : (
           <span className="ib-fl-meta">
             <span className="ib-fl-in" aria-hidden={hide}>
               in <bdi>{d.folder}</bdi>{' '}
@@ -107,6 +115,7 @@ export function drawMessageHead(d: MessageHeadData) {
             </span>
             {count && <span className="ib-fl-files">{count}</span>}
           </span>
+          )}
           <span className="ib-fl-chips" />
           <span className="ib-fl-tm">
             {isNew && <span className="ib-newtag">New</span>}

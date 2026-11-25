@@ -24,9 +24,9 @@ export function isTable(name: string): boolean {
 }
 
 /** The type under a tile's name: "PNG image", "Markdown", "TypeScript", "CSV table", "PDF · 3 pages", "TGZ file". */
-export function wallTypeLabel(row: Pick<InboxArtifactRow, 'attachment'>, pages: number | null = null): string {
+export function wallTypeLabel(row: Pick<InboxArtifactRow, 'attachment' | 'html'>, pages: number | null = null): string {
   const attachment = row.attachment;
-  if (!attachment) return 'Guided review';
+  if (!attachment) return row.html ? 'HTML page' : 'Guided review';
   const kind = readInboxAttachmentKind(attachment.kind);
   const ext = extOf(attachment.name);
   const upper = ext ? ext.toUpperCase() : '';

@@ -382,9 +382,13 @@ const leakedIds =
     ...(config.inboxMarkReadWarning === undefined ? { inboxMarkReadWarning: false } : {}),
     ...((config.inboxReveals as { view_choice?: unknown } | undefined)?.view_choice === undefined ? { inboxReveals: { ...(config.inboxReveals as Record<string, unknown> | undefined), view_choice: { shownAt: "2026-10-01T10:00:00.000Z" } } } : {}),
   };
-  // The Group tip (band-tip.ts, a band's one-time tooltip) too, so no hover in a test shows it.
+  // The Group tip (band-tip.ts, a band's one-time tooltip) too, so no hover in a test shows it. And Code review's
+  // one-time offer, as already shown (the switch stays as the world set it): on the release-numbered modes (whats-new,
+  // restart, reload-hosts) it opens at once, over the window a test drives.
   const reveals = (settled.inboxReveals ?? config.inboxReveals) as Record<string, unknown> | undefined;
   if (reveals?.band_tip === undefined) Object.assign(settled, { inboxReveals: { ...reveals, band_tip: { shownAt: "2026-10-01T10:00:00.000Z" } } });
+  const revealsNow = (settled.inboxReveals ?? config.inboxReveals) as Record<string, unknown> | undefined;
+  if (revealsNow?.code_review === undefined) Object.assign(settled, { inboxReveals: { ...revealsNow, code_review: { shownAt: "2026-10-01T10:00:00.000Z" } } });
   if (Object.keys(settled).length > 0) writeFileSync(file, JSON.stringify({ ...config, ...settled }));
 }
 const server = await startInboxServer({

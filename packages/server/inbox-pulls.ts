@@ -2413,29 +2413,13 @@ export function linkInboxPulls(
     }
   }
 
-  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string, pictureItSince: string | null = null): InboxPullLink => {
-    const { last, guide, pictureIt, pictureItSeen } = threadFacts(store, threadId, pictureItSince);
-    const root = store.message(threadId)?.to ?? null;
-    return {
-      via,
-      ...(via === "owner" && root?.session ? { handed_to: root.session } : {}),
-      thread_id: threadId,
-      thread_subject: store.threadSubject(threadId),
-      project_id: projectId,
-      agent: threadAgent(store, threadId),
-      last: last ? { message_id: last.id, preview: previewOf(last.body), at: last.created_at } : null,
-      guide: guide?.guide
-        ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true, session: guide.author.kind === "agent" ? guide.author.session : null }
-        : null,
-      ...(pictureIt?.picture_it ? { picture_it_page: { message_id: pictureIt.id, title: pictureIt.picture_it.title, at: pictureIt.created_at, ...(pictureItSeen ? { seen: true as const } : {}) } } : {}),
-    };
-  };
+  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string, pictureItSince: string | null = null) => pullLinkOf(store, via, threadId, projectId, pictureItSince);
 
   for (const pull of pulls) {
     const owner = owners.get(pull.key);
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
-      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject, owner.picture_it_at ?? null), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.picture_it_at ? { picture_it_asked_at: owner.picture_it_at } : {}), ...(owner.page ? { page: true as const } : {}) };
+      links[pull.key] = ownerLinkOf(store, owner, ownerProject);
       continue;
     }
     const started = startedThread.get(pull.key);
@@ -2447,6 +2431,46 @@ export function linkInboxPulls(
     if (url) links[pull.key] = linkOf("url", url.thread, url.project);
   }
   return links;
+}
+
+/**
+ * The PRs off the list a thread still owns by the person's tie (a merged ship's teammate PR: the list keeps only the
+ * person's own merged PRs), linked as `linkInboxPulls` links a listed one. A key already linked, or with no tie, or
+ * whose thread has no project, is left alone.
+ */
+export function linkUnlistedPulls(
+  keys: Iterable<string>,
+  links: Record<string, InboxPullLink>,
+  store: InboxPullLinkStore,
+  owners: ReadonlyMap<string, { thread_id: string; ask?: InboxPullAsk; picture_it_at?: string; page?: true }>,
+): void {
+  for (const key of keys) {
+    const owner = links[key] ? undefined : owners.get(key);
+    const project = owner ? store.threadProject(owner.thread_id) : null;
+    if (owner && project) links[key] = ownerLinkOf(store, owner, project);
+  }
+}
+
+function ownerLinkOf(store: InboxPullLinkStore, owner: { thread_id: string; ask?: InboxPullAsk; picture_it_at?: string; page?: true }, projectId: string): InboxPullLink {
+  return { ...pullLinkOf(store, "owner", owner.thread_id, projectId, owner.picture_it_at ?? null), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.picture_it_at ? { picture_it_asked_at: owner.picture_it_at } : {}), ...(owner.page ? { page: true as const } : {}) };
+}
+
+function pullLinkOf(store: InboxPullLinkStore, via: InboxPullLink["via"], threadId: string, projectId: string, pictureItSince: string | null = null): InboxPullLink {
+  const { last, guide, pictureIt, pictureItSeen } = threadFacts(store, threadId, pictureItSince);
+  const root = store.message(threadId)?.to ?? null;
+  return {
+    via,
+    ...(via === "owner" && root?.session ? { handed_to: root.session } : {}),
+    thread_id: threadId,
+    thread_subject: store.threadSubject(threadId),
+    project_id: projectId,
+    agent: threadAgent(store, threadId),
+    last: last ? { message_id: last.id, preview: previewOf(last.body), at: last.created_at } : null,
+    guide: guide?.guide
+      ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true, session: guide.author.kind === "agent" ? guide.author.session : null }
+      : null,
+    ...(pictureIt?.picture_it ? { picture_it_page: { message_id: pictureIt.id, title: pictureIt.picture_it.title, at: pictureIt.created_at, ...(pictureItSeen ? { seen: true as const } : {}) } } : {}),
+  };
 }
 
 /** The Board cards that link the PRs (a card's `pr` or `ref`), by pull key: read only while the Board is on. */

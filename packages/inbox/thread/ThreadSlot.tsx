@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
 import { closeTo } from '../app/focus';
 import { writeRoute } from '../app/writeRoute';
 import { CardChip } from '../board/CardChip';
@@ -85,8 +86,14 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
     reportScreen();
   });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
+  const backLabel = fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle;
+  // A thread that throws while it draws says so in the pane; the sidebar and the list stay (ui's RegionBoundary). Try
+  // again mounts the pane afresh, which reads its reply draft back from the server (replyDraft.ts flushes on unmount).
+  // The notice takes the header's Back too, and the address names the thread (a reload opens it again): its own Back,
+  // in the header's words, closes the pane (on a phone, back to the list).
   return (
     <PaneScopeContext.Provider value={scope}>
+      <RegionBoundary name="Thread pane" className="ib-pane ib-pempty" resetKey={threadId} onClose={onClose} closeLabel={`Back to ${backLabel}`}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
           and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
       {threadId && !ready && ((!phone && !stack.thread) || awayWait) && (
@@ -256,7 +263,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             screen.current = state;
             reportScreen();
           }}
-          backLabel={fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle}
+          backLabel={backLabel}
           cardChip={fromCard ? <CardChip card={host.cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={host.backToCard} /> : undefined}
           phone={phone}
           stacked={stack.thread || !!fromCard}
@@ -279,6 +286,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           }}
         />
       )}
+      </RegionBoundary>
     </PaneScopeContext.Provider>
   );
 }

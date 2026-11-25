@@ -101,6 +101,7 @@ import { loadConfig, resolveInboxLaunch, saveConfig } from "@plannotator/shared/
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxSectionWhileRoutineRuns } from "@plannotator/shared/inbox/list";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
@@ -690,9 +691,10 @@ export function createInboxLaunch(options: {
 
   /**
    * What waits for `session` from the person, oldest first: never the note that its questions moved (resolve_message's
-   * `moved_to`). That note goes to a session that comes on its own; it never starts or respawns one.
+   * `moved_to`), nor Ship's stop or closed line (`ship_note` `stop`). Those go to a session that comes on its own; they
+   * never start or respawn one. Ship's watch notes do: the agent's job is not done until the PR is merged.
    */
-  const personPending = (session: string): InboxMessage[] => pendingOf(session).filter((m) => !m.moved_note);
+  const personPending = (session: string): InboxMessage[] => pendingOf(session).filter((m) => !m.moved_note && m.ship_note?.kind !== "stop");
 
   /**
    * A turn waits for the session: the root or a reply is not taken yet, or it
@@ -704,7 +706,7 @@ export function createInboxLaunch(options: {
     if (root.to && personPending(root.to.session).length > 0) return true;
     if (memo.busySeen) return false;
     // The note that the session's questions moved is not the person's: the latest is the message before it.
-    const lastId = [...store.threadMessageIds(root.thread_id)].reverse().find((id) => !store.message(id)?.moved_note);
+    const lastId = [...store.threadMessageIds(root.thread_id)].reverse().find((id) => !store.message(id)?.moved_note && store.message(id)?.ship_note?.kind !== "stop");
     const last = lastId ? store.message(lastId) : null;
     // The person's latest, unless it went to another session (re-addressed), or is a routine's skip line or a run that didn't start.
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session) && !(last.scheduled_run && !last.to);
@@ -1471,6 +1473,9 @@ ${result.text}`);
         : runLine?.state === "failed" || runLine?.state === "missing"
           ? { ...pending, state: "undelivered" as const, reason: "undelivered" as const, send_now: false }
           : row.delivery;
+    // A routine's run going (its newest divider's own launch): New at least until it ends (list.ts), and the window
+    // brings the row in at once (`scheduled_running`). Counts and `unread` stay the rules' own.
+    if (root.scheduled_run && word) return { ...row, run: word, delivery, section: inboxSectionWhileRoutineRuns(row), scheduled_running: true };
     return { ...row, run: word, delivery };
   };
 
@@ -1978,7 +1983,7 @@ ${result.text}`);
         .threadMessageIds(root.thread_id)
         .map((id) => store.message(id))
         // The person's own words: never the note that the session's questions moved.
-        .filter((m): m is InboxMessage => !!m && m.author.kind === "person" && !m.moved_note && m.delivery?.session === session)
+        .filter((m): m is InboxMessage => !!m && m.author.kind === "person" && !m.moved_note && !m.ship_note && m.delivery?.session === session)
         .at(-1);
       if (!last) throw new InboxError("validation_error", "That launch did not fail.");
       store.sendAgain(last.id, session);
@@ -2048,13 +2053,13 @@ ${result.text}`);
     },
     /** The last login shell's PATH folders (empty until it was read, and on Windows): the installer's extra PATH on Update now. */
     loginPath: (): string[] => [...loginPath],
+    /** The home folder the folder opener reads `~/…` from. */
+    home: options.homeDir,
     /**
      * A folder picked in the folder opener outside compose (Reviews' "On this computer" +, "Another folder…"): its real
      * path when the opener offers to start in it, by the opener's own rules (`resolveHomeFolder`, read off the process
      * outside home); null while launch is off, or for a folder it refuses, can't open, isn't there or never starts in.
      */
-    /** The home folder the folder opener reads `~/…` from. */
-    home: options.homeDir,
     async pickedFolder(typed: string): Promise<string | null> {
       if (!enabled()) return null;
       const read = await resolveFolderAnywhere(typed);
