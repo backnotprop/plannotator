@@ -1875,7 +1875,8 @@ export const inboxApi = {
   /** Take an uploaded picture away: the agents showing it go back to their own mark. Answers `{ faces, rev, icons }`. */
   removeAgentIcon: (id: string) => post<unknown>(inboxUrl('/agent-icons'), { remove: id }),
   /** "Animate it": a request an agent's hand-back names (`{ request }`), for this agent and the picture it shows. */
-  askIconAnimate: (animate: { icon: string; agent: string; sessions: string[] }) => post<{ request?: unknown }>(inboxUrl('/icon-animate'), { animate }),
+  askIconAnimate: (animate: { icon: string; agent: string; sessions: string[] } | { icon: string; project: string }) =>
+    post<{ request?: unknown }>(inboxUrl('/icon-animate', undefined, 'project' in animate ? machineOf(animate.project) : null), { animate }),
   /** Pictures agents handed back and the originals they replaced (`{ results: [{ icon, result }] }`): "Use the original". */
   iconAnimateResults: () => get<{ results?: unknown }>(inboxUrl('/icon-animate')),
   /** The icon sets for agents' icons ("Sets"): built in, then fetchable (`remote`: the pointer is read too; the picker's Sets only). */

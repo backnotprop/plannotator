@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { HostMark, Icon } from '../icons';
 import { Modal } from '../components/Updates';
+import { ProjectMark } from '../letterMarks';
 import type { AgentFaceRef } from './agentFaces';
 import { isOwnFace, type AgentFace } from './faceChoices';
 import { OWN_LABEL, SETS_LABEL } from './FaceFan';
@@ -8,6 +9,7 @@ import { OwnIconsBody } from './OwnIconsBody';
 import { SetsBody } from './SetsBody';
 import { SelectedIcon } from './SelectedIcon';
 import { isSetFace } from './iconSets';
+import { PROJECT_NO_FACE, type IconTarget } from './iconTarget';
 
 export type AgentIconPlace = 'own' | 'sets';
 
@@ -22,14 +24,27 @@ export type AgentIconPlace = 'own' | 'sets';
  * opened on the grid, and its pages without "Animate it".
  */
 export function AgentIconDialog({ place, agent, host, name, face, shared = false, onClose }: { place: AgentIconPlace; agent: AgentFaceRef; host: string | null; name: string; face: AgentFace; shared?: boolean; onClose: () => void }) {
+  return <IconDialog place={place} target={{ kind: 'agent', agent }} host={host} name={name} face={face} shared={shared} onClose={onClose} />;
+}
+
+/**
+ * The same dialog for a project's picture (its letter mark): opened from the project mark's picker or the project ⋯
+ * menu's Set picture…, on the grid of either place. Use this icon keeps the icon's bytes as the project's picture
+ * (iconTarget.ts), on the Inbox that has the project, a linked machine's too.
+ */
+export function ProjectIconDialog({ place, project, name, onClose }: { place: AgentIconPlace; project: string; name: string; onClose: () => void }) {
+  return <IconDialog place={place} target={{ kind: 'project', project, name }} host={null} name={name} face={PROJECT_NO_FACE} onClose={onClose} />;
+}
+
+function IconDialog({ place, target, host, name, face, shared = false, onClose }: { place: AgentIconPlace; target: IconTarget; host: string | null; name: string; face: AgentFace; shared?: boolean; onClose: () => void }) {
   const [on, setOn] = useState<AgentIconPlace>(shared ? 'sets' : place);
   const uid = useId();
-  const agentId = typeof agent === 'string' ? agent : agent.id;
+  const agentId = target.kind === 'agent' ? (typeof target.agent === 'string' ? target.agent : target.agent.id) : null;
   const places: { id: AgentIconPlace; label: string }[] = [
     { id: 'own', label: OWN_LABEL },
     { id: 'sets', label: SETS_LABEL },
   ];
-  const inUse = !shared && (place === 'own' ? isOwnFace(face) : isSetFace(face));
+  const inUse = !shared && target.kind === 'agent' && (place === 'own' ? isOwnFace(face) : isSetFace(face));
   const [page, setPage] = useState(inUse);
   // An icon picked in a grid: shown on its page, not kept.
   const [preview, setPreview] = useState<AgentFace | null>(null);
@@ -48,9 +63,15 @@ export function AgentIconDialog({ place, agent, host, name, face, shared = false
   return (
     <Modal labelledBy={`${uid}-t`} testId="agent-icon" onClose={onClose} ownKeys initialFocus={initialFocus} className="ib-agi">
       <div className="ib-dlg-head ib-agi-head">
-        <span className="ib-agi-mark" data-agent-icon-now={agentId}>
-          <HostMark host={host} agent={agentId} big />
-        </span>
+        {target.kind === 'project' ? (
+          <span className="ib-agi-mark" data-project-icon-now={target.project}>
+            <ProjectMark projectId={target.project} name={target.name} size={24} />
+          </span>
+        ) : (
+          <span className="ib-agi-mark" data-agent-icon-now={agentId}>
+            <HostMark host={host} agent={agentId} big />
+          </span>
+        )}
         <h2 id={`${uid}-t`} dir="auto">
           {name}
         </h2>
@@ -72,7 +93,7 @@ export function AgentIconDialog({ place, agent, host, name, face, shared = false
       </div>
       <div className="ib-agi-body" role={shared ? undefined : 'tabpanel'} tabIndex={-1}>
         {page && (preview || inUse) ? (
-          <SelectedIcon agent={agent} host={host} name={name} face={preview ?? face} previewing={!!preview} shared={shared} onBack={toGrid} onDone={onClose} />
+          <SelectedIcon target={target} host={host} name={name} face={preview ?? face} previewing={!!preview} shared={shared} onBack={toGrid} onDone={onClose} />
         ) : on === 'own' ? (
           <OwnIconsBody face={face} onPick={onPick} />
         ) : (

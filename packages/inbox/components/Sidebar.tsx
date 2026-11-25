@@ -877,8 +877,8 @@ export function Sidebar(props: SidebarProps) {
                       ? (name) => props.onProjectRename!(project.id, name)
                       : undefined
                   }
-                  // A picture is kept by the Inbox that has the project: this machine's projects only.
-                  onPicture={props.onProjectPicture && local(project) ? (file) => props.onProjectPicture!(project.id, file) : undefined}
+                  // A picture is kept by the Inbox that has the project: a linked machine's is sent there.
+                  onPicture={props.onProjectPicture ? (file) => props.onProjectPicture!(project.id, file) : undefined}
                   newSession={
                     props.onProjectNewSession
                       ? (() => {

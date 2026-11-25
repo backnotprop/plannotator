@@ -11,8 +11,9 @@
 /** The new thread's name. */
 export const ANIMATE_THREAD_NAME = 'Animate an agent icon';
 
-export function animatePrompt(requestId: string): string {
-  return `Please animate the picture attached to this message. It is the icon of one of my agents in my Plannotator Inbox.
+/** `of`: whose icon it is, an agent's or a project's picture. */
+export function animatePrompt(requestId: string, of: 'agent' | 'project' = 'agent'): string {
+  return `Please animate the picture attached to this message. It is the icon of one of my ${of === 'project' ? 'projects' : 'agents'} in my Plannotator Inbox.
 
 Make one animated SVG of it that is clearly alive: a little character you can see moving at a glance, with personality, like an idle animation in a game. Lively, but not frantic, and never in sync with itself.
 

@@ -1,7 +1,8 @@
 import type { InboxAgent } from '@plannotator/core/inbox-types';
-import { InboxHeldError, inboxApi } from './api';
+import { InboxApiError, InboxHeldError, inboxApi } from './api';
 import { keepAgentName } from './agents/agentFaces';
 import { formatCount } from './format';
+import { projectRefusal } from './agents/iconTarget';
 import { pictureFromFile } from './projectPictures';
 import { errorToast } from './toastError';
 import type { InboxToastModel } from './components/Toast';
@@ -49,7 +50,8 @@ export function projectWrites({ showToast, dismissToast, refreshList, say, lates
       }
       await inboxApi.setProjectPicture(projectId, read.picture);
     } catch (cause) {
-      showToast(errorToast(cause, 'The picture did not change.'));
+      // A linked machine too old to take a picture is named, as the icon dialog names it.
+      showToast(cause instanceof InboxApiError && cause.code === 'device_route_not_found' ? { icon: 'warn', lead: projectRefusal(projectId, cause), wrap: true } : errorToast(cause, 'The picture did not change.'));
       return false;
     }
     await refreshList(false);
