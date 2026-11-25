@@ -99,6 +99,11 @@ export interface InboxRegistryEntry {
 /** How many earlier runs an entry names (`follows`): a window that slept through more restarts than this reloads, as before. */
 export const INBOX_SESSION_LINEAGE_MAX = 8;
 
+/** Browser links use the published window; local API/MCP traffic still uses entry.url/port. */
+export function inboxBrowserUrl(entry: Pick<InboxRegistryEntry, "url" | "tailscale">): string {
+  return entry.tailscale?.url || entry.url;
+}
+
 /** The `inbox/` folder's identity (device:inode), or null where it cannot be read. A copied or restored folder has another. */
 export function inboxHome(dataDir: string): string | null {
   try {
