@@ -255,8 +255,9 @@ test('a video played in a message is an artifact: the count, the grid, the viewe
     await expect(small.locator(PANE_VIDEO)).toBeVisible();
     await filmReady(small);
     await shot(small, '15-viewer-from-the-body-phone');
-    const cards = small.locator('[data-attachment-pane] .ib-apanel [data-video-card-time]');
-    await expect(cards).toHaveText(['0:00', '0:01']);
+    // A phone lists them under the rail (VideoAttachmentView's `data-video-list`); the side panel stays closed.
+    const cards = small.locator('[data-attachment-pane] [data-video-list] [data-video-card]');
+    await expect(cards.locator('.ib-vtime')).toHaveText(['0:00', '0:01']);
     await cards.nth(0).scrollIntoViewIfNeeded();
     await shot(small, '16-time-comment-phone');
     await cards.nth(1).scrollIntoViewIfNeeded();
