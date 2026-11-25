@@ -320,11 +320,10 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // Export decisions: the thread's decisions as a download (`?format=md|html|json&tz=`), read only, from what the thread read serves.
   { method: "GET", route: /^threads\/([^/]+)\/decisions$/, window: (m) => `/api/inbox/threads/${m[1]}/decisions` },
   // Decision mode on this Inbox's threads from a linked machine's window (mark `decisions`, inbox-decisions-merged.ts):
-  // the decisions waiting here, and a Can't do it's reason kept as the thread's comment draft here, as this window
-  // keeps it. Its picks, marks and Send go through the routes above. Phones have no decision mode.
+  // the decisions waiting here. Its picks, marks and Send go through the routes above; a Can't do it's reason stays a
+  // draft on the window's own Inbox (inbox-comment-drafts.ts) and reaches this one only as the mark's note. Phones
+  // have no decision mode.
   { method: "GET", route: /^decisions$/, window: () => "/api/inbox/decisions", machineOnly: true },
-  { method: "GET", route: /^threads\/([^/]+)\/comment-draft$/, window: (m) => `/api/inbox/threads/${m[1]}/comment-draft`, machineOnly: true },
-  { method: "POST", route: /^threads\/([^/]+)\/comment-draft$/, window: (m) => `/api/inbox/threads/${m[1]}/comment-draft`, machineOnly: true },
   { method: "GET", route: /^attachments\/([^/]+)\/view$/, window: (m) => `/api/inbox/attachments/${m[1]}/view` },
   // An image's bytes, a video's or a recording's (by Range) and any kind's download (by Range
   // too): the window's own routes, so the phone gets the same dotenv refusal,

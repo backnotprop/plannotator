@@ -305,9 +305,6 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST threads/:id/remove-agent": "set",
   "POST threads/:id/remove-agent/undo": "set",
   "POST messages/:id/actions/(a-[0-9a-f]{8}(?:-\\d{1,3})?)": "set",
-  // Decision mode's reason under a Can't do it, kept as the thread's comment draft on the thread's own machine (mark
-  // `decisions`): its words under its key, the last ones saved standing (`force`), so a second copy changes nothing more.
-  "POST threads/:id/comment-draft": "set",
   // A run starts, stops or opens a terminal now, and a secret's value is never written to the outbox: sent now from a
   // press in a window there, or not at all (inbox-run-routes.ts).
   "POST messages/:id/run": "now",

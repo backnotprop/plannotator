@@ -23519,9 +23519,7 @@
     {
       "id": "undecided-door-get-threads-id-comment-draft",
       "title": "door:GET threads/:id/comment-draft",
-      "surface": [
-        "door:GET threads/:id/comment-draft"
-      ],
+      "surface": [],
       "flows": [],
       "mobile": "undecided",
       "why": "",
@@ -23533,9 +23531,7 @@
     {
       "id": "undecided-door-post-threads-id-comment-draft",
       "title": "door:POST threads/:id/comment-draft",
-      "surface": [
-        "door:POST threads/:id/comment-draft"
-      ],
+      "surface": [],
       "flows": [],
       "mobile": "undecided",
       "why": "",

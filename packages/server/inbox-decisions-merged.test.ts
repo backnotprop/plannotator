@@ -61,9 +61,12 @@ describe("the merged read", () => {
     const asleep = await far.read();
     expect(asleep[0]!.map((d) => d.id)).toEqual([`${id(1)}/q1`, `${id(2)}/q2`]);
     expect(studio.asked).toBe(1);
-    // Back, it is read again. Then decision mode turned off on Studio: none of its threads offers it, and nothing is kept for when it sleeps.
+    // Back, it is read again (behind the answer, which is what it last gave). Then decision mode turned off on Studio:
+    // none of its threads offers it, and nothing is kept for when it sleeps.
     studio.state = "online";
     studioOff = true;
+    await far.read();
+    await settle();
     expect(await far.read()).toEqual([[]]);
     studio.state = "offline";
     expect(await far.read()).toEqual([[]]);
@@ -78,9 +81,53 @@ describe("the merged read", () => {
     const far = createFarDecisions(() => [studio]);
     await far.read();
     broken = true;
+    await far.read();
+    await settle();
     expect((await far.read())[0]!.map((d) => d.id)).toEqual([`${id(1)}/q1`]);
   });
+
+  test("a door that stalls mid-body never holds a read: the first waits at most its limit, the next answers at once; reads share one ask", async () => {
+    let stall = false;
+    const studio: DecisionsPeer & { asked: number } = {
+      id: STUDIO,
+      state: "online",
+      list: { marks: [DECISIONS_MARK] },
+      asked: 0,
+      request: async (_route, _search, init) => {
+        studio.asked += 1;
+        if (!stall) return Response.json({ decisions: [decision(1, 1)] });
+        // Headers at once, then a body that never ends: only the read's signal ends it.
+        const body = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"decisions":['));
+            init.signal?.addEventListener("abort", () => controller.error(init.signal!.reason));
+          },
+        });
+        return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+      },
+    };
+    stall = true;
+    const far = createFarDecisions(() => [studio], 60);
+    let started = Date.now();
+    expect(await far.read()).toEqual([[]]);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    await new Promise((done) => setTimeout(done, 120));
+    stall = false;
+    await far.read();
+    await settle();
+    expect((await far.read())[0]!.map((d) => d.id)).toEqual([`${id(1)}/q1`]);
+    // It stalls again: what it last gave answers at once, and two windows' reads meanwhile ask it once.
+    stall = true;
+    const before = studio.asked;
+    started = Date.now();
+    const [one, two] = await Promise.all([far.read(), far.read()]);
+    expect(Date.now() - started).toBeLessThan(40);
+    expect([one[0]!.length, two[0]!.length, studio.asked - before]).toEqual([1, 1, 1]);
+    await new Promise((done) => setTimeout(done, 120));
+  });
 });
+
+const settle = () => new Promise((done) => setTimeout(done, 5));
 
 describe("merging", () => {
   test("this Inbox's first, a far one of a thread held here or listed twice passed over, a project filter kept", () => {

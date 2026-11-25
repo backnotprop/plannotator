@@ -23,6 +23,8 @@ export interface InboxCommentDraft {
 export type InboxCommentDraftSave = { draft: InboxCommentDraft | null } | { conflict: InboxCommentDraft | null };
 
 const DIR = "comment-drafts";
+/** The key of a decision reason kept for a linked computer's thread: `<ibx id>\0decision-reason:<message id>/<key>`. */
+const FAR_REASON_KEY = /^ibx_[0-9A-HJKMNP-TV-Z]{26}\u0000decision-reason:/;
 const KEY_MAX = 600;
 
 function folder(inboxDir: string): string {
@@ -132,6 +134,9 @@ export function inboxCommentDraftUploadIds(inboxDir: string, threadExists: (thre
       continue;
     }
     if (!draft) continue;
+    // A decision reason kept here for a linked computer's thread (packages/server/inbox-comment-drafts.ts): its thread is
+    // on that computer, never in this store, and it holds no pictures.
+    if (FAR_REASON_KEY.test(draft.key)) continue;
     if (!threadExists(draft.thread_id)) {
       try {
         unlinkSync(path);

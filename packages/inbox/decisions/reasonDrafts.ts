@@ -6,12 +6,13 @@
  * only as the mark's note, once Save stages the mark.
  *
  * One reason's writes go one after another, each with the words as they are when it starts, so the last words always
- * land last. A thread on a linked computer keeps its reason there, in its own comment drafts, through the forward and
- * the outbox (mark `decisions`, whose computers alone give decisions here): held while that computer is away, a write
- * counts as saved, since it lands there once that computer is back.
+ * land last. A thread on a linked computer (mark `decisions`) keeps its reasons on this Inbox, in one draft per
+ * computer, thread and key that each save overwrites (inbox-comment-drafts.ts): nothing goes through the outbox, so
+ * they save the same while that computer is away and read back after a reload. Only the mark carries the reason there.
  */
 import { useState } from 'react';
-import { inboxApi, InboxApiError, InboxHeldError } from '../api';
+import { get, inboxApi, InboxApiError, post, type InboxCommentDraftView } from '../api';
+import { inboxUrl, machineOf } from '../inboxUrl';
 import { createTypedSaves, type TypedSavesTimers } from '../typedAnswers';
 
 /** The comment-draft key of an action item's reason (`<message id>/<key>`). */
@@ -22,10 +23,21 @@ export interface ReasonStore {
   write: (threadId: string, key: string, text: string, keepalive: boolean) => Promise<void>;
 }
 
-const commentDrafts: ReasonStore = {
-  read: (threadId, key) => inboxApi.commentDraft(threadId, key).then(({ draft }) => draft?.text ?? null),
+/** A linked computer's thread: its reasons are this Inbox's drafts, named by that computer (never sent there). */
+const farDraftUrl = (threadId: string) => inboxUrl(`/threads/${encodeURIComponent(threadId)}/comment-draft`);
+
+export const commentDrafts: ReasonStore = {
+  read: (threadId, key) => {
+    const machine = machineOf(threadId);
+    const read = machine ? get<{ draft: InboxCommentDraftView | null }>(`${farDraftUrl(threadId)}?key=${encodeURIComponent(key)}&machine=${machine}`) : inboxApi.commentDraft(threadId, key);
+    return read.then(({ draft }) => draft?.text ?? null);
+  },
   // The last words typed stand (any window's): `force`, as a later click wins for picks.
-  write: (threadId, key, text, keepalive) => inboxApi.saveCommentDraft(threadId, { key, text, images: [], base: null, force: true }, { keepalive }).then(() => undefined),
+  write: (threadId, key, text, keepalive) => {
+    const machine = machineOf(threadId);
+    const body = { key, text, images: [], base: null, force: true };
+    return (machine ? post(farDraftUrl(threadId), { ...body, machine }, { keepalive }) : inboxApi.saveCommentDraft(threadId, body, { keepalive })).then(() => undefined);
+  },
 };
 
 export interface ReasonDrafts {
@@ -86,8 +98,6 @@ export function createReasonDrafts(options: {
     const run = store.write(threadId, reasonDraftKey(id), text, keepalive).then(
       () => true,
       (cause: unknown) => {
-        // Held for the linked computer the thread lives on: it lands there when that computer is back.
-        if (cause instanceof InboxHeldError) return true;
         // Newer words were typed since, or a write waits behind this one: that one decides.
         if ((texts.get(id) ?? '') !== text || waiting.has(id)) return true;
         if (silent) {

@@ -26,11 +26,12 @@ import { readInboxQuestionKind } from '@plannotator/core/inbox-types';
 import { whenTime } from '@plannotator/core/inbox-format';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView } from '../api';
-import { awayThreadRead, farMachine, heldSendLine, type HeldMark } from './farThread';
+import { awayThreadRead, farMachine, heldSendLine, outboxNotApplied, type HeldMark } from './farThread';
 import { machineOf } from '../inboxUrl';
 import { replyKeysToRenew, type SendTarget, type SentContents } from '../sendTargets';
 import { agentName, formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
+import { outboxLine } from '../machines';
 import { prefersReducedMotion } from '../settle';
 import { registerReloadFlush } from '../stalePage';
 import { Tip } from '../components/Tip';
@@ -276,33 +277,62 @@ export function DecisionMode(props: DecisionModeProps) {
       machine: farMachine,
     }),
   );
-  /** The words a held answer or mark put up (held for a linked computer): they go once nothing waits for it. */
-  const heldWordsShown = useRef<string | null>(null);
+  /** What waits for a linked computer ("Waiting for Laptop: …"): a status, not an error; it goes once nothing waits. */
+  const [heldNote, setHeldNote] = useState<string | null>(null);
   const sayHeld = (words: string) => {
-    heldWordsShown.current = words;
-    if (!awayRef.current) setError(words);
+    if (!awayRef.current) setHeldNote(words);
   };
   /** Action items' marks held for the linked computer, by outbox key: a Send made while it is away carries them. */
   const heldMarks = useRef(new Map<string, HeldMark>());
-  /** An action item's mark held for the linked computer the thread lives on: staged there once it is back, as a pick is. */
-  const markHeldAsSaved = async (held: HeldMark, write: Promise<unknown>): Promise<void> => {
+  /** An action item's mark: true when it is held for the linked computer the thread lives on (it settles later). */
+  const markHeldAsSaved = async (held: HeldMark, write: Promise<unknown>): Promise<boolean> => {
     try {
       await write;
+      return false;
     } catch (cause) {
       if (!(cause instanceof InboxHeldError)) throw cause;
       heldMarks.current.set(cause.outbox.key, held);
       sayHeld(cause.message);
+      return true;
     }
   };
-  // The outbox's frames settle held answers (applied there, or unpicked again and told); once none waits for the
-  // thread's computer, the words that said so go.
+  // The outbox's frames settle held answers. A held mark delivered there: its reason's draft goes now (never before, so
+  // a mark refused there keeps it). Refused or never applied: the card is open again with its reason, and says why.
+  const settleHeldMarks = (entries: ReadonlyMap<string, OutboxView>) => {
+    for (const [key, entry] of entries) {
+      const held = heldMarks.current.get(key);
+      if (!held || entry.state === 'queued' || entry.state === 'sending') continue;
+      heldMarks.current.delete(key);
+      const thread = queueRef.current.cache.get(held.id)?.thread.id;
+      if (entry.state === 'delivered') {
+        if (held.mark?.outcome === 'cant' && thread) reasons.clear(thread, held.id);
+        continue;
+      }
+      if (held.mark) reopenAction(held.id);
+      if (held.mark?.note && thread && !reasons.text(held.id)) reasons.type(thread, held.id, held.mark.note);
+      setError(`Not saved. ${outboxLine(entry, farMachine(entry.machine))?.text ?? 'Not delivered.'}`);
+      props.refresh();
+    }
+  };
   useEffect(() => {
     if (!props.outbox) return;
     saves.settleHeld(props.outbox.values());
-    for (const [key, entry] of props.outbox) if (entry.state !== 'queued' && entry.state !== 'sending') heldMarks.current.delete(key);
+    settleHeldMarks(props.outbox);
+    // A Send held for that computer and refused there (or never sent): its chip says so with Try again, whatever the
+    // notice does after, and its answers count as not sent again.
+    for (const [group, state] of sendsRef.current) {
+      const lost = state.kind === 'sent' ? state.held?.map((key) => props.outbox!.get(key)).find(outboxNotApplied) : undefined;
+      if (!lost) continue;
+      setSend(group, { kind: 'failed', error: outboxLine(lost, farMachine(lost.machine))?.text ?? 'Not sent.' });
+      setCarried((current) => {
+        const next = new Map(current);
+        next.delete(group);
+        return next;
+      });
+    }
     const machine = threadIdRef.current ? machineOf(threadIdRef.current) : null;
     const waiting = [...props.outbox.values()].some((entry) => entry.machine === machine && (entry.state === 'queued' || entry.state === 'sending'));
-    if (!waiting) setError((shown) => (shown !== null && shown === heldWordsShown.current ? null : shown));
+    if (!waiting) setHeldNote(null);
   }, [props.outbox, saves]);
   /** The reasons typed under "Can't do it…", drafts like every answer (reasonDrafts.ts). */
   const { reasons, texts: reasonTexts } = useReasonDrafts((message) => {
@@ -498,7 +528,7 @@ export function DecisionMode(props: DecisionModeProps) {
         [draft, model] = await Promise.all([inboxApi.replyDraft(first.thread.id), inboxApi.thread(first.thread.id)]);
       } catch (cause) {
         // Its linked computer away: sent from the thread as held here, and the reply waits for it (farThread.ts).
-        const kept = awayThreadRead(cause, first.thread.id, heldRef.current, { picks: saves.heldPicks(), marks: [...heldMarks.current.values()] });
+        const kept = awayThreadRead(cause, first.thread.id, heldRef.current, { picks: saves.heldPicks(), marks: [...heldMarks.current.values()] }, rowsRef.current.get(first.thread.id)?.unsent?.reply_at ?? null);
         if (!kept) {
           setSend(key, { kind: 'failed', error: "Couldn't check the thread for a draft reply, so nothing was sent." });
           return 'failed';
@@ -529,7 +559,10 @@ export function DecisionMode(props: DecisionModeProps) {
         const contents: SentContents = { value: target.message.id, answers: answersOf(target) };
         const last = sendContents.current.get(keyId);
         // A replay of a key answers the reply it wrote: a changed answer (a new revision) takes a new key.
-        const renew = !sendKeys.current.has(keyId) || (last !== undefined && replyKeysToRenew(new Map([[keyId, last]]), new Map([[keyId, contents]])).length > 0);
+        // A reply held for another computer that surely never applied there (refused, cancelled, unlinked before it
+        // went) takes a new key too, so Try again sends it; one that may have applied keeps its key.
+        const heldBefore = props.outbox?.get(sendKeys.current.get(keyId) ?? '');
+        const renew = !sendKeys.current.has(keyId) || outboxNotApplied(heldBefore) || (last !== undefined && replyKeysToRenew(new Map([[keyId, last]]), new Map([[keyId, contents]])).length > 0);
         if (renew) sendKeys.current.set(keyId, newUuid());
         sendContents.current.set(keyId, contents);
         const result = await inboxApi.reply(target.message.id, {
@@ -668,6 +701,19 @@ export function DecisionMode(props: DecisionModeProps) {
     if (pointer && settlesAtOnce(decision, before, answer)) land(id, answer!, answerWords(answer));
   };
 
+  /** An action item's card open again (Undo, or its mark refused on the computer the thread lives on). */
+  const reopenAction = (id: string) => {
+    setQueue((current) => {
+      const known = current.cache.get(id);
+      if (!known) return current;
+      const cache = new Map(current.cache).set(id, { ...known, question: { ...known.question, state: 'open', action_result: null } });
+      const gone = new Map(current.gone);
+      gone.delete(id);
+      return { ...current, cache, gone, current: id };
+    });
+    setStamp(null);
+  };
+
   /** An action item's Done or Can't do it: it waits in the thread's draft, as the thread's own checklist does. */
   const act = (id: string, mark: { outcome: 'done' | 'cant'; note?: string }) => {
     const decision = queueRef.current.cache.get(id);
@@ -682,10 +728,11 @@ export function DecisionMode(props: DecisionModeProps) {
     pendingPicks.current.add(id);
     pickChain.current = pickChain.current.then(async () => {
       try {
-        await markHeldAsSaved({ id, mark }, inboxApi.markAction(decision.message.id, decision.question.key, mark, true));
+        const held = await markHeldAsSaved({ id, mark }, inboxApi.markAction(decision.message.id, decision.question.key, mark, true));
         // The reason now waits as the mark's note: its own draft goes (Undo puts it back). That write failing is
         // never told and never stops a reload: the reason already went with the mark (it is tried again quietly).
-        if (mark.outcome === 'cant' && reasons.text(id)) reasons.clear(decision.thread.id, id);
+        // Held for another computer, it goes once the mark lands there (settleHeldMarks).
+        if (!held && mark.outcome === 'cant' && reasons.text(id)) reasons.clear(decision.thread.id, id);
       } catch (cause) {
         setError(cause instanceof InboxApiError ? cause.message : 'That was not saved.');
         props.refresh();
@@ -732,15 +779,7 @@ export function DecisionMode(props: DecisionModeProps) {
             reasons.type(decision.thread.id, entry!.id, entry!.note);
             reasons.flush();
           }
-          setQueue((current) => {
-            const cache = new Map(current.cache);
-            const known = cache.get(entry!.id) ?? decision;
-            cache.set(entry!.id, { ...known, question: { ...known.question, state: 'open', action_result: null } });
-            const gone = new Map(current.gone);
-            gone.delete(entry!.id);
-            return { ...current, cache, gone, current: entry!.id };
-          });
-          setStamp(null);
+          reopenAction(entry!.id);
           setError(null);
           setSaid('Undone.');
         } catch (cause) {
@@ -901,6 +940,17 @@ export function DecisionMode(props: DecisionModeProps) {
           {error}
         </div>
       )}
+      {/* What waits for a linked computer: a status (polite), drawn as the thread's held writes are. */}
+      <div className="ib-dm-held" role="status" aria-live="polite" data-decision-held={heldNote ? '' : undefined}>
+        {heldNote && (
+          <span className="ib-delivered" data-delivery="queued">
+            <span className="ib-dl-main">
+              <Icon name="clock" size={14} />
+              <span className="ib-dl-text">{heldNote}</span>
+            </span>
+          </span>
+        )}
+      </div>
       <div className="ib-dm-stage">
         {overview ? (
           <Overview

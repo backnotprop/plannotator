@@ -5,11 +5,11 @@
  * and every answer goes there through the forward, the door's allowlist and the outbox. Starts two Inboxes: CI runs it.
  *
  * What this catches: a linked computer's decisions missing from the merged read (no "Decide these N" on its threads),
- * either way; a far decision not named by its computer (its answers would go to the wrong Inbox); a pick, an un-pick or
- * a Can't do it's reason from the window not landing there, or landing here; the reason not read back; the other
- * computer away: its decisions dropped instead of kept as it last gave them, a pick, a reason or the Send refused
- * instead of held, or a held one sent twice or not at all once it is back; a phone reaching the routes a linked
- * computer's window uses.
+ * either way; a far decision not named by its computer (its answers would go to the wrong Inbox); a pick or an un-pick
+ * from the window not landing there, or landing here; a Can't do it's reason sent there or held in the outbox (it is
+ * the window's own Inbox's draft) or not read back; the other computer away: its decisions dropped instead of kept as
+ * it last gave them, a pick or the Send refused instead of held, or a held one sent twice or not at all once it is
+ * back; a phone reaching the decisions door route, or any door reaching a thread's comment drafts.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -156,13 +156,14 @@ describe("decision mode on a linked computer's thread", () => {
       expect([(await onLaptopNow(q1!.key)).state, (await onLaptopNow(q2!.key)).state]).toEqual(["picked", "open"]);
       expect((await onLaptopNow(q1!.key)).answer?.selected).toEqual(["Yes, tonight"]);
 
-      // A Can't do it's reason, kept as Laptop's comment draft for its thread, and read back from Studio.
+      // A Can't do it's reason: Studio's own draft for Laptop's thread, named by Laptop, never sent there (only the mark
+      // carries it). Laptop's comment drafts never see it.
       const reasonKey = `decision-reason:${onLaptop.message_id}/${q2!.key}`;
-      const reason = (text: string) => press(studio.port, `${far}/threads/${onLaptop.thread_id}/comment-draft`, { key: reasonKey, text, images: [], base: null, force: true });
+      const reason = (text: string) => press(studio.port, `/api/inbox/threads/${onLaptop.thread_id}/comment-draft`, { key: reasonKey, text, images: [], base: null, force: true, machine: laptopId });
       expect((await reason("Waiting on Bob Tully's review")).status).toBe(200);
-      const readReason = async (port: number, path: string) => ((await get(port, `${path}/threads/${onLaptop.thread_id}/comment-draft?key=${encodeURIComponent(reasonKey)}`)).draft as Json | null)?.text ?? null;
-      expect(await readReason(laptop.port, "/api/inbox")).toBe("Waiting on Bob Tully's review");
-      expect(await readReason(studio.port, far)).toBe("Waiting on Bob Tully's review");
+      const readReason = async (port: number, machine: string | null) => ((await get(port, `/api/inbox/threads/${onLaptop.thread_id}/comment-draft?key=${encodeURIComponent(reasonKey)}${machine ? `&machine=${machine}` : ""}`)).draft as Json | null)?.text ?? null;
+      expect(await readReason(studio.port, laptopId)).toBe("Waiting on Bob Tully's review");
+      expect(await readReason(laptop.port, null)).toBeNull();
 
       // The thread as Studio's window last read it: a held Send carries what the person saw (rule 11).
       const seen = (await get(studio.port, `${far}/threads/${onLaptop.thread_id}`)).cursor as number;
@@ -173,8 +174,10 @@ describe("decision mode on a linked computer's thread", () => {
       expect((await merged(studio.port)).filter((d) => d.machine === laptopId).map((d) => d.key)).toEqual([q1!.key, q2!.key]);
       const heldPick = await pick(q2!.key, q2!.revision + 2, answer(q2!.key, "Keep the result count next to the search box?", "No"));
       expect(heldPick.status).toBe(202);
-      const heldReason = await reason("Waiting on Bob Tully's review, then legal");
-      expect(heldReason.status).toBe(202);
+      // Two reason saves while Laptop is away: each saved here at once, the last standing, and nothing held for Laptop.
+      expect((await reason("Waiting on Bob Tully's review, then legal")).status).toBe(200);
+      expect((await reason("Waiting on legal")).status).toBe(200);
+      expect(await readReason(studio.port, laptopId)).toBe("Waiting on legal");
       const send = await press(studio.port, `${far}/messages/${onLaptop.message_id}/reply`, {
         words: "",
         seen_through_seq: seen,
@@ -187,7 +190,6 @@ describe("decision mode on a linked computer's thread", () => {
       const sendKey = ((await send.json()) as Json).outbox.key as string;
       expect(((await get(studio.port, "/api/inbox/outbox")).waiting as Json[]).map((e) => e.route)).toEqual([
         `messages/${onLaptop.message_id}/picks`,
-        `threads/${onLaptop.thread_id}/comment-draft`,
         `messages/${onLaptop.message_id}/reply`,
       ]);
 
@@ -200,7 +202,7 @@ describe("decision mode on a linked computer's thread", () => {
       expect((await onLaptopNow(q2!.key)).answer?.selected).toEqual(["No"]);
       const replies = laptop.store.threadMessageIds(onLaptop.thread_id).map((id) => laptop.store.message(id)!).filter((m) => m.author.kind === "person");
       expect(replies).toHaveLength(1);
-      expect(await readReason(laptop.port, "/api/inbox")).toBe("Waiting on Bob Tully's review, then legal");
+      expect([await readReason(laptop.port, null), await readReason(studio.port, laptopId)]).toEqual([null, "Waiting on legal"]);
       // Studio's own thread never took any of it.
       expect(studio.store.threadMessageIds(onStudio.thread_id).map((id) => studio.store.message(id)!).filter((m) => m.author.kind === "person")).toEqual([]);
       // Once answered there, Laptop's decisions leave Studio's merged read.
@@ -213,9 +215,9 @@ describe("decision mode on a linked computer's thread", () => {
 
   test("a phone never reaches the routes a linked computer's window uses for decision mode", async () => {
     const { doorRouteOf } = await import("./inbox-devices");
-    for (const [method, route] of [["GET", "decisions"], ["GET", "threads/msg_01JZ0000000000000000000000/comment-draft"], ["POST", "threads/msg_01JZ0000000000000000000000/comment-draft"]] as const) {
-      expect(doorRouteOf(method, route, false)).toBeNull();
-      expect(doorRouteOf(method, route, true)?.windowPath).toStartWith("/api/inbox/");
-    }
+    expect(doorRouteOf("GET", "decisions", false)).toBeNull();
+    expect(doorRouteOf("GET", "decisions", true)?.windowPath).toBe("/api/inbox/decisions");
+    // A thread's comment drafts are on no door: a reason stays on the Inbox it was typed on.
+    for (const method of ["GET", "POST"] as const) for (const machine of [false, true]) expect(doorRouteOf(method, "threads/msg_01JZ0000000000000000000000/comment-draft", machine)).toBeNull();
   });
 });

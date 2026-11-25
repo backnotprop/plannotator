@@ -30,14 +30,27 @@ export function heldSendLine(held: readonly string[] | undefined, outbox: Readon
   return lines.find((line) => line.tone === 'failed') ?? lines[0] ?? null;
 }
 
+/** A held write that surely never applied there: refused, cancelled, or dropped before it left (unlinked). */
+export function outboxNotApplied(entry: OutboxView | undefined): entry is OutboxView {
+  return !!entry && (entry.state === 'refused' || entry.state === 'cancelled' || (entry.state === 'dropped' && entry.notice?.kind === 'not_delivered'));
+}
+
 /**
  * A Send's fresh reads of the thread failed because its linked computer cannot be reached now: the thread as the dialog
  * holds it, and no reply draft (that computer's cannot be read now), so the reply waits in the outbox as one sent from
  * the thread does. Null for any other failure, or a thread of this Inbox: nothing is sent.
  */
-export function awayThreadRead(cause: unknown, threadId: string, held: ThreadModel | null, waiting: HeldAnswers = { picks: [], marks: [] }): [{ draft: null }, ThreadModel] | null {
+export function awayThreadRead(
+  cause: unknown,
+  threadId: string,
+  held: ThreadModel | null,
+  waiting: HeldAnswers = { picks: [], marks: [] },
+  /** When the thread's reply box last saved words there, as the list last said (`unsent.reply_at`). */
+  replyAt: string | null = null,
+): [{ draft: { at: string } | null }, ThreadModel] | null {
   if (!machineOf(threadId) || !(cause instanceof InboxApiError) || cause.code !== 'machine_offline') return null;
-  return held && held.thread.thread_id === threadId ? [{ draft: null }, withHeldAnswers(held, waiting)] : null;
+  // Words wait in its reply box: the answers go with them from the thread, in one reply, never split from them.
+  return held && held.thread.thread_id === threadId ? [{ draft: replyAt ? { at: replyAt } : null }, withHeldAnswers(held, waiting)] : null;
 }
 
 /** An action item's Done or Can't do it (null: taken back) held for that computer, by `<message id>/<key>`. */

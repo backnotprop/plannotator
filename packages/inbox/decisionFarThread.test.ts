@@ -7,10 +7,10 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
-import type { ThreadModel } from '@plannotator/core/inbox-wire-models';
+import type { OutboxView, ThreadModel } from '@plannotator/core/inbox-wire-models';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxApiError } from './apiError';
-import { awayThreadRead, withHeldAnswers } from './decisions/farThread';
+import { awayThreadRead, outboxNotApplied, withHeldAnswers } from './decisions/farThread';
 import { groupSendTargets } from './decisions/model';
 import { rememberMachine, resetMachineRoutes } from './inboxUrl';
 
@@ -93,6 +93,22 @@ describe("a Send on a linked computer's thread while that computer is away", () 
     expect(target!.actions).toEqual([{ key: 'a-1' }]);
     const q2 = read![1].thread.messages[0]!.questions!.find((q) => q.key === 'q-2')!;
     expect(q2.answer).toEqual(chose('No'));
+  });
+
+  test('words saved in its reply box go with the answers from the thread, never split from them', () => {
+    rememberMachine(['msg_t1'], LAPTOP);
+    expect(awayThreadRead(away, 'msg_t1', model(), undefined, '2026-11-25T10:02:00.000Z')?.[0]).toEqual({ draft: { at: '2026-11-25T10:02:00.000Z' } });
+    expect(awayThreadRead(away, 'msg_t1', model(), undefined, null)?.[0]).toEqual({ draft: null });
+  });
+
+  test('Try again renews the key only for a reply that surely never applied there', () => {
+    const entry = (state: OutboxView['state'], notice: OutboxView['notice'] = null) => ({ key: 'k', machine: LAPTOP, route: 'messages/msg_1/reply', state, queued_at: '', settled_at: null, status: null, answer: null, notice, dismissed: false }) as OutboxView;
+    expect(['refused', 'cancelled'].map((s) => outboxNotApplied(entry(s as OutboxView['state'])))).toEqual([true, true]);
+    expect(outboxNotApplied(entry('dropped', { kind: 'not_delivered', at: '' }))).toBe(true);
+    // It may have applied there (parked after tries, dropped once it left), or it still waits: the same key.
+    expect(outboxNotApplied(entry('dropped', { kind: 'may_have_been_delivered', at: '' }))).toBe(false);
+    expect(['parked', 'queued', 'sending', 'delivered'].map((s) => outboxNotApplied(entry(s as OutboxView['state'])))).toEqual([false, false, false, false]);
+    expect(outboxNotApplied(undefined)).toBe(false);
   });
 
   test('nothing held: the thread as held; a thread of this Inbox or another failure: nothing to send from', () => {

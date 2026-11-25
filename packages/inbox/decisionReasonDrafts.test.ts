@@ -3,8 +3,8 @@
  * it used to live only in the card's own state, so Previous, Next, Escape or Close lost it without a word.
  */
 import { expect, test } from 'bun:test';
-import { createReasonDrafts, reasonDraftKey, type ReasonStore } from './decisions/reasonDrafts';
-import { InboxHeldError, type MachineView } from './api';
+import { commentDrafts, createReasonDrafts, reasonDraftKey, type ReasonStore } from './decisions/reasonDrafts';
+import { rememberMachine, resetMachineRoutes } from './inboxUrl';
 
 const T = 'msg_T';
 const ID = 'msg_A/a1';
@@ -154,39 +154,38 @@ test('emptying a reason after its mark saved: a failed write is not told, keeps 
   expect(s.saved.has(reasonDraftKey(ID))).toBe(false);
 });
 
-// It used to be kept on the card only (comment drafts were not forwarded), so a reason typed on a linked computer's
-// thread was lost on close, and the person was told nothing. Now it is read and written there, and a write held for
-// that computer while it is away is saved: it lands there once it is back.
-test('a thread on a linked computer keeps its reason there; one held while that computer is away is saved, not refused', async () => {
-  const saved = new Map<string, string>();
-  const reads: string[] = [];
-  const writes: string[] = [];
-  let away = false;
-  const outbox = { key: 'k1', machine: 'ibx_01JZ0000000000000000000000', route: 'threads/msg_far/comment-draft', state: 'queued', queued_at: '', settled_at: null, status: null, answer: null, notice: null, dismissed: false } as const;
-  const store: ReasonStore = {
-    read: async (thread, key) => (reads.push(`${thread} ${key}`), saved.get(key) ?? null),
-    write: async (_thread, key, text) => {
-      writes.push(text);
-      if (away) throw new InboxHeldError(outbox, { name: 'Studio', state: 'offline' } as MachineView);
-      saved.set(key, text);
-    },
-  };
-  saved.set(reasonDraftKey(ID), 'Blocked on review');
-  const failed: string[] = [];
-  const timers: (() => void)[] = [];
-  let texts: ReadonlyMap<string, string> = new Map();
-  const reasons = createReasonDrafts({ store, onChange: (next) => (texts = next), onFailed: (m) => failed.push(m), timers: { set: (run) => timers.push(run), clear: () => {} } });
-  reasons.load('msg_far', ID);
-  await settle();
-  expect(reads).toEqual([`msg_far ${reasonDraftKey(ID)}`]);
-  expect(texts.get(ID)).toBe('Blocked on review');
-  away = true;
-  reasons.type('msg_far', ID, 'Blocked on review by Bob Tully');
-  timers.splice(0).forEach((run) => run());
-  expect(await reasons.settled()).toBe(true);
-  expect(writes).toEqual(['Blocked on review by Bob Tully']);
-  expect(failed).toEqual([]);
-  expect(texts.get(ID)).toBe('Blocked on review by Bob Tully');
+// A linked computer's thread kept its reasons there, through the append-only outbox: one held entry per typing pause
+// while it was away, and a held reason overwrote what was typed on that computer. Now they are this Inbox's own
+// drafts, named by that computer, and never go to it; its own threads keep theirs as before.
+test("a linked computer's thread keeps its reasons on this Inbox, named by that computer, never sent there", async () => {
+  const laptop = 'ibx_01JZ0000000000000000000000';
+  rememberMachine(['msg_far'], laptop);
+  const sent: { url: string; body: Record<string, unknown> | null }[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    sent.push({ url: String(url), body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null });
+    return Response.json({ draft: { text: 'Blocked on review' } });
+  }) as typeof fetch;
+  try {
+    const key = reasonDraftKey(ID);
+    expect(await commentDrafts.read('msg_far', key)).toBe('Blocked on review');
+    await commentDrafts.write('msg_far', key, 'Blocked on review by Bob Tully', false);
+    await commentDrafts.write('msg_far', key, 'Blocked until Friday', false);
+    await commentDrafts.read(T, key);
+    expect(sent.map((s) => s.url)).toEqual([
+      `/api/inbox/threads/msg_far/comment-draft?key=${encodeURIComponent(key)}&machine=${laptop}`,
+      '/api/inbox/threads/msg_far/comment-draft',
+      '/api/inbox/threads/msg_far/comment-draft',
+      `/api/inbox/threads/${T}/comment-draft?key=${encodeURIComponent(key)}`,
+    ]);
+    expect(sent.slice(1, 3).map((s) => [s.body?.machine, s.body?.text, s.body?.force])).toEqual([
+      [laptop, 'Blocked on review by Bob Tully', true],
+      [laptop, 'Blocked until Friday', true],
+    ]);
+  } finally {
+    globalThis.fetch = real;
+    resetMachineRoutes();
+  }
 });
 
 test('a read that lands after the person typed never replaces their words', async () => {

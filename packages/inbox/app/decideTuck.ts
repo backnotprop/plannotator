@@ -49,3 +49,6 @@ export function decideAwayToast(notice: DecisionAwayNotice): Omit<InboxToastMode
         : `Pick not saved. Your answer in "${subject}" did not reach the Inbox.`;
   return { icon: 'warn', lead, wrap: true, action: { label: 'Open the thread', onPress: () => writeRoute({ page: 'inbox', project: null, thread: notice.threadId }) } };
 }
+
+/** The dialog's `onAway`: a Send or a save that fails once the dialog is closed or tucked away, told by the window's toast. */
+export const decideAway = (showToast: (toast: Omit<InboxToastModel, 'id'>) => void) => (notice: DecisionAwayNotice) => showToast(decideAwayToast(notice));

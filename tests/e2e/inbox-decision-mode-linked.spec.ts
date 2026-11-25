@@ -171,6 +171,13 @@ async function shot(name: string, on: Page = page): Promise<void> {
   await on.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
+/** The same window at phone width, light and dark, then back to the desktop. */
+async function phoneShot(name: string): Promise<void> {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot(`${name}-phone`);
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+
 const dialog = () => page.locator('[data-decision-mode]');
 const card = () => dialog().locator('[data-decision-card]');
 const promptOf = () => card().locator('[data-decision-question] [data-question-part="prompt"]');
@@ -265,15 +272,21 @@ test("2. The dialog on Laptop's thread: a pick lands on Laptop, Undo takes it ba
   await goToCard(PLAIN);
   await option('Yes, tonight').click();
   await expect.poll(() => laptopState(PLAIN), { timeout: 15_000 }).toBe('picked');
-  // A Can't do it's reason, typed and left: kept as Laptop's comment draft for its thread.
+  // A Can't do it's reason, typed and left: Studio's own draft for Laptop's thread (only a mark carries it there).
   await goToCard(ACTION);
   await card().locator('[data-decision-cant]').click();
   await card().locator('textarea').fill('Bob Tully holds the deploy settings until Friday');
   const action = (await read<{ thread: { messages: { id: string; questions?: WireQuestion[] }[] } }>(laptop, `/api/inbox/threads/${laptopThread}`)).thread.messages.find((m) => m.id === laptopMessage)!.questions!.find((q) => q.kind === 'action')!;
   const key = encodeURIComponent(`decision-reason:${laptopMessage}/${action.key}`);
   await expect
-    .poll(async () => (await read<{ draft: { text: string } | null }>(laptop, `/api/inbox/threads/${laptopThread}/comment-draft?key=${key}`)).draft?.text ?? null, { timeout: 15_000 })
+    .poll(async () => (await read<{ draft: { text: string } | null }>(studio, `/api/inbox/threads/${laptopThread}/comment-draft?key=${key}&machine=${laptop.id}`)).draft?.text ?? null, { timeout: 15_000 })
     .toBe('Bob Tully holds the deploy settings until Friday');
+  // A reload of the dialog reads it back.
+  await page.reload();
+  await (await decideEntry(page, studio.url, laptopThread)).click();
+  await goToCard(ACTION);
+  await card().locator('[data-decision-cant]').click();
+  await expect(card().locator('textarea')).toHaveValue('Bob Tully holds the deploy settings until Friday', { timeout: 15_000 });
   await goToCard(PLAIN);
   await expect(card().locator('[data-question-tag]', { hasText: 'Draft' })).toBeVisible();
   await shot('02-dialog-on-a-far-thread');
@@ -284,11 +297,20 @@ test('3. Laptop asleep: a pick says it waits for Laptop, and Send says it will s
   await expect.poll(() => stateOf(studio, laptop), { timeout: 30_000 }).toBe('offline');
   await goToCard(CHANGE);
   await option('Yes, keep it there').click();
-  await expect(dialog().locator('.ib-dm-error')).toHaveText('Waiting for Laptop: this applies when Laptop is back.', { timeout: 15_000 });
+  // A status, not an error.
+  await expect(dialog().locator('[data-decision-held]')).toHaveText('Waiting for Laptop: this applies when Laptop is back.', { timeout: 15_000 });
+  await expect(dialog().locator('[role="alert"]')).toHaveCount(0);
   await shot('03-pick-held-while-laptop-is-away');
   await dialog().locator('[data-decision-send]').click();
   await expect(dialog().locator('[data-decision-chip-state]')).toHaveText('Will send when Laptop is back', { timeout: 15_000 });
   await shot('04-send-held-while-laptop-is-away');
+  await phoneShot('04-send-held-while-laptop-is-away');
+  // Laptop asleep never delays Studio's own: its fern-api thread offers "Decide these 2" at once.
+  const own = await context.newPage();
+  const started = Date.now();
+  await expect(await decideEntry(own, studio.url, studioThread)).toContainText('2');
+  expect(Date.now() - started).toBeLessThan(8_000);
+  await own.close();
 });
 
 test('4. Laptop back: the held pick and the Send land there once, and what said they wait goes', async () => {
@@ -300,8 +322,9 @@ test('4. Laptop back: the held pick and the Send land there once, and what said 
   const there = await read<{ thread: { messages: { author: { kind: string } }[] } }>(laptop, `/api/inbox/threads/${laptopThread}`);
   expect(there.thread.messages.filter((m) => m.author.kind === 'person')).toHaveLength(1);
   await expect(dialog().locator('[data-decision-chip-state="will send when laptop is back"]')).toHaveCount(0, { timeout: 30_000 });
-  await expect(dialog().locator('.ib-dm-error')).toHaveCount(0);
+  await expect(dialog().locator('[data-decision-held]')).toHaveCount(0);
   await shot('05-after-laptop-is-back');
+  await phoneShot('05-after-laptop-is-back');
 });
 
 test("5. Decision mode is one switch for both: off in Studio's Settings is off in Laptop's, and back on from Laptop", async () => {
