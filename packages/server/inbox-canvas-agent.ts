@@ -54,7 +54,7 @@ export function canvasAgentAskOf(body: Record<string, unknown>): CanvasAgentAsk 
   if (picture !== undefined) ask.picture = typeof picture === "string" ? (words(picture, "picture") as string) : picture === true ? true : (wordList(picture, "picture") as string[]);
   if (body.base !== undefined) ask.base = body.base as number;
   if (body.do !== undefined) ask.do = body.do;
-  if (by) ask.by = { host: typeof by.host === "string" ? by.host : undefined, session: typeof by.session === "string" ? by.session : undefined, name: typeof by.name === "string" ? by.name : undefined };
+  if (by) ask.by = { host: typeof by.host === "string" ? by.host : undefined, session: typeof by.session === "string" ? by.session : undefined, name: typeof by.name === "string" ? by.name : undefined, ...(by.away === true ? { away: true as const } : {}) };
   return ask;
 }
 

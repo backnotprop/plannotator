@@ -273,9 +273,31 @@ const TOMBSTONE_DAYS = 7;
  * name is one it never had (an agent added it meanwhile) and stays. For an
  * element both hold, the higher version wins, and the person wins a tie: an
  * agent's change never silently replaces what the person just did.
+ *
+ * `partial`: the window sent only what it changed since its last save (a window on a linked computer, whose saves may
+ * wait in that computer's outbox: small, and each one a change). The stored order stays; what it names takes its
+ * place by the same version rule, and what is new to the store goes on top, in the window's order.
  */
-export function mergeSave(stored: CanvasScene, incoming: CanvasScene, now: number): { scene: CanvasScene; kept: number } {
+export function mergeSave(stored: CanvasScene, incoming: CanvasScene, now: number, partial = false): { scene: CanvasScene; kept: number } {
   const theirs = new Map(incoming.elements.map((e) => [e.id, e]));
+  if (partial) {
+    let kept = 0;
+    const out = stored.elements.map((old) => {
+      const el = theirs.get(old.id);
+      if (!el) return old;
+      if ((old.version ?? 0) > (el.version ?? 0)) {
+        kept++;
+        return old;
+      }
+      return el;
+    });
+    const held = new Set(stored.elements.map((e) => e.id));
+    const added = new Set<string>();
+    for (const el of incoming.elements) if (!held.has(el.id) && !added.has(el.id)) (added.add(el.id), out.push(el));
+    const cutoff = now - TOMBSTONE_DAYS * 86_400_000;
+    const live = out.filter((e) => !e.isDeleted || (e.updated ?? now) > cutoff);
+    return { scene: { ...stored, source: incoming.source || stored.source, elements: live, appState: { ...stored.appState, ...incoming.appState }, files: { ...stored.files, ...incoming.files } }, kept };
+  }
   const out: CanvasElement[] = [];
   let kept = 0;
   const seen = new Set<string>();

@@ -77,7 +77,8 @@ export async function inboxAgentRouteAction(
     if (path === INBOX_CANVAS_AGENT_ROUTE) {
       const other = Object.keys(body).find((field) => !(CANVAS_AGENT_FIELDS as readonly string[]).includes(field));
       if (other) throw refuse(`body: ${other}: not taken here; only ${CANVAS_AGENT_FIELDS.join(", ")}.`);
-      body.by = { host: by.host, session: by.session, ...(by.name ? { name: by.name } : {}) };
+      // `away`: this agent runs on another computer, so a picture's path on this one is no use to it (inbox-canvas.ts).
+      body.by = { host: by.host, session: by.session, ...(by.name ? { name: by.name } : {}), away: true };
     }
   }
   // As the command's own request on this computer: loopback, no browser origin.

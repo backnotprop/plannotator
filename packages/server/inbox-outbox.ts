@@ -291,6 +291,16 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST threads/:id/pulls": "set",
   // A pinned artifact lives on its thread's machine (mark `artifact-pins`): a pin or an unpin puts a state there.
   "POST artifact-pins": "set",
+  // A thread's canvas lives on the thread's machine (mark `canvas`). A save names only what the person changed
+  // (`partial`), each element under its version, so it is a small command held in order and delivered once; a copy
+  // changes nothing more. An Undo names the revision it takes back; a second one is answered `already`. Pictures'
+  // files (sent ahead of the save that names them), the board's picture and an answer to a drawing job are bytes or
+  // useful only now: never held.
+  "POST threads/:id/canvas": "append",
+  "POST threads/:id/canvas/undo": "append",
+  "POST threads/:id/canvas/files": "file",
+  "POST threads/:id/canvas/picture": "file",
+  "POST canvas/jobs/:id": "file",
   "POST messages/:id/picks": "set",
   "POST messages/:id/reply": "append",
   "POST messages/:id/resolve": "set",

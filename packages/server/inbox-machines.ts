@@ -165,6 +165,8 @@ export interface InboxMachinesContext {
   capabilitySetSaid?: (value: CapabilitySet) => void;
   /** Grid is on here (experimental): only then are linked machines asked for Grid's fields and looks, and `clock_ms` shown. */
   gridOn?: () => boolean;
+  /** The canvas is on here (Settings → Capabilities): only then do a linked machine's canvas frames reach the windows. */
+  canvasOn?: () => boolean;
   /** Where the person wrote a write this Inbox forwards, told from the request (inbox-sent-from.ts). */
   sentFrom?: (req: Request, via: "local" | "tailnet") => InboxSentFrom | null;
   /** Tests: the links' clocks. */
@@ -178,7 +180,7 @@ export interface InboxMachinesContext {
 export type MachineLinkTimings = Partial<PeerLinkTimings> & { updatedShownMs?: number; restartBackMs?: number; accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: PeerRereadEvent | "cards"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: PeerRereadEvent | "cards"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } } | { event: "canvas" | "canvas-job"; data: Record<string, unknown> & { machine: string } };
 
 /** How the window draws a machine's version (approval "inbox-machine-update"). */
 export interface MachineUpdateView {
@@ -677,6 +679,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
       },
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onReread: (event) => emit({ event, data: {} }),
+      // Its canvas frames and drawing jobs, said to be its: the window reads its canvas and answers its job through the forward.
+      onCanvas: (event, data) => {
+        if (context.canvasOn?.() === true) emit({ event, data: { ...data, machine: link.id } });
+      },
       onCards: () => emit({ event: "cards", data: {} }),
       onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),

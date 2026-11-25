@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_LINKED_MARKS } from "@plannotator/core/inbox-types";
 import { createInboxDevices } from "./inbox-devices";
+import { doorWriteKind } from "./inbox-outbox";
 
 type Json = Record<string, any>;
 const roots: string[] = [];
@@ -76,14 +77,46 @@ describe("a thread's canvas on the device door", () => {
     expect([refused.status, ((await refused.json()) as Json).code]).toEqual([409, "canvas_off"]);
   });
 
-  test("a canvas write is not carried yet: a save, an Undo or a picture from a linked machine reaches nothing", async () => {
-    const d = door(() => Response.json({ ok: true }));
+  test("a linked machine's canvas writes reach the window route under their key; a phone's reach nothing", async () => {
+    const d = door(() => Response.json({ ok: true, rev: 5 }));
+    const made = (await (await d.devices.windowRoute(new Request("http://127.0.0.1/api/inbox/pairing", { method: "POST", body: "{}" }), new URL("http://127.0.0.1/api/inbox/pairing")))!.json()) as Json;
+    const phone = await d.pair({ code: made.offer.code, name: "iPhone", platform: "ios" });
     const offer = d.devices.machineDoor.openMachineOffer();
     const machine = await d.pair({ name: "Studio", platform: "machine", secret: offer.secret });
-    for (const path of ["threads/msg_A1/canvas", "threads/msg_A1/canvas/undo", "threads/msg_A1/canvas/picture"]) {
-      const refused = await d.ask(machine.token, path, "POST");
-      expect([path, refused.status]).toEqual([path, 404]);
-    }
+    const post = (token: string, path: string, body: string, type = "application/json") => {
+      const url = new URL(`http://127.0.0.1/api/inbox/device/${path}`);
+      return d.devices.door(new Request(url, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": type }, body }), url);
+    };
+    const save = JSON.stringify({ scene: { elements: [] }, have: 4, partial: true, idempotency_key: "k-save" });
+    const undo = JSON.stringify({ rev: 4, idempotency_key: "k-undo" });
+    const job = `job_${"a".repeat(32)}`;
+    const writes: [string, string, string?][] = [
+      ["threads/msg_A1/canvas", save],
+      ["threads/msg_A1/canvas/undo", undo],
+      ["threads/msg_A1/canvas/files?idempotency_key=k-files", JSON.stringify({ files: {} })],
+      ["threads/msg_A1/canvas/picture?rev=4&x=0&y=0&w=10&h=10&scale=1&idempotency_key=k-pic", "PNGBYTES", "image/png"],
+      [`canvas/jobs/${job}?x=0&y=0&w=10&h=10&scale=1&idempotency_key=k-job`, "PNGBYTES", "image/png"],
+    ];
+    for (const [path, body, type] of writes) expect([path, (await post(phone.token, path, body, type)).status]).toEqual([path, 404]);
     expect(d.handed).toEqual([]);
+    for (const [path, body, type] of writes) expect([path, (await post(machine.token, path, body, type)).status]).toEqual([path, 200]);
+    expect(d.handed.map((line) => line.split("?")[0])).toEqual([
+      "POST /api/inbox/threads/msg_A1/canvas",
+      "POST /api/inbox/threads/msg_A1/canvas/undo",
+      "POST /api/inbox/threads/msg_A1/canvas/files",
+      "POST /api/inbox/threads/msg_A1/canvas/picture",
+      `POST /api/inbox/canvas/jobs/${job}`,
+    ]);
+    // A second copy under its key is answered without running again (the outbox may send a held save twice).
+    expect((await post(machine.token, "threads/msg_A1/canvas", save)).status).toBe(200);
+    expect(d.handed.length).toBe(5);
+  });
+
+  test("each canvas write has its outbox kind: a save and an Undo are held in order, bytes and job answers go now", () => {
+    expect(doorWriteKind("threads/msg_A1/canvas")).toBe("append");
+    expect(doorWriteKind("threads/msg_A1/canvas/undo")).toBe("append");
+    expect(doorWriteKind("threads/msg_A1/canvas/files")).toBe("file");
+    expect(doorWriteKind("threads/msg_A1/canvas/picture")).toBe("file");
+    expect(doorWriteKind(`canvas/jobs/job_${"a".repeat(32)}`)).toBe("file");
   });
 });

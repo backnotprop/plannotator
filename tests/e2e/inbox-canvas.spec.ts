@@ -235,6 +235,18 @@ test("the canvas opens over the window, keeps a shape drawn on it, and shows the
   expect(changed.status, changed.err).toBe(0);
   expect(changed.out).toMatch(/^Done: the canvas is now rev \d+/m);
   await expect(layer.locator('[data-canvas-note]')).toBeVisible({ timeout: 15_000 });
+  // What the agent added comes into view by itself, though it landed by the edge: its washes (which mark where each
+  // thing is on screen) all lie inside the board.
+  const board = (await layer.locator('.excalidraw-host').boundingBox())!;
+  await expect
+    .poll(
+      async () => {
+        const washes = await layer.locator('.ibc-flash').evaluateAll((spans) => spans.map((span) => span.getBoundingClientRect()).map((r) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom })));
+        return washes.length > 0 && washes.every((w) => w.left >= board.x - 8 && w.top >= board.y - 8 && w.right <= board.x + board.width + 8 && w.bottom <= board.y + board.height + 8);
+      },
+      { timeout: 5_000, intervals: [50] },
+    )
+    .toBe(true);
   await expect.poll(async () => (await storedShapes()).some((element) => element.type === 'arrow'), { timeout: 15_000 }).toBe(true);
   await expect(layer.locator('[data-canvas-undo]')).toBeVisible();
   await expect.poll(async () => (await storedShapes()).some((element) => element.text?.includes('Fraud check')), { timeout: 15_000 }).toBe(true);

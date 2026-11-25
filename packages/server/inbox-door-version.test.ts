@@ -101,7 +101,8 @@ describe("the route table: one source for health.door.routes", () => {
   });
 
   test("relay: false exactly where the sealed relay path refuses, true where it hands the command in", async () => {
-    expect(doorRouteTable().filter((row) => !row.relay).map((row) => row.name).sort()).toEqual(["GET events", "POST markups", "POST pair", "POST uploads"]);
+    // The canvas's byte routes are a linked computer's alone (it calls the door, never the relay).
+    expect(doorRouteTable().filter((row) => !row.relay).map((row) => row.name).sort()).toEqual(["GET events", "POST canvas/jobs/:id", "POST markups", "POST pair", "POST threads/:id/canvas/files", "POST threads/:id/canvas/picture", "POST uploads"]);
     const d = door();
     const phone = await d.phone();
     for (const row of doorRouteTable()) {

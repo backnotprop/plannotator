@@ -48,6 +48,7 @@ import {
   readCanvasPicture,
   readCanvasScene,
   writeAgentPicture,
+  writeCanvasFiles,
   writeCanvasPicture,
 } from "@plannotator/shared/inbox/canvas/store";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -63,7 +64,8 @@ export interface CanvasAgentAsk {
   picture?: true | string | string[];
   base?: number;
   do?: unknown;
-  by?: { host?: string; session?: string; name?: string };
+  /** `away`: a paired agent on another computer (the agent door sets it): a picture's path here means nothing to it. */
+  by?: { host?: string; session?: string; name?: string; away?: true };
 }
 
 /** The answer: the text the agent reads, and the canvas's rev (and the pictures' paths). Not ok: nothing changed. */
@@ -605,11 +607,25 @@ export function createInboxCanvas(options: {
         const file = root ? readCanvasFile(dir, root, fileMatch[2]!) : null;
         return file ? json({ file }) : json({ error: "No such file.", code: "not_found" }, 404);
       }
-      const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/canvas(\/picture|\/undo)?$/.exec(path);
+      const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/canvas(\/picture|\/undo|\/files)?$/.exec(path);
       if (!match) return null;
       const message = store.message(match[1]!);
       if (!message) return json({ error: `No thread ${match[1]}.`, code: "thread_not_found" }, 404);
       const threadId = message.thread_id;
+      if (match[2] === "/files") {
+        // Pictures' files ahead of the save that names them: a window on a linked computer sends them now, while this
+        // computer answers, so the save itself (small, and perhaps held in that computer's outbox) carries none.
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        let files: unknown;
+        try {
+          files = (JSON.parse(new TextDecoder().decode(await rawBody(req, SCENE_MAX_BYTES))) as { files?: unknown }).files;
+        } catch {
+          return json({ error: "body: expected { files } no larger than a canvas may be.", code: "validation_error" }, 413);
+        }
+        if (!files || typeof files !== "object" || Array.isArray(files)) return json({ error: "files: expected an object of pictures by id.", code: "validation_error" }, 422);
+        writeCanvasFiles(dir, threadId, files as Record<string, unknown>);
+        return json({ ok: true });
+      }
       if (match[2] === "/undo") {
         // The person takes back one change an agent made: each thing it changed goes back to what it was, what it
         // added goes, and whatever the person did since to other things stays.
@@ -752,11 +768,15 @@ export function createInboxCanvas(options: {
           ),
         };
       }
-      const merged = mergeSave(stored, incoming, now());
+      // `partial`: only what the window changed (a linked computer's window, mergeSave).
+      const partial = body.partial === true;
+      const merged = mergeSave(stored, incoming, now(), partial);
       const committed = commitCanvas(dir, threadId, merged.scene, { kind: "person" }, new Date(now()));
       if (committed.rev !== before) emit("canvas", { thread_id: threadId, rev: committed.rev, by: null, window: typeof body.window === "string" ? body.window : null, elements: [] });
-      // The store held things this window did not (an agent's change landed meanwhile): the window takes the merged scene.
-      return json({ serverSession: options.serverSession, rev: committed.rev, ...(merged.kept > 0 && body.have !== committed.rev ? { scene: merged.scene } : {}) });
+      // The store held things this window did not (an agent's change landed meanwhile): the window takes the merged
+      // scene. A partial save names only its own changes, so what it lacks is anything after the revision it had.
+      const lacks = partial ? merged.kept > 0 || (Number.isInteger(body.have) && body.have !== before) : merged.kept > 0;
+      return json({ serverSession: options.serverSession, rev: committed.rev, ...(lacks && body.have !== committed.rev ? { scene: merged.scene } : {}) });
     },
     async agent(ask) {
       const threadId = threadOf(ask.thread_id ?? "");
@@ -776,6 +796,11 @@ export function createInboxCanvas(options: {
         return { ok: true, text: result.text, structured: { thread_id: threadId, rev: result.rev, changed: true } };
       }
       try {
+        if (ask.picture !== undefined && ask.by?.away) {
+          // A picture is a file on this computer, which an agent paired from elsewhere cannot open: said plainly, with the text it can use.
+          const text = read(threadId, viewer, { in: ask.in });
+          return { ok: true, text: `No picture: it would be a file on the person's computer, which you cannot open from where you run. The canvas as text:\n${text}`, structured: { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev, picture: null } };
+        }
         if (ask.picture !== undefined) {
           const drawn = await picture(threadId, ask.picture);
           const text = read(threadId, viewer, { in: ask.in });

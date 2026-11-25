@@ -169,6 +169,8 @@ export interface PeerLinkOptions {
   onChange: () => void;
   /** A no-record change there (`PEER_REREAD_EVENTS`) and its list was read again: the windows hear the same event. */
   onReread?: (event: PeerRereadEvent) => void;
+  /** A canvas of one of its threads changed (`canvas`), or it asks a window to draw for its agent (`canvas-job`). */
+  onCanvas?: (event: "canvas" | "canvas-job", data: Record<string, unknown>) => void;
   /** Its Board was read again (`cards`): the windows read the merged Board. */
   onCards?: () => void;
   /**
@@ -438,7 +440,9 @@ export class PeerLink {
       // The reread events and `deliveries=1`: none writes a record, so the stream tells this machine when to read the list again.
       // `grid-seen` only while Grid is on here: off, nothing of Grid is asked for.
       const gridOn = this.options.gridOn?.() === true;
-      const asks = [...PEER_REREAD_EVENTS.filter((event) => event !== "grid-seen" || gridOn), "deliveries"].map((event) => `${event}=1`).join("&");
+      // `canvas`: its threads' canvases changing, and its drawing jobs, for the windows here (mark `canvas`; an older
+      // Inbox ignores the ask).
+      const asks = [...PEER_REREAD_EVENTS.filter((event) => event !== "grid-seen" || gridOn), "deliveries", "canvas"].map((event) => `${event}=1`).join("&");
       response = await this.options.transport.events(headers, this.cursor === null ? `?${asks}` : `?cursor=${this.cursor}&${asks}`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;
@@ -508,6 +512,10 @@ export class PeerLink {
           } else if (parsed.event === "deliveries") {
             const change = JSON.parse(parsed.data) as Json;
             this.deliveriesMoved(change.sessions === true, change.agents === true, change.labels === true);
+          } else if (parsed.event === "canvas" || parsed.event === "canvas-job") {
+            // A canvas there changed, or it asks a window to draw for its agent: the windows here hear it, said to be its.
+            const data = JSON.parse(parsed.data) as Json;
+            if (data && typeof data === "object" && !Array.isArray(data)) this.options.onCanvas?.(parsed.event, data);
           }
         }
       }

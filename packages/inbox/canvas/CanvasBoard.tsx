@@ -22,6 +22,8 @@ import { authorWords } from '@plannotator/shared/inbox/canvas/changes';
 import { thingsOf } from '@plannotator/shared/inbox/canvas/reading';
 import { boxOf, boxesOverlap, farElements, pictureTiles, tameFar, unionBox, type Box, type CanvasElement, type CanvasScene } from '@plannotator/shared/inbox/canvas/scene';
 import boardCss from './canvas.css?inline';
+import { InboxHeldError } from '../api';
+import { machineOf, rememberMachine } from '../inboxUrl';
 import { CANVAS_WINDOW, canvasApi, canvasLooked, subscribeCanvasFrames, type CanvasFrame, type CanvasJob, type CanvasReply } from './canvasApi';
 
 export interface CanvasBoardProps {
@@ -57,6 +59,8 @@ function withStyles(): void {
 const asCanvas = (elements: readonly ExcalidrawElement[]) => elements as unknown as CanvasElement[];
 const asExcalidraw = (elements: readonly CanvasElement[]) => elements as unknown as ExcalidrawElement[];
 const sig = (el: { version?: number; versionNonce?: number; isDeleted?: boolean }) => `${el.version ?? 0}:${el.versionNonce ?? 0}:${el.isDeleted ? 1 : 0}`;
+/** A save that names only what changed since what the Inbox holds (`synced`), and no pictures' files: a linked computer's thread. */
+const changedOnly = (scene: CanvasScene, synced: ReadonlyMap<string, string>): CanvasScene => ({ ...scene, elements: scene.elements.filter((e) => synced.get(e.id) !== sig(e)), files: {} });
 
 /**
  * The one drawing face this build does not ship (Xiaolai, 12 MB of Chinese and Japanese handwriting) never enters the
@@ -236,10 +240,12 @@ export async function runCanvasJob(job: CanvasJob): Promise<void> {
         drawn[text] = { error: error instanceof Error ? error.message : String(error) };
       }
     }
-    await canvasApi.answerMermaid(job.id, drawn);
+    await canvasApi.answerMermaid(job.id, drawn, job.machine);
     return;
   }
   if (!job.thread_id) return;
+  // A linked computer's agent asked about one of its threads: read it there, answer there.
+  if (job.machine) rememberMachine([job.thread_id], job.machine);
   try {
     const live = openBoards.get(job.thread_id)?.();
     let elements: readonly ExcalidrawElement[];
@@ -260,13 +266,13 @@ export async function runCanvasJob(job: CanvasJob): Promise<void> {
       // One piece of a long strip: drawn large, cut to exactly the part asked for.
       const whole = await drawPlaced(shown, files, STRIP_MAX, 1);
       const part = whole ? await cut(whole, job.box, 0) : null;
-      await canvasApi.answerPicture(job.id, part, part && whole ? { ...job.box, scale: whole.place.scale } : undefined);
+      await canvasApi.answerPicture(job.id, part, part && whole ? { ...job.box, scale: whole.place.scale } : undefined, job.machine);
       return;
     }
     const drawn = await drawPlaced(shown, files);
-    await canvasApi.answerPicture(job.id, drawn?.blob ?? null, drawn?.place);
+    await canvasApi.answerPicture(job.id, drawn?.blob ?? null, drawn?.place, job.machine);
   } catch {
-    await canvasApi.answerPicture(job.id, null).catch(() => {});
+    await canvasApi.answerPicture(job.id, null, undefined, job.machine).catch(() => {});
   }
 }
 
@@ -307,7 +313,7 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   const [notice, setNoticeNow] = useState<{ text: string; bad?: boolean; at: number } | null>(null);
   const setNotice = useCallback((next: { text: string; bad?: boolean } | null) => setNoticeNow(next ? { ...next, at: Date.now() } : null), []);
   /** The save: `saving` while a failed one is tried again, `failed` once it has given up for now. */
-  const [saveState, setSaveState] = useState<'saving' | 'failed' | null>(null);
+  const [saveState, setSaveState] = useState<'saving' | 'failed' | { held: string } | null>(null);
   const [note, setNote] = useState<{ who: string; added: number; changed: number; removed: number; ids: string[]; rev: number } | null>(null);
   /** The selection the person was writing about was removed by someone else. */
   const [lost, setLost] = useState(false);
@@ -496,16 +502,30 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
     const sent = new Map(scene.elements.map((e) => [e.id, sig(e)]));
     // What the Inbox holds that this window no longer does (a file loaded over the canvas): gone, not "never seen".
     const gone = [...synced.current.keys()].filter((id) => !sent.has(id));
-    const run = canvasApi
-      .save(threadId, scene, rev.current, { gone })
+    // A linked computer's thread: its pictures' files go first, now, and the save names only what changed, so it is
+    // small and, while that computer is away, waits in this Inbox's outbox (held: saved here, sent when it is back).
+    const far = !!machineOf(threadId);
+    const run = (far && Object.keys(scene.files).length > 0 ? canvasApi.files(threadId, scene.files) : Promise.resolve())
+      .then(() =>
+        canvasApi
+          .save(threadId, far ? changedOnly(scene, synced.current) : scene, rev.current, { gone, partial: far })
+          .catch((error: unknown) => {
+            if (error instanceof InboxHeldError) return { held: error.message };
+            throw error;
+          }),
+      )
       .then((answer) => {
         for (const id of Object.keys(scene.files)) sentFiles.current.add(id);
         for (const id of gone) synced.current.delete(id);
         for (const [id, value] of sent) synced.current.set(id, value);
-        if (answer.scene) takeWhenFree(answer.scene);
-        rev.current = answer.rev;
         unsaved.current = again.current;
         fails.current = 0;
+        if ('held' in answer) {
+          if (live.current) setSaveState({ held: answer.held });
+          return;
+        }
+        if (answer.scene) takeWhenFree(answer.scene);
+        rev.current = answer.rev;
         if (live.current) setSaveState(null);
         storePicture();
       })
@@ -620,19 +640,23 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   // Open boards answer drawing jobs from what is on screen; leaving saves what is not saved yet.
   useEffect(() => {
     openBoards.set(threadId, () => ({ elements: api.current?.getSceneElements() ?? [], files: api.current?.getFiles() ?? {} }));
+    // A linked computer's thread: what changed only, and only when no new picture needs its file sent first.
+    const farScene = (scene: CanvasScene): CanvasScene | null => (!machineOf(threadId) ? scene : Object.keys(scene.files).length > 0 ? null : changedOnly(scene, synced.current));
     const leaving = () => {
-      const scene = sceneNow();
+      const whole = sceneNow();
+      const scene = whole ? farScene(whole) : null;
       if (scene && unsaved.current && !threadGone.current) // Uncompressed: compressing waits, and a closing page's request must start at once. Only a scene under the
       // browser's 64 KB limit for such a request gets out this way; a larger one relies on the save made as the tab was put away.
-      void canvasApi.save(threadId, scene, rev.current, { keepalive: true, plain: true }).catch(() => {});
+      void canvasApi.save(threadId, scene, rev.current, { keepalive: true, plain: true, partial: !!machineOf(threadId) }).catch(() => {});
     };
     // A tab put away saves at once (while the page can still wait for the answer); a page going away sends what is left.
     const hidden = () => {
       if (document.visibilityState === 'hidden' && unsaved.current && !threadGone.current) {
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = null;
-        const scene = sceneNow();
-        if (scene) void canvasApi.save(threadId, scene, rev.current, { keepalive: true }).then((answer) => (rev.current = Math.max(rev.current, answer.rev))).catch(() => {});
+        const whole = sceneNow();
+        const scene = whole ? farScene(whole) : null;
+        if (scene) void canvasApi.save(threadId, scene, rev.current, { keepalive: true, partial: !!machineOf(threadId) }).then((answer) => (rev.current = Math.max(rev.current, answer.rev))).catch(() => {});
       }
     };
     const online = () => {
@@ -732,10 +756,15 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
       // The person pressed Show: everything that changed, in view.
       editor.scrollToContent(changed, { fitToViewport: true, viewportZoomFactor: 0.75, maxZoom: 1, animate: !still, duration: 350 });
       setTimeout(show, still ? 0 : 420);
-    } else if (scroll && !inView && around.w * view.zoom.value <= rect.width * 0.9 && around.h * view.zoom.value <= rect.height * 0.8) {
-      // By itself the view only slides, at the person's own zoom, and only to something that fits in it. Anything
-      // larger or farther waits for Show: an agent's change never zooms the person out.
-      editor.scrollToContent(changed, { fitToViewport: false, animate: !still, duration: 350 });
+    } else if (scroll && !inView) {
+      // Not all in view: it comes into view by itself. The view slides at the person's own zoom to the change when it
+      // fits, else to the shapes it added or changed (an arrow to them may run off the edge); only a change whose
+      // shapes fit in no view at this zoom is fitted, never closer than the person's zoom.
+      const fits = (box: Box) => box.w * view.zoom.value <= rect.width * 0.9 && box.h * view.zoom.value <= rect.height * 0.8;
+      const shapes = changed.filter((e) => e.type !== 'arrow' && e.type !== 'line');
+      const target = fits(around) ? changed : shapes.length > 0 && fits(unionBox(asCanvas(shapes).map(boxOf))) ? shapes : null;
+      if (target) editor.scrollToContent(target, { fitToViewport: false, animate: !still, duration: 350 });
+      else editor.scrollToContent(changed, { fitToViewport: true, viewportZoomFactor: 0.75, maxZoom: view.zoom.value, animate: !still, duration: 350 });
       setTimeout(show, still ? 0 : 420);
     } else show();
   }, []);
@@ -787,8 +816,8 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
               ids: [...new Set([...(before?.ids ?? []), ...ids])].slice(-400),
               rev: Math.max(...agents.map((e) => e.rev)),
             }));
-            // The view moves by itself only when the person's hands are off the canvas for a few seconds.
-            reveal(ids, Date.now() - lastInput.current > 3000 && !pointerDown.current);
+            // What the agent did comes into view by itself, but never under the person's pointer or while they type.
+            reveal(ids, !pointerDown.current && !api.current?.getAppState().editingTextElement);
             storePicture();
           });
         })
@@ -802,7 +831,12 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
         });
     };
     const onFrame = (frame: CanvasFrame) => {
-      if (frame.thread_id !== threadId || frame.window === CANVAS_WINDOW) return;
+      if (frame.thread_id !== threadId) return;
+      // A save held for a linked computer that was away: its own frame says it landed there.
+      if (frame.window === CANVAS_WINDOW) {
+        setSaveState((state) => (state && typeof state === 'object' ? null : state));
+        return;
+      }
       // An agent tried and the Inbox refused it: nothing landed, and the canvas stops saying one is on its way.
       if (frame.refused) {
         setWaiting(null);
@@ -973,8 +1007,10 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
       const kept = answer.kept_count ?? answer.kept?.length ?? 0;
       setNotice({ text: answer.already ? 'Already undone' : kept > 0 ? `Undone. Yours kept: ${NUMBER.format(kept)}` : 'Undone' });
       storePicture();
-    } catch {
-      setNotice({ text: "Can't undo", bad: true });
+    } catch (error) {
+      // A linked computer that is away: the Undo waits in the outbox and lands when it is back (its frame brings it here).
+      if (error instanceof InboxHeldError) setNotice({ text: error.message });
+      else setNotice({ text: "Can't undo", bad: true });
     }
   };
 
@@ -1130,7 +1166,7 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   }
 
   // One line of state: the thread is gone, something to say once, or a save that is not through.
-  const state: { text: string; bad?: boolean } | null = gone ? { text: 'Thread deleted', bad: true } : (notice ?? (saveState === 'failed' ? { text: 'Not saved', bad: true } : saveState === 'saving' ? { text: 'Saving…' } : null));
+  const state: { text: string; bad?: boolean } | null = gone ? { text: 'Thread deleted', bad: true } : (notice ?? (saveState === 'failed' ? { text: 'Not saved', bad: true } : saveState === 'saving' ? { text: 'Saving…' } : saveState ? { text: saveState.held } : null));
   // A running session has the reply: the agent's icon, working. Before that, "Sent" for a moment and then nothing.
   const working = waiting !== null && received && !receivedAtSend.current;
   const sentChip = waiting !== null && !note && (working || justSent);

@@ -125,6 +125,14 @@ function writeNewFiles(dir: string, files: Record<string, unknown>): void {
   }
 }
 
+/**
+ * Pictures' files sent ahead of the save that names them (a window on a linked computer: its saves may wait in an
+ * outbox, which holds no file's bytes). Written once each, as a save's are; the canvas's revision does not move.
+ */
+export function writeCanvasFiles(inboxDirPath: string, threadId: string, files: Record<string, unknown>): void {
+  writeNewFiles(canvasDirOf(inboxDirPath, threadId), files);
+}
+
 export function hasCanvas(inboxDirPath: string, threadId: string): boolean {
   try {
     return existsSync(join(canvasDirOf(inboxDirPath, threadId), 'scene.excalidraw'));

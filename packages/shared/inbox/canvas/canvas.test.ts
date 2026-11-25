@@ -135,6 +135,19 @@ describe("who changed what", () => {
     expect(thingsOf(merged).some((t) => t.words === "from the agent")).toBe(true);
   });
 
+  test("a partial save (a linked computer's window) changes only what it names: the order stays, a newer stored version stays, what is new goes on top", () => {
+    const stored = board();
+    const [first, second] = stored.elements;
+    const moved = { ...first!, x: first!.x + 50, version: (first!.version ?? 1) + 1, versionNonce: 9 };
+    const stale = { ...second!, x: second!.x - 999, version: 0 };
+    const added = { ...first!, id: "new_one", x: 900, version: 1 };
+    const merged = mergeSave(stored, { ...stored, elements: [added, stale, moved], files: {} }, 2_000, true).scene;
+    // Nothing it did not name is gone, and the drawing order is the store's, with the new one last.
+    expect(merged.elements.map((e) => e.id)).toEqual([...stored.elements.map((e) => e.id), "new_one"]);
+    expect(merged.elements.find((e) => e.id === first!.id)!.x).toBe(first!.x + 50);
+    expect(merged.elements.find((e) => e.id === second!.id)!.x).toBe(second!.x);
+  });
+
   test("the log says what the person changed since a revision, and a re-stamp alone is no change", () => {
     const dir = mkdtempSync(join(tmpdir(), "canvas-store-"));
     const thread = "msg_TEST";

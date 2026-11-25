@@ -105,7 +105,19 @@ describe("the canvas command's route", () => {
     const door = { host: "codex", session: "paired-1", name: "Codex" };
     const routeOf = (body: Record<string, unknown>) => inboxAgentRouteAction(handle, door, INBOX_AGENT_ROUTE, { method: "POST", path: INBOX_CANVAS_AGENT_ROUTE, body });
     await routeOf({ thread_id: THREAD });
-    expect(seen).toEqual({ thread_id: THREAD, by: door });
+    expect(seen).toEqual({ thread_id: THREAD, by: { ...door, away: true } });
     await expect(routeOf({ thread_id: THREAD, by: { session: "someone-else" } })).rejects.toThrow(/by: not taken here/);
+  });
+
+  test("a paired agent's picture: no path on the person's computer, said plainly, with the canvas as text", async () => {
+    const w = world();
+    await w.ask({ thread_id: THREAD, base: 0, do: [{ add: "box", text: "Ledger" }], by });
+    const answer = await w.ask({ thread_id: THREAD, picture: true, by: { ...by, away: true } });
+    expect(answer.status).toBe(200);
+    const body = answer.body as { text: string; picture: unknown };
+    expect(body.picture).toBeNull();
+    expect(body.text).toMatch(/^No picture: /);
+    expect(body.text).toContain("Ledger");
+    expect(body.text).not.toMatch(/\.png/);
   });
 });

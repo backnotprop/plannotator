@@ -8,7 +8,7 @@ import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { inboxAgentName, type InboxThread } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { HostMark } from '../icons';
-import { machineOf } from '../inboxUrl';
+import { linkedMachinesWith, machineOf } from '../inboxUrl';
 import { CanvasLayerPart, SketchButtonPart } from '../lazyParts';
 import { useInboxTheme } from '../theme';
 import type { ThreadSlotHost } from '../thread/slotHost';
@@ -27,8 +27,10 @@ const SketchButton = SketchButtonPart.Part;
 const CanvasLayer = CanvasLayerPart.Part;
 
 export function useThreadCanvas(thread: InboxThread | null, host: ThreadSlotHost, phone: boolean): ThreadCanvas {
-  // Not on a linked machine's thread yet (its scene lives in that machine's Inbox).
-  const canvasFor = host.settings?.canvas?.on === true && thread && !machineOf(thread.thread_id) ? thread.thread_id : null;
+  // A linked computer's thread too, when that computer has the canvas (mark `canvas`): its scene lives there and every
+  // call goes through the forward (canvasApi.ts). An older one has none, and its threads get no pen.
+  const machine = thread ? machineOf(thread.thread_id) : null;
+  const canvasFor = host.settings?.canvas?.on === true && thread && (!machine || linkedMachinesWith('canvas').includes(machine)) ? thread.thread_id : null;
   // The pens and the layer arrive together while the canvas is on, so a press never waits on Suspense.
   useEffect(() => {
     if (canvasFor) void Promise.all([SketchButtonPart.preload(), CanvasLayerPart.preload()]).catch(() => {});

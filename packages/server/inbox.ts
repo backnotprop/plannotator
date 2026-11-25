@@ -4422,8 +4422,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // again, so a window polls only while a command it shows is running. Windows only (additive).
         const onRunState = (messageIds: readonly string[] | null) => send(`event: runs\ndata: ${JSON.stringify(messageIds ? { message_ids: messageIds } : { all: true })}\n\n`);
         if (windowId) runStateListeners.add(onRunState);
-        // A thread's canvas changed, or the server asks a window to draw (inbox-canvas.ts). Windows only.
-        const stopCanvas = windowId ? canvas.listen((event, data) => canvasCap.on() && send(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)) : null;
+        // A thread's canvas changed, or the server asks a window to draw (inbox-canvas.ts). Windows, and a linked machine
+        // that asks (`canvas=1`, mark `canvas`): its windows show this computer's threads' canvases and draw for its agents.
+        const stopCanvas = windowId || url.searchParams.get("canvas") === "1" ? canvas.listen((event, data) => canvasCap.on() && send(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)) : null;
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
@@ -8710,7 +8711,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (steps) return steps;
       // A thread's canvas (inbox-canvas.ts): the window's read and save, and its answers to the server's drawing jobs.
       // Only while the canvas is on (Settings → Capabilities); off, every one is refused and nothing stored is touched.
-      if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas(\/picture|\/undo)?$/.test(path) || /^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas\/files\/[A-Za-z0-9_-]+$/.test(path) || path === "/api/inbox/canvases" || path.startsWith("/api/inbox/canvas/jobs/")) {
+      if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas(\/picture|\/undo|\/files)?$/.test(path) || /^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas\/files\/[A-Za-z0-9_-]+$/.test(path) || path === "/api/inbox/canvases" || path.startsWith("/api/inbox/canvas/jobs/")) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
@@ -8959,6 +8960,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : kind === "cards" ? store.card(id) !== null : store.message(id) !== null,
       ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
       gridOn,
+      canvasOn: () => canvasCap.on(),
       showArchivedSaid: (value) => {
         try {
           showArchived.adopt(value);

@@ -1,6 +1,6 @@
 ## A thread's canvas
 
-Every thread of this computer's Inbox can hold one canvas: a real Excalidraw scene that the person draws on and an agent reads and changes. A pen on this computer's threads only for now (a linked computer's door answers its canvas reads; the rest is under "Not done"), no phone relay, no approval record yet.
+Every thread of this computer's Inbox can hold one canvas: a real Excalidraw scene that the person draws on and an agent reads and changes. A linked computer's threads too ("Linked computers" below), no phone relay, no approval record yet.
 
 ### The switch
 
@@ -60,9 +60,17 @@ The window's save is merged element by element (`changes.ts` `mergeSave`): the h
 
 A deleted thread's canvas folder is moved to `inbox/canvas/.gone/<thread>-<time>` (`retireCanvas`, on the store's deletion signal), where nothing reads it, and removed 30 days later (`sweepGoneCanvases`, at start and on each deletion).
 
+### Linked computers
+
+A thread's canvas lives with the thread, on its own computer; a window on a linked computer draws on it as on its own (one set of rules: the same routes and merge, `canvasApi.ts` routing every call by `machineOf` through the forward `/api/inbox/m/<machine>/…`).
+- The pen: on a linked computer's thread when its list carries the mark `canvas` (`INBOX_LINKED_MARKS`, `linkedMachinesWith('canvas')` in `useThreadCanvas.tsx`); an older computer has none, and its threads get no pen. The marks list reads each such computer's `canvases` too.
+- The door (`machineOnly`, so a phone gets its 404; `inbox-canvas-door.test.ts`): `GET threads/:id/canvas` (with `look` and `since`), `GET threads/:id/canvas/files/:id`, `GET canvases`; `POST threads/:id/canvas` and `/undo` (rule 8 `append`: held in the outbox in order while that computer is away, delivered once under the window's key); `POST threads/:id/canvas/files`, `/picture` and `canvas/jobs/:id` (raw bodies, rule 8 `file`: sent now or not at all).
+- A save to a linked computer is a command, not a draft: it names only what changed since what that computer holds (`partial`, mergeSave keeps the stored order and the version rule), its pictures' files go first (`/files`, now), so the outbox holds small JSON and no bytes. While that computer is away the save is held and the board says the outbox's words ("Waiting for MacBook: …"); that computer's own frame, once it lands, clears them. An Undo waits the same way and names no window, so its frame brings the result. A new picture drawn while that computer is away waits in the board (its file cannot go yet) and is saved when it is back; one drawn as the page closes then is not sent.
+- Live: the far computer sends its `event: canvas` and `event: canvas-job` to a linked computer that asks (`canvas=1`, inbox-peer-link.ts); this Inbox hands them to its windows with `machine` while its canvas is on, so the board reads that computer and a window here answers its agent's picture or mermaid job through the forward. A far computer whose stream a linked computer holds counts that computer as a window: with none of its windows open, its agent's `--picture` waits the job's 8 s before the stored picture.
+- A paired agent on another computer (the agent door, `by.away`) gets no picture path on the person's computer: "No picture: …", with the canvas as text.
+- Tests: `inbox-canvas-machines.test.ts` (two Inboxes both ways: reads, partial saves, files, frames, a drawing job answered from the other computer, a save held while one is away), `tests/e2e/inbox-canvas-machines.spec.ts` (two compiled Inboxes in a browser, proof shots in `canvas-machines/`).
+
 ### Not done
 
-**Linked computers, the read path only.** A thread's canvas lives with the thread, on its own computer. That computer's door answers a linked machine's reads (`GET threads/:id/canvas` with its `look` and `since`, `GET threads/:id/canvas/files/:id`, `GET canvases`; `machineOnly`, so a phone gets the door's 404; `packages/server/inbox-canvas-door.test.ts`), and its list carries the mark `canvas` (`INBOX_LINKED_MARKS`), so a window can tell an older computer, which has no canvas, and offer it no pen. Still to do before a far thread shows a pen (`useThreadCanvas.tsx` keeps `!machineOf`): the window's canvas calls through the forward (`/api/inbox/m/<machine>/…`, `canvasApi.ts`) and the far `canvases` mark read; the writes on the door (`POST threads/:id/canvas`, `/undo`, `/picture`) with their rule-8 kinds in `DOOR_WRITES` (a save is a `set` the outbox holds while that computer sleeps, so no edit is lost, and the board says it is waiting); the far computer's `event: canvas` reaching this window (a re-read event in `PEER_REREAD_EVENTS`); the far computer's drawing jobs (`canvas-job`: a picture, a mermaid) answered by a window on another computer, or the far agent's `--picture` and mermaid refused there with no window of its own; and two Inboxes in a browser spec, both directions.
-
 A close-page save of a scene over 64 KB (browsers cap what a closing page sends; the save made as the tab is put away, compressed, covers most closes), 
-the phone relay, storage accounting and a sweep of `.gone`, an approval record, a DOM test for the lazy part's failure. A paired cloud agent's `--picture` answers a path on the person's computer, which it cannot open.
+the phone relay, storage accounting and a sweep of `.gone`, an approval record, a DOM test for the lazy part's failure. A browser spec with an older linked computer (no `canvas` mark, so no pen) needs a released binary from before this.

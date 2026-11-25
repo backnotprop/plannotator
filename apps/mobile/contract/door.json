@@ -582,6 +582,96 @@
       "relay": true
     },
     {
+      "name": "POST threads/:id/canvas",
+      "method": "POST",
+      "path": "threads/{thread}/canvas",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadCanvas",
+      "window": "/api/inbox/threads/{thread}/canvas",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "hold",
+      "write": "append",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/canvas/undo",
+      "method": "POST",
+      "path": "threads/{thread}/canvas/undo",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadCanvasUndo",
+      "window": "/api/inbox/threads/{thread}/canvas/undo",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "hold",
+      "write": "append",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/canvas/files",
+      "method": "POST",
+      "path": "threads/{thread}/canvas/files",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadCanvasFiles",
+      "window": "/api/inbox/threads/{thread}/canvas/files",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "bytes",
+      "write": "file",
+      "key": "query",
+      "answer": "json",
+      "range": false,
+      "relay": false
+    },
+    {
+      "name": "POST threads/:id/canvas/picture",
+      "method": "POST",
+      "path": "threads/{thread}/canvas/picture",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadCanvasPicture",
+      "window": "/api/inbox/threads/{thread}/canvas/picture",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "bytes",
+      "write": "file",
+      "key": "query",
+      "answer": "json",
+      "range": false,
+      "relay": false
+    },
+    {
+      "name": "POST canvas/jobs/:id",
+      "method": "POST",
+      "path": "canvas/jobs/{job}",
+      "params": [
+        "job"
+      ],
+      "call": "postCanvasJob",
+      "window": "/api/inbox/canvas/jobs/{job}",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "bytes",
+      "write": "file",
+      "key": "query",
+      "answer": "json",
+      "range": false,
+      "relay": false
+    },
+    {
       "name": "GET pulls/risk",
       "method": "GET",
       "path": "pulls/risk",

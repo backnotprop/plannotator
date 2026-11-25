@@ -100,6 +100,29 @@ describe("a thread's pens follow the switch", () => {
     expect(document.querySelector('header [data-thread-sketch]')).not.toBeNull();
     expect(document.querySelector('footer [data-reply-sketch]')).not.toBeNull();
   });
+
+  test.skipIf(!hasDom)("a linked computer's thread: the pen when that computer says `canvas`, none from an older one", async () => {
+    const { rememberMachine, resetMachineRoutes, setSelfMachine } = await import('../inboxUrl');
+    const self = 'ibx_01M89YNWCSXG5FHZ2AFN0SAG9G';
+    const far = 'ibx_01M89YNWCY3TVAFQV2QZH08AMG';
+    try {
+      for (const [marks, pen] of [[['star', 'canvas'], true], [['star'], false]] as const) {
+        resetMachineRoutes();
+        setSelfMachine(self, [{ id: self, self: true, name: 'Studio' }, { id: far, name: 'MacBook', marks, list_cursor: 3, state: 'online' }]);
+        rememberMachine([thread.thread_id], far);
+        renderPens({ on: true });
+        await act(async () => {
+          await SketchButtonPart.preload();
+        });
+        await act(async () => {});
+        expect([marks.join(','), document.querySelector('header [data-thread-sketch]') !== null]).toEqual([marks.join(','), pen]);
+        act(() => root?.unmount());
+        root = null;
+      }
+    } finally {
+      resetMachineRoutes();
+    }
+  });
 });
 
 describe('Settings → Capabilities → Canvas', () => {

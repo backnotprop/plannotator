@@ -438,9 +438,10 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     const files = Object.entries(DOOR_WRITES)
       .filter(([, kind]) => kind === "file")
       .map(([name]) => name);
+    // A route's pattern in the table's words: `threads\/([^/]+)\/canvas\/files` is `threads/:id/canvas/files`.
     const raw = doorWriteRoutes()
       .filter((route) => route.raw)
-      .map((route) => `POST ${route.route.replace(/^\^|\$$/g, "")}`);
+      .map((route) => `POST ${route.route.replace(/^\^|\$$/g, "").replaceAll("([^/]+)", ":id").replaceAll("\\/", "/")}`);
     expect(files.sort()).toEqual(raw.sort());
   });
 

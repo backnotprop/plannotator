@@ -44,6 +44,8 @@ const COLLECTIONS: Record<string, { word: string; param: string }> = {
   scheduled: { word: 'routine', param: 'routine' },
   // A canvas's pictures' files (`threads/:id/canvas/files/:id`).
   files: { word: 'file', param: 'file' },
+  // A drawing job a linked computer's window answers (`canvas/jobs/:id`).
+  jobs: { word: 'job', param: 'job' },
 };
 
 /**
