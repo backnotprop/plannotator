@@ -56,7 +56,12 @@ async function middleOf(el: Locator): Promise<{ x: number; y: number; left: numb
   return { x: box.x + box.width / 2, y: box.y + box.height / 2, left: box.x + 2, right: box.x + box.width - 2 };
 }
 
-const selectedText = (page: Page) => page.evaluate(() => window.getSelection()?.toString() ?? '');
+/** The words the comment tools hold: the selection, or once they take it, the pending marks they paint over it. */
+const selectedText = (page: Page) =>
+  page.evaluate(() => {
+    const marks = [...document.querySelectorAll('[data-message-id] [data-highlight-id]')].map((mark) => mark.textContent ?? '').join('');
+    return `${window.getSelection()?.toString() ?? ''}|${marks}`;
+  });
 
 test.describe.configure({ mode: 'serial' });
 
@@ -139,12 +144,13 @@ test('a computer: the chip and the skills line each open the skill beside the th
     await page.mouse.move(at.right, at.y, { steps: 6 });
     await page.mouse.up();
     await expect(page.locator('.annotation-toolbar')).toBeVisible();
-    expect(await selectedText(page)).toContain('picture');
+    await expect.poll(() => selectedText(page)).toContain('picture');
     await page.waitForTimeout(300);
     await expect(pane).toHaveCount(0);
     await page.keyboard.press('Escape');
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
     await expect(page.locator('.annotation-toolbar')).toHaveCount(0);
+    await expect.poll(() => selectedText(page)).not.toContain('picture');
 
     // A double-click selects the chip's words and leaves no file open (its first click's open is taken back).
     await page.mouse.dblclick(at.x, at.y);
