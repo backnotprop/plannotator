@@ -59,7 +59,7 @@
   "inbox-comment-pictures.spec.ts": 3,
   "inbox-comments-list-webkit.spec.ts": 10,
   "inbox-comments-list.spec.ts": 35,
-  "inbox-compose-reload-keeps.spec.ts": 8,
+  "inbox-compose-reload-keeps.spec.ts": 18,
   "inbox-compose-skill-picker.spec.ts": 19,
   "inbox-compose-thread-phone.spec.ts": 19,
   "inbox-compose-to-row.spec.ts": 8,

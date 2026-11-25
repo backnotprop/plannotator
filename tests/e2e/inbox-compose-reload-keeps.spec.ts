@@ -12,17 +12,22 @@
  *
  * Nothing is mocked: `plannotator inbox --background` under a temp HOME and
  * PLANNOTATOR_DATA_DIR. Build the binary first (see inbox.spec.ts).
+ *
+ * The last test leaves whole-window PNGs of what New message shows once a
+ * pause saved it (desktop light and dark, a phone) in
+ * <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/never-lose-words/.
  */
 
-import { expect, test, type Browser } from './inbox-test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
+const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'never-lose-words');
 
 let url = '';
 let dataDir = '';
@@ -101,5 +106,57 @@ test('a pause saves New message by itself: the tab then closes without asking, a
     expect(await draftBodies()).toContain(words);
   } finally {
     await context.close();
+  }
+});
+
+/** The whole window as it is now, light or dark. */
+async function shot(page: Page, name: string, scheme: 'light' | 'dark'): Promise<void> {
+  await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: join(proofDir, `${name}-${scheme}.png`) });
+}
+
+test('proof: what New message shows once a pause saved it, desktop light and dark and a phone (whole window)', async ({ browser }: { browser: Browser }) => {
+  mkdirSync(proofDir, { recursive: true });
+  const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await desktop.newPage();
+  page.on('dialog', (dialog) => void dialog.accept());
+  try {
+    await page.goto(url);
+    await page.locator('.ib-side [data-open-compose]').click();
+    const dialog = page.locator('dialog[data-compose]');
+    const text = dialog.getByRole('textbox', { name: 'Message' });
+    await expect(text).toBeFocused();
+    const words = 'Bob Tully: the ledger export splits per month from Friday.';
+    await text.pressSequentially(words, { delay: 5 });
+    // Inside the pause: still a New message, nothing saved yet.
+    await shot(page, 'desktop-typing', 'light');
+    // The pause saved it: the dialog is a Draft ("Draft · saved", Delete draft), and the sidebar's Drafts counts it.
+    await expect.poll(draftBodies, { timeout: 10_000 }).toContain(words);
+    await expect(dialog.locator('.ib-cp-dsaved')).toBeVisible();
+    await expect(dialog.locator('[data-compose-delete]')).toBeVisible();
+    await shot(page, 'desktop-saved', 'light');
+    await shot(page, 'desktop-saved', 'dark');
+  } finally {
+    await desktop.close();
+  }
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const handset = await phone.newPage();
+  handset.on('dialog', (dialog) => void dialog.accept());
+  try {
+    await handset.goto(url);
+    await handset.locator('[data-open-compose]:visible').first().click();
+    const sheet = handset.locator('dialog[data-compose]');
+    const field = sheet.locator('[data-compose-text] textarea');
+    await field.tap();
+    const words = 'Charlie Dunn: hold the export until the totals match.';
+    await field.pressSequentially(words, { delay: 5 });
+    await expect.poll(draftBodies, { timeout: 10_000 }).toContain(words);
+    // A phone's row says "✓ Saved" once the pause saved it.
+    await expect(sheet.locator('[data-compose-saved]')).toBeVisible();
+    await shot(handset, 'phone-saved', 'light');
+    await shot(handset, 'phone-saved', 'dark');
+  } finally {
+    await phone.close();
   }
 });
