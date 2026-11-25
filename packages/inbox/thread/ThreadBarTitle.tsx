@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { isTextCut, Tip } from '../components/Tip';
+import { isTextCut } from '@plannotator/ui/utils/textCut';
+import { Tip } from '../components/Tip';
 import { HeadMark } from '../parts/HeadMark';
 
 type TitleThread = Parameters<typeof HeadMark>[0]['thread'];
@@ -28,7 +29,7 @@ export function ThreadBarTitle({ thread, name, heading }: { thread: TitleThread;
     const el = box.current?.querySelector<HTMLElement>('[data-header-title]');
     // Open, it wraps and cuts nothing: it stays the button that closes it, and is measured again once closed.
     if (!el || open) return;
-    const check = () => setCut(isTextCut(el));
+    const check = () => setCut(isTextCut(el, undefined, 'horizontal'));
     check();
     // The words' box follows the bar's room; the window's own resize too (a box at its widest does not change).
     const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(check);

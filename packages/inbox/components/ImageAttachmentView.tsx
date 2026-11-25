@@ -20,6 +20,7 @@ import { FullScreenCommentBin, FullScreenComposer, FullScreenComposerContext } f
 import { useRowDraft } from '../fileCommentDrafts';
 import { markImageComposer } from '../pageMarks';
 import { useCommentFiles } from '../commentFiles';
+import { InboxComposerField } from './ComposerField';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -387,33 +388,38 @@ export function ImageAttachmentView({
           </span>
         </Tip>
       )}
-      <textarea
-        ref={textRef}
-        className="ib-ta"
-        rows={1}
-        value={text}
-        placeholder={kept ? 'Note (optional)' : markup ? 'What should change?' : 'Comment on this image…'}
-        aria-label={kept ? `A note with your drawing on ${attachment.name}` : `Comment on ${attachment.name}`}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (isCommentSubmitKey(event, enterSavesComment)) {
-            event.preventDefault();
-            event.stopPropagation();
-            void submit();
-            return;
-          }
-          // Escape leaves the field first (approval "inbox-keyboard-shortcuts": one layer per Escape): focus goes
-          // to the file's pane, the words stay; the next Escape is the pane's. Full screen's Escape ladder has
-          // this rung already (AttachmentPane, "Left the comment box."); beside the thread it is this one.
-          if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented) {
-            const paneEl = event.currentTarget.closest<HTMLElement>('[data-attachment-pane]');
-            if (!paneEl || paneEl.closest('[data-full-view]')) return;
-            event.preventDefault();
-            event.stopPropagation();
-            paneEl.focus({ preventScroll: true });
-          }
-        }}
-      />
+      {/* The reply's field (`/` and `$` skills), at the row's one-line size (inbox.css `.ib-crowfield`). */}
+      <div className="ib-fcomp-field ib-crowfield">
+        <InboxComposerField
+          textareaRef={textRef}
+          rows={1}
+          value={text}
+          onChange={setText}
+          placeholder={kept ? 'Note (optional)' : markup ? 'What should change?' : 'Comment on this image…'}
+          ariaLabel={kept ? `A note with your drawing on ${attachment.name}` : `Comment on ${attachment.name}`}
+          destination="your comment"
+          // An open skill list takes Escape first, even before a query is typed; the row's own Escape comes next.
+          escapeClosesMenu
+          onKeyDown={(event) => {
+            if (isCommentSubmitKey(event, enterSavesComment)) {
+              event.preventDefault();
+              event.stopPropagation();
+              void submit();
+              return;
+            }
+            // Escape leaves the field first (approval "inbox-keyboard-shortcuts": one layer per Escape): focus goes
+            // to the file's pane, the words stay; the next Escape is the pane's. Full screen's Escape ladder has
+            // this rung already (AttachmentPane, "Left the comment box."); beside the thread it is this one.
+            if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented) {
+              const paneEl = event.currentTarget.closest<HTMLElement>('[data-attachment-pane]');
+              if (!paneEl || paneEl.closest('[data-full-view]')) return;
+              event.preventDefault();
+              event.stopPropagation();
+              paneEl.focus({ preventScroll: true });
+            }
+          }}
+        />
+      </div>
       <Tip content="Draw on the image (pen, arrow, circle)">
         <button type="button" className="ib-btn ib-cbtn" onClick={() => setAnnotating(true)} disabled={failed} data-markup-open="" aria-label={markup || kept ? 'Redraw' : 'Mark up'}>
           <Icon name="pen" size={15} />

@@ -66,6 +66,7 @@ import {
 } from './model';
 import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
 import { ReviewsList, ReviewsMenu, reviewLinksOf } from './ReviewsList';
+import { PageShipLog, ShipsContext, useShipping } from './useShipping';
 import { selectedLayerOf } from './selectedLayer';
 import { reviewRowLaunchpad, reviewRowProjects, reviewRowsIn } from './reviewsModel';
 import { forgeName } from './labels';
@@ -225,6 +226,7 @@ export function PullsPage(given: PullsPageProps) {
     });
   }, [system?.open]);
   const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
+  const shipping = useShipping(answer, phone, props.onToast, state.reload);
 
   const list = (
     <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-pulls-list="">
@@ -277,6 +279,7 @@ export function PullsPage(given: PullsPageProps) {
         links={model && answer ? reviewLinksOf(model, answer) : NO_LINKS}
         phone={phone}
         onTarget={setMenuRow}
+        ship={shipping.handlers}
         onHide={(pulls) => {
           // The PR open beside the list leaves with its row.
           if (open && pulls.some((pull) => open.stack.layers.some((layer) => layer.key === pull.key))) props.onOpenStack(null);
@@ -329,6 +332,7 @@ export function PullsPage(given: PullsPageProps) {
             onOpenLayer={(row, layer) => props.onReview(row.stacks[0]!.id, layer.key, 'layer')}
             onNew={props.onNew}
             menuRow={menuRow}
+            ships={shipping.ships}
             onShowAgain={(hidden) => void showWithToast([hidden.key], [hiddenLabel(hidden)], props.onToast)}
             onShowRepo={(repo) => void showRepoWithToast(repo, props.onToast)}
             onOpenThread={props.onOpenThread}
@@ -337,6 +341,7 @@ export function PullsPage(given: PullsPageProps) {
           />
         )}
       </ReviewsMenu>
+      {shipping.log}
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge onCollapse={props.threadId ? props.onHide : undefined} />}
       {rulesOpen && risk.answer && (
@@ -385,7 +390,11 @@ export function PullsPage(given: PullsPageProps) {
     />
   ) : null;
   if (phone && open && model) {
-    return <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone onClose={() => props.onOpenStack(null)} />;
+    return (
+      <ShipsContext.Provider value={shipping.handlers}>
+        <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone onClose={() => props.onOpenStack(null)} />
+      </ShipsContext.Provider>
+    );
   }
   if (phone && localPane) return localPane;
   if (phone && drawing) return drawing;
@@ -394,7 +403,9 @@ export function PullsPage(given: PullsPageProps) {
       {list}
       {!phone &&
         (open && model ? (
-          <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone={false} onClose={() => props.onOpenStack(null)} />
+          <ShipsContext.Provider value={shipping.handlers}>
+            <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone={false} onClose={() => props.onOpenStack(null)} />
+          </ShipsContext.Provider>
         ) : localPane ? (
           localPane
         ) : drawing ? (
@@ -642,6 +653,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         startThread={canStartPullThread(start, link, projects) ? () => setDrafting(true) : null}
         untiedThread={link ? null : untiedPullThread(start.key)}
         risk={riskLines}
+        ship={<PageShipLog pullKey={start.key} />}
         onClose={props.onClose}
         onDiff={() => props.onReview(stack.id, start.key, 'layer')}
         onThread={props.onOpenThread}

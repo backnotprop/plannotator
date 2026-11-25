@@ -27,6 +27,13 @@ export interface InboxFarReadMcpContext {
   filePieceOnMachine?: (args: { message_id: string; file: string }, offset: number) => Promise<FarFilePiece | null>;
   /** The name of the linked machine whose list names this thread id, or null. Absent: no machines here. */
   farThreadMachine?: (threadId: string) => string | null;
+  /**
+   * send_message's answer in a thread on another computer that tagged this session there (inbox-mcp-far-reply.ts).
+   * Null: not such a thread (the send goes on as before). Absent: no machines here.
+   */
+  farReply?: (input: Record<string, unknown> & { body: string }, nextStep: () => Promise<string>, workingFolder: string | undefined) => Promise<{ text: string; structured: Record<string, unknown> } | null>;
+  /** A send run here for a session on another linked computer (inbox-far-send.ts): its message names that computer. */
+  farAuthor?: { id: string; name: string | null };
 }
 
 /** Where a thread an id names lives: "<id> is a thread on <machine>." (send_message's and resolve_message's refusals). */

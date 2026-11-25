@@ -143,3 +143,6 @@ export function withoutInboxReplyQuoteLead(body: string): string {
   const after = splitInboxReplyQuoteLead(body.slice(sentence[0].length));
   return after ? `${sentence[0]}${after.rest}` : body;
 }
+
+/** New thread from this message's words and their recognizer (inbox-new-thread-ask.ts), reached through this export. */
+export { isNewThreadFromMessageAsk, NEW_THREAD_FROM_MESSAGE_WORDS } from './inbox-new-thread-ask';

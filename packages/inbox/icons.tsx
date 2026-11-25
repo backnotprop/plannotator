@@ -8,7 +8,7 @@
  * otherwise. Only an icon of one agent passes one; a kind of agent (Settings, the tour, "New Claude Code session")
  * keeps its plain mark.
  */
-import type { InboxAuthor } from '@plannotator/core/inbox-types';
+import { inboxMarkFaceHost, isInboxMarkFace, type InboxAuthor } from '@plannotator/core/inbox-types';
 import { HostMark as UiHostMark, Icon } from '@plannotator/ui/components/inbox-thread/icons';
 import { isScriptAuthor } from './scriptAuthor';
 import type { CSSProperties, ReactNode } from 'react';
@@ -40,12 +40,19 @@ export function HostMark({ host, big, agent, script }: { host: string | null | u
 
 /**
  * A given face in a mark's box (HostMark draws the agent's own; a preview draws one not kept yet). `agent`: whose
- * project a `project` face draws. `children`: drawn inside the box after the face (the Rex status mark).
+ * project a `project` face draws. `mark:<host>`: that host's mark (ui's neutral mark for a host it has none for).
+ * `children`: drawn inside the box after the face (the Rex status mark).
  */
 export function FaceOfMark({ host, big, face, agent, children }: { host: string | null | undefined; big?: boolean; face: AgentFace; agent?: string | null; children?: ReactNode }) {
   if (face === 'agent' || face === 'mark')
     return (
       <UiHostMark host={host} big={big}>
+        {children}
+      </UiHostMark>
+    );
+  if (isInboxMarkFace(face))
+    return (
+      <UiHostMark host={inboxMarkFaceHost(face)} big={big}>
         {children}
       </UiHostMark>
     );

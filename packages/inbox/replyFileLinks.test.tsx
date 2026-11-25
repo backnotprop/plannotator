@@ -155,6 +155,11 @@ test('an image in a message whose time reads differently now is still found by i
   expect(replyFeedbackFile('shots/before.png (image in your 3:04 AM message)', context())).toBeNull();
 });
 
+test('a video the text played is found by its heading, "video in your … message", in any time zone', () => {
+  const played = file('att_played', 'media/tour.webm', 'video', { ref: 'media/tour.webm' });
+  expect(replyFeedbackFile('media/tour.webm (video in your 3:04 AM message)', context([...FILES, played]))?.attachment.id).toBe('att_played');
+});
+
 test('only the attached-files section is read, never a fence, and a label the link cannot hold stays text', () => {
   const body = [
     'My words.',

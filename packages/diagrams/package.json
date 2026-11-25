@@ -1,0 +1,48 @@
+{
+  "name": "@plannotator/diagrams",
+  "version": "0.1.0",
+  "description": "Measured architecture diagrams with addressable parts for review",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist",
+    "bin",
+    "fonts/OFL.txt",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./worker": "./dist/worker.js",
+    "./cli": {
+      "types": "./bin/render.d.ts",
+      "import": "./bin/render.js"
+    },
+    "./notices": {
+      "types": "./dist/notices.d.ts",
+      "import": "./dist/notices.js"
+    }
+  },
+  "bin": {
+    "plannotator-diagrams": "./bin/plannotator-diagrams.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/backnotprop/plannotator.git",
+    "directory": "packages/diagrams"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

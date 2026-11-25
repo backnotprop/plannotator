@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { KeyboardSettings } from './KeyboardSettings';
-import { INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
+import { INBOX_SYSTEM_SWITCH_SHOWN, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
 import { SoundRow, Switch } from './SoundRow';
 import { type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
@@ -88,8 +88,8 @@ export interface SettingsPageProps {
   context: ConnectContext | null;
   error: string | null;
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
-  /** Settings → Capabilities → Experimental: decision mode's switch. Absent (or an Inbox that reports no experimental features): no Experimental group. */
-  onToggleExperimental?: (next: boolean) => void;
+  /** Settings → Capabilities → Experimental: decision mode's switch, and Grid's (`feature`). Absent (or an Inbox that reports no experimental features): no Experimental group. */
+  onToggleExperimental?: (next: boolean, feature?: 'decision_mode' | 'grid') => void;
   /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184). Absent: no row. */
   onToggleCookieHost?: (next: boolean) => void;
   /** `#settings/experimental` (an old link): Capabilities scrolls to its Experimental group and focuses its heading. */
@@ -523,10 +523,11 @@ function GeneralSection({
 /**
  * Whether Settings → Capabilities offers the System switch to everyone (approval "system-inbox", addendum 2026-11-08:
  * in 0.29 System stays off and hidden; it turns on only by config.json `inboxSystem: true`, for testing). False: the
- * row shows only while System is already on, so a tester who turned it on in config.json can turn it off here. Set it
+ * row shows only while System is already on, so a tester who turned it on in config.json can turn it off here. It is
+ * core's `INBOX_SYSTEM_SWITCH_SHOWN`, which also decides whether agents get System (`plannotator inbox capability`): set that
  * to true when System is announced.
  */
-export const SYSTEM_SETTINGS_ROW_VISIBLE = false;
+export const SYSTEM_SETTINGS_ROW_VISIBLE: boolean = INBOX_SYSTEM_SWITCH_SHOWN;
 
 /**
  * Capabilities (the owner, 2026-10-27): the switches that turn a whole
@@ -584,7 +585,7 @@ function CapabilitiesSection({
   floatDrafts: { on: boolean } | null;
   onToggleFloatDrafts?: (next: boolean) => void;
   experimental: InboxExperimentalSettings | null;
-  onToggleExperimental?: (next: boolean) => void;
+  onToggleExperimental?: (next: boolean, feature?: 'decision_mode' | 'grid') => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
   experimentalHeading: RefObject<HTMLHeadingElement | null>;
 }) {
@@ -729,6 +730,20 @@ function CapabilitiesSection({
                     disabled={experimental.decision_mode.env !== null}
                     onClick={() => onToggleExperimental(!experimental.decision_mode.on)}
                   />
+                </span>
+              </div>
+            )}
+            {decisionRow && experimental.grid && (
+              // Grid (approval "inbox-agent-grid"): its page in the sidebar while on; nothing of it while off.
+              <div className="ib-prow" data-settings-grid="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-grid-label">Grid</span>
+                  <span className="ib-desc">
+                    {experimental.grid.env !== null ? `PLANNOTATOR_EXPERIMENTAL turns it ${experimental.grid.env ? 'on' : 'off'}.` : 'A page in the sidebar with all your agents’ work: what needs you, what is moving, what landed and what was dropped.'}
+                  </span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={experimental.grid.on} labelledBy="ib-grid-label" disabled={experimental.grid.env !== null} onClick={() => onToggleExperimental(!experimental.grid!.on, 'grid')} />
                 </span>
               </div>
             )}
@@ -1156,7 +1171,7 @@ export function SettingsPage(props: SettingsPageProps) {
         return !voice?.on ? 'Off' : voice.engine === 'api' ? 'API key' : 'Codex login';
       case 'capabilities': {
         // What is on, by name: "Off", "Board", "Decision mode", or "2 on".
-        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, codeReview?.on ? 'Code review' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
+        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, codeReview?.on ? 'Code review' : null, experimental?.decision_mode.on ? 'Decision mode' : null, experimental?.grid?.on ? 'Grid' : null].filter((name): name is string => name !== null);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} on`;
       }
     }
@@ -1282,6 +1297,7 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'capabilities':
         body =
           (board && props.onToggleBoard) || steps || scheduled || codeReview || bro || experimental ? (
+            <>
             <CapabilitiesSection
               board={board}
               onToggleBoard={props.onToggleBoard}
@@ -1304,6 +1320,7 @@ export function SettingsPage(props: SettingsPageProps) {
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}
             />
+            </>
           ) : (
             <div className="ib-card ib-sempty" data-settings-capabilities-none="">
               <Icon name="puzzle" />

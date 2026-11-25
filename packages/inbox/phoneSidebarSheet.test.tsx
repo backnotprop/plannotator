@@ -239,11 +239,10 @@ test.skipIf(!hasDom)('off a phone the sidebar is as it was: the places above the
   // Search and New message lead the sidebar, as before.
   expect(one('[data-open-search]')).not.toBeNull();
   expect(one('[data-open-compose]')).not.toBeNull();
-  // The sections are the scroll's own children: no block around them, no row around Starred's heading.
-  expect(header('pinned').parentElement).toBe(scroll);
-  expect(one('.ib-pins')!.parentElement).toBe(scroll);
-  expect(one('.ib-projs')!.parentElement).toBe(scroll);
-  expect(document.querySelectorAll('[data-section-total], [data-sheet-showing], [data-sheet-close], .ib-sheet-sec, .ib-pin-sub')).toHaveLength(0);
+  // No counts beside the headings, no "Showing only", no close button, no words under a starred row. (Each section is a
+  // block with its heading in a row of its own at both widths, so the headings stick: sidebarStickyHeadings.test.tsx.)
+  expect(scroll.contains(header('pinned'))).toBe(true);
+  expect(document.querySelectorAll('[data-section-total], [data-sheet-showing], [data-sheet-close], .ib-pin-sub')).toHaveLength(0);
   // Feedback is its own row above Settings, not in Settings' row.
   expect(feedbackRows(one('.ib-setrow')!)).toHaveLength(0);
   expect(feedbackRows(one('.ib-side-foot')!)).toHaveLength(1);

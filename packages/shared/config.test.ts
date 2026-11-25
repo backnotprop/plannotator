@@ -29,6 +29,7 @@ import {
   resolveReviewProgress,
   resolveAgentTool,
   resolveExperimental,
+  savedExperimental,
   parseExperimentalEnv,
   agentToolHostOf,
   agentToolSaveFailed,
@@ -40,6 +41,7 @@ import {
   isValidPublicUrl,
   isValidUrlHost,
   parseReviewAnalysisConfig,
+  parseDisplayOptionsConfig,
   loadConfig,
   saveConfig,
   getServerConfig,
@@ -156,6 +158,71 @@ describe("reviewDefaults persistence", () => {
     expect(cfg.diffOptions?.defaultDiffType).toBe("uncommitted");
     expect(cfg.reviewDefaults).toEqual({ other: { defaultDiffType: "x" }, jj: { defaultDiffType: "jj-evolog" } });
     expect(getServerConfig(null).reviewDefaults?.jj).toEqual({ defaultDiffType: "jj-evolog" });
+  });
+});
+
+describe("displayOptions persistence", () => {
+  const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "plannotator-config-test-"));
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+  });
+
+  afterEach(() => {
+    if (originalDataDir !== undefined) {
+      process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
+    } else {
+      delete process.env.PLANNOTATOR_DATA_DIR;
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("saving one display option keeps the others, and the server sends them", () => {
+    saveConfig({ displayOptions: { textSize: 17, inputMethod: "pinpoint" } });
+    saveConfig({ displayOptions: { fontFamily: "Georgia" } });
+    expect(loadConfig().displayOptions).toEqual({ textSize: 17, inputMethod: "pinpoint", fontFamily: "Georgia" });
+    expect(getServerConfig(null).displayOptions).toEqual({ textSize: 17, inputMethod: "pinpoint", fontFamily: "Georgia" });
+  });
+
+  test("a hand-edited key the UI does not know, or of the wrong type, is kept on disk but not sent", () => {
+    writeFileSync(
+      join(tempDir, "config.json"),
+      JSON.stringify({ displayOptions: { textSize: "17", futureKnob: 1, showGrid: true } }),
+    );
+    saveConfig({ displayOptions: { planWidth: "wide" } });
+    expect(loadConfig().displayOptions).toEqual({ textSize: "17", futureKnob: 1, showGrid: true, planWidth: "wide" });
+    expect(getServerConfig(null).displayOptions).toEqual({ showGrid: true, planWidth: "wide" });
+  });
+
+  test("no displayOptions, or none usable, sends nothing", () => {
+    expect("displayOptions" in getServerConfig(null)).toBe(false);
+    writeFileSync(join(tempDir, "config.json"), JSON.stringify({ displayOptions: { textSize: "17" } }));
+    expect("displayOptions" in getServerConfig(null)).toBe(false);
+  });
+});
+
+describe("parseDisplayOptionsConfig", () => {
+  test("keeps the known keys of the right primitive type", () => {
+    const all = {
+      textSize: 19,
+      fontFamily: "",
+      showGrid: false,
+      diagramShadow: 0,
+      autoOpenSidebar: false,
+      stickyActions: true,
+      planWidth: "wide",
+      taterMode: true,
+      inputMethod: "pinpoint",
+    };
+    expect(parseDisplayOptionsConfig(all)).toEqual(all);
+    expect(parseDisplayOptionsConfig({ textSize: "19", showGrid: 1, extra: true, planWidth: "wide" })).toEqual({ planWidth: "wide" });
+    expect(parseDisplayOptionsConfig({})).toEqual({});
+  });
+
+  test("refuses anything that is not a plain object", () => {
+    for (const bad of [null, [], "wide", 17, true]) expect(parseDisplayOptionsConfig(bad)).toBeUndefined();
   });
 });
 
@@ -1358,6 +1425,19 @@ describe("experimental features", () => {
     writeFileSync(join(dir, "config.json"), JSON.stringify({ inboxLaunch: "off" }));
     saveConfig({ inboxLaunch: { enabled: true } });
     expect(loadConfig().inboxLaunch).toEqual({ enabled: true });
+  });
+
+  test("inboxCapabilityFlips merges key by key: a switch's flip time saved never drops another's saved meanwhile", () => {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ inboxCapabilityFlips: { board: { at: 1_000, by: null } } }));
+    saveConfig({ inboxCapabilityFlips: { steps: { at: 2_000, by: null } } });
+    saveConfig({ inboxCapabilityFlips: { board: { at: 3_000, by: null } } });
+    expect(loadConfig().inboxCapabilityFlips).toEqual({ board: { at: 3_000, by: null }, steps: { at: 2_000, by: null } });
+  });
+
+  test("a saved experimental choice is told from the untouched default", () => {
+    expect(savedExperimental({}, "grid")).toBeUndefined();
+    expect(savedExperimental({ experimental: { grid: false } }, "grid")).toBe(false);
+    expect(savedExperimental({ experimental: { decisionMode: "true" as unknown as boolean } }, "decision-mode")).toBe(true);
   });
 
   test("a hand-edited experimental value that is not an object is replaced, never spread", () => {

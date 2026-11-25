@@ -155,7 +155,7 @@ Approved and denied plans are saved to `~/.plannotator/plans/` by default. You c
 
 ## Config file
 
-Plannotator reads `~/.plannotator/config.json` for persistent settings. This includes display name, diff options, conventional comment labels, and feedback message customization.
+Plannotator reads `~/.plannotator/config.json` for persistent settings. This includes display name, diff options, display options (`displayOptions`: plan review's text size, font, Grid background, diagram shadow, sidebar, sticky actions, plan width, Tater mode, and the Select / Pinpoint selection mode), conventional comment labels, and feedback message customization.
 
 The review open-state flags (`plannotator review --base <ref>` / `--diff-type <type>`) seed a single session and never change the saved defaults — Settings → Review remains the only writer. Git reviews open on `diffOptions.defaultDiffType`; Jujutsu reviews open on `reviewDefaults.jj.defaultDiffType` (`jj-current`, `jj-last`, `jj-line`, `jj-evolog` or `jj-all`; unset or invalid means `jj-current`).
 
