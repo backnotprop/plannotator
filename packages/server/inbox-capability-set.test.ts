@@ -362,6 +362,21 @@ describe("one set of switches across linked computers", () => {
     expect(capabilitySetKeysIn({ show_archived: { on: true } })).toEqual([]);
   });
 
+  test("Decision mode turned from its own Capabilities row is stamped, and a linked computer takes it", async () => {
+    // Its row saves `{ decision_mode: { on } }`; an older window's switch still saves `{ experimental: { decision_mode } }`.
+    expect(capabilitySetKeysIn({ decision_mode: { on: false } })).toEqual(["decision_mode"]);
+    expect(capabilitySetKeysIn({ experimental: { decision_mode: false } })).toEqual(["decision_mode"]);
+    const laptop = computer(LAPTOP, {}, { defaults: ["decision_mode"] });
+    const studio = computer(STUDIO, {}, { defaults: ["decision_mode"] });
+    // The settings route stamps what a save names (inbox.ts: `capabilitySet.flipped(capabilitySetKeysIn(body))`).
+    laptop.state.clock = 5_000;
+    laptop.on.decision_mode = false;
+    laptop.set.flipped(capabilitySetKeysIn({ decision_mode: { on: false } }));
+    expect(laptop.set.wire().decision_mode).toEqual({ on: false, at: 5_000, by: LAPTOP });
+    await meet(laptop, studio);
+    expect([studio.on.decision_mode, studio.applied]).toEqual([false, ["decision_mode false"]]);
+  });
+
   test("a linked computer's set is read by name: an unknown switch, a bad time or a foreign id is dropped", () => {
     expect(readCapabilitySet({ board: { on: true, at: 5, by: STUDIO }, steps: { on: "yes" }, plans: { on: true }, bro: { on: false, at: -1, by: STUDIO }, grid: { on: true, at: 7, by: "laptop" }, float_drafts: { on: false, at: 0, by: null } })).toEqual({
       board: { on: true, at: 5, by: STUDIO },

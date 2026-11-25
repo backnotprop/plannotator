@@ -78,11 +78,15 @@ export function useSettingsSaves(
   const toggleScheduled = (next: boolean) =>
     saveSetting((s) => ({ ...s, scheduled_threads: { ...s.scheduled_threads, on: next } }), () => scheduledApi.saveSwitch(next), (s, saved) => ({ ...s, scheduled_threads: saved.scheduled_threads ?? { on: next } }), reloadSkillCatalog);
 
-  /** One experimental switch: decision mode, or Grid (approval "inbox-agent-grid"); the other keeps what it was. */
-  const toggleExperimental = (next: boolean, feature: 'decision_mode' | 'grid' = 'decision_mode') =>
+  /** Decision mode (Settings → Capabilities): on unless turned off; every window follows through `event: capabilities`. */
+  const toggleDecisionMode = (next: boolean) =>
+    saveSetting((s) => ({ ...s, decision_mode: { ...s.decision_mode, on: next } }), () => inboxApi.saveDecisionMode(next), (s, saved) => ({ ...s, decision_mode: { ...s.decision_mode, ...saved.decision_mode } }));
+
+  /** The one experimental switch with a row: Grid (approval "inbox-agent-grid"). */
+  const toggleExperimental = (next: boolean, _feature: 'grid' = 'grid') =>
     saveSetting(
-      (s) => ({ ...s, experimental: { decision_mode: s.experimental?.decision_mode ?? { on: false, env: null }, ...(s.experimental?.grid ? { grid: s.experimental.grid } : {}), [feature]: { on: next, env: s.experimental?.[feature]?.env ?? null } } }),
-      () => inboxApi.saveExperimental({ [feature]: next }),
+      (s) => ({ ...s, experimental: { ...s.experimental, grid: { on: next, env: s.experimental?.grid?.env ?? null } } }),
+      () => inboxApi.saveExperimental({ grid: next }),
       (s, saved) => ({ ...s, experimental: saved.experimental }),
     );
 
@@ -121,7 +125,7 @@ export function useSettingsSaves(
     }
     await refreshList(true);
   };
-  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleThreadTabs, toggleThreadTabsCountAnchored, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleThreadTabs, toggleThreadTabsCountAnchored, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
 }
 
 /** App's settings take a saved thread panes switch through this (set where App runs `useSettingsSaves`). */
