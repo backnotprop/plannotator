@@ -34,14 +34,35 @@ export function takeTheirWords(host: DraftTakesHost, threadId: string, draft: In
 }
 
 /**
- * The words an offered draft and the box make together, nothing of either lost. Both went on from the words the box held
- * when the draft came (`from`): the draft, then what was typed here after them. Otherwise the draft, a blank line, then
- * the box's words.
+ * The words an offered draft and the box make together, nothing of either lost, and where the caret goes (after the
+ * words typed here; null: their end). The box holds the draft already, then more: the box's words. Both went on from
+ * the words the box held when the draft came (`from`): this box's edit (an addition at the end, or a change in the
+ * middle the draft left as it was) is made in the draft. Otherwise the draft, a blank line, then the box's words.
  */
-export function offeredWithTyped(offered: string, from: string, typed: string): string {
-  if (from.trim() !== '' && typed.startsWith(from) && offered.startsWith(from)) return offered + typed.slice(from.length);
-  if (!offered.trim()) return typed;
-  return typed.trim() ? `${offered.trimEnd()}\n\n${typed.trimStart()}` : offered;
+export function offeredWithTyped(offered: string, from: string, typed: string): { text: string; caret: number | null } {
+  if (offered.trim() !== '' && typed.startsWith(offered)) return { text: typed, caret: null };
+  if (from.trim() !== '' && typed.startsWith(from) && offered.startsWith(from)) return { text: offered + typed.slice(from.length), caret: null };
+  if (!offered.trim()) return { text: typed, caret: null };
+  if (!typed.trim()) return { text: offered, caret: null };
+  // The box's one edit since `from`: `removed` taken out after `before`, `inserted` put in its place.
+  let start = 0;
+  while (start < from.length && start < typed.length && from[start] === typed[start]) start += 1;
+  let end = 0;
+  while (end < from.length - start && end < typed.length - start && from[from.length - 1 - end] === typed[typed.length - 1 - end]) end += 1;
+  const before = from.slice(0, start);
+  const removed = from.slice(start, from.length - end);
+  const after = from.slice(from.length - end);
+  const inserted = typed.slice(start, typed.length - end);
+  if (from.trim() !== '' && before.length + removed.length > 0 && offered.startsWith(before + removed)) {
+    return { text: before + inserted + offered.slice(before.length + removed.length), caret: before.length + inserted.length };
+  }
+  if (from.trim() !== '' && removed.length + after.length > 0 && offered.endsWith(removed + after)) {
+    const at = offered.length - removed.length - after.length;
+    return { text: offered.slice(0, at) + inserted + offered.slice(at + removed.length), caret: at + inserted.length };
+  }
+  const joined = `${offered.trimEnd()}\n\n${typed.trimStart()}`;
+  const lead = typed.length - typed.trimStart().length;
+  return { text: joined, caret: joined.length - typed.trimStart().length + Math.max(0, start + inserted.length - lead) };
 }
 
 interface OfferHost {
@@ -53,6 +74,7 @@ interface OfferHost {
   changeReply: (text: string, behind?: boolean) => void;
   focusReplyEnd: () => void;
   announce: (text: string) => void;
+  textRef?: { readonly current: HTMLTextAreaElement | null };
 }
 
 /**
@@ -64,11 +86,18 @@ export function takeOffered(host: OfferHost, edited = false): void {
   if (!offered) return;
   const { draft } = offered;
   if (offered.typed || edited) {
-    const text = offeredWithTyped(draft.body, offered.from, host.replyText.get());
+    const { text, caret } = offeredWithTyped(draft.body, offered.from, host.replyText.get());
     host.takeDraftFiles(host.draftFilesWithMine(draft.files ?? []), text, 'add');
     host.changeReply(text, true);
-    // An edit made in the box keeps focus where it is; Restore draft puts the caret after the words.
+    // An edit made in the box keeps focus, the caret where the person was typing (the words were set under it);
+    // Restore draft puts the caret after the words.
     if (!edited) host.focusReplyEnd();
+    else if (caret !== null && host.textRef) {
+      const field = host.textRef;
+      const place = () => field.current === document.activeElement && field.current?.setSelectionRange(caret, caret);
+      place();
+      requestAnimationFrame(place);
+    }
   } else {
     host.setBox({ open: true, text: draft.body });
     host.takeDraftFiles(draft.files ?? [], draft.body);

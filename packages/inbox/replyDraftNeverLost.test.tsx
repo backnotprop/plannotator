@@ -557,6 +557,148 @@ test.skipIf(!hasDom)('Send from a closed box after a save did not land: the Send
   expect(drafts.has(ONE)).toBe(false);
 });
 
+/** The box's words as a person's edit leaves them, the caret at `caret`. */
+function editTo(el: HTMLElement, value: string, caret: number) {
+  const text = box(el)!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    text.focus();
+    setter.call(text, value);
+    text.setSelectionRange(caret, caret);
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+test.skipIf(!hasDom)('another device added to words typed here, and the next edit is in their middle: made once in the newer words, the caret where it was', async () => {
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'Ship on Friday.');
+  await until(() => drafts.get(ONE)?.body === 'Ship on Friday.', 'the first save');
+  saveElsewhere(ONE, 'Ship on Friday. QA signed off.');
+  await act(async () => signal.emit());
+  await until(() => offerShown(el), 'the offer');
+  editTo(el, 'Ship on Monday.', 'Ship on Mon'.length);
+  expect(box(el)!.value).toBe('Ship on Monday. QA signed off.');
+  await settle(2);
+  expect([box(el)!.selectionStart, box(el)!.selectionEnd]).toEqual([11, 11]);
+  await until(() => drafts.get(ONE)?.body === 'Ship on Monday. QA signed off.', 'saved', 1500);
+});
+
+const keptInBrowser = () => Object.keys(localStorage).filter((key) => key.startsWith('plannotator-inbox-reply-kept:'));
+
+/** The browser ends the tab (a phone short of memory): nothing of the page runs again, and a new page opens the thread. */
+async function newPageAfterTabEnded(id = ONE): Promise<HTMLElement> {
+  act(() => root?.unmount());
+  host?.remove();
+  resetReplyDraftPageForTests();
+  return open(id);
+}
+
+test.skipIf(!hasDom)('words that did not land, and the tab ended: a new page has them back in the box, "Not saved", and saves them once the Inbox answers', async () => {
+  await typedThenFailed(noNetwork);
+  const el = await newPageAfterTabEnded();
+  await until(() => box(el)?.value === 'Older words. Newer words.', 'the words back in the box');
+  await until(() => el.querySelector('[data-draft-failed]') !== null, '"Not saved"');
+  saveAnswer = null;
+  window.dispatchEvent(new Event('online'));
+  await until(() => drafts.get(ONE)?.body === 'Older words. Newer words.', 'saved');
+  await until(() => !replyDraftUnsaved(), 'nothing left unsaved');
+  expect(keptInBrowser()).toEqual([]);
+});
+
+/** Words that did not land while another device saved the draft: the conflict shows. */
+async function conflictShown(): Promise<HTMLElement> {
+  const el = await typedThenFailed(noNetwork);
+  act(() => draw(TWO));
+  await settle();
+  saveAnswer = null;
+  saveElsewhere(ONE, 'The iPad wrote this.');
+  act(() => draw(ONE));
+  await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict');
+  return el;
+}
+const conflictButton = (el: HTMLElement, label: string) => [...el.querySelectorAll<HTMLButtonElement>('[data-draft-conflict] button')].find((b) => b.textContent === label)!;
+
+test.skipIf(!hasDom)('a conflict, and the tab ended: a new page shows the conflict again with these words; Discard mine then leaves nothing to come back', async () => {
+  await conflictShown();
+  let el = await newPageAfterTabEnded();
+  await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict again');
+  expect(box(el)!.value).toBe('Older words. Newer words.');
+  expect(drafts.get(ONE)?.body).toBe('The iPad wrote this.');
+  await act(async () => conflictButton(el, 'Discard mine').click());
+  await settle(2);
+  expect(keptInBrowser()).toEqual([]);
+  el = await newPageAfterTabEnded();
+  await settle(4);
+  expect(el.querySelector('[data-draft-conflict]') === null).toBe(true);
+  expect((box(el)?.value ?? '').includes('Newer words.')).toBe(false);
+});
+
+test.skipIf(!hasDom)('Keep mine on its way when the tab ended: a new page saves the words over the other draft', async () => {
+  const el = await conflictShown();
+  // The Inbox does not answer Keep mine's save.
+  saveAnswer = noNetwork;
+  await act(async () => conflictButton(el, 'Keep mine').click());
+  expect(keptInBrowser().length).toBe(1);
+  await settle(2);
+  saveAnswer = null;
+  await newPageAfterTabEnded();
+  await until(() => drafts.get(ONE)?.body === 'Older words. Newer words.', 'saved by the new page');
+  await until(() => !replyDraftUnsaved(), 'nothing left unsaved');
+  expect(keptInBrowser()).toEqual([]);
+});
+
+test.skipIf(!hasDom)('words that did not land, then Discard: a new page after the tab ended brings nothing back', async () => {
+  const el = await typedThenFailed(noNetwork);
+  saveAnswer = null;
+  const bin = el.querySelector<HTMLButtonElement>('[data-reply-discard]');
+  expect(!!bin).toBe(true);
+  await act(async () => bin!.click());
+  await settle(2);
+  expect(keptInBrowser()).toEqual([]);
+  const next = await newPageAfterTabEnded();
+  await settle(4);
+  expect((box(next)?.value ?? '').includes('Newer words.')).toBe(false);
+  expect(next.querySelector('[data-draft-failed]') === null).toBe(true);
+});
+
+test.skipIf(!hasDom)('words that did not land, then sent from the closed box: a new page after the tab ended brings nothing back', async () => {
+  const el = await typedThenFailed(noNetwork);
+  await act(async () => {
+    box(el)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  await until(() => box(el) === null, 'the box closed');
+  // Still no network for drafts: the Send carries the words that did not land.
+  await act(async () => el.querySelector<HTMLButtonElement>('[data-foot-buttons] button.ib-pri')!.click());
+  await until(() => replies.length === 1, 'the Send');
+  expect(replies[0]!.words).toBe('Older words. Newer words.');
+  await settle(4);
+  expect(keptInBrowser()).toEqual([]);
+  saveAnswer = null;
+  const next = await newPageAfterTabEnded();
+  await settle(4);
+  expect((box(next)?.value ?? '').includes('Newer words.')).toBe(false);
+  expect(saves.some((s) => s.status === 200 && s.body.includes('Newer words.'))).toBe(false);
+});
+
+test.skipIf(!hasDom)("another computer's thread, and the tab ended: a new page has its words back in the box", async () => {
+  const MAC = `ibx_01K${'0'.repeat(22)}M`;
+  rememberMachine([TWO], MAC);
+  try {
+    const el = await open(TWO);
+    await reply(el);
+    typeOn(el, 'Words for the Mac mini thread.');
+    await settle(2);
+    const next = await newPageAfterTabEnded(TWO);
+    await until(() => box(next)?.value === 'Words for the Mac mini thread.', 'the words back in the box');
+    await act(async () => next.querySelector<HTMLButtonElement>('[data-reply-discard]')!.click());
+    await settle(2);
+    expect(keptInBrowser()).toEqual([]);
+  } finally {
+    resetMachineRoutes();
+  }
+});
+
 test.skipIf(!hasDom)('the page hidden while its save did not land: the words are sent again as it hides', async () => {
   const el = await typedThenFailed(noNetwork);
   try {

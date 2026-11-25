@@ -65,6 +65,7 @@ import {
   type ReplyDraftStore,
 } from '@plannotator/core/inbox-reply-draft';
 import { httpReplyDraftStore } from './replyDraftHttp';
+import { forgetWords, keepWords, keptWordsOf, type KeptWords } from './replyWordsKept';
 import { onInboxReconnected } from './sessionAdopt';
 import { clearReplyMentions, noteDraftMentions, replyMentionsSave } from './threadMentions';
 
@@ -178,6 +179,56 @@ const remoteWords = new Map<string, string>();
 const unsavedOf = (threadId: string): string | null => failedWords.get(threadId) ?? (machineOf(threadId) ? remoteWords.get(threadId) : undefined) ?? null;
 /** Another machine's threads with words kept here (a thread no longer marked as that machine's keeps none here). */
 const remoteKept = (): boolean => [...remoteWords.keys()].some((threadId) => machineOf(threadId) !== null);
+/** Per thread: the `updated_at` of the draft this page last knew (the draft words kept here were typed over). */
+const baseKnown = new Map<string, string | null>();
+/** Per thread: the words of a Keep mine on its way: kept in the browser until a save lands (replyWordsKept.ts). */
+const keepingMine = new Map<string, string>();
+/** Per thread: what this page keeps in the browser for it now (replyWordsKept.ts). */
+const keptHere = new Map<string, KeptWords>();
+/** Threads whose words an earlier page kept in the browser were looked for (once per thread, as it first opens). */
+const lookedForKept = new Set<string>();
+/**
+ * The words each thread holds here and no draft holds, kept in the browser as they change (every change of them is
+ * followed by `unsavedChanged`), and let go there with them: a tab the browser ends loses none (replyWordsKept.ts).
+ */
+function syncKept(): void {
+  const want = new Map<string, KeptWords>();
+  for (const [id, words] of remoteWords) if (machineOf(id)) want.set(id, { kind: 'remote', words, base: null });
+  for (const [id, words] of keepingMine) want.set(id, { kind: 'failed', words, base: baseKnown.get(id) ?? null });
+  for (const [id, words] of failedWords) want.set(id, { kind: 'failed', words, base: baseKnown.get(id) ?? null });
+  for (const [id, words] of conflictWords) want.set(id, { kind: 'conflict', words, base: baseKnown.get(id) ?? null });
+  for (const [id, kept] of want) {
+    const was = keptHere.get(id);
+    if (was && was.kind === kept.kind && was.words === kept.words && was.base === kept.base) continue;
+    keptHere.set(id, kept);
+    keepWords(id, kept);
+  }
+  for (const id of [...keptHere.keys()]) {
+    if (want.has(id)) continue;
+    keptHere.delete(id);
+    forgetWords(id);
+  }
+}
+/**
+ * The thread opens for the first time in this page: words an earlier page kept for it in the browser and this page does
+ * not hold come back as they were (a conflict's, or not saved: the thread's read then saves them or shows the conflict).
+ */
+function takeKeptBack(threadId: string): void {
+  if (lookedForKept.has(threadId)) return;
+  lookedForKept.add(threadId);
+  if (conflictWords.has(threadId) || failedWords.has(threadId) || remoteWords.has(threadId)) return;
+  const kept = keptWordsOf(threadId);
+  if (!kept || (kept.kind === 'remote' && !machineOf(threadId))) return;
+  keptHere.set(threadId, kept);
+  if (!baseKnown.has(threadId)) baseKnown.set(threadId, kept.base);
+  if (kept.kind === 'conflict') conflictWords.set(threadId, kept.words);
+  else if (kept.kind === 'remote') remoteWords.set(threadId, kept.words);
+  else {
+    failedWords.set(threadId, kept.words);
+    refusedThreads.add(threadId);
+  }
+  unsavedChanged();
+}
 /** The dictated words waiting for this thread's box (`landWordsInReplyDraft` on another machine's thread), taken once. */
 export function takeHeldVoiceWords(threadId: string): string[] {
   const words = heldVoice.get(threadId) ?? [];
@@ -193,9 +244,10 @@ export function replyDraftUnsaved(): boolean {
  * on their way are left to end (their counts are theirs); this page's localStorage is the test's to keep or clear.
  */
 export function resetReplyDraftPageForTests(): void {
-  for (const kept of [conflictWords, offers, offerWords, offerFrom, failedWords, carried, discards, heldVoice, remoteWords, sendsOut]) kept.clear();
+  for (const kept of [conflictWords, offers, offerWords, offerFrom, failedWords, carried, discards, heldVoice, remoteWords, sendsOut, baseKnown, keepingMine, keptHere]) kept.clear();
   tooLongThreads.clear();
   refusedThreads.clear();
+  lookedForKept.clear();
 }
 
 /**
@@ -315,6 +367,7 @@ export function onReplyDraftUnsavedChange(listener: () => void): () => void {
   return () => unsavedListeners.delete(listener);
 }
 function unsavedChanged(): void {
+  syncKept();
   for (const listener of unsavedListeners) listener();
 }
 
@@ -471,8 +524,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     if (words === null) conflicts.current.delete(target);
     else {
       conflicts.current.set(target, words);
-      // The conflict keeps the box's newest words: they stand for any that failed before.
+      // The conflict keeps the box's newest words: they stand for any that failed before (or a Keep mine refused).
       failedWords.delete(target);
+      keepingMine.delete(target);
     }
     unsavedChanged();
   };
@@ -481,6 +535,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     // The threads its words mention (approval "inbox-drag-threads"): the box paints them for these words.
     noteDraftMentions(target, draft);
     bases.current.set(target, draft?.updated_at ?? null);
+    baseKnown.set(target, draft?.updated_at ?? null);
     synced.current.set(target, draftKey(draft));
     syncedWords.current.set(target, draft?.body ?? null);
     if (target === current.current) lastWords.current = draft?.body ?? null;
@@ -500,6 +555,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   };
   /** The thread's words were refused for another reason or did not land (on), or a save of them landed or they went (off). */
   const markRefused = (target: string, on: boolean, words?: string) => {
+    // A Keep mine on its way has ended: landed (off), or its words are kept as not saved (on).
+    keepingMine.delete(target);
     // The words that did not land are kept for the thread (`failedWords`) until a save of them lands or they go.
     if (on && words !== undefined) failedWords.set(target, words);
     else if (!on) failedWords.delete(target);
@@ -546,6 +603,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     offerWords.delete(target);
     if (before) {
       bases.current.set(target, before.base);
+      baseKnown.set(target, before.base);
       synced.current.set(target, before.key);
       syncedWords.current.set(target, before.words);
     }
@@ -821,6 +879,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   // The thread's draft, read when it opens; what waited for the last thread is saved first.
   useEffect(() => {
     let live = true;
+    // Words an earlier page of this browser kept for the thread (a tab the browser ended) are this page's again.
+    takeKeptBack(threadId);
     // Words of this window's not saved (a conflict's, a save that did not land) are known before the read answers: a box
     // opened meanwhile holds them, so a key typed there goes after them, never in their place.
     setState({ loadedFor: null, draft: null, conflict: null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), unsaved: conflicts.current.get(threadId) ?? unsavedOf(threadId) });
@@ -829,8 +889,11 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         // An older Inbox answers 404 (caught below): no draft.
         const draft = await storeRef.current.read(threadId);
         if (!live) return;
+        // Words kept here that the draft holds now are saved: no conflict is left over them.
+        if (draft && conflicts.current.get(threadId) === draft.body) setConflict(threadId, null);
         const waiting = failedWords.get(threadId);
-        const knewBase = bases.current.has(threadId) ? baseOf(threadId) : undefined;
+        // The draft this page (or the page before it, for words it kept) last knew.
+        const knewBase = bases.current.has(threadId) ? baseOf(threadId) : baseKnown.has(threadId) ? (baseKnown.get(threadId) ?? null) : undefined;
         const change = ownedChange(threadId, draft, true);
         if (change === null) adopt(threadId, draft);
         setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), offer: offers.get(threadId) ?? null, unsaved: unsavedOf(threadId) });
@@ -1013,6 +1076,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     refusedThreads.delete(target);
     failedWords.delete(target);
     remoteWords.delete(target);
+    keepingMine.delete(target);
     unsavedChanged();
     setState({ loadedFor: target, draft: null, conflict: null, tooLong: false, failed: false });
     if (machineOf(target)) return;
@@ -1082,6 +1146,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     refusedThreads.delete(target);
     failedWords.delete(target);
     remoteWords.delete(target);
+    keepingMine.delete(target);
     unsavedChanged();
     if (!open) {
       if (conflicts.current.has(target) || offeredSends.current.delete(target)) setConflict(target, null);
@@ -1173,6 +1238,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   const keepMine = useCallback(
     (text: string, files: ReplyDraftFiles = NO_FILES) => {
       const target = current.current;
+      // Kept in the browser until the save lands (replyWordsKept.ts): a tab ended meanwhile loses none of them.
+      if (text.trim() !== '') keepingMine.set(target, text);
       setConflict(target, null);
       setState((s) => ({ ...s, conflict: null }));
       write(target, text, take(target, files, text));
