@@ -74,7 +74,8 @@ import { clearLateVoiceMiss, LATE_VOICE_MISSED, useLateVoiceMiss } from '../late
 import { replyBoxSetAside } from '../floaters/model';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
-import { conflictRevision, onPickConflict } from '../pickConflict';
+import { saveOverConflicts } from '../pickConflict';
+import { usePageLeave } from '../pageLeave';
 import { useReplyHasWords, useReplyTextStore } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DRAFT_OFFER_TEXT, DraftHead, DraftFootNote, DraftOffer, DraftStamp, unsentWords } from './DraftLabel';
@@ -2392,29 +2393,23 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       const statesBefore = new Map((threadRef.current.messages.find((m) => m.id === messageId)?.questions ?? []).map((q) => [`${q.message_id}/${q.key}`, q.state] as const));
       try {
         // `unsentOnly`: a save that lands after its question went with a reply never reopens what the agent has.
-        let result: Awaited<ReturnType<typeof inboxApi.pick>>;
-        for (let tries = 0; ; tries += 1) {
-          try {
-            result = await pickSave.mutateAsync({ messageId, key, revision, answer, keepalive: options.keepalive && tries === 0 });
-            break;
-          } catch (cause) {
-            // Another window's answer landed first (pickConflict.ts holds the rule): this one goes again on top of it,
-            // or the Inbox's is drawn. Either way quietly: never the refusal's raw words.
-            const conflict = onPickConflict(cause, tries);
-            if (!conflict) throw cause;
-            const now = conflictRevision(cause)!;
+        // Another window's answer landing first (pickConflict.ts holds the rule): this one goes again on top of it, or
+        // the Inbox's is drawn, quietly; a newer answer of it waiting decides instead, at the revision the Inbox holds.
+        const outcome = await saveOverConflicts((at, tries) => pickSave.mutateAsync({ messageId, key, revision: at, answer, keepalive: options.keepalive && tries === 0 }), revision, {
+          landed: (now) => {
+            revision = now;
             landedRevisions.current.set(id, Math.max(landedRevisions.current.get(id) ?? 0, now));
-            // A newer answer of it is waiting: that one decides, and goes at the revision the Inbox holds now.
-            if (pickQueue.hasNewer(id) || typedSaves.has(id)) return true;
-            if (conflict.action === 'retry') {
-              revision = now;
-              continue;
-            }
+          },
+          newer: () => pickQueue.hasNewer(id) || typedSaves.has(id),
+        });
+        if ('stood' in outcome) {
+          if (outcome.stood === 'adopted') {
             lastAnswers.current.delete(id);
             await onChanged();
-            return true;
           }
+          return true;
         }
+        const result = outcome.saved;
         for (const q of result.questions) {
           revisions.current.set(`${q.message_id}/${q.key}`, q.revision);
           landedRevisions.current.set(`${q.message_id}/${q.key}`, Math.max(landedRevisions.current.get(`${q.message_id}/${q.key}`) ?? 0, q.revision));
@@ -2520,20 +2515,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       void inboxApi.pick(messageId, key, revision, answer, { unsentOnly: true, keepalive: true }).catch(() => {});
     }
   };
-  const saveTypedOnLeaveNow = useRef(saveTypedOnLeave);
-  saveTypedOnLeaveNow.current = saveTypedOnLeave;
-  useEffect(() => {
-    const onHide = () => saveTypedOnLeaveNow.current();
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') onHide();
-    };
-    window.addEventListener('pagehide', onHide);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      window.removeEventListener('pagehide', onHide);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, []);
+  usePageLeave(saveTypedOnLeave);
   // Leaving an answer's field (a click elsewhere, Tab) saves its words now, as the reply box's draft is.
   useEffect(() => {
     const section = sectionRef.current;
