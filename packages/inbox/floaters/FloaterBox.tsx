@@ -28,7 +28,7 @@ import { VoiceMicButton, VoiceStatusLine } from '../components/VoiceMic';
 import { Icon } from '../icons';
 import { linkedMachineFacts, machineOf } from '../inboxUrl';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
-import { replyDraftHost } from '../machineDrafts';
+import { lostDraftFilesOf, replyDraftHost } from '../machineDrafts';
 import { tookOverReply, wordsMessage } from '../sendTargets';
 import { useFloatingReplyWords } from '../threadMentions';
 import { inboxThreadShortcuts } from '../shortcuts';
@@ -143,8 +143,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
     setText(body);
     textRef.current = body;
     const kept = draft.draft?.files ?? [];
-    if (kept.length > 0) {
-      files.restoreDraft(kept, body, 'replace', []);
+    if (kept.length > 0 || lostDraftFilesOf(threadId).length > 0) {
+      files.restoreDraft(kept, body, 'replace', [], lostDraftFilesOf(threadId));
       filesSaved.current = pastedSignature(files.draftFiles());
       draft.boxTook(threadId, kept.map((file) => file.upload_id));
     }
@@ -181,7 +181,7 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
     const want = new Set(wanted);
     const now = files.draftFiles(textRef.current).map((file) => file.upload_id);
     if (now.length === want.size && now.every((upload) => want.has(upload))) return;
-    files.restoreDraft((saved.files ?? []).filter((file) => want.has(file.upload_id)), textRef.current, 'replace', wanted);
+    files.restoreDraft((saved.files ?? []).filter((file) => want.has(file.upload_id)), textRef.current, 'replace', wanted, lostDraftFilesOf(id));
     filesSaved.current = pastedSignature(files.draftFiles());
     draft.boxTook(id, files.draftFiles().map((file) => file.upload_id));
   };

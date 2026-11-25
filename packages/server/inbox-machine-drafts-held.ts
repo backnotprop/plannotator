@@ -10,7 +10,7 @@
  */
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { InboxReplyDraft } from "@plannotator/core/inbox-types";
+import type { InboxDraftFile, InboxReplyDraft } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_MACHINE_DRAFTS_DIR = "machine-drafts";
@@ -41,6 +41,11 @@ export interface HeldDraft {
    * offered in every window as a conflict is (Keep mine / Discard mine) until the person chooses.
    */
   conflict?: InboxReplyDraft;
+  /**
+   * Files a held save added that the draft there did not take as it landed (that machine had swept the upload since: a
+   * held draft does not keep it there). Shown on their tiles as not attached until the person writes again.
+   */
+  gone?: InboxDraftFile[];
   /** A reply held for that machine carried this draft: `view` shows what it leaves, `before` what it held, until it is delivered or refused. */
   sending?: { key: string; before: InboxReplyDraft | null; after: string | null; clear_draft: string; words?: string; uploads: string[] };
 }

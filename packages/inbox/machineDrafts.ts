@@ -7,6 +7,9 @@
  */
 import { hasMachineMark, machineOf, onLinkedMachines } from './inboxUrl';
 
+/** Files a far thread's draft did not take, refused on the box's tiles (lostDraftFiles.ts). */
+export { lostDraftFilesOf } from './lostDraftFiles';
+
 export function keepsReplyDraft(threadId: string | null | undefined): boolean {
   return hasMachineMark(machineOf(threadId), 'reply-drafts');
 }

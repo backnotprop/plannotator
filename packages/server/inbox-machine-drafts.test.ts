@@ -80,6 +80,7 @@ function linked(options: { marks?: string[] } = {}) {
   const gets: string[] = [];
   let failPosts = 0;
   let lostAnswers = 0;
+  let sleepAfterLoss = false;
   /** How each held reply stands in the outbox (inbox-machines.ts `replyState`). */
   const replies = new Map<string, "pending" | "delivered" | "refused">();
   const logged: string[] = [];
@@ -103,6 +104,8 @@ function linked(options: { marks?: string[] } = {}) {
           // Landed there, but its answer never came back (too slow).
           lostAnswers -= 1;
           await far.door(route, { method: init.method, body: init.body });
+          // It went to sleep before answering: nothing more reaches it until it is back.
+          if (sleepAfterLoss) peer.state = "offline";
           throw new Error("no answer in time");
         }
         const canned = answerWith?.(route);
@@ -137,7 +140,7 @@ function linked(options: { marks?: string[] } = {}) {
     heldFiles,
     heldBytes: () => heldFiles().reduce((sum, name) => sum + statSync(join(heldDir, name)).size, 0),
     failNextPosts: (n: number) => void (failPosts = n),
-    loseNextAnswers: (n: number) => void (lostAnswers = n),
+    loseNextAnswers: (n: number, sleep = false) => void ((lostAnswers = n), (sleepAfterLoss = sleep)),
     replies,
     logged,
     heldDir,
@@ -339,6 +342,37 @@ describe("a linked machine's reply draft, from this Inbox", () => {
     expect(l.drafts.read(l.peer, l.far.thread)).toBeNull();
   });
 
+  test("a held save adding a file swept there since: the words land, and the file is named as not taken (never dropped unsaid) until the person writes again", async () => {
+    const l = linked();
+    const upload = (name: string) => receiveInboxUpload(l.far.store.dir, name, new Response(`bytes of ${name}`).body, { at: new Date().toISOString() });
+    const kept = await upload("trace.txt");
+    const swept = await upload("screenshot.png");
+    for (const file of [kept, swept]) l.drafts.noteUpload(Response.json({ upload: file }));
+    await Bun.sleep(5);
+    const held = await answerOf(await l.save({ body: "See the picture", base: null, files_add: [{ upload_id: kept.upload_id }, { upload_id: swept.upload_id }] }));
+    expect(held.body.draft.files.map((file: { upload_id: string }) => file.upload_id)).toEqual([kept.upload_id, swept.upload_id]);
+    removeInboxUploads(l.far.store.dir, [swept.upload_id]);
+    await l.back();
+    const there = l.far.store.replyDraft(l.far.thread)!;
+    expect(there.body).toBe("See the picture");
+    expect(there.files?.map((file) => file.upload_id)).toEqual([kept.upload_id]);
+    // Offered with the far draft's read, by its name, and kept through a restart; nothing waits, nothing counts as unsent.
+    expect(l.drafts.read(l.peer, l.far.thread)).toBeNull();
+    expect(l.drafts.notLanded(MACHINE, l.far.thread)?.files?.map((file) => [file.upload_id, file.name])).toEqual([[swept.upload_id, "screenshot.png"]]);
+    expect(l.drafts.heldCount(MACHINE)).toBe(0);
+    l.restart();
+    l.peer.state = "offline";
+    expect(l.drafts.read(l.peer, l.far.thread)?.not_landed?.files?.map((file) => file.name)).toEqual(["screenshot.png"]);
+    // Landed already: nothing goes again.
+    await l.back();
+    expect(l.posts).toHaveLength(1);
+    // The person writes again: it is said no more.
+    const next = await answerOf(await l.save({ body: "See the picture, attached again later", base: there.updated_at, base_body: there.body }));
+    expect(next.status).toBe(200);
+    expect(l.drafts.notLanded(MACHINE, l.far.thread)).toBeNull();
+    expect(l.heldFiles()).toEqual([]);
+  });
+
   test("a long paste removed with some words while away: the held saves land, never stuck on the paste's old place", async () => {
     const l = linked();
     const paste = await receiveInboxUpload(l.far.store.dir, "pasted.txt", new Response("a long paste ".repeat(200)).body, { at: new Date().toISOString() });
@@ -361,10 +395,11 @@ describe("a linked machine's reply draft, from this Inbox", () => {
   test("a direct save that landed without its answer in time goes again under its own key: the next save never doubles its words", async () => {
     const l = linked();
     l.peer.state = "online";
-    l.loseNextAnswers(1);
+    // It lands there, and the machine sleeps before its answer comes back: the next save is typed while it sleeps.
+    l.loseNextAnswers(1, true);
     const first = await answerOf(await l.save({ body: "W1", base: null }));
     expect(first.status).toBe(200);
-    l.peer.state = "offline";
+    expect(l.peer.state).toBe("offline");
     await answerOf(await l.save({ body: "W1 and more", base: first.body.draft.updated_at, base_body: "W1" }));
     await l.back();
     expect(l.far.store.replyDraft(l.far.thread)?.body).toBe("W1 and more");

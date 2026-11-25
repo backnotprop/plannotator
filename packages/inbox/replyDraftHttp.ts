@@ -7,9 +7,10 @@
  * with other storage (Workspaces, bytes private to the person until Send) swaps
  * them, and the box's behavior stays the same.
  */
-import type { DraftFileUploader, ReplyDraftSaveInput, ReplyDraftStore } from '@plannotator/core/inbox-reply-draft';
+import type { DraftFileUploader, ReplyDraftNotLanded, ReplyDraftSaveInput, ReplyDraftStore } from '@plannotator/core/inbox-reply-draft';
 import { inboxApi, pageServerSession, replyDraftSaveBody, reuseAttachment, uploadFile } from './api';
 import { inboxUrl, machineOf } from './inboxUrl';
+import { noteLostDraftFiles } from './lostDraftFiles';
 
 /**
  * A browser takes at most 64 KiB of keepalive bodies in flight (more is refused at once), so the save sent as the
@@ -39,6 +40,7 @@ export const httpReplyDraftStore: ReplyDraftStore = {
   read: async (threadId) => {
     const answer = await inboxApi.replyDraft(threadId);
     notLandedSeen.set(threadId, answer.not_landed ?? null);
+    noteLostDraftFiles(threadId, answer.not_landed?.files);
     return answer.draft ?? null;
   },
   notLanded: (threadId) => notLandedSeen.get(threadId) ?? null,
@@ -68,7 +70,7 @@ export const httpReplyDraftStore: ReplyDraftStore = {
 };
 
 /** Per thread: the person's words the last read found the draft there does not hold (`not_landed`). */
-const notLandedSeen = new Map<string, { words: string; version: string; conflict?: boolean } | null>();
+const notLandedSeen = new Map<string, ReplyDraftNotLanded | null>();
 
 /** A file's bytes as a pending upload on this Inbox, or (`machine`) on the linked machine whose thread it is. */
 export function httpDraftFileUploader(machine: () => string | null): DraftFileUploader {

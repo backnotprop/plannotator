@@ -72,7 +72,7 @@ import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, useLateVoiceMiss } from '../lateVoice';
 import { replyBoxSetAside } from '../floaters/model';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
-import { keepsReplyDraft, replyDraftHost } from '../machineDrafts';
+import { keepsReplyDraft, lostDraftFilesOf, replyDraftHost } from '../machineDrafts';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
 import { saveOverConflicts } from '../pickConflict';
 import { usePageLeave } from '../pageLeave';
@@ -436,7 +436,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
    */
   const filesSaved = useRef('');
   const takeDraftFiles = (files: readonly InboxDraftFile[], words: string, mode: 'replace' | 'add' = 'replace', alsoKeep: readonly string[] = []) => {
-    replyFiles.restoreDraft(files, words, mode, alsoKeep);
+    replyFiles.restoreDraft(files, words, mode, alsoKeep, lostDraftFilesOf(threadRef.current.thread_id));
     // What the draft holds is saved already; tiles the person attached before it was read (`add`) are saved with it:
     // the box's next save names what changed from the draft's files.
     const held = mode === 'add' ? files : replyFiles.draftFiles();

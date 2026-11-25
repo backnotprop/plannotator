@@ -346,7 +346,18 @@ export interface ReplyDraftStore {
    * Words of the person's the last read of the thread found the draft does not hold (a store that holds the draft for
    * another computer: a conflict met there, or words refused there). Absent or null: none.
    */
-  notLanded?(threadId: string): { words: string; version: string; conflict?: boolean } | null;
+  notLanded?(threadId: string): ReplyDraftNotLanded | null;
+}
+
+/**
+ * A draft read's `not_landed` (a linked machine's thread only, inbox-machine-drafts.ts): the person's words the draft
+ * there does not hold (`conflict`: it changed there first), and `files` a held save added that it did not take.
+ */
+export interface ReplyDraftNotLanded {
+  words: string;
+  version: string;
+  conflict?: boolean;
+  files?: InboxDraftFile[];
 }
 
 /**

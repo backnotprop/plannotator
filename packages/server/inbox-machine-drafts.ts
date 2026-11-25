@@ -72,6 +72,8 @@ export interface DraftNotLanded {
   words: string;
   version: string;
   conflict?: true;
+  /** Files of the person's a held save added that the draft there did not take (swept there since): not attached. */
+  files?: InboxDraftFile[];
 }
 
 /** A lost draft's words for the "Not sent" list (`forget`): every word, its files' names and what it quoted. */
@@ -258,9 +260,27 @@ export function createMachineDrafts(options: {
   const changed = (machine: string, threadId: string) => options.onChange(machine, threadId);
   /** The words a read offers besides the draft: a conflict's, or words that machine refused. */
   const notLandedOf = (record: HeldDraft | undefined): DraftNotLanded | null => {
-    if (record?.conflict) return { words: record.conflict.body, version: record.conflict.updated_at, conflict: true };
-    if (record?.stopped && record.view && record.view.body.trim() !== "") return { words: record.view.body, version: record.view.updated_at };
+    const files = record?.gone?.length ? { files: record.gone } : {};
+    if (record?.conflict) return { words: record.conflict.body, version: record.conflict.updated_at, conflict: true, ...files };
+    if (record?.stopped && record.view && record.view.body.trim() !== "") return { words: record.view.body, version: record.view.updated_at, ...files };
+    if (record?.gone?.length) return { words: "", version: record.view?.updated_at ?? "", ...files };
     return null;
+  };
+  /**
+   * The files `save` added (its `files_add`, or an older page's whole list) that the draft it made there does not hold:
+   * that machine skips an added file whose upload it swept since. Named as this Inbox knew them, beside any found before.
+   */
+  const goneAfter = (save: Body, landed: InboxReplyDraft | null, record: HeldDraft): InboxDraftFile[] => {
+    const there = new Set((landed?.files ?? []).map((file) => file.upload_id));
+    const added = [...refs(save.files_add), ...refs(save.files)].filter((ref) => !there.has(ref.upload_id));
+    const was = (record.gone ?? []).filter((file) => !there.has(file.upload_id) && !added.some((ref) => ref.upload_id === file.upload_id));
+    const named = added.flatMap((ref): InboxDraftFile[] => {
+      const known = record.view?.files?.find((file) => file.upload_id === ref.upload_id) ?? uploads.get(ref.upload_id);
+      if (!known) return [];
+      const { pasted: _pasted, ...upload } = known as InboxDraftFile;
+      return [{ ...upload, ...(ref.pasted ? { pasted: ref.pasted } : {}) }];
+    });
+    return [...was, ...named];
   };
 
   /** Where an upload is known here: the shown draft's own file, or one this forward passed. */
@@ -350,7 +370,7 @@ export function createMachineDrafts(options: {
     const record = held.get(key(machine, threadId));
     if (record?.conflict && record.conflict.updated_at === version) {
       const { conflict: _gone, ...rest } = record;
-      if (waits(record)) put(rest);
+      if (waits(record) || record.gone) put(rest);
       else drop(machine, threadId);
       changed(machine, threadId);
     }
@@ -473,6 +493,8 @@ export function createMachineDrafts(options: {
     for (let step = 0; step < 100; step++) {
       let record = held.get(k);
       if (!record || record.stopped) return true;
+      // Landed, its files not taken there said on their tiles: nothing left to send.
+      if (record.gone && !waits(record)) return true;
       if (record.sending) {
         // A reply carrying this draft waits in the outbox: the draft lands after it, once it is delivered or refused.
         const state = options.replyState?.(record.sending.key) ?? "delivered";
@@ -530,7 +552,15 @@ export function createMachineDrafts(options: {
           : behind?.discard && behind.discard.base === undefined
             ? { ...behind, discard: { ...behind.discard, base: landed?.updated_at ?? null } }
             : behind;
-        put({ ...current, sent: null, next });
+        // A file it added that machine swept since is not in the draft there: never dropped unsaid, its tile says so.
+        const gone = goneAfter(save, landed, current);
+        const { gone: _was, ...rest } = current;
+        put({ ...rest, sent: null, next, ...(gone.length > 0 ? { gone, ...(next ? {} : { view: landed }) } : {}) });
+        if (gone.length > 0 && !next) {
+          await peer.refreshList().catch(() => {});
+          changed(peer.id, threadId);
+          return true;
+        }
         continue;
       }
       if (codeOf(answer.body) === "draft_conflict") {
@@ -552,12 +582,15 @@ export function createMachineDrafts(options: {
         // A file that machine swept since (an upload is kept a day): the same save without it, the words and other files kept.
         const gone = new Set(refs(save.files).filter((ref) => !refs(again.files).some((kept) => kept.upload_id === ref.upload_id)).map((ref) => ref.upload_id));
         let view = current.view;
+        const lost = (view?.files ?? []).filter((file) => gone.has(file.upload_id) && !(current.gone ?? []).some((one) => one.upload_id === file.upload_id));
         if (view) {
           const { files: was, ...rest } = view;
           const files = (was ?? []).filter((file) => !gone.has(file.upload_id));
           view = { ...rest, ...(files.length > 0 ? { files } : {}) };
         }
-        put({ ...current, view, sent: { save: again } });
+        // Said on its tile, as one a save added that machine did not take (`goneAfter`).
+        const said = [...(current.gone ?? []), ...lost];
+        put({ ...current, view, sent: { save: again }, ...(said.length > 0 ? { gone: said } : {}) });
         continue;
       }
       // Any other refusal keeps the words: shown here as not saved there, and carried by the thread's next write
@@ -730,7 +763,7 @@ export function createMachineDrafts(options: {
     },
     /** How many threads hold a draft here for that machine, not landed yet: Unlink says they would be lost. */
     heldCount(machine: string): number {
-      return [...held.values()].filter((record) => record.machine === machine).length;
+      return [...held.values()].filter((record) => record.machine === machine && (waits(record) || !!record.conflict || !!record.stopped)).length;
     },
     /**
      * That machine is no longer linked: what is held for it goes. Each draft whose words did not land there (the one

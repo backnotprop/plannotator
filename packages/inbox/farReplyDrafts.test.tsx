@@ -65,6 +65,8 @@ let peer: DraftPeer & { state: string; list: NonNullable<DraftPeer['list']> };
 let forward: ReturnType<typeof createMachineDrafts>;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+/** The Mini takes uploads but gives no answer to a draft write (it is held here), while true. */
+let draftPostsFail = false;
 let savedFetch: typeof fetch;
 let savedXhr: typeof XMLHttpRequest;
 let signal: Signal;
@@ -155,6 +157,7 @@ class FakeXhr {
 beforeEach(() => {
   if (!hasDom) return;
   mini = { drafts: new Map(), uploads: new Map(), writes: [], clock: 0 };
+  draftPostsFail = false;
   replies = [];
   localDraftCalls = [];
   signal = createSignal();
@@ -165,6 +168,7 @@ beforeEach(() => {
     list: { marks: ['reply-drafts'], rows: [] },
     async request(route, _search, init) {
       if (peer.state !== 'online') throw new Error('unreachable');
+      if (draftPostsFail && init.method === 'POST') throw new Error('no answer');
       return miniDoor(route, init.method, init.body ? (JSON.parse(init.body) as Record<string, unknown>) : {});
     },
     poke() {},
@@ -190,7 +194,9 @@ beforeEach(() => {
         if (peer.state !== 'online') return Response.json({ error: 'Mini cannot be reached now.', code: 'machine_offline' }, { status: 503 });
         const answer = await peer.request(far, '', { method: 'GET', headers: {} });
         forward.noteRead(MINI, thread, answer.clone());
-        return answer;
+        // As inbox-machines.ts: the person's words (or files) the draft there does not hold go with its read.
+        const offered = answer.ok ? forward.notLanded(MINI, thread) : null;
+        return offered ? Response.json({ ...((await answer.json()) as Record<string, unknown>), not_landed: offered }) : answer;
       }
       delete body.serverSession;
       const answer = await forward.write(peer, thread, !!draftRoute[2], body);
@@ -471,6 +477,49 @@ test.skipIf(!hasDom)("a file attached in the Mini's thread goes to the Mini and 
   // The refused tile is the person's to remove or try again; the draft goes.
   const remove = el.querySelector<HTMLButtonElement>('.ib-rbox [data-compose-file="refused"] button');
   if (remove) await act(async () => remove.click());
+  await discardInBox(el);
+  await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
+});
+
+test.skipIf(!hasDom)("a file a held draft names that the Mini swept before it landed: the words land, and the file's tile says it was not attached (never dropped unsaid) until it is removed", async () => {
+  linked(['reply-drafts']);
+  const el = await open(FAR, MINI_VIEW);
+  await reply(el);
+  // The Mini takes the upload but not the draft's saves: they are held here, the file among them.
+  draftPostsFail = true;
+  typeOn(el, 'The export, attached.');
+  const input = el.querySelector<HTMLInputElement>('.ib-rbox input[type="file"][data-reply-attach]');
+  Object.defineProperty(input!, 'files', { configurable: true, value: [new File(['a,b\n1,2\n'], 'ledger.csv', { type: 'text/csv' })] });
+  act(() => {
+    input!.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await until(() => tiles(el).includes('ledger.csv:done'), 'the file uploaded to the Mini');
+  await until(() => forward.read(peer, FAR)?.draft?.files?.some((file) => file.name === 'ledger.csv') === true, 'the file in the held draft');
+  // A day later the Mini swept the upload (no draft there named it), then it takes saves again.
+  mini.uploads.clear();
+  draftPostsFail = false;
+  await act(async () => forward.drain(MINI));
+  await until(() => mini.drafts.get(FAR)?.body === 'The export, attached.', 'the words on the Mini');
+  expect((mini.drafts.get(FAR)?.files ?? []).length).toBe(0);
+  forward.farChanged(MINI, FAR);
+  await act(async () => signal.emit());
+  await until(() => tiles(el).includes('ledger.csv:refused'), 'the tile refused');
+  const said = el.querySelector('.ib-rbox [data-compose-file="refused"] [role="alert"]')?.textContent ?? '';
+  expect(said).toBe('Not attached: that file could not be added.');
+  expect(box(el)!.value).toBe('The export, attached.');
+  // Leaving the thread and coming back still says it.
+  act(() => draw(HERE));
+  await settle();
+  act(() => draw(FAR));
+  await until(() => tiles(el).includes('ledger.csv:refused'), 'the tile refused after coming back');
+  // Removed by the person: it is not said again.
+  const x = el.querySelector<HTMLButtonElement>('.ib-rbox [data-compose-file="refused"] .ib-cp-fx');
+  await act(async () => x!.click());
+  await settle(3);
+  forward.farChanged(MINI, FAR);
+  await act(async () => signal.emit());
+  await settle(6);
+  expect(tiles(el).some((tile) => tile.startsWith('ledger.csv'))).toBe(false);
   await discardInBox(el);
   await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
 });
