@@ -41,9 +41,10 @@ import { envPathOf, foldEnvPath, joinPathFolders, pathFoldersOf } from "./env-pa
 
 /**
  * Never in a spawn: every Plannotator name (markers, data dir, ports, test switches), the other hosts' session
- * markers (an Inbox started from inside a Pi session has Pi's: its session, its file, its model).
+ * markers (an Inbox started from inside a Pi session has Pi's: its session, its file, its model; from a Mistral Vibe
+ * shell, Vibe's).
  */
-const SPAWN_DROP = /^(PLANNOTATOR_.*|CODEX_THREAD_ID|PI_SESSION_ID|PI_SESSION_FILE|PI_PROVIDER|PI_MODEL|PI_REASONING_LEVEL)$/;
+const SPAWN_DROP = /^(PLANNOTATOR_.*|CODEX_THREAD_ID|PI_SESSION_ID|PI_SESSION_FILE|PI_PROVIDER|PI_MODEL|PI_REASONING_LEVEL|VIBE_SESSION|VIBE_CLI)$/;
 
 /**
  * The Plannotator switches a launch keeps from the person's LOGIN shell (approval "inbox-launched-agent-note"):

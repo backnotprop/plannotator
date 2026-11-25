@@ -1397,7 +1397,7 @@ export interface InboxReplyCommand {
    * made, or a clone). Absent on every later command and on every session
    * the Inbox did not launch; an older connection ignores it.
    */
-  launched?: { agent: 'claude-code' | 'pi' | 'codex' | 'opencode'; project: boolean }
+  launched?: { agent: 'claude-code' | 'pi' | 'codex' | 'opencode' | 'mistral-vibe'; project: boolean }
   /**
    * The person pressed Send now in the Inbox: deliver it at once, into the
    * running turn when one runs (Claude Code: `$.session.append`; Pi: a

@@ -64,6 +64,9 @@ import {
   INBOX_T3_HOST,
   INBOX_T3_NAME,
   INBOX_T3_THREAD_ENV,
+  INBOX_VIBE_HOST,
+  INBOX_VIBE_NAME,
+  INBOX_VIBE_SESSION_ENV,
   INBOX_WAKING_HOSTS,
   codexThreadOfCall,
   inboxId,
@@ -118,6 +121,8 @@ export interface InboxHostSession {
  * `isT3ThreadId`); then
  * `PI_SESSION_ID`, which Pi sets on each bash tool call; then
  * `CODEX_THREAD_ID`, which Codex sets in the commands its shell runs; Qwen's;
+ * `PLANNOTATOR_VIBE_SESSION`, which the Inbox puts only in the env of the MCP
+ * server of a Mistral Vibe session it launched (inbox-launch-vibe.ts);
  * last `DSH_SESSION_ID`, DeepSeek Harness's, only beside `DSH_SHELL=1` (its
  * MCP client strips every `DSH_*` variable, so this is a DSH model shell's
  * `plannotator inbox call`). Anything
@@ -157,6 +162,8 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
   if (isQwenSessionId(qwen)) return { host: INBOX_QWEN_HOST, session: qwen, name: INBOX_QWEN_NAME };
   const muse = env[INBOX_MUSE_SESSION_ENV];
   if (isInboxSessionId(muse)) return { host: INBOX_MUSE_HOST, session: muse, name: INBOX_MUSE_NAME };
+  const vibe = env[INBOX_VIBE_SESSION_ENV];
+  if (isInboxSessionId(vibe)) return { host: INBOX_VIBE_HOST, session: vibe, name: INBOX_VIBE_NAME };
   // DeepSeek Harness sets DSH_SESSION_ID with DSH_SHELL=1 in every model shell. Only there: the person's own
   // terminal in DSH Web gets DSH_SESSION_ID without DSH_SHELL, and whatever runs in it is not that session.
   // Last, and only when no other agent's marker is there: every process started from a DSH shell inherits

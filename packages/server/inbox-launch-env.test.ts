@@ -29,6 +29,13 @@ describe("launchSpawnEnv", () => {
     expect(env).toMatchObject({ PATH: "/usr/bin:/bin", HOME: "/Users/me", CLAUDE_CODE_USE_BEDROCK: "1" });
   });
 
+  test("drops the markers a Mistral Vibe shell gives what it runs (an Inbox started from one), keeps the person's Vibe settings", () => {
+    const env = launchSpawnEnv({ ...login, VIBE_SESSION: "1", VIBE_CLI: "rust", VIBE_HOME: "/Users/me/.vibe" });
+    expect(env.VIBE_SESSION).toBeUndefined();
+    expect(env.VIBE_CLI).toBeUndefined();
+    expect(env.VIBE_HOME).toBe("/Users/me/.vibe");
+  });
+
   test("the skip-permissions export never rides the --bg env (it would reach the shared supervisor)", () => {
     const shell = { ...login, [CLAUDE_SKIP_PERMISSIONS_ENV]: "1" };
     expect(launchSpawnEnv(shell)[CLAUDE_SKIP_PERMISSIONS_ENV]).toBeUndefined();
