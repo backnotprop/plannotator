@@ -499,6 +499,8 @@ test('a PR on a linked computer: merged there and gone from the board, its page 
     },
   );
   await page.goto(`${url}#prs&stack=${encodeURIComponent(FAR_KEY)}&layer=${encodeURIComponent(FAR_KEY)}&scope=layer`);
+  // A fresh page: the board this window already read (before the routes above) never named that computer's PR.
+  await page.reload();
   await clearSidebarPeek(page);
   await expect(fileShell()).toBeVisible({ timeout: 30_000 });
   await expect(markOf()).toHaveAttribute('data-ref-state', 'open');
