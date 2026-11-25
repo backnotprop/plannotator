@@ -67,6 +67,9 @@
 .ibc-what[data-lost] { background: color-mix(in oklab, var(--destructive, #c0392b) 14%, transparent); color: var(--destructive, #c0392b); }
 textarea.ibc-words { height: auto; min-height: 36px; max-height: 132px; padding: 8px 12px; line-height: 20px; resize: none; overflow-y: auto; display: block; }
 .ibc-state { max-width: 16em; overflow: hidden; text-overflow: ellipsis; }
+/* A change waiting for a linked computer: the outbox's words ("Waiting for MacBook: this applies when MacBook is
+   back.") are what the person needs to read, so they wrap to two lines rather than cut off. */
+.ibc-state[data-held] { max-width: 22em; white-space: normal; line-height: 16px; }
 @media (max-width: 767px) {
   /* The words get the row; what goes and the state sit above them. */
   .ibc-bar { flex-wrap: wrap; }

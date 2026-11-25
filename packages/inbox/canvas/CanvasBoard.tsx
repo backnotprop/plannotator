@@ -310,8 +310,9 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   const [freehand, setFreehand] = useState(true);
   const [words, setWords] = useState('');
   /** Something to say once (an Undo's outcome, a file that is not a picture): it stays until the person's next press on the canvas. */
-  const [notice, setNoticeNow] = useState<{ text: string; bad?: boolean; at: number } | null>(null);
-  const setNotice = useCallback((next: { text: string; bad?: boolean } | null) => setNoticeNow(next ? { ...next, at: Date.now() } : null), []);
+  /** `held`: the outbox's words for a change waiting for a linked computer, which wrap rather than cut off. */
+  const [notice, setNoticeNow] = useState<{ text: string; bad?: boolean; held?: boolean; at: number } | null>(null);
+  const setNotice = useCallback((next: { text: string; bad?: boolean; held?: boolean } | null) => setNoticeNow(next ? { ...next, at: Date.now() } : null), []);
   /** The save: `saving` while a failed one is tried again, `failed` once it has given up for now. */
   const [saveState, setSaveState] = useState<'saving' | 'failed' | { held: string } | null>(null);
   const [note, setNote] = useState<{ who: string; added: number; changed: number; removed: number; ids: string[]; rev: number } | null>(null);
@@ -1009,7 +1010,7 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
       storePicture();
     } catch (error) {
       // A linked computer that is away: the Undo waits in the outbox and lands when it is back (its frame brings it here).
-      if (error instanceof InboxHeldError) setNotice({ text: error.message });
+      if (error instanceof InboxHeldError) setNotice({ text: error.message, held: true });
       else setNotice({ text: "Can't undo", bad: true });
     }
   };
@@ -1166,7 +1167,7 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   }
 
   // One line of state: the thread is gone, something to say once, or a save that is not through.
-  const state: { text: string; bad?: boolean } | null = gone ? { text: 'Thread deleted', bad: true } : (notice ?? (saveState === 'failed' ? { text: 'Not saved', bad: true } : saveState === 'saving' ? { text: 'Saving…' } : saveState ? { text: saveState.held } : null));
+  const state: { text: string; bad?: boolean; held?: boolean } | null = gone ? { text: 'Thread deleted', bad: true } : (notice ?? (saveState === 'failed' ? { text: 'Not saved', bad: true } : saveState === 'saving' ? { text: 'Saving…' } : saveState ? { text: saveState.held, held: true } : null));
   // A running session has the reply: the agent's icon, working. Before that, "Sent" for a moment and then nothing.
   const working = waiting !== null && received && !receivedAtSend.current;
   const sentChip = waiting !== null && !note && (working || justSent);
@@ -1322,7 +1323,7 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
           aria-label={selected > 0 ? 'What should change in the selection' : 'Note to send with the canvas'}
         />
         {state && (
-          <span className="ibc-state" role="status" data-bad={state.bad ? '' : undefined} title={state.text}>
+          <span className="ibc-state" role="status" data-bad={state.bad ? '' : undefined} data-held={state.held ? '' : undefined} title={state.text}>
             {state.text}
           </span>
         )}

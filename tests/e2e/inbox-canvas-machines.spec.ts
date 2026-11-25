@@ -227,6 +227,9 @@ test('4. MacBook asleep: a box drawn in Studio says it waits, and lands on MacBo
   await expect.poll(async () => (await read<{ machines: { id: string; state: string }[] }>(studio, '/api/inbox/machines')).machines.find((m) => m.id === macbook.id)?.state, { timeout: 30_000 }).toBe('offline');
   await drawBox(0.2, 0.62);
   await expect(layer.getByText('Waiting for MacBook: this applies when MacBook is back.')).toBeVisible({ timeout: 15_000 });
+  // Read whole, not cut off: nothing of the words lies past the slot they sit in.
+  const whole = await layer.locator('.ibc-state[data-held]').evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1);
+  expect(whole).toBe(true);
   await shot('05-far-save-waits');
 
   await start(macbook);
