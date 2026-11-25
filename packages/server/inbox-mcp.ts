@@ -392,6 +392,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * built-in instructions, as before.
    */
   inboxReminder?: () => InboxMcpReminder | null;
+  /** The person uses the Inbox for code review only (config.json `inboxReviewOnly`), read on every connection: the review-only instructions. */
+  reviewOnly?: () => boolean;
   /**
    * The connecting client's `initialize` `clientInfo` (name, version), for an
    * initialize request: the room the person's text gets follows what that
@@ -1281,7 +1283,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
   const clock = () => context.now?.() ?? Date.now();
   const server = new McpServer(
     { name: "plannotator-inbox", version: "1.0.0" },
-    { instructions: inboxMcpInstructions(context.inboxReminder?.() ?? null, inboxMcpTierOf(context.mcpClient)), capabilities: { tools: {} } },
+    { instructions: inboxMcpInstructions(context.inboxReminder?.() ?? null, inboxMcpTierOf(context.mcpClient), context.reviewOnly?.() === true), capabilities: { tools: {} } },
   );
   // Every tool's result carries a Tidy waiting on an agent no connection wakes (MCP only), once, at its end.
   const register = server.registerTool.bind(server) as (name: string, config: unknown, handler: (input: never, ctx: unknown) => Promise<ToolResult>) => unknown;

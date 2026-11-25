@@ -411,6 +411,8 @@ import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
 import { capabilitySetKeysIn, createCapabilitySet } from "./inbox-capability-set";
+import { createReviewOnly } from "./inbox-review-only";
+import { hideInboxNotesForReviewOnly, restoreInboxNotesAfterReviewOnly } from "./inbox-review-only-notes";
 import { nextSharedReactionsRev, settleSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
 import { mergePullBoards } from "./inbox-machine-pulls";
 import { doorRefusesBare, replyIsStale } from "./inbox-outbox";
@@ -670,6 +672,8 @@ export interface InboxServerOptions {
   scheduled?: boolean;
   /** Code review, decided here instead of config.json `inboxCodeReview` (tests). Absent: config.json decides on every request. */
   codeReview?: boolean;
+  /** Code review only, decided here instead of config.json `inboxReviewOnly` (tests). Takes effect only with Code review on. */
+  reviewOnly?: boolean;
   /** Branch reviews, decided here instead of config.json `inboxBranchReviews` (tests). Absent: config.json decides on every request. Only with Code review on. */
   branchReviews?: boolean;
   /** System, decided here instead of config.json `inboxSystem` (tests). Absent: config.json decides on every request. Shown only while Code review is on. */
@@ -1911,6 +1915,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     codeReviewOn: () => codeReviewOn(),
     // The person's own Inbox rules and reminder reach MCP sessions too, read on every connection.
     inboxReminder: () => resolveInboxMcpReminder(loadConfig()),
+    // Code review only: the review-only rule in the instructions, read on every connection.
+    reviewOnly: () => reviewOnly.on(),
     // Branch reviews: send_message's `branch` field is listed and served only while the person has it on.
     branches: branchService.mcp,
     walkthroughThread: (threadId) => pullOwners.started().get(threadId)?.kind === "walkthrough",
@@ -2610,9 +2616,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // agent connected by it can take one now). One pass at a time; the agents' model waits for the one going,
   // so the window reads the notes it wrote.
   let notesPass: Promise<void> = Promise.resolve();
+  // Code review only (inbox-review-only.ts): no note is written by itself. Read here, not through `reviewOnly`, which the start makes later.
+  const reviewOnlyNow = () => (options.reviewOnly ?? loadConfig().inboxReviewOnly === true) && (options.codeReview ?? loadConfig().inboxCodeReview === true);
   const autoNotes = (): Promise<void> => {
     notesPass = notesPass.then(async () => {
-      if (connectStop.signal.aborted) return;
+      if (connectStop.signal.aborted || reviewOnlyNow()) return;
       try {
         await autoAddInboxNotes({ dataDir, selfCommand, environment: agentEnvironment });
       } catch {
@@ -3697,8 +3705,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if ((loadConfig().inboxCodeReview === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     // Every window follows at once (its Settings switch, the review cards, the "/" list).
     if (was !== codeReviewOn()) for (const listener of capabilityListeners) listener("code_review");
+    // Code review only takes effect with Code review: the notes follow it either way.
+    void reviewOnly.syncNotes();
     return { on: codeReviewOn() };
   };
+  /** The Inbox for code review only (inbox-review-only.ts): Settings' Full Inbox row, the welcome, the notes. */
+  const reviewOnly = createReviewOnly({
+    load: () => loadConfig(),
+    save: (patch) => saveConfig(patch),
+    codeReviewOn,
+    turnOnCodeReview: () => saveCodeReview({ on: true }),
+    fixed: options.reviewOnly,
+    notes: {
+      hide: () => hideInboxNotesForReviewOnly(dataDir, agentEnvironment),
+      restore: (agents) => restoreInboxNotesAfterReviewOnly(agents, dataDir, agentEnvironment),
+      auto: () => autoNotes(),
+    },
+    changed: () => {
+      for (const listener of capabilityListeners) listener();
+    },
+  });
+  void reviewOnly.syncNotes();
 
   /** Capabilities on the seam (inbox-capability.ts; Plans): routed, answered in the settings and started through the list only. */
   const capabilities = inboxCapabilities({ dataDir, changed: () => capabilityListeners.forEach((listener) => listener("seam")) });
@@ -4247,6 +4274,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     show_archived: { on: showArchived.state().on, rev: showArchived.state().rev },
     /** Code review (config.json `inboxCodeReview`): off unless the person turned it on. */
     code_review: { on: codeReviewOn() },
+    /** Full Inbox, off while the person uses it for code review only (inbox-review-only.ts); the welcome when it is due. */
+    ...reviewOnly.wire(),
+    ...reviewOnly.welcomeWire(),
     /** Capabilities on the seam (inbox-capability.ts): Plans' `plans: { on: true }`, only while on and only to a window on this computer (its routes answer nowhere else). */
     ...capabilitiesWire(capabilities, capable),
     /** System (config.json `inboxSystem`): its switch, present only while Code review is on (Settings shows the row only then). */
@@ -4476,7 +4506,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           // read), a linked computer's flip taken here too (saveDecisionMode says "decision_mode"). Grid (`experimental`,
           // which still carries decision_mode for an older window): only when it was the change.
           const deciding = decisionModeOn();
-          const frame = { board: { on: boardOn() }, ...(!deciding || changed === "decision_mode" ? { decision_mode: { on: deciding } } : {}), steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          const frame = { board: { on: boardOn() }, ...(!deciding || changed === "decision_mode" ? { decision_mode: { on: deciding } } : {}), steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...(reviewOnly.chosen() ? reviewOnly.wire() : {}), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -5487,6 +5517,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       steps: { on: stepsOn, chosen: chosen((c) => c.inboxSteps), shared: () => options.steps === undefined, apply: (on) => saveSteps({ on }) },
       scheduled_threads: { on: scheduledCap.on, chosen: chosen((c) => c.inboxScheduledThreads), shared: () => options.scheduled === undefined && scheduledCap.wire().scheduled_threads !== undefined, apply: (on) => scheduledCap.answer({ scheduled_threads: { on } }) },
       code_review: { on: codeReviewOn, chosen: chosen((c) => c.inboxCodeReview), shared: () => options.codeReview === undefined, apply: (on) => saveCodeReview({ on }) },
+      // The setting itself, not its effect (that also needs Code review, which is its own switch in the set).
+      full_inbox: { on: () => !reviewOnly.saved(), chosen: chosen((c) => c.inboxReviewOnly), shared: () => options.reviewOnly === undefined && options.codeReview === undefined, apply: (on) => reviewOnly.save({ on }) },
       chapter_diagrams: { on: chapterDiagramsOn, chosen: chosen((c) => c.inboxChapterDiagrams), shared: () => options.chapterDiagrams === undefined, apply: (on) => saveChapterDiagrams({ on }) },
       bro: { on: broOn, chosen: chosen((c) => c.inboxBro), shared: () => true, apply: (on) => saveBro({ on }) },
       float_drafts: { on: floatDraftsOn, chosen: chosen((c) => c.inboxFloatDrafts), shared: () => true, apply: (on) => saveFloatDrafts({ on }) },
@@ -6399,7 +6431,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = (await req.json().catch(() => null)) as { thread?: unknown; page?: unknown } | null;
         if (body?.page !== undefined) {
-          const page = capabilities.find((c) => c.key === body.page && c.on())?.key;
+          // Reviews too, while Code review is on (`plannotator inbox --review`).
+          const page = body.page === "reviews" && codeReviewOn() ? "reviews" : capabilities.find((c) => c.key === body.page && c.on())?.key;
           const target = page ? windows.lastUsed() : null;
           if (page && target) for (const listener of showListeners) listener(null, target, page);
           return json({ shown: target !== null });
@@ -7546,6 +7579,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.mark_read_warning === undefined &&
           body.split_view === undefined &&
           body.code_review === undefined &&
+          body.full_inbox === undefined &&
+          body.review_welcome === undefined &&
           body.system === undefined &&
           body.scheduled_threads === undefined &&
           body.chapter_diagrams === undefined &&
@@ -7555,7 +7590,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, full_inbox, review_welcome, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
@@ -7606,6 +7641,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.mark_read_warning !== undefined) saveMarkReadWarning(body.mark_read_warning, true);
         if (body.split_view !== undefined) saveSplitView(body.split_view, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
+        if (body.full_inbox !== undefined) await reviewOnly.save(body.full_inbox, true);
+        if (body.review_welcome !== undefined && body.review_welcome !== true) throw new InboxError("validation_error", "review_welcome: true.", { field: "review_welcome" });
         if (body.chapter_diagrams !== undefined) saveChapterDiagrams(body.chapter_diagrams, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
@@ -7641,6 +7678,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const markReadWarning = body.mark_read_warning === undefined ? { on: markReadWarningOn() } : saveMarkReadWarning(body.mark_read_warning);
         const splitView = body.split_view === undefined ? { on: splitViewOn() } : saveSplitView(body.split_view);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
+        // Code review only (inbox-review-only.ts): after Code review, which turning it on may turn on too.
+        if (body.full_inbox !== undefined) await reviewOnly.save(body.full_inbox);
+        if (body.review_welcome === true) reviewOnly.welcomeSeen(true);
         const systemAnswer = { ...system.answer(body), ...answerInboxCapabilities(capabilities, body) };
         // Present while Code review is on, and always to the save that set it.
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
@@ -7651,7 +7691,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, decision_mode: decisionMode, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, decision_mode: decisionMode, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: body.full_inbox === undefined ? codeReview.on : codeReviewOn() }, ...reviewOnly.wire(), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {

@@ -638,6 +638,22 @@ export interface PlannotatorConfig {
    */
   inboxCodeReview?: boolean;
   /**
+   * The Inbox for code review only (docs/agent-guides/inbox-review-only.md): `true` while the person uses it only for
+   * code review, `false` once they turned the full Inbox on, unset for everyone who never chose (the full Inbox). Takes
+   * effect only with `inboxCodeReview` on (`resolveInboxReviewOnly`). Written by `plannotator inbox --review` on a
+   * computer where the Inbox was never on, by Settings → Capabilities → Full Inbox and the welcome dialog's switch
+   * (`POST /api/inbox/settings` `{ full_inbox: { on } }`), by `plannotator inbox capability full_inbox`, and by a
+   * linked computer's flip. Hosts read it once per session start, as the reminder switch.
+   */
+  inboxReviewOnly?: boolean;
+  /**
+   * The notes code review only took out of agents' instructions files (the agents whose note was removed), kept to put
+   * them back when the person turns the full Inbox on. Present (even empty) while the notes are out.
+   */
+  inboxReviewOnlyNotes?: string[];
+  /** The welcome dialog `plannotator inbox --review` shows once on a first run: `dueAt` when due, `shownAt` once a window showed it. */
+  inboxReviewWelcome?: { dueAt?: string; shownAt?: string };
+  /**
    * PR risk ranking in the Inbox (approval "code-review-launch-build", item 4),
    * under Code review: the person's "no slop zone rules" and the agent that judges
    * each new pull request against them. Empty or unset `rules`: nothing runs.
@@ -1117,7 +1133,7 @@ function getStatePath(): string {
  */
 const MACHINE_STATE_KEYS = [
   "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
-  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro",
+  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "inboxReviewWelcome", "inboxReviewOnlyNotes",
 ] as const;
 type MachineStateKey = (typeof MACHINE_STATE_KEYS)[number];
 /** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */
@@ -2475,7 +2491,17 @@ export function resolveInboxReminder(
   env: NodeJS.ProcessEnv,
   host: InboxToolHost,
 ): boolean {
-  return INBOX_REMINDER_HOSTS.includes(host) && resolveInboxTool(config, env, host) && (configuredInboxReminder(config, host) ?? true);
+  return INBOX_REMINDER_HOSTS.includes(host) && resolveInboxTool(config, env, host) && !resolveInboxReviewOnly(config) && (configuredInboxReminder(config, host) ?? true);
+}
+
+/**
+ * Whether the person uses the Inbox for code review only (config.json `inboxReviewOnly`, with Code review on): then no
+ * session starts with the reminder (resolveInboxReminder), the agent tool says the review-only rule in place of the
+ * full Inbox's (`inboxAgentTool(tools, { reviewOnly })`), and no note goes into agents' instructions files. Hosts
+ * read it once per session start; a session already running keeps what it was told.
+ */
+export function resolveInboxReviewOnly(config: PlannotatorConfig): boolean {
+  return config.inboxReviewOnly === true && config.inboxCodeReview === true;
 }
 
 /**

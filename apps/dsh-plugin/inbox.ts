@@ -41,7 +41,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig, resolveInboxTool } from "../../packages/shared/config";
+import { loadConfig, resolveInboxReviewOnly, resolveInboxTool } from "../../packages/shared/config";
 import { getPlannotatorDataDir } from "../../packages/shared/data-dir";
 import {
   discoverInboxTools,
@@ -413,7 +413,7 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
   }
 
   const toolsService = service<DshToolsService>(ctx, "tools");
-  const spec = inboxAgentTool(connection.tools);
+  const spec = inboxAgentTool(connection.tools, { reviewOnly: resolveInboxReviewOnly(loadConfig()) });
   if (spec && typeof toolsService?.register === "function") {
     try {
       toolsService.register({

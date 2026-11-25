@@ -85,19 +85,8 @@ import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, drawnSection, listGroups, markHeldRowArchived, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, shownAfter, waitingCount, type OpenThread, priorityChangedRows } from './held';
 import { deliveriesReadList } from './rowDelivery';
 import { inboxAgentsWatched, setInboxAgents, inboxAgentsNow } from './agentsList';
-import {
-  captureSettle,
-  COVERED_LIST_SETTLES,
-  listBody,
-  playSettle,
-  prefersReducedMotion,
-  rowInSlot,
-  SETTLE_AFTER_SIDEBAR_MS,
-  SETTLE_BEAT_MS,
-  SHOW_LIT_AFTER_SLIDE_MS,
-  stopSettle,
-  type SettleSnapshot,
-} from './settle';
+import { captureSettle, COVERED_LIST_SETTLES, listBody, playSettle, prefersReducedMotion, rowInSlot, SETTLE_AFTER_SIDEBAR_MS, SETTLE_BEAT_MS, SHOW_LIT_AFTER_SLIDE_MS, stopSettle, type SettleSnapshot } from './settle';
+import { ReviewWelcome, useReviewOnly } from './reviewOnly';
 import { plural, shortAgentName, tildePath } from './format';
 import { copyMarkdown, threadMarkdown } from './copyMarkdown';
 import { shellLine, type ConnectContext } from './harnesses';
@@ -1658,7 +1647,7 @@ function Inbox() {
         onShow: (threadId, target, page) => {
           if (target !== windowReport().id) return;
           const now = routeRef.current;
-          if (page === 'plans') return void (now.page !== 'plans' && writeRoute({ page: 'plans', project: null, thread: null }));
+          if (page) return void (now.page !== page && writeRoute({ page, project: null, thread: null }));
           if (now.page === 'inbox' && now.thread === threadId && !now.file && !now.guide) return;
           writeRoute({ page: 'inbox', project: now.page === 'inbox' && !now.machine ? now.project : null, thread: threadId });
         },
@@ -4477,7 +4466,9 @@ function Inbox() {
   // The first-run screen drew without the settings (their read failed or was late): it stays, and once the
   // settings come it gains its quiet "Take the tour" line rather than turning into the entry screen under the person.
   const firstRunDrawnBare = useRef(false);
-  const showTourEntry = firstRun && !!settings?.tour && !tourDecided && !firstRunDrawnBare.current && !tourUnavailable;
+  // The Inbox for code review only (reviewOnly.ts): Reviews is home, and neither the tour's entry screen nor the agent note's dialog shows.
+  const reviewOnly = useReviewOnly(settings, route);
+  const showTourEntry = firstRun && !!settings?.tour && !tourDecided && !firstRunDrawnBare.current && !tourUnavailable && !reviewOnly;
   // The entry screen loads the tour while it shows, so Start is at once; content that cannot be had takes the
   // entry screen away before anyone presses Start (the first-run screen shows instead).
   useEffect(() => {
@@ -4525,7 +4516,8 @@ function Inbox() {
     !showTourEntry &&
     !tourIntroShown &&
     // Code review's day-0 offer goes first (its claim then keeps the day, so the note waits for the next free one).
-    codeReviewOffer.settled;
+    codeReviewOffer.settled &&
+    !reviewOnly;
   useEffect(() => {
     if (!agentNoteReady || agentNoteDecided.current) return;
     let cancelled = false;
@@ -5581,7 +5573,7 @@ function Inbox() {
       {/* The sidebar's Customize panel (approval "inbox-sidebar-customize"): one for the window, beside the sidebar or, on a phone, a bottom sheet. */}
       {!tourOn && (
         <SidebarCustomizer
-          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), plans: plansOn, grid: gridOn, reviews: Boolean(pullsShown), usage: settings?.cswap === true, phone })}
+          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), plans: plansOn, grid: gridOn, reviews: Boolean(pullsShown), usage: settings?.cswap === true, phone, reviewOnly })}
           machines={machines.all.length > 0}
           // Opened from Settings on a desktop, where the sidebar is closed: it opens, so the person sees each change.
           onOpen={() => {
@@ -5650,6 +5642,7 @@ function Inbox() {
             agentFilter={filterAgent ? { id: filterAgent.id, name: filterAgent.name } : null}
             tags={sidebarTags}
             inboxCount={waitingCount(latestSections)}
+            reviewOnly={reviewOnly}
             // One machine's list: that machine's projects only.
             projects={filterMachine ? projects.filter((p) => (p.machine ?? machines.self) === filterMachine.id) : projects}
             machines={machines}
@@ -5861,6 +5854,7 @@ function Inbox() {
           onTurnOn={() => turnOnFromReveal('board', boardReveal.close)}
         />
       )}
+      <ReviewWelcome due={settings?.review_welcome === true} fullInbox={settings?.full_inbox?.on === true} phone={phone} />
       {codeReviewOffer.stage === 'open' && (
         <CodeReviewOffer
           phone={phone}

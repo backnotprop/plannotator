@@ -12,7 +12,7 @@ import type { InboxEventHandlers, InboxExperimentalSettings, SettingsModel } fro
 
 export type InboxCapabilities = Parameters<NonNullable<InboxEventHandlers['onCapabilities']>>[0];
 
-type CapabilitySettings = Pick<SettingsModel, 'board' | 'decision_mode' | 'steps' | 'bro' | 'float_drafts' | 'mark_read_warning' | 'code_review' | 'system' | 'chapter_diagrams' | 'scheduled_threads' | 'plans' | 'experimental'>;
+type CapabilitySettings = Pick<SettingsModel, 'board' | 'decision_mode' | 'steps' | 'bro' | 'float_drafts' | 'mark_read_warning' | 'code_review' | 'full_inbox' | 'system' | 'chapter_diagrams' | 'scheduled_threads' | 'plans' | 'experimental'>;
 
 /**
  * A frame's `experimental` (Decision mode and Grid), which it carries only when one of them was the change: saved in
@@ -33,10 +33,10 @@ export function experimentalOfFrame(value: unknown): InboxExperimentalSettings |
 
 /** True when the frame names any switch (an empty one: the window reads the settings again instead). */
 export function namesCapability(capabilities: InboxCapabilities): boolean {
-  return Boolean(capabilities.board || capabilities.decision_mode || capabilities.steps || capabilities.bro || capabilities.float_drafts || capabilities.mark_read_warning || capabilities.split_view || capabilities.code_review || capabilities.system || capabilities.chapter_diagrams || capabilities.scheduled_threads || capabilities.plans || capabilities.experimental);
+  return Boolean(capabilities.board || capabilities.decision_mode || capabilities.steps || capabilities.bro || capabilities.float_drafts || capabilities.mark_read_warning || capabilities.split_view || capabilities.code_review || capabilities.full_inbox || capabilities.system || capabilities.chapter_diagrams || capabilities.scheduled_threads || capabilities.plans || capabilities.experimental);
 }
 
 export function withCapabilities<S extends CapabilitySettings>(current: S, capabilities: InboxCapabilities): S {
-  const { board, decision_mode: decisionMode, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: codeReview, system, chapter_diagrams: chapterDiagrams, scheduled_threads: scheduled, plans, experimental } = capabilities;
-  return { ...current, ...(board ? { board } : {}), ...(decisionMode ? { decision_mode: { ...current.decision_mode, ...decisionMode } } : {}), ...(steps ? { steps } : {}), ...(bro ? { bro } : {}), ...(floatDrafts ? { float_drafts: floatDrafts } : {}), ...(markReadWarning ? { mark_read_warning: markReadWarning } : {}), ...(splitView ? { split_view: splitView } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(system ? { system } : {}), ...(chapterDiagrams ? { chapter_diagrams: chapterDiagrams } : {}), ...(scheduled ? { scheduled_threads: { ...current.scheduled_threads, on: scheduled.on } } : {}), ...(plans ? { plans } : {}), ...(experimental ? { experimental } : {}) };
+  const { board, decision_mode: decisionMode, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: codeReview, full_inbox: fullInbox, system, chapter_diagrams: chapterDiagrams, scheduled_threads: scheduled, plans, experimental } = capabilities;
+  return { ...current, ...(board ? { board } : {}), ...(decisionMode ? { decision_mode: { ...current.decision_mode, ...decisionMode } } : {}), ...(steps ? { steps } : {}), ...(bro ? { bro } : {}), ...(floatDrafts ? { float_drafts: floatDrafts } : {}), ...(markReadWarning ? { mark_read_warning: markReadWarning } : {}), ...(splitView ? { split_view: splitView } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(fullInbox ? { full_inbox: fullInbox } : {}), ...(system ? { system } : {}), ...(chapterDiagrams ? { chapter_diagrams: chapterDiagrams } : {}), ...(scheduled ? { scheduled_threads: { ...current.scheduled_threads, on: scheduled.on } } : {}), ...(plans ? { plans } : {}), ...(experimental ? { experimental } : {}) };
 }

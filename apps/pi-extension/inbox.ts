@@ -40,7 +40,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, readSync } from "node:fs";
-import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxTool } from "./generated/config.ts";
+import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxReviewOnly, resolveInboxTool } from "./generated/config.ts";
 import { getPlannotatorDataDir } from "./generated/data-dir.ts";
 import {
 	discoverInboxTools,
@@ -190,7 +190,7 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
 		registerPiInbox(
 			pi,
 			new InboxAgentConnection({ dataDir, host: PI_INBOX_HOST, agentName: PI_INBOX_AGENT_NAME, tools }),
-			{ ...options, reminder },
+			{ ...options, reminder, reviewOnly: resolveInboxReviewOnly(config) },
 		);
 	});
 }
@@ -364,8 +364,8 @@ function piHandoffLineOf(ctx: ExtensionContext, sessionId: string): string[] {
 }
 
 /** Exported for the tests. */
-export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: string | null }): void {
-	const spec = inboxAgentTool(connection.tools);
+export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: string | null; reviewOnly?: boolean }): void {
+	const spec = inboxAgentTool(connection.tools, { reviewOnly: options.reviewOnly === true });
 	const ohMyPi = detectPiHost(pi) === "oh-my-pi";
 	if (!spec) return;
 

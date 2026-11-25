@@ -45,6 +45,8 @@ import { openSystemSetup } from '../system/opener';
 import { systemStateWords } from '../system/projects';
 import { ScheduledSettingsRow } from '../scheduled/SettingsRow';
 import { usePhone } from '../phone';
+import { reviewOnlyOf } from '../reviewOnly';
+import { FullInboxRow } from './FullInboxRow';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -565,6 +567,7 @@ function CapabilitiesSection({
   experimental,
   onToggleExperimental,
   experimentalHeading,
+  fullInbox,
 }: {
   board: { on: boolean } | null;
   onToggleBoard?: (next: boolean) => void;
@@ -597,10 +600,13 @@ function CapabilitiesSection({
   onToggleExperimental?: (next: boolean, feature?: 'grid') => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
   experimentalHeading: RefObject<HTMLHeadingElement | null>;
+  /** Full Inbox (reviewOnly.ts): its row on top once chosen; while off (code review only), no Board, Checklist or Routines row. */
+  fullInbox?: { on: boolean; chosen?: true } | null;
 }) {
-  const boardRow = board && onToggleBoard;
-  const stepsRow = steps && onToggleSteps;
-  const scheduledRow = scheduled && onToggleScheduled;
+  const reviewOnly = fullInbox?.on === false;
+  const boardRow = board && onToggleBoard && !reviewOnly;
+  const stepsRow = steps && onToggleSteps && !reviewOnly;
+  const scheduledRow = scheduled && onToggleScheduled && !reviewOnly;
   const codeReviewRow = codeReview && onToggleCodeReview;
   // System's row (see SYSTEM_SETTINGS_ROW_VISIBLE): while hidden, it shows only once System is on, and then stays for
   // as long as Capabilities is open, so turning System off here does not pull the row out from under the click.
@@ -617,9 +623,10 @@ function CapabilitiesSection({
   const gridRow = experimental?.grid && onToggleExperimental;
   return (
     <>
-      {(boardRow || stepsRow || decisionRow || scheduledRow || codeReviewRow) && (
+      {(fullInbox?.chosen || boardRow || stepsRow || decisionRow || scheduledRow || codeReviewRow) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
+            {fullInbox?.chosen && <FullInboxRow saved={fullInbox.on} />}
             {boardRow && (
               <div className="ib-prow" data-settings-board="">
                 <span className="ib-txt">
@@ -1329,6 +1336,7 @@ export function SettingsPage(props: SettingsPageProps) {
               experimental={experimental}
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}
+              fullInbox={settings?.full_inbox ?? null}
             />
             </>
           ) : (
@@ -1446,7 +1454,7 @@ export function SettingsPage(props: SettingsPageProps) {
       <div className="ib-sframe-in">
         {!phone && (
           <button type="button" className="ib-sback" onClick={onBack} data-settings-back="">
-            <Icon name="back" size={15} /> Inbox
+            <Icon name="back" size={15} /> {reviewOnlyOf(settings) ? 'Reviews' : 'Inbox'}
           </button>
         )}
         <div className="ib-scols">

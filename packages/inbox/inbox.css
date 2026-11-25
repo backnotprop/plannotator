@@ -7942,6 +7942,15 @@ dialog.ib-lvc .ib-lvc-frame .ib-listcol.ib-lo-list { position: relative; inset: 
 .ib-cro-phone .ib-cro-acts { flex-direction: column-reverse; align-items: stretch; }
 .ib-cro-phone .ib-cro-acts .ib-bsp { display: none; }
 .pn-inbox .ib-cro-phone .ib-cro-acts .ib-btn, dialog.ib-cro-phone .ib-cro-acts .ib-btn { height: 44px; }
+/* The welcome to the code review Inbox (ReviewWelcome.tsx): the offer's shell, then the full Inbox as a switch row under a hairline, and one button on the right. */
+.ib-rwel-full { display: flex; align-items: center; gap: 16px; padding-top: 18px; border-top: 1px solid var(--ib-hair, var(--border)); }
+.ib-rwel-full .ib-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ib-rwel-full .ib-l { font-size: var(--ib-fs-14, 14px); font-weight: 600; color: var(--foreground); }
+.ib-rwel-full .ib-desc { font-size: var(--ib-fs-13, 13px); line-height: 1.45; color: var(--muted-foreground); }
+dialog.ib-rwel .ib-sw { width: 34px; height: 20px; border-radius: 999px; background: var(--muted); position: relative; border: 1px solid var(--border); flex: none; cursor: pointer; }
+dialog.ib-rwel .ib-sw[aria-checked="true"] { background: var(--primary); border-color: var(--primary); }
+dialog.ib-rwel .ib-sw:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-rwel-acts { justify-content: flex-end; }
 
 /* The tab icon dialog ("Which favicon do you prefer?", components/TabIconChoice.tsx; the owner approved the mock,
    2026-11-09): Code review's .ib-cro shell. Its picture is the browser's own tab strip at real

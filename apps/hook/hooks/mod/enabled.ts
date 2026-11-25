@@ -179,6 +179,7 @@ export function resolveInboxToolEnabled(envValue: string | undefined, configText
 export function resolveInboxReminderEnabled(inboxToolEnv: string | undefined, configText: string | null | undefined): boolean {
   if (!resolveInboxToolEnabled(inboxToolEnv, configText)) return false
   if (!configText) return true
+  if (resolveInboxReviewOnlyEnabled(configText)) return false
   let value: unknown
   try {
     value = (JSON.parse(configText) as Record<string, unknown> | null)?.inboxReminder
@@ -193,6 +194,21 @@ export function resolveInboxReminderEnabled(inboxToolEnv: string | undefined, co
     if (v === 'false' || v === '0') return false
   }
   return true
+}
+
+/**
+ * Whether the person uses the Inbox for code review only (config.json `inboxReviewOnly: true` with `inboxCodeReview:
+ * true`): no reminder, and the agent tool's review-only lead. Mirrors `resolveInboxReviewOnly(config)` in
+ * packages/shared/config.ts. Read once, at the first session.start, with the tool.
+ */
+export function resolveInboxReviewOnlyEnabled(configText: string | null | undefined): boolean {
+  if (!configText) return false
+  try {
+    const config = JSON.parse(configText) as Record<string, unknown> | null
+    return config?.inboxReviewOnly === true && config?.inboxCodeReview === true
+  } catch {
+    return false
+  }
 }
 
 /**

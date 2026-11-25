@@ -6,7 +6,7 @@
  */
 import type { InboxMcpTier } from "@plannotator/core/inbox-types";
 import { configuredInboxReminder, INBOX_REMINDER_HOSTS, type PlannotatorConfig } from "@plannotator/shared/config";
-import { INBOX_AGENT_RULES, INBOX_REMINDER_MAX_CHARS, inboxReminderCustomText, inboxReminderRulesText, INBOX_RULES_LEAD } from "@plannotator/shared/inbox/connection";
+import { INBOX_AGENT_RULES, INBOX_REMINDER_MAX_CHARS, INBOX_REVIEW_ONLY_AGENT_RULES, inboxReminderCustomText, inboxReminderRulesText, INBOX_RULES_LEAD } from "@plannotator/shared/inbox/connection";
 
 /**
  * Under Claude Code's 2,048-character cap on server instructions. Room for
@@ -54,6 +54,9 @@ export const INBOX_MCP_INSTRUCTIONS = [
   "",
   INBOX_MCP_INSTRUCTIONS_ATTRIBUTION,
 ].join("\n");
+
+/** The same for a person who uses the Inbox for code review only (config.json `inboxReviewOnly`): only the rules differ. */
+export const INBOX_MCP_INSTRUCTIONS_REVIEW_ONLY = INBOX_MCP_INSTRUCTIONS.replace(INBOX_AGENT_RULES, INBOX_REVIEW_ONLY_AGENT_RULES);
 
 /** Claude Code's cap on server instructions before 2.1.296: the built-in instructions alone stay under it, never at it, so every client reads them whole. */
 export const INBOX_MCP_INSTRUCTIONS_MAX_CHARS = 2048;
@@ -225,7 +228,9 @@ export function inboxMcpSent(reminder: InboxMcpReminder | null, tier: InboxMcpTi
  * line is new or reworded, nothing is ever cut, and the result stays under the
  * tier's cap.
  */
-export function inboxMcpInstructions(reminder: InboxMcpReminder | null, tier: InboxMcpTier = "claude_code_old"): string {
+export function inboxMcpInstructions(reminder: InboxMcpReminder | null, tier: InboxMcpTier = "claude_code_old", reviewOnly = false): string {
+  // Code review only: the review-only rule in the full Inbox's place, and none of the person's reminder or rules (they ride the reminder, which is off).
+  if (reviewOnly) return INBOX_MCP_INSTRUCTIONS_REVIEW_ONLY;
   const sent = inboxMcpSent(reminder, tier);
   const parts = [...(sent.reminder ? [reminder!.custom!] : []), ...(sent.rules ? [rulesBlock(reminder!.rules!)] : [])];
   return parts.length === 0 ? INBOX_MCP_INSTRUCTIONS : withPersonText(parts.join("\n\n"), tier);

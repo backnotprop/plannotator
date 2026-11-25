@@ -389,6 +389,21 @@ export const INBOX_TOOL_LEAD =
   `The Plannotator Inbox on this machine: message the person, get their answer later; nothing blocks. ${INBOX_AGENT_RULES} Set \`action\` to a tool below, with its fields.`
 
 /**
+ * For a person who uses the Inbox for code review only (config.json `inboxReviewOnly`): this one sentence takes the
+ * place of INBOX_USE_RULE, INBOX_THREAD_RULE, INBOX_CHANNEL_RULE and INBOX_FOLLOW_THROUGH_RULE, the rules that ask
+ * for other traffic. NOT YET APPROVED BY THE OWNER: the one place to change it (the mod's copy is pasted from here).
+ */
+export const INBOX_REVIEW_ONLY_RULE =
+  "The person uses it for code review only: use it for a review they ask you for, and to answer them in a review's thread; anything else, ask in the chat."
+
+/** The rules a code-review-only person's agents get with the tool or the MCP server, in one string. */
+export const INBOX_REVIEW_ONLY_AGENT_RULES = `${INBOX_REVIEW_ONLY_RULE} ${INBOX_SUBAGENT_RULE}`
+
+/** What the agent tool says, before the per-action lines, for a code-review-only person. */
+export const INBOX_TOOL_LEAD_REVIEW_ONLY =
+  `The Plannotator Inbox on this machine: message the person, get their answer later; nothing blocks. ${INBOX_REVIEW_ONLY_AGENT_RULES} Set \`action\` to a tool below, with its fields.`
+
+/**
  * Fixed text: how a reply comes back. The connection delivers the person's
  * reply to a message this session sent as a new turn once the session is idle.
  * Host-neutral: Claude Code frames the turn as the plugin's message, Pi and
@@ -881,15 +896,17 @@ export function inboxReminderFor(custom: string | null | undefined, toolName: st
  * The agent tool: name, description and input schema, built from the Inbox's
  * own tools. Null when it offers none. `wakes: false` for a host that cannot
  * deliver a reply as a turn (OpenCode 1): the description then says nothing
- * about replies arriving by themselves.
+ * about replies arriving by themselves. `reviewOnly` for a person who uses the
+ * Inbox for code review only (resolveInboxReviewOnly, read at session start):
+ * the lead then says INBOX_REVIEW_ONLY_RULE in place of the full Inbox's rules.
  */
 export function inboxAgentTool(
   tools: readonly InboxToolInfo[],
-  options: { wakes?: boolean } = {},
+  options: { wakes?: boolean; reviewOnly?: boolean } = {},
 ): { name: string; description: string; inputSchema: Record<string, unknown> } | null {
   if (tools.length === 0) return null
   const description = [
-    INBOX_TOOL_LEAD,
+    options.reviewOnly === true ? INBOX_TOOL_LEAD_REVIEW_ONLY : INBOX_TOOL_LEAD,
     '',
     ...tools.filter((tool) => !INBOX_AGENT_ACTIONS_NO_LINE.includes(tool.name)).map((tool) => `- ${tool.name}: ${INBOX_AGENT_ACTION_LEADS[tool.name] ?? leadOf(tool.description)}`),
     ...(options.wakes === false ? [] : ['', INBOX_TOOL_WAKE_NOTE]),

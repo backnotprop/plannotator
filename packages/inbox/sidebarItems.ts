@@ -54,7 +54,14 @@ export interface SidebarFeatures {
   /** The Tags section (approval "inbox-thread-tags"): absent until a tag holds a thread or the person made one. */
   tags?: boolean;
   phone: boolean;
+  /** The Inbox for code review only (reviewOnly.ts): only Search, Reviews, Drafts, Usage, Feedback, Settings and its icons. */
+  reviewOnly?: boolean;
+  /** Something in the Inbox waits on the person (its row's count): while code review only, its row shows then. */
+  inboxWaits?: boolean;
 }
+
+/** What the full Inbox has and code review only does not draw (the owner's mock S4, 2026-11-23). */
+const FULL_INBOX_ITEMS: readonly InboxSidebarItem[] = ['inbox', 'starred', 'projects', 'agents', 'tags', 'board', 'plans', 'grid', 'scheduled', 'artifacts', 'new-message', 'copy-prompt'];
 
 /** The items this Inbox draws now, in registry order. */
 export function drawnSidebarItems(features: SidebarFeatures): ReadonlySet<InboxSidebarItem> {
@@ -75,5 +82,7 @@ export function drawnSidebarItems(features: SidebarFeatures): ReadonlySet<InboxS
   if (features.tags !== true) off.add('tags');
   if (features.phone || features.shortcuts === false) off.add('shortcuts');
   if (features.phone || features.copyPrompt === false) off.add('copy-prompt');
+  // Nothing that waits on the person is ever hidden: the Inbox row comes back while its count says so.
+  if (features.reviewOnly) for (const item of FULL_INBOX_ITEMS) if (item !== 'inbox' || !features.inboxWaits) off.add(item);
   return new Set(INBOX_SIDEBAR_ITEMS.map((spec) => spec.id).filter((id) => !off.has(id)));
 }
