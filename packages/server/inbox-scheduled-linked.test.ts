@@ -108,7 +108,7 @@ describe("routines and capability switches across linked computers", () => {
       // Routines on B, turned from A as that older group turns them; A's stay off (held off here). The answer carries the switches only.
       const turned = await press(a.port, `${far}/capabilities`, { scheduled_threads: { on: true } });
       expect(turned.status).toBe(200);
-      expect(Object.keys((await turned.json()) as Json).every((key) => ["board", "steps", "scheduled_threads", "code_review", "chapter_diagrams", "system", "bro", "float_drafts"].includes(key))).toBe(true);
+      expect(Object.keys((await turned.json()) as Json).every((key) => ["board", "steps", "decision_mode", "scheduled_threads", "code_review", "chapter_diagrams", "system", "bro", "float_drafts"].includes(key))).toBe(true);
       expect((await get(b.port, "/api/inbox/settings")).scheduled_threads.on).toBe(true);
       // The turn went through B's door (its command log), not to A's own settings.
       const doorLines = readFileSync(join(dataB, "inbox", "device-commands.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as Json);
