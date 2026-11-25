@@ -47,10 +47,13 @@ import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type Ou
 import type { OutboxFile } from "./inbox-outbox-files";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
+import { createMachineShips } from "./inbox-machine-ships";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
+import { sameTailnetRefusal } from "./inbox-same-tailnet";
+import type { TailscaleRunResult } from "@plannotator/shared/tailscale";
 import type { FarArchived } from "./inbox-archived-merged";
 import { ARTIFACT_PINS_MARK, readFarWall } from "./inbox-artifacts-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
@@ -58,6 +61,8 @@ import { createFarRoutines } from "./inbox-scheduled-machines";
 import { CAPABILITY_SET_MARK, type CapabilitySet } from "./inbox-capability-set";
 import type { SharedReactions } from "./inbox-reactions-shared";
 import { FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE } from "./inbox-far-tags";
+import { createLinkThrough, LINK_THROUGH_ASK_ROUTE, LINK_THROUGH_INTRODUCE_ROUTE, LINK_THROUGH_OFFER_ROUTE, LINK_THROUGH_ROUTES, LINK_THROUGH_WINDOW_ONLY, linkThroughAsks } from "./inbox-link-through";
+import type { LinkThroughView } from "@plannotator/core/inbox-link-through";
 
 /** A far tag's door routes (inbox-far-tags.ts): this Inbox sends them itself; the forward never does. */
 const FAR_TAG_OWN_ROUTES = new Set([FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE, FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE]);
@@ -89,6 +94,14 @@ const FORGE_WRITE_MS = 60_000;
 export interface InboxMachineDoor {
   /** Open a one-time machine offer: its secret and six digits. */
   openMachineOffer: () => { secret: string; code: string; expires_at: string };
+  /** Open an introduction's offer (inbox-link-through.ts): a secret only, for one computer, from the one introducing it. */
+  openIntroductionOffer: (forId: string, by: string) => { secret: string; expires_at: string };
+  /** A provisional device's binding: the computer whose link-back completes it, and who introduced it; null otherwise. */
+  introduction: (deviceId: string) => { for: string; by: string } | null;
+  /** The link a provisional device was made for is saved: it is an ordinary device from now on. */
+  settleIntroduction: (deviceId: string) => void;
+  /** A computer is no longer linked: the offers it had opened here close, and the devices still provisional from them go. */
+  dropIntroductions: (by: string) => void;
   /** The device a machine offer was redeemed for, once it was. */
   offerDevice: (secret: string) => string | null;
   /** Close a machine offer that will not be used; the device it made, if one was. */
@@ -101,6 +114,8 @@ export interface InboxMachineDoor {
   revokeDevice: (deviceId: string, options?: { oweRefusal?: boolean }) => void;
   /** This Inbox's door on the tailnet (`host:8443`), or null while it is not published. */
   tailnetAddress: () => string | null;
+  /** This computer's `tailscale status --json` (inbox-same-tailnet.ts); absent, an introduction's link is not checked against it. */
+  tailnetStatus?: () => Promise<TailscaleRunResult>;
   /** Why the door is not published while it should be (its port held, Tailscale stopped), or null. */
   tailnetError: () => string | null;
   /** Publish the door on the tailnet now (the tailnet switch's own path). */
@@ -155,6 +170,8 @@ export interface InboxMachinesContext {
   /** Tests: the links' clocks. */
   timings?: MachineLinkTimings;
   now?: () => Date;
+  /** Where the same-tailnet check of an introduction's link reads the test sandbox flag (inbox-same-tailnet.ts). Default `process.env`. */
+  tailnetCheckEnv?: Record<string, string | undefined>;
 }
 
 /** The links' clocks, and `accountsMs`: how long a read of a machine's accounts waits. */
@@ -312,6 +329,8 @@ export interface MachineView {
   message_deletions: boolean;
   /** How far its clock runs ahead of this one's (ms, whole minutes), from its list's `now`; absent within two minutes. Grid reads it. */
   clock_ms?: number;
+  /** This Inbox only: its links not linked to each other, and computers it reaches through a link (inbox-link-through.ts). */
+  link_through?: LinkThroughView;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -477,6 +496,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const machinePulls = createMachinePulls({ peers: () => peers.values() });
   // Branch reviews: each linked machine's reported branches, read when Reviews is (inbox-machine-branches.ts).
   const machineBranches = createMachineBranches({ peers: () => peers.values() });
+  // Ship: each linked machine's merged ships, read when Reviews is (inbox-machine-ships.ts).
+  const machineShips = createMachineShips({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
   const launchReads = createMachineLaunchReads();
   /** The person's writes waiting for a linked computer, laid on its routines as they are shown. */
@@ -488,6 +509,44 @@ export function createInboxMachines(context: InboxMachinesContext) {
   // ...and finds them: its search and read_thread's list ask every linked machine too (inbox-machine-agent-find.ts).
   const agentFind = createMachineAgentFind({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
   const listeners = new Set<(frame: MachineFrame) => void>();
+  /** A linked computer's stream that asked `links=1`: told when this Inbox's links, as its list names them, change. */
+  const linksListeners = new Set<() => void>();
+  let lastLinksWire = "";
+  // Two of this Inbox's links not linked to each other, linked with one click (inbox-link-through.ts).
+  const linkThrough = createLinkThrough({
+    dataDir: context.dataDir,
+    selfId: () => links.selfId,
+    peers: () =>
+      links.list().map((record) => {
+        const peer = peers.get(record.id);
+        return { id: record.id, name: record.name, state: peer?.state ?? "connecting", marks: peer?.list?.marks ?? [], wire: peer?.list?.link_through ?? null, url: record.transport.url };
+      }),
+    request: (machine, route, body, timeoutMs) => {
+      const peer = peers.get(machine);
+      if (!peer) return Promise.reject(new Error("not linked"));
+      return peer.request(route, "", { method: "POST", headers: { "Content-Type": "application/json", [MACHINE_WINDOW_HEADER]: "1" }, body: JSON.stringify(body), timeoutMs });
+    },
+    hold: (via, body) => {
+      const peer = peers.get(via);
+      if (!peer) return;
+      // The person's click, held as this Inbox's own write (never listed as waiting): its row says how it stands.
+      outbox.submit(via, LINK_THROUGH_ASK_ROUTE, body, null, true, null, true);
+      if (peer.state === "online") peer.flush();
+      else peer.poke();
+    },
+    held: () => links.list().flatMap((record) => linkThroughAsks(outbox.list(record.id), record)),
+    link: (input) => link(input, { introduced: true }),
+    introOffer: (forId, by) => {
+      const opened = context.door.openIntroductionOffer(forId, by);
+      links.keepSelf();
+      return { link: buildLinkOffer({ id: links.selfId, name: context.computerName(), tailnet: context.door.tailnetAddress(), secret: opened.secret, code: null }) };
+    },
+    ownAddress: () => context.door.tailnetAddress(),
+    refresh: async (ids) => {
+      await Promise.all(ids.map((id) => peers.get(id)?.refreshList()));
+    },
+    changed: () => machinesChanged(),
+  });
   /** An offer that published the door: the door comes down when it expires unused. */
   let offerTimer: ReturnType<typeof setTimeout> | null = null;
   /** The door's close after the other machine's `unlink` was answered (UNLINKED_DOOR_CLOSE_MS). */
@@ -523,6 +582,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       marks: [...INBOX_LINKED_MARKS],
       launch: null,
       message_deletions: true,
+      link_through: linkThrough.view(),
     },
     ...links.list().map((link) => {
       const peer = peers.get(link.id);
@@ -552,6 +612,13 @@ export function createInboxMachines(context: InboxMachinesContext) {
   /** Tell the windows when the machines block changed (a state, a name, the waiting count). */
   const machinesChanged = () => {
     armUpdateClock();
+    // The links as this Inbox's list names them to a linked computer: each that asked hears when they move.
+    const wire = JSON.stringify(linkThrough.wire());
+    if (wire !== lastLinksWire) {
+      lastLinksWire = wire;
+      for (const listener of linksListeners) listener();
+    }
+    linkThrough.tick();
     const machines = machinesView();
     const text = JSON.stringify(machines.map(({ since: _since, ...rest }) => rest));
     if (text === lastMachines) return;
@@ -576,6 +643,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   };
 
   outbox.onChange(({ entry }) => {
+    // A link-through ask is drawn on its own row (how it stands, a refusal's words): the rows hear it, not the outbox.
+    if (entry.auto && entry.route === LINK_THROUGH_ASK_ROUTE) return machinesChanged();
     // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it,
     // except the notice of one the person is told about when it does not land (`notify`).
     if (entry.auto && !(entry.notify && entry.notice !== null)) return;
@@ -630,9 +699,13 @@ export function createInboxMachines(context: InboxMachinesContext) {
     peers.delete(id);
     machinePulls.forget(id);
     machineBranches.forget(id);
+    machineShips.forget(id);
     launchReads.forget(id);
     const link = links.remove(id);
     if (link?.device_id) context.door.revokeDevice(link.device_id, { oweRefusal: closeDoor === "after_refusal" });
+    // What it introduced and is not complete yet goes with it: its open codes here, the devices they made, the introductions it sent.
+    context.door.dropIntroductions(id);
+    linkThrough.forgetBroker(id);
     outbox.dropMachine(id, link?.name ?? null);
     // The last link gone: with Phones off the tailnet door has nothing left to serve (but a refusal owed).
     if (closeDoor === "after_answer") closeDoorAfterAnswer();
@@ -727,7 +800,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
    * ways is the person's consent to it). When it cannot be published, the
    * link is refused unless `one_way` says the person wants it that way.
    */
-  const link = async (input: { link?: unknown; address?: unknown; code?: unknown; back?: unknown; one_way?: unknown }) => {
+  const link = async (input: { link?: unknown; address?: unknown; code?: unknown; back?: unknown; one_way?: unknown }, how: { introduced?: boolean } = {}) => {
     const parsed = typeof input.link === "string" && input.link.trim() ? parseLinkOffer(input.link) : null;
     if (typeof input.link === "string" && input.link.trim() && !parsed) throw new InboxError("validation_error", "link: not a plannotator://link code.", { field: "link" });
     const secret = parsed?.secret ?? null;
@@ -760,6 +833,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     const back = backRaw ? checkTailnetAddress(backRaw) : null;
     try {
+      // A code a linked computer handed over (inbox-link-through.ts): only for one of this person's own computers on
+      // this tailnet, checked before its secret leaves here (inbox-same-tailnet.ts). A code pasted by hand is not.
+      if (how.introduced) {
+        const refused = await sameTailnetRefusal(url, context.door.tailnetStatus, context.tailnetCheckEnv);
+        if (refused) throw new InboxError("not_same_tailnet", refused);
+      }
       const target = await redeem({ kind: "tailnet", url }, { id: parsed?.id ?? null, secret, code });
       let deviceId: string | null = null;
       if (back) {
@@ -783,6 +862,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
           throw error;
         }
         deviceId = context.door.offerDevice(backOffer.secret);
+        if (!deviceId) {
+          // Its way back was taken, but the offer that names the device it made is gone: a link saved without it could
+          // not revoke that device at Unlink. Nothing half-made: the other machine forgets its side.
+          await tellUnlink(target.transport, target.token);
+          throw new InboxError("machine_not_linked", "That machine is not linked.");
+        }
       }
       const record: InboxLinkRecord = { id: target.id, name: target.name, token: target.token, transport: { kind: "tailnet", url }, device_id: deviceId, linked_at: new Date().toISOString() };
       save(record);
@@ -840,10 +925,29 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (!parsed?.secret || !parsed.tailnet || !parsed.id) return json({ error: "link: a plannotator://link code with an address.", code: "validation_error" }, 422);
     const url = checkTailnetAddress(parsed.tailnet);
     if (!url) return json({ error: "link: its address is not usable.", code: "validation_error" }, 422);
+    // A device an introduction's code made (inbox-link-through.ts) is completed only by the computer it was made for,
+    // however many link-backs came before; it stays bound until its link is saved.
+    const introduced = context.door.introduction(deviceId);
+    if (introduced && introduced.for !== parsed.id) {
+      context.door.revokeDevice(deviceId);
+      return json({ error: "This link code was made for another computer.", code: "introduction_mismatch" }, 403);
+    }
+    // ...and only when it is one of this person's own computers on this tailnet (inbox-same-tailnet.ts).
+    const refused = introduced ? await sameTailnetRefusal(url, context.door.tailnetStatus, context.tailnetCheckEnv) : null;
+    if (refused) {
+      context.door.revokeDevice(deviceId);
+      return json({ error: refused, code: "not_same_tailnet" }, 403);
+    }
     try {
       const target = await redeem({ kind: "tailnet", url }, parsed);
+      // Dropped meanwhile (its time ran out, or the computer that introduced it was unlinked): nothing is saved.
+      if (introduced && (target.id !== introduced.for || !context.door.introduction(deviceId))) {
+        await tellUnlink(target.transport, target.token);
+        return json({ error: "This introduction is no longer open. Click Link again.", code: "introduction_dropped" }, 409);
+      }
       const record: InboxLinkRecord = { id: target.id, name: target.name, token: target.token, transport: { kind: "tailnet", url }, device_id: deviceId, linked_at: new Date().toISOString() };
       save(record);
+      if (introduced) context.door.settleIntroduction(deviceId);
       return json({ machine: { id: links.selfId, name: context.computerName() } }, 201);
     } catch (error) {
       if (error instanceof InboxError) return json({ error: error.message, code: error.code }, 409);
@@ -877,7 +981,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // would hold a write such as a switch on disk. Nothing under `accounts/` either: a linked machine's switch is its own step.
     // `update` has its own route (`/api/inbox/machines/:id/update`), never a held forward.
     // A far tag's own writes (inbox-far-tags.ts) are this Inbox's, never a window's.
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts" || safeDecode(route) === "update" || FAR_TAG_OWN_ROUTES.has(safeDecode(route))) {
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts" || safeDecode(route) === "update" || FAR_TAG_OWN_ROUTES.has(safeDecode(route)) || LINK_THROUGH_ROUTES.has(safeDecode(route))) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
@@ -1258,6 +1362,22 @@ export function createInboxMachines(context: InboxMachinesContext) {
         return json({ error: `${name} did not answer. Nothing may have started.`, code: "machine_offline" }, 503);
       }
     }
+    // Link two computers through a third (inbox-link-through.ts): here two of this Inbox's links (`a`, `c`), or this
+    // Inbox with a computer it reaches through one of its links (`via`, `with`). A click in a window only.
+    if (path === "/api/inbox/machines/link-through") {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      const body = await context.readBody(req);
+      const stale = staleTab(body);
+      if (stale) return stale;
+      if (!isWindowRequest(req, body, context.serverSession)) return json(LINK_THROUGH_WINDOW_ONLY, 403);
+      const id = (value: unknown) => (isInboxId("ibx", value) ? value : null);
+      const via = id(body.via);
+      const withId = id(body.with);
+      const a = id(body.a);
+      const c = id(body.c);
+      const answer = via && withId ? linkThrough.askVia(via, withId) : a && c ? linkThrough.linkHere(a, c) : { status: 422, body: { error: "a and c, or via and with: computers' ids.", code: "validation_error" } };
+      return json({ ...answer.body, link_through: linkThrough.view() }, answer.status);
+    }
     const unlinkMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/unlink$/.exec(path);
     if (path === "/api/inbox/machines/offer" || path === "/api/inbox/machines/link" || unlinkMatch) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -1427,6 +1547,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     pullLinkedThere: (key: string) => machinePulls.linkedThere(key),
     /** Each linked machine's reported branches (mark `branches`), for Reviews (inbox-machine-branches.ts). */
     branchLists: () => machineBranches.start((machine) => links.get(machine)?.name ?? null),
+    /** Each linked machine's merged ships (mark `ships`), as last read: for Reviews' rows kept while Merged shows. */
+    mergedShips: () => machineShips.start(),
     farCard,
     snoozeThread,
     /**
@@ -1493,8 +1615,35 @@ export function createInboxMachines(context: InboxMachinesContext) {
     accountsOf,
     linkBack,
     unlinkedBy,
+    /** This Inbox's links as its list names them to a linked computer (`link_through`, mark `link-through`). */
+    linkThroughWire: () => linkThrough.wire(),
+    /** A linked computer's stream asked `links=1`: told when those links move. */
+    onLinks: (listener: () => void) => {
+      linksListeners.add(listener);
+      return () => linksListeners.delete(listener);
+    },
+    /**
+     * The three door routes of linking through a third (inbox-link-through.ts), from a linked computer's token:
+     * `window`, its word that a press in a window there made it (`X-Plannotator-Window`, believed from a machine only).
+     */
+    linkThroughDoor: async (route: string, deviceId: string, window: boolean, body: Record<string, unknown>): Promise<Response> => {
+      const from = links.list().find((l) => l.device_id === deviceId)?.id ?? null;
+      const answer =
+        route === LINK_THROUGH_ASK_ROUTE
+          ? linkThrough.asked(from, window, body)
+          : route === LINK_THROUGH_OFFER_ROUTE
+            ? await linkThrough.offerFor(from, window, body)
+            : route === LINK_THROUGH_INTRODUCE_ROUTE
+              ? await linkThrough.introduce(from, window, body)
+              : { status: 404, body: { error: "Not found", code: "not_found" } };
+      return json(answer.body, answer.status);
+    },
     start,
-    stop,
+    stop: () => {
+      linkThrough.stop();
+      linksListeners.clear();
+      stop();
+    },
   };
 }
 

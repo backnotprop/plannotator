@@ -56,7 +56,7 @@ Approval "inbox-ship-mode" (`.product/approved/inbox-ship-mode/`, look "Glint").
   - the shipping session ended with a ship note waiting for 10 minutes (`INBOX_SHIP_ENDED_MS`, `shipEndedWaiting`, `shipSessionEnded`);
   - the PR could not be read 3 times in a row (`INBOX_SHIP_READ_MISSES`: `gh` or `glab` missing, signed out, refused): "Stuck: can't read the pull request", with why in the log and on stderr, until a read works.
 - **How a ship ends.**
-  - Merged, by anyone: the record goes merged, with no wake. The row shows "Merged <time>" for 6 hours (`INBOX_SHIP_MERGED_SHOWN_MS`), then returns to normal.
+  - Merged, by anyone: the record goes merged, with no wake. The row shows "Merged <time>" for 6 hours (`INBOX_SHIP_MERGED_SHOWN_MS`), then returns to normal. Meanwhile a thread on that PR keeps its Reviews row though its PR landed (by the PR's key, core `shipsMergedShown`: the ship's own thread, or this computer's thread on a PR shipped from a linked machine, below), its agent ended or not, once it owns no open PR (an open layer of its stack is that PR's own row) (core `inboxReviewRows` `shipMerged`; the row finds its ship by its landing's key, a ship that still draws before an older one). The ship's record is the PR's landing until a read records one (its key, link, number, title and merge time; no forge read): a teammate's PR leaves the list once merged (the list keeps only the person's own merged PRs), so a thread tied to it keeps its row by its tie (server `linkUnlistedPulls`), and a review thread on it says Merged at once. A PR the list saw land while its ship is still shipping or stuck (its watch has not marked it merged yet) keeps its row the same way (`shipActive`), and a window that sees a ship it drew turn merged reads Reviews once more at once (`pulls/shipMergedRead.ts`), so the row never drops in between. A row kept only for this never asks anything of the person: it is in the group it is in with its PRs landed (an approval stays Ready to land, an answered review With your agents, a thread with no review Open, not reviewed), and where that would be On you (its PRs gone, an answer posted on the forge no longer counts), Waiting on others, so it adds to no count of what needs the person. After that a landed thread leaves Reviews as any does.
   - Closed: the ship stops, and the agent gets the closed line.
   - Stop: the ship stops at once in the record, and the agent gets the stop line on its next turn.
 - **The merge.** The merge is the agent's own `gh pr merge`. The Inbox never approves or merges.
@@ -103,6 +103,7 @@ Its who line is the agent, the repository and, once a computer that ships is lin
   - `POST ships` (outbox kind `now`)
   - `POST ships/stop` (outbox kind `now`)
   - `POST ships/newer` (outbox kind `set`; only a linked computer's Inbox sends it, never a window)
+- **A merge on a linked machine.** This Inbox's Reviews keeps its own row for a PR whose ship merged on a linked machine, as for one here: the Reviews read takes each linked machine's merged ships as last read (`GET ships` through the door, mark `ships`; `packages/server/inbox-machine-ships.ts`), never waited for, not again within 30 s, only the merged and active ones and only their PR's key, link, number, title and times (`farMergedShip`). A far merge's 6 hours run from when this computer first saw it merged (`farEndedAt`), so another computer's clock ahead or behind never stretches or cuts them. A machine with Code review off answers `409` and none of its ships count; an asleep one's stay as last read. A linked machine reading this list gets this machine's own ships only.
 - **The phone.** The phone layout of the window ships as a desktop does. The native app has no pull routes (they are `machineOnly`), so its ledger row `ship-mode` is `later` (`L-size`).
 - **What does not cross.** A linked machine that is offline or too old to take ships is left out of the list. The native iPhone app has no pull routes (above).
 
@@ -112,5 +113,6 @@ Its who line is the agent, the repository and, once a computer that ships is lin
 - `packages/server/inbox-ship-watch.test.ts`
 - `packages/server/inbox-ship-read.test.ts`
 - `packages/server/inbox-ship-routes.test.ts`
+- `packages/server/inbox-machine-ships.test.ts` (a linked machine's merged ships); the kept rows in `packages/core/inbox-reviews.test.ts` ("landed PRs")
 - DOM: `packages/inbox/pulls/shipMode.test.tsx`, `packages/inbox/pulls/shipAcross.test.tsx` (another computer's agents, the thread's ⋯ menu)
 - e2e: `tests/e2e/inbox-ship.spec.ts` (shots in `ship/`)

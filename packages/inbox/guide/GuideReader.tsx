@@ -44,6 +44,7 @@ import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type Guide
 import { GuideCodeSpanContext } from '@plannotator/guide-viewer/renderInlineMarkdown';
 import { CommentPopover, restoreCommentDraft } from '@plannotator/ui/components/CommentPopover';
 import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
+import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
@@ -328,9 +329,13 @@ function usePackageChangeCards(images: GuideReaderImages | undefined): AllFilesC
  * reader on screen and end with the last, so a page with no diff does not hold them.
  */
 export default function GuideReader(props: GuideReaderProps) {
+  // A reader that throws while it draws says so in its place; the review's bar and comments stay (ui's RegionBoundary,
+  // inside the lazy part: a chunk that cannot arrive is still PanePart's "Couldn't load this view").
   return (
     <ReviewWorkerPoolProvider>
-      <Reader {...props} />
+      <RegionBoundary name="Guide reader">
+        <Reader {...props} />
+      </RegionBoundary>
     </ReviewWorkerPoolProvider>
   );
 }
