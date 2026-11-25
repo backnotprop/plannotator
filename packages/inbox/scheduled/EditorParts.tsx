@@ -11,6 +11,7 @@ import { inboxApi } from '../api';
 import { FolderMenu } from '../compose/FolderMenu';
 import { LaunchChoiceButton, LaunchChoiceMenu } from '../compose/LaunchChoiceMenu';
 import { SCRATCH_PICK } from '../compose/model';
+import { machineLaunchesKept } from '../compose/useMachineLaunches';
 import { tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
 
@@ -19,20 +20,27 @@ export interface LaunchBlock {
   launch: InboxComposeLaunch | null;
 }
 
-/** New message's launch block: the agents this computer can start, their models, and its projects. */
-export function useLaunchBlock(): LaunchBlock | null {
-  const [block, setBlock] = useState<LaunchBlock | null>(null);
+/**
+ * New message's launch block: the agents a computer can start, their models, and its projects. `machine`: a linked
+ * computer's, through the forward; one that does not answer gives its last read (New message keeps it).
+ */
+export function useLaunchBlock(machine: string | null = null): LaunchBlock | null {
+  const [read, setRead] = useState<{ machine: string | null; block: LaunchBlock } | null>(null);
   useEffect(() => {
     let live = true;
-    inboxApi.composeSessions().then(
-      (model) => live && setBlock({ home: model.home, launch: model.launch ?? null }),
-      () => live && setBlock({ home: '', launch: null }),
+    const kept = () => {
+      const last = machine ? machineLaunchesKept().get(machine) : undefined;
+      return { home: last?.home ?? '', launch: last?.launch ?? null };
+    };
+    inboxApi.composeSessions(null, null, machine).then(
+      (model) => live && setRead({ machine, block: { home: model.home, launch: model.launch ?? null } }),
+      () => live && setRead({ machine, block: kept() }),
     );
     return () => {
       live = false;
     };
-  }, []);
-  return block;
+  }, [machine]);
+  return read && read.machine === machine ? read.block : null;
 }
 
 function usePortal() {
@@ -90,10 +98,13 @@ export function RunsAs({ block, agent, model, effort, phone, onChange }: { block
   );
 }
 
-export function FolderPick({ block, folder, shown, agentName, phone, onChange }: { block: LaunchBlock | null; folder: InboxScheduledFolder; shown: string | null; agentName: string; phone: boolean; onChange: (next: InboxScheduledFolder) => void }) {
+/** `machine`: a linked computer's routine, whose folders are that computer's (one group, its browser reads there). */
+export function FolderPick({ block, folder, shown, agentName, phone, onChange, machine = null }: { block: LaunchBlock | null; folder: InboxScheduledFolder; shown: string | null; agentName: string; phone: boolean; onChange: (next: InboxScheduledFolder) => void; machine?: { id: string; name: string } | null }) {
   const [open, setOpen] = useState(false);
   const launch = block?.launch ?? null;
   const home = block?.home ?? null;
+  const scratch = launch?.scratch ? { folder: tildePath(launch.scratch.root, home), root: tildePath(launch.scratch.root, home), trusted: true, agentName } : null;
+  const groups = machine && launch ? [{ machine: machine.id, name: machine.name, quiet: null, home, projects: launch.projects, last: null, scratch, notice: null }] : null;
   const project = 'project_id' in folder ? launch?.projects.find((p) => p.id === folder.project_id) : undefined;
   const words = 'scratch' in folder ? 'New scratch folder' : (shown ?? (project ? tildePath(project.root, home) : 'path' in folder ? tildePath(folder.path, home) : 'Pick a folder'));
   return (
@@ -117,8 +128,10 @@ export function FolderPick({ block, folder, shown, agentName, phone, onChange }:
             setOpen(false);
             onChange({ path });
           }}
-          folderPicked={'path' in folder ? { folder: tildePath(folder.path, home), machine: null } : null}
-          scratch={launch.scratch ? { folder: tildePath(launch.scratch.root, home), root: tildePath(launch.scratch.root, home), trusted: true, agentName } : null}
+          folderPicked={'path' in folder ? { folder: tildePath(folder.path, home), machine: machine?.id ?? null } : null}
+          scratch={scratch}
+          groups={groups}
+          selectedMachine={machine?.id ?? null}
           onScratch={() => {
             setOpen(false);
             onChange({ scratch: true });

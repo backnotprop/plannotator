@@ -17,6 +17,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import { InboxApiError } from '../apiError';
+import { InboxHeldError } from '../api';
 import { newUuid } from '../uuid';
 import { scheduledApi, type ScheduledFields } from './client';
 import { forgetKeptRoutine, keepEdits, keepRoutine, readKeptEdits, readKeptRoutine } from './routineDraft';
@@ -72,6 +73,8 @@ export function useAutosave(opts: {
   /** It is on: a typed name or prompt waits for the field to be left, not the typing pause. */
   holdTyping: boolean;
   onCreated: (id: string) => void;
+  /** A new one is made on this linked computer (null or absent: this one). */
+  machine?: string | null;
 }) {
   const live = useRef(opts);
   live.current = opts;
@@ -96,6 +99,8 @@ export function useAutosave(opts: {
   const pause = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tries = useRef(0);
+  /** A new one's create waits in the outbox for a computer that is away. */
+  const waiting = useRef(false);
   const gone = useRef(false);
   const dropped = useRef(false);
   const failed = useRef<{ retrying: boolean; message: string } | null>(null);
@@ -134,7 +139,7 @@ export function useAutosave(opts: {
   /** The tab keeps what is not saved yet: a new one whole, a saved one's edits with what the server had. */
   const keepNow = () => {
     if (dropped.current) return;
-    if (!made.current) return keepRoutine(typed.current, key.current);
+    if (!made.current) return keepRoutine(typed.current, key.current, live.current.machine ?? null);
     if (!base.current) return;
     const fields = changes();
     const was: Partial<ScheduledFields> = {};
@@ -188,7 +193,8 @@ export function useAutosave(opts: {
     if (!made.current) {
       if (missing(d) || heldAny(d)) return;
       const body = { ...d, ...(wantOn.current ? { enabled: true } : {}) };
-      const answer = await once(`new ${json(body)}`, keepalive, () => scheduledApi.create(body, key.current, keepalive));
+      const answer = await once(`new ${json(body)}`, keepalive, () => scheduledApi.create(body, key.current, keepalive, live.current.machine ?? null));
+      waiting.current = false;
       // Answered already (the same create, or one that raced it with this key): one routine.
       if (!answer || made.current) return;
       if (dropped.current) {
@@ -239,6 +245,13 @@ export function useAutosave(opts: {
       (cause: unknown) => {
         fell = true;
         if (gone.current) return;
+        // A new one held for a computer that is away (its toast said so): asked again under its one key until that
+        // computer has made it; it stays "Not saved yet", and the tab keeps its words.
+        if (cause instanceof InboxHeldError) {
+          waiting.current = true;
+          retry.current = setTimeout(() => latest.current.save(auto), RETRY_MS[Math.min(tries.current++, RETRY_MS.length - 1)]);
+          return;
+        }
         if (retryable(cause)) {
           retry.current = setTimeout(() => latest.current.save(auto), RETRY_MS[Math.min(tries.current++, RETRY_MS.length - 1)]);
           setFailure({ retrying: true, message: '' });
@@ -326,7 +339,7 @@ export function useAutosave(opts: {
     const d = typed.current;
     if (failed.current?.retrying) return { kind: 'failed' };
     if (failed.current) return { kind: 'refused', message: failed.current.message };
-    if (!made.current) return missing(d) || heldAny(d) ? { kind: 'new' } : { kind: 'saving' };
+    if (!made.current) return waiting.current || missing(d) || heldAny(d) ? { kind: 'new' } : { kind: 'saving' };
     if (!d.name.trim()) return { kind: 'needs', field: 'name' };
     if (!d.prompt.trim()) return { kind: 'needs', field: 'prompt' };
     if (busy.current || pause.current) return { kind: 'saving' };

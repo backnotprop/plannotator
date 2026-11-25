@@ -23,14 +23,11 @@ import { resolve } from 'node:path';
 import { FIXTURE_V1_LOCAL, FIXTURE_V2_OVERVIEW } from '@plannotator/core/guide-format-fixtures';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
-import type { InboxShapes } from './shape/useInboxShapes';
 import { drawMermaidFencesWithMermaid } from '@plannotator/ui/test-setup/mermaidEngine';
 
 // A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
 drawMermaidFencesWithMermaid();
 
-const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 // The window's tsconfig points `#guide-reader` at the reader's type shape (reader-module.d.ts), which Bun
 // would load as the module; the real reader is package.json's `imports` entry (as guideDiffStyle.test.tsx).
@@ -162,7 +159,7 @@ const withChapterDiagrams = (sources: Array<string | null>, base: GuideSnapshot 
   },
 });
 const chapter = (i: number) => document.querySelector(`[data-guide-section="${i}"]`);
-const pane = (chapterDiagrams?: boolean) => <ReviewPane thread={thread} message={message} codeReview {...(chapterDiagrams === undefined ? {} : { chapterDiagrams })} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />;
+const pane = (chapterDiagrams?: boolean) => <ReviewPane thread={thread} message={message} codeReview {...(chapterDiagrams === undefined ? {} : { chapterDiagrams })} onBack={() => {}} onClose={() => {}} onSent={() => {}} />;
 
 test.skipIf(!hasDom)("the pane draws a chapter's Mermaid diagram at the top of that chapter's code pane, above its first file, with Expand", async () => {
   snapshot = withChapterDiagrams([LR]);

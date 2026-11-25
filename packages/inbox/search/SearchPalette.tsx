@@ -23,11 +23,10 @@
 
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow, type InboxSearchSort } from '@plannotator/core/inbox-search';
-import { inboxApi, saveRecentSearch, searchInbox, type MachineView, type SearchModel } from '../api';
+import { saveRecentSearch, searchInbox, type MachineView, type SearchModel } from '../api';
 
 import { HostMark, Icon } from '../icons';
 import { rowTintTitle, tintAttrs, type RowTint } from '../tagColours';
-import { ShapeThumb } from '@plannotator/ui/components/shape/ShapeGrid';
 import { KeyCaps } from '../shortcuts/hint';
 import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { actionLabel, busyWord, namesActionWord, startedLine, type ComposeAction } from '../compose/model';
@@ -53,7 +52,6 @@ import {
   searchTime,
   searchGroups,
   searchRowMark,
-  type SearchShape,
   sectionLabel,
   termMarks,
   typeCountWords,
@@ -97,8 +95,6 @@ export interface SearchPaletteProps {
   actions?: (q: string) => ComposeAction[];
   /** An action chosen: the palette closes and the window opens compose. */
   onAction?: (action: ComposeAction) => void;
-  /** Shape's boards the words find (the "Shape" group, under the results). Absent: none (Shape off). */
-  shapes?: (q: string) => SearchShape[];
   /** A thread result's tag colour (tagColours.ts), as its row in the list has: tinted, the tag named. Absent or null: as usual. */
   tintOf?: (threadId: string) => RowTint | null;
 }
@@ -459,7 +455,7 @@ function keepInputFocus(event: ReactMouseEvent): void {
 }
 
 export default function SearchPalette(props: SearchPaletteProps) {
-  const { open, phone, currentProject, projects, projectLabels, linkedMachines, onClose, onOpenResult, actions, onAction, shapes } = props;
+  const { open, phone, currentProject, projects, projectLabels, linkedMachines, onClose, onOpenResult, actions, onAction } = props;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   /** An IME composition is under way in the input (its Escape is not the palette's). */
@@ -668,17 +664,14 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const found = answered.model.indexing ? [] : searchGroups(answered.model, expanded);
     // A picked type lists its group alone, without Actions.
     if (answered.type) return found;
-    // Shape's boards the words find: their own group, under the results.
-    const shapeList = shapes && answered.q.trim() ? shapes(answered.q) : [];
-    const withShapes = shapeList.length ? [...found, { id: 'shapes' as const, heading: 'Shape', total: null, options: shapeList.map((shape) => ({ kind: 'shape' as const, shape })) }] : found;
     const actionList = actions ? actions(answered.q) : [];
-    if (actionList.length === 0) return withShapes;
+    if (actionList.length === 0) return found;
     const group: SearchGroupView = { id: 'actions', heading: 'Actions', total: null, options: actionList.map((action) => ({ kind: 'action' as const, action })) };
     // Above everything (Recent searches included) with no words, when nothing
     // matched, or when the words name an action; below real results otherwise.
-    const first = !answered.q.trim() || withShapes.length === 0 || namesActionWord(answered.q);
-    return first ? [group, ...withShapes] : [...withShapes, group];
-  }, [answered, expanded, actions, shapes]);
+    const first = !answered.q.trim() || found.length === 0 || namesActionWord(answered.q);
+    return first ? [group, ...found] : [...found, group];
+  }, [answered, expanded, actions]);
   const options = useMemo(() => groups.flatMap((g) => g.options), [groups]);
   const optionsKey = answered?.key ?? '';
   optionsRef.current = options;
@@ -791,15 +784,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (option.kind === 'action') {
       close('opened');
       onAction?.(option.action);
-      return;
-    }
-    if (option.kind === 'shape') {
-      if (newTab) {
-        window.open(`${window.location.pathname}${window.location.search}${option.shape.hash}`, '_blank', 'noopener');
-        return;
-      }
-      close('opened');
-      onOpenResult(option.shape.hash, null);
       return;
     }
     if (option.kind === 'recent-q') {
@@ -1173,22 +1157,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
                     <span className="ib-sp-s">
                       {action.kind === 'new' ? 'Start a thread with a live agent' : action.kind === 'review' ? 'Local changes or a pull request' : `${startedLine(action.target)}${busyWord(action.target) ? ` · ${busyWord(action.target)!.toLowerCase()}` : ''}`}
                     </span>
-                  </span>
-                </div>
-              );
-            }
-            if (option.kind === 'shape') {
-              const shape = option.shape;
-              return (
-                <div key={`shape-${shape.id}`} className="ib-sp-row" {...common} data-result="shape" data-result-id={shape.id}>
-                  <span className="ib-sp-shape-prev" aria-hidden="true">
-                    <ShapeThumb picture={shape.picture} refs={shape.refs} resolveSrc={(src) => inboxApi.shapeFileUrl(shape.id, src)} />
-                  </span>
-                  <span className="ib-sp-rs">
-                    <span className="ib-sp-p">{shape.title}</span>
-                  </span>
-                  <span className="ib-sp-time ib-sp-shape-meta">
-                    {shape.project} · {shape.meta}
                   </span>
                 </div>
               );

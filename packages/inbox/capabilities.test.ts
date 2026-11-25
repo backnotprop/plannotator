@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import { dispatchInboxFrame, type InboxEventHandlers, type SettingsModel } from './api';
 import { namesCapability, withCapabilities } from './capabilities';
 
-type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'bro' | 'float_drafts' | 'code_review' | 'shape' | 'system'>;
+type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'bro' | 'float_drafts' | 'code_review' | 'system'>;
 
 /** What App's onCapabilities does with a frame: apply what it names, else read the settings again. */
 function hear(data: string, settings: Held): { settings: Held; reread: boolean } {
@@ -78,5 +78,16 @@ describe('event: capabilities', () => {
     const { settings } = hear(JSON.stringify({ board: { on: false }, steps: { on: true }, code_review: { on: true }, system: { on: true } }), { ...OFF, system: { on: false } });
     expect(settings.system).toEqual({ on: true });
     expect(hear(JSON.stringify({ board: { on: false }, system: { on: 'yes' } }), { ...OFF, system: { on: false } }).settings.system).toEqual({ on: false });
+  });
+
+  test('Grid or Decision mode turned in another window, or taken from a linked computer: this window follows; a frame without them leaves them', () => {
+    const before = { ...OFF, experimental: { decision_mode: { on: false, env: null }, grid: { on: false, env: null } } } as Held;
+    // The server names `experimental` only in the frame of its own change (inbox.ts onCapabilities).
+    const on = hear(JSON.stringify({ board: { on: false }, steps: { on: true }, experimental: { decision_mode: { on: false, env: null }, grid: { on: true, env: null } } }), before);
+    expect(on.reread).toBe(false);
+    expect((on.settings as { experimental?: unknown }).experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: true, env: null } });
+    expect((hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), on.settings).settings as { experimental?: unknown }).experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: true, env: null } });
+    // A malformed one is not applied.
+    expect((hear(JSON.stringify({ board: { on: false }, experimental: { grid: { on: true } } }), before).settings as { experimental?: unknown }).experimental).toEqual((before as { experimental?: unknown }).experimental);
   });
 });

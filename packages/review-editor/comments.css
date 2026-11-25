@@ -5,6 +5,11 @@
    line comments on a guided review's diffs with the same components. */
 
 /* Review comment thread styling */
+[data-annotation-slot] {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .review-comment {
   position: relative;
   box-sizing: border-box;
@@ -359,7 +364,7 @@
   padding: 0.5rem;
 }
 
-/* A host's selection chooser (SelectionChooser): the words Comment | Ask | Show me, before the comment box. */
+/* A host's selection chooser (SelectionChooser): the words Comment | Ask, before the comment box. */
 .review-selpop {
   display: inline-flex;
   background: var(--popover);
@@ -385,8 +390,6 @@
 .review-selpop-btn + .review-selpop-btn { border-left: 1px solid color-mix(in oklch, var(--foreground) 11%, transparent); }
 .review-selpop-btn:hover { background: color-mix(in oklch, var(--foreground) 7%, transparent); }
 .review-selpop-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-.review-selpop-btn.review-selpop-show { color: var(--primary); font-weight: 600; }
-.review-selpop-btn.review-selpop-show:hover { background: color-mix(in oklch, var(--primary) 9%, transparent); }
 @media (pointer: coarse) { .review-selpop-btn { height: 44px; padding: 0 12px; } }
 /* The diff's + mark offers the same thing as Comment: gone while the bar is open. Custom properties reach into the diff's shadow root (usePierreTheme). */
 html:has([data-selection-chooser]) { --review-selection-plus: none; }
@@ -467,6 +470,8 @@ html:has([data-selection-chooser]) { --review-selection-plus: none; }
 .suggestion-block {
   border: 1px solid oklch(from var(--success) l c h / 0.3);
   border-radius: var(--radius-sm);
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
 }
 
@@ -486,6 +491,7 @@ html:has([data-selection-chooser]) { --review-selection-plus: none; }
 
 .suggestion-block-code {
   margin: 0;
+  max-width: 100%;
   font-size: 0.6875rem;
   line-height: 1.6;
   background: var(--code-bg);
@@ -535,6 +541,7 @@ html:has([data-selection-chooser]) { --review-selection-plus: none; }
 
 /* Suggestion diff (original vs suggested) */
 .suggestion-diff {
+  max-width: 100%;
   font-family: var(--font-mono);
   font-size: 0.6875rem;
   line-height: 1.5;

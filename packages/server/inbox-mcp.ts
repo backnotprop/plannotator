@@ -68,7 +68,7 @@ import type { ProjectHostOf } from "./inbox-thread-pulls";
 import { applyAgentPriority, priorityLine, PRIORITY_FIELD } from "./inbox-mcp-priority";
 import { BRANCH_FIELD, branchReportOf, checkBranchSend, planBranchSend, type BranchSendPlan, type InboxBranchMcpContext } from "./inbox-mcp-branch";
 import { inboxBranchReportedLine, inboxBranchSameLine } from "@plannotator/core/inbox-branch-reports";
-import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
+import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpContext, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
 export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps", "routine"] as const;
 
@@ -364,6 +364,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
   pulls?: InboxPullsMcpLive;
   /** The host of a project's git remote, for a short `group/project!45` (inbox-thread-pulls.ts `parseProjectPullRefs`). Absent: gitlab.com. */
   projectHost?: ProjectHostOf;
+  /** Ship: the shipping agent's `thread_pulls` `ship` (inbox-mcp-pulls.ts). */
+  shipStep?: InboxPullsMcpContext["shipStep"];
   /**
    * What this Inbox already knows of a project's PRs, read with no forge call (inbox-mcp-hints.ts): for the attach
    * hint's `owner/repo#12` and bare `#12`. Absent: only a PR's URL and a short `group/project!45` count. Its `lookUp`
@@ -399,11 +401,6 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
   mcpClient?: InboxMcpClient;
   /** The New review box started this thread as a walkthrough: every guide sent in it is one. */
   walkthroughThread?: (threadId: string) => boolean;
-  /**
-   * Whether Shape is on (config.json `inboxShape`, read on every request). With Code review on, get_guide_brief names
-   * the overview's drawing only while this is on too (approval "code-review-029-shape-off"). Absent: off.
-   */
-  shapeOn?: () => boolean;
   /**
    * Whether Chapter diagrams is on (Settings → Capabilities, config.json `inboxChapterDiagrams`, on unless false; read
    * on every request). With Code review on and this off, get_guide_brief and submit_guide name no chapter diagram.
@@ -621,6 +618,11 @@ export type AgentSendInput = {
   agent_session?: string;
   agent_name?: string;
   agent_host?: string;
+  /**
+   * Not a tool field: a session on another linked computer writing here (inbox-far-tags.ts), that computer's id and
+   * name. Its paths are that computer's, so nothing in its body is read from this disk.
+   */
+  agent_machine?: { id: string; name: string | null };
 };
 
 /** The project a send lands in: reply_to's, else the one at project_path. */
@@ -927,7 +929,9 @@ export async function sendAgentMessage(
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
   // Pictures sent as bytes go first, so each is taken now: their bytes are not on disk for a later read to find.
   const fromBytes = uploaded && uploaded.pictures.size > 0 ? [...uploaded.pictures.keys()] : null;
-  const captured = bodyShowsLocalImages(input.body)
+  // A session on another computer (inbox-far-send.ts): only the pictures it sent as bytes, never a path on this disk.
+  const farAuthor = input.agent_machine ?? context.farAuthor;
+  const captured = (farAuthor ? !!fromBytes : bodyShowsLocalImages(input.body))
     ? await captureInboxInlineImages(store.dir, {
         body: input.body,
         root: project.root,
@@ -938,7 +942,7 @@ export async function sendAgentMessage(
         ...(uploaded && fromBytes
           ? {
               files: uploaded.pictures,
-              refs: [...fromBytes, ...inboxMessageImageRefsInOrder(input.body).filter((ref) => !uploaded.pictures.has(ref))],
+              refs: farAuthor ? [...fromBytes] : [...fromBytes, ...inboxMessageImageRefsInOrder(input.body).filter((ref) => !uploaded.pictures.has(ref))],
               max: Math.max(INBOX_INLINE_IMAGES_MAX, fromBytes.length),
             }
           : {}),
@@ -963,6 +967,7 @@ export async function sendAgentMessage(
         host: input.agent_host?.trim() || null,
         session: input.agent_session?.trim() || null,
         name: inboxStoredAgentName(input.agent_name),
+        ...(farAuthor ? { machine: farAuthor.id, ...(farAuthor.name ? { machine_name: farAuthor.name } : {}) } : {}),
       },
       body: input.body,
       subject: input.subject ?? null,
@@ -1099,6 +1104,22 @@ export async function sendAgentMessage(
       ...(notFramed.length > 0 ? { prototypes_not_framed: notFramed } : {}),
     },
   };
+}
+
+/**
+ * The one line a removed agent's post carries (approval "inbox-remove-agent-from-thread", the words approved): the
+ * person removed it from the thread, so it is told nothing at the time; its own post lands and it stays out.
+ */
+export const INBOX_REMOVED_FROM_THREAD_TEXT = "You were removed from this thread. Your message is posted, but the person's replies come to you only if they write to you again.";
+
+/**
+ * That line, on a line of its own, on the sender's first post into a thread it is out of since the person removed it
+ * (once per removal: its later posts there carry nothing); "" otherwise.
+ */
+export function removedFromThreadText(store: InboxStore, structured: Record<string, unknown>, session: string | undefined): string {
+  const who = session?.trim();
+  if (!who || structured.new_thread === true) return "";
+  return store.firstPostSinceRemoval(String(structured.thread_id), who, String(structured.message_id)) ? `\n${INBOX_REMOVED_FROM_THREAD_TEXT}` : "";
 }
 
 /**
@@ -1298,6 +1319,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     },
     async (input, ctx) =>
       guarded(async () => {
+        // A thread on another computer: the send runs there, with every field, by that computer's rules (inbox-mcp-far-reply.ts).
+        const farSent = input.reply_to && !store.message(ownMessageId(store, input.reply_to)) && context.farReply ? await context.farReply(input, async () => replyNextStepText(await senderWakes(context, ctx, input), input.agent_host), callerWorkingFolder(ctx)) : null;
+        if (farSent) return ok(farSent.text, farSent.structured);
         // A list that does not read is refused before anything is sent, so a message never lands without its steps.
         const withSteps = (input as { steps?: unknown }).steps;
         if (withSteps !== undefined) {
@@ -1387,6 +1411,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           prototypesNotFramedText(sent.notFramed),
           questionOpenersWithTextText(sent.questionOpenersWithText),
           inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined),
+          removedFromThreadText(store, sent.structured, input.agent_session),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
         hints.push(askedRefsText(String(sent.structured.message_id), sent.asked));

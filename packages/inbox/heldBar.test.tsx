@@ -239,15 +239,16 @@ function layOut(body: HTMLElement): { scrollTop: () => number } {
   body.getBoundingClientRect = () => ({ top: 0, bottom: 400, left: 0, right: 380, width: 380, height: 400, x: 0, y: 0, toJSON() {} }) as DOMRect;
   const rect = Element.prototype.getBoundingClientRect;
   const rects = Element.prototype.getClientRects;
+  // A row and its box (`.ib-rw`, the box the list measures it by: holdView.ts `rowBox`) are in the same place.
   Element.prototype.getBoundingClientRect = function (this: Element) {
-    const id = this.getAttribute('data-thread-id');
+    const id = this.getAttribute('data-thread-id') ?? this.getAttribute('data-row');
     if (id === null || !body.contains(this)) return rect.call(this);
     const bar = body.querySelector('[data-held-bar]');
     const y = (bar ? (bar.getAttribute('data-lines') === '2' ? 96 : 50) : 0) + Number(id.slice(1)) * 80 - top;
     return { top: y, bottom: y + 80, left: 0, right: 380, width: 380, height: 80, x: 0, y, toJSON() {} } as DOMRect;
   };
   Element.prototype.getClientRects = function (this: Element) {
-    return (this.hasAttribute('data-thread-id') ? [this.getBoundingClientRect()] : rects.call(this)) as unknown as DOMRectList;
+    return (this.hasAttribute('data-thread-id') || this.hasAttribute('data-row') ? [this.getBoundingClientRect()] : rects.call(this)) as unknown as DOMRectList;
   };
   restore.push(() => {
     Element.prototype.getBoundingClientRect = rect;

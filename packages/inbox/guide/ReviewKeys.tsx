@@ -160,12 +160,12 @@ function coverOpen(): boolean {
 
 /**
  * Whether the review has the keys now, from where focus is (`target`): not while focus is in a dialog, menu, frame or
- * the PR's Details, or under a modal, a cover, a Shape board or a repository file. Otherwise the keys are the Inbox's
+ * the PR's Details, or under a modal, a cover or a repository file. Otherwise the keys are the Inbox's
  * again, and the map and the Undo toast say so (OpenReviewKeys `live`).
  */
 export function reviewKeysLive(root: HTMLElement, scroller: HTMLElement, target: Element | null): boolean {
   if (target && (inOverlay(target) || target.closest('[role="menu"], [role="listbox"], iframe, [data-pull-details]'))) return false;
-  if (modalOpen() || selectionToolbarShowing(document) || boardOver(target) || coverOpen()) return false;
+  if (modalOpen() || selectionToolbarShowing(document) || coverOpen()) return false;
   return diffOnScreen(scroller);
 }
 
@@ -184,13 +184,6 @@ export function reviewKeyAllowed(event: KeyboardEvent, root: HTMLElement, scroll
     if (path.some((node) => node instanceof Element && node.matches(ARROW_OWNERS))) return false;
   }
   return reviewKeysLive(root, scroller, target);
-}
-
-/** A Shape board open over the review (ShapeBoardLayer), or the key from inside one: the board has the keys then. */
-function boardOver(target: Element | null): boolean {
-  if (target?.closest('[data-shape-layer]')) return true;
-  const layers = document.querySelectorAll<HTMLElement>('[data-shape-layer]:not([data-shape-in-thread])');
-  return [...layers].some((layer) => !layer.closest('[hidden]'));
 }
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));

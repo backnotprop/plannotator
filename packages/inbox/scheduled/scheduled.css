@@ -254,3 +254,6 @@ button.st-foot-mark:hover { background: var(--muted); }
   .st-tabs.ib-seg { display: flex; flex-wrap: nowrap; align-self: stretch; }
   .st-tabs .ib-seg-o { flex: 1; justify-content: center; font-size: var(--ib-fs-15, 15px); }
 }
+/* The editor's "Runs on <computer>": a new routine's computer, a quiet pick like the time zone. */
+.st-home { height: auto; gap: 2px; padding: 0 2px; color: var(--foreground); }
+.st-dim-name { color: var(--muted-foreground); font-weight: 400; }

@@ -36,6 +36,8 @@ export interface RecipientRow {
   alone?: boolean;
   /** A start row (thread/replyStart.ts): a new session of this agent, in `project`; `asleep`, its machine is away. */
   start?: { project: string; asleep: boolean };
+  /** Its row offers Remove (thread/recipientList.ts): one of the thread's agents, not the last one there. */
+  removable?: boolean;
 }
 
 /** Whether a session can take the reply alone: it wrote here (the reply answers its message), or `to` reaches it (live). */
@@ -76,6 +78,14 @@ export function sessionFolder(session: string, thread: InboxThread, model: Tagga
  */
 export function headFolder(message: InboxMessageWire, thread: InboxThread, model: TaggableModel | null): string {
   if (message.author.kind !== 'agent') return thread.project.name;
+  // A session tagged in from another computer: its computer after the folder, as the list names another machine's project.
+  const author = message.author;
+  if (author.machine) {
+    const found = author.session ? (model?.sessions.find((s) => s.session === author.session) ?? null) : null;
+    const folder = found?.project?.name ?? null;
+    const computer = author.machine_name ?? null;
+    if (computer) return folder ? `${folder} · ${computer}` : computer;
+  }
   if (message.from_project?.name) return message.from_project.name;
   const session = message.author.session;
   const found = session ? model?.sessions.find((s) => s.session === session) : undefined;

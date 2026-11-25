@@ -44,14 +44,24 @@ import { inboxFarReaderName, inboxMachineRecordName } from "./inbox-sent-from-re
 import { createMachineAgentFind } from "./inbox-machine-agent-find";
 import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
+import type { OutboxFile } from "./inbox-outbox-files";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
+import { createMachineShips } from "./inbox-machine-ships";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 import type { FarArchived } from "./inbox-archived-merged";
+import { ARTIFACT_PINS_MARK, readFarWall } from "./inbox-artifacts-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
+import { createFarRoutines } from "./inbox-scheduled-machines";
+import { CAPABILITY_SET_MARK, type CapabilitySet } from "./inbox-capability-set";
+import type { SharedReactions } from "./inbox-reactions-shared";
+import { FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE } from "./inbox-far-tags";
+
+/** A far tag's door routes (inbox-far-tags.ts): this Inbox sends them itself; the forward never does. */
+const FAR_TAG_OWN_ROUTES = new Set([FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE, FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE]);
 
 /** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
 const FAR_ARCHIVED_LIMIT_MAX = 200;
@@ -135,6 +145,12 @@ export interface InboxMachinesContext {
   ownVersions?: () => { current: string; latest: string | null };
   /** A linked machine's list was read: this Inbox takes its "Show archived" switch when that one is newer. */
   showArchivedSaid?: (value: InboxShowArchived) => void;
+  /** A linked machine's list was read: this Inbox takes its saved reaction emoji when that set is newer. */
+  reactionsSaid?: (value: SharedReactions) => void;
+  /** A linked computer's list was read, one that keeps the one set (mark `capability-set`): this Inbox takes each newer flip. */
+  capabilitySetSaid?: (value: CapabilitySet) => void;
+  /** Grid is on here (experimental): only then are linked machines asked for Grid's fields and looks, and `clock_ms` shown. */
+  gridOn?: () => boolean;
   /** Where the person wrote a write this Inbox forwards, told from the request (inbox-sent-from.ts). */
   sentFrom?: (req: Request, via: "local" | "tailnet") => InboxSentFrom | null;
   /** Tests: the links' clocks. */
@@ -295,6 +311,8 @@ export interface MachineView {
    * (422) reads "<name> needs an update to delete words". True for this Inbox; false until its health is read, and for an older Inbox.
    */
   message_deletions: boolean;
+  /** How far its clock runs ahead of this one's (ms, whole minutes), from its list's `now`; absent within two minutes. Grid reads it. */
+  clock_ms?: number;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -335,8 +353,11 @@ export interface OutboxView {
 /** At most this much of a held write's words rides its view. */
 const OUTBOX_WORDS_SHOWN = 2_000;
 
-const wordsOf = (body: Record<string, unknown>): string | null => {
-  const words = typeof body.words === "string" ? body.words : typeof body.body === "string" ? body.body : null;
+const wordsOf = (entry: OutboxEntry): string | null => {
+  const { body } = entry;
+  // An agent's answer in a thread there (inbox-mcp-far-reply.ts) holds send_message's arguments: its words are theirs.
+  const args = entry.route === FAR_AGENT_REPLY_ROUTE && body.args && typeof body.args === "object" ? (body.args as Record<string, unknown>) : null;
+  const words = args ? (typeof args.body === "string" ? args.body : null) : typeof body.words === "string" ? body.words : typeof body.body === "string" ? body.body : null;
   if (words === null) return null;
   return words.length > OUTBOX_WORDS_SHOWN ? `${words.slice(0, OUTBOX_WORDS_SHOWN)}…` : words;
 };
@@ -352,7 +373,7 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
   answer: entry.answer,
   notice: entry.notice,
   dismissed: entry.dismissed,
-  words: wordsOf(entry.body),
+  words: wordsOf(entry),
   thread: entry.thread ?? null,
   machine_name: entry.machine_name ?? null,
 });
@@ -393,13 +414,15 @@ export function forwardedFileReadRefusal(route: string, req: Request): { status:
 const LAUNCH_ROUTE = /^launch\/[^/]+\/(stop|retry|trust|delete)$/;
 /** New message, and a reply sent to a new session in place of one that ended: both carry `to.launch`. */
 const LAUNCHES_WITH_TO = /^messages(\/[^/]+\/reply)?$/;
+/** A routine's write there (make, edit, turn, run, stop, delete, bring back): that computer takes it only from a window. */
+const ROUTINE_WRITE = /^scheduled(\/sch_[^/]+(\/(on|off|run|stop|delete|restore))?)?$/;
 
 /**
  * Remote launch: a write that starts, stops or trusts an agent on another machine, which is code run there. Only a
  * press in a window of this Inbox sends one; an agent's or a script's bare call through the forward never does.
  */
 export function startsAgentThere(route: string, body: Record<string, unknown>): boolean {
-  if (LAUNCH_ROUTE.test(route)) return true;
+  if (LAUNCH_ROUTE.test(route) || ROUTINE_WRITE.test(route)) return true;
   const to = body.to;
   return LAUNCHES_WITH_TO.test(route) && !!to && typeof to === "object" && "launch" in to;
 }
@@ -455,8 +478,14 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const machinePulls = createMachinePulls({ peers: () => peers.values() });
   // Branch reviews: each linked machine's reported branches, read when Reviews is (inbox-machine-branches.ts).
   const machineBranches = createMachineBranches({ peers: () => peers.values() });
+  // Ship: each linked machine's merged ships, read when Reviews is (inbox-machine-ships.ts).
+  const machineShips = createMachineShips({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
   const launchReads = createMachineLaunchReads();
+  /** The person's writes waiting for a linked computer, laid on its routines as they are shown. */
+  const heldOn = (machine: string) => outbox.list(machine, "pending").filter((entry) => !entry.auto);
+  /** Each linked computer's routines (mark `routines`), for the Routines page's merged read (inbox-scheduled-machines.ts). */
+  const farRoutines = createFarRoutines(() => peers.values(), heldOn);
   // An agent here reads a linked machine's thread, and saves its files here (inbox-machine-agent-read.ts).
   const agentRead = createMachineAgentRead({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
   // ...and finds them: its search and read_thread's list ask every linked machine too (inbox-machine-agent-find.ts).
@@ -518,6 +547,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         update: peer ? updateView(peer) : null,
         launch: peer?.launch ?? null,
         message_deletions: peer?.messageDeletions ?? false,
+        ...(context.gridOn?.() && peer?.list?.clock_ms ? { clock_ms: peer.list.clock_ms } : {}),
       } satisfies MachineView;
     }),
   ];
@@ -549,8 +579,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
   };
 
   outbox.onChange(({ entry }) => {
-    // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it.
-    if (entry.auto) return;
+    // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it,
+    // except the notice of one the person is told about when it does not land (`notify`).
+    if (entry.auto && !(entry.notify && entry.notice !== null)) return;
     emit({ event: "outbox", data: outboxView(entry) });
     machinesChanged();
   });
@@ -573,6 +604,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onRecord: (record) => emit({ event: "machine", data: record }),
       onChange: () => {
         if (peer.list?.show_archived) context.showArchivedSaid?.(peer.list.show_archived);
+        if (peer.list?.reactions) context.reactionsSaid?.(peer.list.reactions);
+        // An older Plannotator there says no mark: its switches stay its own, and none of its are taken here.
+        if (peer.list?.capability_set && peer.list.marks.includes(CAPABILITY_SET_MARK)) context.capabilitySetSaid?.(peer.list.capability_set);
         machinesChanged();
       },
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
@@ -580,6 +614,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onCards: () => emit({ event: "cards", data: {} }),
       onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
+      gridOn: context.gridOn,
     });
     peers.set(link.id, peer);
     peer.start();
@@ -598,6 +633,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     peers.delete(id);
     machinePulls.forget(id);
     machineBranches.forget(id);
+    machineShips.forget(id);
     launchReads.forget(id);
     const link = links.remove(id);
     if (link?.device_id) context.door.revokeDevice(link.device_id, { oweRefusal: closeDoor === "after_refusal" });
@@ -844,7 +880,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check, and
     // would hold a write such as a switch on disk. Nothing under `accounts/` either: a linked machine's switch is its own step.
     // `update` has its own route (`/api/inbox/machines/:id/update`), never a held forward.
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts" || safeDecode(route) === "update") {
+    // A far tag's own writes (inbox-far-tags.ts) are this Inbox's, never a window's.
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts" || safeDecode(route) === "update" || FAR_TAG_OWN_ROUTES.has(safeDecode(route))) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
@@ -1310,8 +1347,18 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const search = `?limit=${Math.min(count, FAR_ARCHIVED_LIMIT_MAX)}${project ? `&project=${encodeURIComponent(project)}` : ""}`;
     return Promise.all([...peers.values()].filter((peer) => !owner || peer.id === owner).map((peer) => peer.archivedPage(search)));
   };
+  /** The linked machines whose list takes artifact pins (inbox-artifacts-merged.ts): an older one is never asked. */
+  const artifactPeers = () => [...peers.values()].filter((peer) => peer.list?.marks.includes(ARTIFACT_PINS_MARK));
+  const artifactPins = {
+    /** Each one's pins as its list last said (an asleep machine's from memory). */
+    pinLists: () => artifactPeers().map((peer) => ({ machine: peer.id, pins: peer.list!.artifact_pins })),
+    /** Each one's Wall page for its own part of the ask, read now while it is online. */
+    walls: (searchOf: (machine: string) => string) => Promise.all(artifactPeers().map((peer) => readFarWall(peer, searchOf(peer.id)))),
+  };
   /** Each linked machine's "Show archived" switch as its list last said: a save here goes past the newest. */
   const showArchivedCopies = (): InboxShowArchived[] => [...peers.values()].flatMap((peer) => (peer.list?.show_archived ? [peer.list.show_archived] : []));
+  /** Each linked machine's saved reaction emoji as its list last said: a save here goes past the newest. */
+  const reactionsCopies = (): SharedReactions[] => [...peers.values()].flatMap((peer) => (peer.list?.reactions ? [peer.list.reactions] : []));
   /** A linked machine's card, as its Board last said: the lane marks and a link's site icon are read here for it. */
   const farCard = (id: string): InboxCardWire | null => {
     for (const peer of peers.values()) {
@@ -1351,7 +1398,14 @@ export function createInboxMachines(context: InboxMachinesContext) {
     hasLinks: () => links.list().length > 0,
     /** A linked machine's name, or null when it is not linked. */
     nameOf: (machine: string): string | null => links.get(machine)?.name ?? null,
+    /** Every linked machine's id (a Ship tells each of them, inbox-ship-watch.ts `onStart`). */
+    linkedIds: (): string[] => links.list().map((link) => link.id),
     machinesView,
+    /** Grid was turned on or off here: every link asks its machine again (inbox-peer-link.ts `gridChanged`). */
+    gridChanged: () => {
+      for (const peer of peers.values()) peer.gridChanged();
+      machinesChanged();
+    },
     /** This Inbox's door changed by itself (published again once Tailscale ran): the windows hear the machines block. */
     machinesChanged,
     rows,
@@ -1364,7 +1418,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
     tagColourLists,
     cardLists,
     archivedPages,
+    farRoutines,
+    /** Pinned artifacts and the Wall on linked machines (mark `artifact-pins`, inbox-artifacts-merged.ts). */
+    artifactPins,
     showArchivedCopies,
+    reactionsCopies,
     /** Each linked machine's PR board (mark `pulls`), for the merged board (inbox-machine-pulls.ts). */
     pullLists: (refresh: boolean) => {
       const snapshot = machinePulls.start(refresh);
@@ -1373,15 +1431,18 @@ export function createInboxMachines(context: InboxMachinesContext) {
     pullLinkedThere: (key: string) => machinePulls.linkedThere(key),
     /** Each linked machine's reported branches (mark `branches`), for Reviews (inbox-machine-branches.ts). */
     branchLists: () => machineBranches.start((machine) => links.get(machine)?.name ?? null),
+    /** Each linked machine's merged ships (mark `ships`), as last read: for Reviews' rows kept while Merged shows. */
+    mergedShips: () => machineShips.start(),
     farCard,
     snoozeThread,
     /**
      * A write this Inbox makes itself on a linked machine's thread (a Combine's archive there, and its Undo;
      * inbox-combine-far.ts): held in the outbox as the window's writes are, so one queue and one key per write, sent
      * now while that machine is online and when it is back otherwise. Waits up to `waitMs` for its answer. Null when
-     * that machine is not linked. `own`: the write it undoes (`follows`), and when it stops being worth sending (`send_by`).
+     * that machine is not linked. `own`: the write it undoes (`follows`), when it stops being worth sending (`send_by`), and
+     * whether its refusal is a notice the window shows (`notify`).
      */
-    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string } = {}): Promise<OutboxEntry | null> | null => {
+    holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own: { follows?: string; send_by?: string; notify?: boolean; files?: readonly OutboxFile[] } = {}): Promise<OutboxEntry | null> | null => {
       const peer = peers.get(machine);
       if (!peer) return null;
       // Marked as this Inbox's own (`auto`): the window never lists it as the person's waiting write.
@@ -1390,8 +1451,14 @@ export function createInboxMachines(context: InboxMachinesContext) {
       else peer.poke();
       return outbox.waitSettled(entry.key, peer.state === "online" ? waitMs : 0);
     },
+    /** Every linked machine's line (a far tag's `@` list, inbox-far-tags.ts). */
+    peerLinks: (): PeerLink[] => [...peers.values()],
     /** A held write of this Inbox's own, by its key: how it stands (null: never held). */
     heldWrite: (key: string): OutboxEntry | null => outbox.get(key),
+    /** A held write's notice, dismissed: the one who made it was told already (inbox-mcp-far-reply.ts). */
+    dismissHeld: (key: string): void => {
+      outbox.dismiss(key);
+    },
     /** Take back a held write of this Inbox's own that never left (rule 10: one that left stays), or one past its `send_by`. */
     cancelHeld: (key: string): OutboxEntry | null => outbox.cancel(key),
     /** A linked machine's rows as its list last said, or null while this Inbox holds no list of it. */

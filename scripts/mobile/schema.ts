@@ -44,7 +44,7 @@ export const ROOTS: Record<string, string[]> = {
     'DoorError', 'DoorPairRequest', 'DoorPairAnswer', 'DoorRevokeAnswer', 'DoorHelloFrame', 'DoorRecordFrame', 'DoorSeenBody',
     'DoorPicksBody', 'DoorPicksAnswer', 'DoorReplyBody',
     'DoorResolveBody', 'DoorKeyBody', 'DoorMarkUnreadAnswer', 'DoorPinBody', 'DoorPinsBody',
-    'DoorSnoozeBody', 'DoorSnoozeAnswer', 'DoorPriorityBody', 'DoorPriorityAnswer', 'DoorThreadDraftAnswer', 'DoorThreadAttachmentsAnswer', 'DoorAnnotationBody', 'DoorAnnotationAnswer', 'DoorAnnotationRemoveBody', 'DoorMarkupAnswer', 'DoorSessionsAnswer', 'DoorComposeBody', 'DoorComposeAnswer', 'DoorUploadAnswer',
+    'DoorSnoozeBody', 'DoorSnoozeAnswer', 'DoorPriorityBody', 'DoorPriorityAnswer', 'DoorThreadDraftAnswer', 'DoorThreadAttachmentsAnswer', 'DoorAnnotationBody', 'DoorAnnotationAnswer', 'DoorAnnotationRemoveBody', 'DoorMarkupAnswer', 'DoorSessionsAnswer', 'DoorComposeBody', 'DoorComposeAnswer', 'DoorUploadAnswer', 'DoorAckBody', 'DoorAckAnswer', 'DoorTakeBackAnswer', 'DoorTaggableAnswer',
   ],
 };
 
