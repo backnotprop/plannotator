@@ -161,7 +161,7 @@ import {
   type TagOption,
 } from '../tags';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
-import { TAG_TOKEN_CLASS } from './ComposerField';
+import { TAG_TOKEN_CLASS, ThreadSkillFilter } from './ComposerField';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { type ActionMark } from './ActionChecklist';
@@ -5751,6 +5751,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     </section>
     {protoWindow}
     {openAttachment && (
+      <ThreadSkillFilter.Provider value={skillFilter}>
       <AttachmentPane
         ref={paneRef}
         pageStart={pageStart}
@@ -5811,9 +5812,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         onToast={onToast}
         questions={fileQuestions}
         onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus, view: currentView, set: setFor(attachmentId) }, { replace: true })}
-        onClose={() => {
-          onOpenFile(null);
-        }}
+        onClose={() => onOpenFile(null)}
         strip={{
           picks: picksCount,
           annotations: records.length,
@@ -5821,6 +5820,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }}
         composer={composer}
       />
+      </ThreadSkillFilter.Provider>
     )}
     {!openAttachment && file === null && namedFile && (
       <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />

@@ -101,6 +101,7 @@ import { loadConfig, resolveInboxLaunch, saveConfig } from "@plannotator/shared/
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxSectionWhileRoutineRuns } from "@plannotator/shared/inbox/list";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
@@ -1472,6 +1473,9 @@ ${result.text}`);
         : runLine?.state === "failed" || runLine?.state === "missing"
           ? { ...pending, state: "undelivered" as const, reason: "undelivered" as const, send_now: false }
           : row.delivery;
+    // A routine's run going (its newest divider's own launch): New at least until it ends (list.ts), and the window
+    // brings the row in at once (`scheduled_running`). Counts and `unread` stay the rules' own.
+    if (root.scheduled_run && word) return { ...row, run: word, delivery, section: inboxSectionWhileRoutineRuns(row), scheduled_running: true };
     return { ...row, run: word, delivery };
   };
 

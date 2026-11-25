@@ -219,7 +219,7 @@ export type MarkReadPlace = 'open' | 'held' | 'list';
  * pane. What the agent is told is the thread's Read banner's to say.
  */
 export function markReadToast(
-  before: Pick<InboxListRow, 'subject' | 'author' | 'questions'> & { resolved_at?: string | null; unsent?: InboxListRow['unsent'] },
+  before: Pick<InboxListRow, 'subject' | 'author' | 'questions'> & { resolved_at?: string | null; unsent?: InboxListRow['unsent']; scheduled_running?: true },
   place: MarkReadPlace,
 ): MarkReadToast {
   const subject = `“${before.subject ?? '(no subject)'}”`;
@@ -246,6 +246,9 @@ export function markReadToast(
   // Words typed in the reply box, or comments waiting, keep it out of Quiet (approval "inbox-reply-drafts"; Mark read closes the picks).
   const kept = !archived && before.unsent != null && (before.unsent.reply_at !== null || before.unsent.comments > 0);
   if (kept) return { lead: 'Marked read', phoneLead: 'Read', detail: place === 'open' ? 'Your draft keeps it in New' : `${subject} · your draft keeps it in New`, warn: false };
+  // A routine's run going keeps it in New until the run ends (shared/inbox/list.ts `inboxSectionWhileRoutineRuns`):
+  // no move to promise, so the toast of a row that stays put (`held`, App.tsx `seenStaysPut`).
+  if (place === 'open' && !archived && before.scheduled_running === true) return { lead: 'Marked read', phoneLead: 'Read', detail: subject, warn: false };
   if (place === 'open') return { lead: 'Marked read', phoneLead: 'Read', detail: archived ? 'Goes back to Archived' : 'Moves to Quiet', warn: false };
   return { lead: archived ? 'Back in Archived' : 'Moved to Quiet', detail: subject, warn: false };
 }
