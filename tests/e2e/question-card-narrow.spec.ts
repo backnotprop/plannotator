@@ -2,7 +2,7 @@
  * The question card (`:::question`, ui's QuestionBlock) in narrow columns,
  * proved in Chromium against the compiled binary: annotate, plan review and
  * the Inbox thread (full width, beside a file, on a phone), and the Inbox's
- * Decide dialog (its own card, the same footer actions).
+ * Decide dialog (the thread's own card, one question at a time).
  *
  * The owner's report: in a narrow column the footer's words broke inside
  * their buttons ("Add / note", "Accept / recommended") and the Accept pill
@@ -77,6 +77,8 @@ const DOC = [
 ].join('\n');
 
 const CARD = 'fieldset[data-question-key]';
+/** Where the Decide dialog draws its question: the thread's own card (QuestionBlock), one question at a time. */
+const DECIDE = '[data-decision-mode] [data-decision-question]';
 
 /**
  * What is wrong with the question cards' footers under `scope`: a button
@@ -170,18 +172,18 @@ async function footerProblems(page: Page, options: { scope?: string; minTarget?:
   }, { scope: options.scope ?? null, card: CARD, minTarget: options.minTarget ?? 0, oneRow: options.oneRow ?? false, order: options.order ?? true });
 }
 
-/** The Recommended tag in a choice row: one line, inside its row, never alone on a line its label left room on. */
-async function tagProblems(page: Page): Promise<string[]> {
-  return page.evaluate((card) => {
+/** The Recommended tag in a choice row (under `scope`): one line, inside its row, never alone on a line its label left room on. */
+async function tagProblems(page: Page, scope?: string): Promise<string[]> {
+  return page.evaluate(({ scope, card }) => {
     const out: string[] = [];
-    document.querySelectorAll<HTMLElement>(`${card} label[data-question-option] [data-question-tag="rec"]`).forEach((tag) => {
+    document.querySelectorAll<HTMLElement>(`${scope ? `${scope} ` : ''}${card} label[data-question-option] [data-question-tag="rec"]`).forEach((tag) => {
       const row = tag.closest('label')!.getBoundingClientRect();
       const box = tag.getBoundingClientRect();
       if (box.height > 24) out.push(`a Recommended tag is ${Math.round(box.height)} px tall`);
       if (box.right > row.right + 1) out.push('a Recommended tag runs past its row');
     });
     return out;
-  }, CARD);
+  }, { scope: scope ?? null, card: CARD });
 }
 
 /**
@@ -521,8 +523,8 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
   const root = inboxScratch('plannotator-question-card-inbox-');
   const dataDir = join(root, 'data');
   mkdirSync(dataDir, { recursive: true });
-  // Decision mode is experimental: on in this Inbox's own config.
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true } }));
+  // Decision mode is on by default.
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF }));
   const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
   let agent: SimAgent | null = null;
   try {
@@ -594,6 +596,8 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
       await page.locator(`${pane} [data-open-questions]`).click();
       await page.locator('[data-thread-decide]').click();
       await expect(page.locator('[data-decision-mode]')).toBeVisible();
+      // One question at a time, drawn by the thread's own card.
+      await expect(page.locator(`${DECIDE} ${CARD}`)).toHaveCount(1);
       for (const width of [1440, 720]) {
         await page.setViewportSize({ width, height: 900 });
         await page.waitForTimeout(300);
@@ -614,6 +618,7 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
       await p.locator(`${pane} [data-open-questions]`).click();
       await p.locator('[data-thread-decide]').click();
       await expect(p.locator('[data-decision-mode]')).toBeVisible();
+      await expect(p.locator(`${DECIDE} ${CARD}`)).toHaveCount(1);
       await p.waitForTimeout(300);
       check(await decideProblems(p), 'Decide on a phone').toEqual([]);
       await shot(p, `decide-phone-390-${value}`);
@@ -625,37 +630,12 @@ test('the Inbox: a thread full width, beside a file, on a phone, and the Decide 
   }
 });
 
-/** The Decide card: its secondary actions keep their words on one line; a Recommended tag never squeezes its choice's words. */
+/**
+ * The Decide card: the thread card's checks inside the dialog. Its footer buttons (Add note, Skip, Accept
+ * recommended) keep their words on one line, inside the card, on one row while they fit; a Recommended tag stays one
+ * line inside its choice's row. The Inbox's own footer wraps in reverse (#2206), as in the thread: the reading-order
+ * check is off for that.
+ */
 async function decideProblems(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const out: string[] = [];
-    /** The lines an element's visible words sit on: its text nodes' boxes (an icon is not a line). */
-    const textLines = (el: Element): Set<number> => {
-      const tops = new Set<number>();
-      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.trim()) continue;
-        // Visually hidden words (a 1 px clipped box) are no line of the button.
-        const holder = node.parentElement!.getBoundingClientRect();
-        if (holder.width <= 1 || holder.height <= 1) continue;
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        for (const r of range.getClientRects()) if (r.width > 1 && r.height > 1) tops.add(Math.round(r.top + r.height / 2));
-      }
-      return tops;
-    };
-    for (const button of document.querySelectorAll<HTMLButtonElement>('[data-decision-mode] .ib-dm-more button')) {
-      if (button.getBoundingClientRect().width === 0) continue;
-      const lines = textLines(button);
-      if (lines.size > 1) out.push(`"${button.textContent?.trim()}" wraps onto ${lines.size} lines`);
-    }
-    for (const rec of document.querySelectorAll<HTMLElement>('[data-decision-mode] .ib-dm-choice .ib-dm-rec')) {
-      const label = rec.parentElement!.querySelector<HTMLElement>('.ib-dm-chl');
-      if (!label) continue;
-      const lineHeight = parseFloat(getComputedStyle(label).lineHeight) || 20;
-      const tooNarrow = label.getBoundingClientRect().width < 120 && label.getBoundingClientRect().height > lineHeight * 2.5;
-      if (tooNarrow) out.push(`"${label.textContent?.trim()}" is squeezed beside its Recommended tag`);
-    }
-    return out;
-  });
+  return [...(await footerProblems(page, { scope: DECIDE, order: false })), ...(await tagProblems(page, DECIDE))];
 }

@@ -109,8 +109,8 @@ test.beforeAll(async () => {
   const home = join(root, 'home');
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
-  // The dialog case needs Decision mode, which is off by default.
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true } }));
+  // The dialog case needs Decision mode, which is on by default.
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF }));
   const env = {
     PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: join(root, 'claude'), CODEX_HOME: join(root, 'codex'), OPENCODE_CONFIG_DIR: join(root, 'opencode'),
