@@ -25,6 +25,7 @@ import { chipDropsTo, saysWords } from './components/ReplyRecipient';
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+const { replyDraftUnsaved } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'superfans-abcdef', name: 'superfans', root: '/work/superfans', created_at: '2026-11-01T10:00:00.000Z' };
 const FAR = { id: 'prj_2', name: 'plannotator', root: '/work/plannotator' };
@@ -141,13 +142,18 @@ beforeEach(() => {
   }) as typeof fetch;
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
   root = null;
   host = null;
+  // The box's last save (sent as it unmounts) is answered by this test's fetch: one failing on the real fetch would
+  // be kept for the thread and show in the next test's box.
+  for (let i = 0; i < 100 && replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const left = replyDraftUnsaved();
   globalThis.fetch = savedFetch;
+  if (left) throw new Error('the test left a reply draft save on its way, or words not saved');
 });
 
 async function settle(ms = 0) {
