@@ -545,6 +545,24 @@ describe("the list (rule 5)", () => {
     expect(peer.list!.reactions).toBeNull();
   });
 
+  test("the computers it is linked to come from its list, and a `links` frame reads the list again", async () => {
+    const told: string[] = [];
+    const MINI = `ibx_${"0".repeat(25)}M`;
+    const d = door({
+      cursor: 3,
+      frames: ["event: links\ndata: {}\n\n"],
+      threads: () => Response.json({ cursor: 3, sections: [], marks: ["link-through"], link_through: { links: d.stats.threads > 1 ? [{ id: MINI, name: "Mini", through: true, away: false }] : [], pending: [] } }),
+    });
+    const { peer } = link(d.url, { onReread: (event) => void told.push(`${event}:${peer.list!.link_through?.links.length}`) });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("links")).toBe("1");
+    expect(told).toEqual(["links:1"]);
+    // An older Inbox's list names none.
+    peer.acceptList({ cursor: 4, sections: [] });
+    expect(peer.list!.link_through).toBeNull();
+  });
+
   test("a machine's stars and the marks it takes come from its list; an older Inbox's list says no marks", () => {
     const { peer } = link("http://127.0.0.1:9");
     peer.acceptList({ cursor: 3, sections: [], pins: [{ thread_id: "msg_a" }] });

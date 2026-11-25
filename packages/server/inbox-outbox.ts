@@ -35,8 +35,16 @@
  *
  * Files: `inbox/outbox/<machine id>.jsonl`, 0600. Each line is a full
  * snapshot of one entry (the store's line rules: the last line per key wins,
- * a torn last line is skipped). Only small JSON writes are held: a file
- * upload never enters the outbox.
+ * a torn last line is skipped). Only small JSON is held here, never a file's
+ * bytes. A file the window sends (`uploads`, `markups`) never enters the
+ * outbox: it streams through while the machine is online. An agent's answer
+ * in another computer's thread waits with its files: its entry names this
+ * Inbox's own pending uploads (`files`), whose bytes stay in the store's blob
+ * folder, kept while the entry waits or its notice stands. They go up in
+ * their own lane (inbox-outbox-file-lane.ts), each id there saved on the
+ * entry as it comes (`sent_files`); the write queue passes the entry by until
+ * they are all there (`outboxWaitsForFiles`), then sends the write once under
+ * its key (inbox-outbox-files.ts).
  */
 
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -45,6 +53,7 @@ import { JsonLines } from "@plannotator/shared/inbox/devices";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { inboxTidyWords, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
+import type { OutboxFile } from "./inbox-outbox-files";
 
 export const INBOX_OUTBOX_DIR = "outbox";
 /** The header a linked machine's Inbox sends with a write the person made in its window (`OutboxEntry.window`). */
@@ -55,7 +64,7 @@ export const OUTBOX_MAX_SERVER_ERRORS = 5;
 export const OUTBOX_KEEP_SETTLED_MS = 7 * 24 * 3600_000;
 /** How long a notice nobody dismissed is kept. */
 export const OUTBOX_KEEP_NOTICE_MS = 30 * 24 * 3600_000;
-/** The largest JSON body the outbox holds. Files go straight to the machine, never through here. */
+/** The largest JSON body the outbox holds. A window's files go straight to the machine; a held agent answer's files are named, not held, here. */
 export const OUTBOX_MAX_BODY_BYTES = 256 * 1024;
 
 /**
@@ -128,6 +137,20 @@ export interface OutboxEntry {
    * thread, held while that computer was away; inbox-mcp-far-reply.ts): its refusal is a notice, as a window's write's.
    */
   notify?: true;
+  /**
+   * That answer's files (inbox-outbox-files.ts): this Inbox's own pending uploads, sent to the machine's `uploads` route
+   * just before the write, their ids there put in `body.args.attachments`. Never on the wire as they are.
+   */
+  files?: OutboxFile[];
+  /** Their ids on that machine so far, saved as each one lands, so a retry sends no file twice. */
+  sent_files?: string[];
+  /**
+   * Which try of the files those are (their keys there): one more each time a file stalled (a stuck upload there
+   * keeps its key busy) and when that machine forgot the ids.
+   */
+  files_try?: number;
+  /** Its files went again once already, after that machine forgot their ids. */
+  files_again?: true;
 }
 
 /** Whether a settled entry may have been applied there: delivered (and not skipped there by its guard), given up after 5xx, or taken back after it left. */
@@ -138,6 +161,16 @@ export function outboxMayHaveApplied(entry: OutboxEntry): boolean {
 
 /** What one try got back: the owner's status and JSON body, or `null` when the machine could not be reached. */
 export type OutboxAnswer = { status: number; body: unknown } | null;
+
+/** A held answer still sending its files (inbox-outbox-file-lane.ts): the write queue passes it by until they are all there. */
+export function outboxWaitsForFiles(entry: OutboxEntry): boolean {
+  return pending(entry) && !!entry.files && entry.files.length > 0 && (entry.sent_files?.length ?? 0) < entry.files.length;
+}
+
+/** An agent's answers in one thread of that machine keep their order among themselves: their session and thread. */
+function answerLane(entry: OutboxEntry): string | null {
+  return entry.route === "agent-reply" && typeof entry.body.session === "string" ? `${entry.body.session}\u0000${entry.thread ?? ""}` : null;
+}
 
 export type AnswerClass = "delivered" | "refused" | "revoked" | "retry";
 
@@ -309,7 +342,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // would move it when nobody asked.
   "POST rex/show": "now",
   // Tag an agent on another computer (inbox-far-tags.ts), each sent by the Inbox itself, never the person and never
-  // through the forward: a wake kept once per reply and session, an answer written under its idempotency key, a delivery.
+  // through the forward: a wake kept once per reply and session, an answer written under its idempotency key (its
+  // files sent to `uploads` just before it, by the sender loop: inbox-outbox-files.ts), a delivery.
   "POST far-wake": "set",
   "POST agent-reply": "append",
   "POST far-delivered": "set",
@@ -331,6 +365,12 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST capabilities": "set",
   "POST link-back": "set",
   "POST unlink": "set",
+  // Link two computers through a third (inbox-link-through.ts), each sent by the Inbox itself, never through the
+  // forward. An ask is held until the broker is back (one job per pair there, so a second copy changes nothing); a
+  // link code and the introduction carrying it are wanted now or not at all (a code lives 10 minutes).
+  "POST link-through-ask": "set",
+  "POST link-through-offer": "now",
+  "POST link-through-introduce": "now",
   // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.
   "POST update": "set",
 };
@@ -368,7 +408,7 @@ export function doorRefusesBare(door: { window: boolean } | null | undefined, ro
 }
 
 /** Statuses a proxy in front of the owner answers when the owner itself never got the request (`tailscale serve` with the Inbox down). */
-const GATEWAY_STATUSES = new Set([502, 503, 504]);
+export const GATEWAY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
 
 const MACHINE_FILE = /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -397,12 +437,15 @@ export class InboxOutbox {
   private readonly inFlight = new Set<string>();
   /** The folder is made with the first held write: an Inbox that never links keeps none. */
   private dirMade = false;
+  /** The store's folder, where a held answer's files wait (its pending uploads and blobs). */
+  readonly storeDir: string;
 
   private constructor(
     dataDir: string,
     private readonly now: () => Date,
   ) {
-    this.dir = join(inboxDir(dataDir), INBOX_OUTBOX_DIR);
+    this.storeDir = inboxDir(dataDir);
+    this.dir = join(this.storeDir, INBOX_OUTBOX_DIR);
     for (const name of safeReaddir(this.dir)) {
       if (!name.endsWith(".jsonl")) continue;
       const machine = name.slice(0, -".jsonl".length);
@@ -452,6 +495,41 @@ export class InboxOutbox {
     return this.entries.get(key) ?? null;
   }
 
+  /** A held answer's files so far sent there (inbox-outbox-files.ts), saved before the next request leaves. */
+  noteSentFiles(key: string, sent: readonly string[], attempt = 0): void {
+    const entry = this.entries.get(key);
+    if (entry && pending(entry)) this.save({ ...entry, sent_files: [...sent], ...(attempt > 0 ? { files_try: attempt } : {}) });
+  }
+
+  /**
+   * A held answer's file that stalled or met a server error there: counted as a 5xx is. Nothing of the answer reached
+   * that machine, so after OUTBOX_MAX_SERVER_ERRORS it ends refused (its notice says why), never "may have been delivered".
+   */
+  filesFailed(key: string, answer: { status: number; body: unknown }): void {
+    const entry = this.entries.get(key);
+    if (!entry || !pending(entry)) return;
+    const errors = entry.errors + 1;
+    if (errors >= OUTBOX_MAX_SERVER_ERRORS) this.settle({ ...entry, errors }, answer, "refused");
+    else this.save({ ...entry, errors });
+  }
+
+  /** A held answer's file that machine refused (or that is no longer here): the answer is refused, a notice. */
+  filesRefused(key: string, answer: { status: number; body: unknown }): void {
+    const entry = this.entries.get(key);
+    if (entry && pending(entry)) this.settle(entry, answer, "refused");
+  }
+
+  /**
+   * That machine forgot a held answer's file ids (its upload sweep took them while it was away a day): its files go
+   * again, once, under new keys. False when they went again already (the refusal then stands).
+   */
+  filesForgotten(key: string): boolean {
+    const entry = this.entries.get(key);
+    if (!entry || !pending(entry) || entry.files_again) return false;
+    this.save({ ...entry, sent_files: [], files_try: (entry.files_try ?? 0) + 1, files_again: true });
+    return true;
+  }
+
   /** A machine's entries in queue order (all of them, or only those not settled). */
   list(machine: string, only: "pending" | "all" = "all"): OutboxEntry[] {
     return [...this.entries.values()].filter((e) => e.machine === machine && (only === "all" || pending(e))).sort((a, b) => a.n - b.n);
@@ -482,7 +560,7 @@ export class InboxOutbox {
     window = false,
     sentFrom: InboxSentFromPlace | null = null,
     auto = false,
-    own: { follows?: string; send_by?: string; notify?: boolean } = {},
+    own: { follows?: string; send_by?: string; notify?: boolean; files?: readonly OutboxFile[] } = {},
   ): { entry: OutboxEntry; fresh: boolean } {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
@@ -521,6 +599,7 @@ export class InboxOutbox {
       ...(auto && own.follows ? { follows: own.follows } : {}),
       ...(auto && own.send_by ? { send_by: own.send_by } : {}),
       ...(auto && own.notify ? { notify: true as const } : {}),
+      ...(auto && own.files && own.files.length > 0 ? { files: own.files.map((file) => ({ ...file })) } : {}),
     });
     return { entry, fresh: true };
   }
@@ -627,7 +706,17 @@ export class InboxOutbox {
     // try, and the person's writes behind them go now.
     let ownFailed = false;
     for (;;) {
-      const head = this.list(machine, "pending").find((e) => !(ownFailed && e.auto));
+      // A held answer whose files are still going up (their own lane, inbox-outbox-file-lane.ts) is not this queue's
+      // yet, and nor is a later answer of the same agent in the same thread: it stays behind the one before it.
+      const waiting = new Set<string>();
+      const head = this.list(machine, "pending").find((e) => {
+        const lane = answerLane(e);
+        if (outboxWaitsForFiles(e) || (lane !== null && waiting.has(lane))) {
+          if (lane !== null) waiting.add(lane);
+          return false;
+        }
+        return !(ownFailed && e.auto);
+      });
       if (!head) return ownFailed ? "server_error" : "empty";
       // This Inbox's own: one past its day is never sent again; one behind a write that surely did not land goes with it.
       const before = head.follows ? this.entries.get(head.follows) : undefined;
@@ -649,6 +738,8 @@ export class InboxOutbox {
       const current = this.entries.get(leaving.key);
       // Dropped while in flight (Unlink): its notice already says it may have landed.
       if (!current || !pending(current)) continue;
+      // That machine forgot its files' ids: it waits for them again (`filesForgotten`), never settled by that refusal.
+      if (outboxWaitsForFiles(current)) continue;
       const verdict = classifyAnswer(answer);
       if (verdict === "delivered" || verdict === "refused") {
         this.settle(current, answer!, verdict);

@@ -128,6 +128,7 @@ import {
   parseAutoUpdateEnv,
   parseExperimentalEnv,
   resolveExperimental,
+  savedExperimental,
   parseInboxToolEnv,
   parseUpdateCheckEnv,
   resolveAutoUpdate,
@@ -356,7 +357,7 @@ import { themeChooserLook, themeChooserOpen } from "@plannotator/shared/inbox/th
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
-import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { createInboxPulls, InboxPullsError, linkInboxPulls, linkUnlistedPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
 import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
@@ -367,7 +368,7 @@ import { gridRowDecorator, gridRowStripped } from "./inbox-grid-row";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createShipReader } from "./inbox-ship-read";
 import { shipBinds, shipLaunchFailed, shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
-import { inboxNoticeOf, type InboxShip } from "@plannotator/core/inbox-pull-handoff";
+import { inboxNoticeOf, shipActive, shipsMergedShown, type InboxShip } from "@plannotator/core/inbox-pull-handoff";
 import { createInboxShipRoutes } from "./inbox-ship-routes";
 import { createInboxShipStore } from "./inbox-ship-store";
 import { createInboxShipWatch, shipEndedWaiting } from "./inbox-ship-watch";
@@ -408,9 +409,11 @@ import { agentSearchDoorAnswer, agentThreadsDoorAnswer } from "./inbox-far-find"
 import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
+import { capabilitySetKeysIn, createCapabilitySet } from "./inbox-capability-set";
 import { nextSharedReactionsRev, settleSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
 import { mergePullBoards } from "./inbox-machine-pulls";
 import { doorRefusesBare, replyIsStale } from "./inbox-outbox";
+import { outboxHeldUploadsOnDisk } from "./inbox-outbox-files";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay, readRelayFile, relayUrl as defaultRelayUrl } from "./inbox-relay";
 import { createInboxCloudGate } from "./inbox-cloud-gate";
@@ -467,8 +470,11 @@ import { createInboxSessionLabels } from "./inbox-session-labels";
  */
 const BRIDGE_WAKING_HOSTS: ReadonlySet<string> = new Set(INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host)));
 
-/** A host whose session's bridge may poll: T3 Code's too, for a thread whose Claude runs the Claude Code mod. */
-const pollingWakeHost = (host: string): boolean => BRIDGE_WAKING_HOSTS.has(host) || host === INBOX_T3_HOST;
+/**
+ * A host whose session's bridge may poll: T3 Code's too, for a thread whose Claude runs the Claude Code mod, and
+ * Orca's, for a chat whose plugin polls as it. Only a session that polls now is woken (`live.pollsNow`).
+ */
+const pollingWakeHost = (host: string): boolean => BRIDGE_WAKING_HOSTS.has(host) || host === INBOX_T3_HOST || host === "orca";
 
 /** Where a request came in: the window's loopback port, or the tailnet-only listener `tailscale serve` points at. */
 type RequestVia = "local" | "tailnet";
@@ -1382,7 +1388,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: which one, for a switch whose frame names it only then. */
-  const capabilityListeners = new Set<(changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "thread_tabs" | "scheduled_threads" | "seam") => void>();
+  const capabilityListeners = new Set<(changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "thread_tabs" | "scheduled_threads" | "seam" | "experimental") => void>();
   /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
   const tailscaleListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -1923,7 +1929,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
   // `plannotator inbox capability` (inbox-capability-agent.ts): this computer's switches, turned through the settings
-  // route as Settings turns them; a linked computer's through the forward, as its Settings group does.
+  // route as Settings turns them, so every linked computer takes the flip (inbox-capability-set.ts).
   const capabilityAgent: InboxCapabilityContext = {
     resolveProject,
     here: () => inboxCapabilitySwitchesOf(settingsModel("local", false, null, false)),
@@ -1933,8 +1939,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (!answer.ok) throw new InboxError(typeof body.code === "string" ? body.code : "validation_error", typeof body.error === "string" ? body.error : "The switch did not turn.");
       return inboxCapabilitySwitchesOf(settingsModel("local", false, null, false));
     },
-    there: async (computer, change, by) => (machines ? machines.capabilitiesOn(computer, change, by ?? null) : null),
-    linked: () => machines?.linkedNames() ?? [],
     // `project`: the agent's own project, by the lookup of the door it came through (a paired agent's is the door's).
     tell: async (by, threadId, project, body) => {
       const author = { kind: "agent" as const, host: by.host, session: by.session, name: by.name };
@@ -4121,6 +4125,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (Object.entries(change).some(([key, on]) => saved?.[key] !== on)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     // Grid turned on or off: the linked machines are asked again with or without Grid's fields and looks.
     if (gridOn() !== gridWas) machines?.gridChanged();
+    // Every window follows at once (its Settings switch, Grid's sidebar row, Decision mode).
+    for (const listener of capabilityListeners) listener("experimental");
     return experimentalState();
   };
 
@@ -4439,6 +4445,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // (`show-archived=1`: a switch writes no record, inbox-peer-link.ts).
         const stopShowArchived =
           windowId || url.searchParams.get("show-archived") === "1" ? showArchived.subscribe(({ on, rev }) => send(`event: show-archived\ndata: ${JSON.stringify({ on, rev })}\n\n`)) : () => {};
+        // A capability switch flipped or taken here: a linked computer that asks reads this list and takes the newer flip.
+        const stopCapabilitySet = url.searchParams.get("capability-set") === "1" ? capabilitySet.subscribe(() => send(`event: capability-set\ndata: {}\n\n`)) : () => {};
         // The sidebar's layout was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onSidebar = (sidebar: InboxSidebarLayout, rev: number) => send(`event: sidebar\ndata: ${JSON.stringify({ sidebar, rev })}\n\n`);
         if (windowId) sidebarListeners.add(onSidebar);
@@ -4451,9 +4459,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
         if (windowId || url.searchParams.get("reactions") === "1") reactionsListeners.add(onReactions);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
-        const onCapabilities = (changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "thread_tabs" | "scheduled_threads" | "seam") => {
+        const onCapabilities = (changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "thread_tabs" | "scheduled_threads" | "seam" | "experimental") => {
           const floats = floatDraftsOn();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "thread_tabs" ? { thread_tabs: threadTabsState() } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          // Decision mode and Grid: only when one of them was the change (a linked computer's flip taken here, too).
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "thread_tabs" ? { thread_tabs: threadTabsState() } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -4474,6 +4483,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A `machines` snapshot opens every stream: a resync, never a notification.
         const sendMachine = (frame: MachineFrame) => send(`event: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`);
         const stopMachines = url.searchParams.get("machines") === "1" ? machines.subscribe(sendMachine) : () => {};
+        // This Inbox's links moved (one linked, unlinked, asleep or back, or a link through it under way): a linked
+        // computer that asks (`links=1`) reads this list again for its `link_through` (inbox-link-through.ts).
+        const stopLinks = url.searchParams.get("links") === "1" && fromDeviceDoor.get(req)?.platform === MACHINE_PLATFORM ? machines.onLinks(() => send(`event: links\ndata: {}\n\n`)) : () => {};
         if (url.searchParams.get("machines") === "1") sendMachine({ event: "machines", data: { machines: machines.machinesView() } });
         // A window hears its heartbeat (a named frame, so the page sees it and can tell a dead connection from a
         // quiet Inbox); the phone's door, a linked machine and agents keep the comment line, as before.
@@ -4505,6 +4517,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           rowsListeners.delete(onRows);
           soundListeners.delete(onSound);
           stopShowArchived();
+          stopCapabilitySet();
           sidebarListeners.delete(onSidebar);
           agentFaceListeners.delete(onAgentFaces);
           reactionsListeners.delete(onReactions);
@@ -4512,6 +4525,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           tailscaleListeners.delete(onTailscale);
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
+          stopLinks();
           leave();
         };
         req.signal.addEventListener("abort", () => {
@@ -5447,6 +5461,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   scheduled.sync();
   if (scheduledCap.on()) void scheduledCap.syncLogin();
+  // One set of Capabilities switches across linked computers (inbox-capability-set.ts): a switch an env var, the build
+  // or a test decides here is not shared. Taking a flip turns it as its Settings row does. `chosen`: its own key is
+  // set (a choice from before flips were kept counts as a flip at time 0; an untouched default as none).
+  const experimentalFree = (feature: "decision-mode" | "grid") => parseExperimentalEnv(feature) === undefined;
+  const chosen = (read: (config: PlannotatorConfig) => unknown) => () => typeof read(loadConfig()) === "boolean";
+  const capabilitySet = createCapabilitySet({
+    switches: {
+      board: { on: boardOn, chosen: chosen((c) => c.inboxBoard), shared: () => INBOX_CARD_ACTION_ON && options.board === undefined, apply: (on) => saveBoard({ on }) },
+      steps: { on: stepsOn, chosen: chosen((c) => c.inboxSteps), shared: () => options.steps === undefined, apply: (on) => saveSteps({ on }) },
+      scheduled_threads: { on: scheduledCap.on, chosen: chosen((c) => c.inboxScheduledThreads), shared: () => options.scheduled === undefined && scheduledCap.wire().scheduled_threads !== undefined, apply: (on) => scheduledCap.answer({ scheduled_threads: { on } }) },
+      code_review: { on: codeReviewOn, chosen: chosen((c) => c.inboxCodeReview), shared: () => options.codeReview === undefined, apply: (on) => saveCodeReview({ on }) },
+      chapter_diagrams: { on: chapterDiagramsOn, chosen: chosen((c) => c.inboxChapterDiagrams), shared: () => options.chapterDiagrams === undefined, apply: (on) => saveChapterDiagrams({ on }) },
+      bro: { on: broOn, chosen: chosen((c) => c.inboxBro), shared: () => true, apply: (on) => saveBro({ on }) },
+      float_drafts: { on: floatDraftsOn, chosen: chosen((c) => c.inboxFloatDrafts), shared: () => true, apply: (on) => saveFloatDrafts({ on }) },
+      decision_mode: { on: decisionModeOn, chosen: chosen((c) => savedExperimental(c, "decision-mode")), shared: () => experimentalFree("decision-mode"), apply: (on) => saveExperimental({ decision_mode: on }) },
+      grid: { on: gridOn, chosen: chosen((c) => savedExperimental(c, "grid")), shared: () => experimentalFree("grid"), apply: (on) => saveExperimental({ grid: on }) },
+    },
+    times: () => loadConfig().inboxCapabilityFlips,
+    // Key by key under the config lock (saveConfig merges it), so a stamp saved meanwhile is never lost.
+    saveTimes: (times) => void saveConfig({ inboxCapabilityFlips: times }),
+    self: () => machines?.selfId ?? null,
+  });
   routinesIntroUndecided = (waits) =>
     snoozeIntroRelease &&
     routinesIntroOpen({
@@ -5646,7 +5682,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A Combine's files copied from a linked computer wait as uploads until its new thread is here (inbox-combine-across.ts).
   let combineUploads: () => string[] = () => [];
   const compose = createInboxCompose({
-    keepUploads: () => combineUploads(),
+    // So do an agent's files held with its answer for a linked computer (inbox-outbox-files.ts), read from the outbox's
+    // own files, so the first sweep at start, before the linked machines are made, keeps them too.
+    keepUploads: () => [...combineUploads(), ...outboxHeldUploadsOnDisk(dataDir)],
     store,
     serverSession,
     live,
@@ -6438,8 +6476,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const agents = withRexPlaces(listed, phone ? null : thisComputersWindow(req, via) ? "here" : "away");
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts), the
         // artifacts pinned here (mark `artifact-pins`): that machine's windows show them on this Inbox's threads, and the
-        // saved reaction emoji (inbox-reactions-shared.ts).
-        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState() } : {}) };
+        // saved reaction emoji (inbox-reactions-shared.ts), the capability switches with their flips (inbox-capability-set.ts),
+        // and the computers this one is linked to (link-through).
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState(), capability_set: capabilitySet.wire(), link_through: machines.linkThroughWire() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
@@ -6823,8 +6862,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (row && !inboxRowArchived(row)) started.set(threadId, { ...start, name: row.thread_name ?? row.subject });
         }
         const allOwners = new Map([...branchOwners, ...pullOwners.all()]);
+        // The PRs whose ship merged and still says so, here and on each linked machine (that machine's as last read,
+        // never waited for; a linked machine reading this list gets this machine's own).
+        const shipList = [...ships.all(), ...(byWindow ? machines.mergedShips() : [])];
+        const shipMerged = shipsMergedShown(shipList);
+        // A PR seen landed before its ship's watch marks it merged keeps its row in between.
+        const shipGoing = new Set(shipList.filter(shipActive).map((ship) => ship.key));
+        // A teammate's PR leaves the list once merged: the thread the person tied it to keeps it while Merged shows.
+        linkUnlistedPulls(shipMerged.keys(), links, pullLinkStore, owners);
         const rows = reviewRowsShown(
-          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true }),
+          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true, shipMerged, shipActive: shipGoing }),
           hiddenKeys,
           (key) => links[key]?.thread_id ?? allOwners.get(key)?.thread_id ?? null,
         );
@@ -7583,9 +7630,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const threadTabs = body.thread_tabs === undefined ? threadTabsState() : saveThreadTabs(body.thread_tabs);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const systemAnswer = { ...system.answer(body), ...answerInboxCapabilities(capabilities, body) };
-        const scheduledAnswer = await scheduledCap.answer(body);
         // Present while Code review is on, and always to the save that set it.
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
+        // The person's flips, stamped now, before Routines' wait for the login item: every linked computer takes them,
+        // and a linked computer's older flip read during that wait never undoes them (inbox-capability-set.ts).
+        capabilitySet.flipped(capabilitySetKeysIn(body));
+        const scheduledAnswer = await scheduledCap.answer(body);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
@@ -8902,6 +8952,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           // config.json could not be written: this machine keeps its own emoji until the next read.
         }
       },
+      // Each flip newer than this computer's is taken (inbox-capability-set.ts); a switch not saved stays until the next read.
+      capabilitySetSaid: (value) => void capabilitySet.take(value).catch(() => {}),
       sentFrom: sentFromOf,
       timings: options.machineLinkTimings,
     });

@@ -472,6 +472,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   muse: "Muse Code",
   openclaw: "OpenClaw",
   hermes: "Hermes Agent",
+  orca: "Orca",
   cloud: "Cloud agent",
   "cloud-claude": "Claude Code routine",
   "cloud-grok": "Grok Bot",
@@ -2164,6 +2165,12 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   run?: "starting" | "working" | "cloning" | null;
   /**
+   * A routine's run is going in this thread (inbox-launch.ts `decorate`): the row is in New at least while it goes
+   * (shared/inbox/list.ts `inboxSectionWhileRoutineRuns`), and a window brings it into its held list at once
+   * (packages/inbox/held.ts `routineRunsEnter`). It counts nothing and notifies nothing. Absent otherwise and from an older Inbox.
+   */
+  scheduled_running?: true;
+  /**
    * The window's own drawing (approval "inbox-multi-select"): the thread is in a Combine still waiting for its new
    * thread, so the row says "Combining…". No server sends it.
    */
@@ -3724,11 +3731,15 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * (`scheduled…`; inbox-scheduled-machines.ts in the server). `capabilities`: its Settings → Capabilities switches are
  * read and turned from there (`capabilities`; core inbox-capability-switches.ts). `capability-note`: a switch an agent
  * there turns carries `capability_note` (the agent's name), and this Inbox posts its own line for it
- * (inbox-capability-note.ts in the server).
+ * (inbox-capability-note.ts in the server). `capability-set`: its Capabilities switches are one set with a linked
+ * machine's, the newer flip winning on both (its list's `capability_set`; inbox-capability-set.ts in the server); an
+ * Inbox without it keeps its own, and `capabilities` and `capability-note` stay for such an older machine's window.
  * `ships` (approval "inbox-ship-mode"): its ships are read, started and stopped through its door (`ships`, `ships/log`,
  * `ships/stop`), so a linked machine's Reviews draws them and offers its agents in Ship's list.
+ * `link-through`: its list names the computers it is linked to (`link_through`), and its door brokers, makes the
+ * link code for, and takes, a link between two computers linked to one (core inbox-link-through.ts).
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
@@ -4367,7 +4378,14 @@ export type InboxOwnFace = `own:${string}`;
  * Plannotator drops these entries when it reads the file, as it does `own:` ones, and the file stays `v: 1`.
  */
 export type InboxSetFace = `set:${string}/${string}`;
-export type InboxAgentFace = InboxBuiltInFace | InboxOwnFace | InboxSetFace;
+/**
+ * Another host's mark: `mark:<host>`, the host as `InboxAuthor.host` names it (`mark:codex`), for an agent whose own
+ * host is an app that runs another's sessions (an Orca chat running Codex draws Codex's mark). Set through
+ * `POST /api/inbox/agent-faces`; the picker offers none. A host this window has no mark for draws the neutral mark;
+ * an older Plannotator drops these entries when it reads the file, as it does `own:` ones, and the file stays `v: 1`.
+ */
+export type InboxMarkFace = `mark:${string}`;
+export type InboxAgentFace = InboxBuiltInFace | InboxOwnFace | InboxSetFace | InboxMarkFace;
 /**
  * A tile choice beside the face `agent` (approval "inbox-generated-agent-icons"; an entry's `tile`): `project`, a solid
  * tile with its project's letters and the agent's own mark on its corner ("From the project name" in the picker), and
@@ -4398,8 +4416,14 @@ export function inboxSetFaceParts(face: InboxSetFace): { set: string; icon: stri
   return { set: match?.[1] ?? "", icon: match?.[2] ?? "" };
 }
 
+/** Another host's mark as a face id: `mark:` and the host's id (lowercase letters, digits and dashes). */
+export const INBOX_MARK_FACE = /^mark:([a-z0-9][a-z0-9-]{0,39})$/;
+export const isInboxMarkFace = (value: unknown): value is InboxMarkFace => typeof value === "string" && INBOX_MARK_FACE.test(value);
+/** The host whose mark a `mark:` face draws. */
+export const inboxMarkFaceHost = (face: InboxMarkFace): string => face.slice(5);
+
 export const isInboxAgentFace = (value: unknown): value is InboxAgentFace =>
-  typeof value === "string" && ((INBOX_AGENT_FACES as readonly string[]).includes(value) || INBOX_OWN_FACE.test(value) || INBOX_SET_FACE.test(value));
+  typeof value === "string" && ((INBOX_AGENT_FACES as readonly string[]).includes(value) || INBOX_OWN_FACE.test(value) || INBOX_SET_FACE.test(value) || INBOX_MARK_FACE.test(value));
 
 /**
  * A set of icons for agents ("Sets" in the face picker), as `GET /api/inbox/icon-sets` lists it: a built-in one

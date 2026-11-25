@@ -4,7 +4,6 @@ import { INBOX_SYSTEM_SWITCH_SHOWN, INBOX_TEXT_SIZES } from '@plannotator/core/i
 import type { InboxSound } from '../sound';
 import { SoundRow, Switch } from './SoundRow';
 import { ThreadTabsRows } from './ThreadTabsSettings';
-import { LinkedCapabilities } from './LinkedCapabilities';
 import { type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
@@ -1336,8 +1335,6 @@ export function SettingsPage(props: SettingsPageProps) {
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}
             />
-            {/* Each linked computer's switches, under this computer's (LinkedCapabilities.tsx). */}
-            <LinkedCapabilities machines={machines} />
             </>
           ) : (
             <div className="ib-card ib-sempty" data-settings-capabilities-none="">

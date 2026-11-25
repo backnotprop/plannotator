@@ -1,6 +1,7 @@
 import { createElement, useMemo } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { HostMark } from '@plannotator/ui/components/inbox-thread/icons';
+import { inboxMarkFaceHost, isInboxMarkFace } from '@plannotator/core/inbox-types';
 import { useShownAgentFace } from './agents/projectFace';
 import { useAgentFaceSources } from './agents/faceArtLoad';
 import { isOwnFace } from './agents/faceChoices';
@@ -24,14 +25,16 @@ export function hostMarkSrc(host: string | null | undefined): string | null {
 /**
  * The picture of the face the Inbox shows for an agent (the thread's row: `rowAgent`), for a thread tab's favicon:
  * an uploaded or set icon's address, or one of ours (the light picture). A face drawn as markup (the agent's own
- * mark, a project's letter tile) gives the agent's host mark; null only when that draws nothing either.
+ * mark, another host's mark (`mark:<host>`), a project's letter tile) gives that host's mark; null only when that
+ * draws nothing either.
  */
 export function useThreadFaceSrc(agent: string | null | undefined, host: string | null | undefined): string | null {
   const face = useShownAgentFace(agent);
-  const drawn = face === 'agent' || face === 'mark' || face === 'project';
+  const markHost = isInboxMarkFace(face) ? inboxMarkFaceHost(face) : face === 'agent' || face === 'mark' || face === 'project' ? host : undefined;
+  const drawn = markHost !== undefined;
   const ours = useAgentFaceSources(!drawn && !isOwnFace(face) && !isSetFace(face));
-  const mark = useMemo(() => (drawn ? hostMarkSrc(host) : null), [drawn, host]);
-  if (drawn) return mark;
+  const mark = useMemo(() => (drawn ? hostMarkSrc(markHost) : null), [drawn, markHost]);
+  if (drawn || face === 'agent' || face === 'mark' || face === 'project' || isInboxMarkFace(face)) return mark;
   if (isOwnFace(face)) return ownIconSrc(face, true);
   if (isSetFace(face)) {
     const { set, icon } = setFaceParts(face);

@@ -6,18 +6,35 @@
  * its row comes or goes in every open window, and a window on its page goes back to the Inbox. Thread panes too
  * (`split_view`, Settings → General → Appearance): every window, the one that saved it included, turns them on or off.
  */
-import type { InboxEventHandlers, SettingsModel } from './api';
+import type { InboxEventHandlers, InboxExperimentalSettings, SettingsModel } from './api';
 
 export type InboxCapabilities = Parameters<NonNullable<InboxEventHandlers['onCapabilities']>>[0];
 
-type CapabilitySettings = Pick<SettingsModel, 'board' | 'steps' | 'bro' | 'float_drafts' | 'mark_read_warning' | 'code_review' | 'thread_tabs' | 'system' | 'chapter_diagrams' | 'scheduled_threads' | 'plans'>;
+type CapabilitySettings = Pick<SettingsModel, 'board' | 'steps' | 'bro' | 'float_drafts' | 'mark_read_warning' | 'code_review' | 'thread_tabs' | 'system' | 'chapter_diagrams' | 'scheduled_threads' | 'plans' | 'experimental'>;
+
+/**
+ * A frame's `experimental` (Decision mode and Grid), which it carries only when one of them was the change: saved in
+ * another window, or a linked computer's flip taken here (one set of capabilities, inbox-capability-set.ts in the
+ * server). Read by name; anything else is none.
+ */
+export function experimentalOfFrame(value: unknown): InboxExperimentalSettings | undefined {
+  const v = value && typeof value === 'object' ? (value as { decision_mode?: unknown; grid?: unknown }) : null;
+  const one = (s: unknown) => {
+    const x = s && typeof s === 'object' ? (s as { on?: unknown; env?: unknown }) : null;
+    return x && typeof x.on === 'boolean' ? { on: x.on, env: typeof x.env === 'boolean' ? x.env : null } : null;
+  };
+  const decisionMode = one(v?.decision_mode);
+  if (!decisionMode) return undefined;
+  const grid = one(v?.grid);
+  return { decision_mode: decisionMode, ...(grid ? { grid } : {}) };
+}
 
 /** True when the frame names any switch (an empty one: the window reads the settings again instead). */
 export function namesCapability(capabilities: InboxCapabilities): boolean {
-  return Boolean(capabilities.board || capabilities.steps || capabilities.bro || capabilities.float_drafts || capabilities.mark_read_warning || capabilities.split_view || capabilities.thread_tabs || capabilities.code_review || capabilities.system || capabilities.chapter_diagrams || capabilities.scheduled_threads || capabilities.plans);
+  return Boolean(capabilities.board || capabilities.steps || capabilities.bro || capabilities.float_drafts || capabilities.mark_read_warning || capabilities.split_view || capabilities.thread_tabs || capabilities.code_review || capabilities.system || capabilities.chapter_diagrams || capabilities.scheduled_threads || capabilities.plans || capabilities.experimental);
 }
 
 export function withCapabilities<S extends CapabilitySettings>(current: S, capabilities: InboxCapabilities): S {
-  const { board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, thread_tabs: threadTabs, code_review: codeReview, system, chapter_diagrams: chapterDiagrams, scheduled_threads: scheduled, plans } = capabilities;
-  return { ...current, ...(board ? { board } : {}), ...(steps ? { steps } : {}), ...(bro ? { bro } : {}), ...(floatDrafts ? { float_drafts: floatDrafts } : {}), ...(markReadWarning ? { mark_read_warning: markReadWarning } : {}), ...(splitView ? { split_view: splitView } : {}), ...(threadTabs ? { thread_tabs: threadTabs } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(system ? { system } : {}), ...(chapterDiagrams ? { chapter_diagrams: chapterDiagrams } : {}), ...(scheduled ? { scheduled_threads: { ...current.scheduled_threads, on: scheduled.on } } : {}), ...(plans ? { plans } : {}) };
+  const { board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, thread_tabs: threadTabs, code_review: codeReview, system, chapter_diagrams: chapterDiagrams, scheduled_threads: scheduled, plans, experimental } = capabilities;
+  return { ...current, ...(board ? { board } : {}), ...(steps ? { steps } : {}), ...(bro ? { bro } : {}), ...(floatDrafts ? { float_drafts: floatDrafts } : {}), ...(markReadWarning ? { mark_read_warning: markReadWarning } : {}), ...(splitView ? { split_view: splitView } : {}), ...(threadTabs ? { thread_tabs: threadTabs } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(system ? { system } : {}), ...(chapterDiagrams ? { chapter_diagrams: chapterDiagrams } : {}), ...(scheduled ? { scheduled_threads: { ...current.scheduled_threads, on: scheduled.on } } : {}), ...(plans ? { plans } : {}), ...(experimental ? { experimental } : {}) };
 }

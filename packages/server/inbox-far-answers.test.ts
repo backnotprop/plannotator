@@ -32,7 +32,6 @@ function laptop(answer: (entry: OutboxEntry) => OutboxAnswer, more: Partial<FarR
   const deps: FarReplyDeps = {
     placeOf: async (msg) => (msg === THREAD ? { machine: STUDIO, thread_id: THREAD } : null),
     nameOf: () => "Studio",
-    online: () => state.online,
     takes: () => true,
     holdWrite: (machine, route, body, thread, waitMs, own = {}) => {
       const { entry } = outbox.submit(machine, route, body, thread, false, null, true, own);
@@ -42,8 +41,7 @@ function laptop(answer: (entry: OutboxEntry) => OutboxAnswer, more: Partial<FarR
     heldWrite: (key) => outbox.get(key),
     dismissHeld: (key) => void outbox.dismiss(key),
     readFiles: async () => [],
-    blobOf: () => "",
-    upload: async () => "upl_1",
+    holdFiles: async () => [],
     ...more,
   };
   return { outbox, sent, state, deps };
