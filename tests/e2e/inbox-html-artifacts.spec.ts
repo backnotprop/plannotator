@@ -6,7 +6,9 @@
  * header's count, the thread's Artifacts grid (a quiet tile: the page's heading, else "HTML block") and the
  * Artifacts wall; its tile opens the block's own page big, with Code and the pen, never the file viewer. A comment
  * made there is the message's own (the block in the text shows it, Send names "HTML block 1 in the message"), the
- * tile pins, the Wall's tile opens the same and closing goes back to the Wall, and a phone does the same.
+ * tile pins, the Wall's tile opens the same and closing goes back to the Wall, and a phone does the same. A block
+ * that asks a made-up host for a picture, a stylesheet, a background and a prefetch asks it nothing from the grid
+ * or the Wall. The block's own Full screen (unchanged) is shot beside the view opened from Artifacts.
  *
  * Whole-window PNGs, 1440 × 900 light and dark and a 390 × 844 phone, land in PLANNOTATOR_E2E_SHOTS_DIR (default
  * `.local/proof/html-artifacts`).
@@ -73,6 +75,16 @@ const TIDE_CHART = [
   '</script>',
 ].join('\n');
 
+/** Every way a page asks the web for something, all to a made-up host. */
+const TRACKER = 'https://tracker.invalid';
+const TRACKED_PAGE = [
+  `<link rel="dns-prefetch" href="${TRACKER}"><link rel="preconnect" href="${TRACKER}">`,
+  `<link rel="stylesheet" href="${TRACKER}/brand.css">`,
+  '<h2 style="font:600 18px system-ui">Ledger · export</h2>',
+  `<img src="${TRACKER}/pixel.png?seen=grid" alt="" width="1" height="1">`,
+  `<div style="height:80px;border-radius:10px;background:#eef3f6 url(${TRACKER}/bg.png?seen=grid) center/cover"></div>`,
+].join('\n');
+
 test('an html block is an artifact: the count, the grid, opened big with its tools, a comment there, a pin, the wall, a phone', async ({ browserName }) => {
   test.skip(browserName !== 'chromium', 'Chromium draws the proof');
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
@@ -126,6 +138,37 @@ test('an html block is an artifact: the count, the grid, opened big with its too
         '```',
       ].join('\n'),
     });
+    const ledger = await agent.send({
+      project_path: scratchProject(join(root, 'src'), 'ledger'),
+      subject: 'Ledger: the export page',
+      body: ['The export page, as the brand team drew it:', '', '```html', TRACKED_PAGE, '```'].join('\n'),
+    });
+
+    // A block that asks the web for everything it can: its tile in the grid and its card on the Wall ask nothing.
+    // (Its thread is opened on the grid, so the block in the text, under the grid, never draws.)
+    const guard = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+    const tracked: string[] = [];
+    await guard.route(`${TRACKER}/**`, (route) => {
+      tracked.push(route.request().url());
+      return route.abort();
+    });
+    guard.on('request', (request) => {
+      if (request.url().includes('tracker.invalid')) tracked.push(request.url());
+    });
+    const watch = await guard.newPage();
+    await watch.goto(`${url}#thread=${ledger.thread_id}&artifacts`);
+    const ledgerTile = watch.locator('[data-artifacts-view] [data-artifact-tile]');
+    await expect(ledgerTile).toHaveCount(1, { timeout: 20_000 });
+    await expect(ledgerTile).toContainText('Ledger · export');
+    const tileFrame = watch.locator('[data-artifacts-view] [data-face="html-block"] iframe');
+    await expect(tileFrame).toHaveAttribute('sandbox', '');
+    await expect(tileFrame).toHaveAttribute('srcdoc', /^<meta http-equiv="x-dns-prefetch-control" content="off">/);
+    await watch.waitForTimeout(2000);
+    await watch.goto(`${url}#artifacts`);
+    await expect(watch.locator('[data-wall-artifact]').filter({ hasText: 'Ledger · export' })).toHaveCount(1, { timeout: 20_000 });
+    await watch.waitForTimeout(2000);
+    expect(tracked).toEqual([]);
+    await guard.close();
 
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
     const page = await context.newPage();
@@ -141,6 +184,14 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await expect(inline.first()).toHaveAttribute('data-html-embed-phase', 'ready', { timeout: 20_000 });
     expect(await inline.first().locator('figcaption button').evaluateAll((buttons) => buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim()))).toEqual(['Code', 'Full screen', 'Annotate']);
     await shot(page, '01-thread-with-count-desktop');
+    // The block's own Full screen, unchanged, to set beside the one opened from Artifacts (03).
+    await inline.first().locator('[data-html-embed-full]').click();
+    const popout = page.locator('[data-popout]');
+    await expect(popout).toBeVisible();
+    await expect(page.locator('[data-html-embed-open]')).toHaveCount(0);
+    await shot(page, '01b-inline-full-screen-desktop');
+    await popout.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(popout).toHaveCount(0);
 
     await button.click();
     const tiles = page.locator('[data-artifacts-view] [data-artifact-tile]');
@@ -199,7 +250,8 @@ test('an html block is an artifact: the count, the grid, opened big with its too
 
     await page.goto(`${url}#artifacts`);
     const wall = page.locator('[data-wall-artifact]');
-    await expect(wall).toHaveCount(3, { timeout: 20_000 });
+    // The harbor thread's three and the ledger page.
+    await expect(wall).toHaveCount(4, { timeout: 20_000 });
     await expect(wall.filter({ hasText: 'Harbor · berth plan' })).toHaveCount(1);
     await expect(wall.filter({ hasText: 'HTML block' })).toHaveCount(1);
     await shot(page, '06-artifacts-wall-desktop');
@@ -212,7 +264,7 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await big.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(big).toHaveCount(0);
     await expect(page).toHaveURL(/#artifacts$/);
-    await expect(wall).toHaveCount(3);
+    await expect(wall).toHaveCount(4);
 
     const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, reducedMotion: 'reduce' });
     const small = await phone.newPage();

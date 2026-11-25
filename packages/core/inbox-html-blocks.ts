@@ -81,12 +81,59 @@ export function inboxHtmlBlockHash(source: string): string {
 const TITLE_MAX = 120;
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
+/** How much of a page its name is read from, and how much of a heading: a name is short, and a block may be huge. */
+const TITLE_SCAN = 64 * 1024;
+const TITLE_INNER = 1024;
+const TITLE_TAG = /<(h[1-6]|title|script|style|template)(?=[\s/>]|$)/y;
+
+/**
+ * The words of the page's first heading (`<h1>`…`<h6>`) outside a comment, script, style or template, else of
+ * its `<title>`; null when it has neither. One pass of indexOf over the first 64 KB: a tag with no close is
+ * remembered, so a page of many unclosed tags costs no more than one.
+ */
+function titleInner(source: string): string | null {
+  const text = source.length > TITLE_SCAN ? source.slice(0, TITLE_SCAN) : source;
+  const lower = text.toLowerCase();
+  const unclosed = new Set<string>();
+  let title: string | null = null;
+  let at = 0;
+  for (;;) {
+    const lt = lower.indexOf("<", at);
+    if (lt === -1) break;
+    if (lower.startsWith("<!--", lt)) {
+      const end = lower.indexOf("-->", lt + 4);
+      if (end === -1) break;
+      at = end + 3;
+      continue;
+    }
+    TITLE_TAG.lastIndex = lt;
+    const tag = TITLE_TAG.exec(lower)?.[1];
+    if (!tag || unclosed.has(tag)) {
+      at = lt + 1;
+      continue;
+    }
+    const close = lower.indexOf(`</${tag}`, lt);
+    if (close === -1) {
+      unclosed.add(tag);
+      at = lt + 1;
+      continue;
+    }
+    at = close + tag.length + 2;
+    if (tag === "script" || tag === "style" || tag === "template") continue;
+    const open = lower.indexOf(">", lt);
+    if (open === -1 || open > close) continue;
+    const inner = text.slice(open + 1, Math.min(close, open + 1 + TITLE_INNER));
+    if (tag !== "title") return inner;
+    title ??= inner;
+  }
+  return title;
+}
+
 /** The page's first heading (`<h1>`…`<h6>`), else its `<title>`, as plain words; null when it has none. */
 export function inboxHtmlBlockTitle(source: string): string | null {
-  const text = source.replace(/<!--[\s\S]*?-->/g, "").replace(/<(script|style|template)\b[\s\S]*?<\/\1\s*>/gi, "");
-  const found = /<(h[1-6])\b[^>]*>([\s\S]*?)<\/\1\s*>/i.exec(text) ?? /<(title)\b[^>]*>([\s\S]*?)<\/\1\s*>/i.exec(text);
-  if (!found) return null;
-  const words = found[2]!
+  const inner = titleInner(source);
+  if (inner === null) return null;
+  const words = inner
     .replace(/<[^>]*>/g, " ")
     .replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (whole, name: string) => {
       if (name[0] === "#") {
@@ -112,10 +159,12 @@ const byteLength = (text: string): number => new TextEncoder().encode(text).leng
 const scanned = new Map<string, readonly InboxHtmlBlock[]>();
 const SCANNED_MAX = 400;
 const NONE: readonly InboxHtmlBlock[] = Object.freeze([]);
+const HTML_FENCE_HINT = /```[ \t]*html/i;
 
 /** A message text's live html blocks in text order, each source once (its first place). */
 export function inboxMessageHtmlBlocks(body: string): readonly InboxHtmlBlock[] {
-  if (!body.includes("```")) return NONE;
+  // One pass, no allocation: a text with no html fence (nearly all of them) is never scanned or cached.
+  if (!HTML_FENCE_HINT.test(body)) return NONE;
   const kept = scanned.get(body);
   if (kept) return kept;
   const blocks = scan(body);

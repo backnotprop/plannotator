@@ -334,13 +334,15 @@ function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean })
 
 /**
  * An html block's face: its page drawn small as an attached page's is (`PageFrame`: no script, nothing from the web),
- * only once the tile is near; until then, and on the Wall (no source there), the typed face of an HTML file.
+ * only once the tile is near; until then, and on the Wall (no source there), the typed face of an HTML file. A
+ * dns-prefetch hint is not covered by the policy, so the page is told first not to prefetch (as plans/planContent.tsx).
  */
+const NO_PREFETCH = '<meta http-equiv="x-dns-prefetch-control" content="off">';
 export function HtmlBlockFace({ source, near }: { source: string | null; near: boolean }) {
   return (
     <span className="ib-art-prev ib-art-f-page" data-face="html-block">
       {near && source !== null ? (
-        <PageFrame html={source} />
+        <PageFrame html={`${NO_PREFETCH}${source}`} />
       ) : (
         <span className="ib-art-typed">
           <Icon name={typedIcon('html')} size={26} />

@@ -96,5 +96,22 @@ describe("a message's html blocks", () => {
 
   test("a body without a fence is no block", () => {
     expect(inboxMessageHtmlBlocks("Just words, <b>and html</b> inline.")).toEqual([]);
+    expect(inboxMessageHtmlBlocks("```ts\nconst page = '<h1>harbor</h1>';\n```\n\n```\n<h2>plain</h2>\n```")).toEqual([]);
+  });
+
+  test("a hostile 1 MB block of unclosed tags is read in well under a second, in the window and the store alike", () => {
+    // Every tag the name reads, opened and never closed: a lazy regex over this goes quadratic.
+    const hostile = "<h1>a<script>b<h2 c<title>d<style>e<template>f<!-".repeat(21_000);
+    expect(hostile.length).toBeGreaterThan(1_000_000);
+    const started = performance.now();
+    expect(inboxHtmlBlockTitle(hostile)).toBeNull();
+    const blocks = inboxMessageHtmlBlocks(["Ledger's page:", "", "```html", hostile, "```"].join("\n"));
+    expect(blocks.length).toBe(1);
+    expect(blocks[0]!.title).toBeNull();
+    // Closed somewhere far past what the name reads: still quick, still no name.
+    expect(inboxHtmlBlockTitle(`${hostile}</h1></script></h2></title>`)).toBeNull();
+    expect(performance.now() - started).toBeLessThan(300);
+    // A real heading after the hostile part's first 64 KB is not read; one before it is.
+    expect(inboxHtmlBlockTitle(`<h2>Fern API · tides</h2>${hostile}`)).toBe("Fern API · tides");
   });
 });

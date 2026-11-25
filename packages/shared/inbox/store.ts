@@ -1617,13 +1617,13 @@ export class InboxStore {
 
   /**
    * Pin an artifact of a thread, or unpin it. `key` is the artifact's key
-   * (an attachment id, or `guide:<message id>`) and must be one of the
+   * (an attachment id, `guide:<message id>` or `html:<message id>:<hash>`) and must be one of the
    * thread's artifacts (an attached record folded into the shown copy of the
    * same file names that artifact: the pin is kept under its key). Pinning a
    * pinned artifact, or unpinning one that is not, changes nothing. Writes no store line.
    */
   setArtifactPinned(threadId: string, key: unknown, pinned: boolean): readonly InboxArtifactPin[] {
-    if (!isInboxArtifactKey(key)) throw new InboxError("validation_error", "key: an attachment id (att_) or guide:<message id>.", { field: "key" });
+    if (!isInboxArtifactKey(key)) throw new InboxError("validation_error", "key: an attachment id (att_), guide:<message id> or html:<message id>:<hash>.", { field: "key" });
     if (!this.isThreadRoot(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     // An attached twin's id (a window that read the thread before its shown copy was captured) names the one artifact.
     const known = this.artifactKeysOf(threadId).get(key);
