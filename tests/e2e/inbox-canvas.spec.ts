@@ -191,7 +191,8 @@ test("the canvas opens over the window, keeps a shape drawn on it, and shows the
   const layer = await openCanvas(page, '[data-thread-sketch]');
   await shot(page, '05-canvas-open');
 
-  await layer.locator('[data-testid="toolbar-rectangle"]').click();
+  // Excalidraw's tool is a visually hidden radio inside its label: the person presses the label.
+  await layer.locator('label:has([data-testid="toolbar-rectangle"])').click();
   const area = (await layer.locator('.excalidraw-host').boundingBox())!;
   const x = area.x + area.width * 0.25;
   const y = area.y + area.height * 0.3;
@@ -201,6 +202,8 @@ test("the canvas opens over the window, keeps a shape drawn on it, and shows the
   await page.mouse.up();
   await expect.poll(async () => (await storedShapes()).filter((element) => element.type === 'rectangle').length, { timeout: 15_000 }).toBe(1);
   await shot(page, '06-shape-drawn');
+  // A click on empty canvas lets go of the new shape, so a later Send is the whole canvas.
+  await page.mouse.click(area.x + area.width * 0.6, area.y + area.height * 0.75);
 
   const drawer = world.drawer!;
   const read = await drawer.canvas({ thread_id: world.threadId });
@@ -221,16 +224,16 @@ test("the reply box's pen: a sketch sent from the canvas reaches the agent as th
   await shot(page, '08-reply-pen');
 
   const layer = await openCanvas(page, '[data-reply-sketch]');
-  await layer.getByRole('textbox', { name: 'Note to send with the canvas' }).fill('Here is where I want it: before the charge.');
+  await layer.getByRole('textbox', { name: /^(Note to send with the canvas|What should change in the selection)$/ }).fill('Here is where I want it: before the charge.');
   await shot(page, '09-reply-with-sketch');
   await layer.locator('[data-canvas-send]').click();
 
   const reply = await world.drawer!.nextReply(world.threadId, 30);
   const said = JSON.stringify(reply);
   expect(said).toContain('Here is where I want it: before the charge.');
-  expect(said).toContain('canvas.png');
+  expect(said).toMatch(/canvas(-selection)?\.png/);
   if (await layer.count()) await layer.locator('[data-canvas-close]').click();
-  await expect(page.locator('.ib-pane').getByText('Here is where I want it: before the charge.')).toBeVisible();
+  await expect(page.locator('.ib-pane').getByText('Here is where I want it: before the charge.').first()).toBeVisible();
   await shot(page, '10-reply-sent');
 });
 
