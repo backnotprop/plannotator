@@ -227,10 +227,12 @@ test('3b. a read from A leaves B\'s delivery state unchanged', async () => {
   expect(reply.body).toContain(waiting.reply);
 });
 
-test('4. a reply into the far thread says plainly it is not available from this computer yet', () => {
-  const sent = call(studio, 'send_message', { reply_to: onMac.id, body: 'On it.' });
-  expect(sent.status).toBe(1);
-  expect(sent.err).toContain('thread_on_other_machine: ');
+test('4. a reply into the far thread from an agent here lands in it, on the thread\'s computer', async () => {
+  const sent = call(studio, 'send_message', { reply_to: onMac.id, body: 'On it, from the Studio.' }, { env: { PLANNOTATOR_SESSION_TAG: 'claude-code:5b2c7d1e-3f4a-4b60-8c71-a2b3c4d5e6f7' } });
+  expect(sent.status, sent.err).toBe(0);
+  expect(sent.json!.machine).toEqual({ id: macbook.id, name: macbook.name });
+  const thread = await read<{ thread: { messages: { body: string; author: { machine?: string } }[] } }>(macbook, `/api/inbox/threads/${onMac.id}`);
+  expect(thread.thread.messages.find((m) => m.body === 'On it, from the Studio.')?.author.machine).toBe(studio.id);
 });
 
 /** A git project with `origin` set, as a clone on that computer would have it. */

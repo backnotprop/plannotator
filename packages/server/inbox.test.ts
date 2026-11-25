@@ -464,7 +464,8 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
   test("send_message with question blocks, pick, Send, read_thread returns the answer", async () => {
     const root = tempRoot();
     const project = gitProject(root);
-    const server = await start(join(root, "data"));
+    // The default tool list: the switches decided here, never by a config.json an earlier file in this process left on.
+    const server = await start(join(root, "data"), { board: false, steps: false, scheduled: false });
     const client = await mcpClient(server);
 
     expect(client.getInstructions()).toBe(INBOX_MCP_INSTRUCTIONS);
@@ -1159,6 +1160,16 @@ describe("the window's routes: settings, restart, favicon", () => {
       expect(full.status).toBe(422);
       expect(await settings()).toMatchObject({ reactions_rev: 7 });
       expect((await (await change({ op: "remove", emoji: "🚀" })).json()).reactions).toEqual([{ emoji: "🎉" }, { emoji: "🧪" }, { emoji: "👀" }, { emoji: "❤️" }]);
+
+      // A skill on a saved emoji (approval "inbox-reactions-every-message"): saved, read back, kept by a rename, '' takes it away.
+      expect((await (await change({ op: "skill", emoji: "🧪", skill: "review-recheck" })).json()).reactions[1]).toEqual({ emoji: "🧪", skill: "review-recheck" });
+      expect((await change({ op: "name", emoji: "🧪", label: "Test it" })).status).toBe(200);
+      expect(((await settings()).reactions as unknown[])[1]).toEqual({ emoji: "🧪", label: "Test it", skill: "review-recheck" });
+      expect((onDisk().inboxReactions as unknown[])[1]).toEqual({ emoji: "🧪", label: "Test it", skill: "review-recheck" });
+      expect((await change({ op: "skill", emoji: "🧪", skill: "not a skill" })).status).toBe(422);
+      const whole = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, reactions: [{ emoji: "🧪", skill: "../ledger" }] });
+      expect(whole.status).toBe(422);
+      expect((await (await change({ op: "skill", emoji: "🧪", skill: "" })).json()).reactions[1]).toEqual({ emoji: "🧪", label: "Test it" });
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

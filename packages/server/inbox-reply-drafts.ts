@@ -51,8 +51,17 @@ export function createInboxReplyDrafts(options: {
    * is not one.
    */
   onEdited?: (threadId: string) => void;
+  /**
+   * The earlier runs of this Inbox's data folder (registry.ts `inboxSessionLineage`, the health's `follows`). A draft
+   * SAVE from a page one of them served (a restart or an update of this same Inbox) is taken: the page keeps saving what
+   * the person types. It is a compare-and-set on the draft's own `updated_at`, so such a page never writes over newer
+   * words. Every other write with another session (Discard, any other route, a page another Inbox served) is refused.
+   */
+  follows?: readonly string[];
 }) {
   const { store, serverSession, json } = options;
+  /** A draft save carrying an earlier run's session of this same data folder. */
+  const earlierRun = (body: Record<string, unknown>) => typeof body.serverSession === "string" && (options.follows ?? []).includes(body.serverSession);
 
   const route = async (req: Request, url: URL): Promise<Response | null> => {
     const match = INBOX_REPLY_DRAFT_PATH.exec(url.pathname);
@@ -65,7 +74,7 @@ export function createInboxReplyDrafts(options: {
     }
     if (req.method !== "POST") return json({ error: match[2] ? "Use POST." : "Use GET or POST." }, 405);
     const body = await options.readBody(req);
-    if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+    if (checkServerSession(body, serverSession) === "mismatch" && (match[2] || !earlierRun(body))) return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     if (match[2]) {
       if (!store.thread(threadId)) return json({ error: `No thread ${threadId}.`, code: "thread_not_found" }, 404);
       const deleted = store.deleteReplyDraft(threadId);

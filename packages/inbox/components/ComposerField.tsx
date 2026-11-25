@@ -27,7 +27,7 @@
  * the caret's line, kept inside the box `caretMenu.bounds` names (compose: the viewport on a desktop, so it floats
  * over the footer; the sheet above its footer on a phone).
  */
-import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ComposerTokenTextarea } from '@plannotator/ui/components/ComposerTokenTextarea';
 import { HumanOnlySkillNotice, SkillReferenceMenu } from '@plannotator/ui/components/SkillReferenceMenu';
@@ -108,7 +108,7 @@ export interface InboxComposerFieldProps {
   voice?: VoiceHandle;
   /** The voice note opens and closes in one motion (the reply box, approval "inbox-reply-box"). */
   voiceNoteGlide?: boolean;
-  /** Which skills this field offers and paints (skills.ts `inboxSkillFilter`); all by default. Keep its identity stable. */
+  /** Which skills this field offers and paints (skills.ts `inboxSkillFilter`); absent, the thread's (`ThreadSkillFilter`). Keep its identity stable. */
   skillFilter?: (entry: SkillCatalogEntry) => boolean;
   /** The Inbox's own commands this field lists with the skills after a `/` (`ComposerCommand`). Absent: none. Keep its identity stable. */
   commands?: readonly ComposerCommand[];
@@ -122,11 +122,21 @@ export interface InboxComposerFieldProps {
    * chip in a thread with several agents. Absent: the field as ever.
    */
   lead?: React.ReactNode;
+  /** The field took focus (a video's comment row pauses the film and pins the moment). */
+  onFocus?: (event: React.FocusEvent<HTMLTextAreaElement>) => void;
+  /** The field's rows: 2 by default (the reply box); a file's one-line comment row passes 1. */
+  rows?: number;
 }
 
 const NO_PEOPLE: readonly MentionPerson[] = [];
 /** Where no thread says a review happened (New message, compose, a comment): `/review-recheck` is not offered. */
 const OUTSIDE_A_REVIEW = inboxSkillFilter(false);
+/**
+ * The thread's skill rule for the fields under it that name none (`skillFilter`): Thread provides it around the open
+ * file, so a comment on an image, a film or a page lists the skills the thread's Send honours (`/review-recheck` once
+ * a review happened). Elsewhere, no skill that needs a review.
+ */
+export const ThreadSkillFilter = createContext<(entry: SkillCatalogEntry) => boolean>(OUTSIDE_A_REVIEW);
 
 export function InboxComposerField({
   value,
@@ -142,11 +152,15 @@ export function InboxComposerField({
   escapeClosesMenu = false,
   voice,
   voiceNoteGlide = false,
-  skillFilter = OUTSIDE_A_REVIEW,
+  skillFilter: ownSkillFilter,
   commands,
   mentionThread,
   lead,
+  onFocus,
+  rows = 2,
 }: InboxComposerFieldProps) {
+  const threadSkillFilter = useContext(ThreadSkillFilter);
+  const skillFilter = ownSkillFilter ?? threadSkillFilter;
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useCallback(
     (el: HTMLTextAreaElement | null) => {
@@ -355,7 +369,7 @@ export function InboxComposerField({
         listboxId={listboxId}
         listboxOpen={skillMenuShown || hashMenuShown || tagMenuShown}
         activeOptionId={activeOption}
-        inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
+        inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows, onFocus }}
       />
       {threadMentions.overlay}
       {voice && <VoiceNote voice={voice} glide={voiceNoteGlide} />}
@@ -506,6 +520,13 @@ function FloatingSkillMenu({
           anchor = { ...anchor, top: edge, bottom: edge };
         }
       }
+    }
+    // A file's comment row (an image's, a film's): the list spans the whole card, not the one-line field squeezed
+    // between the row's time chip, frame and buttons, so names and descriptions read as in the reply box.
+    const card = own ? null : wrap.closest('.ib-crowfield')?.closest<HTMLElement>('.ib-ccard');
+    if (card) {
+      const c = card.getBoundingClientRect();
+      if (c.width > anchor.width) anchor = { ...anchor, left: c.left, width: c.width };
     }
     // In the host's coordinates: an absolute box is placed against its padding box.
     const h = host.getBoundingClientRect();

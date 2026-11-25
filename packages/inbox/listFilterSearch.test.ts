@@ -1,34 +1,27 @@
 /**
- * The search in the list's filter menu (listFilterSearch.ts): when the field shows, and how a query narrows the rows.
+ * The find fields of the list's filter menu (listFilterSearch.ts): when a section gets one, and how a query narrows
+ * that section's rows.
  *
- * What this catches: a field on a short menu (or none on a long one); a match that misses on case or accents, or bolds
- * the wrong letters; a ticked row that goes when it does not match (it could no longer be unticked); a section with
- * nothing left that stays; a ticked-only row or section that comes before a match (Enter, which ticks the first row,
- * would untick it); a kept row counted as a match (a screen reader would hear a wrong count); a fold that takes away a
- * mark making another letter (か matching が) or misses ı and ς; a long label shortened inside a grapheme, or not
- * shortened when its match is out of view (CJK counted narrow).
+ * What this catches: a field on a section of eight rows (or none on nine); a match that misses on case or accents, or
+ * bolds the wrong letters; a pinned row that goes when it does not match (it could no longer be unticked) or that is
+ * drawn twice; a row that is not pinned kept without a match; a wrong count (a screen reader would hear it); a fold that
+ * takes away a mark making another letter (か matching が) or misses ı and ς; a long label shortened inside a grapheme,
+ * or not shortened when its match is out of view (CJK counted narrow).
  */
 import { describe, expect, test } from 'bun:test';
-import { filterSearchShown, labelStart, searchFilterSections, searchHit } from './listFilterSearch';
+import { findInSection, labelStart, searchHit, sectionIsLong } from './listFilterSearch';
 
-type Row = { label: string; on: boolean };
-type Section = { id: string; rows: Row[] };
-const r = (label: string, on = false): Row => ({ label, on });
+type Row = { key: string; label: string };
+const r = (label: string): Row => ({ key: `k_${label}`, label });
+const PROJECTS: Row[] = ['api', 'Billing', 'web', 'rebill', 'docs'].map(r);
+const pins = (...labels: string[]) => new Set(labels.map((label) => `k_${label}`));
+const labels = (rows: readonly { row: Row }[]) => rows.map((x) => x.row.label);
 
-const SECTIONS: Section[] = [
-  { id: 'notSeen', rows: [r('Not seen', true)] },
-  { id: 'updated', rows: [r('Today'), r('Last 7 days', true), r('Custom range…')] },
-  { id: 'tags', rows: [r('billing-v2'), r('design')] },
-  { id: 'projects', rows: [r('api'), r('Billing'), r('web', true), r('rebill')] },
-];
-const view = (query: string) =>
-  searchFilterSections<Section, Row>(SECTIONS, query).sections.map((s) => [s.section.id, s.rows.map((x) => x.row.label)] as const);
-
-describe('when the field shows', () => {
-  test('only once a section holds more than eight rows', () => {
-    expect(filterSearchShown([1, 5, 8, 8])).toBe(false);
-    expect(filterSearchShown([1, 5, 9])).toBe(true);
-    expect(filterSearchShown([])).toBe(false);
+describe('when a section gets its field', () => {
+  test('only once it holds more than eight rows', () => {
+    expect(sectionIsLong(0)).toBe(false);
+    expect(sectionIsLong(8)).toBe(false);
+    expect(sectionIsLong(9)).toBe(true);
   });
 });
 
@@ -101,55 +94,42 @@ describe('a match', () => {
   });
 });
 
-describe('narrowing', () => {
-  test('no query: every row, every non-empty section, in order; not searching', () => {
-    const all = searchFilterSections<Section, Row>([...SECTIONS, { id: 'empty', rows: [] }], '');
+describe("narrowing one section's rows", () => {
+  test('no query: the pinned rows above, every other row below in its order, none bold; not searching', () => {
+    const all = findInSection(PROJECTS, '', pins('web'));
     expect(all.searching).toBe(false);
-    expect(all.sections.map((s) => s.section.id)).toEqual(['notSeen', 'updated', 'tags', 'projects']);
-    expect(all.sections.every((s) => s.rows.every((x) => x.hit === null))).toBe(true);
+    expect(labels(all.pinned)).toEqual(['web']);
+    expect(labels(all.rows)).toEqual(['api', 'Billing', 'rebill', 'docs']);
+    expect(all.matches).toBe(5);
+    expect([...all.pinned, ...all.rows].every((x) => x.hit === null)).toBe(true);
   });
 
-  test('a query narrows every section at once, matches first, ticked rows kept after them, sections with only ticks last', () => {
-    expect(view('bil')).toEqual([
-      ['tags', ['billing-v2']],
-      ['projects', ['Billing', 'rebill', 'web']],
-      ['notSeen', ['Not seen']],
-      ['updated', ['Last 7 days']],
-    ]);
-  });
-
-  test('the first row is always a match when there is one', () => {
-    for (const q of ['bil', 'web', 'day', 'a', 'custom']) {
-      const first = searchFilterSections<Section, Row>(SECTIONS, q).sections[0]!.rows[0]!;
-      expect(first.hit).not.toBeNull();
-    }
-  });
-
-  test('the count is the matches only; a kept ticked row is not one', () => {
-    const found = searchFilterSections<Section, Row>(SECTIONS, 'bil');
+  test('a query keeps the rows that hold it, in their order, with where it is', () => {
+    const found = findInSection(PROJECTS, 'BIL', pins());
+    expect(labels(found.rows)).toEqual(['Billing', 'rebill']);
+    expect(found.rows.map((x) => x.hit)).toEqual([[0, 3], [2, 5]]);
+    expect(found.matches).toBe(2);
     expect(found.searching).toBe(true);
-    expect(found.matches).toBe(3);
-    const kept = found.sections.flatMap((s) => s.rows).filter((x) => x.hit === null);
-    expect(kept.map((x) => x.row.label)).toEqual(['web', 'Not seen', 'Last 7 days']);
   });
 
-  test('nothing matches: no match counted, only the ticked rows stay', () => {
-    const found = searchFilterSections<Section, Row>(SECTIONS, 'zzz');
+  test('a pinned row stays above whatever is typed, and is never drawn twice', () => {
+    const miss = findInSection(PROJECTS, 'bil', pins('web'));
+    expect(labels(miss.pinned)).toEqual(['web']);
+    expect(miss.pinned[0]!.hit).toBeNull();
+    expect(labels(miss.rows)).toEqual(['Billing', 'rebill']);
+    // A pinned row that matches is bold and counted, still only above.
+    const hit = findInSection(PROJECTS, 'bil', pins('rebill'));
+    expect(labels(hit.pinned)).toEqual(['rebill']);
+    expect(hit.pinned[0]!.hit).toEqual([2, 5]);
+    expect(labels(hit.rows)).toEqual(['Billing']);
+    expect(hit.matches).toBe(2);
+  });
+
+  test('nothing matches: no match counted, only the pinned rows stay', () => {
+    const found = findInSection(PROJECTS, 'zzz', pins('web'));
     expect(found.matches).toBe(0);
-    expect(view('zzz')).toEqual([
-      ['notSeen', ['Not seen']],
-      ['updated', ['Last 7 days']],
-      ['projects', ['web']],
-    ]);
-  });
-
-  test('a ticked row that matches is a match, in its place among the matches', () => {
-    expect(view('e')).toEqual([
-      ['notSeen', ['Not seen']],
-      ['updated', ['Custom range…', 'Last 7 days']],
-      ['tags', ['design']],
-      ['projects', ['web', 'rebill']],
-    ]);
+    expect(labels(found.pinned)).toEqual(['web']);
+    expect(found.rows).toEqual([]);
   });
 });
 
