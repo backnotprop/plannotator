@@ -995,7 +995,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
 
   // A reload or a closed tab while a save waits: sent as the page goes (keepalive).
   useEffect(() => {
-    const onHide = () => {
+    /** `going`: the page goes (`pagehide`: a reload, a closed tab), so nothing queued here would run after it. */
+    const onHide = (going = false) => {
       // What waits for the pause in typing, else words of the open thread whose save did not land.
       const open = current.current;
       const failed = failedWords.get(open);
@@ -1006,7 +1007,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       // A save of the thread on its way (a desktop tab switch mid-save): these words go after it, in order, as any save
       // does; a keepalive beside it could land first and refuse it as another window's change. Kept in the browser
       // until they land, so a tab ended meanwhile loses none.
-      if (queuedOf(next.threadId).length > 0) {
+      if (!going && queuedOf(next.threadId).length > 0) {
         if (next !== pending.current) return;
         flush();
         const queuedNow = queuedOf(next.threadId).at(-1);
@@ -1063,11 +1064,12 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     // A phone hides the page (another app, the tab switcher, the screen locked) without `pagehide`, and may end it there:
     // what waits is sent as the page hides, as it is when the page goes.
     const onVisibility = () => (document.visibilityState === 'hidden' ? onHide() : readBack());
-    window.addEventListener('pagehide', onHide);
+    const onGo = () => onHide(true);
+    window.addEventListener('pagehide', onGo);
     window.addEventListener('pageshow', onShow);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('pagehide', onGo);
       window.removeEventListener('pageshow', onShow);
       document.removeEventListener('visibilitychange', onVisibility);
     };
