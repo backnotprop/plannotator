@@ -138,7 +138,7 @@ class Boundary extends React.Component<RegionBoundaryProps, BoundaryState> {
     }
     const { focused } = this.state;
     return (
-      <div className={this.props.page ? 'flex min-h-dvh items-center justify-center bg-background p-6' : this.props.className}>
+      <div className={this.props.page ? 'pn-rf-page' : this.props.className}>
         <RegionFailed
           name={this.props.name}
           error={this.state.error}
@@ -176,7 +176,62 @@ export function renderErrorReport(error: unknown, where: string, version: string
   return `${stripAddressQueries(body)}\n\nWhere: ${where}\nPlannotator ${version}\n${userAgent}`;
 }
 
-const BUTTON = 'h-7 px-2.5 rounded-md border border-border bg-background text-[11.5px] font-medium text-foreground hover:bg-muted';
+/**
+ * The notice's own look, in a sheet it adds to the page itself. An app's root box is drawn when the app failed before
+ * its theme was set (the theme's tokens, `--background` and the rest, come from a class the app's ThemeProvider puts
+ * on <html>), and it cannot lean on classes the failed app would have drawn. So it reads the theme's tokens where they
+ * are set, and falls back to Plannotator's default palette, light or dark as the system is, where they are not.
+ *
+ * On a phone a closable part's four buttons do not fit one row at 360 px: Reload goes (the browser's own reload is
+ * there), so Try again, Copy error and the way back stay on one row.
+ */
+const STYLE_ID = 'pn-region-failed-style';
+const STYLE = `
+.pn-rf, .pn-rf-page {
+  --pn-rf-bg: var(--background, oklch(0.97 0.005 260));
+  --pn-rf-fg: var(--foreground, oklch(0.18 0.02 260));
+  --pn-rf-muted: var(--muted, oklch(0.92 0.01 260));
+  --pn-rf-muted-fg: var(--muted-foreground, oklch(0.40 0.02 260));
+  --pn-rf-border: var(--border, oklch(0.88 0.01 260));
+  --pn-rf-icon: oklch(0.666 0.179 58.318);
+}
+@media (prefers-color-scheme: dark) {
+  .pn-rf, .pn-rf-page {
+    --pn-rf-bg: var(--background, oklch(0.15 0.02 260));
+    --pn-rf-fg: var(--foreground, oklch(0.90 0.01 260));
+    --pn-rf-muted: var(--muted, oklch(0.26 0.02 260));
+    --pn-rf-muted-fg: var(--muted-foreground, oklch(0.72 0.02 260));
+    --pn-rf-border: var(--border, oklch(0.35 0.02 260));
+    --pn-rf-icon: oklch(0.828 0.189 84.429);
+  }
+}
+.pn-rf-page { box-sizing: border-box; display: flex; min-height: 100dvh; align-items: center; justify-content: center; padding: 24px; background: var(--pn-rf-bg); }
+.pn-rf { display: flex; gap: 10px; padding: 12px 14px; text-align: left; font-family: var(--font-sans, 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif); font-size: 12.5px; line-height: 1.375; color: var(--pn-rf-fg); }
+.pn-rf-icon { flex: none; margin-top: 2px; color: var(--pn-rf-icon); }
+.pn-rf-body { min-width: 0; flex: 1 1 0%; }
+.pn-rf-title { font-weight: 600; color: var(--pn-rf-fg); }
+.pn-rf-detail { margin-top: 2px; color: var(--pn-rf-muted-fg); }
+.pn-rf-row { margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.pn-rf-btn { box-sizing: border-box; height: 28px; margin: 0; padding: 0 10px; border: 1px solid var(--pn-rf-border); border-radius: calc(var(--radius, 0.625rem) - 2px); background: var(--pn-rf-bg); color: var(--pn-rf-fg); font: inherit; font-size: 11.5px; font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer; }
+@media (hover: hover) { .pn-rf-btn:hover { background: var(--pn-rf-muted); } }
+@media (max-width: 480px) {
+  .pn-rf { gap: 8px; padding: 12px 6px; }
+  .pn-rf-row { gap: 4px 8px; }
+  .pn-rf-btn { padding: 0 8px; }
+  .pn-rf-row[data-closable] [data-region-reload] { display: none; }
+}
+`;
+
+/** The sheet, once per page, before the notice is first painted. */
+function useNoticeStyle(): void {
+  useLayoutEffect(() => {
+    if (document.getElementById(STYLE_ID)) return;
+    const sheet = document.createElement('style');
+    sheet.id = STYLE_ID;
+    sheet.textContent = STYLE;
+    document.head.appendChild(sheet);
+  }, []);
+}
 
 /** The notice, drawn as ui's ProblemNotice draws one (the errors system): icon, bold line, muted line, the next steps. */
 function RegionFailed({ name, error, focusWasIn, onTryAgain, close }: {
@@ -190,6 +245,7 @@ function RegionFailed({ name, error, focusWasIn, onTryAgain, close }: {
   const [copied, setCopied] = useState<'yes' | 'no' | null>(null);
   const timer = useRef<number | null>(null);
   const first = useRef<HTMLButtonElement>(null);
+  useNoticeStyle();
   useEffect(() => () => {
     if (timer.current !== null) window.clearTimeout(timer.current);
   }, []);
@@ -206,30 +262,30 @@ function RegionFailed({ name, error, focusWasIn, onTryAgain, close }: {
     timer.current = window.setTimeout(() => setCopied(null), 2000);
   };
   return (
-    <div className="flex gap-2.5 px-3.5 py-3 text-left text-[12.5px] leading-snug" data-region-failed={name}>
-      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mt-[2px] flex-none text-amber-600 dark:text-amber-400">
+    <div className="pn-rf" data-region-failed={name}>
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="pn-rf-icon">
         <path d="M7.13 2.5a1 1 0 0 1 1.74 0l5.5 9.5a1 1 0 0 1-.87 1.5H2.5a1 1 0 0 1-.87-1.5z" />
         <path d="M8 6.25v3M8 11.4v.1" />
       </svg>
-      <div className="min-w-0 flex-1">
+      <div className="pn-rf-body">
         {/* Said once, as the notice arrives; the buttons and what Copy error says after are not part of it. */}
         <div role="alert">
-          <div className="font-semibold text-foreground">This part didn't load</div>
-          <div className="mt-0.5 text-muted-foreground">Something went wrong drawing it.</div>
+          <div className="pn-rf-title">This part didn't load</div>
+          <div className="pn-rf-detail">Something went wrong drawing it.</div>
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <button ref={first} type="button" className={BUTTON} onClick={onTryAgain} data-region-try-again="">
+        <div className="pn-rf-row" data-closable={close ? '' : undefined}>
+          <button ref={first} type="button" className="pn-rf-btn" onClick={onTryAgain} data-region-try-again="">
             Try again
           </button>
-          <button type="button" className={BUTTON} onClick={() => void reloadAfterFlush()} data-region-reload="">
+          <button type="button" className="pn-rf-btn" onClick={() => void reloadAfterFlush()} data-region-reload="">
             Reload
           </button>
-          <button type="button" className={BUTTON} onClick={() => void copy()} data-region-copy="">
+          <button type="button" className="pn-rf-btn" onClick={() => void copy()} data-region-copy="">
             {/* Only this word is said when it changes ("Copied"), politely. */}
             <span aria-live="polite">{copied === 'yes' ? 'Copied' : copied === 'no' ? "Couldn't copy" : 'Copy error'}</span>
           </button>
           {close && (
-            <button type="button" className={BUTTON} onClick={close.onClose} data-region-close="">
+            <button type="button" className="pn-rf-btn" onClick={close.onClose} data-region-close="">
               {close.label}
             </button>
           )}

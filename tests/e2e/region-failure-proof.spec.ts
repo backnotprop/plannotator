@@ -152,6 +152,34 @@ async function expectNotice(scope: Page | Locator, region: string, close?: strin
   return notice;
 }
 
+/** The notice's buttons a person can see, in order; they must be one row (the project bans stacked button rows). */
+async function oneRow(notice: Locator, what: string): Promise<string[]> {
+  const shown = await notice.locator('button').evaluateAll((buttons) =>
+    buttons.filter((b) => b.getClientRects().length > 0).map((b) => ({ label: (b.textContent ?? '').trim(), top: Math.round(b.getBoundingClientRect().top) })),
+  );
+  expect(new Set(shown.map((b) => b.top)).size, `${what}: the buttons are one row (${JSON.stringify(shown)})`).toBe(1);
+  return shown.map((b) => b.label);
+}
+
+/**
+ * The notice's own look, which holds where the app failed before its theme was set: the app's font, rounded buttons,
+ * and the page's colour (an app's root) by the system's scheme.
+ */
+async function lookOf(notice: Locator, what: string): Promise<string> {
+  const look = await notice.evaluate((el) => {
+    const button = el.querySelector('button')!;
+    return {
+      font: getComputedStyle(el).fontFamily,
+      radius: parseFloat(getComputedStyle(button).borderTopLeftRadius),
+      page: getComputedStyle(el.parentElement!).backgroundColor,
+    };
+  });
+  expect(look.font, `${what}: the notice is in the app's font`).toMatch(/Inter/);
+  expect(look.radius, `${what}: the buttons are rounded`).toBeGreaterThan(0);
+  expect(look.page, `${what}: the page has a colour`).not.toBe('rgba(0, 0, 0, 0)');
+  return look.page;
+}
+
 const arm = (page: Page, region: string | null) =>
   page.evaluate((name) => {
     (window as { __plannotatorBreakRegionForTests?: string | null }).__plannotatorBreakRegionForTests = name;
@@ -183,7 +211,8 @@ test('a. the Inbox at 1440×900: a failed thread pane says so in its place, besi
       await arm(page, 'Thread pane');
       // As the other Inbox specs open a thread: the address names it (the same page, so the switch stays set).
       await page.goto(`${world.url}#thread=${thread}`);
-      await expectNotice(page, 'Thread pane', 'Back to Inbox');
+      const notice = await expectNotice(page, 'Thread pane', 'Back to Inbox');
+      expect(await oneRow(notice, 'the desk')).toEqual(['Try again', 'Reload', 'Copy error', 'Back to Inbox']);
       // The rest of the window stays: the list with its other threads, the sidebar with the projects.
       await expect(page.locator('.ib-listcol')).toBeVisible();
       await expect(page.locator(`.ib-lbody [data-row="${world.threads.unopened}"]`)).toBeVisible();
@@ -208,8 +237,15 @@ test('b. the Inbox on a phone: the failed thread pane says Back to Inbox, and it
       await row.click();
       const notice = await expectNotice(page, 'Thread pane', 'Back to Inbox');
       await expect(notice.locator('[data-region-close]')).toBeInViewport();
+      // One row on a phone: Reload goes (the browser's own is there), Try again, Copy error and the way back stay.
+      const phoneRow = ['Try again', 'Copy error', 'Back to Inbox'];
+      expect(await oneRow(notice, 'a phone at 390 px')).toEqual(phoneRow);
       expect(errors.unexpected(), 'only the switch threw').toEqual([]);
       await shot(page, 'b-inbox-thread-pane-phone', scheme);
+      await page.setViewportSize({ width: 360, height: 780 });
+      await expect(notice).toBeVisible();
+      expect(await oneRow(notice, 'a phone at 360 px')).toEqual(phoneRow);
+      await shot(page, 'b-inbox-thread-pane-phone-360', scheme);
 
       // The thread that threw is the one being left: with it gone, nothing throws.
       await arm(page, null);
@@ -284,11 +320,15 @@ test("c. the review window's Guided Review: a failed diff says so in the file's 
 
 test('d. a whole app failed: the review window and the Inbox say so in the middle of the page', async ({ browser }) => {
   const session = await reviewOf('region-failure-root', { [FILE]: berths(false) }, { [FILE]: berths(true) });
+  // The app failed before its theme was set: the notice still has its look, light or dark as the system is.
+  const pages: Record<string, string[]> = { 'Code review': [], Inbox: [] };
   try {
     for (const scheme of SCHEMES) {
       const { context, page, errors } = await reviewPage(browser, session.url, scheme, 'Code review');
       try {
-        await expectNotice(page, 'Code review');
+        const notice = await expectNotice(page, 'Code review');
+        pages['Code review']!.push(await lookOf(notice, `the review window, ${scheme}`));
+        await oneRow(notice, `the review window, ${scheme}`);
         expect(errors.unexpected(), 'only the switch threw').toEqual([]);
         await shot(page, 'd-review-root', scheme);
       } finally {
@@ -303,11 +343,14 @@ test('d. a whole app failed: the review window and the Inbox say so in the middl
     try {
       await armFromStart(context, 'Inbox');
       await page.goto(world.url);
-      await expectNotice(page, 'Inbox');
+      const notice = await expectNotice(page, 'Inbox');
+      pages.Inbox!.push(await lookOf(notice, `the Inbox, ${scheme}`));
+      await oneRow(notice, `the Inbox, ${scheme}`);
       expect(errors.unexpected(), 'only the switch threw').toEqual([]);
       await shot(page, 'd-inbox-root', scheme);
     } finally {
       await context.close();
     }
   }
+  for (const [app, [light, dark]] of Object.entries(pages)) expect(dark, `${app}: the dark page is not the light one`).not.toBe(light);
 });
