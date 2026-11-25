@@ -667,6 +667,13 @@ export interface PlannotatorConfig {
    */
   inboxSplitView?: boolean;
   /**
+   * Thread tabs (Settings → Capabilities, off unless `true`): a browser tab at `#thread=<id>&alone` shows that thread only,
+   * with its own title and favicon, and the main tab leaves it out of its counts. Read on every request.
+   */
+  inboxThreadTabs?: boolean;
+  /** With Thread tabs on: the main tab's title, favicon and app badge still count the threads that have a thread tab (off unless `true`). */
+  inboxThreadTabsCountAnchored?: boolean;
+  /**
    * Branch reviews in the Inbox (docs/agent-guides/inbox-files-and-guides.md, "Branch reviews"): agents report a branch
    * ready for review (`send_message`'s `branch`), each report one review thread per project and branch in Reviews, and
    * the by-hand list of branches nobody reported. Off unless `true`, and only while Code review is on. Config only, no
@@ -1254,6 +1261,11 @@ function withMachineState(config: Record<string, unknown>, state: Record<string,
     merged[key] = withoutUndefined({ ...pickFields(kept, fields, false), ...soundDialog(pickFields(kept, fields, true) ?? {}, saved) });
   }
   return merged as PlannotatorConfig;
+}
+
+/** Thread tabs (config.json `inboxThreadTabs`, `inboxThreadTabsCountAnchored`): both off unless the person turned them on. */
+export function inboxThreadTabsOf(config: Pick<PlannotatorConfig, "inboxThreadTabs" | "inboxThreadTabsCountAnchored">): { on: boolean; count_anchored: boolean } {
+  return { on: config.inboxThreadTabs === true, count_anchored: config.inboxThreadTabsCountAnchored === true };
 }
 
 /** Chapter diagrams (config.json `inboxChapterDiagrams`): on unless the person turned it off. */

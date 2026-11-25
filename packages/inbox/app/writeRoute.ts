@@ -57,6 +57,7 @@ export function hashOf(route: Route): string {
     if (route.tag) params.set('tag', route.tag);
     if (route.project) params.set('project', route.project);
     if (route.thread) params.set('thread', route.thread);
+    if (route.thread && route.alone) params.set('alone', '');
     if (route.thread && route.msg) params.set('msg', route.msg);
     if (route.thread && route.artifacts) params.set('artifacts', '');
     if (route.thread && route.artifacts && route.links) params.set('links', '');
@@ -83,8 +84,8 @@ export function hashOf(route: Route): string {
     if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);
     if (route.thread && route.card && route.boardProject) params.set('board-project', route.boardProject);
     if (route.thread && route.card && route.boardInitiative) params.set('board-initiative', route.boardInitiative);
-    // `&artifacts`, `&links` and `&files`, flags: written without their empty `=`.
-    hash = params.toString().replace(/(^|&)(artifacts|links|files)=(?=&|$)/g, '$1$2');
+    // `&alone`, `&artifacts`, `&links` and `&files`, flags: written without their empty `=`.
+    hash = params.toString().replace(/(^|&)(alone|artifacts|links|files)=(?=&|$)/g, '$1$2');
     if (route.reviews) hash = hash ? `reviews&${hash}` : 'reviews';
   }
   return hash ? `#${hash}` : '';

@@ -255,6 +255,11 @@ export const SLICE_RULES: SliceRule[] = [
     ],
     specs: ['inbox-machines.spec.ts', 'inbox-machine-update.spec.ts', 'inbox-phones.spec.ts', 'inbox-accounts*.spec.ts', 'inbox-snooze-machines.spec.ts', 'inbox-machines-agent-read.spec.ts', 'inbox-cloud-*.spec.ts', 'inbox-routines-machines.spec.ts', 'inbox-artifact-pins-machines.spec.ts'],
   },
+  {
+    name: 'Inbox: thread tabs',
+    paths: ['packages/inbox/threadTabs*', 'packages/inbox/useThreadTabs*', 'packages/inbox/app/useThreadTabRouting*', 'packages/inbox/threadFace*', 'packages/inbox/components/AnchoredThreads*', 'packages/server/inbox-windows*'],
+    specs: ['inbox-thread-tabs*.spec.ts', 'inbox-show-thread.spec.ts', 'inbox-shared-events.spec.ts'],
+  },
   { name: 'Inbox: guided reviews', stopgap: true, paths: ['packages/inbox/guide/**', 'packages/server/inbox-guides*'], specs: ['inbox-guides.spec.ts', 'inbox-request-guide.spec.ts'] },
   { name: 'Inbox: Ask window', stopgap: true, paths: ['packages/inbox/ask/**', 'packages/server/inbox-ask*'], specs: ['inbox-ask-window.spec.ts', 'inbox-reask.spec.ts'] },
   { name: 'Inbox: search', stopgap: true, paths: ['packages/inbox/search/**'], specs: ['inbox-search*.spec.ts', 'inbox-feedback-search*.spec.ts'] },

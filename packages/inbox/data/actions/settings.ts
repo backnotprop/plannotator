@@ -66,6 +66,15 @@ export function useSettingsSaves(
     saveSetting((s) => ({ ...s, chapter_diagrams: { on: next } }), () => inboxApi.saveChapterDiagrams(next), (s, saved) => ({ ...s, chapter_diagrams: saved.chapter_diagrams ?? { on: next } }));
 
 
+  const saveThreadTabs = (change: { on?: boolean; count_anchored?: boolean }) =>
+    saveSetting(
+      (s) => ({ ...s, thread_tabs: { on: false, count_anchored: false, ...s.thread_tabs, ...change } }),
+      () => post<{ thread_tabs: { on: boolean; count_anchored: boolean } }>(inboxUrl('/settings'), { thread_tabs: change }),
+      (s, saved) => ({ ...s, thread_tabs: saved.thread_tabs }),
+    );
+  const toggleThreadTabs = (next: boolean) => saveThreadTabs({ on: next });
+  const toggleThreadTabsCountAnchored = (next: boolean) => saveThreadTabs({ count_anchored: next });
+
   const toggleScheduled = (next: boolean) =>
     saveSetting((s) => ({ ...s, scheduled_threads: { ...s.scheduled_threads, on: next } }), () => scheduledApi.saveSwitch(next), (s, saved) => ({ ...s, scheduled_threads: saved.scheduled_threads ?? { on: next } }), reloadSkillCatalog);
 
@@ -112,7 +121,7 @@ export function useSettingsSaves(
     }
     await refreshList(true);
   };
-  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleThreadTabs, toggleThreadTabsCountAnchored, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
 }
 
 /** App's settings take a saved thread panes switch through this (set where App runs `useSettingsSaves`). */

@@ -264,6 +264,8 @@
   "inbox-thread-pulls-phone-sheet.spec.ts": 4,
   "inbox-thread-scroll-return.spec.ts": 101,
   "inbox-thread-sessions.spec.ts": 5,
+  "inbox-thread-tabs-machines.spec.ts": 10,
+  "inbox-thread-tabs.spec.ts": 14,
   "inbox-thread-tags.spec.ts": 4,
   "inbox-tidy.spec.ts": 20,
   "inbox-toast-fit.spec.ts": 17,

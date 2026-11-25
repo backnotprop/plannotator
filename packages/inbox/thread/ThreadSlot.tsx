@@ -102,6 +102,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             host.paneReads.retry(paneId);
           }}
           onClose={onClose}
+          onFull={host.threadTab ? host.leaveFull : undefined}
         />
       )}
       {threadId && thread && ready && (
@@ -258,6 +259,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           phone={phone}
           stacked={stack.thread || !!fromCard}
           threadAlone={full}
+          threadTab={host.threadTab}
           paired={host.paired}
           fullSidebar={host.fullSidebar}
           onFull={fromCard ? undefined : (on) => (on ? host.setThreadFull(true) : host.leaveFull())}

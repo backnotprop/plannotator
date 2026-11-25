@@ -138,6 +138,33 @@ export function NotificationAsk({
 }
 
 /**
+ * A plain click on a thread that has a thread tab this tab cannot reach (Thread tabs, threadTabs.ts): never navigates
+ * silently; the person may open it here anyway.
+ */
+export function AnchoredLine({ onOpenHere, onDismiss }: { onOpenHere: () => void; onDismiss: () => void }) {
+  return (
+    <AskShell
+      className="ib-askline ib-askquiet"
+      icon="info"
+      label="Open in another tab"
+      data={{ 'data-anchored-banner': '' }}
+      actions={
+        <>
+          <button type="button" className="ib-btn ib-ghost ib-sm" onClick={onOpenHere}>
+            Open here anyway
+          </button>
+          <button type="button" className="ib-btn ib-ghost ib-sm" onClick={onDismiss}>
+            Dismiss
+          </button>
+        </>
+      }
+    >
+      <span className="ib-mut">This thread is open in another tab</span>
+    </AskShell>
+  );
+}
+
+/**
  * The browser put this tab to sleep in the background, so it could not
  * notify (notify.ts `TabSlept`). Said once, with how to keep it awake.
  */

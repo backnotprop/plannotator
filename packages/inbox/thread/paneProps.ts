@@ -21,6 +21,8 @@ export interface ThreadPaneProps {
   /** Beside another thread pane: its ✕ closes this pane, so it stays beside ‹ Inbox (full screen, a stacked window). */
   paired?: boolean;
   fullSidebar?: boolean;
+  /** A thread tab (Settings → Capabilities → Thread tabs): the way back from full screen is "Show full Inbox". */
+  threadTab?: boolean;
   onFull?: (on: boolean) => void;
   notice?: ReactNode;
   thread: InboxThread;

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import { inboxRowArchived, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { boxState, useRowPicks, type PickRules } from '../rowPicks';
+import { rowGateClaimsModClick } from '../starPress';
 import type { BulkWrites } from '../bulkWrites';
 import { machineTakes, type MachinesModel } from '../machines';
 import { inboxListPickShortcuts } from '../shortcuts/listPick.shortcuts';
@@ -125,6 +126,8 @@ export function useListPicks(input: ListPicksInput) {
     if (!listed.has(row.getAttribute('data-thread-id')!)) return;
     const toggle = event.metaKey || event.ctrlKey;
     if (!picks.on && !toggle && !event.shiftKey) return;
+    // Thread tabs: ⌘/Ctrl-click opens the thread's own tab (Shift-click still starts picking).
+    if (!picks.on && toggle && !event.shiftKey && rowGateClaimsModClick()) return;
     event.preventDefault();
     event.stopPropagation();
     picks.press(row.getAttribute('data-thread-id')!, event.shiftKey ? 'range' : 'toggle', order());

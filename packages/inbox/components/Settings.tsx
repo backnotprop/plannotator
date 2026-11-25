@@ -3,6 +3,7 @@ import { KeyboardSettings } from './KeyboardSettings';
 import { INBOX_SYSTEM_SWITCH_SHOWN, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
 import { SoundRow, Switch } from './SoundRow';
+import { ThreadTabsRows } from './ThreadTabsSettings';
 import { LinkedCapabilities } from './LinkedCapabilities';
 import { type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
@@ -105,6 +106,8 @@ export interface SettingsPageProps {
   systemProjects?: SystemProjectRow[] | null;
   /** Settings → Capabilities → Chapter diagrams, under Code review and shown only while it is on. Absent (or an Inbox without it): no row. */
   onToggleChapterDiagrams?: (next: boolean) => void;
+  onToggleThreadTabs?: (next: boolean) => void;
+  onToggleThreadTabsCountAnchored?: (next: boolean) => void;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
   /** Settings → Capabilities → Routines (after Checklist). Absent (or an Inbox without it, Windows among them): no row. */
@@ -553,6 +556,9 @@ function CapabilitiesSection({
   systemProjects,
   chapterDiagrams,
   onToggleChapterDiagrams,
+  threadTabs,
+  onToggleThreadTabs,
+  onToggleThreadTabsCountAnchored,
   bro,
   onToggleBro,
   floatDrafts,
@@ -579,6 +585,10 @@ function CapabilitiesSection({
   /** Chapter diagrams: null unless Code review is on (the server sends it only then). */
   chapterDiagrams: { on: boolean } | null;
   onToggleChapterDiagrams?: (next: boolean) => void;
+  /** Thread tabs (config.json `inboxThreadTabs`), null on an Inbox without it. */
+  threadTabs: { on: boolean; count_anchored: boolean } | null;
+  onToggleThreadTabs?: (next: boolean) => void;
+  onToggleThreadTabsCountAnchored?: (next: boolean) => void;
   /** Bro mode (approval "bro-mode"), null on an Inbox without it. */
   bro: { on: boolean } | null;
   onToggleBro?: (next: boolean) => void;
@@ -670,6 +680,7 @@ function CapabilitiesSection({
                 </span>
               </div>
             )}
+            {threadTabs && onToggleThreadTabs && <ThreadTabsRows threadTabs={threadTabs} onToggle={onToggleThreadTabs} onToggleCountAnchored={onToggleThreadTabsCountAnchored} />}
             {systemRow && (
               <div className="ib-prow ib-sysrow" data-settings-system="">
                 <div className="ib-sysrow-top">
@@ -1091,6 +1102,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const codeReview = settings?.code_review && props.onToggleCodeReview ? settings.code_review : null;
   const system = settings?.system && props.onToggleSystem ? settings.system : null;
   const chapterDiagrams = settings?.chapter_diagrams && props.onToggleChapterDiagrams ? settings.chapter_diagrams : null;
+  const threadTabs = settings?.thread_tabs && props.onToggleThreadTabs ? settings.thread_tabs : null;
   const bro = settings?.bro && props.onToggleBro ? settings.bro : null;
   const floatDrafts = settings?.float_drafts && props.onToggleFloatDrafts ? settings.float_drafts : null;
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
@@ -1297,7 +1309,7 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'capabilities':
         body =
-          (board && props.onToggleBoard) || steps || scheduled || codeReview || bro || experimental ? (
+          (board && props.onToggleBoard) || steps || scheduled || codeReview || threadTabs || bro || experimental ? (
             <>
             <CapabilitiesSection
               board={board}
@@ -1313,6 +1325,9 @@ export function SettingsPage(props: SettingsPageProps) {
               systemProjects={props.systemProjects}
               chapterDiagrams={chapterDiagrams}
               onToggleChapterDiagrams={props.onToggleChapterDiagrams}
+              threadTabs={threadTabs}
+              onToggleThreadTabs={props.onToggleThreadTabs}
+              onToggleThreadTabsCountAnchored={props.onToggleThreadTabsCountAnchored}
               bro={bro}
               onToggleBro={props.onToggleBro}
               floatDrafts={floatDrafts}

@@ -12915,3 +12915,5 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-sknf { position: relative; display: block; }
 .ib-sknf > .ib-namer-in { width: 100%; }
 .pn-inbox .ib-namer-in[data-skill] { color: var(--primary); }
+/* A list row whose thread is open in its own tab (Thread tabs): a small mark after the agents' tiles. */
+.ib-anchored { display: inline-flex; align-items: center; flex: none; margin-inline-start: 4px; color: var(--muted-foreground); opacity: 0.8; }

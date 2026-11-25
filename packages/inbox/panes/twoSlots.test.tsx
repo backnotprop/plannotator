@@ -187,7 +187,7 @@ function hostFor(threadId: string, seen: (threadId: string, through: number) => 
     patchQuestions: noop, onPickSaves: (_ids, paneClosed, threadId) => void pickSaves.push([threadId, paneClosed]), afterWrite: async () => {}, rowPatches: new Map(), decideInThread: () => null,
     searchLanding: { current: null }, decideLanding: { current: null }, landed: noop,
     seenOnSight: seen, covered: false, panesOnScreen: createPanesOnScreen(), setOpenThreadCovered: noop, listTitle: 'Inbox', fullSidebar: true,
-    setThreadFull: noop, leaveFull: noop, showToast: noop, inboxLink: () => null,
+    setThreadFull: noop, leaveFull: noop, threadTab: false, showToast: noop, inboxLink: () => null,
     holdSidebarIfTight: noop, backFromFile: { current: null },
   };
 }
