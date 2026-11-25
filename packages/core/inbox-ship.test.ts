@@ -1,6 +1,6 @@
 /** Ship's pure parts (inbox-ship.ts): what a row draws, its words, and the instruction's data fence. */
 import { describe, expect, test } from "bun:test";
-import { INBOX_SHIP_MERGED_SHOWN_MS, shipChanges, shipLook, shipMessage, shipNewerWins, shipReady, shipRowWords, inboxNoticeOf, type InboxShipRead } from "./inbox-ship";
+import { INBOX_SHIP_MERGED_SHOWN_MS, shipChanges, shipLook, shipMessage, shipNewerWins, shipReady, shipRowWords, shipsMergedShown, inboxNoticeOf, type InboxShipRead } from "./inbox-ship";
 import { SHIP_INSTRUCTION, SHIP_NOTE_WAKE_INSTRUCTION } from "./inbox-ship-words";
 
 const read = (over: Partial<InboxShipRead> = {}): InboxShipRead => ({
@@ -28,6 +28,27 @@ describe("shipLook", () => {
     expect(shipLook({ state: "merged", ended_at: "2026-11-24T17:00:00Z" }, now)).toBe("merged");
     expect(shipLook({ state: "merged", ended_at: new Date(now - INBOX_SHIP_MERGED_SHOWN_MS - 1).toISOString() }, now)).toBeNull();
     expect(shipLook(null, now)).toBeNull();
+  });
+
+  test("shipsMergedShown: only merges still showing, by the stored ended time, by pull request key", () => {
+    const ship = (number: number, state: "shipping" | "stuck" | "stopped" | "merged", ended_at: string | null, merged_at: string | null = state === "merged" ? ended_at : null) => ({ key: `github.com/harbor/fern-api#${number}`, url: `https://github.com/harbor/fern-api/pull/${number}`, number, title: `Change ${number}`, state, ended_at, merged_at });
+    const old = new Date(now - INBOX_SHIP_MERGED_SHOWN_MS - 1).toISOString();
+    const shown = shipsMergedShown(
+      [
+        ship(1, "merged", "2026-11-24T17:00:00Z", "2026-11-24T16:59:00Z"),
+        ship(2, "stuck", null),
+        ship(3, "stopped", "2026-11-24T17:59:00Z"),
+        // A PR closed while shipping: the ship stops.
+        ship(4, "stopped", "2026-11-24T17:59:00Z"),
+        ship(5, "merged", old),
+        // Merged long ago by the forge's clock, ended (recorded) just now: the stored ended time decides.
+        ship(6, "merged", "2026-11-24T17:30:00Z", "2026-11-20T09:00:00Z"),
+        ship(7, "shipping", null),
+      ],
+      now,
+    );
+    expect([...shown.keys()]).toEqual(["github.com/harbor/fern-api#1", "github.com/harbor/fern-api#6"]);
+    expect(shown.get("github.com/harbor/fern-api#1")).toEqual({ key: "github.com/harbor/fern-api#1", url: "https://github.com/harbor/fern-api/pull/1", number: 1, title: "Change 1", at: "2026-11-24T16:59:00Z" });
   });
 });
 

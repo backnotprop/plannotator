@@ -21,6 +21,7 @@ packages/ui/components/html-viewer/HtmlViewer.frameScale.test.tsx
 packages/ui/components/html-viewer/bridgeTouchSelection.test.tsx
 packages/ui/components/html-embed/HtmlEmbedBlock.test.tsx
 packages/ui/components/LazyBlockBoundary.test.tsx
+packages/ui/components/RegionBoundary.test.tsx
 packages/ui/components/inbox-thread/SnoozeMenu.test.tsx
 packages/ui/components/Viewer.vimMode.integration.test.tsx
 packages/ui/components/CodeFilePopout.lineScroll.test.tsx
@@ -95,6 +96,7 @@ packages/inbox/replyFeedback.test.tsx
 packages/inbox/replyFocusOnOpen.test.tsx
 packages/inbox/permissionFocus.test.tsx
 packages/inbox/replyBoxTyping.test.tsx
+packages/inbox/paneFailureKeepsReply.test.tsx
 packages/inbox/replyFootPhone.test.tsx
 packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
@@ -344,6 +346,7 @@ packages/inbox/videoAttachment.test.tsx
 packages/inbox/audioAttachment.test.tsx
 packages/inbox/markupAddsToReply.test.tsx
 packages/inbox/commentSubmitKey.test.tsx
+packages/inbox/commentRowSkills.test.tsx
 packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
 packages/inbox/pickerOpensOnTyping.test.tsx
@@ -428,6 +431,7 @@ packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
 packages/review-editor/components/AllFilesCodeView.fileCommentAttachments.test.tsx
+packages/review-editor/components/AllFilesCodeView.retryClearsSelection.test.tsx
 packages/review-editor/components/DiffViewer.fileCommentAttachments.test.tsx
 packages/ui/utils/highlightCopy.test.ts
 packages/ui/components/Viewer.highlightCopy.test.tsx
@@ -455,6 +459,7 @@ packages/review-editor/components/TokenHoverCard.test.tsx
 packages/review-editor/components/tokenHoverAffordance.test.tsx
 packages/review-editor/utils/stitchTokenIdentifier.test.ts
 packages/review-editor/utils/diffSelection.test.ts
+packages/review-editor/utils/diffSelectionForeignNode.test.ts
 packages/review-editor/hooks/useAutoViewed.test.tsx
 packages/review-editor/hooks/useHiddenViewedFiles.hook.test.tsx
 packages/review-editor/hooks/useReviewProgress.test.tsx
@@ -615,6 +620,7 @@ packages/ui/components/Settings.experimental.test.tsx
 packages/ui/components/Settings.reviewDefaults.test.tsx
 packages/ui/components/Settings.gridChoice.test.tsx
 packages/editor/App.planLookNotice.test.tsx
+packages/editor/App.displayOptions.test.tsx
 packages/ui/config/documentTextSizeSetting.test.ts
 packages/ui/utils/diffFonts.test.ts
 packages/ui/components/Settings.agentTool.test.tsx
@@ -879,6 +885,7 @@ packages/inbox/scheduled/routinesAcross.test.tsx
 packages/inbox/scheduled/scheduledThread.test.tsx
 packages/inbox/scheduled/scheduledRows.test.tsx
 packages/inbox/scheduled/rowRunEnds.test.tsx
+packages/inbox/scheduled/runEntersHeld.test.tsx
 packages/inbox/scheduled/scheduledActions.test.tsx
 packages/inbox/scheduled/routineAutosave.test.tsx
 packages/inbox/scheduled/routineTabs.test.tsx

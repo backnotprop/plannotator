@@ -23153,6 +23153,20 @@
       }
     },
     {
+      "id": "undecided-field-inboxlistrow-scheduled-running",
+      "title": "field:InboxListRow.scheduled_running",
+      "surface": [
+        "field:InboxListRow.scheduled_running"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-setting-decision-mode",
       "title": "setting:decision_mode",
       "surface": [
@@ -23161,7 +23175,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-24",
+      "since": "2026-11-25",
       "ios": {
         "state": "not-started"
       }

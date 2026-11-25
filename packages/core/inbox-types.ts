@@ -2166,6 +2166,12 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   run?: "starting" | "working" | "cloning" | null;
   /**
+   * A routine's run is going in this thread (inbox-launch.ts `decorate`): the row is in New at least while it goes
+   * (shared/inbox/list.ts `inboxSectionWhileRoutineRuns`), and a window brings it into its held list at once
+   * (packages/inbox/held.ts `routineRunsEnter`). It counts nothing and notifies nothing. Absent otherwise and from an older Inbox.
+   */
+  scheduled_running?: true;
+  /**
    * The window's own drawing (approval "inbox-multi-select"): the thread is in a Combine still waiting for its new
    * thread, so the row says "Combining…". No server sends it.
    */

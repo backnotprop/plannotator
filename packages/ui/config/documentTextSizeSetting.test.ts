@@ -60,8 +60,17 @@ describe('documentTextSize setting', () => {
     }
   });
 
-  test('it is cookie-only: no server key', () => {
-    expect(SETTINGS.documentTextSize.serverKey).toBeUndefined();
+  test('config.json carries it as displayOptions.textSize and drops a size that is not offered', () => {
+    const def = SETTINGS.documentTextSize;
+    expect(def.serverKey).toBe('displayOptions');
+    for (const step of DOCUMENT_TEXT_SIZE_OPTIONS) {
+      expect(def.toServer(step)).toEqual({ displayOptions: { textSize: step } });
+      expect(def.fromServer({ displayOptions: { textSize: step } })).toBe(step);
+    }
+    for (const bad of [16, '17', null]) {
+      expect(def.fromServer({ displayOptions: { textSize: bad } })).toBeUndefined();
+    }
+    expect(def.fromServer({ displayOptions: 'huge' })).toBeUndefined();
   });
 });
 

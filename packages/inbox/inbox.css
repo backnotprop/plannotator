@@ -3846,9 +3846,9 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-phead > .ib-sp { flex: 1; }
   .ib-phead h2.ib-phsubj { padding: 0 4px; }
   .ib-phead:has(> h2.ib-phsubj[data-open]) { min-height: calc(48px + env(safe-area-inset-top)); }
-  /* A cut title is a 44 px target like the bar's other controls: its line is the bar's height, the words where they were. */
+  /* The title's line is the bar's height, cut or not: a cut title is a 44 px target like the bar's other controls, and one that fits has its mark and badge whole, the words where they were. */
   .pn-inbox button.ib-phsubj-t { min-height: 44px; }
-  .ib-phead h2.ib-phsubj:not([data-open]) button.ib-phsubj-t { line-height: 44px; }
+  .ib-phead h2.ib-phsubj:not([data-open]) .ib-phsubj-t { line-height: 44px; }
   .pn-inbox .ib-iconbtn { width: 44px; height: 44px; }
   .pn-inbox .ib-ptool { min-width: 44px; height: 44px; justify-content: center; }
   .ib-ptool-l { display: none; }
@@ -8861,6 +8861,18 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .pn-inbox .ib-fcomp .ib-htmlcomment-on .ib-fvb { grid-area: tools; justify-self: start; flex: none; width: 44px; height: 44px; padding: 0; border: 0; background: none; color: var(--muted-foreground); }
 .pn-inbox .ib-fcomp .ib-htmlcomment-on .ib-fvb[data-html-comment-step="child"] { margin-left: 44px; }
 .ib-fcomp .ib-ccard > .ib-fcomp-field { grid-area: field; min-width: 0; }
+/* An image's or a film's comment row takes the reply's field (ComposerField: the `/` and `$` skill list) at the plain
+   one-line field's metrics it replaced, beside the thread and in full screen's card, so an empty row is drawn as
+   before; it grows with the words as that field did. The textarea and its mirror share them. */
+.ib-ccard > .ib-crowfield { flex: 1; min-width: 0; padding: 0; }
+.pn-inbox .ib-crowfield :is(.ib-rtext, .ib-rmirror) { min-height: 34px; max-height: 160px; padding: 7px 8px; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
+.pn-inbox .ib-fcomp .ib-crowfield :is(.ib-rtext, .ib-rmirror) { min-height: 52px; max-height: 30vh; padding: 12px 6px 6px; font-size: var(--ib-fs-14, 14px); }
+.ib-crowfield [data-skill-human-only-notice] { padding: 0 8px 4px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-crowfield :is(.ib-rtext, .ib-rmirror) { min-height: 44px; padding: 11px 8px; font-size: var(--ib-fs-16-in, 16px); }
+  .pn-inbox .ib-fcomp .ib-crowfield :is(.ib-rtext, .ib-rmirror) { min-height: 52px; padding: 12px 6px 6px; }
+  .pn-inbox .ib-fcomp.ib-phone .ib-crowfield :is(.ib-rtext, .ib-rmirror) { min-height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+}
 
 /* The list's look options (approval "inbox-list-options", 2026-10-30; listLook.ts): four checkboxes in the list's
    ⋮ menu, all off by default. Every rule here needs its option's class on the list column (.ib-lk-pill,

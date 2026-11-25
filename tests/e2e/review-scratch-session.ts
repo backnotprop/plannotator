@@ -20,7 +20,22 @@ function write(dir: string, files: Record<string, string>) {
   }
 }
 
-export async function reviewOf(name: string, base: Record<string, string>, head: Record<string, string>): Promise<{ url: string; close: () => Promise<void> }> {
+/** The scratch repository a review is about to start in, and the environment it starts with. */
+export interface ReviewScratchRepo {
+  /** The scratch folder: the repository, the data dir and anything else a spec writes sit under it. */
+  root: string;
+  /** The repository, with the head files written over the base commit. */
+  cwd: string;
+  env: Record<string, string>;
+  binary: string;
+}
+
+export interface ReviewScratchOptions {
+  /** Runs once the head files are written, before `plannotator review` starts: a guide import, say (`importGuide`). */
+  before?: (repo: ReviewScratchRepo) => void;
+}
+
+export async function reviewOf(name: string, base: Record<string, string>, head: Record<string, string>, options: ReviewScratchOptions = {}): Promise<{ url: string; close: () => Promise<void> }> {
   const root = inboxScratch(name);
   const dataDir = join(root, 'data');
   mkdirSync(dataDir, { recursive: true });
@@ -49,6 +64,12 @@ export async function reviewOf(name: string, base: Record<string, string>, head:
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_GIT_REMOTE_CHECK: '0',
   };
+  try {
+    options.before?.({ root, cwd, env, binary });
+  } catch (error) {
+    await removeInboxScratch(root);
+    throw error;
+  }
   const child: ChildProcess = spawn(binary, ['review'], { env, cwd, stdio: 'ignore' });
   await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
   const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
@@ -99,4 +120,33 @@ export async function openReview(
     await page.keyboard.press('Escape');
   }
   return { context, page };
+}
+
+/**
+ * `plannotator guide import` in the scratch repository, with the review's own environment (`reviewOf`'s `before`):
+ * the review that starts next lists the guide under its saved guides. The guide and its patch (`git diff` of the head
+ * files) are written beside the repository, never in it, so they are not part of the diff under review.
+ */
+export function importGuide({ root, cwd, env, binary }: ReviewScratchRepo, guide: object): void {
+  const diff = spawnSync('git', ['diff'], { cwd, encoding: 'utf8' });
+  if (diff.status !== 0 || !diff.stdout) throw new Error(`git diff: ${diff.stderr}`);
+  const guideFile = join(root, 'guide.json');
+  const patchFile = join(root, 'guide.patch');
+  writeFileSync(guideFile, JSON.stringify(guide));
+  writeFileSync(patchFile, diff.stdout);
+  const run = spawnSync(binary, ['guide', 'import', '--guide', guideFile, '--patch', patchFile], { cwd, env, encoding: 'utf8', timeout: 30_000 });
+  if (run.status !== 0) throw new Error(`plannotator guide import (${run.status}): ${run.stderr}`);
+}
+
+/**
+ * Opens a saved guide in the review window, as a person does with AI features off (`reviewOf` turns them off): the
+ * header's Guide, then the guide's row under "Saved guides". Resolves once the guide's first file card is on the page.
+ */
+export async function openSavedGuide(page: import('@playwright/test').Page, title: string): Promise<void> {
+  const guide = page.locator('[data-guide-button]');
+  await expect(guide, 'the header offers the Guide (a saved guide, with AI features off)').toBeVisible({ timeout: 30_000 });
+  await guide.click();
+  await expect(page.getByRole('heading', { name: 'Saved guides' })).toBeVisible();
+  await page.locator('button', { hasText: title }).first().click();
+  await expect(page.locator('[data-guide-file-shell]').first(), `the guide "${title}" opens on its first file`).toBeAttached({ timeout: 30_000 });
 }
