@@ -17,12 +17,15 @@
  * (`GET /api/inbox/pulls/pull`, read from the forge by number) and says merged; a reload with only a kept draft
  * comment reopens it with the draft and the reader still taking comments. Then GitHub stops answering: a reload, and
  * a restart of the Inbox while still offline, reopen the page with one line saying GitHub didn't answer; back online,
- * the next focus asks again and the line goes.
+ * the next focus asks again (the restarted Inbox reads its list first) and the line goes. GitHub then answers 404 for
+ * it (repository deleted, access lost): a reload keeps the page as last read, with one line saying so. A PR on a linked
+ * computer (its routes answered as that computer's Inbox would): merged there and gone from the board, its page stays,
+ * asks that computer and says merged, also after a reload.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/review-stays-open (CI keeps .local/proof/ as "inbox-window-proof-N"):
  * before-merge and merged at 1440 light and dark, merged on a phone at 390, and the page after the reload, light and
- * dark; then teammate-merged,
- * draft-only-reloaded, forge-unreachable and forge-unreachable-restarted, 1440 light.
+ * dark; then teammate-merged, draft-only-reloaded, forge-unreachable, forge-unreachable-restarted, forge-missing,
+ * linked-merged and linked-reloaded, 1440 light, and linked-reloaded at 390.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-review-stays-open.spec.ts`.
@@ -147,6 +150,8 @@ function writeForge(): void {
     '  echo \'{"data":null}\'; exit 1',
     'fi',
     'case "$*" in *"/contents/"*) echo "gh: Not Found (HTTP 404)" >&2; exit 1;; esac',
+    // A PR the forge no longer has for this login (its repository deleted, access lost): every read of it is a 404.
+    `if [ "$1" = api ] && [ "$2" = --hostname ] && [ -f "$dir/gone-\${4##*/}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi`,
     // `repos/<owner>/<repo>/pulls/<n>` with a jq: the PR as the forge has it now (its last part names it).
     `if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then case "$6" in *tojson*) cat "$dir/pr-\${4##*/}.json";; *) echo ${HEAD};; esac; exit 0; fi`,
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then cat "$dir/pull.patch"; exit 0; fi',
@@ -426,8 +431,97 @@ test('GitHub not answering: the page stays as last read with one line, through a
   await expect(gone()).toHaveCount(0);
   await shot('forge-unreachable-restarted', 1440, 900, 'light');
 
-  // Back online: the next focus asks again, and the line goes.
+  // Back online: the next focus asks again (the restarted Inbox had read no list yet: it reads one first, so the PR it
+  // kept from before is still found), and the line goes; the page stays, merged.
   forgeDown(false);
   await focusUntil(() => unread().count(), 0);
   await expect(markOf()).toHaveAttribute('data-ref-state', 'merged');
+  await expect(gone()).toHaveCount(0);
+  await expect(review().locator('[data-pull-review-title] [data-pull-review-state]')).toContainText('Merged');
+});
+
+test('GitHub no longer has the PR (its repository deleted, access lost): the page stays as last read and says so', async () => {
+  writeFileSync(join(forge, `gone-${THEIRS.number}`), '1');
+  // Past the server's 20 s hold of its last read of the PR, a reload asks again.
+  await page.waitForTimeout(FOCUS_READ_MS);
+  await page.reload();
+  await expect(review().locator('[data-pull-review-title]')).toBeVisible({ timeout: 30_000 });
+  const missing = review().locator('[data-pull-review-missing]');
+  await expect(missing).toHaveCount(1, { timeout: 30_000 });
+  await expect(missing).toContainText('GitHub');
+  await expect(unread()).toHaveCount(0);
+  await expect(gone()).toHaveCount(0);
+  await expect(markOf()).toHaveAttribute('data-ref-state', 'merged');
+  await shot('forge-missing', 1440, 900, 'light');
+});
+
+/** A linked computer ("Mac mini") whose gh lists a PR this one does not: the window reads it there, through `/api/inbox/m/<id>/`. */
+const FAR_MACHINE = 'ibx_01JZ0000000000000000000000';
+const FAR: Who = { number: 990, title: 'Bill annual plans on the first of the month', author: 'mira', head: 'mira/annual-billing' };
+const FAR_KEY = keyOf(FAR);
+let farListed = true;
+let farState: 'open' | 'merged' = 'open';
+const farAsked: string[] = [];
+function farPull(): Record<string, unknown> {
+  const at = new Date(Date.now() - 600_000).toISOString();
+  return {
+    key: FAR_KEY, platform: 'github', host: 'github.com', repo: REPO, number: FAR.number, url: `https://github.com/${REPO}/pull/${FAR.number}`,
+    title: FAR.title, author: FAR.author, mine: false, requested: true, state: farState, base: 'main', head: FAR.head, head_repo: REPO,
+    head_sha: HEAD, additions: 2, deletions: 1, files: 1, review: null, approved_by: null, reviewers: ['ada'], checks: null,
+    updated_at: at, merged_at: farState === 'merged' ? at : null, machine: FAR_MACHINE,
+  };
+}
+
+test('a PR on a linked computer: merged there and gone from the board, its page stays, says Merged, and reopens after a reload', async () => {
+  // This computer's board (the Pull requests page) with the linked computer's PR under it while that computer lists it.
+  await page.route(
+    (u) => u.pathname === '/api/inbox/pulls' && u.searchParams.get('everywhere') === '1',
+    async (route) => {
+      const response = await route.fetch();
+      const json = (await response.json()) as { pulls: Record<string, unknown>[]; machines?: Record<string, unknown> };
+      const pulls = farListed ? [...json.pulls, farPull()] : json.pulls;
+      return route.fulfill({ response, json: { ...json, pulls, machines: { ...(json.machines ?? {}), [FAR_MACHINE]: { read_at: new Date().toISOString(), pending: false, name: 'Mac mini' } } } });
+    },
+  );
+  // That computer's per-PR routes, as its Inbox answers them (its own kept copy and its forge: inbox-pull-departed.ts).
+  await page.route(
+    (u) => u.pathname.startsWith(`/api/inbox/m/${FAR_MACHINE}/`),
+    async (route) => {
+      const u = new URL(route.request().url());
+      const path = u.pathname.slice(`/api/inbox/m/${FAR_MACHINE}`.length);
+      farAsked.push(path);
+      if (path === '/pulls/pull') return route.fulfill({ json: { serverSession: 'far', pull: farPull() } });
+      if (path === '/pulls/diff') {
+        return route.fulfill({ json: { serverSession: 'far', key: FAR_KEY, scope: 'layer', base: 'main', head: FAR.head, patch: PATCH, description: null, head_sha: HEAD, state: farState, merged_at: null } });
+      }
+      if (path === '/pulls/details') return route.fulfill({ json: { serverSession: 'far', key: FAR_KEY, description: null, labels: [], reviewers: [], checks: [], comments: [] } });
+      return route.fulfill({ status: 404, json: { error: 'Not here.', code: 'not_found' } });
+    },
+  );
+  await page.goto(`${url}#prs&stack=${encodeURIComponent(FAR_KEY)}&layer=${encodeURIComponent(FAR_KEY)}&scope=layer`);
+  await clearSidebarPeek(page);
+  await expect(fileShell()).toBeVisible({ timeout: 30_000 });
+  await expect(markOf()).toHaveAttribute('data-ref-state', 'open');
+  expect(farAsked).toContain('/pulls/diff');
+
+  // Merged on that computer: its board no longer names it. The page stays, asks that computer for it, and says merged.
+  farListed = false;
+  farState = 'merged';
+  await page.waitForTimeout(FOCUS_READ_MS);
+  await focusUntil(() => markOf().getAttribute('data-ref-state'), 'merged');
+  expect(farAsked).toContain('/pulls/pull');
+  await expect(gone()).toHaveCount(0);
+  await expect(fileShell()).toBeVisible();
+  await expect(review().locator('[data-pull-review-title] [data-pull-review-state]')).toContainText('Merged');
+  await shot('linked-merged', 1440, 900, 'light');
+
+  // A reload: no board names it; the window still knows whose it is, and the page reopens on it, merged, read there.
+  farAsked.length = 0;
+  await page.reload();
+  await expect(fileShell()).toBeVisible({ timeout: 30_000 });
+  await expect(markOf()).toHaveAttribute('data-ref-state', 'merged');
+  await expect(gone()).toHaveCount(0);
+  expect(farAsked).toContain('/pulls/pull');
+  await shot('linked-reloaded', 1440, 900, 'light');
+  await shot('linked-reloaded', 390, 844, 'light');
 });
