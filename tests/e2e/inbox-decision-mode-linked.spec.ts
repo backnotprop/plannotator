@@ -281,11 +281,12 @@ test("2. The dialog on Laptop's thread: a pick lands on Laptop, Undo takes it ba
   await expect
     .poll(async () => (await read<{ draft: { text: string } | null }>(studio, `/api/inbox/threads/${laptopThread}/comment-draft?key=${key}&machine=${laptop.id}`)).draft?.text ?? null, { timeout: 15_000 })
     .toBe('Bob Tully holds the deploy settings until Friday');
-  // A reload of the dialog reads it back.
+  // A reload of the dialog reads it back: the field opens by itself with the words (a click on "Can't do it…" would
+  // close it again, as on this computer's threads).
   await page.reload();
   await (await decideEntry(page, studio.url, laptopThread)).click();
   await goToCard(ACTION);
-  await card().locator('[data-decision-cant]').click();
+  await expect(card().locator('[data-decision-cant]')).toHaveAttribute('aria-expanded', 'true', { timeout: 15_000 });
   await expect(card().locator('textarea')).toHaveValue('Bob Tully holds the deploy settings until Friday', { timeout: 15_000 });
   await goToCard(PLAIN);
   await expect(card().locator('[data-question-tag]', { hasText: 'Draft' })).toBeVisible();
