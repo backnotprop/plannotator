@@ -10,9 +10,11 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
-import { act } from 'react';
+import { act, useLayoutEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { Annotation } from '../../types';
+import type { Annotation, HostDraft } from '../../types';
+import type { ViewerHandle } from '../Viewer';
+import type { HtmlViewerProps } from './HtmlViewer';
 import { AnnotationType } from '../../types';
 import { BRIDGE_PROTOCOL_VERSION } from './bridge-script';
 import { THUMBS_UP_LABEL } from '../../utils/quickLabels';
@@ -231,10 +233,15 @@ describe.if(hasDom)('parseBridgeMessage selection additions', () => {
   });
 });
 
+const DISPLAY_ATTRIBUTES = [{ key: 'state', attribute: 'data-demo-state' }];
+const displayedState = (value: string) => ({ entries: [{ key: 'state', value }] });
+
 describe.if(hasDom)('pinpoint click-to-pin flow', () => {
   async function mountViewer(options: {
     mode: 'selection' | 'redline' | 'comment';
     onAdd: (ann: Annotation) => void;
+    displayedContextAttributes?: HtmlViewerProps['displayedContextAttributes'];
+    onHostDraft?: (draft: HostDraft | null) => void;
   }) {
     if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
     const HtmlViewer = htmlViewerModule.HtmlViewer;
@@ -242,19 +249,24 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     document.body.appendChild(host);
     const root = createRoot(host);
     mountedRoots.push(root);
-    await act(async () => {
+    const handle = React.createRef<ViewerHandle>();
+    const render = (rawHtml: string) => act(async () => {
       root.render(
         <HtmlViewer
-          rawHtml="<html><body><p>Pinpoint target</p></body></html>"
+          ref={handle}
+          rawHtml={rawHtml}
           annotations={[]}
           onAddAnnotation={options.onAdd}
           onSelectAnnotation={() => {}}
           selectedAnnotationId={null}
           mode={options.mode}
           inputMethod="pinpoint"
+          displayedContextAttributes={options.displayedContextAttributes}
+          onHostDraft={options.onHostDraft}
         />,
       );
     });
+    await render('<html><body><p>Pinpoint target</p></body></html>');
     const iframe = host.querySelector<HTMLIFrameElement>('iframe');
     if (!iframe?.contentWindow) throw new Error('HTML iframe missing');
     const postSelection = async (data: Record<string, unknown>) => {
@@ -265,7 +277,7 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
         }));
       });
     };
-    return { postSelection };
+    return { postSelection, handle, iframe, render };
   }
 
   const selectionMessage = {
@@ -295,6 +307,137 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
       button.click();
     });
   }
+
+  test('a drag selection keeps its displayed context through the comment toolbar and Save', async () => {
+    const added: Annotation[] = [];
+    const { postSelection } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann), displayedContextAttributes: DISPLAY_ATTRIBUTES });
+    await postSelection({ ...selectionMessage, anchor: undefined, displayedContext: displayedState('empty') });
+    const comment = document.querySelector<HTMLButtonElement>('.annotation-toolbar button[title="Comment"]');
+    if (!comment) throw new Error('Comment button missing');
+    await act(async () => comment.click());
+    await typeComment('Text selection in empty cart');
+    await saveComment();
+    expect(added[0]).toMatchObject({ text: 'Text selection in empty cart', displayedContext: displayedState('empty') });
+  });
+
+  test('keyboard pinpoint carries its snapshot through the comment-mode selection to Save', async () => {
+    const added: Annotation[] = [];
+    const { postSelection } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann), displayedContextAttributes: DISPLAY_ATTRIBUTES });
+    await postSelection({
+      ...selectionMessage, pinpoint: true, targetKey: 'keyboard-pin', modeOverride: 'comment',
+      displayedContext: displayedState('keyboard'),
+    });
+    await typeComment('Keyboard pinpoint note');
+    await saveComment();
+    expect(added[0]).toMatchObject({ text: 'Keyboard pinpoint note', displayedContext: displayedState('keyboard') });
+  });
+
+  test('a textless pin and each extra target carry their own snapshot through peek, promotion, and Save', async () => {
+    const added: Annotation[] = [];
+    const { postSelection, handle } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann), displayedContextAttributes: DISPLAY_ATTRIBUTES });
+    await postSelection({
+      ...selectionMessage, pinpoint: true, targetKey: 'image', text: '[element: Image]',
+      anchor: { selector: '#cart-image', tagName: 'img', text: '' }, displayedContext: displayedState('empty'),
+    });
+    for (const [key, state] of [['cart-title', 'full'], ['cart-total', 'loaded']] as const) {
+      await postSelection({
+        type: 'plannotator-bridge-multi-target-added', key, text: key,
+        anchor: { selector: `#${key}`, tagName: 'span' }, displayedContext: displayedState(state),
+      });
+    }
+    expect(handle.current?.peekComment?.()).toMatchObject({
+      originalText: '[element: Image]', displayedContext: displayedState('empty'),
+      htmlAdditionalTargets: [
+        { text: 'cart-title', displayedContext: displayedState('full') },
+        { text: 'cart-total', displayedContext: displayedState('loaded') },
+      ],
+    });
+    await postSelection({ type: 'plannotator-bridge-multi-target-removed', key: 'image' });
+    await typeComment('Promoted first extra');
+    await saveComment();
+    expect(added[0]).toMatchObject({
+      originalText: 'cart-title', htmlAnchor: { selector: '#cart-title' }, displayedContext: displayedState('full'),
+      htmlAdditionalTargets: [{ text: 'cart-total', displayedContext: displayedState('loaded') }],
+    });
+  });
+
+  test('a saved draft keeps its original displayed context after the bridge re-pins it', async () => {
+    const added: Annotation[] = [];
+    const { postSelection, handle, iframe } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann), displayedContextAttributes: DISPLAY_ATTRIBUTES });
+    const restored: Record<string, unknown>[] = [];
+    iframe.contentWindow!.postMessage = (message: Record<string, unknown>) => {
+      if (message.type === 'plannotator-bridge-restore-draft') restored.push(message);
+    };
+    await postSelection({ type: 'plannotator-bridge-ready', protocolVersion: BRIDGE_PROTOCOL_VERSION });
+    for (const savedContext of [displayedState('empty'), undefined]) {
+      expect(handle.current?.reopenComment?.({
+        id: 'saved', blockId: '', startOffset: 0, endOffset: 0, createdA: 0,
+        type: AnnotationType.COMMENT, text: 'Previously drafted', originalText: selectionMessage.text,
+        htmlAnchor: selectionMessage.anchor, displayedContext: savedContext,
+      })).toBe(true);
+      await postSelection({ ...selectionMessage, pinpoint: true, restoreId: restored.at(-1)?.id, displayedContext: displayedState('full') });
+      expect(handle.current?.peekComment?.()?.displayedContext).toEqual(savedContext);
+      await saveComment();
+      expect(added.at(-1)?.text).toBe('Previously drafted');
+      expect(added.at(-1)?.displayedContext).toEqual(savedContext);
+    }
+  });
+
+  test('the host composer gets the snapshot with the target, not after the host composes', async () => {
+    const drafts: HostDraft[] = [];
+    const { postSelection } = await mountViewer({
+      mode: 'selection', onAdd: () => {}, displayedContextAttributes: DISPLAY_ATTRIBUTES,
+      onHostDraft: (draft) => { if (draft) drafts.push(draft); },
+    });
+    await postSelection({ ...selectionMessage, pinpoint: true, displayedContext: displayedState('empty') });
+    act(() => drafts[0]!.cancel());
+    await postSelection({ ...selectionMessage, pinpoint: true, displayedContext: displayedState('full') });
+    expect(drafts.map(({ annotation }) => annotation.displayedContext)).toEqual([displayedState('empty'), displayedState('full')]);
+  });
+
+  test('cancel and reselect never inherit the earlier target snapshot', async () => {
+    const added: Annotation[] = [];
+    const { postSelection, handle } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann), displayedContextAttributes: DISPLAY_ATTRIBUTES });
+    await postSelection({ ...selectionMessage, pinpoint: true, displayedContext: displayedState('empty') });
+    const textarea = document.querySelector('[data-comment-popover] textarea')!;
+    await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(handle.current?.peekComment?.()).toBeNull();
+    await postSelection({ ...selectionMessage, pinpoint: true, displayedContext: displayedState('full') });
+    await typeComment('New target after cancel');
+    await saveComment();
+    expect(added[0]?.displayedContext).toEqual(displayedState('full'));
+    await postSelection({ ...selectionMessage, pinpoint: true });
+    expect(handle.current?.peekComment?.()).not.toHaveProperty('displayedContext');
+  });
+
+  test('replacing the document clears snapshots on both draft targets', async () => {
+    const { postSelection, handle, render } = await mountViewer({ mode: 'selection', onAdd: () => {}, displayedContextAttributes: DISPLAY_ATTRIBUTES });
+    await postSelection({ ...selectionMessage, pinpoint: true, targetKey: 'primary', displayedContext: displayedState('empty') });
+    await postSelection({ type: 'plannotator-bridge-multi-target-added', key: 'extra', text: 'Extra', displayedContext: displayedState('full') });
+    expect(handle.current?.peekComment?.()?.htmlAdditionalTargets?.[0]?.displayedContext).toEqual(displayedState('full'));
+    await render('<html><body><p>Different document</p></body></html>');
+    const peek = handle.current?.peekComment?.();
+    expect(peek?.displayedContext).toBeUndefined();
+    expect(peek?.htmlAdditionalTargets?.[0]?.displayedContext).toBeUndefined();
+  });
+
+  test('malformed snapshots leave selections usable and do not reach Save', async () => {
+    const added: Annotation[] = [];
+    const { postSelection } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann), displayedContextAttributes: DISPLAY_ATTRIBUTES });
+    for (const displayedContext of [
+      { entries: 'not an array' }, { entries: [{ key: 'state', value: false }] },
+      { entries: [{ key: 'state', value: 'a' }, { key: 'state', value: 'b' }] },
+      { entries: Array.from({ length: 9 }, (_, i) => ({ key: `s${i}`, value: 'large' })) },
+      displayedState('x'.repeat(161)),
+      { entries: Array.from({ length: 5 }, (_, i) => ({ key: `s${i}`, value: '界'.repeat(160) })) },
+    ]) {
+      await postSelection({ ...selectionMessage, pinpoint: true, displayedContext });
+      await typeComment('Valid note despite the payload');
+      await saveComment();
+    }
+    expect(added).toHaveLength(6);
+    expect(added.every((annotation) => !('displayedContext' in annotation))).toBe(true);
+  });
 
   test('a pinpoint selection opens the comment composer, not the toolbar', async () => {
     const { postSelection } = await mountViewer({ mode: 'selection', onAdd: () => {} });
@@ -423,8 +566,8 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     // produce the same labeled-comment shape the markdown surface produces,
     // never a DELETION and never a bare comment.
     const added: Annotation[] = [];
-    const { postSelection } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann) });
-    await postSelection({ ...selectionMessage, anchor: undefined });
+    const { postSelection } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann), displayedContextAttributes: DISPLAY_ATTRIBUTES });
+    await postSelection({ ...selectionMessage, anchor: undefined, displayedContext: displayedState('empty') });
     const toolbar = document.querySelector('.annotation-toolbar');
     if (!toolbar) throw new Error('toolbar missing');
     const thumbs = Array.from(toolbar.querySelectorAll<HTMLButtonElement>('button')).find(
@@ -436,6 +579,7 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     expect(added[0]?.type).toBe(AnnotationType.COMMENT);
     expect(added[0]?.isQuickLabel).toBe(true);
     expect(added[0]?.text).toBe('Looks good');
+    expect(added[0]?.displayedContext).toEqual(displayedState('empty'));
   });
 
   function composerThumbsUp(): HTMLButtonElement | null {
@@ -450,11 +594,12 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     // must mint the same labeled comment the toolbar 👍 does, on the pinned
     // element, carrying the anchor and element context a typed comment would.
     const added: Annotation[] = [];
-    const { postSelection } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann) });
+    const { postSelection } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann), displayedContextAttributes: DISPLAY_ATTRIBUTES });
     await postSelection({
       ...selectionMessage,
       pinpoint: true,
       context: { tag: 'p', path: 'body > p' },
+      displayedContext: displayedState('full'),
     });
     const thumbs = composerThumbsUp();
     if (!thumbs) throw new Error('composer thumbs-up missing');
@@ -467,6 +612,7 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     expect(added[0]!.text).toBe(THUMBS_UP_LABEL.text);
     expect(added[0]!.quickLabelTip).toBe(THUMBS_UP_LABEL.tip);
     expect(added[0]!.originalText).toBe('Pinpoint target');
+    expect(added[0]!.displayedContext).toEqual(displayedState('full'));
     expect(added[0]!.htmlAnchor).toEqual(selectionMessage.anchor);
     expect(added[0]!.elementContext).toMatchObject({ tag: 'p', path: 'body > p' });
     expect(document.querySelector('[data-comment-popover]')).toBeNull();
@@ -1866,5 +2012,37 @@ describe.if(hasDom)('parseHtmlElementContext (validated DTO)', () => {
     const context = parse()({ tag: 'div', rect: { x: 1, y: 2, w: NaN, h: 4, vw: 5, vh: 6 }, children: 3.7 })!;
     expect(context.rect).toBeUndefined();
     expect(context.children).toBe(3);
+  });
+});
+
+
+describe.if(hasDom)('HTML hook deletion output', () => {
+  test('explicit deletion keeps the selection snapshot without enabling HTML redline UI', () => {
+    const added: Annotation[] = [];
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    mountedRoots.push(root);
+    const actions: { deleteSelection?: () => void } = {};
+    const capture = () => true;
+    function Harness() {
+      const iframeRef = useRef<HTMLIFrameElement>(null);
+      const hook = hookModule!.useHtmlAnnotation({
+        iframeRef, mode: 'selection', selectedAnnotationId: null, annotations: [],
+        onAddAnnotation: (ann) => added.push(ann), canCaptureDisplayedContext: capture,
+      });
+      useLayoutEffect(() => { actions.deleteSelection = () => hook.handleAnnotate(AnnotationType.DELETION); }, [hook.handleAnnotate]);
+      return <iframe ref={iframeRef} title="Draft target" />;
+    }
+    act(() => root.render(<Harness />));
+    act(() => window.dispatchEvent(new MessageEvent('message', {
+      source: host.querySelector('iframe')!.contentWindow,
+      data: {
+        type: 'plannotator-bridge-selection', text: 'Empty cart items',
+        rect: { top: 10, left: 10, width: 120, height: 24 }, displayedContext: displayedState('empty'),
+      },
+    })));
+    act(() => actions.deleteSelection!());
+    expect(added[0]).toMatchObject({ type: AnnotationType.DELETION, originalText: 'Empty cart items', displayedContext: displayedState('empty') });
   });
 });

@@ -750,6 +750,83 @@ Behavior is pinned by `../core/html-anchor.test.ts` (the wire fingerprint of a c
 
 ---
 
+## Displayed context through the host seam
+
+`HtmlViewer` accepts an optional `displayedContextAttributes` list of `{ key,
+attribute }` pairs. These pairs select labels from `document.documentElement`
+(the framed page's `<html>` element), not from the selected element. The page
+owns the label values. No form fields, descendant attributes, or nested state
+are read. With no prop, capture is off. Plannotator's own hosts do not pass it.
+
+```tsx
+import { HtmlViewer, type HtmlDisplayedContextAttribute } from '@plannotator/ui/components/html-viewer';
+import type { Annotation } from '@plannotator/ui/types';
+
+const labels = [
+  { key: 'screen', attribute: 'data-demo-screen' },
+  { key: 'state', attribute: 'data-demo-state' },
+] satisfies readonly HtmlDisplayedContextAttribute[];
+
+function CartReview({ annotations, onAdd }: {
+  annotations: Annotation[];
+  onAdd: (annotation: Annotation) => void;
+}) {
+  return (
+    <HtmlViewer
+      rawHtml={'<!doctype html><html data-demo-screen="cart" data-demo-state="empty"><body><p>No items</p></body></html>'}
+      displayedContextAttributes={labels}
+      annotations={annotations}
+      onAddAnnotation={onAdd}
+      onSelectAnnotation={() => {}}
+      selectedAnnotationId={null}
+      mode="selection"
+      inputMethod="pinpoint"
+    />
+  );
+}
+```
+
+A comment in this frame can carry `displayedContext: { entries: [{ key: 'screen',
+value: 'cart' }, { key: 'state', value: 'empty' }] }`. Use the same attribute
+names as the page when it updates those values.
+
+- **Timing.** Text selections and pins capture when the bridge reports the
+  selection. Each shift-clicked target captures separately. Removing the primary
+  target promotes the next target and its snapshot. A reopened target draft
+  keeps the saved annotation's snapshot, including its absence. Global comments
+  capture at each composer opening, even when the composer restores kept words.
+  A missing or stale bridge reply does not delay Save and adds no context.
+- **Limits.** Up to eight pairs. Keys are unique, start with a letter, and use
+  1–40 letters, digits, `_`, `-`, or `.`. Attribute names are unique lowercase
+  `data-*` names of up to 64 characters. Values are non-empty strings of up to
+  160 UTF-16 units. Missing or empty attributes are omitted. If no labels
+  remain, the annotation has no snapshot. A malformed or over-limit snapshot, including one whose UTF-8 JSON exceeds 2 KiB, is dropped
+  whole. Values are never cut. Invalid configuration turns capture off and logs
+  one warning per viewer. Configuration is sent after each bridge `ready` for
+  inline HTML, a script URL, or a live frame. Older bridges ignore these
+  messages; there is no protocol version change.
+- **Persistence.** `buildPersistedHtmlAnchor` and `projectHostThreads` preserve
+  `displayedContext` on the primary annotation and each extra target. The new
+  fields serialize after the existing fields. If the row exceeds the 16 KiB
+  default byte budget, the helper trims the quote to its 400-unit floor, sheds extra-target
+  element context from the end, then primary element context, extra-target
+  displayed context from the end, then primary displayed context. It then drops
+  targets from the end and only then cuts the rest of the quote. Shedding
+  metadata is silent and does not change the target-drop counts.
+- **Export and trust.** Feedback prints an escaped line for each snapshot,
+  including on global comments. Labels are descriptions, not proof of state,
+  permission, or revision. They do not replay state. The external annotations
+  API does not author them; PATCH preserves an existing value. The feedback
+  archive keeps them only in exported text. The Inbox store passes annotations
+  through. Share URLs and WebMCP replies do not include the field.
+
+`@plannotator/core/html-anchor` owns `HtmlDisplayedContext`,
+`HtmlDisplayedContextAttribute`, `parseHtmlDisplayedContext`,
+`parseHtmlDisplayedContextAttributes`, and the `MAX_DISPLAYED_CONTEXT_*` limits.
+`@plannotator/ui/types` and `@plannotator/ui/components/html-viewer` re-export
+these unchanged. **Publish core before UI**, and update UI's exact core
+dependency to that release before packing UI.
+
 ## Mermaid 12 (0.40.0)
 
 `@plannotator/ui` 0.40.0 moves the diagram runtime from `mermaid` `^11.17.2` to an exact `mermaid` `12.0.0` and, in the same release, stops registering it eagerly in Plannotator's own plan editor. The theme mapping from 0.39.x (see "Theme-aware Mermaid diagrams") is unchanged and was re-swept on 12: all 52 palettes in `packages/ui/themes` in every mode they define (78 combinations — 26 palette halves do not exist, 22 palettes being dark-only and 4 light-only — 15 diagrams each), 12,870 text-on-fill pairs and 7,410 line-on-canvas pairs measured from the rendered SVG in Chromium, **0 failures** against the 4.5:1 / 3:1 rule and 0 render errors. This section is the contract a host needs to adopt 0.40.0; the publish order is at the end.

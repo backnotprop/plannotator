@@ -1,3 +1,15 @@
+import type { HtmlDisplayedContext } from '@plannotator/core/html-anchor';
+export {
+  parseHtmlDisplayedContext,
+  parseHtmlDisplayedContextAttributes,
+  MAX_DISPLAYED_CONTEXT_ENTRIES,
+  MAX_DISPLAYED_CONTEXT_KEY_LENGTH,
+  MAX_DISPLAYED_CONTEXT_ATTRIBUTE_LENGTH,
+  MAX_DISPLAYED_CONTEXT_VALUE_LENGTH,
+  MAX_DISPLAYED_CONTEXT_BYTES,
+  type HtmlDisplayedContext,
+  type HtmlDisplayedContextAttribute,
+} from '@plannotator/core/html-anchor';
 import type { DiagramAnchor } from '@plannotator/core/diagram-anchor';
 import type { ImageRegion } from '@plannotator/core/image-region';
 import type { HtmlBlockAnchor } from '@plannotator/core/html-block-anchor';
@@ -108,6 +120,7 @@ export interface Annotation {
   htmlAnchor?: HtmlElementAnchor; // raw-HTML pinpoint: serialized element anchor for reliable restoration
   elementContext?: HtmlElementContext; // raw-HTML / live-app pinpoint: bounded agent-facing description of the primary element (never used by restore)
   htmlAdditionalTargets?: HtmlAnnotationTarget[]; // raw-HTML shift-click multi-select: extra elements this one comment covers (primary stays htmlAnchor/originalText)
+  displayedContext?: HtmlDisplayedContext; // HTML annotations: page-declared labels at capture time
   diagramAnchor?: DiagramAnchor; // a comment on a rendered diagram part (Mermaid / Graphviz fence): the part's own id, label and document source line; the highlighter skips it and the diagram overlay restores it (see @plannotator/core/diagram-anchor)
   htmlBlockAnchor?: HtmlBlockAnchor; // a comment on an element of a live `html` block in the document (the Inbox's messages): which block (its place, its embed id, its fence's lines); the element is `htmlAnchor` / `elementContext` inside that block's page. The highlighter skips it and the block's own viewer restores it (see @plannotator/core/html-block-anchor)
   imageRegion?: ImageRegion; // a comment on part of an image in a markdown document (#2100): the image's src as written, its document line, and the box in the image's own pixels; drawn by the image viewer, skipped by the highlighter, exported as `Image:` / `Region:` lines (see @plannotator/core/image-region)
@@ -163,6 +176,7 @@ export interface HtmlAnnotationTarget {
   anchor?: HtmlElementAnchor;
   /** Agent-facing element description (smaller budget than the primary's). */
   context?: HtmlElementContext;
+  displayedContext?: HtmlDisplayedContext;
 }
 
 /**
