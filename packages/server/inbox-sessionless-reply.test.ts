@@ -25,6 +25,9 @@ import { rowDeliveryLine } from "../inbox/rowDelivery";
 import { rowAgentName, rowIsScript, rowRecipientName } from "../inbox/scriptAuthor";
 import { agentAuthor, windowedThread, windowedThreadText } from "./inbox-mcp-read";
 import { createInboxLiveSessions, INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
+import { InboxOutbox } from "./inbox-outbox";
+import { PeerLink } from "./inbox-peer-link";
+import { openTransport } from "./inbox-transport";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -237,6 +240,39 @@ describe("a script's post reads \"Script\" in the window, and only there", () =>
     expect(rowAgentName(w.row(scriptOnly.thread_id), scriptOnly.author)).toBe("Script");
     const own = w.tool("ses-ops", "The nightly sync is green.");
     expect(w.row(own.thread_id).participants).toBeUndefined();
+  });
+
+  test("a linked computer's script rows, as this Inbox's link takes its list: a script's own thread still names Script, one a session took over names that session", async () => {
+    const far = world();
+    await far.poll("ses-ops");
+    const scriptOnly = far.script("Spend check: $412 of $450 this month.");
+    far.reply(scriptOnly.thread_id, "Thanks.");
+    const taken = far.script("Disk at 91% on node 3.");
+    far.tool("ses-ops", "I can clear the snapshots.", taken.id);
+    // Its door's `threads` is its window's list; the link here reads it as JSON (inbox-peer-link.ts `acceptList`).
+    const sent = JSON.parse(JSON.stringify({ cursor: 1, sections: [{ id: "new", threads: [far.row(scriptOnly.thread_id), far.row(taken.thread_id)] }] }));
+    const outboxRoot = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-sessionless-link-")));
+    roots.push(outboxRoot);
+    const url = "http://127.0.0.1:9";
+    const peer = new PeerLink({
+      link: { id: "ibx_01K00000000000000000000000", name: "Mini", token: "t", transport: { kind: "tailnet", url }, device_id: null, linked_at: "2026-11-25T00:00:00Z" },
+      transport: openTransport({ kind: "tailnet", url }),
+      outbox: InboxOutbox.open(join(outboxRoot, "data")),
+      onRecord: () => {},
+      onChange: () => {},
+      onRevoked: () => {},
+    });
+    expect(peer.acceptList(sent)).toBe(true);
+    const here = (id: string) => peer.list!.rows.find((r) => r.thread_id === id)!;
+    const own = here(scriptOnly.thread_id);
+    expect(own.delivery?.script).toBe(true);
+    expect(rowIsScript(own, own.author)).toBe(true);
+    expect(rowAgentName(own, own.author)).toBe("Script");
+    expect(rowRecipientName(own, own.author)).toBe("Script");
+    const over = here(taken.thread_id);
+    expect(rowIsScript(over, over.author)).toBe(false);
+    expect(rowAgentName(over, over.author)).toBe("Claude Code");
+    expect(rowRecipientName(over, over.author)).toBe("Claude Code");
   });
 
   test("read_thread's text, as an agent gets it, never says Script: a script's thread and one a session took over still name the script An agent", async () => {
