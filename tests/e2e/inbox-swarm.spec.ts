@@ -100,6 +100,26 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
 }
 
+/** Every ghost on screen, as drawn: its box (square, as its 24 × 24 drawing is) and how its mask fits the box. */
+async function ghostBoxes(page: Page): Promise<{ w: number; h: number; size: string; position: string }[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('.ib-ghost-g')].map((el) => {
+      const box = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return { w: Math.round(box.width * 10) / 10, h: Math.round(box.height * 10) / 10, size: style.getPropertyValue('mask-size') || style.getPropertyValue('-webkit-mask-size'), position: style.getPropertyValue('mask-position') || style.getPropertyValue('-webkit-mask-position') };
+    }),
+  );
+}
+
+/** Never stretched: each ghost's box is square and its drawing fits it whole, centred. */
+async function expectGhostsUnstretched(page: Page, count: number): Promise<void> {
+  const boxes = await ghostBoxes(page);
+  expect(boxes).toHaveLength(count);
+  for (const box of boxes) {
+    expect({ square: box.w === box.h, size: box.size, centred: /^(50% 50%|center( center)?)$/.test(box.position) }, JSON.stringify(box)).toEqual({ square: true, size: 'contain', centred: true });
+  }
+}
+
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async () => {
@@ -240,6 +260,8 @@ test('the agents join, say what they do and talk; the thread shows the summary r
   );
   expect(covered).toEqual([true, true, true, true]);
   await expect(claude.locator('.ib-swarm-wh')).toHaveText("ledger · Charlie's Mac");
+  // The Ghost button's and the status view's foot's.
+  await expectGhostsUnstretched(page, 2);
   await shot(page, '03-status-view');
 });
 
@@ -301,6 +323,8 @@ test('a swarm nobody has talked in yet: the empty ghost pane', async ({ page }) 
   await expect(empty).toBeVisible();
   await expect(empty).toContainText('No ghost messages yet');
   await expect(empty).toContainText('When the agents talk to each other, it shows up here.');
+  // The Ghost button's, the pane's header's and the empty state's.
+  await expectGhostsUnstretched(page, 3);
   // The shot once New message's "Sent to" toast has gone by itself (it sits over the pane's Send while it is up).
   await expect(page.locator('.ib-toast')).toHaveCount(0, { timeout: 20_000 });
   await shot(page, '05-ghost-pane-empty');

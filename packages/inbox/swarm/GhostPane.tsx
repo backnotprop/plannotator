@@ -13,8 +13,8 @@ import { ghostFromWords, ghostToWords } from './swarmModel';
 
 /**
  * The ghost pane (approval "inbox-swarm-thread-ui", shots 5 and 7): a swarm thread's ghost thread, beside the thread
- * the way a file is (useThreadSwarm.ts says when it covers the thread instead). Its header: the Hug drawing (the full
- * cut), "Ghost thread" and how many messages it holds. Then the agents' words, oldest first, each headed "X to Y" or
+ * the way a file is (useThreadSwarm.ts says when it covers the thread instead). Its header: the ghost (GhostGlyph, the
+ * full cut), "Ghost thread" and how many messages it holds. Then the agents' words, oldest first, each headed "X to Y" or
  * "X to everyone", drawn as the thread draws a message (the person's own to the left, like the rest). Its box writes to
  * every member, or to one picked in its "to" (the reply's recipient chip), as the person (`POST .../swarm` `say`).
  * No Pause in this piece. A phone shows it as its own page; "‹ <thread title>" goes back.

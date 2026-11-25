@@ -8,7 +8,7 @@ export function ghostButtonWords(unread: number): string {
 
 /**
  * The Ghost button (approval "inbox-swarm-thread-ui", shot g-ghost-hug-nosmile-in-topbar): first in a swarm thread's
- * top bar, the small Hug drawing, the agents' new ghost messages counted beside it while there are any. Pressed (the
+ * top bar, the ghost's small cut (GhostGlyph), the agents' new ghost messages counted beside it while there are any. Pressed (the
  * ghost pane open) it takes the accent and the count is gone: opening the pane marks them seen. No keyboard shortcut
  * (the owner's record: "No keyboard shortcut for the Ghost button").
  */
