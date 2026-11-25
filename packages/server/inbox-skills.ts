@@ -31,10 +31,12 @@ import type { SkillCatalogEntry, SkillExportContent } from "@plannotator/core/sk
 import { listReferenceSkills, readReferenceSkillContent, type ReferenceSkillContent } from "./review-skill-loader";
 import { handleReferenceSkillContent } from "./shared-handlers";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
-import { INBOX_SKILL_FILE_PATH, inboxSkillFile } from "./inbox-skill-file";
+import { inboxSkillFile } from "./inbox-skill-file";
 
 export const INBOX_SKILLS_PATH = "/api/inbox/skills";
 export const INBOX_SKILL_CONTENT_PATH = "/api/inbox/skills/content";
+/** One skill's SKILL.md for the person to read (inbox-skill-file.ts). */
+export const INBOX_SKILL_FILE_PATH = "/api/inbox/skills/file";
 
 function noStore(res: Response): Response {
   res.headers.set("Cache-Control", "no-store");

@@ -27,8 +27,6 @@ import { INBOX_BUILTIN_SKILL_ROOT } from "@plannotator/core/inbox-review";
 import { inboxBuiltinSkillContent } from "@plannotator/core/inbox-skills-compose";
 import type { SkillCatalogEntry } from "@plannotator/core/skill-references-render";
 
-export const INBOX_SKILL_FILE_PATH = "/api/inbox/skills/file";
-
 /** The most of a SKILL.md the viewer is sent. */
 export const INBOX_SKILL_FILE_MAX_BYTES = 256 * 1024;
 
