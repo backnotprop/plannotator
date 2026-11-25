@@ -36,6 +36,12 @@ import { MACHINE_VIEW_MAX_BYTES, readCappedBytes, rebaseMachineHtmlAssets, refus
 
 /** The pictures a far Markdown file shows. */
 export const MACHINE_MARKDOWN_IMAGE_ROUTE = /^attachments\/[^/]+\/markdown-image$/;
+/**
+ * A far guided review's pictures (mark `linked-reads`): an image's side and a changed Markdown file's picture. Passed
+ * on as a far Markdown file's pictures are (`machineMarkdownImageAnswer`: an image only, the same cap) and asked only
+ * from this Inbox's window (`forwardedFileReadRefusal`).
+ */
+export const MACHINE_GUIDE_IMAGE_ROUTE = /^messages\/[^/]+\/guide\/review-(?:markdown-)?image$/;
 /** A document next to a far attached file. */
 export const MACHINE_LINKED_PAGE_ROUTE = /^attachments\/[^/]+\/linked-page$/;
 /** The most of one far picture passed on: the local route's own cap. */

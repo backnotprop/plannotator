@@ -36,7 +36,7 @@ import { INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, is
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { createMachinePulls } from "./inbox-machine-pulls";
-import { MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, machineLinkedPageAnswer, machineMarkdownImageAnswer } from "./inbox-machine-files";
+import { MACHINE_GUIDE_IMAGE_ROUTE, MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, machineLinkedPageAnswer, machineMarkdownImageAnswer } from "./inbox-machine-files";
 import { farCsp, MACHINE_ASSET_ROUTE, MACHINE_PAGE_ROUTE, MACHINE_VIEW_ROUTE, machineAssetAnswer, machineAssetCsp, machinePageAnswer, machineViewAnswer } from "./inbox-machine-page";
 import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
 import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent-read";
@@ -403,8 +403,11 @@ const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
 /** A file a message names, read on another machine (approval "inbox-file-refs-open-viewer"): its view, its bytes. */
 const FILE_READ_ROUTE = /^open-in\//;
-/** The reads of a far file only this Inbox's window makes: a file a message names, a Markdown file's pictures, a document next to a file. */
-const WINDOW_FILE_READ = /^(?:open-in\/|attachments\/[^/]+\/(?:markdown-image|linked-page)$)/;
+/**
+ * The reads of a far file only this Inbox's window makes: a file a message names, a Markdown file's pictures, a
+ * document next to a file, a guided review's pictures.
+ */
+const WINDOW_FILE_READ = /^(?:open-in\/|attachments\/[^/]+\/(?:markdown-image|linked-page)$|messages\/[^/]+\/guide\/review-(?:markdown-)?image$)/;
 /** A forwarded file read that is not a press in this Inbox's window. */
 export const INBOX_MACHINE_FILE_WINDOW_ONLY_BODY = { error: "A file on another machine opens from the Inbox window only.", code: "window_only" } as const;
 
@@ -995,7 +998,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const fileRead = forwardedFileReadRefusal(route, req);
     if (fileRead) return json(fileRead.body, fileRead.status);
     // HEAD as a local page and its folder answer it: the far GET's headers, no body.
-    const head = req.method === "HEAD" && (MACHINE_PAGE_ROUTE.test(route) || MACHINE_ASSET_ROUTE.test(route) || MACHINE_MARKDOWN_IMAGE_ROUTE.test(route));
+    const head = req.method === "HEAD" && (MACHINE_PAGE_ROUTE.test(route) || MACHINE_ASSET_ROUTE.test(route) || MACHINE_MARKDOWN_IMAGE_ROUTE.test(route) || MACHINE_GUIDE_IMAGE_ROUTE.test(route));
     if (req.method === "GET" || head) {
       const search = url.search;
       const headers = pick(req.headers, PASS_REQUEST);
@@ -1022,7 +1025,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         }
         if (MACHINE_VIEW_ROUTE.test(route)) return passAnswer(await machineViewAnswer(answer, machine));
         // A Markdown file's pictures and a document next to a file (inbox-machine-files.ts): as a local file's.
-        if (MACHINE_MARKDOWN_IMAGE_ROUTE.test(route)) return passAnswer(machineMarkdownImageAnswer(answer), { csp: MACHINE_IMAGE_CSP, head });
+        if (MACHINE_MARKDOWN_IMAGE_ROUTE.test(route) || MACHINE_GUIDE_IMAGE_ROUTE.test(route)) return passAnswer(machineMarkdownImageAnswer(answer), { csp: MACHINE_IMAGE_CSP, head });
         if (MACHINE_LINKED_PAGE_ROUTE.test(route)) return passAnswer(await machineLinkedPageAnswer(answer, machine));
         // Its folder, read from an opaque origin as a local page's is: CORS reads (fonts, module scripts) as here,
         // under a local folder's CSP, never the far one.

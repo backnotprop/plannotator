@@ -9,14 +9,14 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { INBOX_LINKED_MARKS } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_READS_MARK } from "@plannotator/core/inbox-types";
 import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { doorRouteOf } from "./inbox-devices";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxOpenInRoute, type InboxOpenInLauncher } from "./inbox-open-in";
 import { doorWriteKind } from "./inbox-outbox";
-import { searchAcrossMachines, TAG_SEARCH_MARK } from "./inbox-search-machines";
+import { searchAcrossMachines } from "./inbox-search-machines";
 
 const MSG = "msg_01KAAAAAAAAAAAAAAAAAAAAAAA";
 
@@ -45,9 +45,8 @@ describe("the door", () => {
     expect(doorRouteOf("GET", "open-in/apps", true)).toBeNull();
   });
 
-  test("Viewed goes through the outbox as a set, so it is held while that machine is away; the list says the mark", () => {
+  test("Viewed goes through the outbox as a set, so it is held while that machine is away", () => {
     expect(doorWriteKind(`messages/${MSG}/guide/viewed`)).toBe("set");
-    expect(INBOX_LINKED_MARKS as readonly string[]).toContain(TAG_SEARCH_MARK);
   });
 });
 
@@ -183,7 +182,7 @@ describe("search with a Tag filter", () => {
       answerOf: async () => answer([row("thr_here", 2)]) as never,
       machines: {
         linked: () => [
-          { id: NEW, name: "MacBook", online: true, marks: ["tags", TAG_SEARCH_MARK] },
+          { id: NEW, name: "MacBook", online: true, marks: ["tags", INBOX_LINKED_READS_MARK] },
           { id: OLD, name: "Mini", online: true, marks: ["tags"] },
         ],
         projectOwner: () => null,

@@ -1,4 +1,4 @@
-import { isInboxId } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_READS_MARK, isInboxId } from "@plannotator/core/inbox-types";
 import {
   INBOX_SEARCH_BROWSE_LIMIT,
   INBOX_SEARCH_CAPS,
@@ -19,9 +19,6 @@ export interface InboxSearchMachine {
   /** The marks its list says (`INBOX_LINKED_MARKS`): a Tag filter asks only a machine that takes `linked-reads`. */
   marks?: readonly string[];
 }
-
-/** The mark of a machine whose search takes a Tag filter by any machine's id of the tag (each keeps only its own). */
-export const TAG_SEARCH_MARK = "linked-reads";
 
 export interface InboxSearchMachines {
   linked(): InboxSearchMachine[];
@@ -62,7 +59,8 @@ export async function searchAcrossMachines(input: SearchAcrossInput): Promise<An
   // A Tag filter names every machine's id of each tag; each machine filters by its own. An older machine is not asked
   // with one, as before: it may not know the filter.
   const tagged = own.searchParams.has("tag");
-  const merged = linked.filter((machine) => !tagged || (machine.marks ?? []).includes(TAG_SEARCH_MARK));
+  // `linked` never holds this machine: its own answer is `answerOf`, asked with every id whatever its marks.
+  const merged = linked.filter((machine) => !tagged || (machine.marks ?? []).includes(INBOX_LINKED_READS_MARK));
   const nameOf = (id: string) => linked.find((machine) => machine.id === id)?.name ?? id;
 
   const ask = async (machine: string, params: URLSearchParams): Promise<InboxSearchAnswer | null> => {

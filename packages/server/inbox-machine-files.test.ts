@@ -20,6 +20,7 @@ const FAR = "ibx_01K00000000000000000000000";
 const TOKEN = "tok_test";
 const MD = "att_01K7MDMDMDMDMDMDMDMDMDMDMD";
 const PAGE = "att_01K7PAPAPAPAPAPAPAPAPAPAPA";
+const GUIDE = "msg_01K7GUGUGUGUGUGUGUGUGUGUGU";
 const FOLDER = "f0f1f2f3f4f5f6f7";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 /** What a hostile far machine adds to every answer: a sandbox that escapes, a sniffing hint, CORS and a cross-origin CORP. */
@@ -89,6 +90,14 @@ function farDoor() {
         if (path === "page.png") return new Response("<script>top.x()</script>", { headers: { ...HOSTILE, "Content-Type": "text/html" } });
         if (path === "huge.png") return new Response(streamed(MACHINE_IMAGE_MAX_BYTES + 10), { headers: { "Content-Type": "image/png" } });
         return Response.json({ error: "That image is not shown by this file.", code: "image_not_referenced" }, { status: 404, headers: HOSTILE });
+      }
+      // A guided review's pictures on that machine (mark `linked-reads`): an image's side, a Markdown file's picture.
+      if (route === `messages/${GUIDE}/guide/review-image` || route === `messages/${GUIDE}/guide/review-markdown-image`) {
+        const name = path ?? url.searchParams.get("src");
+        if (name === "shot.png") return new Response(PNG, { headers: { ...HOSTILE, "Content-Type": "image/png", "X-Image-Width": "1", "X-Image-Height": "1" } });
+        if (name === "page.png") return new Response("<script>top.x()</script>", { headers: { ...HOSTILE, "Content-Type": "text/html" } });
+        if (name === "huge.png") return new Response(streamed(MACHINE_IMAGE_MAX_BYTES + 10), { headers: { "Content-Type": "image/png" } });
+        return Response.json({ reason: "too-large", error: "The file is larger than 10 MB" }, { status: 413 });
       }
       if (route === `attachments/${MD}/linked-page`) {
         if (path === "notes.md") return Response.json({ serverSession: "far", path: "/work/docs/notes.md", name: "notes.md", html: null, text: "# Notes", url: "https://evil.example/" });
@@ -223,6 +232,51 @@ describe("a far Markdown file's pictures", () => {
     const huge = await get(image("huge.png"));
     expect(huge.status).toBe(200);
     await expect(huge.arrayBuffer()).rejects.toThrow();
+  });
+});
+
+describe("a far guided review's pictures", () => {
+  const reads = (name: string) => [
+    `/api/inbox/m/${FAR}/messages/${GUIDE}/guide/review-image?path=${name}&side=new&snapshot=${GUIDE}`,
+    `/api/inbox/m/${FAR}/messages/${GUIDE}/guide/review-markdown-image?doc=README.md&side=new&src=${name}&snapshot=${GUIDE}`,
+  ];
+
+  test("held as a far Markdown file's pictures are: a picture under this computer's headers, the same cap, never a page", async () => {
+    const { get } = await linkedInbox();
+    for (const path of reads("shot.png")) {
+      const shot = await get(path);
+      expect([path, shot.status, Buffer.from(await shot.arrayBuffer()).equals(PNG)]).toEqual([path, 200, true]);
+      expect([shot.headers.get("content-security-policy"), shot.headers.get("cross-origin-resource-policy"), shot.headers.get("cache-control"), shot.headers.get("content-disposition"), shot.headers.get("x-image-width")]).toEqual([
+        INBOX_MESSAGE_IMAGE_CSP,
+        "same-origin",
+        "private, no-cache",
+        null,
+        "1",
+      ]);
+    }
+    for (const path of reads("huge.png")) {
+      const huge = await get(path);
+      expect([path, huge.status]).toEqual([path, 200]);
+      await expect(huge.arrayBuffer()).rejects.toThrow();
+    }
+    for (const path of reads("page.png")) {
+      const page = await get(path);
+      expect([path, page.status, ((await page.json()) as { code: string }).code]).toEqual([path, 502, "machine_answer_unreadable"]);
+    }
+    // Its own refusal (the preview's words) comes back as it said it.
+    const refused = await get(reads("big.png")[0]!);
+    expect([refused.status, ((await refused.json()) as { reason: string }).reason]).toEqual([413, "too-large"]);
+  });
+
+  test("only this Inbox's window reads them: a bare call is refused, never asked of the far machine", async () => {
+    const { get } = await linkedInbox();
+    for (const path of reads("shot.png")) {
+      for (const headers of [{}, { "Sec-Fetch-Site": "none" }, { "Sec-Fetch-Site": "same-origin", Origin: "http://evil.test" }] as Record<string, string>[]) {
+        const refused = await get(path, headers);
+        expect([path, headers, refused.status, ((await refused.json()) as { code: string }).code]).toEqual([path, headers, 403, "window_only"]);
+      }
+    }
+    expect(asked).toEqual([]);
   });
 });
 

@@ -4,14 +4,18 @@
  * Viewed ticks, a referenced file's hover text, and a search with a Tag filter. An older Inbox there does not say the
  * mark, so the window asks it nothing new and shows what it showed before (docs/agent-guides/inbox-machines.md).
  */
+import { INBOX_LINKED_READS_MARK } from '@plannotator/core/inbox-types';
 import { linkedMachineFacts, machineOf, selfMachineId } from './inboxUrl';
 
-export const LINKED_READS_MARK = 'linked-reads';
-
-/** Whether a machine serves these reads: this machine always; a linked one once its list says the mark. */
+/**
+ * Whether a machine serves these reads. This machine always, by its own routes: an id with no machine (`null`: this
+ * Inbox's own, or a window with no machines) or this machine's own id. A linked machine once its list says the mark;
+ * one not listed yet, or older, does not.
+ */
 export function machineServesReads(machine: string | null | undefined): boolean {
-  if (!machine || machine === selfMachineId()) return true;
-  return linkedMachineFacts(machine)?.marks.includes(LINKED_READS_MARK) ?? false;
+  if (!machine) return true;
+  if (machine === selfMachineId()) return true;
+  return linkedMachineFacts(machine)?.marks.includes(INBOX_LINKED_READS_MARK) ?? false;
 }
 
 /** Whether the machine that owns this id (a thread, a message) serves these reads. */
