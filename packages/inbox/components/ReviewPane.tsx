@@ -69,9 +69,12 @@ import type { ReviewAt } from '../app/reviewAt';
 import type { GuideSelectionActions } from '../guide/types';
 import { reviewSourceLine } from '../guide/sourceLine';
 import { InboxApiError, InboxHeldError, inboxApi } from '../api';
-import type { OutboxView } from '@plannotator/core/inbox-wire-models';
-import { viewedWithHeld } from '../guide/heldViewed';
+import type { MachineView, OutboxView } from '@plannotator/core/inbox-wire-models';
+import { heldViewed, viewedWithHeld } from '../guide/heldViewed';
 import { ownerSwitch, readsServedFor, useLinkedReadsRev } from '../linkedReads';
+import { linkedMachineFacts, machineOf } from '../inboxUrl';
+import { outboxLine } from '../machines';
+import { OutboxStateLine } from './HeldWrites';
 import { guideReviewImages } from '../reviewImages';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
@@ -516,6 +519,10 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   // What its Inbox keeps, with each tick still held for it (its machine away) laid over: as the person ticked them.
   const shownViewed = useMemo(() => viewedWithHeld(viewed, outbox, message.id), [viewed, outbox, message.id]);
   const viewedSet = useMemo(() => new Set(shownViewed), [shownViewed]);
+  // While a tick waits for its machine: the thread's own held line ("Will send when Laptop is back"), never an error.
+  const viewedMachine = linkedMachineFacts(machineOf(message.id) ?? '');
+  const heldTick = heldViewed(outbox, message.id).at(-1);
+  const heldLine = heldTick ? outboxLine(heldTick, viewedMachine as { name: string; state: MachineView['state'] } | null) : null;
   const toggleViewed = useCallback(
     (path: string) => {
       // One file's change, never the whole list: a tick that waits never undoes another made since.
@@ -962,6 +969,11 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
           {(saveError || sendError) && (
             <div className="ib-error ib-gerror" role="alert">
               {sendError ?? saveError}
+            </div>
+          )}
+          {heldLine && viewedProp && (
+            <div className="ib-rv-held" data-review-held="">
+              <OutboxStateLine line={heldLine} machine={viewedMachine as Pick<MachineView, 'state'> | null} />
             </div>
           )}
           {error ? (

@@ -185,6 +185,22 @@ test.skipIf(!hasDom)("its machine away: a tick is held, not an error; reopened, 
   ]);
 });
 
+test.skipIf(!hasDom)("a tick held for its machine says it waits, in the thread's held words, never as an error; landed, the line goes", async () => {
+  switchThere = { far: true, here: true };
+  setSelfMachine(SELF, [
+    { id: SELF, self: true, name: 'Studio' },
+    { id: OTHER, name: 'MacBook', marks: ['linked-reads'], list_cursor: 1, state: 'offline' },
+  ]);
+  const entry = { key: 'k1', machine: OTHER, route: `messages/${FAR}/guide/viewed`, state: 'queued' as const, queued_at: '2026-11-25T10:00:00.000Z', settled_at: null, status: null, answer: null, notice: null, dismissed: false, viewed: { path: 'src/guard.ts', viewed: true } };
+  await render(FAR, true, new Map([['k1', entry]]));
+  expect([...viewed!.files]).toEqual(['src/guard.ts']);
+  expect(host!.querySelector('[data-review-held] [data-outbox-line]')?.textContent).toBe('Will send when MacBook is back');
+  expect(host!.querySelector('[role="alert"], .ib-error')).toBeNull();
+  // Delivered: nothing waits, so nothing says it does.
+  await render(FAR, true, new Map([['k1', { ...entry, state: 'delivered' as const }]]));
+  expect(host!.querySelector('[data-review-held]')).toBeNull();
+});
+
 test.skipIf(!hasDom)("a linked machine's marks read after the review opened: its Viewed ticks show then, with no reopening", async () => {
   switchThere = { far: true, here: true };
   setSelfMachine(SELF, [

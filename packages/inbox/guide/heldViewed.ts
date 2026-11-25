@@ -8,9 +8,14 @@ import type { OutboxView } from '@plannotator/core/inbox-wire-models';
 /** A held tick still on its way: queued or being sent. */
 const WAITING = new Set<OutboxView['state']>(['queued', 'sending']);
 
-export function viewedWithHeld(kept: readonly string[], outbox: ReadonlyMap<string, OutboxView> | null | undefined, messageId: string): string[] {
+/** The review's Viewed ticks still held for its machine, oldest first. */
+export function heldViewed(outbox: ReadonlyMap<string, OutboxView> | null | undefined, messageId: string): OutboxView[] {
   const route = `messages/${messageId}/guide/viewed`;
-  const held = [...(outbox?.values() ?? [])].filter((entry) => entry.route === route && WAITING.has(entry.state) && entry.viewed).sort((a, b) => a.queued_at.localeCompare(b.queued_at));
+  return [...(outbox?.values() ?? [])].filter((entry) => entry.route === route && WAITING.has(entry.state) && entry.viewed).sort((a, b) => a.queued_at.localeCompare(b.queued_at));
+}
+
+export function viewedWithHeld(kept: readonly string[], outbox: ReadonlyMap<string, OutboxView> | null | undefined, messageId: string): string[] {
+  const held = heldViewed(outbox, messageId);
   let shown = [...kept];
   for (const { viewed } of held) {
     shown = shown.filter((path) => path !== viewed!.path);
