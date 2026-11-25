@@ -461,6 +461,22 @@
     "InboxGridNudge": [
       "quiet_from"
     ],
+    "InboxGridNudgeRow": [
+      "agent",
+      "last",
+      "seq",
+      "taken",
+      "to"
+    ],
+    "InboxGridNudgeRowAgent": [
+      "host",
+      "session"
+    ],
+    "InboxGridNudgeRowLast": [
+      "answered_at",
+      "at",
+      "quiet_from"
+    ],
     "InboxGuideCommentTarget": [
       "file",
       "line_end",
@@ -554,15 +570,6 @@
     "InboxListRowAck": [
       "at",
       "label"
-    ],
-    "InboxListRowGridNudge": [
-      "last",
-      "to"
-    ],
-    "InboxListRowGridNudgeLast": [
-      "answered_at",
-      "at",
-      "quiet_from"
     ],
     "InboxListRowGridSeen": [
       "at",

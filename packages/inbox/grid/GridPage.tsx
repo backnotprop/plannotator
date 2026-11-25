@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
+import type { OutboxView } from '../api';
 import { createGridModel, GRID_GROUPS, GRID_HOUR, gridHourTicks, gridLandedWord, type GridGroup, type GridLine } from '../../shared/inbox/grid';
 import { useListModel } from '../data/queries/list';
 import { useInboxAgents } from '../agentsList';
@@ -70,15 +71,16 @@ function useClock(): { now: number; sitting: number } {
   return { now, sitting };
 }
 
-export function GridRoute({ on, settingsKnown, phone, onOpen }: { on: boolean; settingsKnown: boolean; phone: boolean; onOpen: (thread: string) => void }) {
+/** `outbox`: the writes this Inbox holds for other machines (App's), so a held nudge reads as nudged in every window. */
+export function GridRoute({ on, settingsKnown, phone, outbox, onOpen }: { on: boolean; settingsKnown: boolean; phone: boolean; outbox?: ReadonlyMap<string, OutboxView>; onOpen: (thread: string) => void }) {
   useEffect(() => {
     if (settingsKnown && !on) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
   }, [settingsKnown, on]);
   if (!on) return <section className="ib-dpage" aria-busy={!settingsKnown || undefined} data-grid-waiting="" />;
-  return <GridPage phone={phone} onOpen={onOpen} />;
+  return <GridPage phone={phone} outbox={outbox} onOpen={onOpen} />;
 }
 
-function GridPage({ phone, onOpen }: { phone: boolean; onOpen: (thread: string) => void }) {
+function GridPage({ phone, outbox, onOpen }: { phone: boolean; outbox?: ReadonlyMap<string, OutboxView>; onOpen: (thread: string) => void }) {
   const list = useListModel(useQueryClient());
   const groups = useInboxAgents();
   const labels = useSessionLabels();
@@ -102,7 +104,7 @@ function GridPage({ phone, onOpen }: { phone: boolean; onOpen: (thread: string) 
   const [earlierOpen, setEarlierOpen] = useState(false);
   const sections = list?.sections ?? null;
   const machines = useMemo(() => machinesModel(list?.machines), [list?.machines]);
-  const model = useMemo(() => (sections ? derive(gridThreads({ sections, groups, machines, labels, seenOf }), now) : null), [derive, sections, groups, machines, labels, seenOf, now]);
+  const model = useMemo(() => (sections ? derive(gridThreads({ sections, groups, machines, labels, seenOf, outbox }), now) : null), [derive, sections, groups, machines, labels, seenOf, outbox, now]);
   const clockOf = useCallback((machine: string | null) => gridClockOf(machine, machines), [machines]);
   const seen = useGridSeen(model, clockOf);
   // The window's open is a new function on each of its draws: the lines keep one, so they draw only when they change.
@@ -111,10 +113,9 @@ function GridPage({ phone, onOpen }: { phone: boolean; onOpen: (thread: string) 
   const open = useCallback((thread: string) => opener.current(thread), []);
   const clock = useMemo<GridClock>(() => ({ from: model?.span.from ?? now - 6 * GRID_HOUR, to: now, at: (ms) => (now - ms >= 20 * GRID_HOUR ? `${day(ms)} ` : '') + hm(ms) }), [model?.span.from, now]);
   const onTap = useCallback((id: string) => setTapped((was) => (was === id ? null : id)), []);
-  // Glint and the moments (gridMotion.ts): where the lines that change group were, read before this draw lands.
+  // Glint and the moments (gridMotion.ts): a line that changes group slides from where the last draw left it.
   const page = useRef<HTMLElement | null>(null);
   const motion = useGridMotion(page, model);
-  motion.capture();
   // Nudge (gridNudge.ts): one press, the reply in the work's own thread.
   const nudge = useGridNudge(clock.at, clockOf, motion.nudged);
   const landedLines = model?.groups.find((g) => g.id === 'land')?.lines ?? [];

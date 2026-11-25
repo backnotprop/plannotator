@@ -4,13 +4,16 @@
  * window nudges a stale line whose thread lives on the Mini: the row Studio reads carries where the nudge goes on the
  * Mini, the nudge goes through the reply route's forward and lands in the Mini's thread once, as the person's reply
  * with its words exactly, and Studio's next read says when it went. The Mini asleep: the press is held (202) and
- * delivered once when it is back, never twice. Starts two Inboxes: CI runs it.
+ * delivered once when it is back, never twice, and a second press under another key while it waits is the same held
+ * one. The other way, the Mini nudging Studio's thread: held once, and refused at delivery when Studio's work moved
+ * meanwhile (`409 thread_moved_on`, nothing written). Starts two Inboxes: CI runs it.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
+import { gridNudgeKey } from "@plannotator/shared/inbox/grid-nudge-key";
 import { startInboxServer } from "./inbox";
 import { waitFor } from "../../tests/helpers/inbox-world";
 
@@ -71,15 +74,16 @@ describe("a nudge on another computer's thread", () => {
       const row = (await gridRow(studio.port, opened.thread_id))!;
       expect(row.machine).toBe(miniId);
       // `seq`: the thread's newest seq on the Mini, which a reply forwarded there must carry (Rule 11).
-      expect(row.grid_nudge).toEqual({ to: failing.id, seq: mini.store.messageCursor(failing.id)!, last: null });
+      expect(row.grid_nudge).toEqual({ to: failing.id, seq: mini.store.messageCursor(failing.id)!, agent: { host: "claude-code", session: "ses_tide" }, taken: 0, last: null });
 
       const words = `Haptics on save has been quiet for 3 h 37 min, with tests failing on #22. ${ASK}`;
+      const key = (turn: number) => gridNudgeKey({ thread: opened.thread_id, quietFrom: Date.parse(failing.created_at), turn, taken: 0 });
       const nudge = (key: string) =>
         post(studio.port, `/api/inbox/m/${miniId}/messages/${failing.id}/reply`, { idempotency_key: key, words, questions: [], seen_through_seq: row.grid_nudge!.seq, nudge: { quiet_from: failing.created_at } });
       const nudgesOnMini = () => mini.store.thread(opened.thread_id)!.messages.filter((m) => m.nudge);
 
-      expect((await nudge("grid-nudge-far-1")).status).toBe(200);
-      expect((await nudge("grid-nudge-far-1")).status).toBe(200);
+      expect((await nudge(key(1))).status).toBe(200);
+      expect((await nudge(key(1))).status).toBe(200);
       expect(nudgesOnMini().length).toBe(1);
       const first = nudgesOnMini()[0]!;
       // A reply to the agent's last message there, so it goes to that agent (ses_tide) as a typed reply would.
@@ -88,15 +92,64 @@ describe("a nudge on another computer's thread", () => {
       await waitFor("the nudge on Studio's Grid read", async () => (await gridRow(studio.port, opened.thread_id))?.grid_nudge?.last?.at === first.created_at, 20_000);
 
       // The Mini asleep: held (202), delivered once when it is back, and a second press of the same key writes nothing.
+      // A press under another key while it is held (another window, a later turn) answers the held one: one nudge.
       mini.stop();
       await waitFor("the Mini offline on Studio", async () => ((await get(studio.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === miniId)?.state === "offline", 30_000);
-      expect((await nudge("grid-nudge-far-2")).status).toBe(202);
+      expect((await nudge(key(2))).status).toBe(202);
+      const again = await nudge(key(3));
+      expect([again.status, ((await again.json()) as Json).outbox?.key]).toEqual([202, key(2)]);
       mini = await start(dataMini);
       await waitFor("the held nudge on the Mini", () => nudgesOnMini().length === 2, 45_000);
-      expect((await nudge("grid-nudge-far-2")).status).toBe(200);
+      expect((await nudge(key(2))).status).toBe(200);
       await new Promise((resolve) => setTimeout(resolve, 1500));
       expect(nudgesOnMini().length).toBe(2);
       expect(nudgesOnMini().map((m) => m.body)).toEqual([words, words]);
+    } finally {
+      studio.stop();
+      mini.stop();
+    }
+  }, 120_000);
+
+  test("the other way, Mini nudging Studio's thread: held once while Studio sleeps, and refused at delivery because the work moved meanwhile", async () => {
+    const dataStudio = scratch("plannotator-grid-nudge-studio2-");
+    const dataMini = scratch("plannotator-grid-nudge-mini2-");
+    let studio = await start(dataStudio);
+    const mini = await start(dataMini);
+    try {
+      const offered = (await (await fetch(`${at(mini.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(studio.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(mini.port), back: at(studio.port) }) });
+      expect(linked.status).toBe(201);
+      const studioId = (await get(studio.port, "/api/inbox/threads?machines=1")).self as string;
+      const studioOnMini = async () => ((await get(mini.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === studioId);
+      await waitFor("Studio linked on the Mini", async () => (await studioOnMini())?.state === "online", 30_000);
+
+      // Studio's agent went quiet in a thread of its own.
+      const project = studio.store.ensureProject({ name: "harbor", root: "/work/harbor" });
+      const agent = { kind: "agent" as const, host: "claude-code", session: "ses_ship", name: "Claude Code" };
+      const quiet = studio.store.sendMessage({ project_id: project.id, author: agent, thread: "Release notes", body: "Drafted the notes." }).message;
+      const seq = studio.store.messageCursor(quiet.id)!;
+      // Then the work moved (its steps changed) after the stretch began, past the few seconds' slack.
+      await new Promise((resolve) => setTimeout(resolve, 5500));
+      studio.store.setThreadSteps({ thread_id: quiet.thread_id, agent, steps: [{ step: "Write the notes", status: "doing" }] });
+
+      const words = `Release notes has been quiet for 3 h 5 min. ${ASK}`;
+      const key = (turn: number) => gridNudgeKey({ thread: quiet.thread_id, quietFrom: Date.parse(quiet.created_at), turn, taken: 0 });
+      const nudge = (k: string) => post(mini.port, `/api/inbox/m/${studioId}/messages/${quiet.id}/reply`, { idempotency_key: k, words, questions: [], seen_through_seq: seq, nudge: { quiet_from: quiet.created_at } });
+      const nudgesOnStudio = () => studio.store.thread(quiet.thread_id)!.messages.filter((m) => m.nudge);
+
+      studio.stop();
+      await waitFor("Studio offline on the Mini", async () => (await studioOnMini())?.state === "offline", 30_000);
+      expect((await nudge(key(1))).status).toBe(202);
+      const again = await nudge(key(2));
+      expect([again.status, ((await again.json()) as Json).outbox?.key]).toEqual([202, key(1)]);
+
+      studio = await start(dataStudio);
+      // Delivered when Studio is back, and refused there: the outbox keeps the refusal, the thread no nudge.
+      let answer: Response | null = null;
+      await waitFor("the held nudge settled", async () => (answer = await nudge(key(1))).status !== 202, 45_000);
+      expect(answer!.status).toBe(409);
+      expect(((await answer!.json()) as Json).code).toBe("thread_moved_on");
+      expect(nudgesOnStudio()).toEqual([]);
     } finally {
       studio.stop();
       mini.stop();

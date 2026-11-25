@@ -54,6 +54,7 @@ export * from "./inbox-initiatives";
 export * from "./inbox-tag-colours";
 // Removing an agent from a thread (approval "inbox-remove-agent-from-thread"), the same way.
 export * from "./inbox-removed";
+export * from "./inbox-words-target";
 import type { InboxRemoval } from "./inbox-removed";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
 export * from "./inbox-surface-bridge";
@@ -1009,6 +1010,24 @@ export interface InboxMessage {
 /** A Grid nudge's mark on its reply (`InboxMessage.nudge`): when the quiet stretch it was sent in began (ISO). */
 export interface InboxGridNudge {
   quiet_from: string;
+}
+
+/**
+ * What a list row carries for Grid's Nudge (`InboxListRow.grid_nudge`, approval "inbox-agent-grid", round 4), worked out
+ * on the thread's own computer (packages/server/inbox-grid-nudge.ts). Absent on a thread with no message to reply to,
+ * on a row that cannot go stale, and from an older Inbox (no Nudge there).
+ */
+export interface InboxGridNudgeRow {
+  /** The message a nudge replies to: the one the person's typed words would answer (core `inboxWordsMessage`). */
+  to: string;
+  /** The thread's newest seq there, which the nudge carries as `seen_through_seq`. */
+  seq: number;
+  /** The session a reply to `to` reaches (`inboxWordsRecipient`): the agent Nudge names and wakes. Null when none is known. */
+  agent: { host: string | null; session: string } | null;
+  /** How many of the thread's nudges were taken back: each makes the next press a new write (its key, grid-nudge-key.ts). */
+  taken: number;
+  /** The latest nudge not taken back: its time, the quiet stretch it was sent in, and the agent's first message after it (null while unanswered). */
+  last: { at: string; quiet_from: string; answered_at: string | null } | null;
 }
 
 /** A skill emoji's reply (`InboxMessage.skill_reaction`): one emoji (`isInboxReactionEmoji`) and a skill name (`isInboxReactionSkill`). */
@@ -2105,14 +2124,8 @@ export interface InboxListRow extends InboxThreadSummary {
    * Only while that machine's Checklist switch is on; a linked machine's rows carry their own. Absent otherwise.
    */
   steps_progress?: { done: number; total: number; doing: string | null; at: string };
-  /**
-   * Grid's Nudge (approval "inbox-agent-grid", round 4), on a read that asks for Grid: `to`, the message a nudge
-   * replies to (the thread's newest agent message, else its first), and `last`, the latest nudge among the thread's
-   * last messages (its time, the quiet stretch it was sent in, and the agent's first message after it; null while
-   * unanswered). `seq`: the thread's newest seq there, which the nudge carries as `seen_through_seq`. Absent on a
-   * thread with no message to reply to, and from an older Inbox (no Nudge there).
-   */
-  grid_nudge?: { to: string; seq: number; last: { at: string; quiet_from: string; answered_at: string | null } | null };
+  /** Grid's Nudge (approval "inbox-agent-grid", round 4), on a read that asks for Grid: `InboxGridNudgeRow`. */
+  grid_nudge?: InboxGridNudgeRow;
   /**
    * The thread's open PRs that are not hidden (keys; the server's inbox-pull-hidden.ts): the row menu's and the picks'
    * "Hide pull request". Only on this Inbox's own rows of the list the window and the phone read; absent when none.

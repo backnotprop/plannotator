@@ -18,7 +18,8 @@
  * the walk (`document.getAnimations()` works out the page's style). One timer every 1.7 s while the tab shows; none
  * while it is hidden or with prefers-reduced-motion (then nothing moves and lines change group in place). Lines off
  * screen are skipped (the page's IntersectionObserver, gridSeen.ts, marks the ones on screen `data-vis`; no layout
- * read). The slide reads the lines' places once, before a draw in which a line changes group, and never otherwise.
+ * read). The slide reads the lines' places in a layout effect after each draw of the page (never during render), when
+ * the browser lays the page out anyway, and slides from the places the draw before left.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { GridGroup, GridModel } from '../../shared/inbox/grid';
@@ -78,7 +79,7 @@ function glint(line: HTMLElement): boolean {
   return true;
 }
 
-export function useGridMotion(list: RefObject<HTMLElement | null>, model: GridModel | null): { nudged: (id: string) => void; capture: () => void } {
+export function useGridMotion(list: RefObject<HTMLElement | null>, model: GridModel | null): { nudged: (id: string) => void } {
   const groups = useRef(new Map<string, GridGroup>());
   /** Where each line, group heading (`h:<group>`) and "N more" (`d:<group>`) was; a heading's or a door's group is null. */
   const before = useRef(new Map<string, { top: number; group: GridGroup | null }>());
@@ -133,44 +134,42 @@ export function useGridMotion(list: RefObject<HTMLElement | null>, model: GridMo
   }, [list]);
 
   /**
-   * Before the page draws a new model in which a line changes group: where every line is now, so each one the change
-   * moves (the line itself and the lines it passes) slides from there, as the approved take does. Read once, and only
-   * then; a draw in which no line changes group reads nothing.
+   * After each draw of the page (a layout effect, never during render): when the model changed and a line changed
+   * group, each line the change moves (the line itself and the lines it passes) slides from where the draw before left
+   * it, as the approved take does; going Stale cools, landing settles. Then where everything is now is kept, on the
+   * page's own coordinates (a scroll between draws moves nothing), for the next draw. The places are read once per
+   * draw, after the draw's own changes, when the browser lays the page out anyway; with reduced motion, never.
    */
-  const capture = useCallback(() => {
-    const root = list.current;
-    before.current.clear();
-    if (!root || !model || reducedMotion()) return;
-    const changing = model.groups.some(({ id, lines }) => lines.some((line) => {
-      const was = groups.current.get(line.id);
-      return was !== undefined && was !== id;
-    }));
-    if (!changing) return;
-    for (const [key, el] of sliders(root)) {
-      const was = key.startsWith('h:') || key.startsWith('d:') ? null : groups.current.get(key);
-      if (was !== undefined) before.current.set(key, { top: el.getBoundingClientRect().top, group: was });
-    }
-  }, [list, model]);
-
-  // After it drew: each line that changed group slides from where it was; going Stale cools, landing settles.
+  const drawn = useRef<GridModel | null>(null);
   useLayoutEffect(() => {
     const root = list.current;
     if (!root || !model) return;
-    const moved = before.current;
-    before.current = new Map();
+    const changed = drawn.current !== model;
+    drawn.current = model;
     const next = new Map<string, GridGroup>();
     for (const { id, lines } of model.groups) for (const line of lines) next.set(line.id, id);
-    if (!reducedMotion() && moved.size > 0) {
-      for (const [key, el] of sliders(root)) {
-        const was = moved.get(key);
+    const was = groups.current;
+    groups.current = next;
+    if (reducedMotion()) {
+      before.current.clear();
+      return;
+    }
+    const top0 = root.getBoundingClientRect().top;
+    const now = new Map<string, { el: HTMLElement; top: number }>();
+    for (const [key, el] of sliders(root)) now.set(key, { el, top: el.getBoundingClientRect().top - top0 });
+    const moving = changed && [...next].some(([id, group]) => was.has(id) && was.get(id) !== group);
+    if (moving) {
+      for (const [key, { el, top }] of now) {
+        const at = before.current.get(key);
         // A group heading that was not there comes in softly, as the approved take does.
-        if (!was) {
+        if (!at) {
           if (key.startsWith('h:') && typeof el.animate === 'function') el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: 'ease-out' });
           continue;
         }
-        const group = was.group === null ? null : next.get(key);
+        const from = at.group;
+        const group = from === null ? null : next.get(key);
         if (group === undefined) continue;
-        const dy = was.top - el.getBoundingClientRect().top;
+        const dy = at.top - top;
         if (Math.abs(dy) > 1 && typeof el.animate === 'function') {
           // A longer way takes longer: 0.38 s to 0.8 s. A line going further than a row rides over the others.
           const ms = 380 + Math.min(420, Math.abs(dy) * 0.9);
@@ -179,15 +178,16 @@ export function useGridMotion(list: RefObject<HTMLElement | null>, model: GridMo
           const travel = el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: ms, easing: IN_OUT });
           if (far) travel.onfinish = travel.oncancel = () => el.removeAttribute('data-far');
         }
-        if (group === null || was.group === group) continue;
-        if (group === 'stale' && (was.group === 'move' || was.group === 'quiet')) flag(el, 'data-cool', COOL_MS);
+        if (group === null || from === group) continue;
+        if (group === 'stale' && (from === 'move' || from === 'quiet')) flag(el, 'data-cool', COOL_MS);
         if (group === 'land') flag(el, 'data-landing', LAND_MS);
       }
+      // Lines that changed: the breath is put back in step on the walk's next turn.
+      breathing.current = '';
     }
-    groups.current = next;
-    // Lines that changed: the breath is put back in step on the walk's next turn.
-    breathing.current = '';
-  }, [list, model]);
+    // Where everything is now, for the next draw: a line by its group now; a heading's or a door's group is null.
+    before.current = new Map([...now].map(([key, { top }]) => [key, { top, group: key.startsWith('h:') || key.startsWith('d:') ? null : (next.get(key) ?? null) }]));
+  });
 
   const nudged = useCallback(
     (id: string) => {
@@ -196,7 +196,7 @@ export function useGridMotion(list: RefObject<HTMLElement | null>, model: GridMo
     },
     [list],
   );
-  return { nudged, capture };
+  return { nudged };
 }
 
 /** What slides when a line changes group: every line, and each group's heading and "N more", by a key that outlives the draw. */

@@ -111,6 +111,11 @@ export interface InboxThreadPullsSummaryItem {
   added_at: string;
   read_at: string | null;
   checks: InboxThreadPullChecks | null;
+  /**
+   * When this Inbox saw the checks change (a run started or ended), to within minutes (additive; Grid round 4's
+   * movement). Absent when it did not see the change happen: no read close enough before it.
+   */
+  checks_at?: string;
   review: InboxThreadPullReview | null;
 }
 
@@ -260,7 +265,7 @@ export function inboxThreadPullHeadline<T extends Pick<InboxThreadPull, "pull" |
 /** A row's summary of its thread's live PRs, or undefined when it has none. */
 export function inboxThreadPullsSummary(
   pulls: readonly InboxThreadPull[],
-  live?: (key: string) => { checks?: InboxThreadPullChecks | null; review?: InboxThreadPullReview | null } | undefined,
+  live?: (key: string) => { checks?: InboxThreadPullChecks | null; review?: InboxThreadPullReview | null; checks_at?: string } | undefined,
 ): InboxThreadPullsSummary | undefined {
   const headline = inboxThreadPullHeadline(pulls, inboxThreadPullGroups(pulls));
   if (!headline) return undefined;
@@ -268,7 +273,7 @@ export function inboxThreadPullsSummary(
   if (!live) return summary;
   const items = pulls.map((pull) => {
     const now = live(pull.pull);
-    return { key: pull.pull, state: pull.state, added_at: pull.added_at, read_at: pull.read_at, checks: now?.checks ?? null, review: now?.review ?? null };
+    return { key: pull.pull, state: pull.state, added_at: pull.added_at, read_at: pull.read_at, checks: now?.checks ?? null, ...(now?.checks_at ? { checks_at: now.checks_at } : {}), review: now?.review ?? null };
   });
   return { ...summary, items };
 }

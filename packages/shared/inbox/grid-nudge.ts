@@ -14,14 +14,22 @@ export const GRID_NUDGE_ASK = "Please finish it, or tell me in a few words why i
 
 /**
  * A stale line's nudge at `now`. `at` says a time as the line says it ("8:05 PM"). The detail, from what the line
- * already shows: a PR's failing tests, a draft PR, or a plan never started. Failing tests carry no "since 8:05 PM":
- * the list keeps no time for when a PR's checks began failing, and the quiet stretch's start would say something else.
+ * already shows: a PR's failing tests, a draft PR, or a plan never started. Failing tests say "since 8:05 PM" only
+ * when the thread's computer saw them start failing (`detail.since`, the PR's `checks_at`); otherwise no time.
+ *
+ * The forms: "<name> has been quiet for <D>." with nothing, ", with tests failing on #22 since 8:05 PM",
+ * ", with tests failing on #22", ", with tests failing", ", with #7 still a draft", ", planned at 7:20 PM and not
+ * started"; then GRID_NUDGE_ASK. <D> is exact ("3 h 37 min", "1 d 6 h").
  */
 export function gridNudgeWords(line: Pick<GridLine, "name" | "staleFrom" | "planned" | "detail">, now: number, at: (ms: number) => string): string {
   const from = line.staleFrom ?? now;
   let detail = "";
   if (line.planned !== null) detail = `, planned at ${at(line.planned)} and not started`;
-  else if (line.detail?.words === "tests failing") detail = `, with tests failing${line.detail.pr ? ` on ${line.detail.pr}` : ""}`;
-  else if (line.detail?.words === "draft") detail = line.detail.pr ? `, with ${line.detail.pr} still a draft` : ", still a draft";
-  return `${line.name} has been quiet for ${gridExact(now - from)}${detail}. ${GRID_NUDGE_ASK}`;
+  else if (line.detail?.words === "tests failing") {
+    const since = line.detail.since ?? null;
+    detail = `, with tests failing${line.detail.pr ? ` on ${line.detail.pr}` : ""}${since !== null ? ` since ${at(since)}` : ""}`;
+  }
+  // A draft is named by its PR ("with #7 still a draft"); one with no label says no detail (approved forms only).
+  else if (line.detail?.words === "draft" && line.detail.pr) detail = `, with ${line.detail.pr} still a draft`;
+  return `${line.name} has been quiet for ${gridExact(now - from, true)}${detail}. ${GRID_NUDGE_ASK}`;
 }

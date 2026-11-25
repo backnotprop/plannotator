@@ -11,7 +11,7 @@
  * "Claude Code (plannotator)" in another one, and a number after those when
  * two would still read the same.
  */
-import { INBOX_AGENT_LABELS, INBOX_HOST_NAMES, inboxRemovedNow, type InboxMessageWire, type InboxParticipant, type InboxTag, type InboxThread } from '@plannotator/core/inbox-types';
+import { INBOX_AGENT_LABELS, INBOX_HOST_NAMES, inboxActiveHandoff, inboxRemovedNow, type InboxMessageWire, type InboxParticipant, type InboxTag, type InboxThread } from '@plannotator/core/inbox-types';
 import { sanitizeMentionLabel, type MentionPerson } from '@plannotator/ui/utils/mentions';
 import type { TagMode, TaggableModel, TaggableSession } from './api';
 import { shortLabel } from './sessionLabels';
@@ -251,18 +251,10 @@ export function effectiveTagMode(tagged: readonly TagOption[], chosen: TagMode):
 /**
  * The thread's active hand-off (approval "inbox-tag-handoff"): the person's
  * latest reply that handed it to another session and was not taken back.
- * Its `to` owns the thread now. Null: no hand-off.
+ * Its `to` owns the thread now. Null: no hand-off. The rule is core's (inbox-words-target.ts), shared with Grid's Nudge.
  */
 export function activeHandoff(thread: InboxThread): InboxMessageWire | null {
-  // A hand-off to an agent the person removed from the thread since no longer holds it (core inbox-removed.ts).
-  const removed = inboxRemovedNow(thread.messages);
-  for (let index = thread.messages.length - 1; index >= 0; index--) {
-    const message = thread.messages[index]!;
-    if (message.author.kind === 'person' && message.handoff && !message.handoff.undone_at && message.to) return removed.has(message.to.session) ? null : message;
-    // A later reply took over from the session that ended: the thread is no longer that hand-off's.
-    if (message.took_over) return null;
-  }
-  return null;
+  return inboxActiveHandoff(thread.messages);
 }
 
 /** The name a hand-off's new owner reads by: the label the person picked, else its agent's name. */

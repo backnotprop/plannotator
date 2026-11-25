@@ -20,6 +20,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAgentsGroup, InboxListRow } from '@plannotator/core/inbox-types';
+import type { OutboxView } from '../api';
+import { gridNudgeKey } from '../../shared/inbox/grid-nudge-key';
 
 const hasDom = typeof document !== 'undefined';
 const { Sidebar } = (hasDom ? await import('../components/Sidebar') : {}) as typeof import('../components/Sidebar');
@@ -116,33 +118,36 @@ const baseRows = () => [
   row({ thread_id: 'msg_push', thread_name: 'Push notification settings', ...far, last_at: new Date(NOW - 60_000 + MINI_AHEAD).toISOString(), last_agent_at: new Date(NOW - 60_000 + MINI_AHEAD).toISOString(), sent: null, created_at: new Date(NOW - 50 * 60_000 + MINI_AHEAD).toISOString() }),
 ];
 
-function mount(options: { on: boolean; phone?: boolean; opened?: string[]; rows?: InboxListRow[] }) {
+function mount(options: { on: boolean; phone?: boolean; opened?: string[]; rows?: InboxListRow[]; outbox?: OutboxView[]; miniAway?: boolean; agents?: InboxAgentsGroup[] }) {
   const client = new QueryClient();
   const put = (rows: InboxListRow[]) =>
     putList(client, {
       sections: [{ id: 'sent', label: 'Sent', threads: rows }],
       machines: [
         { id: SELF, name: 'MacBook', self: true, state: 'online', since: null },
-        { id: MINI, name: 'Mac mini', self: false, state: 'online', since: null, clock_ms: MINI_AHEAD },
+        { id: MINI, name: 'Mac mini', self: false, state: options.miniAway ? 'offline' : 'online', since: null, clock_ms: MINI_AHEAD },
       ],
       self: SELF,
     } as never);
   put(options.rows ?? baseRows());
-  setInboxAgents(agents);
+  setInboxAgents(options.agents ?? agents);
   const host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
   root = createRoot(host);
-  act(() =>
-    root!.render(
-      <QueryClientProvider client={client}>
-        <SidebarProvider>
-          <GridRoute on={options.on} settingsKnown phone={options.phone === true} onOpen={(thread) => options.opened?.push(thread)} />
-        </SidebarProvider>
-      </QueryClientProvider>,
-    ),
-  );
-  return { host, put };
+  // The window's outbox (App's): every window of this Inbox holds the same, read again after a reload.
+  const draw = (outbox: OutboxView[] = []) =>
+    act(() =>
+      root!.render(
+        <QueryClientProvider client={client}>
+          <SidebarProvider>
+            <GridRoute on={options.on} settingsKnown phone={options.phone === true} outbox={new Map(outbox.map((e) => [e.key, e]))} onOpen={(thread) => options.opened?.push(thread)} />
+          </SidebarProvider>
+        </QueryClientProvider>,
+      ),
+    );
+  draw(options.outbox);
+  return { host, put, draw };
 }
 
 function requests(): { url: string; body: unknown }[] {
@@ -400,7 +405,7 @@ test.skipIf(!hasDom)('phone: a tap opens the readout under the line, with Open t
 });
 
 /** A linked computer's work, quiet 3 h 40 min on its own clock, its agent still there: a stale line Nudge can reach. */
-const farStale = () =>
+const farStale = (nudge: Partial<NonNullable<InboxListRow['grid_nudge']>> = {}) =>
   row({
     thread_id: 'msg_tide',
     thread_name: 'Haptics on save',
@@ -409,8 +414,26 @@ const farStale = () =>
     last_at: new Date(NOW - 220 * 60_000 + MINI_AHEAD).toISOString(),
     last_agent_at: new Date(NOW - 220 * 60_000 + MINI_AHEAD).toISOString(),
     sent: { at: new Date(NOW - 230 * 60_000 + MINI_AHEAD).toISOString(), checked_at: new Date(NOW - 229 * 60_000 + MINI_AHEAD).toISOString() },
-    grid_nudge: { to: 'msg_tide_last', seq: 41, last: null },
+    grid_nudge: { to: 'msg_tide_last', seq: 41, agent: { host: 'claude-code', session: 'ses_ledger' }, taken: 0, last: null, ...nudge },
   });
+/** The stretch's start on the Mac mini's clock, as the nudge's key and mark carry it. */
+const FAR_QUIET_FROM = Date.parse(new Date(NOW - 220 * 60_000 + MINI_AHEAD).toISOString());
+/** A nudge for msg_tide in this Inbox's outbox. */
+const heldNudge = (over: Partial<OutboxView> = {}): OutboxView => ({
+  key: gridNudgeKey({ thread: 'msg_tide', quietFrom: FAR_QUIET_FROM, turn: 1, taken: 0 }),
+  machine: MINI,
+  route: 'messages/msg_tide_last/reply',
+  state: 'queued',
+  queued_at: ago(2),
+  settled_at: null,
+  status: null,
+  answer: null,
+  notice: null,
+  dismissed: false,
+  words: 'Haptics on save has been quiet for 3 h 38 min. Please finish it, or tell me in a few words why it stopped.',
+  thread: 'msg_tide',
+  ...over,
+});
 
 test.skipIf(!hasDom)("Nudge: one press sends the words once, on the thread's own computer and clock, and the line says Nudged just now", async () => {
   fakeScreen();
@@ -431,13 +454,123 @@ test.skipIf(!hasDom)("Nudge: one press sends the words once, on the thread's own
   expect(body.seen_through_seq).toBe(41);
   expect(body.words).toBe('Haptics on save has been quiet for 3 h 40 min. Please finish it, or tell me in a few words why it stopped.');
   // On the Mac mini's clock: when it last moved there, and the key built on it.
-  const quietFrom = NOW - 220 * 60_000 + MINI_AHEAD;
-  expect(Date.parse(body.nudge.quiet_from)).toBe(Date.parse(new Date(quietFrom).toISOString()));
-  expect(body.idempotency_key).toBe(`grid-nudge-msg_tide-${Date.parse(new Date(quietFrom).toISOString())}-1`);
+  expect(Date.parse(body.nudge.quiet_from)).toBe(FAR_QUIET_FROM);
+  expect(body.idempotency_key).toBe(gridNudgeKey({ thread: 'msg_tide', quietFrom: FAR_QUIET_FROM, turn: 1, taken: 0 }));
   // No second press: the button is gone, and the line says so.
   expect(line().querySelector('[data-grid-nudge]')).toBeNull();
   expect(line().querySelector('[data-grid-nudged]')!.textContent).toBe('Nudged just now');
   expect(line().querySelector('[data-grid-readout]')!.textContent).toContain('Nudged');
+});
+
+test.skipIf(!hasDom)('Nudge by keyboard: focus shows it, Enter sends once, and a second Enter finds nothing to send or open', async () => {
+  fakeScreen();
+  const asked = requests();
+  const opened: string[] = [];
+  const { host } = mount({ on: true, opened, rows: [farStale()] });
+  await settle();
+  const button = host.querySelector<HTMLButtonElement>('[data-grid-line="msg_tide"] [data-grid-nudge]')!;
+  act(() => button.focus());
+  expect(document.activeElement).toBe(button);
+  // Enter on a focused button is a click with no pointer (detail 0).
+  act(() => void button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })));
+  await settle();
+  act(() => void (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await settle();
+  expect(asked.filter((r) => r.url.includes('/reply')).length).toBe(1);
+  expect(opened).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a double click on Nudge sends once and never opens the thread (its second click lands on the name)', async () => {
+  fakeScreen();
+  const asked = requests();
+  const opened: string[] = [];
+  const { host } = mount({ on: true, opened, rows: [farStale()] });
+  await settle();
+  const line = () => host.querySelector('[data-grid-line="msg_tide"]')!;
+  act(() => void line().querySelector('[data-grid-nudge]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })));
+  // The button is gone: the second click of the double click lands on the name's whole-line hit.
+  expect(line().querySelector('[data-grid-nudge]')).toBeNull();
+  act(() => void line().querySelector('.ib-grid-name')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })));
+  await settle();
+  expect(asked.filter((r) => r.url.includes('/reply')).length).toBe(1);
+  expect(opened).toEqual([]);
+  // A click later on is an ordinary open.
+  await settle(750);
+  act(() => void line().querySelector('.ib-grid-name')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })));
+  expect(opened).toEqual(['msg_tide']);
+});
+
+test.skipIf(!hasDom)('a nudge held for the away Mac mini is nudged in every window and after a reload: no Nudge, and the readout says it waits', async () => {
+  fakeScreen();
+  const asked = requests();
+  // A fresh window (or a reload): nothing pressed here, only the outbox's held entry.
+  const { host, draw } = mount({ on: true, rows: [farStale()], outbox: [heldNudge()], miniAway: true });
+  await settle();
+  const line = () => host.querySelector('[data-grid-line="msg_tide"]')!;
+  expect(line().getAttribute('data-group')).toBe('stale');
+  expect(line().querySelector('[data-grid-nudge]')).toBeNull();
+  expect(line().querySelector('[data-grid-nudged]')!.textContent).toBe('Nudged 2 min ago');
+  expect(line().querySelector('[data-grid-readout]')!.textContent).toContain('Will send when Mac mini is back');
+  expect(asked.filter((r) => r.url.includes('/reply'))).toEqual([]);
+  // Another window's later turn of the same stretch (a new turn's key) is held back too: still no Nudge after 3 h.
+  draw([heldNudge({ queued_at: ago(200) })]);
+  await settle();
+  expect(line().querySelector('[data-grid-nudge]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a held nudge refused on delivery (the work moved): the line says why in the status grey, and offers no Nudge in that stretch', async () => {
+  fakeScreen();
+  requests();
+  const refusedEntry = heldNudge({ state: 'refused', status: 409, settled_at: ago(1), notice: { kind: 'refused', at: ago(1) }, answer: { error: 'The work moved on after this nudge was pressed, so it was not sent.', code: 'thread_moved_on' } });
+  const { host } = mount({ on: true, rows: [farStale()], outbox: [refusedEntry] });
+  await settle();
+  const line = host.querySelector('[data-grid-line="msg_tide"]')!;
+  const status = line.querySelector('[data-grid-nudged]')!;
+  expect(status.textContent).toBe('Not delivered: The work moved on after this nudge was pressed, so it was not sent.');
+  expect(status.hasAttribute('data-not-sent')).toBe(true);
+  expect(line.querySelector('[data-grid-nudge]')).toBeNull();
+  expect(line.textContent).not.toContain('Nudged');
+});
+
+test.skipIf(!hasDom)('Take back, then Nudge: the row counts it taken, so Nudge is offered again and the press is a new write (a new key)', async () => {
+  fakeScreen();
+  const asked = requests();
+  const { host, put } = mount({ on: true, rows: [farStale()] });
+  await settle();
+  const line = () => host.querySelector('[data-grid-line="msg_tide"]')!;
+  act(() => line().querySelector<HTMLButtonElement>('[data-grid-nudge]')!.click());
+  await settle();
+  // The person took it back in the thread: the row no longer carries it and counts one taken back.
+  act(() => put([farStale({ taken: 1, seq: 42 })]));
+  await settle(750);
+  const again = line().querySelector<HTMLButtonElement>('[data-grid-nudge]');
+  expect(again).not.toBeNull();
+  act(() => again!.click());
+  await settle();
+  const keys = asked.filter((r) => r.url.includes('/reply')).map((r) => (r.body as { idempotency_key: string }).idempotency_key);
+  expect(keys).toEqual([gridNudgeKey({ thread: 'msg_tide', quietFrom: FAR_QUIET_FROM, turn: 1, taken: 0 }), gridNudgeKey({ thread: 'msg_tide', quietFrom: FAR_QUIET_FROM, turn: 1, taken: 1 })]);
+});
+
+test.skipIf(!hasDom)('after a hand-off, Nudge names the agent it goes to; an agent whose session is not known live is offered none', async () => {
+  fakeScreen();
+  requests();
+  const tide = { id: 'ses_tide', session: 'ses_tide', host: 'claude-code', label: 'tide-ios', project: { id: 'prj_ledger', name: 'ledger' }, state: 'idle', waiting: 0, live: true, started_at: ago(300), last_seen_at: ago(2) } as const;
+  const handed: InboxAgentsGroup[] = [agents[0]!, { ...agents[1]!, total: 2, agents: [...agents[1]!.agents, tide] }];
+  const { host } = mount({ on: true, rows: [farStale({ agent: { host: 'claude-code', session: 'ses_tide' } })], agents: handed });
+  await settle();
+  const line = host.querySelector('[data-grid-line="msg_tide"]')!;
+  // The line's own agent is still ledger; the nudge goes to tide-ios, and says so.
+  expect(line.querySelector('.ib-grid-nm')!.textContent).toBe('ledger');
+  expect(line.querySelector('[data-grid-nudge]')!.getAttribute('aria-label')).toBe('Nudge tide-ios');
+  act(() => root!.unmount());
+  root = null;
+  document.body.innerHTML = '';
+  // Its session not listed on the Mac mini (killed, or the Mac mini's agents not known): Stale, no Nudge.
+  const gone = mount({ on: true, rows: [farStale({ agent: { host: 'claude-code', session: 'ses_gone' } })] });
+  await settle();
+  const quiet = gone.host.querySelector('[data-grid-line="msg_tide"]')!;
+  expect(quiet.getAttribute('data-group')).toBe('stale');
+  expect(quiet.querySelector('[data-grid-nudge]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('Glint: only a Moving line on screen glints; a stale one never; nothing while the tab is hidden', async () => {
@@ -489,7 +622,9 @@ test.skipIf(!hasDom)('Nudge on a phone: a tap on the stale line opens Nudge with
   const readout = line().querySelector('[data-grid-readout]')!;
   const nudge = readout.querySelector<HTMLButtonElement>('[data-grid-nudge]')!;
   expect(nudge.textContent).toBe('Nudge ledger');
-  act(() => nudge.click());
+  act(() => void nudge.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })));
+  // A double tap: Nudge is gone and Open thread moved under the finger; the second tap lands there and opens nothing.
+  act(() => void line().querySelector('[data-grid-readout] .ib-grid-ro-open')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })));
   await settle();
   expect(asked.filter((r) => r.url.includes('/reply')).length).toBe(1);
   expect(opened).toEqual([]);

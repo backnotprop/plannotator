@@ -13,7 +13,14 @@
  *     tide-ios is handed it. A Moving line's light runs meanwhile (so the reduced-motion case below means something).
  *  2. Phone: no Nudge until a line is tapped; a tap on Nightly summary opens its readout on the page's own ground
  *     (no panel) with "Nudge wrangler" beside Open thread; one tap sends one reply with the approved words.
- *  3. Reduced motion: nothing on the Grid page animates, pointed at or not.
+ *  3. Reduced motion: none of Grid's own animations runs, pointed at or not.
+ *  4. Mini asleep: a nudge on its Offline sync is held: "Nudged just now", the readout says it waits, and a second
+ *     window offers no second Nudge. Its work moves while it sleeps; back, it refuses the nudge, and the line says
+ *     "Not delivered: …" in the status grey (the window's list read held where it was, so the line is still Stale when
+ *     the refusal lands); nothing lands in its thread.
+ *
+ * The browsers' clock is frozen (`clock.setFixedTime`) at the seed's own now plus 30 s, the same for both computers'
+ * made-up times, so "Stale 3.5 h" and the nudge's "3 h 37 min" never depend on how long setup took.
  *
  * Proof: whole-window shots in PLANNOTATOR_E2E_PROOF_DIR/grid-stale-nudge, else .local/proof/grid-stale-nudge: the
  * desktop at 1440×900 in light and dark, the phone at 390×844.
@@ -35,6 +42,10 @@ const CLOSED = 'http://127.0.0.1:9';
 const MIN = 60_000;
 /** The approved second sentence, word for word. */
 const ASK = 'Please finish it, or tell me in a few words why it stopped.';
+/** The seed's now, on both computers; the browsers' clock stays at it plus half a minute. */
+const SEED_NOW = Math.floor(Date.now() / MIN) * MIN;
+const BROWSER_NOW = SEED_NOW + 30_000;
+const SEED = join(repo, 'tests/e2e/inbox-grid-stale-nudge-seed.ts');
 
 interface Seeded {
   threads: Record<string, string>;
@@ -91,13 +102,19 @@ function machine(name: string, computer: 'studio' | 'mini'): Machine {
     PLANNOTATOR_FEEDBACK_URL: `${CLOSED}/feedback`,
   };
   // The work, at times in the past, before the Inbox starts (the seed writes forge.json beside the data dir).
-  const seeded = spawnSync('bun', [join(repo, 'tests/e2e/inbox-grid-stale-nudge-seed.ts'), dataDir, join(root, 'src'), computer], {
+  const seeded = seed(root, dataDir, computer);
+  return { name, root, dataDir, env, url: '', id: '', seeded: JSON.parse(seeded.trim()) as Seeded };
+}
+
+/** The seed script on a machine's data dir (its Inbox stopped): the made-up work, or `move` a thread's work now. */
+function seed(root: string, dataDir: string, ...args: string[]): string {
+  const run = spawnSync('bun', [SEED, dataDir, join(root, 'src'), ...args], {
     cwd: repo,
     encoding: 'utf8',
-    env: { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_TEST_SANDBOX: root, PLANNOTATOR_RELAY_URL: CLOSED },
+    env: { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_TEST_SANDBOX: root, PLANNOTATOR_RELAY_URL: CLOSED, GRID_SEED_NOW: String(SEED_NOW) },
   });
-  expect(seeded.status, seeded.stderr).toBe(0);
-  return { name, root, dataDir, env, url: '', id: '', seeded: JSON.parse(seeded.stdout.trim()) as Seeded };
+  expect(run.status, run.stderr).toBe(0);
+  return run.stdout;
 }
 
 const cli = (m: Machine, ...args: string[]) => {
@@ -145,13 +162,11 @@ function keepAgents(m: Machine): Promise<void> {
   })();
 }
 
-/** The nudge's words for a line quiet since `quiet`, said at `at` ("3 h 37 min"), with its detail. */
-function nudgeWords(name: string, quiet: string, at: number, detail: string): string {
-  const minutes = Math.floor((at - Date.parse(quiet)) / MIN);
+/** The nudge's words for a line quiet since `quiet`, at the browsers' frozen now ("3 h 37 min"), with its detail. */
+function nudgeWords(name: string, quiet: string, detail: string): string {
+  const minutes = Math.floor((BROWSER_NOW - Date.parse(quiet)) / MIN);
   return `${name} has been quiet for ${Math.floor(minutes / 60)} h ${minutes % 60} min${detail}. ${ASK}`;
 }
-/** The words at any minute the press could have fallen in (a linked computer's clock is read to the millisecond, so a minute either side). */
-const wordsBetween = (name: string, quiet: string, from: number, to: number, detail: string) => [...new Set([from - MIN, from, to, to + MIN].map((at) => nudgeWords(name, quiet, at, detail)))];
 
 /** Every reply the window posts. */
 function replies(page: Page): { url: string; body: { words: string; nudge?: unknown } }[] {
@@ -180,6 +195,8 @@ async function open(browser: Browser, options: { phone?: boolean; reducedMotion?
     ...(options.phone ? { isMobile: true, hasTouch: true } : {}),
   });
   contexts.push(context);
+  // Date.now() and new Date() stay at the seed's now plus 30 s; timers run as usual.
+  await context.clock.setFixedTime(BROWSER_NOW);
   const page = await context.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(`${studio.url}#grid`);
@@ -222,7 +239,7 @@ test('desktop: Stale with its time and why; Nudge on pointing; one click, one re
   const line = lineOf(page, haptics);
 
   // The Stale group, between Not moving and Landed, with its count; its lines are the quiet ones.
-  await expect(page.locator('[data-grid-counts]')).toContainText('3 stale');
+  await expect(page.locator('[data-grid-counts]')).toContainText('4 stale');
   const order = await page.locator('[data-grid-group]').evaluateAll((groups) => groups.map((g) => g.getAttribute('data-grid-group')));
   expect(order.indexOf('stale')).toBeGreaterThan(order.indexOf('quiet'));
   expect(order.indexOf('stale')).toBeLessThan(order.indexOf('land'));
@@ -266,15 +283,14 @@ test('desktop: Stale with its time and why; Nudge on pointing; one click, one re
 
   const sent = replies(page);
   const quiet = mini.seeded.quiet['Haptics on save']!;
-  const before = Date.now();
   await nudge.click();
   await expect(line.locator('[data-grid-nudged]')).toHaveText('Nudged just now');
   await page.waitForTimeout(2_000);
-  const after = Date.now();
   // One click, one reply, through Studio to Mini's thread, with the approved words.
   expect(sent).toHaveLength(1);
   expect(sent[0]!.url).toContain(`/api/inbox/m/${mini.id}/messages/`);
-  expect(wordsBetween('Haptics on save', quiet, before, after, ', with tests failing on #22')).toContain(sent[0]!.body.words);
+  expect(sent[0]!.body.words).toBe(nudgeWords('Haptics on save', quiet, ', with tests failing on #22'));
+  expect(sent[0]!.body.words).toBe(`Haptics on save has been quiet for 3 h 37 min, with tests failing on #22. ${ASK}`);
   await expect(line.locator('[data-grid-nudge]')).toHaveCount(0);
   // Mini keeps one nudge in the thread, with those words, and hands it to tide-ios.
   await expect
@@ -312,13 +328,11 @@ test('phone: a tap opens the stale line on the page\'s ground with Nudge beside 
 
   const sent = replies(page);
   const quiet = studio.seeded.quiet['Nightly summary']!;
-  const before = Date.now();
   await nudge.tap();
   await expect(line.locator('[data-grid-nudged]')).toHaveText('Nudged just now');
   await page.waitForTimeout(2_000);
-  const after = Date.now();
   expect(sent).toHaveLength(1);
-  expect(wordsBetween('Nightly summary', quiet, before, after, ', with #7 still a draft')).toContain(sent[0]!.body.words);
+  expect(sent[0]!.body.words).toBe(nudgeWords('Nightly summary', quiet, ', with #7 still a draft'));
   // One nudge in the thread, with those words, handed to wrangler.
   await expect
     .poll(async () => (await read<{ thread: { messages: { body: string; nudge?: unknown }[] } }>(studio, `/api/inbox/threads/${nightly}`)).thread.messages.filter((m) => m.nudge).map((m) => m.body), { timeout: 15_000 })
@@ -328,11 +342,20 @@ test('phone: a tap opens the stale line on the page\'s ground with Nudge beside 
   expect(errors).toEqual([]);
 });
 
-test('reduced motion: nothing on the Grid page animates, pointed at or not', async ({ browser }) => {
+test('reduced motion: none of Grid\'s own animations runs, pointed at or not', async ({ browser }) => {
   test.setTimeout(60_000);
   const page = await open(browser, { reducedMotion: 'reduce' });
+  // Grid's own: its CSS animations (`ib-grid-*`) and the Web Animations gridMotion.ts starts (the light, the mark, a
+  // sliding line, heading or "N more"). The sidebar's agent marks and anything else on the page are not Grid's.
   const moving = () =>
-    page.evaluate(() => document.getAnimations().filter((a) => a.playState === 'running' && !!((a.effect as KeyframeEffect | null)?.target as Element | null)?.closest('[data-grid-page]')).length);
+    page.evaluate(() =>
+      document.getAnimations().filter((a) => {
+        if (a.playState !== 'running') return false;
+        if ((a as CSSAnimation).animationName?.startsWith('ib-grid')) return true;
+        const target = (a.effect as KeyframeEffect | null)?.target as Element | null;
+        return !!target?.matches('.ib-grid-glc > i, .ib-grid-mk, [data-grid-line], [data-grid-group] > .ib-grid-gh, [data-grid-group] > .ib-grid-door');
+      }).length,
+    );
   const counts: number[] = [];
   // Three turns of the glint's walk, then pointing at a Moving line and a Needs-you one.
   for (let i = 0; i < 20; i++) {
@@ -344,5 +367,64 @@ test('reduced motion: nothing on the Grid page animates, pointed at or not', asy
   counts.push(await moving());
   expect(counts.every((n) => n === 0)).toBe(true);
   await shot(page, '07-desktop-reduced-motion', ['light']);
+  expect(errors).toEqual([]);
+});
+
+test('Mini asleep: the nudge is held and nudged in every window; refused when Mini is back because its work moved, said in the status grey', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const page = await open(browser);
+  const sync = mini.seeded.threads['Offline sync']!;
+  const line = lineOf(page, sync);
+  await expect(line).toHaveAttribute('data-group', 'stale');
+  // What this window's list reads ask for, so they can be held where they are later.
+  let listUrl = '';
+  page.on('request', (request: Request) => {
+    if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/inbox/threads') listUrl = request.url();
+  });
+  await page.reload();
+  await expect(line).toHaveAttribute('data-group', 'stale', { timeout: 30_000 });
+
+  // Mini goes to sleep: Studio keeps its rows and its agents as it last read them.
+  expect(cli(mini, 'stop').status).toBe(0);
+  await expect.poll(async () => (await read<{ machines: { id: string; state: string }[] }>(studio, '/api/inbox/machines')).machines.find((m) => m.id === mini.id)?.state, { timeout: 30_000 }).toBe('offline');
+
+  const sent = replies(page);
+  await line.locator('.ib-grid-t').hover();
+  await line.locator('[data-grid-nudge]').click();
+  await expect(line.locator('[data-grid-nudged]')).toHaveText('Nudged just now');
+  expect(sent).toHaveLength(1);
+  expect(sent[0]!.body.words).toBe(`Offline sync has been quiet for 3 h 20 min. ${ASK}`);
+  await expect(line.locator('[data-grid-readout]')).toContainText('Will send when Mini is back');
+  await expect(line.locator('[data-grid-nudge]')).toHaveCount(0);
+  await shot(page, '08-desktop-nudge-held', ['light']);
+
+  // A second window (or a reload): the held nudge is in Studio's outbox, so the line is nudged there too, with no Nudge.
+  const other = await open(browser);
+  const there = lineOf(other, sync);
+  await there.locator('.ib-grid-t').hover();
+  await expect(there.locator('[data-grid-nudged]')).toHaveText('Nudged just now');
+  await expect(there.locator('[data-grid-readout]')).toContainText('Will send when Mini is back');
+  await expect(there.locator('[data-grid-nudge]')).toHaveCount(0);
+  await other.close();
+
+  // While Mini sleeps its agent moves the work on. This window's list read is held where it is, so the line is still
+  // Stale when Mini's refusal reaches the outbox (a real read would move the line to Moving, and say nothing of it).
+  seed(mini.root, mini.dataDir, 'move', sync);
+  expect(listUrl).not.toBe('');
+  const frozen = await (await fetch(new URL(new URL(listUrl).pathname + new URL(listUrl).search, base(studio)))).text();
+  await page.route((url) => url.pathname === '/api/inbox/threads', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: frozen }));
+  await start(mini);
+
+  const status = line.locator('[data-grid-nudged]');
+  await expect(status).toHaveText('Not delivered: The work moved on after this nudge was pressed, so it was not sent.', { timeout: 60_000 });
+  await expect(status).toHaveAttribute('data-not-sent', '');
+  // The status grey, as "Nudged just now" on Haptics on save: never the failing red.
+  const haptics = lineOf(page, mini.seeded.threads['Haptics on save']!).locator('[data-grid-nudged]');
+  expect(await status.evaluate((el) => getComputedStyle(el).color)).toBe(await haptics.evaluate((el) => getComputedStyle(el).color));
+  await expect(line.locator('[data-grid-nudge]')).toHaveCount(0);
+  await page.mouse.move(5, 895);
+  await shot(page, '09-desktop-nudge-refused');
+  // Nothing landed in Mini's thread.
+  expect((await read<{ thread: { messages: { nudge?: unknown }[] } }>(mini, `/api/inbox/threads/${sync}`)).thread.messages.filter((m) => m.nudge)).toEqual([]);
   expect(errors).toEqual([]);
 });

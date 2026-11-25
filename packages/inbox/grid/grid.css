@@ -76,15 +76,16 @@
 .ib-grid-q { grid-column: 1 / -1; margin: -3px 0 5px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--ib-grid-amber); }
 /* A thread's message sent by Grid's Nudge: "to tide-ios · Nudge from Grid" (parts/MessageHead.tsx). */
 .ib-m-nudge { margin-left: 4px; color: var(--muted-foreground); }
-/* Nudged (round 4): under the name, in grey; a nudge that did not go says why, in the closed colour. */
+/* Nudged (round 4): under the name, in grey; a nudge that did not go says why in the same grey (news, not an error). */
 .ib-grid-ng { grid-column: 1 / -1; margin: -3px 0 5px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-grid-mut); }
-.ib-grid-ng[data-bad] { color: var(--ib-ref-closed); }
-/* Nudge: at the end of the name, shown while the line is pointed at or holds focus; above the name's whole-line hit. */
-.pn-inbox .ib-grid-nudge { display: none; grid-column: 1; grid-row: 1; justify-self: end; align-self: center; position: relative; z-index: 1; height: 24px; padding: 0 10px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--foreground); box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 8%, transparent); cursor: pointer; }
-.pn-inbox .ib-grid-nudge:hover { background: color-mix(in oklch, var(--card) 94%, var(--foreground)); }
-.ib-grid-ln:hover > .ib-grid-nudge, .ib-grid-ln:focus-within > .ib-grid-nudge { display: inline-flex; }
-/* The name gives the button its room while it shows, so a long name ends in "…" before it. */
-.ib-grid-ln:has(> .ib-grid-nudge):is(:hover, :focus-within) > .ib-grid-name { padding-right: 78px; }
+/* The name and Nudge right after it. Nudge keeps its room while hidden, so pointing never moves where a long name is
+   cut; it shows while the line is pointed at or holds focus, white with an outline, above the name's whole-line hit. */
+.ib-grid-nw { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ib-grid-nw > .ib-grid-name { min-width: 0; }
+.pn-inbox .ib-grid-nudge { visibility: hidden; flex: none; position: relative; z-index: 1; display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--foreground); box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 8%, transparent); cursor: pointer; }
+.pn-inbox .ib-grid-nudge:hover { background: color-mix(in oklch, var(--card) 96%, var(--foreground)); }
+.pn-inbox .ib-grid-nudge:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 1px; }
+.ib-grid-ln:is(:hover, :focus-within) .ib-grid-nudge { visibility: visible; }
 
 /* The bar: pieces at percentages of the clock; the merge mark, the cross and the plan's ring on it. */
 .ib-grid-bar { position: relative; height: 28px; overflow: hidden; }
@@ -107,11 +108,13 @@
 .ib-grid-ln[data-group="drop"] .ib-grid-bar { filter: grayscale(1); opacity: 0.7; }
 
 /* The bar in words. The last piece is where the work is: darker, amber when it needs the person. gridSaid leaves out
-   the oldest pieces to fit the column; words that still do not fit (a longer locale, a larger text size) go on to a
-   second line between pieces, never cut, so the detail that says why a line is stale is always read. */
-.ib-grid-s { font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-grid-mut); font-variant-numeric: tabular-nums; line-height: 1.4; }
+   the oldest pieces to fit the column. On a stale line, words that still do not fit (a longer locale, a larger text
+   size) go on to a second line between pieces, never cut, so the detail that says why it is stale is always read;
+   every other line stays one line, cut with "…" as before. */
+.ib-grid-s { font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-grid-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .ib-grid-pc { white-space: nowrap; }
-.ib-grid-s > .ib-grid-pc { display: inline-block; }
+.ib-grid-ln[data-group="stale"] > .ib-grid-s { white-space: normal; overflow: visible; line-height: 1.4; }
+.ib-grid-ln[data-group="stale"] > .ib-grid-s > .ib-grid-pc { display: inline-block; }
 .ib-grid-pc b { font-weight: 450; margin-right: 4px; }
 .ib-grid-pc[data-on] { color: var(--foreground); }
 .ib-grid-pc[data-on] b { font-weight: 600; }
@@ -133,6 +136,7 @@
 .ib-grid-ro-w { display: inline-flex; align-items: center; font-weight: 550; }
 .ib-grid-ro-w .ib-refmark, .ib-grid-ro-w .ib-ic { width: 12px; height: 12px; margin-right: 5px; }
 .ib-grid-ro-d { color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; }
+.ib-grid-ro-d [data-bad] { color: var(--ib-ref-closed); }
 .ib-grid-ro-by { display: flex; margin-top: 2px; color: var(--ib-grid-mut); }
 
 .ib-grid-door { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--ib-grid-mut); cursor: pointer; }

@@ -128,7 +128,7 @@ export type ThreadPullFixture = Readonly<Record<string, Partial<ThreadPullRead>>
 
 export interface ThreadPullStates {
   /** What the reader knows now about a PR beyond the stored state (checks, review), or undefined. */
-  live(key: string): { checks: InboxThreadPullChecks | null; review: InboxThreadPullReview | null; problem?: ThreadPullFailure["problem"] } | undefined;
+  live(key: string): { checks: InboxThreadPullChecks | null; review: InboxThreadPullReview | null; checks_at?: string; problem?: ThreadPullFailure["problem"] } | undefined;
   /** The private detail of a PR's last failed read (the tool's last line, exit, time), never sent; undefined when none. */
   diag(key: string): ProblemDiag | null | undefined;
   /**
@@ -141,9 +141,18 @@ export interface ThreadPullStates {
   refresh(pulls: readonly InboxThreadPull[], options?: { refresh?: boolean; retry?: boolean }): Promise<void>;
 }
 
+/**
+ * Grid's movement (approval "inbox-agent-grid", round 4): a change of a PR's checks is kept with a time only when the
+ * read before it was at most this long before, so the time is right to within minutes. A change found after a longer
+ * gap (no window looking, an Inbox restart) has no time: when it happened is not known, and none is made up.
+ */
+export const CHECKS_SEEN_GAP_MS = 2 * CARD_MARK_FRESH_MS;
+
 interface Cached {
   read: ThreadPullRead | null;
   at: number;
+  /** When a read last found the checks changed from the read before, that read close enough (`CHECKS_SEEN_GAP_MS`). */
+  checksAt?: number;
   /** Why the last read failed (read null), when known. */
   failure?: ThreadPullFailure;
 }
@@ -215,7 +224,11 @@ export function createThreadPullStates(options: {
     const prev = cache.get(key);
     const before = prev?.read;
     const problemBefore = prev?.failure?.problem.code ?? null;
-    cache.set(key, { read, at: now(), ...(failure ? { failure } : {}) });
+    // Checks seen to change (a push starts a run, a run ends): now, when the last read was close enough to say so.
+    const seen = read && before && before.checks !== read.checks && now() - prev!.at <= CHECKS_SEEN_GAP_MS ? now() : undefined;
+    // Unchanged, or not known to have changed (a failed read on either side): the last change's time stays.
+    const checksAt = seen ?? (!read || !before || before.checks === read.checks ? prev?.checksAt : undefined);
+    cache.set(key, { read, at: now(), ...(failure ? { failure } : {}), ...(checksAt !== undefined ? { checksAt } : {}) });
     // A problem that appeared, changed or cleared reaches the windows (the card shows it under what is known).
     const problemNow = read ? null : (failure?.problem.code ?? null);
     if (!read) {
@@ -307,7 +320,7 @@ export function createThreadPullStates(options: {
   return {
     live(key) {
       const hit = cache.get(key);
-      if (hit?.read) return { checks: hit.read.checks, review: hit.read.review };
+      if (hit?.read) return { checks: hit.read.checks, review: hit.read.review, ...(hit.checksAt !== undefined ? { checks_at: new Date(hit.checksAt).toISOString() } : {}) };
       return hit?.failure ? { checks: null, review: null, problem: hit.failure.problem } : undefined;
     },
     diag(key) {

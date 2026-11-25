@@ -3,12 +3,16 @@
  * (the store's clock is injected), before that Inbox starts. Run with bun:
  *
  *   bun tests/e2e/inbox-grid-stale-nudge-seed.ts <data dir> <projects dir> <studio|mini>
+ *   bun tests/e2e/inbox-grid-stale-nudge-seed.ts <data dir> <projects dir> move <thread id>
+ *
+ * The times are counted back from `GRID_SEED_NOW` (ms; the spec gives both computers the one it freezes its browser
+ * near), else now. `move`, run while that Inbox is stopped: the thread's agent sets its steps now, so its work moved.
  *
  * Studio: harbor's Pagination cursors asks the person (Needs you); Rate limit the export (#418, tests running) and
  * fern-api's Webhook retries are Moving; quill-docs' Search index rebuild is Not moving; fern-api's Nightly summary
  * (#7, a draft) has been quiet 3 h 10 min and a quill-docs plan was never started 14 h on (both Stale); Ledger CSV export
- * (#402) merged 41 min ago. Mini: ledger's Haptics on save (#22, tests failing) has been quiet 3 h 37 min (Stale) and
- * Reconcile cron is Moving.
+ * (#402) merged 41 min ago. Mini: ledger's Haptics on save (#22, tests failing) has been quiet 3 h 37 min and Offline
+ * sync 3 h 20 min (both Stale), and Reconcile cron is Moving.
  *
  * Each agent session is its own (`ses_…`); the spec keeps them connected, so their agents are still there, and names
  * them (tide-ios, wrangler, …) in `inbox/agent-faces.json`, as Rename… would. The PRs' states are the forge fixture's
@@ -20,10 +24,19 @@ import { dirname, join } from 'node:path';
 import { InboxStore } from '../../packages/shared/inbox/store';
 import { parseInboxThreadPullRef } from '../../packages/core/inbox-thread-pulls';
 
-const [dataDir, src, computer] = process.argv.slice(2);
-if (!dataDir || !src || (computer !== 'studio' && computer !== 'mini')) throw new Error('usage: inbox-grid-stale-nudge-seed.ts <data dir> <projects dir> <studio|mini>');
+const [dataDir, src, computer, movedThread] = process.argv.slice(2);
+if (!dataDir || !src || (computer !== 'studio' && computer !== 'mini' && !(computer === 'move' && movedThread))) {
+  throw new Error('usage: inbox-grid-stale-nudge-seed.ts <data dir> <projects dir> <studio|mini|move <thread id>>');
+}
 
-const NOW = Date.now();
+if (computer === 'move') {
+  const moving = InboxStore.open(dataDir);
+  const by = moving.thread(movedThread!)!.messages.find((m) => m.author.kind === 'agent')!.author;
+  moving.setThreadSteps({ thread_id: movedThread!, agent: by, steps: [{ step: 'Retry the sync on reconnect', status: 'doing' }] });
+  process.exit(0);
+}
+
+const NOW = Number(process.env.GRID_SEED_NOW) || Date.now();
 let at = NOW;
 const store = InboxStore.open(dataDir, { now: () => new Date(at) });
 const ago = (minutes: number) => NOW - minutes * 60_000;
@@ -96,6 +109,7 @@ if (computer === 'studio') {
   const tide = agent('ses_tide_ios', 'tide-ios');
   const haptics = work(ledger, tide, 'Haptics on save', [330, 260, 217], 'One test fails on the simulator; looking.');
   pull(haptics.thread, 'acme/ledger#22', tide, 280, { state: 'open', checks: 'failing' });
+  work(ledger, agent('ses_tide_sync', 'tide-sync'), 'Offline sync', [320, 200]);
   work(ledger, agent('ses_ledger_cron', 'ledger-cron'), 'Reconcile cron', [80, 12, 2]);
 }
 at = NOW;

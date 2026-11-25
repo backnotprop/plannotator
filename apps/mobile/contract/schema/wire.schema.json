@@ -3174,6 +3174,93 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
+    "InboxGridNudgeRow": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "host": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "session": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "host",
+                "session"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "taken": {
+          "type": "number"
+        },
+        "last": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "quiet_from": {
+                  "type": "string"
+                },
+                "answered_at": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "at",
+                "quiet_from",
+                "answered_at"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "to",
+        "seq",
+        "agent",
+        "taken",
+        "last"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
     "InboxGuideCommentTarget": {
       "type": "object",
       "properties": {
@@ -3951,55 +4038,7 @@
           "additionalProperties": true
         },
         "grid_nudge": {
-          "type": "object",
-          "properties": {
-            "to": {
-              "type": "string"
-            },
-            "seq": {
-              "type": "integer"
-            },
-            "last": {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "at": {
-                      "type": "string"
-                    },
-                    "quiet_from": {
-                      "type": "string"
-                    },
-                    "answered_at": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": [
-                    "at",
-                    "quiet_from",
-                    "answered_at"
-                  ],
-                  "additionalProperties": true
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          },
-          "required": [
-            "to",
-            "seq",
-            "last"
-          ],
-          "additionalProperties": true
+          "$ref": "#/$defs/InboxGridNudgeRow"
         },
         "hide_pulls": {
           "type": "array",
@@ -7587,6 +7626,9 @@
               "type": "null"
             }
           ]
+        },
+        "checks_at": {
+          "type": "string"
         },
         "review": {
           "anyOf": [

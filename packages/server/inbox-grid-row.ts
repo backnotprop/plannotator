@@ -7,7 +7,7 @@
  */
 import { inboxStepsProgress, type InboxListRow, type InboxSteps } from "@plannotator/core/inbox-types";
 import type { InboxGridSeenStore } from "./inbox-grid-seen";
-import type { GridNudgeRow } from "./inbox-grid-nudge";
+import type { InboxGridNudgeRow } from "@plannotator/core/inbox-types";
 
 /**
  * A row as a list read that did not ask for Grid gets it (`grid=1` absent): without Grid's fields, as before Grid. A
@@ -25,7 +25,7 @@ export function gridRowStripped<R extends InboxListRow>(row: R): R {
 export function gridRowDecorator(
   seen: Pick<InboxGridSeenStore, "get">,
   lists: readonly InboxSteps[] | null,
-  nudgeOf: (threadId: string) => GridNudgeRow | undefined = () => undefined,
+  nudgeOf: (row: InboxListRow) => InboxGridNudgeRow | undefined = () => undefined,
 ): (row: InboxListRow) => InboxListRow {
   // The thread's latest list that holds steps (a thread may have one per agent session).
   const latest = new Map<string, InboxSteps>();
@@ -37,7 +37,7 @@ export function gridRowDecorator(
   return (row) => {
     const look = seen.get(row.thread_id);
     const list = latest.get(row.thread_id);
-    const nudge = nudgeOf(row.thread_id);
+    const nudge = nudgeOf(row);
     if (!look && !list && !nudge) return row;
     const out: InboxListRow = { ...row };
     if (look) out.grid_seen = { through: look.through, at: look.at };

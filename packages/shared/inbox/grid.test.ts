@@ -248,7 +248,7 @@ describe("the page", () => {
 describe("words", () => {
   test("lengths round as the line says them and as the readout does", () => {
     expect([gridRounded(32 * GRID_MIN), gridRounded(95 * GRID_MIN), gridRounded(130 * GRID_MIN), gridRounded(30 * GRID_HOUR), gridRounded(3 * GRID_DAY)]).toEqual(["32 min", "1.5 h", "2 h", "1 d", "3 d"]);
-    expect([gridExact(40 * GRID_MIN), gridExact(130 * GRID_MIN), gridExact(4 * GRID_HOUR + 5 * GRID_MIN), gridExact(4 * GRID_HOUR)]).toEqual(["40 min", "2 h 10 min", "4 h 5 min", "4 h"]);
+    expect([gridExact(40 * GRID_MIN), gridExact(130 * GRID_MIN), gridExact(4 * GRID_HOUR + 5 * GRID_MIN), gridExact(4 * GRID_HOUR)]).toEqual(["40 min", "2 h 10 min", "4 h", "4 h"]);
     expect([gridSpoken("1.5 h"), gridSpoken("1 h"), gridSpoken("32 min"), gridSpoken("3 d")]).toEqual(["1.5 hours", "1 hour", "32 minutes", "3 days"]);
   });
 

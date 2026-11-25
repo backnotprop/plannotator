@@ -33,6 +33,7 @@
  *
  * Pure: no runtime APIs, so the window and the tests share it.
  */
+import type { InboxGridNudgeRow } from "@plannotator/core/inbox-types";
 
 export type GridGroup = "you" | "move" | "quiet" | "stale" | "land" | "plan" | "drop";
 
@@ -59,11 +60,15 @@ export const GRID_PIECE_NAMES: Readonly<Record<GridPieceKind, string>> = { work:
 export type GridDropWhy = "PR closed" | "agent ended" | "quiet 3 days";
 
 /**
- * What a line can do: open its thread; on a stale line whose thread names where a reply goes, nudge its agent. A nudge
- * is a reply on message `to` (on the thread's own computer); `key` is its idempotency key, one per quiet stretch and
- * three-hour turn, so a second press, a second window or a held copy writes it once.
+ * What a line can do: open its thread; on a stale line whose thread names where a reply goes and whose agent there is
+ * live, nudge that agent (`agent`: its name). A nudge is a reply on message `to` (on the thread's own computer); its
+ * idempotency key (grid-nudge-key.ts) is made from `quietFrom` (on the thread's clock), `turn` (the three-hour turn of
+ * the stretch) and `taken` (the thread's nudges taken back), so a second press, a second window or a held copy writes
+ * it once, and a press after a Take back writes a new one.
  */
-export type GridAction = { kind: "open"; thread: string } | { kind: "nudge"; thread: string; to: string; seq: number; key: string; quietFrom: number };
+export type GridAction =
+  | { kind: "open"; thread: string }
+  | { kind: "nudge"; thread: string; to: string; seq: number; quietFrom: number; turn: number; taken: number; agent: string };
 
 export const GRID_MIN = 60_000;
 export const GRID_HOUR = 60 * GRID_MIN;
@@ -95,7 +100,24 @@ export interface GridPullIn {
   /** For a merged or closed PR: when the Inbox saw that state. */
   read_at: string | null;
   checks: "passing" | "failing" | "running" | null;
+  /**
+   * When the thread's computer saw its checks change (a push starts a run, a run ends), within minutes; null when it
+   * did not see it happen (no read close enough before it, or an older Inbox). Movement, as a step or a message is.
+   */
+  checks_at?: string | null;
   review: "approved" | "changes_requested" | "review_required" | null;
+}
+
+/**
+ * Nudge on one thread (the row's `grid_nudge`, core `InboxGridNudgeRow`), with what the window knows besides: the agent
+ * the nudge goes to (its name and whether its session is live: null when not known), a nudge for the thread held in
+ * this Inbox's outbox while its computer is away (`held`: when it was pressed, and what the outbox says), and one its
+ * computer refused when it got there (`refused`: the outbox's words, and the quiet stretch it was pressed in).
+ */
+export interface GridNudgeIn extends Omit<InboxGridNudgeRow, "agent"> {
+  agent: { name: string; live: boolean | null } | null;
+  held: { at: string; words: string } | null;
+  refused: { words: string; quiet_from: number } | null;
 }
 
 /** A thread's checklist as Grid reads it (the row's `steps_progress`). */
@@ -139,11 +161,8 @@ export interface GridThreadIn {
   steps: GridStepsIn | null;
   /** The person's last look at this line (`through`: its last landing or drop that look showed; `at`: when), ms. */
   seen: { through: number; at: number } | null;
-  /**
-   * Nudge (the row's `grid_nudge`): the message a nudge replies to, and the thread's last nudge (its time, the quiet
-   * stretch it was sent in, the agent's first message after it). Null from an Inbox that carries none: no Nudge.
-   */
-  nudge: { to: string; seq: number; last: { at: string; quiet_from: string; answered_at: string | null } | null } | null;
+  /** Nudge (`GridNudgeIn`). Null from an Inbox that carries none: no Nudge. */
+  nudge: GridNudgeIn | null;
 }
 
 export interface GridLine {
@@ -164,13 +183,23 @@ export interface GridLine {
   planned: number | null;
   /** What it asks the person, under the name. */
   ask: string | null;
-  /** After the last piece: the PR's checks or review, or draft (`pr`: the PR it is about), or a stale plan's "not started". */
-  detail: { words: string; bad: boolean; pr?: string | null } | null;
+  /**
+   * After the last piece: the PR's checks or review, or draft (`pr`: the PR it is about; `since`: when failing tests
+   * were seen to start failing, when known), or a stale plan's "not started".
+   */
+  detail: { words: string; bad: boolean; pr?: string | null; since?: number | null } | null;
   steps: GridStepsIn | null;
   /** A stale line: when its quiet stretch began (its last movement, or when its plan was made). */
   staleFrom: number | null;
-  /** The thread's last nudge: when, and whether it was sent in the quiet stretch the line is in now ("Nudged 12 min ago"). */
-  nudged: { at: number; now: boolean } | null;
+  /**
+   * The thread's last nudge: when, whether it was sent in the quiet stretch the line is in now ("Nudged 12 min ago"),
+   * and, for one still held for its computer, what the outbox says ("Will send when Mac mini is back").
+   */
+  nudged: { at: number; now: boolean; held: string | null } | null;
+  /** A held nudge its computer refused when it got there, pressed in the stretch the line is in now: the outbox's words. */
+  refused: string | null;
+  /** The agent a nudge goes to (it may not be the line's own agent after a hand-off), by name; null when not known. */
+  nudgeTo: string | null;
   actions: GridAction[];
   /** The order within its group. */
   at: number;
@@ -221,7 +250,7 @@ function prsOf(pulls: readonly GridPullIn[]): { label: string | null; at: number
 
 function detailOf(open: readonly GridPullIn[]): GridLine["detail"] {
   const failing = open.find((p) => p.checks === "failing");
-  if (failing) return { words: "tests failing", bad: true, pr: failing.label };
+  if (failing) return { words: "tests failing", bad: true, pr: failing.label, ...(failing.checks_at ? { since: ms(failing.checks_at) } : {}) };
   if (open.some((p) => p.checks === "running")) return { words: "tests running", bad: false };
   const first = open[0]!;
   if (first.review === "approved") return { words: "reviewed", bad: false };
@@ -291,14 +320,19 @@ export function gridPlaceTimed(t: GridThreadIn, now: number): { placed: GridPlac
   const prAt = pr?.at ?? null;
   const working = t.running || (t.agentState === "working" && t.agentHere);
   const lastNudge = t.nudge?.last ?? null;
-  const nudgeAt = ms(lastNudge?.at);
+  const lastAt = ms(lastNudge?.at);
+  // A nudge held for the thread's computer is a nudge sent, in every window and after a reload: it counts as nudged now.
+  const heldAt = ms(t.nudge?.held?.at);
+  const nudgeAt = heldAt !== null && (lastAt === null || heldAt > lastAt) ? heldAt : lastAt;
   // The nudge's own delivery is not movement: the agent being handed the person's nudge has done nothing yet.
-  const sentIsNudge = nudgeAt !== null && t.sent !== null && ms(t.sent.at) === nudgeAt;
-  const moved = Math.max(start, ms(t.last_agent_at) ?? start, (sentIsNudge ? null : ms(t.sent?.checked_at)) ?? start, prAt ?? start, ms(t.steps?.at) ?? start);
+  const sentIsNudge = lastAt !== null && t.sent !== null && ms(t.sent.at) === lastAt;
+  // A check run seen to start or end on an open PR is movement too (a push starts one).
+  const checksAt = Math.max(start, ...t.pulls.flatMap((p) => (inPlay(p.state) ? (ms(p.checks_at) ?? []) : [])));
+  const moved = Math.max(start, ms(t.last_agent_at) ?? start, (sentIsNudge ? null : ms(t.sent?.checked_at)) ?? start, prAt ?? start, ms(t.steps?.at) ?? start, checksAt);
   // A nudged stretch the work came back from stays on the bar as Stale: from its start to the agent's first answer.
   const nudgeFrom = ms(lastNudge?.quiet_from);
   const nudgedStretch: GridPiece | null =
-    nudgeAt !== null && nudgeFrom !== null && moved > nudgeAt ? { kind: "stale", from: nudgeFrom, to: Math.min(ms(lastNudge?.answered_at) ?? moved, moved) } : null;
+    lastAt !== null && nudgeFrom !== null && moved > lastAt ? { kind: "stale", from: nudgeFrom, to: Math.min(ms(lastNudge?.answered_at) ?? moved, moved) } : null;
   const ask = askWords(t);
   const ended = t.session_ended || t.agentState === "ended";
   const unseen = (at: number) => t.seen === null || t.seen.through < at;
@@ -319,16 +353,25 @@ export function gridPlaceTimed(t: GridThreadIn, now: number): { placed: GridPlac
     detail: pr?.detail ?? null,
     steps: t.steps,
     staleFrom: null,
-    nudged: nudgeAt !== null ? { at: nudgeAt, now: nudgeAt >= moved } : null,
+    nudged: nudgeAt !== null ? { at: nudgeAt, now: nudgeAt >= moved, held: nudgeAt === heldAt ? t.nudge!.held!.words : null } : null,
+    refused: null,
+    nudgeTo: t.nudge?.agent?.name ?? null,
     actions: [{ kind: "open", thread: t.id }] as GridAction[],
   } satisfies Partial<GridLine>;
   const idleOver = (end: number): GridPiece | null => (!working && end - moved >= GRID_QUIET_MS ? { kind: "idle", from: moved, to: end } : null);
-  // A stale line's actions: Nudge, while its thread names where a reply goes and no nudge went in the last three quiet hours.
-  const staleActions = (quietFrom: number): GridAction[] => {
+  /**
+   * A stale line: its refusal, and its actions. Nudge, while its thread names where a reply goes, the agent it goes to
+   * is live (not known: no Nudge), none is held for its computer, none was refused in this stretch, and none went in
+   * the last three quiet hours.
+   */
+  const staleOf = (quietFrom: number): Pick<GridLine, "refused" | "actions"> => {
+    const nudge = t.nudge;
+    // A refusal of a nudge pressed in this stretch (its start the same to within a minute: clocks are read again).
+    const refused = nudge?.refused && Math.abs(nudge.refused.quiet_from - quietFrom) < GRID_MIN ? nudge.refused.words : null;
     const again = nudgeAt === null || nudgeAt < quietFrom || now - nudgeAt >= GRID_STALE_MS;
-    if (!t.nudge || !again) return base.actions;
-    const key = `grid-nudge-${t.id}-${quietFrom}-${Math.floor((now - quietFrom) / GRID_STALE_MS)}`;
-    return [...base.actions, { kind: "nudge", thread: t.id, to: t.nudge.to, seq: t.nudge.seq, key, quietFrom }];
+    if (!nudge || nudge.agent?.live !== true || nudge.held || refused || !again) return { refused, actions: base.actions };
+    const turn = Math.floor((now - quietFrom) / GRID_STALE_MS);
+    return { refused, actions: [...base.actions, { kind: "nudge", thread: t.id, to: nudge.to, seq: nudge.seq, quietFrom, turn, taken: nudge.taken, agent: nudge.agent.name }] };
   };
 
   // The marks an ended line crosses: first sight, its 3 hours, 12 hours unseen, Earlier's week.
@@ -362,7 +405,7 @@ export function gridPlaceTimed(t: GridThreadIn, now: number): { placed: GridPlac
     const at = (sentIsNudge ? nudgeFrom : ms(t.sent.at)) ?? start;
     if (now - at >= GRID_PLAN_STALE_MS) {
       // Not started twelve hours on: Stale, the whole wait drawn as its stretch.
-      const line: GridLine = { ...base, group: "stale", planned: at, staleFrom: at, detail: { words: "not started", bad: false }, pieces: [{ kind: "stale", from: at, to: now }], actions: staleActions(at), at };
+      const line: GridLine = { ...base, group: "stale", planned: at, staleFrom: at, detail: { words: "not started", bad: false }, pieces: [{ kind: "stale", from: at, to: now }], ...staleOf(at), at };
       return timed({ place: "shown", line }, minute);
     }
     // Not started stays as it is until twelve hours make it Stale (or three quiet days drop it).
@@ -373,7 +416,7 @@ export function gridPlaceTimed(t: GridThreadIn, now: number): { placed: GridPlac
   const quiet = !working && now - moved >= GRID_QUIET_MS;
   const stale = !working && now - moved >= GRID_STALE_MS;
   if (stale) {
-    const line: GridLine = { ...base, group: "stale", staleFrom: moved, pieces: piecesOf(start, prAt, now, nudgedStretch, { kind: "stale", from: moved, to: now }), actions: staleActions(moved), at: moved };
+    const line: GridLine = { ...base, group: "stale", staleFrom: moved, pieces: piecesOf(start, prAt, now, nudgedStretch, { kind: "stale", from: moved, to: now }), ...staleOf(moved), at: moved };
     return timed({ place: "shown", line }, minute);
   }
   return timed(
@@ -399,7 +442,8 @@ export function gridSameIn(a: GridThreadIn, b: GridThreadIn): boolean {
     } else if (key === "nudge") {
       const p = x as GridThreadIn["nudge"];
       const q = y as GridThreadIn["nudge"];
-      if (!p || !q || p.to !== q.to || p.seq !== q.seq || !(p.last === q.last || (p.last && q.last && sameFlat(p.last, q.last)))) return false;
+      const same = <T extends object>(u: T | null, v: T | null) => u === v || (!!u && !!v && sameFlat(u, v));
+      if (!p || !q || p.to !== q.to || p.seq !== q.seq || p.taken !== q.taken || !same(p.last, q.last) || !same(p.agent, q.agent) || !same(p.held, q.held) || !same(p.refused, q.refused)) return false;
     } else if (!x || !y || typeof x !== "object" || typeof y !== "object" || !sameFlat(x, y)) return false;
   }
   return Object.keys(a).length === Object.keys(b).length;
@@ -515,17 +559,22 @@ export function gridRounded(length: number): string {
 }
 
 /**
- * A length as the readout and a nudge say it: "40 min", "3 h 37 min" (round 4: exact, so it never disagrees with the
- * rounded line), then days.
+ * A length as the readout says it: "40 min", "2 h 10 min" under three hours, then hours, then days. `exact` (a stale
+ * line's readout and a nudge's words, round 4): to the minute and the hour all the way ("3 h 37 min", "1 d 6 h"), so a
+ * nudge never says a looser time than the line it was sent from.
  */
-export function gridExact(length: number): string {
+export function gridExact(length: number, exact = false): string {
   const minutes = Math.max(1, Math.floor(length / GRID_MIN));
   if (minutes < 60) return `${minutes} min`;
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
+  if (exact) {
+    if (h >= 24) return h % 24 ? `${Math.floor(h / 24)} d ${h % 24} h` : `${Math.floor(h / 24)} d`;
+    return m ? `${h} h ${m} min` : `${h} h`;
+  }
   if (h >= 48) return `${Math.floor(h / 24)} d`;
   if (h >= 24) return "1 d";
-  return m ? `${h} h ${m} min` : `${h} h`;
+  return h < 3 && m ? `${h} h ${m} min` : `${h} h`;
 }
 
 /** A length as a screen reader says it: the line's words with the units in full ("2 hours", "32 minutes"). */

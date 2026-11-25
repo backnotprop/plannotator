@@ -5330,7 +5330,7 @@ function Inbox() {
   } else if (route.page === 'reviews') {
     main = <div className="ib-listcol" aria-busy="true" />;
   } else if (route.page === 'grid') {
-    main = <GridRoute on={gridOn} settingsKnown={settings !== null} phone={phone} onOpen={(thread) => go({ page: 'inbox', project: null, thread })} />;
+    main = <GridRoute on={gridOn} settingsKnown={settings !== null} phone={phone} outbox={outbox} onOpen={(thread) => go({ page: 'inbox', project: null, thread })} />;
   } else if (route.page === 'plans') {
     main = <PlansRoute route={route} on={plansOn} settingsKnown={settings !== null} phone={phone} projects={projects} />;
   } else if (route.page === 'scheduled') {
