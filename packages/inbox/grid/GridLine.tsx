@@ -221,8 +221,10 @@ export const GridLineView = memo(function GridLineView({ line, clock, phone, com
   const action = gridNudgeOf(line);
   const went = sent && !sent.failed ? sent : null;
   const canNudge = !!action && !!onNudge && !(went && went.press === gridNudgePress(action));
-  // This window's press shows at once; a held one and the thread's own nudge as the line carries them.
-  const mine = went && line.group === 'stale' && (!line.nudged || went.at > line.nudged.at) ? went : null;
+  // This window's press shows at once; a held one and the thread's own nudge as the line carries them. Once the press's
+  // computer refused it (`line.refused`: a refusal in this stretch, after which no Nudge is offered in it), the line
+  // says the refusal, not "Nudged": the outbox's verdict wins over what this window heard when it pressed.
+  const mine = went && line.group === 'stale' && !line.refused && (!line.nudged || went.at > line.nudged.at) ? went : null;
   const nudged = mine ? { at: mine.at, held: mine.held ?? line.nudged?.held ?? null } : line.nudged ? { at: line.nudged.at, held: line.nudged.held } : null;
   const under = line.group !== 'stale' ? null : mine ? nudgedWords(mine.at, clock.to) : line.nudged?.now ? nudgedWords(line.nudged.at, clock.to) : null;
   // A nudge that did not go: why, in the status's grey (a refusal is news, not an error), until the line leaves Stale.

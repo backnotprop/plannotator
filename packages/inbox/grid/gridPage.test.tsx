@@ -532,6 +532,28 @@ test.skipIf(!hasDom)('a held nudge refused on delivery (the work moved): the lin
   expect(line.textContent).not.toContain('Nudged');
 });
 
+test.skipIf(!hasDom)('the window that pressed a held nudge says the refusal when its computer comes back and refuses it, not "Nudged"', async () => {
+  fakeScreen();
+  const asked = requests();
+  const { host, draw } = mount({ on: true, rows: [farStale()], miniAway: true });
+  await settle();
+  const line = () => host.querySelector('[data-grid-line="msg_tide"]')!;
+  // This window presses it while the Mac mini is away; the outbox holds it.
+  act(() => line().querySelector<HTMLButtonElement>('[data-grid-nudge]')!.click());
+  await settle();
+  expect(asked.filter((r) => r.url.includes('/reply')).length).toBe(1);
+  draw([heldNudge({ queued_at: new Date().toISOString() })]);
+  await settle();
+  expect(line().querySelector('[data-grid-nudged]')!.textContent).toBe('Nudged just now');
+  // Back, the Mac mini refused it (the work moved): the outbox's entry settles refused, and this window says so.
+  draw([heldNudge({ state: 'refused', status: 409, settled_at: new Date().toISOString(), notice: { kind: 'refused', at: new Date().toISOString() }, answer: { error: 'The work moved on after this nudge was pressed, so it was not sent.', code: 'thread_moved_on' } })]);
+  await settle();
+  const status = line().querySelector('[data-grid-nudged]')!;
+  expect(status.textContent).toBe('Not delivered: The work moved on after this nudge was pressed, so it was not sent.');
+  expect(status.hasAttribute('data-not-sent')).toBe(true);
+  expect(line().querySelector('[data-grid-nudge]')).toBeNull();
+});
+
 test.skipIf(!hasDom)('Take back, then Nudge: the row counts it taken, so Nudge is offered again and the press is a new write (a new key)', async () => {
   fakeScreen();
   const asked = requests();
