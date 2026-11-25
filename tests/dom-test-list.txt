@@ -117,6 +117,7 @@ packages/inbox/threadSteps.test.tsx
 packages/inbox/panePollsPause.test.tsx
 packages/inbox/decisionMode.test.tsx
 packages/inbox/decisionCardContract.test.tsx
+packages/inbox/decisionModeSettings.test.tsx
 packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
 packages/inbox/components/stalePageNotice.test.tsx
@@ -161,6 +162,7 @@ packages/inbox/earlierComments.test.tsx
 packages/inbox/phoneStepping.test.tsx
 packages/inbox/touchStepping.test.tsx
 packages/inbox/htmlPageSize.test.tsx
+packages/inbox/htmlPageClear.test.tsx
 packages/inbox/imageSwipe.test.tsx
 packages/inbox/sharedPictureChoice.test.tsx
 packages/inbox/acceptStepsAside.test.tsx
@@ -943,3 +945,4 @@ packages/inbox/commentRowFiles.test.tsx
 packages/inbox/sidebarStickyHeadings.test.tsx
 packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx
+packages/inbox/reviewAnalysis.test.tsx
