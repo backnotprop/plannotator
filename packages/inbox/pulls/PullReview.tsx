@@ -92,7 +92,7 @@ import { liveView } from '../prs/stackRange';
 import { lookedBefore, markLooked, useLooked } from '../prs/looked';
 import { RailScopeRows } from './RailScopeRows';
 import { drawnStackWith, hiddenIn, useKeptStack } from './keptStack';
-import { forgeSaid, loneStack, unreadWords, useRoutePull, withForgeState } from './routePull';
+import { forgeSaid, loneStack, missingWords, unreadWords, useRoutePull, withForgeState } from './routePull';
 import { shutWord } from './stateWord';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -895,10 +895,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
 
   const readOnlyParts: Words = layer.mine ? ['No review thread yet'] : layer.author ? ['by ', person(layer.author)] : ['by a deleted account'];
   const readOnlyWords = wordsText(readOnlyParts);
-  // The forge not answering for a PR no list names: the page stays as last read, with one line saying so.
-  const unreadNote = route.unread && (
-    <p className="ib-prr-note" data-pull-review-unread="">
-      {unreadWords(forgeName(layer))}
+  // The forge not answering for a PR no list names, or saying it has no such PR now: the page stays as last read,
+  // with one line saying so.
+  const unreadNote = (route.unread || route.missing) && (
+    <p className="ib-prr-note" {...(route.missing ? { 'data-pull-review-missing': '' } : { 'data-pull-review-unread': '' })}>
+      {route.missing ? missingWords(forgeName(layer)) : unreadWords(forgeName(layer))}
     </p>
   );
   const readOnlyNote = !canDecide && !posted && !diffError && (

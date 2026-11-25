@@ -6677,10 +6677,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (path === "/api/inbox/pulls/pull") {
           const key = url.searchParams.get("key") ?? "";
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
-          const { pull, unreadable } = await pulls.pull(key);
+          const { pull, unreadable, missing } = await pulls.pull(key, (await pullProjects()).wanted);
           if (pull) pullAvatars.allow(pull.host, pulls.avatarUrls(pull.host));
           // `unreadable`: the forge did not answer, which says nothing of the PR; the page keeps what it shows.
-          return json({ serverSession, pull, ...(unreadable ? { unreadable: true } : {}) });
+          // `missing`: the forge has no such PR now (deleted, or no longer visible): what the page shows is its last read.
+          return json({ serverSession, pull, ...(unreadable ? { unreadable: true } : {}), ...(missing ? { missing: true } : {}) });
         }
         if (path === "/api/inbox/pulls/details") {
           const key = url.searchParams.get("key") ?? "";

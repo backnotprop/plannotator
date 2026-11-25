@@ -72,10 +72,11 @@ export function forgePullOf(platform: InboxPullPlatform, host: string, repo: str
 }
 
 /**
- * What a read of one PR found: the PR; none (`pull` null: the forge answered that it has no such PR); or `unreadable`
- * (the forge did not answer: offline, signed out, down, an answer that is not a PR), which says nothing of the PR.
+ * What a read of one PR found: the PR; `missing` (the forge answered that it has no such PR: deleted with its
+ * repository, or no longer visible to this login); or `unreadable` (the forge did not answer: offline, signed out,
+ * down, an answer that is not a PR), which says nothing of the PR.
  */
-export type ForgePullRead = { pull: InboxPull | null; unreadable?: true };
+export type ForgePullRead = { pull: InboxPull | null; unreadable?: true; missing?: true };
 
 /** The forge said it has no such PR (gh's and glab's `HTTP 404` / `404 Not Found`). */
 const saysNotFound = (text: string): boolean => /\b404\b/.test(text);
@@ -87,7 +88,7 @@ export async function readForgePull(run: RefRunner, cli: RefCli, platform: Inbox
   const endpoint = platform === "github" ? `repos/${repo}/pulls/${number}` : `projects/${encodeURIComponent(repo)}/merge_requests/${number}`;
   const read = await run(cli, ["api", "--hostname", host, endpoint, ...(platform === "github" ? ["--jq", FORGE_PULL_JQ] : [])]).catch(() => null);
   if (!read) return { pull: null, unreadable: true };
-  if (read.exitCode !== 0) return saysNotFound(`${read.stderr}\n${read.stdout}`) ? { pull: null } : { pull: null, unreadable: true };
+  if (read.exitCode !== 0) return saysNotFound(`${read.stderr}\n${read.stdout}`) ? { pull: null, missing: true } : { pull: null, unreadable: true };
   try {
     const pull = forgePullOf(platform, host, repo, number, obj(JSON.parse(read.stdout)), was);
     return pull ? { pull } : { pull: null, unreadable: true };

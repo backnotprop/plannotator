@@ -84,6 +84,8 @@ let serverPull: Record<string, InboxPull> = {};
 /** The forge does not answer the server's read of one PR (`unreadable`); `pullReads`: how many times the page asked. */
 let forgeQuiet = false;
 let pullReads = 0;
+/** The forge answers that it has no such PR now (`missing`: deleted, or no longer visible to the person). */
+let forgeMissing = false;
 /** The diff read fails too (the forge is down and no patch was read since the page opened). */
 let diffDown = false;
 /** This Inbox's ships (`GET /api/inbox/ships`): what the Reviews row's "Merged <time>" reads. */
@@ -99,6 +101,7 @@ beforeEach(() => {
   serverPull = {};
   forgeQuiet = false;
   pullReads = 0;
+  forgeMissing = false;
   diffDown = false;
   ships = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -114,7 +117,7 @@ beforeEach(() => {
     }
     if (url.pathname.endsWith('/pulls/pull')) {
       pullReads += 1;
-      return Response.json({ serverSession: 's', pull: serverPull[url.searchParams.get('key')!] ?? null, ...(forgeQuiet ? { unreadable: true } : {}) });
+      return Response.json({ serverSession: 's', pull: serverPull[url.searchParams.get('key')!] ?? null, ...(forgeQuiet ? { unreadable: true } : forgeMissing ? { missing: true } : {}) });
     }
     if (url.pathname.endsWith('/api/inbox/sessions')) {
       return Response.json({
@@ -453,28 +456,28 @@ test.skipIf(!hasDom)('opened while GitHub does not answer (an offline restart), 
   expect(refState()).toBe('merged');
 });
 
-test.skipIf(!hasDom)('a page drawn from the server’s copy stays when a later ask answers none (a PR never drawn keeps today’s words: above)', async () => {
-  serverPull[theirs.key] = { ...theirs, state: 'merged', checks: null };
+test.skipIf(!hasDom)('the forge saying it has no such PR any more: the page stays as its last read and says so', async () => {
+  serverPull[theirs.key] = { ...theirs, checks: null };
   let model = without(theirs.key);
   function Page() {
     const [shown, setShown] = useState(model);
     read = setShown;
     return <PullReview model={shown} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />;
   }
-  forgeQuiet = true;
   mount(<Page />);
   for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
   await settle();
-  expect(refState()).toBe('merged');
-  // The next ask answers none (the server kept nothing for it): the page keeps what it drew.
-  forgeQuiet = false;
+  expect(!!$('[data-pull-review-missing]')).toBe(false);
+  // Its repository deleted (or the person lost access): the forge answers 404, and the server kept nothing for it.
+  forgeMissing = true;
   delete serverPull[theirs.key];
   model = { ...model };
   await act(async () => read(model));
-  await fire('focus');
+  await settle(20);
   expect(!!$('[data-stub-reader]')).toBe(true);
   expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
-  expect(refState()).toBe('merged');
+  expect($('[data-pull-review-missing]')?.textContent).toContain('GitHub');
+  expect(!!$('[data-pull-review-unread]')).toBe(false);
 });
 
 /** A phone's window for `run` (usePhone's media queries), the desktop's again after. */

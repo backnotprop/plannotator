@@ -17,12 +17,16 @@ import { pullUrl } from './pullMachines';
 
 /**
  * The server's copy of one PR, listed or not (`pull` null: none it may read). `unreadable`: the forge did not answer
- * (offline, down), which says nothing of the PR; `pull` is then the copy the server kept, if any.
+ * (offline, down), which says nothing of the PR; `pull` is then the copy the server kept, if any. `missing`: the forge
+ * answered that it has no such PR now (deleted, or no longer visible to the person); `pull` is the copy kept, if any.
  */
-export const readRoutePull = (key: string, signal?: AbortSignal) => get<{ pull: InboxPull | null; unreadable?: true }>(pullUrl('/pulls/pull', key), signal);
+export const readRoutePull = (key: string, signal?: AbortSignal) => get<{ pull: InboxPull | null; unreadable?: true; missing?: true }>(pullUrl('/pulls/pull', key), signal);
 
 /** The page's one line while the forge does not answer: what shows is its last read. */
 export const unreadWords = (forge: string) => `${forge} didn't answer; showing its last read.`;
+
+/** The page's one line once the forge says it has no such PR: what shows is its last read, never current again. */
+export const missingWords = (forge: string) => `${forge} can't find this pull request any more; showing its last read.`;
 
 /** One PR as a stack of its own. */
 export function loneStack(pull: InboxPull): InboxPullStack {
@@ -39,12 +43,16 @@ export function itemOf(stack: InboxPullStack, key: string): InboxPullItem {
  * The PR the address names when no stack the list draws holds it (`wanted`): the raw list's copy, else the server's
  * (asked once per PR). `asking` while that read is out, so the page says it is reading, not that the PR is gone.
  * `unread` while the forge does not answer (or the Inbox could not be reached): the copy the page has stays, never
- * "gone", and it is asked again when the window gets its focus back or the browser is back online.
+ * "gone", and it is asked again when the window gets its focus back or the browser is back online. `missing` once the
+ * forge says it has no such PR: the copy the page has stays too, as its last read, and the page says so.
  */
-export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'> | null, wanted: boolean): { pull: InboxPull | null; asking: boolean; unread: boolean } {
+export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'> | null, wanted: boolean): { pull: InboxPull | null; asking: boolean; unread: boolean; missing: boolean } {
   const raw = useMemo(() => (wanted && model ? (model.pulls.find((p) => p.key === key) ?? null) : null), [wanted, model, key]);
-  /** `read`: the forge answered; `unread`: it did not (the server said so); `failed`: the Inbox could not be reached. */
-  const [got, setGot] = useState<{ key: string; pull: InboxPull | null; as: 'read' | 'unread' | 'failed' } | null>(null);
+  /**
+   * `read`: the forge answered; `missing`: it answered that it has no such PR; `unread`: it did not answer (the server
+   * said so); `failed`: the Inbox could not be reached.
+   */
+  const [got, setGot] = useState<{ key: string; pull: InboxPull | null; as: 'read' | 'missing' | 'unread' | 'failed' } | null>(null);
   const [retry, setRetry] = useState(0);
   // Asked each time the list stops naming it (or the page opens so), and again on each list read while the copy it
   // has is open or none: the server's copy can be a list's older read (a list that never named it here, or the other
@@ -61,23 +69,25 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
   useEffect(() => {
     if (!ask) return;
     const controller = new AbortController();
-    // A read that found nothing new keeps the copy this page has: an unanswered read never says "gone".
-    const unanswered = (pull: InboxPull | null, as: 'unread' | 'failed') => setGot((was) => ({ key, pull: pull ?? (was?.key === key ? was.pull : null), as }));
+    // A read that found nothing new keeps the copy this page has: an unanswered read never says "gone", nor does the
+    // forge saying it has no such PR now (the page says that instead). Only "none" (the PR is not the person's to
+    // read here any more: hidden, its project removed) takes it away.
+    const keep = (pull: InboxPull | null, as: 'missing' | 'unread' | 'failed') => setGot((was) => ({ key, pull: pull ?? (was?.key === key ? was.pull : null), as }));
     readRoutePull(key, controller.signal)
       .then((answer) => {
         if (controller.signal.aborted) return;
-        if (answer.unreadable) unanswered(answer.pull, 'unread');
-        // "None" never takes away a copy this page drew (what is open stays open); one it never had stays none.
-        else setGot((was) => ({ key, pull: answer.pull ?? (was?.key === key ? was.pull : null), as: 'read' }));
+        if (answer.unreadable) keep(answer.pull, 'unread');
+        else if (answer.missing) keep(answer.pull, 'missing');
+        else setGot({ key, pull: answer.pull, as: 'read' });
       })
       .catch(() => {
-        if (!controller.signal.aborted) unanswered(null, 'failed');
+        if (!controller.signal.aborted) keep(null, 'failed');
       });
     return () => controller.abort();
   }, [ask, key, retry]);
   const mine = ask && got?.key === key ? got : null;
   const unread = mine?.as === 'unread';
-  const unanswered = !!mine && mine.as !== 'read';
+  const unanswered = unread || mine?.as === 'failed';
   useEffect(() => {
     if (!unanswered) return;
     const askAgain = () => setRetry((n) => n + 1);
@@ -91,7 +101,8 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
   const fetched = got?.key === key ? got.pull : null;
   // The forge's read is newer than the raw list's for a PR no stack holds (its state, its head). An unanswered read
   // with no copy at all reads as still reading, never as gone.
-  return { pull: wanted ? (fetched ?? raw) : null, asking: wanted && !!model && (got?.key !== key || (got.as !== 'read' && !fetched && !raw)), unread };
+  const answered = got?.key === key && (got.as === 'read' || got.as === 'missing');
+  return { pull: wanted ? (fetched ?? raw) : null, asking: wanted && !!model && (got?.key !== key || (!answered && !fetched && !raw)), unread, missing: mine?.as === 'missing' };
 }
 
 /** What the forge said of this PR at the diff's read: only merged or closed. */

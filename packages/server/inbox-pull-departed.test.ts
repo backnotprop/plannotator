@@ -12,6 +12,8 @@
  *    or a host kept through failed checks for ever;
  *  - a restart while offline, or a forge down for longer than the sign-in keep, erasing the saved PRs (the open page
  *    says "gone"); a forge that did not answer read as "not yours" (`pull`), or a failed read held as an answer;
+ *  - a restarted Inbox asked for a kept PR before its first list read answering none (no repository known yet), so
+ *    the page open on it said "no longer in the list" once the forge was back; a forge 404 answered as a current copy;
  *  - a reload or a restart of this Inbox losing a PR that left the list (the page it had open says "no longer in the
  *    list"), or a PR no list keeps any more not read from the forge by number; the forge's merged or closed state not
  *    reaching the page; an action on a PR that left the list answered "not in the list".
@@ -281,9 +283,9 @@ test("pull() tells a forge that did not answer from a PR that is not yours or no
   f.merged.add(777);
   expect(await pulls.pull(keyOf(777))).toMatchObject({ pull: { number: 777, state: "merged" } });
   expect((await pulls.pull(keyOf(777))).unreadable).toBeUndefined();
-  // The forge answering that it has no such PR is not "unreadable".
+  // The forge answering that it has no such PR is not "unreadable": it is `missing`.
   f.missing.add(778);
-  expect(await pulls.pull(keyOf(778))).toEqual({ pull: null });
+  expect(await pulls.pull(keyOf(778))).toEqual({ pull: null, missing: true });
 });
 
 test("a restart keeps a PR that left the list readable, and one no list kept is read from the forge, merged", async () => {
@@ -347,6 +349,52 @@ test("one list stops naming a PR while the other's older read still does: pull()
   // A PR both lists still name is the list's copy, no forge read.
   const asked = f.calls.length;
   expect((await pulls.pull(keyOf(880))).pull?.state).toBe("open");
+  expect(f.calls.length).toBe(asked);
+});
+
+test("restarted, the page asks before any list read: the PR kept from before answers, offline and back online, never none", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-pull-departed-"));
+  try {
+    let now = 1_000_000;
+    const f = forge();
+    const first = createInboxPulls({ run: f.run, now: () => now, dir });
+    await first.list(repos);
+    // A teammate merges #880: no list names it; the page open on it reads it from the forge.
+    f.listed = [881];
+    f.merged.add(880);
+    now += INBOX_PULLS_FRESH_MS;
+    await first.list(repos, { refresh: true });
+    expect((await first.pull(keyOf(880), repos)).pull?.state).toBe("merged");
+    // The Inbox restarts while offline; the open page asks again (a focus) before the window's list is read.
+    now += 21_000;
+    f.down = true;
+    const offline = createInboxPulls({ run: f.run, now: () => now, dir });
+    expect(await offline.pull(keyOf(880), repos)).toMatchObject({ pull: { number: 880, state: "merged" }, unreadable: true });
+    // Back online: the next ask reads it from the forge.
+    f.down = false;
+    expect(await offline.pull(keyOf(880), repos)).toEqual({ pull: expect.objectContaining({ number: 880, state: "merged" }) });
+    // Restarted online, asked first: the same.
+    const online = createInboxPulls({ run: f.run, now: () => now, dir });
+    expect(await online.pull(keyOf(880), repos)).toEqual({ pull: expect.objectContaining({ number: 880, state: "merged" }) });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the forge saying it has no such PR any more: missing, with the copy kept as its last read", async () => {
+  let now = 1_000_000;
+  const f = forge();
+  const pulls = createInboxPulls({ run: f.run, now: () => now });
+  await pulls.list(repos);
+  f.listed = [880];
+  now += INBOX_PULLS_FRESH_MS;
+  await pulls.list(repos, { refresh: true });
+  // #881's repository was deleted, or the person lost access: GitHub answers 404.
+  f.missing.add(881);
+  expect(await pulls.pull(keyOf(881), repos)).toEqual({ pull: expect.objectContaining({ number: 881 }), missing: true });
+  // Never "unreadable" (the forge did answer), and held like any answer: no second read within the hold.
+  const asked = f.calls.length;
+  expect((await pulls.pull(keyOf(881), repos)).missing).toBe(true);
   expect(f.calls.length).toBe(asked);
 });
 
