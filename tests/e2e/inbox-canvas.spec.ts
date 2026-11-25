@@ -259,9 +259,12 @@ test("the reply box's pen: a sketch sent from the canvas reaches the agent as th
   const said = JSON.stringify(reply);
   expect(said).toContain('Here is where I want it: before the charge.');
   expect(said).toMatch(/canvas(-selection)?\.png/);
-  // What the agent reads with it points at the command's own help, and names no tool action.
-  expect(said).toContain('plannotator inbox canvas --help');
-  expect(said).not.toContain('canvas {');
+  // What the agent reads with it (read_thread as an agent reads it, not the stored record) points at the command's
+  // own help, and names no tool action.
+  const read = JSON.stringify(await world.claude.readThread(world.threadId));
+  expect(read).toContain('Sent from this thread\'s canvas');
+  expect(read).toContain('plannotator inbox canvas --help');
+  expect(read).not.toContain('canvas {');
   if (await layer.count()) await layer.locator('[data-canvas-close]').click();
   await expect(page.locator('.ib-pane').getByText('Here is where I want it: before the charge.').first()).toBeVisible();
   await shot(page, '10-reply-sent');

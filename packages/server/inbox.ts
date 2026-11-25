@@ -226,7 +226,7 @@ import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-r
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { createInboxCanvas } from "./inbox-canvas";
-import { canvasAgentRoute, INBOX_CANVAS_AGENT_ROUTE } from "./inbox-canvas-agent";
+import { canvasAgentRoute } from "./inbox-canvas-agent";
 import { canvasSwitch, INBOX_CANVAS_OFF_ANSWER } from "./inbox-canvas-switch";
 import { capabilityNoteOf, postCapabilityNotes } from "./inbox-capability-note";
 import { capabilityRoute, type InboxCapabilityContext } from "./inbox-capability-agent";
@@ -7494,7 +7494,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (answer) return answer;
       }
       // An agent's `plannotator inbox canvas` (inbox-canvas-agent.ts): this computer's own, only while the canvas is on.
-      if (path === INBOX_CANVAS_AGENT_ROUTE) {
+      if (path === "/api/inbox/canvas/agent") {
         const answer = await canvasAgentRoute(req, url, { canvas, on: () => canvasCap.on(), readBody, fromDeviceDoor: fromDeviceDoor.has(req) });
         if (answer) return answer;
       }
