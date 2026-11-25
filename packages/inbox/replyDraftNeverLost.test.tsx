@@ -20,7 +20,7 @@ import type { Signal } from './signal';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
-const { replyDraftUnsaved } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
+const { replyDraftUnsaved, resetReplyDraftPageForTests } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
 const { createSignal } = (hasDom ? await import('./signal') : {}) as typeof import('./signal');
 const { inboxReconnected } = (hasDom ? await import('./sessionAdopt') : {}) as typeof import('./sessionAdopt');
 const { rememberMachine, resetMachineRoutes } = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./inboxUrl');
@@ -114,7 +114,12 @@ afterEach(async () => {
   saveAnswer = null;
   readHeld = null;
   for (let i = 0; i < 100 && replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const left = replyDraftUnsaved();
   globalThis.fetch = savedFetch;
+  // Each test starts on a page of its own: nothing one leaves can make the next pass or fail.
+  resetReplyDraftPageForTests();
+  localStorage.clear();
+  if (left) throw new Error('the test left a reply draft save on its way, or words not saved');
 });
 
 async function settle(turns = 4, ms = 20) {
@@ -425,6 +430,90 @@ test.skipIf(!hasDom)("another computer's thread: words typed in its box stay wit
   } finally {
     resetMachineRoutes();
   }
+});
+
+test.skipIf(!hasDom)('a draft offered here, then sent from the other device: its words never come back into this box or a save', async () => {
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'Started on the Mac.');
+  await until(() => drafts.get(ONE)?.body === 'Started on the Mac.', 'the first save');
+  saveElsewhere(ONE, 'The iPad rewrote it and sent it.');
+  await act(async () => signal.emit());
+  await until(() => offerShown(el), 'the offer');
+  // The iPad sends it: its draft goes.
+  drafts.delete(ONE);
+  const sentAt = Date.now();
+  await act(async () => signal.emit());
+  await settle(6);
+  if (box(el)) typeOn(el, ' k');
+  await settle(4, 300);
+  expect((box(el)?.value ?? '').includes('The iPad rewrote it')).toBe(false);
+  expect(saves.some((s) => s.at >= sentAt && s.status === 200 && s.body.includes('The iPad rewrote it'))).toBe(false);
+  expect((drafts.get(ONE)?.body ?? '').includes('The iPad rewrote it')).toBe(false);
+  expect(el.querySelector('[data-draft-conflict]') === null).toBe(true);
+});
+
+test.skipIf(!hasDom)('a draft offered here, then saved again on the other device: the next key takes the newer one in', async () => {
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'Started on the Mac.');
+  await until(() => drafts.get(ONE)?.body === 'Started on the Mac.', 'the first save');
+  saveElsewhere(ONE, 'Started on the Mac. iPad, first pass.');
+  await act(async () => signal.emit());
+  await until(() => offerShown(el), 'the offer');
+  saveElsewhere(ONE, 'Started on the Mac. iPad, second pass.');
+  await act(async () => signal.emit());
+  await settle(6);
+  typeOn(el, ' Mac again.');
+  expect(box(el)!.value).toBe('Started on the Mac. iPad, second pass. Mac again.');
+  await until(() => drafts.get(ONE)?.body === 'Started on the Mac. iPad, second pass. Mac again.', 'both saved', 1500);
+  expect(el.querySelector('[data-draft-conflict]') === null).toBe(true);
+});
+
+test.skipIf(!hasDom)('the page shown again with a slow read-back while newer words are typed: the older words never land after them', async () => {
+  const el = await open();
+  await reply(el);
+  try {
+    typeOn(el, 'Words typed first.');
+    // The phone hides inside the pause, and its keepalive does not land.
+    saveAnswer = noNetwork;
+    pageVisibility('hidden');
+    await settle(2);
+    saveAnswer = null;
+    let letGo!: () => void;
+    readHeld = new Promise<void>((done) => (letGo = done));
+    pageVisibility('visible');
+    await settle(1);
+    // Newer words, whose save waits behind the slow read-back.
+    typeOn(el, ' Then newer ones.');
+    await settle(4, 200);
+    letGo();
+    readHeld = null;
+    await until(() => drafts.get(ONE)?.body !== undefined, 'a save');
+    await settle(6, 100);
+    expect(drafts.get(ONE)?.body).toBe('Words typed first. Then newer ones.');
+  } finally {
+    pageVisibility('visible');
+  }
+});
+
+test.skipIf(!hasDom)('words that did not land, the thread left and opened again, Reply tapped and a key typed before the read answers: both are kept and saved', async () => {
+  const el = await typedThenFailed(noNetwork);
+  act(() => draw(TWO));
+  await settle();
+  saveAnswer = null;
+  let letGo!: () => void;
+  readHeld = new Promise<void>((done) => (letGo = done));
+  act(() => draw(ONE));
+  await settle(1);
+  await reply(el);
+  typeOn(el, ' And k.');
+  letGo();
+  readHeld = null;
+  await until(() => (drafts.get(ONE)?.body ?? '').includes('And k.'), 'a save with the new key', 2000);
+  expect(drafts.get(ONE)?.body).toBe('Older words. Newer words. And k.');
+  expect(box(el)!.value).toBe('Older words. Newer words. And k.');
+  await until(() => !replyDraftUnsaved(), 'nothing left unsaved');
 });
 
 test.skipIf(!hasDom)('the page hidden while its save did not land: the words are sent again as it hides', async () => {

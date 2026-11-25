@@ -188,6 +188,15 @@ export function takeHeldVoiceWords(threadId: string): string[] {
 export function replyDraftUnsaved(): boolean {
   return unsaved > 0 || landing > 0 || heldVoice.size > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || failedWords.size > 0 || remoteKept() || carriesFiles();
 }
+/**
+ * DOM tests: the words this page keeps per thread, as a new page has them (a killed tab, or the next test). Saves still
+ * on their way are left to end (their counts are theirs); this page's localStorage is the test's to keep or clear.
+ */
+export function resetReplyDraftPageForTests(): void {
+  for (const kept of [conflictWords, offers, offerWords, offerFrom, failedWords, carried, discards, heldVoice, remoteWords, sendsOut]) kept.clear();
+  tooLongThreads.clear();
+  refusedThreads.clear();
+}
 
 /**
  * A file that left the reply box still uploading (the box closed, or the person went to another thread): once
@@ -386,6 +395,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   const synced = useRef(new Map<string, string | null>());
   /** Per thread: that draft's words (null: no draft). */
   const syncedWords = useRef(new Map<string, string | null>());
+  /** Per thread: the base and draft this window knew before a draft was offered (Restore draft), known again if it goes. */
+  const beforeOffer = useRef(new Map<string, { base: string | null; key: string | null; words: string | null }>());
   /**
    * Per thread: this window's own Send (unconfirmed) may have cleared the draft holding these words.
    * A save refused because of it is not another window's doing: adopted, and the words saved again.
@@ -517,10 +528,28 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     const edits = pending.current?.threadId === target || carried.has(target) || replyContentKey(mine.text, mine.files) !== (synced.current.get(target) ?? '');
     const typedFirst = edits && first && !synced.current.has(target) && !!onOfferRef.current;
     if (edits && !typedFirst) return 'edits';
+    if (!offers.has(target)) beforeOffer.current.set(target, { base: baseOf(target), key: synced.current.get(target) ?? null, words: syncedWords.current.get(target) ?? null });
     adopt(target, draft);
     offers.set(target, draft);
     offerFrom.set(target, typedFirst ? '' : mine.text);
     return typedFirst ? 'typed' : 'offer';
+  };
+  /**
+   * The offered draft is gone (sent or discarded elsewhere) or a newer one took its place: the offer goes, never to be
+   * taken in by a later key, and this window knows the draft it knew before the offer came (its base and words).
+   */
+  const dropOffer = (target: string) => {
+    const before = beforeOffer.current.get(target);
+    beforeOffer.current.delete(target);
+    offers.delete(target);
+    offerFrom.delete(target);
+    offerWords.delete(target);
+    if (before) {
+      bases.current.set(target, before.base);
+      synced.current.set(target, before.key);
+      syncedWords.current.set(target, before.words);
+    }
+    unsavedChanged();
   };
   const offerToConflict = (target: string): boolean => {
     if (!offers.has(target)) return false;
@@ -792,7 +821,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   // The thread's draft, read when it opens; what waited for the last thread is saved first.
   useEffect(() => {
     let live = true;
-    setState({ loadedFor: null, draft: null, conflict: null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId) });
+    // Words of this window's not saved (a conflict's, a save that did not land) are known before the read answers: a box
+    // opened meanwhile holds them, so a key typed there goes after them, never in their place.
+    setState({ loadedFor: null, draft: null, conflict: null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), unsaved: conflicts.current.get(threadId) ?? unsavedOf(threadId) });
     void chain.current.then(async () => {
       try {
         // An older Inbox answers 404 (caught below): no draft.
@@ -850,7 +881,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
           if (latest === undefined) {
             if (kept.text.trim() !== '') markRefused(kept.threadId, true, kept.text);
           }
-          else if (!conflicts.current.has(kept.threadId)) write(kept.threadId, kept.text);
+          // Newer words of the box on their way (typed since, queued or waiting for the pause) carry these and the file
+          // changes kept for them: these older words are never saved after them.
+          else if (!conflicts.current.has(kept.threadId) && queuedOf(kept.threadId).length === 0 && pending.current?.threadId !== kept.threadId) write(kept.threadId, kept.text);
           return;
         }
         takeCarried(kept.threadId);
@@ -1102,6 +1135,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       if (knew === learned.current) break;
       if (attempt === 2) return undefined;
     }
+    // The offered draft was sent or discarded elsewhere, or a newer one took its place: its words never come back.
+    const offered = offers.get(target);
+    if (offered && (draft?.updated_at ?? null) !== offered.updated_at) dropOffer(target);
     const local = generation !== generationOf(target) || claimed.current.has(target) ? null : boxWords();
     if ((draft?.updated_at ?? null) === baseOf(target)) {
       show(target, draft);
@@ -1221,6 +1257,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     offers.delete(target);
     offerWords.delete(target);
     offerFrom.delete(target);
+    beforeOffer.current.delete(target);
     if (draft) for (const queuedSave of queuedOf(target)) queuedSave.taken = true;
     unsavedChanged();
     setState((s) => ({ ...s, offer: null }));
