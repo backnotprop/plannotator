@@ -5,6 +5,8 @@
  *
  * As this Inbox's own drafts (reply-drafts.ts): each save overwrites the thread's one file, never appends to a log, so
  * any number of saves while that machine sleeps leave one small file. It goes once that machine took what it says.
+ * A file that does not read (torn by a crash, or not ours) is moved aside beside it (`<thread>.json.corrupt-<time>`),
+ * never deleted, and said once in the log: the thread then holds no draft here, and its next save starts a new file.
  */
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,7 +19,8 @@ const THREAD = /^[A-Za-z0-9_]+$/;
 
 /** One write of a thread's draft for that machine: a Discard, then a save, either or both, each under its own key. */
 export interface HeldDraftWrite {
-  discard?: { idempotency_key: string };
+  /** `base`: the version there the person threw away (undefined: the one the write before it leaves there). */
+  discard?: { idempotency_key: string; base?: string | null };
   save?: Record<string, unknown>;
 }
 
@@ -31,15 +34,22 @@ export interface HeldDraft {
   sent: HeldDraftWrite | null;
   /** The saves since, folded into one: sent once `sent` is answered, on the draft it left there. */
   next: HeldDraftWrite | null;
-  /** That machine refused it for a reason no retry cures: its words stay the draft shown here, carried by the next write. */
+  /** That machine refused it for a reason no retry cures: its words stay the draft shown here, "Not saved", carried by the next write. */
   stopped?: true;
+  /**
+   * Words of the person's that did not land there because the draft there changed meanwhile (`view` is that draft):
+   * offered in every window as a conflict is (Keep mine / Discard mine) until the person chooses.
+   */
+  conflict?: InboxReplyDraft;
+  /** A reply held for that machine carried this draft: `view` shows what it leaves, `before` what it held, until it is delivered or refused. */
+  sending?: { key: string; before: InboxReplyDraft | null; after: string | null; clear_draft: string; words?: string; uploads: string[] };
 }
 
 const dirOf = (dataDir: string, machine: string) => join(inboxDir(dataDir), INBOX_MACHINE_DRAFTS_DIR, machine);
 const fileOf = (dataDir: string, machine: string, threadId: string) => join(dirOf(dataDir, machine), `${threadId}.json`);
 
-/** Every held draft, of every machine (a file that does not read is skipped). */
-export function readHeldDrafts(dataDir: string): HeldDraft[] {
+/** Every held draft, of every machine. A file that does not read is moved aside (`<name>.corrupt-<time>`) and said once. */
+export function readHeldDrafts(dataDir: string, log: (line: string) => void = (line) => console.error(line)): HeldDraft[] {
   const root = join(inboxDir(dataDir), INBOX_MACHINE_DRAFTS_DIR);
   const out: HeldDraft[] = [];
   for (const machine of names(root)) {
@@ -47,18 +57,29 @@ export function readHeldDrafts(dataDir: string): HeldDraft[] {
     for (const name of names(join(root, machine))) {
       const threadId = name.endsWith(".json") ? name.slice(0, -5) : "";
       if (!THREAD.test(threadId)) continue;
+      const file = join(root, machine, name);
       try {
-        const held = JSON.parse(readFileSync(join(root, machine, name), "utf8")) as HeldDraft;
-        if (held?.v === 1 && held.machine === machine && held.thread_id === threadId) out.push(held);
+        const held = JSON.parse(readFileSync(file, "utf8")) as HeldDraft;
+        if (held?.v === 1 && held.machine === machine && held.thread_id === threadId) {
+          out.push(held);
+          continue;
+        }
       } catch {
-        // Torn or not ours: nothing of it is shown.
+        // Torn (a crash mid-write) or not JSON: moved aside below.
+      }
+      const aside = `${file}.corrupt-${Date.now()}`;
+      try {
+        renameSync(file, aside);
+        log(`Plannotator Inbox: a held reply draft for another computer did not read; kept aside as ${aside}.`);
+      } catch {
+        log(`Plannotator Inbox: a held reply draft for another computer did not read (${file}); left where it is.`);
       }
     }
   }
   return out;
 }
 
-/** Write one held draft whole (owner-only folder and file). */
+/** Write one held draft whole (owner-only folder and file). Throws when it cannot (a full disk): the file before stays. */
 export function writeHeldDraft(dataDir: string, held: HeldDraft): void {
   if (!MACHINE.test(held.machine) || !THREAD.test(held.thread_id)) throw new Error("A held draft names a machine and a thread.");
   mkdirSync(dirOf(dataDir, held.machine), { recursive: true, mode: 0o700 });

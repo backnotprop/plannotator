@@ -1683,7 +1683,8 @@ export const inboxApi = {
   /** `replies` (additive): open threads holding unsent work; an older Inbox sends none. */
   drafts: () => get<{ serverSession: string; drafts: DraftView[]; replies?: InboxReplyDraftRow[] }>(inboxUrl('/drafts')),
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
-  replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
+  /** `not_landed`: a linked machine's thread only (inbox-machine-drafts.ts): the person's words the draft there does not hold. */
+  replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null; not_landed?: { words: string; version: string; conflict?: boolean } }>(threadUrl(threadId, `/draft`)),
   commentDraft: (threadId: string, key: string) => get<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft', `key=${encodeURIComponent(key)}`)),
   saveCommentDraft: (threadId: string, body: { key: string; text: string; images: readonly ImageRef[]; base: string | null; force?: boolean }, init: { keepalive?: boolean } = {}) =>
     post<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft'), body, init),
@@ -1917,7 +1918,7 @@ export const inboxApi = {
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
-  discardReplyDraft: (threadId: string) => post<{ ok: true; deleted: boolean }>(threadUrl(threadId, '/draft/delete'), {}),
+  discardReplyDraft: (threadId: string, body: { base?: string | null; not_landed?: string } = {}) => post<{ ok: true; deleted: boolean }>(threadUrl(threadId, '/draft/delete'), body),
   saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: DraftFileInput[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; pulls?: InboxDraft['pulls']; board_request?: true; start?: InboxDraft['start'] }) =>
     post<{ draft: DraftView }>(inboxUrl(`/drafts/${encodeURIComponent(id)}`), { ...input }),
   deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/drafts/${encodeURIComponent(id)}/delete`), {}),

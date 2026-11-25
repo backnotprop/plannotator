@@ -159,7 +159,9 @@ export function composeReplyDraftFileOps<F extends ReplyDraftFileRef>(first: Rep
       ...then.add,
     ],
     remove: [...first.remove.filter((id) => !touched.has(id)), ...then.remove],
-    place: [...first.place.filter((entry) => !placed.has(entry.upload_id)), ...then.place],
+    // A place `then` gives, or for a file `then` removed or adds again, is `then`'s to say: `first`'s place (in its own,
+    // older words) would name a spot past the end of shorter words.
+    place: [...first.place.filter((entry) => !placed.has(entry.upload_id) && !touched.has(entry.upload_id)), ...then.place],
     ...((then.order ?? first.order) ? { order: then.order ?? first.order } : {}),
   };
 }
@@ -335,7 +337,16 @@ export interface ReplyDraftStore {
   read(threadId: string): Promise<InboxReplyDraft | null>;
   /** `keepalive`: sent as the page goes; its answer may never be read. */
   save(threadId: string, input: ReplyDraftSaveInput, options: { keepalive: boolean }): Promise<{ draft: InboxReplyDraft | null }>;
-  discard(threadId: string): Promise<void>;
+  /**
+   * `base`: the version the person threw away (a store that holds the draft for another computer discards only that
+   * one there). `notLanded`: Discard mine after a conflict the last read offered (`notLanded`): only those words go.
+   */
+  discard(threadId: string, options?: { base?: string | null; notLanded?: string }): Promise<void>;
+  /**
+   * Words of the person's the last read of the thread found the draft does not hold (a store that holds the draft for
+   * another computer: a conflict met there, or words refused there). Absent or null: none.
+   */
+  notLanded?(threadId: string): { words: string; version: string; conflict?: boolean } | null;
 }
 
 /**

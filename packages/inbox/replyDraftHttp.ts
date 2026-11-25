@@ -36,7 +36,12 @@ const saveBody = (input: ReplyDraftSaveInput) => replyDraftSaveBody(input.body, 
 
 /** Reply drafts on this computer's Inbox. */
 export const httpReplyDraftStore: ReplyDraftStore = {
-  read: async (threadId) => (await inboxApi.replyDraft(threadId)).draft ?? null,
+  read: async (threadId) => {
+    const answer = await inboxApi.replyDraft(threadId);
+    notLandedSeen.set(threadId, answer.not_landed ?? null);
+    return answer.draft ?? null;
+  },
+  notLanded: (threadId) => notLandedSeen.get(threadId) ?? null,
   save: async (threadId, input, options) => {
     if (!options.keepalive) return inboxApi.saveReplyDraft(threadId, input.body, input.base, input.baseBody, input.files, input.recipients, input.quote, input.mentions);
     // As the page goes: its answer is never read (the window reads the draft back when it comes back). A linked
@@ -50,10 +55,20 @@ export const httpReplyDraftStore: ReplyDraftStore = {
     }).catch(() => {});
     return { draft: null };
   },
-  discard: async (threadId) => {
-    await inboxApi.discardReplyDraft(threadId);
+  // A linked machine's thread: the version thrown away goes with it, so one changed there since stays (this Inbox's own
+  // Discard is as it always was).
+  discard: async (threadId, options = {}) => {
+    const far = machineOf(threadId) !== null;
+    if (options.notLanded !== undefined) {
+      if (far) await inboxApi.discardReplyDraft(threadId, { not_landed: options.notLanded });
+      return;
+    }
+    await inboxApi.discardReplyDraft(threadId, far && options.base !== undefined ? { base: options.base } : {});
   },
 };
+
+/** Per thread: the person's words the last read found the draft there does not hold (`not_landed`). */
+const notLandedSeen = new Map<string, { words: string; version: string; conflict?: boolean } | null>();
 
 /** A file's bytes as a pending upload on this Inbox, or (`machine`) on the linked machine whose thread it is. */
 export function httpDraftFileUploader(machine: () => string | null): DraftFileUploader {

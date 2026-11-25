@@ -24,10 +24,17 @@ export function keepRemoteWords(threadId: string, text: string): void {
   else remoteWords.delete(threadId);
 }
 
-/** That computer keeps drafts now (the host's `canPersist`): the thread's kept words leave here (undefined: none, or still not kept there). */
+/**
+ * That computer keeps drafts now (the host's `canPersist`): the thread's kept words, to save there (undefined: none, or
+ * still not kept there). They stay here until the caller has kept them elsewhere, then it lets them go.
+ */
 export function remoteWordsToSave(threadId: string, canPersist: (threadId: string) => boolean): string | undefined {
   const words = remoteWords.get(threadId);
   if (words === undefined || !canPersist(threadId)) return undefined;
-  remoteWords.delete(threadId);
   return words;
+}
+
+/** DOM tests: no host says which threads are remote (as a new page has it). */
+export function resetRemoteThreadsForTests(): void {
+  remote = () => false;
 }

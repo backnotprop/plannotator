@@ -47,7 +47,7 @@ import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type Ou
 import type { OutboxFile } from "./inbox-outbox-files";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
-import { createMachineDrafts, MACHINE_DRAFT_ROUTE } from "./inbox-machine-drafts";
+import { createMachineDrafts, lostDraftParts, MACHINE_DRAFT_ROUTE } from "./inbox-machine-drafts";
 import { createMachineShips } from "./inbox-machine-ships";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
@@ -382,6 +382,8 @@ const wordsOf = (entry: OutboxEntry): string | null => {
   const args = entry.route === FAR_AGENT_REPLY_ROUTE && body.args && typeof body.args === "object" ? (body.args as Record<string, unknown>) : null;
   const words = args ? (typeof args.body === "string" ? args.body : null) : typeof body.words === "string" ? body.words : typeof body.body === "string" ? body.body : null;
   if (words === null) return null;
+  // A reply draft lost with its link is there to be copied whole ("Not sent"): its card shows the start of it.
+  if (MACHINE_DRAFT_ROUTE.test(entry.route)) return words;
   return words.length > OUTBOX_WORDS_SHOWN ? `${words.slice(0, OUTBOX_WORDS_SHOWN)}…` : words;
 };
 
@@ -505,6 +507,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const drafts = createMachineDrafts({
     dataDir: context.dataDir,
     peer: (id) => peers.get(id),
+    // A reply that carried a held draft: the draft settles once it is delivered there; refused or cancelled, it comes back.
+    replyState: (key) => {
+      const state = outbox.get(key)?.state;
+      return state === "delivered" ? "delivered" : state === undefined || state === "refused" || state === "dropped" || state === "cancelled" ? "refused" : "pending";
+    },
     onChange: (_machine, threadId) => {
       emit({ event: "drafts", data: { thread_id: threadId } });
       machinesChanged();
@@ -661,6 +668,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
   };
 
   outbox.onChange(({ entry }) => {
+    if (REPLY_ROUTE.test(entry.route)) drafts.replySettled(entry.machine, entry.key);
     // A link-through ask is drawn on its own row (how it stands, a refusal's words): the rows hear it, not the outbox.
     if (entry.auto && entry.route === LINK_THROUGH_ASK_ROUTE) return machinesChanged();
     // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it,
@@ -733,12 +741,14 @@ export function createInboxMachines(context: InboxMachinesContext) {
     linkThrough.forgetBroker(id);
     // A reply draft held for it is lost with the link, as a write waiting for it is: its words join the "Not sent"
     // list (a write that was waiting, dropped below), never gone silently. Only here does a draft enter the outbox.
+    // Every word goes (its files and quote named after them): a draft longer than one held write fits is said in parts.
     for (const lost of drafts.forget(id)) {
-      try {
-        // Well under the outbox's limit on a held body (the line shows the first OUTBOX_WORDS_SHOWN of them).
-        outbox.submit(id, `threads/${lost.thread}/draft`, { idempotency_key: crypto.randomUUID(), body: lost.words.slice(0, 100_000) }, lost.thread);
-      } catch {
-        // Not a machine id this outbox keeps: nothing more can be done for them.
+      for (const part of lostDraftParts(lost)) {
+        try {
+          outbox.submit(id, `threads/${lost.thread}/draft`, { idempotency_key: crypto.randomUUID(), body: part }, lost.thread);
+        } catch {
+          // Not a machine id this outbox keeps: nothing more can be done for them.
+        }
       }
     }
     outbox.dropMachine(id, link?.name ?? null);
@@ -1055,7 +1065,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
       try {
         const answer = await peer.request(page ? `attachments/${page[1]}/view` : route, search, { method: "GET", headers, signal: req.signal });
         if (sessionsRead !== null && answer.ok) void launchReads.keep(machine, sessionsRead, answer.clone(), () => peers.has(machine));
-        if (draftRoute && !draftRoute[2]) drafts.noteRead(machine, draftRoute[1]!, answer.clone());
+        if (draftRoute && !draftRoute[2]) {
+          drafts.noteRead(machine, draftRoute[1]!, answer.clone());
+          // Words of the person's the draft there does not hold (a conflict a held save met): offered with it.
+          const offered = answer.ok ? drafts.notLanded(machine, draftRoute[1]!) : null;
+          if (offered) return json({ ...((await answer.json().catch(() => ({}))) as Record<string, unknown>), not_landed: offered });
+        }
         if (page) {
           const made = await machinePageAnswer(answer, machine, search, (far) => passAnswer(far));
           if (!head) return made;
@@ -1182,7 +1197,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const place = inboxForwardedPlace(context.sentFrom?.(req, via) ?? null);
     const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window, place);
     // A reply that carries a draft still waiting to land there: the draft shown here settles with it.
-    if (fresh && REPLY_ROUTE.test(route) && THREAD_HINT.test(named)) drafts.afterReply(peer, named, body);
+    if (fresh && REPLY_ROUTE.test(route) && THREAD_HINT.test(named)) drafts.afterReply(peer, named, body, entry.key);
     if (peer.state === "online") peer.flush();
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;

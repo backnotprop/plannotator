@@ -49,7 +49,7 @@
  * Storage is the host's (`store`, @plannotator/core/inbox-reply-draft's
  * `ReplyDraftStore`); this Inbox's is HTTP (replyDraftHttp.ts).
  */
-import { isRemoteThread, keepRemoteWords, remoteKept, remoteWords, remoteWordsToSave, setRemoteThreads } from './remoteReplyWords';
+import { isRemoteThread, keepRemoteWords, remoteKept, remoteWords, remoteWordsToSave, resetRemoteThreadsForTests, setRemoteThreads } from './remoteReplyWords';
 import { clearLateVoiceMiss, noteLateVoiceMiss } from './lateVoice';
 import { spaced } from './voiceField';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -183,7 +183,7 @@ const discardsOf = (threadId: string) => discards.get(threadId) ?? 0;
 /** A linked computer's thread whose draft is not kept there (machineDrafts.ts): dictated words for its closed box wait in this page for the box. */
 const heldVoice = new Map<string, string[]>();
 /** Words the box shows for the thread that no draft holds: a save that did not land, or a remote thread's kept words. */
-const unsavedOf = (threadId: string): string | null => failedWords.get(threadId) ?? (isRemoteThread(threadId) ? remoteWords.get(threadId) : undefined) ?? null;
+const unsavedOf = (threadId: string): string | null => (isRemoteThread(threadId) ? remoteWords.get(threadId) : undefined) ?? failedWords.get(threadId) ?? null;
 /** Per thread: the `updated_at` of the draft this page last knew (the draft words kept here were typed over). */
 const baseKnown = new Map<string, string | null>();
 /** Per thread: the words of a Keep mine on its way: kept in the browser until a save lands (replyWordsKept.ts). */
@@ -200,21 +200,23 @@ const remoteWaiting = new Set<string>();
  */
 function syncKept(): void {
   const want = new Map<string, KeptWords>();
-  for (const [id, words] of remoteWords) if (isRemoteThread(id)) want.set(id, { kind: 'remote', words, base: baseKnown.get(id) ?? null });
+  // A remote thread's words are kept beside its other words (their own entry), never written over by them.
+  for (const [id, words] of remoteWords) if (isRemoteThread(id)) want.set(`${id}\n`, { kind: 'remote', words, base: baseKnown.get(id) ?? null });
   for (const [id, words] of failedWords) want.set(id, { kind: 'failed', words, base: failedOver.get(id)?.base ?? null });
   // The box's newer words on their way win over older ones that did not land (those come back once these end).
   for (const [id, words] of keepingMine) want.set(id, { kind: 'failed', words, base: failedOver.has(id) ? failedOver.get(id)!.base : (baseKnown.get(id) ?? null) });
   for (const [id, words] of conflictWords) want.set(id, { kind: 'conflict', words, base: baseKnown.get(id) ?? null });
+  const thread = (id: string) => (id.endsWith('\n') ? id.slice(0, -1) : id);
   for (const [id, kept] of want) {
     const was = keptHere.get(id);
     if (was && was.kind === kept.kind && was.words === kept.words && was.base === kept.base) continue;
     keptHere.set(id, kept);
-    keepWords(id, kept);
+    keepWords(thread(id), kept);
   }
   for (const id of [...keptHere.keys()]) {
     if (want.has(id)) continue;
     keptHere.delete(id);
-    forgetWords(id);
+    forgetWords(thread(id), id.endsWith('\n') ? ':remote' : '');
   }
 }
 /**
@@ -227,7 +229,7 @@ async function takeKeptBack(threadId: string): Promise<boolean> {
   if (lookedForKept.has(threadId)) return false;
   lookedForKept.add(threadId);
   const found = await keptWordsGone(threadId);
-  if (!found || conflictWords.has(threadId) || failedWords.has(threadId) || remoteWords.has(threadId)) return false;
+  if (!found || (found.kind === 'remote' ? remoteWords.has(threadId) : conflictWords.has(threadId) || failedWords.has(threadId))) return false;
   const { key, ...kept } = found;
   if (kept.kind === 'remote' && !isRemoteThread(threadId)) {
     lookedForKept.delete(threadId);
@@ -269,6 +271,7 @@ export function resetReplyDraftPageForTests(): void {
   refusedThreads.clear();
   lookedForKept.clear();
   remoteWaiting.clear();
+  resetRemoteThreadsForTests();
   newKeptPageForTests();
 }
 
@@ -637,13 +640,32 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   const remoteToDraft = (target: string): boolean => {
     const words = remoteWordsToSave(target, keeps);
     if (words === undefined) return false;
-    if (!failedWords.has(target) && !conflicts.current.has(target)) {
+    // They were typed after (in a box that showed) any words of the thread not saved before: the newest stand for
+    // those, as a conflict keeps the box's newest words. Kept elsewhere first, then let go here.
+    if (conflicts.current.has(target)) setConflict(target, words);
+    else {
       failedWords.set(target, words);
-      if (baseKnown.has(target)) failedOver.set(target, { base: baseKnown.get(target) ?? null, ...(syncedWords.current.has(target) ? { words: syncedWords.current.get(target) ?? null } : {}) });
+      if (!failedOver.has(target) && baseKnown.has(target)) failedOver.set(target, { base: baseKnown.get(target) ?? null, ...(syncedWords.current.has(target) ? { words: syncedWords.current.get(target) ?? null } : {}) });
       refusedThreads.add(target);
     }
+    remoteWords.delete(target);
     unsavedChanged();
     return true;
+  };
+  /**
+   * Words of the person's the store says the draft does not hold (`notLanded`: a draft held for another computer met
+   * newer words there, or was refused there): a conflict, as one met by a save here (Keep mine / Discard mine), or
+   * words "Not saved" over the draft shown, saved again by the next key. Never joined to the draft by themselves.
+   */
+  const offerNotLanded = (target: string, draft: InboxReplyDraft | null) => {
+    const lost = storeRef.current.notLanded?.(target);
+    if (!lost || lost.words.trim() === '' || conflicts.current.has(target)) return;
+    if (lost.conflict) {
+      if ((draft?.body ?? '').includes(lost.words)) return;
+      dropFailed(target);
+      refusedThreads.delete(target);
+      setConflict(target, lost.words);
+    } else if (!failedWords.has(target)) markRefused(target, true, lost.words, { base: draft?.updated_at ?? null, words: draft?.body ?? null });
   };
   /** Words taken back from a gone page that the box the person typed in (before they came back) does not show. */
   const notShown = (target: string, draft: InboxReplyDraft | null): string | undefined => {
@@ -994,6 +1016,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         // An older Inbox answers 404 (caught below): no draft.
         const draft = await storeRef.current.read(threadId);
         if (!live) return;
+        offerNotLanded(threadId, draft);
         // Words kept here that the draft holds now are saved: no conflict is left over them.
         const kept = conflicts.current.get(threadId);
         if (draft && kept !== undefined && draft.body.includes(kept)) setConflict(threadId, null);
@@ -1027,10 +1050,11 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     void takeKeptBack(threadId).then((took) => took && saveRemote.current(threadId));
   });
   /** Words kept for a linked computer's thread that keeps drafts now are saved there (`remoteToDraft`); the box is told. */
-  const saveRemote = useRef((target: string) => {
+  const saveRemote = useRef((_target: string) => {});
+  saveRemote.current = (target: string) => {
     if (remoteToDraft(target)) retry(target);
     if (target === current.current) setState((s) => ({ ...s, failed: refusedThreads.has(target), unsaved: unsavedOf(target) }));
-  });
+  };
   useEffect(() => options.onPersistenceChange?.(() => [...remoteWords.keys()].forEach((target) => saveRemote.current(target))), []);
   // A reload or a closed tab while a save waits: sent as the page goes (keepalive).
   useEffect(() => {
@@ -1206,6 +1230,10 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       return;
     }
     bump(target);
+    // The version thrown away (a store holding it for another computer discards only that one there), and whether a
+    // draft was shown: one the host holds while it keeps none for the thread goes too, so it never comes back.
+    const base = baseOf(target);
+    const shown = base !== null || stateRef.current.draft !== null;
     // A file still landing from an earlier Cancel or thread switch was thrown away with the rest.
     replyDraftDiscarded(target);
     setConflict(target, null);
@@ -1222,8 +1250,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     keepingMine.delete(target);
     unsavedChanged();
     setState({ loadedFor: target, draft: null, conflict: null, tooLong: false, failed: false });
-    if (!keeps(target)) return;
-    chain.current = chain.current.then(() => storeRef.current.discard(target).then(() => undefined, () => undefined));
+    if (!keeps(target) && !shown) return;
+    chain.current = chain.current.then(() => storeRef.current.discard(target, { base }).then(() => undefined, () => undefined));
   }, []);
 
   /**
@@ -1346,6 +1374,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     // The offered draft was sent or discarded elsewhere, or a newer one took its place: its words never come back.
     const offered = offers.get(target);
     if (offered && (draft?.updated_at ?? null) !== offered.updated_at) dropOffer(target);
+    // Before the box is judged: words of the person's the draft there does not hold are a conflict, never replaced.
+    offerNotLanded(target, draft);
     const local = generation !== generationOf(target) || claimed.current.has(target) ? null : boxWords();
     if ((draft?.updated_at ?? null) === baseOf(target)) {
       show(target, draft);
@@ -1407,6 +1437,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     setConflict(target, null);
     takeCarried(target);
     setState((s) => ({ ...s, conflict: null }));
+    // Words a conflict met there offered (the store keeps them until the person chooses): they go now.
+    const lost = storeRef.current.notLanded?.(target);
+    if (lost?.conflict) chain.current = chain.current.then(() => storeRef.current.discard(target, { notLanded: lost.version }).then(() => undefined, () => undefined));
     return stateRef.current.draft;
   }, []);
 

@@ -196,7 +196,8 @@ function sweepOnce(storage: Storage): void {
   trim(storage);
 }
 
-const keyOf = (threadId: string) => `${PREFIX}${page}:${threadId}`;
+/** `remote`: a thread's words kept while its draft is not kept there, beside (never over) its other words. */
+const keyOf = (threadId: string, slot: '' | ':remote' = '') => `${PREFIX}${page}:${threadId}${slot}`;
 
 /**
  * The newest words another page kept for the thread whose page is gone (null: none): its entry's key goes with it, for
@@ -235,22 +236,23 @@ export function dropKept(key: string): void {
 export function keepWords(threadId: string, kept: KeptWords): void {
   const storage = store();
   if (!storage) return;
-  if (kept.words.trim() === '' || kept.words.length > MAX_CHARS) return forgetWords(threadId);
+  const slot = kept.kind === 'remote' ? ':remote' : '';
+  if (kept.words.trim() === '' || kept.words.length > MAX_CHARS) return forgetWords(threadId, slot);
   holdPageLock();
   sweepOnce(storage);
   try {
     const entry: Entry = { ...kept, thread: threadId, page, at: Date.now() };
-    storage.setItem(keyOf(threadId), JSON.stringify(entry));
+    storage.setItem(keyOf(threadId, slot), JSON.stringify(entry));
   } catch {
     // Full or blocked: the page still holds the words.
   }
   trim(storage);
 }
 
-export function forgetWords(threadId: string): void {
+export function forgetWords(threadId: string, slot: '' | ':remote' = ''): void {
   const storage = store();
   if (!storage) return;
-  remove(storage, keyOf(threadId));
+  remove(storage, keyOf(threadId, slot));
   // Nothing of this page's kept any more: its heartbeat stops (the next words kept start it again).
   if (beating && !entries(storage).some(({ entry }) => entry?.page === page)) {
     stopBeat(storage);

@@ -254,7 +254,7 @@ function UnsentWrites({ linked }: { linked: readonly MachineView[] }) {
               </span>
               {entry.words ? (
                 <span className="ib-desc ib-held-words" dir="auto">
-                  {entry.words}
+                  {entry.words.length > UNSENT_WORDS_SHOWN ? `${entry.words.slice(0, UNSENT_WORDS_SHOWN)}…` : entry.words}
                 </span>
               ) : (
                 <span className="ib-desc">{unsentWhat(entry.route)}</span>
@@ -282,6 +282,9 @@ function UnsentWrites({ linked }: { linked: readonly MachineView[] }) {
 }
 
 /** A held write with no words, said by what it did. */
+/** At most this much of a "Not sent" line's words shows (Copy copies them all: a lost reply draft's words come whole). */
+const UNSENT_WORDS_SHOWN = 2_000;
+
 function unsentWhat(route: string): string {
   if (/\/picks$/.test(route)) return 'A pick';
   if (/\/(read|seen)$/.test(route)) return 'Mark read';
