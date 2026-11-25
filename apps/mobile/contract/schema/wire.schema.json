@@ -7663,6 +7663,169 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
+    "LinkThroughPairView": {
+      "type": "object",
+      "properties": {
+        "a": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "additionalProperties": true
+        },
+        "c": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "additionalProperties": true
+        },
+        "status": {
+          "$ref": "#/$defs/LinkThroughStatus"
+        },
+        "waiting_for": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "why": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "a",
+        "c",
+        "status",
+        "waiting_for",
+        "why"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-link-through.ts"
+    },
+    "LinkThroughRowView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "via": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "additionalProperties": true
+        },
+        "status": {
+          "$ref": "#/$defs/LinkThroughStatus"
+        },
+        "waiting_for": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "why": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "via",
+        "status",
+        "waiting_for",
+        "why"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-link-through.ts"
+    },
+    "LinkThroughStatus": {
+      "type": "string",
+      "enum": [
+        "failed",
+        "idle",
+        "linking",
+        "waiting"
+      ],
+      "x-open": true,
+      "x-source": "packages/core/inbox-link-through.ts"
+    },
+    "LinkThroughView": {
+      "type": "object",
+      "properties": {
+        "pairs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LinkThroughPairView"
+          }
+        },
+        "through": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LinkThroughRowView"
+          }
+        }
+      },
+      "required": [
+        "pairs",
+        "through"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-link-through.ts"
+    },
     "ListModel": {
       "type": "object",
       "properties": {
@@ -8045,6 +8208,9 @@
         },
         "clock_ms": {
           "type": "integer"
+        },
+        "link_through": {
+          "$ref": "#/$defs/LinkThroughView"
         }
       },
       "required": [

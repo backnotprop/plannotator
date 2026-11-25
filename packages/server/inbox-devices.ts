@@ -442,6 +442,11 @@ const DOOR_OWN_ROUTES = [
   { method: "POST", route: "far-delivered", grant: "machine", needs: "machines" },
   { method: "POST", route: "link-back", grant: "machine", needs: "machines" },
   { method: "POST", route: "unlink", grant: "machine", needs: "machines" },
+  // Link two computers through a third (inbox-link-through.ts, mark `link-through`): a linked computer asks this one to
+  // broker, a broker asks this one for a link code for another of its links, or hands this one another's code.
+  { method: "POST", route: "link-through-ask", grant: "machine", needs: "machines" },
+  { method: "POST", route: "link-through-offer", grant: "machine", needs: "machines" },
+  { method: "POST", route: "link-through-introduce", grant: "machine", needs: "machines" },
   { method: "GET", route: "update", grant: "machine", needs: "machine_update" },
   { method: "POST", route: "update", grant: "machine", needs: "machine_update" },
 ] as const satisfies readonly { method: "GET" | "POST"; route: string; grant: "phone" | "machine"; needs?: DoorOwnNeeds }[];
@@ -711,6 +716,8 @@ export interface InboxDoorMachines {
   hasLinks: () => boolean;
   /** The linked machine a door device belongs to, or null. */
   machineOfDevice?: (deviceId: string) => { machine: string; name: string } | null;
+  /** Linking through a third (inbox-link-through.ts): one of its three door routes, with the machine's window mark. */
+  linkThroughDoor?: (route: string, deviceId: string, window: boolean, body: Record<string, unknown>) => Promise<Response>;
 }
 
 /** The platform a linked Inbox pairs as. */
@@ -719,6 +726,25 @@ export const MACHINE_PLATFORM = "machine";
 export const AGENT_PLATFORM = "agent";
 /** Machine offers kept, open or redeemed (a CLI offer and a link-back can be open at once). */
 const MACHINE_OFFERS_KEPT = 8;
+/**
+ * Introductions' offers open per computer introducing them, in their own list: however many a linked computer asks
+ * for, the person's own link codes and an ordinary link's way back keep their slots. A newer one replaces its oldest.
+ */
+const INTRODUCTION_OFFERS_PER_BROKER = 2;
+/**
+ * An introduction's link code (inbox-link-through.ts) lives this long by this computer's clock: the computer it is for
+ * redeems it the moment the broker hands it over, so this is its freshness, whatever the other clocks say.
+ */
+export const INTRODUCTION_OFFER_MS = 2 * 60_000;
+/**
+ * A device an introduction's code made is provisional this long: revoked unless the link-back of the computer it was
+ * made for saved its link first. The ordinary link's own steps take at most a minute (its health read, 15 s, then its
+ * link-back, 30 s, inside which this computer pairs back and reads health, 15 s each), so twice that leaves room for a
+ * slow line and none for a pass nobody uses.
+ */
+export const INTRODUCED_DEVICE_MS = 2 * 60_000;
+/** The door routes a provisional device reaches: the ordinary link's health read, the link-back that completes it, and its own unlink. */
+const INTRODUCED_ROUTES = new Set(["GET health", "POST link-back", "POST unlink"]);
 
 /**
  * The computer's name as a phone and a linked machine show it: PLANNOTATOR_MACHINE_NAME when set (a headless box
@@ -899,7 +925,14 @@ export function createInboxDevices(context: InboxDevicesContext) {
   let lastOffer: Offer | null = null;
   const phonesOn = context.phones !== false;
   /** Machine offers (inbox-machines.ts), newest last, with the device each was redeemed for. */
-  const machineOffers: (Offer & { deviceId: string | null })[] = [];
+  const machineOffers: (Offer & { deviceId: string | null; for?: string; by?: string })[] = [];
+  /**
+   * Introductions' offers (inbox-link-through.ts), newest last, apart from `machineOffers`: each carries the computer it
+   * is for and the one that introduced it (`for`, `by`), and no six digits (`code` empty).
+   */
+  let introOffers: (typeof machineOffers)[number][] = [];
+  // A provisional device outlives no restart: the link-back that would complete it ended with the last run.
+  for (const device of devices.list()) if (device.introduced) devices.revoke(device.id, now().toISOString());
   let name: string | null = null;
   const tailnet: TailnetState = { on: false, address: null, error: null };
 
@@ -957,16 +990,50 @@ export function createInboxDevices(context: InboxDevicesContext) {
       attempts: [],
       deviceId: null,
     };
-    machineOffers.push(made);
-    if (machineOffers.length > MACHINE_OFFERS_KEPT) machineOffers.splice(0, machineOffers.length - MACHINE_OFFERS_KEPT);
+    keepMachineOffer(made);
     return { secret: made.secret, code: made.code, expires_at: new Date(made.expiresAt).toISOString() };
   };
-  const openMachineOffers = () => machineOffers.filter((o) => !o.redeemed && o.wrong < PAIRING_CODE_TRIES && o.expiresAt > now().getTime());
+  const keepMachineOffer = (made: (typeof machineOffers)[number]) => {
+    machineOffers.push(made);
+    if (machineOffers.length > MACHINE_OFFERS_KEPT) machineOffers.splice(0, machineOffers.length - MACHINE_OFFERS_KEPT);
+  };
+  /**
+   * An introduction's offer (inbox-link-through.ts): its secret only, no six digits, for one computer (`forId`), from
+   * the computer that introduced it (`by`). The device it makes is provisional (`INTRODUCED_DEVICE_MS`).
+   */
+  const openIntroductionOffer = (forId: string, by: string) => {
+    const made = {
+      secret: randomBytes(32).toString("base64url"),
+      code: "",
+      expiresAt: now().getTime() + INTRODUCTION_OFFER_MS,
+      wrong: 0,
+      redeemed: false,
+      attempts: [],
+      deviceId: null,
+      for: forId,
+      by,
+    };
+    // Its own list: a closed one goes, and `by` keeps at most INTRODUCTION_OFFERS_PER_BROKER open, its oldest replaced.
+    introOffers = introOffers.filter(isOpen);
+    const mine = introOffers.filter((o) => o.by === by);
+    const replaced = new Set(mine.slice(0, Math.max(mine.length - INTRODUCTION_OFFERS_PER_BROKER + 1, 0)));
+    introOffers = [...introOffers.filter((o) => !replaced.has(o)), made];
+    return { secret: made.secret, expires_at: new Date(made.expiresAt).toISOString() };
+  };
+  const isOpen = (o: Offer) => !o.redeemed && o.wrong < PAIRING_CODE_TRIES && o.expiresAt > now().getTime();
+  const openMachineOffers = () => [...machineOffers, ...introOffers].filter(isOpen);
   const offerDevice = (secret: string) => machineOffers.find((o) => sameSecret(o.secret, secret))?.deviceId ?? null;
+
+  /** A provisional device still unsettled when its time is up is revoked. */
+  const expireIntroduced = (id: string) => {
+    const device = devices.get(id);
+    if (device?.introduced && device.revoked_at === null) revoke(device);
+  };
 
   /** A machine redeems a machine offer: the same limits as a phone's (10 minutes, 5 wrong codes), its own slots. */
   const redeemMachine = (name: string, secret: string | null, code: string | null): Response => {
-    const open = openMachineOffers();
+    // Six digits never reach an introduction's offer: it has none.
+    const open = openMachineOffers().filter((o) => secret !== null || o.code !== "");
     const match = open.find((o) => (secret ? sameSecret(secret, o.secret) : code === o.code));
     if (!match) {
       if (!secret) for (const o of open) o.wrong += 1;
@@ -978,10 +1045,15 @@ export function createInboxDevices(context: InboxDevicesContext) {
     match.redeemed = true;
     const token = `tok_${randomBytes(32).toString("base64url")}`;
     const at = now().toISOString();
-    const device = devices.add({ id: inboxId("dev"), name, platform: MACHINE_PLATFORM, token, secret: match.secret, at });
+    const introduced = match.for && match.by ? { for: match.for, by: match.by, until: new Date(now().getTime() + INTRODUCED_DEVICE_MS).toISOString() } : undefined;
+    const device = devices.add({ id: inboxId("dev"), name, platform: MACHINE_PLATFORM, token, secret: match.secret, at, ...(introduced ? { introduced } : {}) });
     // A machine is never a phone: no relay carriage, no pushes.
     devices.setCarriage(device.id, false, at);
     match.deviceId = device.id;
+    if (introduced) {
+      const timer = setTimeout(() => expireIntroduced(device.id), INTRODUCED_DEVICE_MS + 50);
+      (timer as { unref?: () => void }).unref?.();
+    }
     return json({ device: publicDevice(devices.get(device.id) ?? device), token, computer: computer() }, 201);
   };
 
@@ -1251,6 +1323,13 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
   };
 
+  /** Linking through a third (inbox-link-through.ts): answered by inbox-machines.ts, an older wiring's unknown route. */
+  const linkThroughOwn = async (req: Request, device: InboxDevice, route: string): Promise<Response> => {
+    const door = context.machines?.()?.linkThroughDoor;
+    if (!door) return routeNotFound(device);
+    return await door(route, device.id, req.headers.get(MACHINE_WINDOW_HEADER) === "1", await context.readBody(req));
+  };
+
   /** A linked machine's own routes (`DOOR_OWN_ROUTES`), each answered only when `hasOwn` says so. */
   const machineOwn: Record<MachineOwnName, (req: Request, url: URL, device: InboxDevice) => Promise<Response>> = {
     // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
@@ -1268,6 +1347,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
     "POST far-delivered": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.delivered) : routeNotFound(device)),
     "POST link-back": async (req, _url, device) => context.machines?.()?.linkBack(device.id, await context.readBody(req)) ?? routeNotFound(device),
     "POST unlink": async (_req, _url, device) => context.machines?.()?.unlinkedBy(device.id) ?? routeNotFound(device),
+    // Who asks is its token's linked computer only; a press in its window, its `X-Plannotator-Window` (a machine's word).
+    "POST link-through-ask": (req, _url, device) => linkThroughOwn(req, device, "link-through-ask"),
+    "POST link-through-offer": (req, _url, device) => linkThroughOwn(req, device, "link-through-offer"),
+    "POST link-through-introduce": (req, _url, device) => linkThroughOwn(req, device, "link-through-introduce"),
     // The body is never read, so a machine cannot name a version or a place to download from.
     "GET update": async (_req, _url, device) => (context.machineUpdate ? json(context.machineUpdate.read()) : routeNotFound(device)),
     "POST update": async (_req, _url, device) => (context.machineUpdate ? json(await context.machineUpdate.start()) : routeNotFound(device)),
@@ -1291,6 +1374,14 @@ export function createInboxDevices(context: InboxDevicesContext) {
       // A machine reads this Inbox's own threads only (PLAN rule 3): never the merged view, so links both ways cannot echo.
       if (url.searchParams.has("machines")) return refuse(403, "machines_view_refused", "A linked machine reads this Inbox's own threads only.");
       const name = `${req.method} ${route}`;
+      // An introduction's device is provisional: past its time it is revoked; until then it reaches only what completes its link.
+      if (device.introduced) {
+        if (Date.parse(device.introduced.until) <= now().getTime()) {
+          revoke(device);
+          return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
+        }
+        if (!INTRODUCED_ROUTES.has(name)) return refuse(403, "introduction_pending", "This link is not complete yet.");
+      }
       const own = DOOR_OWN_ROUTES.find((row) => row.grant === "machine" && `${row.method} ${row.route}` === name);
       if (own && (!("needs" in own) || hasOwn(own.needs))) return await machineOwn[name as MachineOwnName](req, url, device);
     }
@@ -2038,7 +2129,23 @@ export function createInboxDevices(context: InboxDevicesContext) {
   /** Linked machines (inbox-machines.ts): the door's side of linking. */
   const machineDoor = {
     openMachineOffer,
+    openIntroductionOffer,
     offerDevice,
+    /** The computer a provisional device's link-back must come from, and who introduced it; null for any other device. */
+    introduction: (deviceId: string): { for: string; by: string } | null => {
+      const device = devices.get(deviceId);
+      if (!device?.introduced || device.revoked_at !== null) return null;
+      return { for: device.introduced.for, by: device.introduced.by };
+    },
+    /** The link a provisional device was made for is saved: it is an ordinary device from now on. */
+    settleIntroduction: (deviceId: string) => {
+      devices.settleIntroduced(deviceId, now().toISOString());
+    },
+    /** `by` is no longer linked: every offer it had opened here closes, and every device still provisional from one goes. */
+    dropIntroductions: (by: string) => {
+      for (const o of introOffers) if (o.by === by) o.redeemed = true;
+      for (const device of devices.list()) if (device.introduced?.by === by) revoke(device);
+    },
     /** `oweRefusal`: a machine unlinked while it could not be told; the door stays up until its token is refused once. */
     revokeDevice: (id: string, options: { oweRefusal?: boolean } = {}) => {
       const device = devices.get(id);
@@ -2054,6 +2161,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
       return found.deviceId ?? null;
     },
     tailnetAddress: () => tailnet.address,
+    /** `tailscale status --json`, without blocking (the same reader as the door's own looks): this computer and its tailnet's. */
+    tailnetStatus: () => readTailscale(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS),
     /** Why the door is not published, while it should be (a port held, Tailscale stopped), in the window's words. */
     tailnetError: () => tailnet.error,
     publishTailnet: (): { ok: true; address: string } | { ok: false; message: string } => {

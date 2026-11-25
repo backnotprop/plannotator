@@ -23139,6 +23139,328 @@
       }
     },
     {
+      "id": "undecided-door-post-link-through-ask",
+      "title": "door:POST link-through-ask",
+      "surface": [
+        "door:POST link-through-ask"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-link-through-introduce",
+      "title": "door:POST link-through-introduce",
+      "surface": [
+        "door:POST link-through-introduce"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-link-through-offer",
+      "title": "door:POST link-through-offer",
+      "surface": [
+        "door:POST link-through-offer"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-machines-link-through",
+      "title": "window:/api/inbox/machines/link-through",
+      "surface": [
+        "window:/api/inbox/machines/link-through"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-frame-links",
+      "title": "frame:links",
+      "surface": [
+        "frame:links"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-linkthroughstatus-failed",
+      "title": "enum:LinkThroughStatus.failed",
+      "surface": [
+        "enum:LinkThroughStatus.failed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-linkthroughstatus-idle",
+      "title": "enum:LinkThroughStatus.idle",
+      "surface": [
+        "enum:LinkThroughStatus.idle"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-linkthroughstatus-linking",
+      "title": "enum:LinkThroughStatus.linking",
+      "surface": [
+        "enum:LinkThroughStatus.linking"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-linkthroughstatus-waiting",
+      "title": "enum:LinkThroughStatus.waiting",
+      "surface": [
+        "enum:LinkThroughStatus.waiting"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughpairview-a",
+      "title": "field:LinkThroughPairView.a",
+      "surface": [
+        "field:LinkThroughPairView.a"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughpairview-c",
+      "title": "field:LinkThroughPairView.c",
+      "surface": [
+        "field:LinkThroughPairView.c"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughpairview-status",
+      "title": "field:LinkThroughPairView.status",
+      "surface": [
+        "field:LinkThroughPairView.status"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughpairview-waiting-for",
+      "title": "field:LinkThroughPairView.waiting_for",
+      "surface": [
+        "field:LinkThroughPairView.waiting_for"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughpairview-why",
+      "title": "field:LinkThroughPairView.why",
+      "surface": [
+        "field:LinkThroughPairView.why"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-id",
+      "title": "field:LinkThroughRowView.id",
+      "surface": [
+        "field:LinkThroughRowView.id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-name",
+      "title": "field:LinkThroughRowView.name",
+      "surface": [
+        "field:LinkThroughRowView.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-status",
+      "title": "field:LinkThroughRowView.status",
+      "surface": [
+        "field:LinkThroughRowView.status"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-via",
+      "title": "field:LinkThroughRowView.via",
+      "surface": [
+        "field:LinkThroughRowView.via"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-waiting-for",
+      "title": "field:LinkThroughRowView.waiting_for",
+      "surface": [
+        "field:LinkThroughRowView.waiting_for"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-why",
+      "title": "field:LinkThroughRowView.why",
+      "surface": [
+        "field:LinkThroughRowView.why"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughview-pairs",
+      "title": "field:LinkThroughView.pairs",
+      "surface": [
+        "field:LinkThroughView.pairs"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughview-through",
+      "title": "field:LinkThroughView.through",
+      "surface": [
+        "field:LinkThroughView.through"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-machineview-link-through",
+      "title": "field:MachineView.link_through",
+      "surface": [
+        "field:MachineView.link_through"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-frame-capability-set",
       "title": "frame:capability-set",
       "surface": [

@@ -4456,6 +4456,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A `machines` snapshot opens every stream: a resync, never a notification.
         const sendMachine = (frame: MachineFrame) => send(`event: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`);
         const stopMachines = url.searchParams.get("machines") === "1" ? machines.subscribe(sendMachine) : () => {};
+        // This Inbox's links moved (one linked, unlinked, asleep or back, or a link through it under way): a linked
+        // computer that asks (`links=1`) reads this list again for its `link_through` (inbox-link-through.ts).
+        const stopLinks = url.searchParams.get("links") === "1" && fromDeviceDoor.get(req)?.platform === MACHINE_PLATFORM ? machines.onLinks(() => send(`event: links\ndata: {}\n\n`)) : () => {};
         if (url.searchParams.get("machines") === "1") sendMachine({ event: "machines", data: { machines: machines.machinesView() } });
         // A window hears its heartbeat (a named frame, so the page sees it and can tell a dead connection from a
         // quiet Inbox); the phone's door, a linked machine and agents keep the comment line, as before.
@@ -4495,6 +4498,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           tailscaleListeners.delete(onTailscale);
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
+          stopLinks();
           leave();
         };
         req.signal.addEventListener("abort", () => {
@@ -6445,8 +6449,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const agents = withRexPlaces(listed, phone ? null : thisComputersWindow(req, via) ? "here" : "away");
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts), the
         // artifacts pinned here (mark `artifact-pins`): that machine's windows show them on this Inbox's threads, and the
-        // saved reaction emoji (inbox-reactions-shared.ts), and the capability switches with their flips (inbox-capability-set.ts).
-        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState(), capability_set: capabilitySet.wire() } : {}) };
+        // saved reaction emoji (inbox-reactions-shared.ts), the capability switches with their flips (inbox-capability-set.ts),
+        // and the computers this one is linked to (link-through).
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState(), capability_set: capabilitySet.wire(), link_through: machines.linkThroughWire() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");

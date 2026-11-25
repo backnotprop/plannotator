@@ -6,6 +6,7 @@ import { machineNotice, machineStatus } from '../machines';
 import { MachineUpdateButton } from './MachineUpdate';
 import { CodeBox, CopyButton } from './ConnectPicker';
 import { UnlinkLink } from './Devices';
+import { LinkThroughRows } from './LinkThrough';
 import { errorText } from '../toastError';
 
 /**
@@ -125,6 +126,7 @@ export function MachinesSection({ machines, onChanged, onMachineUpdate }: Machin
             </span>
           </div>
         ))}
+        <LinkThroughRows view={machines.find((machine) => machine.self)?.link_through} onChanged={onChanged} />
         {linking ? (
           <LinkForm
             onCancel={() => {
