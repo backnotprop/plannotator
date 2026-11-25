@@ -52,6 +52,20 @@ describe("Stale", () => {
     expect(gridSaid(stale).pieces.map((p) => `${p.name} ${p.length}`)).toEqual(["Working 2 h", "Stale 3 h"]);
   });
 
+  test("the words after the bar make room for why it is stale: the oldest pieces go, never the detail", () => {
+    // "Working 50 min › PR 1 h › Stale 3.5 h · tests failing" is past the room: Working goes to "…".
+    const failing = line(thread({ created_at: ago(330), last_agent_at: ago(210), pulls: [pull({ checks: "failing", added_at: ago(270) })] }));
+    expect(failing.detail?.words).toBe("tests failing");
+    const said = gridSaid(failing);
+    expect(said.cut).toBe(true);
+    expect(said.pieces.map((p) => p.name)).toEqual(["PR", "Stale"]);
+    // A tighter room keeps the last piece alone, still with its detail after it.
+    expect(gridSaid(failing, { phone: false, room: 30 }).pieces.map((p) => p.name)).toEqual(["Stale"]);
+    // A stale plan says "Planned 7:20 PM" before its piece; with its detail it still fits.
+    const plan = line(thread({ created_at: ago(14 * 60), last_agent_at: null, sent: { at: ago(14 * 60), checked_at: null } }));
+    expect(gridSaid(plan)).toEqual({ cut: false, pieces: [expect.objectContaining({ name: "Stale" })] });
+  });
+
   test("anything happening brings it back to Moving: a push, a step, a test run's PR read, a message", () => {
     const quiet = { last_agent_at: ago(240) };
     expect(line(thread(quiet)).group).toBe("stale");
@@ -143,7 +157,8 @@ describe("Nudge", () => {
 
   test("the words: the line's name, how long it has been quiet, one detail, then the approved sentence", () => {
     const failing = line(thread({ last_agent_at: ago(217), pulls: [pull({ checks: "failing" })] }));
-    expect(gridNudgeWords(failing, NOW, at)).toBe("Haptics on save has been quiet for 3 h 37 min, with tests failing on #22 since 01:05. Please finish it, or tell me in a few words why it stopped.");
+    // No "since …": the list keeps no time for when the checks began failing, and the quiet stretch's start is not it.
+    expect(gridNudgeWords(failing, NOW, at)).toBe("Haptics on save has been quiet for 3 h 37 min, with tests failing on #22. Please finish it, or tell me in a few words why it stopped.");
     const draft = line(thread({ name: "Pricing page hero", last_agent_at: ago(7 * 60), created_at: ago(8 * 60), pulls: [pull({ label: "#7", state: "draft", added_at: ago(7 * 60 + 5) })] }));
     expect(gridNudgeWords(draft, NOW, at)).toBe(`Pricing page hero has been quiet for 7 h, with #7 still a draft. ${GRID_NUDGE_ASK}`);
     const plan = line(thread({ name: "Receipts by email", created_at: ago(14 * 60), last_agent_at: null, sent: { at: ago(14 * 60), checked_at: null } }));

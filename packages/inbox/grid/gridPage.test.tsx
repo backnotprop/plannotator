@@ -446,21 +446,35 @@ test.skipIf(!hasDom)('Glint: only a Moving line on screen glints; a stale one ne
   const { host } = mount({ on: true, rows: [farStale(), ...baseRows()] });
   await settle();
   screen.show(['msg_tide', 'msg_rate', 'msg_page']);
+  // The light is a Web Animation on the bar's light (and the mark's bob), never an attribute on the line, which would
+  // make the browser work out the whole line's style again: record which line's light each animation runs on.
   const glints = new Set<string>();
+  const lineAttributes: string[] = [];
   const watch = new MutationObserver((changes) => {
-    for (const c of changes) if (c.attributeName === 'data-glint' && (c.target as HTMLElement).hasAttribute('data-glint')) glints.add((c.target as HTMLElement).dataset.gridLine!);
+    for (const c of changes) if ((c.target as HTMLElement).dataset?.gridLine && c.attributeName !== 'data-vis') lineAttributes.push(c.attributeName!);
   });
-  watch.observe(host, { subtree: true, attributes: true, attributeFilter: ['data-glint'] });
-  // Two turns of the 1.7 s walk: the one Moving line on screen glints once (not twice within 7 s).
-  await settle(3600);
-  // msg_push moves too but was never on screen.
-  expect([...glints]).toEqual(['msg_rate']);
-  hidden = true;
-  act(() => document.dispatchEvent(new Event('visibilitychange')));
-  glints.clear();
-  await settle(2000);
-  watch.disconnect();
-  expect([...glints]).toEqual([]);
+  watch.observe(host, { subtree: true, attributes: true });
+  const animate = HTMLElement.prototype.animate;
+  HTMLElement.prototype.animate = function (this: HTMLElement) {
+    const line = this.closest<HTMLElement>('[data-grid-line]');
+    if (line && this.closest('.ib-grid-glc')) glints.add(line.dataset.gridLine!);
+    return { cancel() {}, finish() {}, onfinish: null, oncancel: null } as unknown as Animation;
+  };
+  try {
+    // Two turns of the 1.7 s walk: the one Moving line on screen glints once (not twice within 7 s).
+    await settle(3600);
+    // msg_push moves too but was never on screen.
+    expect([...glints]).toEqual(['msg_rate']);
+    expect(lineAttributes).toEqual([]);
+    hidden = true;
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    glints.clear();
+    await settle(2000);
+    expect([...glints]).toEqual([]);
+  } finally {
+    watch.disconnect();
+    HTMLElement.prototype.animate = animate;
+  }
 }, 15_000);
 
 test.skipIf(!hasDom)('Nudge on a phone: a tap on the stale line opens Nudge with Open thread', async () => {

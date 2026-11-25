@@ -543,15 +543,20 @@ export interface GridSaid {
 
 /**
  * The bar in words, at most three pieces (two on a phone when there are more): the oldest are cut, and `cut` says so
- * (the line starts with "…"; the readout has them all). On a desktop line the pieces also have to fit `room`
- * characters, keeping two at least.
+ * (the line starts with "…"; the readout has them all). On a desktop line the words also have to fit `room`
+ * characters: the pieces, the detail after the last one ("· tests failing", what makes a stale line stale) and a
+ * plan's "Planned 7:20 PM". The oldest pieces go first, down to the last one, so the detail is never what is cut.
  */
 export function gridSaid(line: GridLine, options: { phone: boolean; room?: number } = { phone: false }): { cut: boolean; pieces: GridSaid[] } {
   const all = line.pieces.map((p, i, list) => ({ kind: p.kind, name: GRID_PIECE_NAMES[p.kind], length: gridRounded(p.to - p.from), on: i === list.length - 1 && line.merged === null }));
   let shown = options.phone && all.length > 3 ? all.slice(-2) : all.slice(-3);
   const room = options.room ?? 50;
-  const width = (pieces: GridSaid[]) => pieces.reduce((n, p) => n + p.name.length + p.length.length + 4, pieces.length < all.length ? 3 : 0);
-  while (!options.phone && shown.length > 2 && width(shown) > room) shown = shown.slice(1);
+  const last = all.at(-1);
+  // The detail shows after the last piece while it is now (not after Needs you, which has its question under the name).
+  const detail = last?.on && last.kind !== "wait" && line.detail ? line.detail.words.length + 3 : 0;
+  const width = (pieces: GridSaid[]) =>
+    pieces.reduce((n, p) => n + p.name.length + p.length.length + 4, detail + (pieces.length < all.length ? 3 : line.planned !== null ? 19 : 0));
+  while (!options.phone && shown.length > 1 && width(shown) > room) shown = shown.slice(1);
   return { cut: shown.length < all.length, pieces: shown };
 }
 

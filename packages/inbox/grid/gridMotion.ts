@@ -4,31 +4,61 @@
  *
  * - Glint: Ship's light crosses one Moving bar toward now, a new line every 1.7 s, walking down the list; no line twice
  *   within 7 s. The line's agent mark bobs while it crosses.
- * - A line that changes group slides there (0.4 to 0.8 s by distance) instead of jumping.
+ * - A line that changes group slides there (0.38 to 0.8 s by distance) instead of jumping, and the lines it passes
+ *   slide up or down to their new places with it, the group headings and "N more" too; a new heading fades in.
  * - A line going Stale lets its tail's old grey go to the stale colour (1.8 s); a merge settles with a soft light, once.
  * - Needs you breathes in amber on its waiting tip, all in step (the CSS; this file keeps them in step).
  * - A nudge sends a warmer light along the stale bar, then a soft light at its end.
  *
- * Cost: the motion is CSS keyframes on transform and opacity, started by an attribute on the line; this file only
- * picks the line. One timer every 1.7 s while the tab shows; none while it is hidden or with prefers-reduced-motion
- * (then nothing moves and lines change group in place). Lines off screen are skipped (the page's IntersectionObserver,
- * gridSeen.ts, marks the ones on screen `data-vis`; no layout read). The slide reads the place of only the lines that
- * changed group, once.
+ * Cost (measured with 30 lines over CDP, grid-motion notes in docs/agent-guides/inbox-grid.md): every motion is
+ * transform and opacity only, so it runs on the compositor. The glint is a Web Animation on the light and on the mark
+ * themselves, started by the walk's one timer: nothing is set on the line, so no style is worked out again for the
+ * line and nothing is laid out, as an attribute on the line would make Chrome do for all of it. The breath is a CSS
+ * animation on lines on screen; it is put back in step only when the lines breathing change, never on every turn of
+ * the walk (`document.getAnimations()` works out the page's style). One timer every 1.7 s while the tab shows; none
+ * while it is hidden or with prefers-reduced-motion (then nothing moves and lines change group in place). Lines off
+ * screen are skipped (the page's IntersectionObserver, gridSeen.ts, marks the ones on screen `data-vis`; no layout
+ * read). The slide reads the lines' places once, before a draw in which a line changes group, and never otherwise.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { GridGroup, GridModel } from '../../shared/inbox/grid';
 
 const GLINT_EVERY_MS = 1700;
 const GLINT_AGAIN_MS = 7000;
-const GLINT_MS = 1500;
 const COOL_MS = 1800;
 const LAND_MS = 1000;
 const NUDGE_MS = 2000;
 
+/** The approved curve, per keyframe as the CSS had it, so the light speeds up and slows down along the bar. */
+const IN_OUT = 'cubic-bezier(0.65, 0, 0.35, 1)';
+/** Ship's light: from before the bar's start to past its end, fading in and out at the ends. */
+const GLINT: Keyframe[] = [
+  { offset: 0, transform: 'translateX(calc(-50% - 17px))', opacity: 0, easing: IN_OUT },
+  { offset: 0.18, opacity: 0.95, easing: IN_OUT },
+  { offset: 0.82, opacity: 0.95, easing: IN_OUT },
+  { offset: 1, transform: 'translateX(calc(50% + 17px))', opacity: 0 },
+];
+/** A bar too short to cross: a brief brighter tip. */
+const FLASH: Keyframe[] = [
+  { offset: 0, opacity: 0, easing: 'ease-out' },
+  { offset: 0.4, opacity: 0.85, easing: 'ease-out' },
+  { offset: 1, opacity: 0 },
+];
+/** Ship's bob: 0.9 px and 4 degrees, in and out. */
+const BOB: Keyframe[] = [
+  { offset: 0, transform: 'none', easing: 'ease-in-out' },
+  { offset: 0.22, transform: 'translateY(-0.6px) rotate(2.5deg)', easing: 'ease-in-out' },
+  { offset: 0.48, transform: 'translateY(0.9px) rotate(-4deg)', easing: 'ease-in-out' },
+  { offset: 0.74, transform: 'translateY(-0.5px) rotate(2deg)', easing: 'ease-in-out' },
+  { offset: 1, transform: 'none' },
+];
+const GLINT_MS = 1350;
+const FLASH_MS = 700;
+
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const lineSel = (id: string) => `[data-grid-line="${CSS.escape(id)}"]`;
 
-/** Set an attribute on a line for `ms`, so its CSS animation runs once. */
+/** Set an attribute on a line for `ms`, so its CSS animation runs once (the rare ones: going stale, a merge, a nudge). */
 function flag(el: Element, name: string, ms: number): void {
   el.removeAttribute(name);
   // A new start for an animation the same attribute ran before: the attribute comes back on the next frame.
@@ -38,11 +68,23 @@ function flag(el: Element, name: string, ms: number): void {
   });
 }
 
+/** Ship's light across one line's bar, and its agent's mark bobbing: Web Animations on those two elements only. */
+function glint(line: HTMLElement): boolean {
+  const light = line.querySelector<HTMLElement>('.ib-grid-glc > i');
+  if (!light || typeof light.animate !== 'function') return false;
+  const short = light.parentElement!.hasAttribute('data-short');
+  light.animate(short ? FLASH : GLINT, { duration: short ? FLASH_MS : GLINT_MS });
+  line.querySelector<HTMLElement>('.ib-grid-mk')?.animate(BOB, { duration: GLINT_MS });
+  return true;
+}
+
 export function useGridMotion(list: RefObject<HTMLElement | null>, model: GridModel | null): { nudged: (id: string) => void; capture: () => void } {
   const groups = useRef(new Map<string, GridGroup>());
-  const before = useRef(new Map<string, { top: number; group: GridGroup }>());
+  /** Where each line, group heading (`h:<group>`) and "N more" (`d:<group>`) was; a heading's or a door's group is null. */
+  const before = useRef(new Map<string, { top: number; group: GridGroup | null }>());
   const glinted = useRef(new Map<string, number>());
   const lastGlint = useRef<string | null>(null);
+  const breathing = useRef('');
 
   // The glint's walk: one timer while the tab shows, none while hidden or with reduced motion. Only lines on screen
   // (`data-vis`, set by the page's one IntersectionObserver in gridSeen.ts) glint or breathe.
@@ -52,8 +94,12 @@ export function useGridMotion(list: RefObject<HTMLElement | null>, model: GridMo
       timer = null;
       const root = list.current;
       if (root && !reducedMotion()) {
-        // A waiting tip that came on screen started its breath late: back in step with the others.
-        if (root.querySelector('[data-group="you"][data-vis]')) breatheInStep();
+        // A waiting tip that came on screen started its breath late: back in step with the others, once.
+        const you = [...root.querySelectorAll<HTMLElement>('[data-grid-line][data-group="you"][data-vis]')].map((el) => el.dataset.gridLine).join(' ');
+        if (you !== breathing.current) {
+          breathing.current = you;
+          if (you) breatheInStep();
+        }
         const moving = [...root.querySelectorAll<HTMLElement>('[data-grid-line][data-group="move"][data-vis]')];
         const now = Date.now();
         const after = moving.findIndex((el) => el.dataset.gridLine === lastGlint.current) + 1;
@@ -63,7 +109,7 @@ export function useGridMotion(list: RefObject<HTMLElement | null>, model: GridMo
           if (now - (glinted.current.get(id) ?? -Infinity) < GLINT_AGAIN_MS) continue;
           glinted.current.set(id, now);
           lastGlint.current = id;
-          flag(el, 'data-glint', GLINT_MS);
+          glint(el);
           break;
         }
       }
@@ -86,18 +132,23 @@ export function useGridMotion(list: RefObject<HTMLElement | null>, model: GridMo
     };
   }, [list]);
 
-  /** Before the page draws a new model: where each line that changes group is now (read once, only those lines). */
+  /**
+   * Before the page draws a new model in which a line changes group: where every line is now, so each one the change
+   * moves (the line itself and the lines it passes) slides from there, as the approved take does. Read once, and only
+   * then; a draw in which no line changes group reads nothing.
+   */
   const capture = useCallback(() => {
     const root = list.current;
     before.current.clear();
     if (!root || !model || reducedMotion()) return;
-    for (const { id, lines } of model.groups) {
-      for (const line of lines) {
-        const was = groups.current.get(line.id);
-        if (!was || was === id) continue;
-        const el = root.querySelector(lineSel(line.id));
-        if (el) before.current.set(line.id, { top: el.getBoundingClientRect().top, group: was });
-      }
+    const changing = model.groups.some(({ id, lines }) => lines.some((line) => {
+      const was = groups.current.get(line.id);
+      return was !== undefined && was !== id;
+    }));
+    if (!changing) return;
+    for (const [key, el] of sliders(root)) {
+      const was = key.startsWith('h:') || key.startsWith('d:') ? null : groups.current.get(key);
+      if (was !== undefined) before.current.set(key, { top: el.getBoundingClientRect().top, group: was });
     }
   }, [list, model]);
 
@@ -109,25 +160,33 @@ export function useGridMotion(list: RefObject<HTMLElement | null>, model: GridMo
     before.current = new Map();
     const next = new Map<string, GridGroup>();
     for (const { id, lines } of model.groups) for (const line of lines) next.set(line.id, id);
-    if (!reducedMotion()) {
-      for (const [lineId, was] of moved) {
-        const el = root.querySelector<HTMLElement>(lineSel(lineId));
-        const group = next.get(lineId);
-        if (!el || !group) continue;
-        const dy = was.top - el.getBoundingClientRect().top;
-        if (Math.abs(dy) > 1) {
-          // A longer way takes longer: 0.4 s to 0.8 s.
-          const ms = Math.min(800, 400 + Math.abs(dy) * 0.8);
-          el.setAttribute('data-far', '');
-          const travel = el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: ms, easing: 'cubic-bezier(0.65, 0, 0.35, 1)' });
-          travel.onfinish = travel.oncancel = () => el.removeAttribute('data-far');
+    if (!reducedMotion() && moved.size > 0) {
+      for (const [key, el] of sliders(root)) {
+        const was = moved.get(key);
+        // A group heading that was not there comes in softly, as the approved take does.
+        if (!was) {
+          if (key.startsWith('h:') && typeof el.animate === 'function') el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: 'ease-out' });
+          continue;
         }
+        const group = was.group === null ? null : next.get(key);
+        if (group === undefined) continue;
+        const dy = was.top - el.getBoundingClientRect().top;
+        if (Math.abs(dy) > 1 && typeof el.animate === 'function') {
+          // A longer way takes longer: 0.38 s to 0.8 s. A line going further than a row rides over the others.
+          const ms = 380 + Math.min(420, Math.abs(dy) * 0.9);
+          const far = group !== null && Math.abs(dy) > 40;
+          if (far) el.setAttribute('data-far', '');
+          const travel = el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: ms, easing: IN_OUT });
+          if (far) travel.onfinish = travel.oncancel = () => el.removeAttribute('data-far');
+        }
+        if (group === null || was.group === group) continue;
         if (group === 'stale' && (was.group === 'move' || was.group === 'quiet')) flag(el, 'data-cool', COOL_MS);
         if (group === 'land') flag(el, 'data-landing', LAND_MS);
       }
     }
     groups.current = next;
-    breatheInStep();
+    // Lines that changed: the breath is put back in step on the walk's next turn.
+    breathing.current = '';
   }, [list, model]);
 
   const nudged = useCallback(
@@ -138,6 +197,17 @@ export function useGridMotion(list: RefObject<HTMLElement | null>, model: GridMo
     [list],
   );
   return { nudged, capture };
+}
+
+/** What slides when a line changes group: every line, and each group's heading and "N more", by a key that outlives the draw. */
+function sliders(root: HTMLElement): Map<string, HTMLElement> {
+  const all = new Map<string, HTMLElement>();
+  for (const el of root.querySelectorAll<HTMLElement>('[data-grid-line], [data-grid-group] > .ib-grid-gh, [data-grid-group] > .ib-grid-door')) {
+    const line = el.dataset.gridLine;
+    const group = (el.parentElement as HTMLElement).dataset.gridGroup;
+    all.set(line ?? `${el.classList.contains('ib-grid-gh') ? 'h' : 'd'}:${group}`, el);
+  }
+  return all;
 }
 
 /** Every Needs you breath in step, so they read as one thing: their animations share the page's start. */

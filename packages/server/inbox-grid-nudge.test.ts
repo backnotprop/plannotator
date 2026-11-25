@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 const TIDE: Extract<InboxAuthor, { kind: "agent" }> = { kind: "agent", host: "claude-code", session: "ses_tide", name: "Claude Code" };
-const WORDS = "Haptics on save has been quiet for 3 h 37 min, with tests failing on #22 since 8:05 PM. Please finish it, or tell me in a few words why it stopped.";
+const WORDS = "Haptics on save has been quiet for 3 h 37 min, with tests failing on #22. Please finish it, or tell me in a few words why it stopped.";
 
 function setup() {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-grid-nudge-"));
