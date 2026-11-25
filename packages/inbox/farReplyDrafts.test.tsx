@@ -67,6 +67,8 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 /** The Mini takes uploads but gives no answer to a draft write (it is held here), while true. */
 let draftPostsFail = false;
+/** The Mini refuses a draft write (422), while true. */
+let draftPostsRefused = false;
 let savedFetch: typeof fetch;
 let savedXhr: typeof XMLHttpRequest;
 let signal: Signal;
@@ -158,6 +160,7 @@ beforeEach(() => {
   if (!hasDom) return;
   mini = { drafts: new Map(), uploads: new Map(), writes: [], clock: 0 };
   draftPostsFail = false;
+  draftPostsRefused = false;
   replies = [];
   localDraftCalls = [];
   signal = createSignal();
@@ -169,6 +172,7 @@ beforeEach(() => {
     async request(route, _search, init) {
       if (peer.state !== 'online') throw new Error('unreachable');
       if (draftPostsFail && init.method === 'POST') throw new Error('no answer');
+      if (draftPostsRefused && init.method === 'POST') return Response.json({ error: 'Not this time.', code: 'validation_error' }, { status: 422 });
       return miniDoor(route, init.method, init.body ? (JSON.parse(init.body) as Record<string, unknown>) : {});
     },
     poke() {},
@@ -280,6 +284,26 @@ async function newPage(id = FAR): Promise<HTMLElement> {
   localStorage.clear();
   return open(id);
 }
+
+/** A reload: a new page of this browser, its storage kept (the words an ended tab kept come back from it). */
+async function reloadKeepingStorage(marks: string[]): Promise<HTMLElement> {
+  act(() => root?.unmount());
+  host?.remove();
+  resetReplyDraftPageForTests();
+  // The ended tab's heartbeat is old: its words are free to take.
+  for (const key of Object.keys(localStorage)) if (key.startsWith('plannotator-inbox-reply-kept-alive:')) localStorage.setItem(key, String(Date.now() - 60_000));
+  linked(marks);
+  return open();
+}
+
+/** What browser storage keeps for the far thread: each entry's kind and words. */
+const keptFor = (thread: string) =>
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith('plannotator-inbox-reply-kept:'))
+    .map((key) => JSON.parse(localStorage.getItem(key)!) as { thread: string; kind: string; words: string })
+    .filter((entry) => entry.thread === thread)
+    .map((entry) => `${entry.kind}:${entry.words}`)
+    .sort();
 
 const box = (el: HTMLElement) => el.querySelector<HTMLTextAreaElement>('.ib-rbox textarea');
 const conflictShown = (el: HTMLElement) => el.querySelector('[data-draft-conflict]') !== null;
@@ -523,3 +547,90 @@ test.skipIf(!hasDom)("a file a held draft names that the Mini swept before it la
   await discardInBox(el);
   await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
 });
+
+test.skipIf(!hasDom)("words typed while the Mini's marks are not known (this Inbox restarted) after a save it refused: both kept in browser storage apart; a reload with the Mini back saves the newest there, nothing lost or left to come back", async () => {
+  linked(['reply-drafts']);
+  const el = await open();
+  await reply(el);
+  draftPostsRefused = true;
+  typeOn(el, 'W1 first words.');
+  await until(() => notSavedShown(el), 'Not saved');
+  // This Inbox restarted: the Mini's list is not read yet, so it is not known to keep drafts.
+  await act(async () => linked([]));
+  typeOn(el, ' W2 typed after.');
+  await settle(35);
+  expect(keptFor(FAR)).toEqual(['failed:W1 first words.', 'remote:W1 first words. W2 typed after.']);
+  // The tab is reloaded and the Mini's list read again: the newest words are the box's, and saved there once.
+  draftPostsRefused = false;
+  const next = await reloadKeepingStorage(['reply-drafts']);
+  // The words taken back open the box by themselves (otherwise Reply opens it).
+  await settle(6);
+  if (!box(next)) await reply(next);
+  await until(() => box(next)?.value === 'W1 first words. W2 typed after.', 'the newest words in the box');
+  await until(() => mini.drafts.get(FAR)?.body === 'W1 first words. W2 typed after.', 'the newest words on the Mini');
+  await settle(35);
+  expect(farWrites().filter((write) => write.status === 200).length).toBe(1);
+  // Saved there: nothing of either is left in storage to come back on a later page.
+  await until(() => keptFor(FAR).length === 0, 'browser storage let go once saved');
+  await discardInBox(next);
+  await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
+});
+
+test.skipIf(!hasDom)("Discard while the Mini's marks are not known throws away the draft held here for it: the words do not come back when the Mini wakes", async () => {
+  peer.state = 'offline';
+  linked(['reply-drafts']);
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'Words to throw away.');
+  await until(() => forward.heldCount(MINI) === 1, 'the save held here');
+  // Its marks not known for now (this Inbox read no list of it since a restart).
+  await act(async () => linked([]));
+  await discardInBox(el);
+  await settle(6);
+  linked(['reply-drafts']);
+  peer.state = 'online';
+  await act(async () => forward.drain(MINI));
+  await settle(10);
+  expect(mini.drafts.has(FAR)).toBe(false);
+  expect(mini.writes.some((write) => write.body === 'Words to throw away.')).toBe(false);
+  act(() => draw(HERE));
+  await settle();
+  act(() => draw(FAR));
+  await settle(6);
+  expect(box(el)?.value ?? '').toBe('');
+});
+
+for (const choice of ['Keep mine', 'Discard mine'] as const) {
+  test.skipIf(!hasDom)(`a held save meets newer words typed on the Mini: the conflict line offers ${choice} beside the Mini's words, and nothing is joined`, async () => {
+    linked(['reply-drafts']);
+    const el = await open();
+    await reply(el);
+    typeOn(el, 'Start.');
+    await until(() => mini.drafts.get(FAR)?.body === 'Start.', 'the first save on the Mini');
+    peer.state = 'offline';
+    linked(['reply-drafts']);
+    typeOn(el, ' Mine from the Studio.');
+    await until(() => forward.read(peer, FAR)?.draft?.body === 'Start. Mine from the Studio.', 'the save held here');
+    await typedOnTheMini(FAR, 'Start. Theirs from the Mini.');
+    peer.state = 'online';
+    linked(['reply-drafts']);
+    await act(async () => forward.drain(MINI));
+    forward.farChanged(MINI, FAR);
+    await act(async () => signal.emit());
+    await until(() => conflictShown(el), 'the conflict line');
+    expect(box(el)!.value).toBe('Start. Mine from the Studio.');
+    expect(mini.drafts.get(FAR)?.body).toBe('Start. Theirs from the Mini.');
+    const button = el.querySelector<HTMLButtonElement>(choice === 'Keep mine' ? '[data-draft-keep-mine]' : '[data-draft-conflict] [data-draft-discard]');
+    expect(!!button).toBe(true);
+    await act(async () => button!.click());
+    const want = choice === 'Keep mine' ? 'Start. Mine from the Studio.' : 'Start. Theirs from the Mini.';
+    await until(() => mini.drafts.get(FAR)?.body === want && box(el)?.value === want, `${choice} settled`);
+    await settle(35);
+    expect(conflictShown(el)).toBe(false);
+    expect(forward.notLanded(MINI, FAR)).toBe(null);
+    // Never both: no joined words, there or here.
+    for (const words of [mini.drafts.get(FAR)!.body, box(el)!.value]) expect(words.includes('Mine') && words.includes('Theirs')).toBe(false);
+    await discardInBox(el);
+    await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
+  });
+}

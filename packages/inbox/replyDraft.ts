@@ -181,7 +181,12 @@ function syncKept(): void {
 async function takeKeptBack(threadId: string): Promise<boolean> {
   if (lookedForKept.has(threadId)) return false;
   lookedForKept.add(threadId);
-  const found = await keptWordsGone(threadId);
+  // Each slot's newest: words not saved and a remote thread's page-only words are kept apart, so both come back.
+  const other = await takeKeptSlot(threadId, false);
+  return (await takeKeptSlot(threadId, true)) || other;
+}
+async function takeKeptSlot(threadId: string, remote: boolean): Promise<boolean> {
+  const found = await keptWordsGone(threadId, remote);
   if (!found || (found.kind === 'remote' ? remoteWords.has(threadId) : conflictWords.has(threadId) || failedWords.has(threadId))) return false;
   const { key, ...kept } = found;
   if (kept.kind === 'remote' && !isRemoteThread(threadId)) {

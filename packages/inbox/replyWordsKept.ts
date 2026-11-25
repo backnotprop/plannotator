@@ -203,12 +203,14 @@ const keyOf = (threadId: string, slot: '' | ':remote' = '') => `${PREFIX}${page}
  * The newest words another page kept for the thread whose page is gone (null: none): its entry's key goes with it, for
  * `dropKept` once this page keeps them. A page still open keeps its own.
  */
-export async function keptWordsGone(threadId: string): Promise<(KeptWords & { key: string }) | null> {
+export async function keptWordsGone(threadId: string, remote?: boolean): Promise<(KeptWords & { key: string }) | null> {
   const storage = store();
   if (!storage) return null;
   sweepOnce(storage);
+  // `remote` given: only the entries of that slot (a remote thread's page-only words sit beside its other words).
+  const slotOf = (entry: Entry) => remote === undefined || (entry.kind === 'remote') === remote;
   const theirs = entries(storage)
-    .flatMap(({ key, entry }) => (entry && entry.thread === threadId && entry.page !== page ? [{ key, entry }] : []))
+    .flatMap(({ key, entry }) => (entry && entry.thread === threadId && entry.page !== page && slotOf(entry) ? [{ key, entry }] : []))
     .sort((a, b) => b.entry.at - a.entry.at);
   if (theirs.length === 0) return null;
   const open = new Set<string>();
