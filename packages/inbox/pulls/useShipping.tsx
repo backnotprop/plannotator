@@ -3,7 +3,8 @@
  * machine's that takes ships or holds a row's thread), the menu's handlers, and the ship log by its row. Code review's
  * page only: nothing reads or draws while it is not shown.
  */
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { shipTurnedMerged } from './shipMergedRead';
 import { shipActive, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import type { InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { machineOf } from '../inboxUrl';
@@ -25,10 +26,18 @@ export function shipMachines(answer: InboxReviewsAnswer | null, takers: readonly
   return [...out].sort();
 }
 
-export function useShipping(answer: InboxReviewsAnswer | null, phone: boolean, onToast?: (toast: Omit<InboxToastModel, 'id'>, ms: number) => void): { ships: ReadonlyMap<string, InboxShipView>; handlers: ShipHandlers; log: ReactNode } {
+export function useShipping(answer: InboxReviewsAnswer | null, phone: boolean, onToast?: (toast: Omit<InboxToastModel, 'id'>, ms: number) => void, onMerged?: () => void): { ships: ReadonlyMap<string, InboxShipView>; handlers: ShipHandlers; log: ReactNode } {
   const takers = useShipTakers();
   const machines = useMemo(() => shipMachines(answer, takers), [answer, takers]);
   const ships = useShips(true, machines, answer);
+  // A ship turned merged: Reviews once more now (shipMergedRead.ts).
+  const before = useRef(ships);
+  const merged = useRef(onMerged);
+  merged.current = onMerged;
+  useEffect(() => {
+    if (shipTurnedMerged(before.current, ships)) merged.current?.();
+    before.current = ships;
+  }, [ships]);
   const [open, setOpen] = useState<{ ship: InboxShipView; anchor: HTMLElement | null } | null>(null);
   const fail = (cause: unknown, fallback: string) => onToast?.(errorToast(cause, fallback), 8000);
   const stop = (ship: InboxShipView) => {

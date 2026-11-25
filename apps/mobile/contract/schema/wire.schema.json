@@ -4065,6 +4065,10 @@
             }
           ]
         },
+        "scheduled_running": {
+          "type": "boolean",
+          "const": true
+        },
         "combining": {
           "type": "boolean",
           "const": true

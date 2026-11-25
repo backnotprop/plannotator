@@ -1244,6 +1244,7 @@
       "InboxListRow.reask_pending",
       "InboxListRow.resolved_at",
       "InboxListRow.run",
+      "InboxListRow.scheduled_running",
       "InboxListRow.section",
       "InboxListRow.sent",
       "InboxListRow.session_ended",

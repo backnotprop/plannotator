@@ -5592,6 +5592,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
   public var guideWalkthrough: Bool?
   public var addressee: InboxAddressee?
   public var run: InboxListRowRun?
+  public var scheduledRunning: Bool?
   public var combining: Bool?
   public var readAt: String?
   public var ack: InboxListRowAck?
@@ -5614,9 +5615,9 @@ public struct InboxListRow: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["project", "machine", "thread_name", "latest_preview", "section", "session_ended", "unread", "answered_not_sent", "unsent", "waiting_since", "pinned_at", "acted_at", "tags", "snoozed", "priority", "snooze_back", "steps_waiting", "pulls", "grid_seen", "steps_progress", "hide_pulls", "unseen", "sent", "participants", "last_agent_at", "last_agent", "guide", "guide_walkthrough", "addressee", "run", "combining", "read_at", "ack", "agent_after_archive", "back_from_archive", "reask_pending", "delivery", "waits", "thread_id", "project_id", "subject", "author", "created_at", "last_at", "last_author", "message_count", "resolved_at", "questions", "waiting_on_person"]
+  static let knownKeys: Set<String> = ["project", "machine", "thread_name", "latest_preview", "section", "session_ended", "unread", "answered_not_sent", "unsent", "waiting_since", "pinned_at", "acted_at", "tags", "snoozed", "priority", "snooze_back", "steps_waiting", "pulls", "grid_seen", "steps_progress", "hide_pulls", "unseen", "sent", "participants", "last_agent_at", "last_agent", "guide", "guide_walkthrough", "addressee", "run", "scheduled_running", "combining", "read_at", "ack", "agent_after_archive", "back_from_archive", "reask_pending", "delivery", "waits", "thread_id", "project_id", "subject", "author", "created_at", "last_at", "last_author", "message_count", "resolved_at", "questions", "waiting_on_person"]
 
-  public init(project: InboxListRowProject, machine: String? = nil, threadName: String? = nil, latestPreview: String? = nil, section: InboxSectionId, sessionEnded: Bool? = nil, unread: Bool, answeredNotSent: Bool, unsent: InboxRowUnsent? = nil, waitingSince: String? = nil, pinnedAt: String? = nil, actedAt: String? = nil, tags: [String]? = nil, snoozed: InboxRowSnooze? = nil, priority: InboxRowPriority? = nil, snoozeBack: String? = nil, stepsWaiting: Bool? = nil, pulls: InboxThreadPullsSummary? = nil, gridSeen: InboxListRowGridSeen? = nil, stepsProgress: InboxListRowStepsProgress? = nil, hidePulls: [String]? = nil, unseen: Double, sent: InboxListRowSent? = nil, participants: [InboxParticipant]? = nil, lastAgentAt: String? = nil, lastAgent: InboxListRowLastAgent? = nil, guide: Bool, guideWalkthrough: Bool? = nil, addressee: InboxAddressee? = nil, run: InboxListRowRun? = nil, combining: Bool? = nil, readAt: String? = nil, ack: InboxListRowAck? = nil, agentAfterArchive: Bool? = nil, backFromArchive: Bool? = nil, reaskPending: Bool? = nil, delivery: InboxRowDelivery? = nil, waits: [InboxRowWait]? = nil, threadId: ThreadID, projectId: ProjectID, subject: String? = nil, author: InboxAuthor, createdAt: String, lastAt: String, lastAuthor: InboxListRowLastAuthor, messageCount: Int64, resolvedAt: String? = nil, questions: InboxQuestionSummary, waitingOnPerson: Bool, unknownFields: [String: JSONValue] = [:]) {
+  public init(project: InboxListRowProject, machine: String? = nil, threadName: String? = nil, latestPreview: String? = nil, section: InboxSectionId, sessionEnded: Bool? = nil, unread: Bool, answeredNotSent: Bool, unsent: InboxRowUnsent? = nil, waitingSince: String? = nil, pinnedAt: String? = nil, actedAt: String? = nil, tags: [String]? = nil, snoozed: InboxRowSnooze? = nil, priority: InboxRowPriority? = nil, snoozeBack: String? = nil, stepsWaiting: Bool? = nil, pulls: InboxThreadPullsSummary? = nil, gridSeen: InboxListRowGridSeen? = nil, stepsProgress: InboxListRowStepsProgress? = nil, hidePulls: [String]? = nil, unseen: Double, sent: InboxListRowSent? = nil, participants: [InboxParticipant]? = nil, lastAgentAt: String? = nil, lastAgent: InboxListRowLastAgent? = nil, guide: Bool, guideWalkthrough: Bool? = nil, addressee: InboxAddressee? = nil, run: InboxListRowRun? = nil, scheduledRunning: Bool? = nil, combining: Bool? = nil, readAt: String? = nil, ack: InboxListRowAck? = nil, agentAfterArchive: Bool? = nil, backFromArchive: Bool? = nil, reaskPending: Bool? = nil, delivery: InboxRowDelivery? = nil, waits: [InboxRowWait]? = nil, threadId: ThreadID, projectId: ProjectID, subject: String? = nil, author: InboxAuthor, createdAt: String, lastAt: String, lastAuthor: InboxListRowLastAuthor, messageCount: Int64, resolvedAt: String? = nil, questions: InboxQuestionSummary, waitingOnPerson: Bool, unknownFields: [String: JSONValue] = [:]) {
     self.project = project
     self.machine = machine
     self.threadName = threadName
@@ -5647,6 +5648,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
     self.guideWalkthrough = guideWalkthrough
     self.addressee = addressee
     self.run = run
+    self.scheduledRunning = scheduledRunning
     self.combining = combining
     self.readAt = readAt
     self.ack = ack
@@ -5701,6 +5703,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
     self.guideWalkthrough = try c.decodeIfPresent(Bool.self, forKey: WireKey("guide_walkthrough"))
     self.addressee = try c.decodeIfPresent(InboxAddressee.self, forKey: WireKey("addressee"))
     self.run = try c.decodeIfPresent(InboxListRowRun.self, forKey: WireKey("run"))
+    self.scheduledRunning = try c.decodeIfPresent(Bool.self, forKey: WireKey("scheduled_running"))
     self.combining = try c.decodeIfPresent(Bool.self, forKey: WireKey("combining"))
     self.readAt = try c.decodeIfPresent(String.self, forKey: WireKey("read_at"))
     self.ack = try c.decodeIfPresent(InboxListRowAck.self, forKey: WireKey("ack"))
@@ -5755,6 +5758,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.guideWalkthrough, forKey: WireKey("guide_walkthrough"))
     try c.encodeIfPresent(self.addressee, forKey: WireKey("addressee"))
     try c.encodeIfPresent(self.run, forKey: WireKey("run"))
+    try c.encodeIfPresent(self.scheduledRunning, forKey: WireKey("scheduled_running"))
     try c.encodeIfPresent(self.combining, forKey: WireKey("combining"))
     try c.encodeIfPresent(self.readAt, forKey: WireKey("read_at"))
     try c.encodeIfPresent(self.ack, forKey: WireKey("ack"))
