@@ -105,6 +105,15 @@ export interface HtmlEmbedAnnotate {
   allowImages?: boolean;
 }
 
+/**
+ * The block drawn on its own, big (the Inbox's Artifacts: a block's tile opens it): the Full screen popout's frame
+ * and title bar, the page whole at its own height (no clip), and the caption's tools in the title bar (Code, the
+ * pen), the same state and comments as the block in the text. Absent: the block in the text, as always.
+ */
+export interface HtmlEmbedOpen {
+  onClose(): void;
+}
+
 /** The annotatable frame (ui's HtmlViewer and its bridge): fetched only when a block is first annotated. */
 const AnnotatableEmbedFrame = lazy(async () => ({ default: (await import('./AnnotatableEmbedFrame')).AnnotatableEmbedFrame }));
 
@@ -249,9 +258,11 @@ function EmbedFrame({
 
 type Phase = 'far' | 'waiting' | 'loading' | 'ready' | 'failed';
 
-export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedHost }) {
+export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: HtmlEmbedHost; open?: HtmlEmbedOpen }) {
   const figureRef = useRef<HTMLElement>(null);
-  const near = useNearViewport(figureRef);
+  // Open big (`open`): on screen by definition, and never waiting for a live slot.
+  const big = open !== undefined;
+  const near = useNearViewport(figureRef) || big;
   const theme = useEmbedTheme();
   const [showCode, setShowCode] = useState(false);
   const [phase, setPhase] = useState<Phase>('far');
@@ -357,7 +368,7 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
     let stopWaiting: (() => void) | null = null;
     const start = () => {
       if (cancelled) return;
-      if (!claimEmbedLive(forced)) {
+      if (!claimEmbedLive(forced || big)) {
         setPhase('waiting');
         stopWaiting = onEmbedLiveFreed(() => {
           stopWaiting?.();
@@ -395,7 +406,7 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
       if (holdsLive) releaseEmbedLive();
       setUrl(null);
     };
-  }, [near, showCode, forced, block.content]);
+  }, [near, showCode, forced, big, block.content]);
 
   // Loaded: the load permit goes back. Ready only once the page speaks (a frame the browser
   // refused loads too, blank, and never speaks).
@@ -420,8 +431,18 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
     // Escape in the page hands the keyboard back to the document (the host's own Escape comes next).
     if (frame && document.activeElement === frame) frame.blur();
   }, []);
+  // Open big: Escape in the page turns the pen off, else closes, as Full screen's page does.
+  const openRef = useRef(open);
+  openRef.current = open;
+  const armedRef = useRef(armed);
+  armedRef.current = armed;
+  const escapeBig = useCallback(() => {
+    if (armedRef.current) setArmed(false);
+    else openRef.current?.onClose();
+  }, []);
+  const escapePage = big ? escapeBig : escapeInline;
 
-  const clipped = !expanded && height !== undefined && height > EMBED_CLIP_PX;
+  const clipped = !big && !expanded && height !== undefined && height > EMBED_CLIP_PX;
   const title = host.author ? `HTML from ${host.author}` : 'HTML page';
   const caption = host.author ? `From ${host.author}. It runs in a sandbox and can load from the web.` : 'It runs in a sandbox and can load from the web.';
   const live = !showCode && url !== null;
@@ -473,9 +494,7 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
     return null;
   }, [showCode, phase, block, height]);
 
-  return (
-    <figure ref={figureRef} data-block-id={block.id} data-html-embed="" data-html-embed-phase={showCode ? 'code' : phase} data-html-embed-comments={mine.own.length > 0 ? mine.own.map((annotation) => annotation.id).join(' ') : undefined} className="relative my-4" {...(showCode || phase === 'failed' ? undefined : sourceLineAttrs(block))}>
-      {body ?? (
+  const page = body ?? (
         <div className="relative">
           <div
             data-html-embed-clip=""
@@ -497,7 +516,7 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
                   title={title}
                   height={height}
                   onHeight={setHeight}
-                  onEscape={escapeInline}
+                  onEscape={escapePage}
                   onReady={annotatableReady}
                   armed={penOn}
                   onDisarm={disarm}
@@ -518,7 +537,7 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
                 title={title}
                 height={height}
                 onHeight={setHeight}
-                onEscape={escapeInline}
+                onEscape={escapePage}
                 onLoaded={loaded}
                 onReady={ready}
               />
@@ -539,18 +558,8 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
             </div>
           )}
         </div>
-      )}
-      <figcaption data-html-embed-caption="" className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-        <Code aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-        <HostTitle title={caption}>
-          <span className="truncate">HTML · sandboxed</span>
-        </HostTitle>
-        <span className="flex-1" />
-        {expanded && !showCode && (
-          <button type="button" className="rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground" onClick={() => setExpanded(false)}>
-            Show less
-          </button>
-        )}
+  );
+  const codeButton = (
         <button
           type="button"
           data-html-embed-code=""
@@ -560,16 +569,8 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
         >
           Code
         </button>
-        <button
-          type="button"
-          data-html-embed-full=""
-          disabled={url === null || showCode}
-          className="rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          onClick={() => setFull(true)}
-        >
-          Full screen
-        </button>
-        {penShown && (
+  );
+  const pen = penShown && (
           // On: its name says what a press does next, as the pen over an attached page.
           <HostTitle title={penOn ? 'Interact' : 'Annotate'} name>
             <button
@@ -586,7 +587,55 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
               <PenLine aria-hidden="true" className="h-3.5 w-3.5" />
             </button>
           </HostTitle>
+  );
+  const phaseAttr = showCode ? 'code' : phase;
+  const commentsAttr = mine.own.length > 0 ? mine.own.map((annotation) => annotation.id).join(' ') : undefined;
+
+  if (open) {
+    // Big: Full screen's popout and title bar, the page whole below it, the caption's tools in the bar.
+    return (
+      <PopoutDialog open onClose={open.onClose} title={title} className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-none" dataAttributes={{ 'data-html-embed-open': '' }}>
+        <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border pl-4 pr-12 text-xs font-medium text-foreground">
+          <span className="min-w-0 flex-1 truncate">{title}</span>
+          <span className="flex shrink-0 items-center gap-1 font-normal text-muted-foreground">
+            {codeButton}
+            {pen}
+          </span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto px-4">
+          <figure ref={figureRef} data-block-id={block.id} data-html-embed="" data-html-embed-phase={phaseAttr} data-html-embed-comments={commentsAttr} className="relative my-4">
+            {page}
+          </figure>
+        </div>
+      </PopoutDialog>
+    );
+  }
+
+  return (
+    <figure ref={figureRef} data-block-id={block.id} data-html-embed="" data-html-embed-phase={phaseAttr} data-html-embed-comments={commentsAttr} className="relative my-4" {...(showCode || phase === 'failed' ? undefined : sourceLineAttrs(block))}>
+      {page}
+      <figcaption data-html-embed-caption="" className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+        <Code aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+        <HostTitle title={caption}>
+          <span className="truncate">HTML · sandboxed</span>
+        </HostTitle>
+        <span className="flex-1" />
+        {expanded && !showCode && (
+          <button type="button" className="rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground" onClick={() => setExpanded(false)}>
+            Show less
+          </button>
         )}
+        {codeButton}
+        <button
+          type="button"
+          data-html-embed-full=""
+          disabled={url === null || showCode}
+          className="rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          onClick={() => setFull(true)}
+        >
+          Full screen
+        </button>
+        {pen}
       </figcaption>
       {full && url !== null && (
         <PopoutDialog

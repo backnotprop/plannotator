@@ -122,6 +122,8 @@ import {
   INBOX_TOOL_HOSTS,
   cookieHostState,
   inboxChapterDiagramsOn,
+  inboxDecisionModeEnvOff,
+  inboxDecisionModeOn,
   loadConfig,
   saveCookieHost,
   parseAutoUpdateEnv,
@@ -1393,7 +1395,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: which one, for a switch whose frame names it only then. */
-  const capabilityListeners = new Set<(changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => void>();
+  const capabilityListeners = new Set<(changed?: "code_review" | "decision_mode" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => void>();
   /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
   const tailscaleListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -3452,11 +3454,35 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Decision mode (Settings → Capabilities, the owner 2026-11-24): on unless the person turned it off (config.json
+   * `inboxDecisionMode`, or the old `experimental.decisionMode`: shared `inboxDecisionModeOn`). A window feature
+   * only: nothing an agent reads changes. Read on every request; every window follows a save through
+   * `event: capabilities`, as the Board's.
+   */
+  const decisionModeOn = () => inboxDecisionModeOn(loadConfig());
+  /** Its wire: `env` false while PLANNOTATOR_EXPERIMENTAL turns it off (Settings locks the switch then), else null. */
+  const decisionModeWire = () => ({ on: decisionModeOn(), env: inboxDecisionModeEnvOff() ? (false as const) : null });
+  const saveDecisionMode = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "decision_mode: { on: boolean }.", { field: "decision_mode" });
+    }
+    const on = (input as { on: boolean }).on;
+    // PLANNOTATOR_EXPERIMENTAL=-decision-mode decides (as it did while experimental): saving on would change nothing.
+    if (on && inboxDecisionModeEnvOff()) {
+      throw new InboxError("experimental_env_decides", "PLANNOTATOR_EXPERIMENTAL is set in this Inbox's environment, so decision mode stays off.", { field: "decision_mode" });
+    }
+    if (validateOnly) return decisionModeWire();
+    const was = decisionModeOn();
+    saveConfig({ inboxDecisionMode: on });
+    if (decisionModeOn() !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was !== on) for (const listener of capabilityListeners) listener("decision_mode");
+    return decisionModeWire();
+  };
+  /**
    * Experimental features (config.json `experimental`, PLANNOTATOR_EXPERIMENTAL
    * wins): each switch, and whether the env var decides it. Read on every
    * request, so a switch applies at once.
    */
-  const decisionModeOn = () => resolveExperimental(loadConfig(), "decision-mode");
   /** Grid (approval "inbox-agent-grid"), off by default: its sidebar row is never saved while it is off. */
   const gridOn = () => resolveExperimental(loadConfig(), "grid");
   /** Swarm (docs/agent-guides/inbox-swarm.md), off by default: Settings → Capabilities → Experimental, config `experimental.swarm`, or PLANNOTATOR_EXPERIMENTAL=swarm. */
@@ -4105,21 +4131,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     saveConfig({ inboxReveals: revealStampNotNow(loadConfig().inboxReveals, new Date().toISOString()) });
   };
   const experimentalState = () => ({
-    decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
+    // For an Inbox window from before Decision mode left Experimental, which reads `experimental.decision_mode.on`:
+    // the real state (the new place is `decision_mode`). Remove after one release.
+    decision_mode: { on: decisionModeOn(), env: inboxDecisionModeEnvOff() ? false : null },
     // Grid (approval "inbox-agent-grid"): the window's page of work in flight, drawn from what the window already reads.
     grid: { on: gridOn(), env: parseExperimentalEnv("grid") ?? null },
     // Swarm (docs/agent-guides/inbox-swarm.md): its Settings row, and every swarm piece of the window.
     swarm: { on: swarmOn(), env: parseExperimentalEnv("swarm") ?? null },
   });
 
-  /** Save `experimental: { decision_mode?, grid?, swarm? }` (one switch or more). `validateOnly`: check and write nothing. */
+  /**
+   * Save `experimental: { grid?, swarm? }` (one switch or both). `validateOnly`: check and write nothing. An older window's Decision mode switch
+   * (`experimental: { decision_mode }`) saves the new setting, as `decision_mode: { on }` does. Remove after one release.
+   */
   const saveExperimental = (input: unknown, validateOnly = false) => {
-    const switches = { decision_mode: ["decision-mode", "decisionMode", "decision mode"], grid: ["grid", "grid", "Grid"], swarm: ["swarm", "swarm", "Swarm"] } as const;
-    const named = input && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
-    if (named.length === 0 || named.some(([key, value]) => !Object.hasOwn(switches, key) || typeof value !== "boolean")) {
-      throw new InboxError("validation_error", "experimental: { decision_mode?: boolean, grid?: boolean, swarm?: boolean }.", { field: "experimental" });
+    const switches = { grid: ["grid", "grid", "Grid"], swarm: ["swarm", "swarm", "Swarm"] } as const;
+    const all = input && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
+    const legacy = all.find(([key]) => key === "decision_mode");
+    const named = all.filter(([key]) => key !== "decision_mode");
+    if (all.length === 0 || (legacy && typeof legacy[1] !== "boolean") || named.some(([key, value]) => !Object.hasOwn(switches, key) || typeof value !== "boolean")) {
+      throw new InboxError("validation_error", "experimental: { grid?: boolean, swarm?: boolean }.", { field: "experimental" });
     }
-    const change: { decisionMode?: boolean; grid?: boolean; swarm?: boolean } = {};
+    if (legacy) saveDecisionMode({ on: legacy[1] }, true);
+    const change: { grid?: boolean; swarm?: boolean } = {};
     for (const [key, on] of named as [keyof typeof switches, boolean][]) {
       const [feature, configKey, words] = switches[key];
       // The env var decides (like PLANNOTATOR_INBOX_TAILSCALE): saving to config.json would change nothing.
@@ -4130,6 +4164,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       change[configKey] = on;
     }
     if (validateOnly) return experimentalState();
+    if (legacy) saveDecisionMode({ on: legacy[1] });
+    if (named.length === 0) return experimentalState();
     const gridWas = gridOn();
     saveConfig({ experimental: change });
     const saved = loadConfig().experimental as Record<string, unknown> | undefined;
@@ -4225,6 +4261,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     experimental: experimentalState(),
     /** The Board (config.json `inboxBoard`): off unless the person turned it on. */
     board: { on: boardOn() },
+    /** Decision mode (config.json `inboxDecisionMode`): on unless the person turned it off; `env` false while PLANNOTATOR_EXPERIMENTAL turns it off. */
+    decision_mode: decisionModeWire(),
     /** Routines (config.json `inboxScheduledThreads`): off unless the person turned them on; absent on Windows. */
     ...scheduledCap.wire(),
     /** Launch (config.json `inboxLaunch`, on unless `enabled` is false; off by default on Windows): Settings → Agents' "Start agents from New message" switch, and while on its full-permissions switch and scratch root. */
@@ -4475,10 +4513,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
         if (windowId || url.searchParams.get("reactions") === "1") reactionsListeners.add(onReactions);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
-        const onCapabilities = (changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => {
+        const onCapabilities = (changed?: "code_review" | "decision_mode" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => {
           const floats = floatDraftsOn();
-          // Decision mode and Grid: only when one of them was the change (a linked computer's flip taken here, too).
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          // Decision mode: while off, and to the save that changed it (on is everyone's default: a window keeps what it
+          // read), a linked computer's flip taken here too (saveDecisionMode says "decision_mode"). Grid (`experimental`,
+          // which still carries decision_mode for an older window): only when it was the change.
+          const deciding = decisionModeOn();
+          const frame = { board: { on: boardOn() }, ...(!deciding || changed === "decision_mode" ? { decision_mode: { on: deciding } } : {}), steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -5496,8 +5537,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   if (scheduledCap.on()) void scheduledCap.syncLogin();
   // One set of Capabilities switches across linked computers (inbox-capability-set.ts): a switch an env var, the build
   // or a test decides here is not shared. Taking a flip turns it as its Settings row does. `chosen`: its own key is
-  // set (a choice from before flips were kept counts as a flip at time 0; an untouched default as none).
-  const experimentalFree = (feature: "decision-mode" | "grid" | "swarm") => parseExperimentalEnv(feature) === undefined;
+  // set (a choice from before flips were kept counts as a flip at time 0; an untouched default as none). Decision mode:
+  // its own key or its old place under `experimental`; shared unless PLANNOTATOR_EXPERIMENTAL turns it off here.
+  const experimentalFree = (feature: "grid" | "swarm") => parseExperimentalEnv(feature) === undefined;
   const chosen = (read: (config: PlannotatorConfig) => unknown) => () => typeof read(loadConfig()) === "boolean";
   const capabilitySet = createCapabilitySet({
     switches: {
@@ -5508,7 +5550,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       chapter_diagrams: { on: chapterDiagramsOn, chosen: chosen((c) => c.inboxChapterDiagrams), shared: () => options.chapterDiagrams === undefined, apply: (on) => saveChapterDiagrams({ on }) },
       bro: { on: broOn, chosen: chosen((c) => c.inboxBro), shared: () => true, apply: (on) => saveBro({ on }) },
       float_drafts: { on: floatDraftsOn, chosen: chosen((c) => c.inboxFloatDrafts), shared: () => true, apply: (on) => saveFloatDrafts({ on }) },
-      decision_mode: { on: decisionModeOn, chosen: chosen((c) => savedExperimental(c, "decision-mode")), shared: () => experimentalFree("decision-mode"), apply: (on) => saveExperimental({ decision_mode: on }) },
+      decision_mode: { on: decisionModeOn, chosen: chosen((c) => (typeof c.inboxDecisionMode === "boolean" ? c.inboxDecisionMode : (c.experimental as Record<string, unknown> | undefined)?.decisionMode)), shared: () => !inboxDecisionModeEnvOff(), apply: (on) => saveDecisionMode({ on }) },
       grid: { on: gridOn, chosen: chosen((c) => savedExperimental(c, "grid")), shared: () => experimentalFree("grid"), apply: (on) => saveExperimental({ grid: on }) },
       swarm: { on: swarmOn, chosen: chosen((c) => savedExperimental(c, "swarm")), shared: () => experimentalFree("swarm"), apply: (on) => saveExperimental({ swarm: on }) },
     },
@@ -6549,8 +6591,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (answer) return thisComputersWindow(req, via) ? await inboxRaiseAfterFarShow(path, answer, rex) : answer;
       }
       if (path === "/api/inbox/threads/archived" && req.method === "GET") return json(url.searchParams.get("machines") === "1" ? await mergedArchivedModel(url) : archivedModel(url));
-      // Decision mode (experimental, approval "inbox-decision-mode"): a read-only projection of every
-      // decision waiting on the person. Off (the default), the route does not exist.
+      // Decision mode (Settings → Capabilities, on unless turned off): a read-only projection of every decision
+      // waiting on the person. Turned off, the route does not exist.
       if (path === "/api/inbox/decisions") {
         if (!decisionModeOn()) return json({ error: "Not found", code: "not_found" }, 404);
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -7570,6 +7612,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.tour === undefined &&
           body.prompts === undefined &&
           body.board === undefined &&
+          body.decision_mode === undefined &&
           body.steps === undefined &&
           body.bro === undefined &&
           body.agent_status === undefined &&
@@ -7586,7 +7629,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
@@ -7629,6 +7672,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.experimental !== undefined) saveExperimental(body.experimental, true);
         if (body.tour !== undefined) saveTour(body.tour, true);
         if (body.board !== undefined) saveBoard(body.board, true);
+        if (body.decision_mode !== undefined) saveDecisionMode(body.decision_mode, true);
         if (body.steps !== undefined) saveSteps(body.steps, true);
         if (body.bro !== undefined) saveBro(body.bro, true);
         if (body.agent_status !== undefined) agentStatus.save(body.agent_status, true);
@@ -7663,6 +7707,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
+        const decisionMode = body.decision_mode === undefined ? decisionModeWire() : saveDecisionMode(body.decision_mode);
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
         const bro = body.bro === undefined ? { on: broOn() } : saveBro(body.bro);
         const agentStatusNow = body.agent_status === undefined ? { on: agentStatus.on() } : agentStatus.save(body.agent_status);
@@ -7680,7 +7725,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, decision_mode: decisionMode, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {

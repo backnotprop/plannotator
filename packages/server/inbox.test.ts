@@ -464,7 +464,8 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
   test("send_message with question blocks, pick, Send, read_thread returns the answer", async () => {
     const root = tempRoot();
     const project = gitProject(root);
-    const server = await start(join(root, "data"));
+    // The default tool list: the switches decided here, never by a config.json an earlier file in this process left on.
+    const server = await start(join(root, "data"), { board: false, steps: false, scheduled: false });
     const client = await mcpClient(server);
 
     expect(client.getInstructions()).toBe(INBOX_MCP_INSTRUCTIONS);

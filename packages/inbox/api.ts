@@ -23,6 +23,7 @@ import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
 import { learnDefaultRefHost } from './defaultRefHost';
 import type { ReplyViewing } from './replyViewing';
+import type { InboxLaunchSettings } from './launchSettingsModel';
 import type { ArchivedModel, ListModel, MachineUpdateView, MachineView, OutboxView, ProjectFolder, ReplyResult, ThreadModel, UpdateCheckFailing } from '@plannotator/core/inbox-wire-models';
 // The read envelopes live in core, so the native app's contract reads them without the window.
 export type { ArchivedModel, ListModel, MachineUpdateView, MachineView, OutboxView, ProjectFolder, ReplyResult, ThreadModel, UpdateCheckFailing } from '@plannotator/core/inbox-wire-models';
@@ -393,6 +394,8 @@ export interface SettingsModel {
   experimental?: InboxExperimentalSettings;
   /** The Board (config.json `inboxBoard`): off unless the person turned it on. Absent from an Inbox before the switch (the Board is then always there). */
   board?: { on: boolean };
+  /** Decision mode (config.json `inboxDecisionMode`, Settings → Capabilities): on unless turned off; absent from an older Inbox (its switch then sits under Experimental). `env`: false while PLANNOTATOR_EXPERIMENTAL turns it off (its switch locked), else null or absent. */
+  decision_mode?: { on: boolean; env?: false | null };
   /** The list's "Show archived" (config.json `inboxShowArchived`), the same on every linked machine. Absent from an older Inbox. */
   show_archived?: { on: boolean; rev: number };
   /** Thread steps (config.json `inboxSteps`, approval "inbox-thread-steps"): off unless the person turned them on. Absent from an older Inbox (no steps then). */
@@ -451,29 +454,8 @@ export interface InboxStorageModel {
   }[];
 }
 
-/** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). Off, only `enabled` and a false `full_permissions`. */
-export interface InboxLaunchSettings {
-  /** "Start agents from New message": on unless config.json `inboxLaunch.enabled` is false (off by default on Windows). */
-  enabled: boolean;
-  /** Windows: launch has no support there, so Settings → Agents shows no switch (config.json only). */
-  unsupported?: boolean;
-  /** "Start new sessions with full permissions": Claude Code starts in bypass mode (otherwise auto mode). */
-  full_permissions: boolean;
-  /** Never set by the person, and on because their Claude settings (`claude`) or their shell (`shell`) run Claude in bypass mode. */
-  follows?: 'claude' | 'shell' | null;
-  /** A launch starts in the person's own Claude default mode (not auto). */
-  own_mode?: boolean;
-  /** Full permissions wanted, but Claude Code's bypass notice is not accepted on this computer: a launch starts without them. */
-  needs_consent?: boolean;
-  /** Full permissions wanted, but Claude Code's own settings turn bypass mode off: a launch starts without them. */
-  bypass_off?: boolean;
-  /** Where new scratch folders go (absolute), and as shown (`~/…`). Absent from an older Inbox. */
-  scratch_dir?: string;
-  scratch_dir_shown?: string;
-  /** Only the path: the file may hold a secret. */
-  settings_file?: string | null;
-  settings_file_shown?: string;
-}
+/** Settings → Agents (launchSettingsModel.ts). */
+export type { InboxLaunchSettings } from './launchSettingsModel';
 
 /**
  * Whether this page offers Ask AI: in every Inbox, with no switch (approval "inbox-ask-ai-flow", addendum
@@ -485,7 +467,10 @@ export function inboxAskOn(settings: Pick<SettingsModel, 'via'> | null | undefin
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
 export interface InboxExperimentalSettings {
-  decision_mode: { on: boolean; env: boolean | null }; /** Grid (approval "inbox-agent-grid"); absent from an older Inbox. */ grid?: { on: boolean; env: boolean | null }; /** Swarm (swarm/swarmOn.ts); absent from an older Inbox. */ swarm?: { on: boolean; env: boolean | null };
+  /** Decision mode's old place, kept for an older window; read `SettingsModel.decision_mode`. */
+  decision_mode?: { on: boolean; env: boolean | null };
+  /** Grid (approval "inbox-agent-grid") and Swarm (swarm/swarmOn.ts); each absent from an older Inbox. */
+  grid?: { on: boolean; env: boolean | null }; swarm?: { on: boolean; env: boolean | null };
 }
 
 /** One live agent session of a thread's project (New message, record 5.x). */
@@ -1294,7 +1279,7 @@ export const inboxApi = {
     if (project) query.set('project', project);
     return get<InboxActivityModel>(inboxUrl('/activity', query.toString()));
   },
-  /** Decision mode (experimental): every decision waiting on the person, in queue order. 404 while the feature is off. */
+  /** Decision mode (on unless Settings › Capabilities turns it off): every decision waiting on the person, in queue order. 404 while it is off. */
   decisions: () => get<InboxDecisionsModel>(inboxUrl('/decisions')),
   /** Tidy: who it would ask in the list's (or the Board's) scope, or about picked `threads`, and the last run; `machine`: a linked machine's. */
   tidy: (project: string | null, surface: 'list' | 'board', machine?: string | null, threads?: readonly string[]) =>
@@ -1303,10 +1288,12 @@ export const inboxApi = {
   startTidy: (input: { sessions: readonly string[]; idempotency_key: string; project: string | null; surface: 'list' | 'board'; thread_ids?: readonly string[]; words?: string }, machine?: string | null) =>
     post<{ run: InboxTidyRun | null; asked: string[] }>(inboxUrl('/tidy', undefined, machine), { ...input, sessions: [...input.sessions], ...(input.thread_ids ? { thread_ids: [...input.thread_ids] } : {}) }),
   saveCookieHost: (on: boolean) => post<{ cookie_host: InboxCookieHost }>(inboxUrl('/settings'), { cookie_host: on }),
-  saveExperimental: (change: { decision_mode?: boolean; grid?: boolean; swarm?: boolean }) =>
+  saveExperimental: (change: { grid?: boolean; swarm?: boolean }) =>
     post<{ experimental: InboxExperimentalSettings }>(inboxUrl('/settings'), { experimental: change }),
   /** The Board on or off (Settings → Capabilities): agents get the card action from their next session. */
   saveBoard: (on: boolean) => post<{ board: { on: boolean } }>(inboxUrl('/settings'), { board: { on } }),
+  /** Decision mode on or off (Settings → Capabilities): every window hears `event: capabilities`. */
+  saveDecisionMode: (on: boolean) => post<{ decision_mode: { on: boolean; env?: false | null } }>(inboxUrl('/settings'), { decision_mode: { on } }),
   /** Thread steps on or off (Settings → Capabilities, approval "inbox-thread-steps"): every window hears `event: capabilities`. */
   saveSteps: (on: boolean) => post<{ steps: { on: boolean } }>(inboxUrl('/settings'), { steps: { on } }),
   saveBro: (on: boolean) => post<{ bro: { on: boolean } }>(inboxUrl('/settings'), { bro: { on } }),
@@ -1698,8 +1685,8 @@ export const inboxApi = {
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
   replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
   commentDraft: (threadId: string, key: string) => get<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft', `key=${encodeURIComponent(key)}`)),
-  saveCommentDraft: (threadId: string, body: { key: string; text: string; images: readonly ImageRef[]; base: string | null; force?: boolean }) =>
-    post<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft'), body),
+  saveCommentDraft: (threadId: string, body: { key: string; text: string; images: readonly ImageRef[]; base: string | null; force?: boolean }, init: { keepalive?: boolean } = {}) =>
+    post<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft'), body, init),
   deleteCommentDraft: (threadId: string, key: string) => post<{ ok: true; deleted: boolean }>(threadUrl(threadId, '/comment-draft/delete'), { key }),
   /** Save (compare-and-set on `base`, the `updated_at` last read; null to create); an empty body deletes it. */
   /**

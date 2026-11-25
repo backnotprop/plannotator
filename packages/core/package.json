@@ -93,6 +93,7 @@
     "./inbox-snooze": "./inbox-snooze.ts",
     "./inbox-sidebar": "./inbox-sidebar.ts",
     "./inbox-artifact-pins": "./inbox-artifact-pins.ts",
+    "./inbox-html-blocks": "./inbox-html-blocks.ts",
     "./inbox-list-delta": "./inbox-list-delta.ts",
     "./shape": "./shape.ts",
     "./plans": "./plans.ts",

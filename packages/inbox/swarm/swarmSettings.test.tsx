@@ -38,7 +38,7 @@ const MODEL = {
 };
 const experimental = (swarm: { on: boolean; env: boolean | null }) => ({ decision_mode: { on: false, env: null }, grid: { on: false, env: null }, swarm });
 
-async function renderSettings(settings: object, section: 'capabilities' | null, onToggle: (next: boolean, feature?: string) => void) {
+async function renderSettings(settings: object, section: 'capabilities' | null, onToggle: (next: boolean, feature?: string) => void, onToggleDecisionMode?: (next: boolean) => void) {
   const { SettingsPage } = await import('../components/Settings');
   const { SidebarProvider } = await import('../shell/sidebar');
   const noop = () => {};
@@ -50,6 +50,7 @@ async function renderSettings(settings: object, section: 'capabilities' | null, 
         error={null}
         onToggleTool={noop}
         onToggleExperimental={onToggle}
+        onToggleDecisionMode={onToggleDecisionMode}
         onToggleBoard={noop}
         onToggleTailscale={noop}
         tailscaleBusy={false}
@@ -84,6 +85,15 @@ test.skipIf(!hasDom)('Capabilities → Experimental has Swarm: its words, its sw
   expect(sw.disabled).toBe(false);
   act(() => sw.click());
   expect(turns).toEqual([[true, 'swarm']]);
+});
+
+test.skipIf(!hasDom)('Swarm comes after Grid in Experimental, and Decision mode keeps its own row in Capabilities', async () => {
+  const settings = { ...MODEL, decision_mode: { on: true, env: null }, experimental: experimental({ on: false, env: null }) };
+  const el = await renderSettings(settings, 'capabilities', () => {}, () => {});
+  const rows = [...el.querySelectorAll<HTMLElement>('[data-settings-experimental] .ib-prow')].map((row) => row.querySelector('.ib-l')!.textContent);
+  expect(rows.slice(0, 2)).toEqual(['Grid', 'Swarm']);
+  expect(el.querySelector('[data-settings-capabilities] [data-settings-decision-mode]')).not.toBeNull();
+  expect(el.querySelector('[data-settings-experimental] [data-settings-decision-mode]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('PLANNOTATOR_EXPERIMENTAL deciding it: the row says so and its switch is locked; on, the phone row names Swarm', async () => {

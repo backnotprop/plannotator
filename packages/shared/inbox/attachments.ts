@@ -189,9 +189,10 @@ interface Scan {
  * Read a file handle from its start to its end in 1 MiB chunks, yielding to
  * the event loop between them: the sha256, the size, the first
  * INBOX_ATTACHMENT_HEAD_BYTES and whether it is UTF-8 text with no NUL.
- * `sink` sees every chunk (the send path copies them to a blob).
+ * `sink` sees every chunk (the send path copies them to a blob; so does the
+ * capture of a sound or video a message's text plays, inline-media-capture.ts).
  */
-async function scanHandle(handle: FileHandle, sink?: (chunk: Buffer) => Promise<void>): Promise<Scan> {
+export async function scanHandle(handle: FileHandle, sink?: (chunk: Buffer) => Promise<void>): Promise<Scan> {
   const hash = createHash("sha256");
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const headParts: Buffer[] = [];

@@ -156,7 +156,7 @@ export function rememberArtifactMachines<T extends { pins?: readonly ArtifactIds
   const list = (value: unknown): readonly ArtifactIds[] => (Array.isArray(value) ? value : []);
   for (const entry of [...list(model?.pins), ...list(model?.artifacts)]) {
     if (!entry || typeof entry.machine !== 'string' || !entry.machine || typeof entry.key !== 'string' || typeof entry.thread_id !== 'string') continue;
-    const file = entry.key.startsWith('guide:') ? '' : entry.key;
+    const file = entry.key.startsWith('guide:') || entry.key.startsWith('html:') ? '' : entry.key;
     rememberMachine([entry.thread_id, entry.message_id ?? '', entry.project?.id ?? '', entry.attachment?.id ?? '', file], entry.machine);
   }
   return model;
