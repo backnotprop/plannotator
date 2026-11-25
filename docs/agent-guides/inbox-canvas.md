@@ -4,7 +4,7 @@ Every thread of this computer's Inbox can hold one canvas: a real Excalidraw sce
 
 ### The switch
 
-A capability, off by default: Settings → Capabilities → Canvas, last in the main card (`canvas/SettingsRow.tsx`, config.json `inboxCanvas`, `POST /api/inbox/settings` `{ canvas: { on } }`, answered as `canvas: { on }` and sent to every window in `event: capabilities`; `packages/server/inbox-canvas-switch.ts`). Read on every request. Off:
+A capability, off by default: Settings → Capabilities → Canvas, last in the main card (`canvas/SettingsRow.tsx`, config.json `inboxCanvas`, `POST /api/inbox/settings` `{ canvas: { on } }`, answered as `canvas: { on }` and sent to every window in `event: capabilities`; `packages/server/inbox-canvas-switch.ts`). Read on every request. One of the one set across linked computers (`INBOX_CAPABILITY_SET_KEYS`, "One set of capabilities" in `inbox-machines.md`): a flip on any of them applies on all, and `plannotator inbox capability canvas on|off` turns it. Off:
 
 - no pen in a thread's header or reply box, and the window loads nothing of the canvas (`canvas/useThreadCanvas.tsx` renders nothing; the pens and the layer are the lazy `canvas/CanvasParts.tsx`, the editor the lazy `#canvas-board`);
 - every canvas route answers `409 canvas_off`; no `event: canvas` or `canvas-job` frame is sent; a reply's `sketch` is dropped (the reply goes);
