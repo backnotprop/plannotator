@@ -296,6 +296,31 @@ describe.if(hasDom)('a video comment row', () => {
     expect(saved.map((a) => a.text)).toEqual(['/readback /']);
   });
 
+  test('the list spans the whole card, not the narrow field between the time chip, the frame and the buttons', async () => {
+    // A laid-out row: the card 520 px wide, the field squeezed to 160 px inside it.
+    const previous = Object.getOwnPropertyDescriptor(Element.prototype, 'getBoundingClientRect')!;
+    const own = previous.value as (this: Element) => DOMRect;
+    const rect = (left: number, width: number) => ({ top: 600, bottom: 646, left, right: left + width, width, height: 46, x: left, y: 600, toJSON() {} }) as DOMRect;
+    Object.defineProperty(Element.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      writable: true,
+      value(this: Element) {
+        if (this.classList.contains('ib-ccard')) return rect(40, 520);
+        if (this.classList.contains('ib-cfield')) return rect(150, 160);
+        return own.call(this);
+      },
+    });
+    restores.push(() => Object.defineProperty(Element.prototype, 'getBoundingClientRect', previous));
+    await render(videoRow());
+    const el = field('[data-video-composer]');
+    await focus(el);
+    await typeKeys(el, '/');
+    expect(skillList()).not.toBeNull();
+    const anchor = document.querySelector<HTMLElement>('[data-skill-menu-anchor]')!;
+    expect(anchor.style.width).toBe('520px');
+    expect(anchor.style.left).toBe('40px');
+  });
+
   test("on a phone's full-screen card, the field taking focus pauses the film and pins the moment", async () => {
     await render(videoRow({ phone: true, composer: phoneCard }));
     const el = field('[data-fcomp] [data-video-composer]');

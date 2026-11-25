@@ -521,6 +521,13 @@ function FloatingSkillMenu({
         }
       }
     }
+    // A file's comment row (an image's, a film's): the list spans the whole card, not the one-line field squeezed
+    // between the row's time chip, frame and buttons, so names and descriptions read as in the reply box.
+    const card = own ? null : wrap.closest('.ib-crowfield')?.closest<HTMLElement>('.ib-ccard');
+    if (card) {
+      const c = card.getBoundingClientRect();
+      if (c.width > anchor.width) anchor = { ...anchor, left: c.left, width: c.width };
+    }
     // In the host's coordinates: an absolute box is placed against its padding box.
     const h = host.getBoundingClientRect();
     const box: AnchorBox = {

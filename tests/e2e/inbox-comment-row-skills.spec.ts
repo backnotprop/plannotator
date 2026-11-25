@@ -171,6 +171,7 @@ test('a computer: / in the image row and the video row lists the skills; the rep
     await expect(menu).toBeVisible();
     await expect(menu.locator('[data-skill-item="readback"]')).toBeVisible();
     await expect(menu.locator('[data-skill-item="write-better"]')).toBeVisible();
+    const imageMenuWidth = (await menu.boundingBox())!.width;
     await shot(page, '1-image-menu');
 
     await menu.locator('[data-skill-item="write-better"]').click();
@@ -195,6 +196,15 @@ test('a computer: / in the image row and the video row lists the skills; the rep
     // The first key paused the film and pinned the moment, as typing always did.
     expect(await paused(page)).toBe(true);
     await expect(filmPane.locator('[data-video-composer] [data-video-time]')).toHaveAttribute('data-pinned', '');
+    // The film's row also holds the time chip and the frame: its list still spans the card, as wide as the
+    // picture's, so a skill's whole name reads (it was cut to "write-be…" at the field's width).
+    const videoMenuWidth = (await menu.boundingBox())!.width;
+    expect(videoMenuWidth).toBeGreaterThanOrEqual(imageMenuWidth - 1);
+    expect(videoMenuWidth).toBeGreaterThanOrEqual(280);
+    const name = menu.locator('[data-skill-item="write-better"] [data-skill-item-part="name"]');
+    await expect(name).toBeVisible();
+    const cut = await name.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+    expect(cut.scroll).toBeLessThanOrEqual(cut.client);
     await shot(page, '3-video-menu');
     await menu.locator('[data-skill-item="readback"]').click();
     await expect(row).toHaveValue('/readback ');
