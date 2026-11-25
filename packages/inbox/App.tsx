@@ -6223,7 +6223,7 @@ function Inbox() {
           open={!decide.tucked}
           decisions={sittingDecisions}
           scope={decide.title}
-          rows={latestRows}
+          rows={latestRows} outbox={outbox}
           start={decide.start}
           startNonce={decide.startNonce}
           phone={phone}

@@ -23501,6 +23501,48 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-get-decisions",
+      "title": "door:GET decisions",
+      "surface": [
+        "door:GET decisions"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-threads-id-comment-draft",
+      "title": "door:GET threads/:id/comment-draft",
+      "surface": [
+        "door:GET threads/:id/comment-draft"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-comment-draft",
+      "title": "door:POST threads/:id/comment-draft",
+      "surface": [
+        "door:POST threads/:id/comment-draft"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

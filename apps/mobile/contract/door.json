@@ -1260,6 +1260,58 @@
       "relay": true
     },
     {
+      "name": "GET decisions",
+      "method": "GET",
+      "path": "decisions",
+      "params": [],
+      "call": "getDecisions",
+      "window": "/api/inbox/decisions",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET threads/:id/comment-draft",
+      "method": "GET",
+      "path": "threads/{thread}/comment-draft",
+      "params": [
+        "thread"
+      ],
+      "call": "getThreadCommentDraft",
+      "window": "/api/inbox/threads/{thread}/comment-draft",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/comment-draft",
+      "method": "POST",
+      "path": "threads/{thread}/comment-draft",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadCommentDraft",
+      "window": "/api/inbox/threads/{thread}/comment-draft",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "GET attachments/:id/view",
       "method": "GET",
       "path": "attachments/{attachment}/view",

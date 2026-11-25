@@ -7,7 +7,7 @@
 import { expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
-import { InboxApiError } from './api';
+import { InboxApiError, InboxHeldError, type MachineView, type OutboxView } from './api';
 import type { HeldThread } from './data/apply/record';
 import { createDecisionSaves, withPendingAnswers, type DecisionPick, type DecisionSavesDeps } from './decisions/saves';
 
@@ -110,4 +110,93 @@ test('closing with a save out puts the words on the thread card at once', () => 
   // The other question is untouched, and nothing pending keeps the same thread.
   expect(q2!.answer).toBeNull();
   expect(withPendingAnswers(held, new Map())).toBe(held);
+});
+
+/** A pick held for the linked computer the thread lives on (the forward's `202`), under outbox key `key`. */
+const outboxEntry = (key: string, state: OutboxView['state'], notice: OutboxView['notice'] = null): OutboxView => ({
+  key,
+  machine: 'ibx_01JZ0000000000000000000000',
+  route: 'messages/msg_A/picks',
+  state,
+  queued_at: '',
+  settled_at: null,
+  status: null,
+  answer: state === 'refused' ? { error: 'That question was replaced.' } : null,
+  notice,
+  dismissed: false,
+});
+const heldBy = (key: string) => new InboxHeldError(outboxEntry(key, 'queued'), { name: 'Studio', state: 'offline' } as MachineView);
+
+// Decision mode kept a held pick drawn and its revision raised for good: a pick the other computer then refused stayed
+// on the card as if saved, and the next pick on that question went at a revision that computer never had. The rule is
+// now the thread's own (heldPicks.ts).
+test('a pick held for a linked computer: the next goes on top; delivered, it stands; refused, the card goes back and says why', async () => {
+  const h = harness(async (save, n) => {
+    if (n <= 2) throw heldBy(`k${n}`);
+    return { questions: [saved(save.revision + 1, save.answer)] };
+  });
+  const first = answer('', ['a']);
+  const second = answer('', ['b']);
+  h.saves.change(ID, first, null);
+  expect(await h.saves.settled()).toBe(true);
+  h.saves.change(ID, second, first);
+  expect(await h.saves.settled()).toBe(true);
+  // Held in order: the second goes at the revision the first makes there.
+  expect(h.calls.map((c) => c.revision)).toEqual([1, 2]);
+  expect(h.pending().get(ID)).toEqual(second);
+  // With no `onHeld`, the waiting words go to `onFailed` (the dialog passes `onHeld`).
+  expect(h.failed.splice(0)).toEqual(['Waiting for Studio: this applies when Studio is back.', 'Waiting for Studio: this applies when Studio is back.']);
+  // Both still held, in order: a Send made while Studio is away carries them (decisions/farThread.ts).
+  expect(h.saves.heldPicks().map((p) => [p.answer, p.revision])).toEqual([
+    [first, 1],
+    [second, 2],
+  ]);
+  // The first lands; the second is refused there: it is unpicked, the person is told, and the revision it would have
+  // made is given back: the next pick goes at what this window holds (a conflict there is saved over), never at 3.
+  h.saves.settleHeld([outboxEntry('k1', 'delivered'), outboxEntry('k2', 'refused', { kind: 'refused', at: '' })]);
+  expect(h.pending().has(ID)).toBe(false);
+  expect(h.saves.heldPicks()).toEqual([]);
+  expect(h.failed).toEqual(['Pick not saved. Not delivered: That question was replaced.']);
+  h.saves.change(ID, first, null);
+  expect(await h.saves.settled()).toBe(true);
+  expect(h.calls.at(-1)!.revision).toBe(1);
+  // An entry settles once: told again, it changes nothing.
+  h.saves.settleHeld([outboxEntry('k2', 'refused', { kind: 'refused', at: '' })]);
+  expect(h.failed).toHaveLength(1);
+});
+
+test('a held pick says it waits (not that it failed), and the Send it precedes is not stopped', async () => {
+  const held: string[] = [];
+  const calls: DecisionPick[] = [];
+  const saves = createDecisionSaves({
+    pick: async (save) => {
+      calls.push(save);
+      throw heldBy('k1');
+    },
+    known: () => 1,
+    onPending: () => {},
+    onSaved: () => {},
+    onFailed: () => held.push('failed'),
+    onHeld: (_id, words) => held.push(words),
+    onChanged: () => {},
+  });
+  saves.change(ID, answer('', ['a']), null);
+  const release = await saves.forSend();
+  expect(release).not.toBeNull();
+  release!();
+  expect(held).toEqual(['Waiting for Studio: this applies when Studio is back.']);
+});
+
+test('a held pick delivered there: the card draws it from the thread again, so a later change there shows', async () => {
+  const h = harness(async () => {
+    throw heldBy('k1');
+  });
+  const picked = answer('', ['a']);
+  h.saves.change(ID, picked, null);
+  expect(await h.saves.settled()).toBe(true);
+  expect(h.pending().get(ID)).toEqual(picked);
+  h.saves.settleHeld([outboxEntry('k1', 'sending')]);
+  expect(h.pending().get(ID)).toEqual(picked);
+  h.saves.settleHeld([outboxEntry('k1', 'delivered')]);
+  expect([h.pending().has(ID), h.saves.heldPicks(), h.failed.slice(1)]).toEqual([false, [], []]);
 });

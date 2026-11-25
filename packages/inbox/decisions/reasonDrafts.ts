@@ -6,12 +6,12 @@
  * only as the mark's note, once Save stages the mark.
  *
  * One reason's writes go one after another, each with the words as they are when it starts, so the last words always
- * land last. A thread on a linked computer keeps its reason on the card only: comment drafts are not forwarded there,
- * as the thread's own comment box keeps none for it (commentPictures.tsx).
+ * land last. A thread on a linked computer keeps its reason there, in its own comment drafts, through the forward and
+ * the outbox (mark `decisions`, whose computers alone give decisions here): held while that computer is away, a write
+ * counts as saved, since it lands there once that computer is back.
  */
 import { useState } from 'react';
-import { inboxApi, InboxApiError } from '../api';
-import { machineOf } from '../inboxUrl';
+import { inboxApi, InboxApiError, InboxHeldError } from '../api';
 import { createTypedSaves, type TypedSavesTimers } from '../typedAnswers';
 
 /** The comment-draft key of an action item's reason (`<message id>/<key>`). */
@@ -52,13 +52,10 @@ export function createReasonDrafts(options: {
   onChange: (texts: ReadonlyMap<string, string>) => void;
   onFailed: (message: string) => void;
   store?: ReasonStore;
-  /** The thread lives on a linked computer (its reason is never read or written). */
-  far?: (threadId: string) => boolean;
   delayMs?: number;
   timers?: TypedSavesTimers;
 }): ReasonDrafts {
   const store = options.store ?? commentDrafts;
-  const far = options.far ?? ((threadId: string) => machineOf(threadId) !== null);
   const typed = createTypedSaves(options.delayMs, options.timers);
   let texts: ReadonlyMap<string, string> = new Map();
   const threads = new Map<string, string>();
@@ -89,6 +86,8 @@ export function createReasonDrafts(options: {
     const run = store.write(threadId, reasonDraftKey(id), text, keepalive).then(
       () => true,
       (cause: unknown) => {
+        // Held for the linked computer the thread lives on: it lands there when that computer is back.
+        if (cause instanceof InboxHeldError) return true;
         // Newer words were typed since, or a write waits behind this one: that one decides.
         if ((texts.get(id) ?? '') !== text || waiting.has(id)) return true;
         if (silent) {
@@ -109,7 +108,7 @@ export function createReasonDrafts(options: {
   };
   const save = (id: string, keepalive = false): Promise<boolean> => {
     const threadId = threads.get(id);
-    if (!threadId || far(threadId)) return Promise.resolve(true);
+    if (!threadId) return Promise.resolve(true);
     owed.delete(id);
     quietOwed.delete(id);
     const before = running.get(id);
@@ -133,7 +132,7 @@ export function createReasonDrafts(options: {
     text: (id) => texts.get(id) ?? '',
     load(threadId, id) {
       threads.set(id, threadId);
-      if (known.has(id) || far(threadId)) return;
+      if (known.has(id)) return;
       known.add(id);
       void store.read(threadId, reasonDraftKey(id)).then(
         (text) => {

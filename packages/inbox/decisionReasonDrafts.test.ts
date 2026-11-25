@@ -4,6 +4,7 @@
  */
 import { expect, test } from 'bun:test';
 import { createReasonDrafts, reasonDraftKey, type ReasonStore } from './decisions/reasonDrafts';
+import { InboxHeldError, type MachineView } from './api';
 
 const T = 'msg_T';
 const ID = 'msg_A/a1';
@@ -153,20 +154,39 @@ test('emptying a reason after its mark saved: a failed write is not told, keeps 
   expect(s.saved.has(reasonDraftKey(ID))).toBe(false);
 });
 
-test("a thread on a linked computer keeps its reason on the card: no comment-draft read or write goes", async () => {
-  const s = heldStore();
+// It used to be kept on the card only (comment drafts were not forwarded), so a reason typed on a linked computer's
+// thread was lost on close, and the person was told nothing. Now it is read and written there, and a write held for
+// that computer while it is away is saved: it lands there once it is back.
+test('a thread on a linked computer keeps its reason there; one held while that computer is away is saved, not refused', async () => {
+  const saved = new Map<string, string>();
+  const reads: string[] = [];
+  const writes: string[] = [];
+  let away = false;
+  const outbox = { key: 'k1', machine: 'ibx_01JZ0000000000000000000000', route: 'threads/msg_far/comment-draft', state: 'queued', queued_at: '', settled_at: null, status: null, answer: null, notice: null, dismissed: false } as const;
+  const store: ReasonStore = {
+    read: async (thread, key) => (reads.push(`${thread} ${key}`), saved.get(key) ?? null),
+    write: async (_thread, key, text) => {
+      writes.push(text);
+      if (away) throw new InboxHeldError(outbox, { name: 'Studio', state: 'offline' } as MachineView);
+      saved.set(key, text);
+    },
+  };
+  saved.set(reasonDraftKey(ID), 'Blocked on review');
   const failed: string[] = [];
   const timers: (() => void)[] = [];
-  const reasons = createReasonDrafts({ store: s.store, far: (thread) => thread === 'msg_far', onChange: () => {}, onFailed: (m) => failed.push(m), timers: { set: (run) => timers.push(run), clear: () => {} } });
+  let texts: ReadonlyMap<string, string> = new Map();
+  const reasons = createReasonDrafts({ store, onChange: (next) => (texts = next), onFailed: (m) => failed.push(m), timers: { set: (run) => timers.push(run), clear: () => {} } });
   reasons.load('msg_far', ID);
-  reasons.type('msg_far', ID, 'Blocked on review');
+  await settle();
+  expect(reads).toEqual([`msg_far ${reasonDraftKey(ID)}`]);
+  expect(texts.get(ID)).toBe('Blocked on review');
+  away = true;
+  reasons.type('msg_far', ID, 'Blocked on review by Bob Tully');
   timers.splice(0).forEach((run) => run());
-  reasons.clear('msg_far', ID);
-  reasons.leave();
   expect(await reasons.settled()).toBe(true);
-  expect(s.reads).toEqual([]);
-  expect(s.writes).toEqual([]);
+  expect(writes).toEqual(['Blocked on review by Bob Tully']);
   expect(failed).toEqual([]);
+  expect(texts.get(ID)).toBe('Blocked on review by Bob Tully');
 });
 
 test('a read that lands after the person typed never replaces their words', async () => {

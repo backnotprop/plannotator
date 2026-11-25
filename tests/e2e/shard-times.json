@@ -71,6 +71,7 @@
   "inbox-copy-highlight.spec.ts": 4,
   "inbox-copy-message.spec.ts": 11,
   "inbox-debug-log.spec.ts": 64,
+  "inbox-decision-mode-linked.spec.ts": 60,
   "inbox-decision-mode.spec.ts": 75,
   "inbox-dictation-paste.spec.ts": 26,
   "inbox-draft-after-send-webkit.spec.ts": 24,

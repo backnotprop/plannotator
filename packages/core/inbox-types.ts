@@ -1884,6 +1884,8 @@ export interface InboxDecision {
    * no session, which is a reply of its own).
    */
   session: { key: string; host: string | null; session: string | null; name: string | null; wakes: boolean };
+  /** The linked machine the thread lives on (`?machines=1`, inbox-decisions-merged.ts); absent for this Inbox's own. */
+  machine?: string;
 }
 
 export interface InboxDecisionsModel {
@@ -3741,8 +3743,11 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * `ships/stop`), so a linked machine's Reviews draws them and offers its agents in Ship's list.
  * `link-through`: its list names the computers it is linked to (`link_through`), and its door brokers, makes the
  * link code for, and takes, a link between two computers linked to one (core inbox-link-through.ts).
+ * `decisions`: decision mode works on its threads from a linked machine's window: its door gives the decisions waiting
+ * there (`GET decisions`) and keeps a Can't do it's reason as the thread's comment draft (`threads/:id/comment-draft`;
+ * inbox-decisions-merged.ts in the server). A machine without it is never asked: its threads offer no "Decide these N".
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through", "decisions"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

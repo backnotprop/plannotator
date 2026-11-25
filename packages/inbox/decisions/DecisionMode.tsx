@@ -25,7 +25,9 @@ import type { InboxDecision, InboxInlineImage, InboxListRow, InboxMessageWire, I
 import { readInboxQuestionKind } from '@plannotator/core/inbox-types';
 import { whenTime } from '@plannotator/core/inbox-format';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
-import { InboxApiError, inboxApi } from '../api';
+import { InboxApiError, InboxHeldError, inboxApi, type OutboxView } from '../api';
+import { awayThreadRead, farMachine, heldSendLine, type HeldMark } from './farThread';
+import { machineOf } from '../inboxUrl';
 import { replyKeysToRenew, type SendTarget, type SentContents } from '../sendTargets';
 import { agentName, formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
@@ -86,6 +88,8 @@ export interface DecisionModeProps {
   scope?: string | null;
   /** The list rows, by thread id: where a sent reply is (Delivered, Replied). */
   rows: ReadonlyMap<string, InboxListRow>;
+  /** The writes held for linked computers, by key: a thread there gets its answers and Send through them (farThread.ts). */
+  outbox?: ReadonlyMap<string, OutboxView>;
   /** Start on this decision. */
   start?: string | null;
   /** A new start: moves to `start` again. */
@@ -266,8 +270,40 @@ export function DecisionMode(props: DecisionModeProps) {
         else setError(message);
       },
       onChanged: () => propsRef.current.refresh(),
+      // A thread on a linked computer that is away: the answer waits for it, and saying so goes once it applied there.
+      onHeld: (_id, words) => sayHeld(words),
+      outbox: () => propsRef.current.outbox?.values() ?? [],
+      machine: farMachine,
     }),
   );
+  /** The words a held answer or mark put up (held for a linked computer): they go once nothing waits for it. */
+  const heldWordsShown = useRef<string | null>(null);
+  const sayHeld = (words: string) => {
+    heldWordsShown.current = words;
+    if (!awayRef.current) setError(words);
+  };
+  /** Action items' marks held for the linked computer, by outbox key: a Send made while it is away carries them. */
+  const heldMarks = useRef(new Map<string, HeldMark>());
+  /** An action item's mark held for the linked computer the thread lives on: staged there once it is back, as a pick is. */
+  const markHeldAsSaved = async (held: HeldMark, write: Promise<unknown>): Promise<void> => {
+    try {
+      await write;
+    } catch (cause) {
+      if (!(cause instanceof InboxHeldError)) throw cause;
+      heldMarks.current.set(cause.outbox.key, held);
+      sayHeld(cause.message);
+    }
+  };
+  // The outbox's frames settle held answers (applied there, or unpicked again and told); once none waits for the
+  // thread's computer, the words that said so go.
+  useEffect(() => {
+    if (!props.outbox) return;
+    saves.settleHeld(props.outbox.values());
+    for (const [key, entry] of props.outbox) if (entry.state !== 'queued' && entry.state !== 'sending') heldMarks.current.delete(key);
+    const machine = threadIdRef.current ? machineOf(threadIdRef.current) : null;
+    const waiting = [...props.outbox.values()].some((entry) => entry.machine === machine && (entry.state === 'queued' || entry.state === 'sending'));
+    if (!waiting) setError((shown) => (shown !== null && shown === heldWordsShown.current ? null : shown));
+  }, [props.outbox, saves]);
   /** The reasons typed under "Can't do it…", drafts like every answer (reasonDrafts.ts). */
   const { reasons, texts: reasonTexts } = useReasonDrafts((message) => {
     if (awayRef.current) away('reason');
@@ -460,9 +496,14 @@ export function DecisionMode(props: DecisionModeProps) {
       let model: Awaited<ReturnType<typeof inboxApi.thread>>;
       try {
         [draft, model] = await Promise.all([inboxApi.replyDraft(first.thread.id), inboxApi.thread(first.thread.id)]);
-      } catch {
-        setSend(key, { kind: 'failed', error: "Couldn't check the thread for a draft reply, so nothing was sent." });
-        return 'failed';
+      } catch (cause) {
+        // Its linked computer away: sent from the thread as held here, and the reply waits for it (farThread.ts).
+        const kept = awayThreadRead(cause, first.thread.id, heldRef.current, { picks: saves.heldPicks(), marks: [...heldMarks.current.values()] });
+        if (!kept) {
+          setSend(key, { kind: 'failed', error: "Couldn't check the thread for a draft reply, so nothing was sent." });
+          return 'failed';
+        }
+        [draft, model] = kept;
       }
       const reply = draft.draft !== null && draft.draft !== undefined;
       // The thread's own row is the fresh count; an older Inbox without it falls back to the list's row.
@@ -480,6 +521,8 @@ export function DecisionMode(props: DecisionModeProps) {
         return 'sent';
       }
       let sentAt: string | null = null;
+      /** Replies held for the linked computer the thread lives on, by outbox key: its chip says so until they land. */
+      const held: string[] = [];
       replies = { went: 0, of: targets.length };
       for (const target of targets) {
         const keyId = `${key}\u0002${target.message.id}`;
@@ -499,12 +542,13 @@ export function DecisionMode(props: DecisionModeProps) {
         });
         const created = (result.reply as { created_at?: unknown } | null)?.created_at;
         if (typeof created === 'string') sentAt = created;
+        if (result.held) held.push(result.held.key);
         // What this reply took, so a follow-up answered later is told apart from it.
         const ids = contents.answers.map(answerIdOf);
         setCarried((current) => new Map(current).set(key, new Set([...(current.get(key) ?? []), ...ids])));
         replies.went += 1;
       }
-      setSend(key, { kind: 'sent', at: sentAt ?? new Date().toISOString() });
+      setSend(key, { kind: 'sent', at: sentAt ?? new Date().toISOString(), ...(held.length > 0 ? { held } : {}) });
       setSaid(`Sent ${agentLabel(first)} your answers.`);
       props.refresh();
       return 'sent';
@@ -638,7 +682,7 @@ export function DecisionMode(props: DecisionModeProps) {
     pendingPicks.current.add(id);
     pickChain.current = pickChain.current.then(async () => {
       try {
-        await inboxApi.markAction(decision.message.id, decision.question.key, mark, true);
+        await markHeldAsSaved({ id, mark }, inboxApi.markAction(decision.message.id, decision.question.key, mark, true));
         // The reason now waits as the mark's note: its own draft goes (Undo puts it back). That write failing is
         // never told and never stops a reload: the reason already went with the mark (it is tried again quietly).
         if (mark.outcome === 'cant' && reasons.text(id)) reasons.clear(decision.thread.id, id);
@@ -682,7 +726,7 @@ export function DecisionMode(props: DecisionModeProps) {
       // The mark waits in the draft: taking it back is one more save.
       pickChain.current = pickChain.current.then(async () => {
         try {
-          await inboxApi.markAction(decision.message.id, decision.question.key, null, true);
+          await markHeldAsSaved({ id: entry!.id, mark: null }, inboxApi.markAction(decision.message.id, decision.question.key, null, true));
           // A Can't do it taken back: its reason is the card's draft again, never lost with the mark.
           if (entry!.note && !reasons.text(entry!.id)) {
             reasons.type(decision.thread.id, entry!.id, entry!.note);
@@ -844,6 +888,7 @@ export function DecisionMode(props: DecisionModeProps) {
         rows={props.rows}
         busy={busy}
         queue={queue}
+        outbox={props.outbox}
         onSendNow={(key) => void sendGroups([key])}
         onOpenThread={(key) => {
           const first = queue.cache.get(groupIds(queue, key)[0]!);
@@ -866,7 +911,7 @@ export function DecisionMode(props: DecisionModeProps) {
             }}
           />
         ) : done ? (
-          <EndScreen queue={queue} sends={sends} rows={props.rows} busy={busy} unsent={answeredCount} onClose={close} />
+          <EndScreen queue={queue} sends={sends} rows={props.rows} busy={busy} outbox={props.outbox} unsent={answeredCount} onClose={close} />
         ) : current ? (
           <div className="ib-dm-deck" data-reduced={reduced ? '' : undefined}>
             {/* The next card peeks behind this one: an edge, nothing to read. */}
@@ -994,7 +1039,7 @@ function agentLabel(decision: InboxDecision): string {
 }
 
 /** What a chip says about its session's reply. */
-function chipSend(chip: SessionChip, sends: ReadonlyMap<string, GroupSend>, rows: ReadonlyMap<string, InboxListRow>, busy: ReadonlyMap<string, boolean>, queue: QueueState):
+function chipSend(chip: SessionChip, sends: ReadonlyMap<string, GroupSend>, rows: ReadonlyMap<string, InboxListRow>, busy: ReadonlyMap<string, boolean>, queue: QueueState, outbox?: ReadonlyMap<string, OutboxView>):
   | { kind: 'none' }
   | { kind: 'draft'; key: string }
   | { kind: 'failed'; key: string; error: string; words: string }
@@ -1003,6 +1048,13 @@ function chipSend(chip: SessionChip, sends: ReadonlyMap<string, GroupSend>, rows
     const state = sends.get(key);
     if (state?.kind === 'draft') return { kind: 'draft', key };
     if (state?.kind === 'failed') return { kind: 'failed', key, error: state.error, words: failedWords(state) };
+  }
+  // A reply held for the linked computer the thread lives on: "Will send when Laptop is back" until it lands there.
+  for (const key of chip.groups) {
+    const state = sends.get(key);
+    const line = state?.kind === 'sent' ? heldSendLine(state.held, outbox) : null;
+    if (line?.tone === 'failed') return { kind: 'failed', key, error: line.text, words: line.text };
+    if (line) return { kind: 'words', text: line.text, tone: 'quiet' };
   }
   const sent = chip.groups.map((key) => ({ key, state: sends.get(key) })).filter((g) => g.state?.kind === 'sent' || g.state?.kind === 'sending');
   if (sent.length === 0) return { kind: 'none' };
@@ -1021,6 +1073,7 @@ function Strip(props: {
   rows: ReadonlyMap<string, InboxListRow>;
   busy: ReadonlyMap<string, boolean>;
   queue: QueueState;
+  outbox?: ReadonlyMap<string, OutboxView>;
   onSendNow: (key: string) => void;
   onOpenThread: (key: string) => void;
   /** Chips named by agent (a sitting scoped to one thread), else by project. */
@@ -1029,7 +1082,7 @@ function Strip(props: {
   return (
     <ol className="ib-dm-strip" aria-label="Agents waiting" data-decision-strip="">
       {props.chips.map((chip) => {
-        const send = chipSend(chip, props.sends, props.rows, props.busy, props.queue);
+        const send = chipSend(chip, props.sends, props.rows, props.busy, props.queue, props.outbox);
         const on = chip.dots.some((d) => d.state === 'current');
         const handled = chip.dots.filter((d) => d.state === 'done').length;
         return (
@@ -1110,7 +1163,7 @@ function answerWordsOf(decision: InboxDecision): string {
 }
 
 /** The end: nothing waits, and what each agent did with its reply. */
-function EndScreen(props: { queue: QueueState; sends: ReadonlyMap<string, GroupSend>; rows: ReadonlyMap<string, InboxListRow>; busy: ReadonlyMap<string, boolean>; unsent: number; onClose: () => void }) {
+function EndScreen(props: { queue: QueueState; sends: ReadonlyMap<string, GroupSend>; rows: ReadonlyMap<string, InboxListRow>; busy: ReadonlyMap<string, boolean>; outbox?: ReadonlyMap<string, OutboxView>; unsent: number; onClose: () => void }) {
   const ref = useRef<HTMLHeadingElement>(null);
   useEffect(() => ref.current?.focus({ preventScroll: true }), []);
   const chips = sessionChips(props.queue);
@@ -1133,7 +1186,7 @@ function EndScreen(props: { queue: QueueState; sends: ReadonlyMap<string, GroupS
       {chips.length > 0 && (
         <ul className="ib-dm-endlist">
           {chips.map((chip) => {
-            const send = chipSend(chip, props.sends, props.rows, props.busy, props.queue);
+            const send = chipSend(chip, props.sends, props.rows, props.busy, props.queue, props.outbox);
             const words =
               send.kind === 'words'
                 ? send.text
