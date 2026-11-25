@@ -7,7 +7,8 @@
  * The nudge is an ordinary reply from the person (the reply route, its wake), its words the window's. Its reply target
  * is the one a typed reply's words take (core `inboxWordsDefault`: the newest agent message that is not a permission
  * prompt's or a routine's change line), else the thread's first message (a thread the person started that no agent
- * answered: the reply goes to the session it names). Only the thread's last `GRID_NUDGE_WALK` messages are read, so a
+ * answered: the reply goes to the session it names). `seq` is the thread's newest seq, which the nudge sends as what the
+ * person saw (a linked computer's reply must carry it). Only the thread's last `GRID_NUDGE_WALK` messages are read, so a
  * list read costs O(rows), not O(messages).
  */
 import { inboxWordsDefault, type InboxListRow, type InboxMessage } from "@plannotator/core/inbox-types";
@@ -17,7 +18,11 @@ export const GRID_NUDGE_WALK = 60;
 
 export type GridNudgeRow = NonNullable<InboxListRow["grid_nudge"]>;
 
-export function gridNudgeReader(store: { threadMessageIds(threadId: string): readonly string[]; message(id: string): InboxMessage | null }): (threadId: string) => GridNudgeRow | undefined {
+export function gridNudgeReader(store: {
+  threadMessageIds(threadId: string): readonly string[];
+  message(id: string): InboxMessage | null;
+  messageCursor(id: string): number | null;
+}): (threadId: string) => GridNudgeRow | undefined {
   return (threadId) => {
     const ids = store.threadMessageIds(threadId);
     if (ids.length === 0) return undefined;
@@ -35,6 +40,9 @@ export function gridNudgeReader(store: { threadMessageIds(threadId: string): rea
       last = { at: message.created_at, quiet_from: message.nudge.quiet_from, answered_at: answer?.created_at ?? null };
       break;
     }
-    return { to: target.id, last };
+    // What the person saw of the thread when the row was read: a nudge carries it (`seen_through_seq`), so one the agent
+    // has moved past since is refused (409 thread_moved_on), here and on a linked computer (Rule 11).
+    const seq = Math.max(0, ...ids.slice(-GRID_NUDGE_WALK).map((id) => store.messageCursor(id) ?? 0));
+    return { to: target.id, seq, last };
   };
 }

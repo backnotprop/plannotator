@@ -5843,14 +5843,16 @@ public struct InboxListRowAck: Codable, Hashable, Sendable {
 
 public struct InboxListRowGridNudge: Codable, Hashable, Sendable {
   public var to: String
+  public var seq: Int64?
   public var last: InboxListRowGridNudgeLast?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["to", "last"]
+  static let knownKeys: Set<String> = ["to", "seq", "last"]
 
-  public init(to: String, last: InboxListRowGridNudgeLast? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(to: String, seq: Int64? = nil, last: InboxListRowGridNudgeLast? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.to = to
+    self.seq = seq
     self.last = last
     self.unknownFields = unknownFields
   }
@@ -5858,6 +5860,7 @@ public struct InboxListRowGridNudge: Codable, Hashable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.to = try c.decode(String.self, forKey: WireKey("to"))
+    self.seq = try c.decodeIfPresent(Int64.self, forKey: WireKey("seq"))
     self.last = try c.decodeIfPresent(InboxListRowGridNudgeLast.self, forKey: WireKey("last"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
@@ -5865,6 +5868,7 @@ public struct InboxListRowGridNudge: Codable, Hashable, Sendable {
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encode(self.to, forKey: WireKey("to"))
+    try c.encodeIfPresent(self.seq, forKey: WireKey("seq"))
     try c.encode(self.last, forKey: WireKey("last"))
     try WireKey.write(unknownFields, to: &c)
   }

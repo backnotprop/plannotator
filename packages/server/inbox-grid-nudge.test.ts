@@ -82,15 +82,16 @@ describe("a nudge on the store", () => {
 
     const asked = store.sendMessage({ project_id: project.id, author: TIDE, thread: "Haptics on save", body: "Opened #22." }).message;
     const read = gridNudgeReader(store);
-    expect(read(asked.thread_id)).toEqual({ to: asked.id, last: null });
+    expect(read(asked.thread_id)).toEqual({ to: asked.id, seq: store.messageCursor(asked.id)!, last: null });
 
     clock.now += 4 * 3600_000;
     const nudge = store.sendReply(asked.id, { idempotency_key: "grid-nudge-b", words: WORDS, questions: [], nudge: { quiet_from: asked.created_at } }).reply;
-    expect(read(asked.thread_id)).toEqual({ to: asked.id, last: { at: nudge.created_at, quiet_from: asked.created_at, answered_at: null } });
+    expect(read(asked.thread_id)).toEqual({ to: asked.id, seq: store.messageCursor(nudge.id)!, last: { at: nudge.created_at, quiet_from: asked.created_at, answered_at: null } });
 
     clock.now += 16 * 60_000;
     const answer = store.sendMessage({ project_id: project.id, author: TIDE, body: "Stubbed the engine and pushed to #22.", reply_to: asked.id }).message;
-    expect(read(asked.thread_id)).toEqual({ to: answer.id, last: { at: nudge.created_at, quiet_from: asked.created_at, answered_at: answer.created_at } });
+    // `seq`: the thread's newest, which the nudge sends as what the person saw.
+    expect(read(asked.thread_id)).toEqual({ to: answer.id, seq: store.messageCursor(answer.id)!, last: { at: nudge.created_at, quiet_from: asked.created_at, answered_at: answer.created_at } });
 
     const row = { thread_id: asked.thread_id } as InboxListRow;
     const decorated = gridRowDecorator({ get: () => undefined }, null, read)(row);

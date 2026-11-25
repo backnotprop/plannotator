@@ -2108,9 +2108,10 @@ export interface InboxListRow extends InboxThreadSummary {
    * Grid's Nudge (approval "inbox-agent-grid", round 4), on a read that asks for Grid: `to`, the message a nudge
    * replies to (the thread's newest agent message, else its first), and `last`, the latest nudge among the thread's
    * last messages (its time, the quiet stretch it was sent in, and the agent's first message after it; null while
-   * unanswered). Absent on a thread with no message to reply to, and from an older Inbox (no Nudge there).
+   * unanswered). `seq`: the thread's newest seq there, which the nudge carries as `seen_through_seq`. Absent on a
+   * thread with no message to reply to, and from an older Inbox (no Nudge there).
    */
-  grid_nudge?: { to: string; last: { at: string; quiet_from: string; answered_at: string | null } | null };
+  grid_nudge?: { to: string; seq: number; last: { at: string; quiet_from: string; answered_at: string | null } | null };
   /**
    * The thread's open PRs that are not hidden (keys; the server's inbox-pull-hidden.ts): the row menu's and the picks'
    * "Hide pull request". Only on this Inbox's own rows of the list the window and the phone read; absent when none.

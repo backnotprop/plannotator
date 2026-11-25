@@ -32,6 +32,8 @@ export function sendGridNudge(line: GridLine, action: GridNudgeAction, words: st
     idempotency_key: `grid-nudge-${action.thread}-${from}-${action.key.slice(action.key.lastIndexOf('-') + 1)}`,
     words,
     questions: [],
+    // What the person saw (the row's newest seq there): an agent message since refuses it, and a linked computer's reply must carry it.
+    seen_through_seq: action.seq,
     nudge: { quiet_from: new Date(from).toISOString() },
   });
 }

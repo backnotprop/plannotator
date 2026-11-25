@@ -70,10 +70,12 @@ describe("a nudge on another computer's thread", () => {
       await waitFor("the Mini's row on Studio's Grid read", async () => (await gridRow(studio.port, opened.thread_id))?.grid_nudge?.to === failing.id, 20_000);
       const row = (await gridRow(studio.port, opened.thread_id))!;
       expect(row.machine).toBe(miniId);
-      expect(row.grid_nudge).toEqual({ to: failing.id, last: null });
+      // `seq`: the thread's newest seq on the Mini, which a reply forwarded there must carry (Rule 11).
+      expect(row.grid_nudge).toEqual({ to: failing.id, seq: mini.store.messageCursor(failing.id)!, last: null });
 
       const words = `Haptics on save has been quiet for 3 h 37 min, with tests failing on #22 since 8:05 PM. ${ASK}`;
-      const nudge = (key: string) => post(studio.port, `/api/inbox/m/${miniId}/messages/${failing.id}/reply`, { idempotency_key: key, words, questions: [], nudge: { quiet_from: failing.created_at } });
+      const nudge = (key: string) =>
+        post(studio.port, `/api/inbox/m/${miniId}/messages/${failing.id}/reply`, { idempotency_key: key, words, questions: [], seen_through_seq: row.grid_nudge!.seq, nudge: { quiet_from: failing.created_at } });
       const nudgesOnMini = () => mini.store.thread(opened.thread_id)!.messages.filter((m) => m.nudge);
 
       expect((await nudge("grid-nudge-far-1")).status).toBe(200);

@@ -14,7 +14,7 @@
   --ib-grid-wait: color-mix(in oklab, var(--warning) 62%, var(--card));
   --ib-grid-idle: color-mix(in oklch, var(--foreground) 15%, var(--card));
   /* Stale (round 4): a warm brown-grey tail, and its words in sand; Needs you keeps the stronger amber. */
-  --ib-grid-stale: color-mix(in oklab, color-mix(in oklab, var(--warning) 30%, var(--foreground)) 34%, var(--card));
+  --ib-grid-stale: color-mix(in oklab, color-mix(in oklab, var(--warning) 42%, var(--foreground)) 36%, var(--card));
   --ib-grid-sand: color-mix(in oklab, color-mix(in oklab, var(--warning) 38%, var(--foreground)) 82%, var(--card));
   padding-top: 16px;
   font-size: var(--ib-fs-13-5, 13.5px);

@@ -3956,6 +3956,9 @@
             "to": {
               "type": "string"
             },
+            "seq": {
+              "type": "integer"
+            },
             "last": {
               "anyOf": [
                 {
@@ -3993,6 +3996,7 @@
           },
           "required": [
             "to",
+            "seq",
             "last"
           ],
           "additionalProperties": true

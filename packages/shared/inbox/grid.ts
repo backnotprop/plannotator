@@ -63,7 +63,7 @@ export type GridDropWhy = "PR closed" | "agent ended" | "quiet 3 days";
  * is a reply on message `to` (on the thread's own computer); `key` is its idempotency key, one per quiet stretch and
  * three-hour turn, so a second press, a second window or a held copy writes it once.
  */
-export type GridAction = { kind: "open"; thread: string } | { kind: "nudge"; thread: string; to: string; key: string; quietFrom: number };
+export type GridAction = { kind: "open"; thread: string } | { kind: "nudge"; thread: string; to: string; seq: number; key: string; quietFrom: number };
 
 export const GRID_MIN = 60_000;
 export const GRID_HOUR = 60 * GRID_MIN;
@@ -143,7 +143,7 @@ export interface GridThreadIn {
    * Nudge (the row's `grid_nudge`): the message a nudge replies to, and the thread's last nudge (its time, the quiet
    * stretch it was sent in, the agent's first message after it). Null from an Inbox that carries none: no Nudge.
    */
-  nudge: { to: string; last: { at: string; quiet_from: string; answered_at: string | null } | null } | null;
+  nudge: { to: string; seq: number; last: { at: string; quiet_from: string; answered_at: string | null } | null } | null;
 }
 
 export interface GridLine {
@@ -328,7 +328,7 @@ export function gridPlaceTimed(t: GridThreadIn, now: number): { placed: GridPlac
     const again = nudgeAt === null || nudgeAt < quietFrom || now - nudgeAt >= GRID_STALE_MS;
     if (!t.nudge || !again) return base.actions;
     const key = `grid-nudge-${t.id}-${quietFrom}-${Math.floor((now - quietFrom) / GRID_STALE_MS)}`;
-    return [...base.actions, { kind: "nudge", thread: t.id, to: t.nudge.to, key, quietFrom }];
+    return [...base.actions, { kind: "nudge", thread: t.id, to: t.nudge.to, seq: t.nudge.seq, key, quietFrom }];
   };
 
   // The marks an ended line crosses: first sight, its 3 hours, 12 hours unseen, Earlier's week.
@@ -399,7 +399,7 @@ export function gridSameIn(a: GridThreadIn, b: GridThreadIn): boolean {
     } else if (key === "nudge") {
       const p = x as GridThreadIn["nudge"];
       const q = y as GridThreadIn["nudge"];
-      if (!p || !q || p.to !== q.to || !(p.last === q.last || (p.last && q.last && sameFlat(p.last, q.last)))) return false;
+      if (!p || !q || p.to !== q.to || p.seq !== q.seq || !(p.last === q.last || (p.last && q.last && sameFlat(p.last, q.last)))) return false;
     } else if (!x || !y || typeof x !== "object" || typeof y !== "object" || !sameFlat(x, y)) return false;
   }
   return Object.keys(a).length === Object.keys(b).length;

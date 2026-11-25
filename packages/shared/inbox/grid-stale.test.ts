@@ -34,7 +34,7 @@ function thread(over: Partial<GridThreadIn> = {}): GridThreadIn {
     pulls: [],
     steps: null,
     seen: null,
-    nudge: { to: "msg_last", last: null },
+    nudge: { to: "msg_last", seq: 9, last: null },
     ...over,
   };
 }
@@ -112,7 +112,7 @@ describe("Nudge", () => {
       last_agent_at: ago(222),
       section: "sent",
       sent: { at: nudgedAt, checked_at: ago(4) },
-      nudge: { to: "msg_last", last: { at: nudgedAt, quiet_from: ago(222), answered_at: null } },
+      nudge: { to: "msg_last", seq: 10, last: { at: nudgedAt, quiet_from: ago(222), answered_at: null } },
     });
     const now = line(nudged);
     expect(now.group).toBe("stale");
@@ -132,7 +132,7 @@ describe("Nudge", () => {
     const answered = thread({
       last_agent_at: ago(1),
       pulls: [pull({ added_at: ago(250), checks: "running" })],
-      nudge: { to: "msg_answer", last: { at: ago(17), quiet_from: ago(233), answered_at: ago(1) } },
+      nudge: { to: "msg_answer", seq: 11, last: { at: ago(17), quiet_from: ago(233), answered_at: ago(1) } },
     });
     const moved = line(answered);
     expect(moved.group).toBe("move");

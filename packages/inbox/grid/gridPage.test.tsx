@@ -409,7 +409,7 @@ const farStale = () =>
     last_at: new Date(NOW - 220 * 60_000 + MINI_AHEAD).toISOString(),
     last_agent_at: new Date(NOW - 220 * 60_000 + MINI_AHEAD).toISOString(),
     sent: { at: new Date(NOW - 230 * 60_000 + MINI_AHEAD).toISOString(), checked_at: new Date(NOW - 229 * 60_000 + MINI_AHEAD).toISOString() },
-    grid_nudge: { to: 'msg_tide_last', last: null },
+    grid_nudge: { to: 'msg_tide_last', seq: 41, last: null },
   });
 
 test.skipIf(!hasDom)("Nudge: one press sends the words once, on the thread's own computer and clock, and the line says Nudged just now", async () => {
@@ -426,7 +426,9 @@ test.skipIf(!hasDom)("Nudge: one press sends the words once, on the thread's own
   await settle();
   const sent = asked.filter((r) => r.url.includes('/reply'));
   expect(sent.map((r) => r.url)).toEqual([`/api/inbox/m/${MINI}/messages/msg_tide_last/reply`]);
-  const body = sent[0]!.body as { words: string; idempotency_key: string; nudge: { quiet_from: string } };
+  const body = sent[0]!.body as { words: string; idempotency_key: string; seen_through_seq: number; nudge: { quiet_from: string } };
+  // What the person saw there: a linked computer refuses a reply without it, and an agent message since refuses the nudge.
+  expect(body.seen_through_seq).toBe(41);
   expect(body.words).toBe('Haptics on save has been quiet for 3 h 40 min. Please finish it, or tell me in a few words why it stopped.');
   // On the Mac mini's clock: when it last moved there, and the key built on it.
   const quietFrom = NOW - 220 * 60_000 + MINI_AHEAD;

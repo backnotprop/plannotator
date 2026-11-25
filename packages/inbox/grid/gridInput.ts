@@ -115,7 +115,7 @@ export function gridThreads({ sections, groups, machines, labels, seenOf }: Grid
         steps: steps ? { done: steps.done, total: steps.total, doing: steps.doing, at: local(steps.at) } : null,
         seen: seen ? { through: seen.through - clock, at: seen.at - clock } : null,
         nudge: nudge
-          ? { to: nudge.to, last: lastNudge ? { at: local(lastNudge.at), quiet_from: local(lastNudge.quiet_from), answered_at: local(lastNudge.answered_at) } : null }
+          ? { to: nudge.to, seq: nudge.seq, last: lastNudge ? { at: local(lastNudge.at), quiet_from: local(lastNudge.quiet_from), answered_at: local(lastNudge.answered_at) } : null }
           : null,
       },
     ];
