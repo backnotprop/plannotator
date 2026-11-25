@@ -272,7 +272,8 @@ test('a first run of --review: code review only, the welcome once over Reviews, 
   expect(new URL(page.url()).hash).toBe('#reviews');
   await expect(item(page, 'reviews')).toBeVisible();
   for (const id of ['inbox', 'board', 'projects', 'artifacts', 'new-message']) await expect(item(page, id)).toHaveCount(0);
-  await expect(page.getByText('Tide tables in the booking form').first()).toBeVisible({ timeout: 20_000 });
+  // The person's pull requests are in (the Pull requests board draws them as tiles; the titles are in its Table view).
+  await expect(page.locator('[data-prs-page] [data-pr-tile]')).toHaveCount(4, { timeout: 20_000 });
   await page.mouse.move(4, 4);
   await shots(page, 'reviews-review-only-{s}', ['light', 'dark']);
 
