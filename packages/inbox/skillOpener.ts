@@ -4,7 +4,6 @@
  * drawn anew while the file was open. It is forgotten when the file goes another way: the browser's Back, or the
  * thread it was opened in going away (another thread opened), so a later file never sends focus to a stale control.
  */
-import { backTo } from './history';
 import { routeOf } from './app/route';
 import { currentHash, writeRoute } from './app/writeRoute';
 
@@ -82,8 +81,8 @@ export function openSkillFile(open: () => void): number {
 
 /**
  * A double-click's second press takes back the open its first click made (`id`, openSkillFile), and only that one:
- * history goes back to as it was before the first click (the open's own entry is left by the browser's Back, or put
- * back in place), so a later Back never opens a file the person did not ask for. Focus stays put. Nothing is done
+ * the open's own history entry is put back to the screen it was opened from, so a later Back never opens a file the
+ * person did not ask for. Focus stays put. Nothing is done
  * when the click changed nothing (that file was open already) or the window has moved on since.
  */
 export function takeBackSkillFile(id: number): void {
@@ -91,7 +90,9 @@ export function takeBackSkillFile(id: number): void {
   const open = lastOpen;
   lastOpen = null;
   if (!open || open.id !== id || open.after === open.before || currentHash() !== open.after) return;
-  if (!backTo(open.before, window.history)) writeRoute(routeOf(open.before), { replace: true });
+  // In place, at once: a Back would land later, after the second press drew its selection and the comment tools,
+  // and the file closing then moves the words from under them.
+  writeRoute(routeOf(open.before), { replace: true });
 }
 
 // The browser's Back (or Forward) moved the window: what opened the file is not where focus goes any more.
