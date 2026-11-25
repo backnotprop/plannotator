@@ -11,6 +11,10 @@
  *
  * The thread pane over a scripted Inbox (a stubbed fetch holding drafts with the server's compare-and-set). DOM-gated:
  * runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
+ *
+ * happy-dom has no Web Locks (`navigator.locks`), as a phone's page on plain http has none: every test here runs that
+ * path (a page keeping words says it is open with a heartbeat in localStorage), except those that install
+ * `locksHeldBy` or `slowLocks` (the Web Locks path).
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -596,10 +600,15 @@ test.skipIf(!hasDom)('another device added to words typed here, and the next edi
 
 const keptInBrowser = () => Object.keys(localStorage).filter((key) => key.startsWith('plannotator-inbox-reply-kept:'));
 
-/** The browser ends the tab (a phone short of memory): nothing of the page runs again, and a new page opens the thread. */
-async function newPageAfterTabEnded(id = ONE): Promise<HTMLElement> {
+const ALIVE = 'plannotator-inbox-reply-kept-alive:';
+/**
+ * The browser ends the tab (a phone short of memory): nothing of the page runs again, and a new page opens the thread.
+ * `satHidden`: the tab sat hidden first (a phone freezes a hidden tab), so its last heartbeat is older than 30 s.
+ */
+async function newPageAfterTabEnded(id = ONE, satHidden = true): Promise<HTMLElement> {
   act(() => root?.unmount());
   host?.remove();
+  if (satHidden) for (const key of Object.keys(localStorage)) if (key.startsWith(ALIVE)) localStorage.setItem(key, String(Date.now() - 60_000));
   resetReplyDraftPageForTests();
   return open(id);
 }
@@ -959,4 +968,192 @@ test.skipIf(!hasDom)('the page hidden while its save did not land: the words are
   } finally {
     pageVisibility('visible');
   }
+});
+
+test.skipIf(!hasDom)('the page hidden inside the pause with the Inbox out of reach, then the tab ended: a new page has the words back, "Not saved", and saves them', async () => {
+  saveElsewhere(ONE, 'Older words.');
+  const el = await open();
+  await until(() => box(el)?.value === 'Older words.', 'the draft back in the box');
+  try {
+    // The computer is asleep: the save sent as the phone hides the page (a keepalive) does not land.
+    saveAnswer = noNetwork;
+    typeOn(el, ' Typed on the phone.');
+    pageVisibility('hidden');
+    await settle(2);
+    expect(drafts.get(ONE)?.body).toBe('Older words.');
+    const next = await newPageAfterTabEnded();
+    pageVisibility('visible');
+    await until(() => box(next)?.value === 'Older words. Typed on the phone.', 'the words back in the box');
+    await until(() => next.querySelector('[data-draft-failed]') !== null, '"Not saved"');
+    saveAnswer = null;
+    window.dispatchEvent(new Event('online'));
+    await until(() => drafts.get(ONE)?.body === 'Older words. Typed on the phone.', 'saved');
+    await until(() => !replyDraftUnsaved(), 'nothing left unsaved');
+    expect(keptInBrowser()).toEqual([]);
+  } finally {
+    pageVisibility('visible');
+  }
+});
+
+/**
+ * A save on the Inbox whose answer is slow, newer words queued behind it (and, `typing`, more waiting for the pause in
+ * typing), then a reload: the page goes. After all of it the Inbox holds the newest words and a new page shows them.
+ */
+async function goneWithSavesOnTheirWay(typing: boolean) {
+  saveElsewhere(ONE, 'Older words.');
+  const el = await open();
+  await until(() => box(el)?.value === 'Older words.', 'the draft back in the box');
+  let answer!: () => void;
+  const slow = new Promise<void>((done) => (answer = done));
+  let first = true;
+  saveAnswer = async (thread, body) => {
+    // Each save lands on the Inbox as it comes; the first one's answer is slow.
+    const landed = storeSave(thread, body);
+    if (first) {
+      first = false;
+      await slow;
+    }
+    return landed;
+  };
+  typeOn(el, ' One.');
+  await until(() => drafts.get(ONE)?.body === 'Older words. One.', 'the first save on the Inbox');
+  typeOn(el, ' Two.');
+  // Past the pause in typing: its save waits behind the first.
+  await settle(4, 200);
+  if (typing) typeOn(el, ' Three.');
+  const newest = typing ? 'Older words. One. Two. Three.' : 'Older words. One. Two.';
+  act(() => {
+    window.dispatchEvent(new Event('pagehide'));
+  });
+  await settle(2);
+  const next = await newPageAfterTabEnded();
+  await until(() => box(next)?.value === newest, 'the newest words in the box');
+  // The gone page's slow answer comes (a real browser runs nothing after it): what that page still sends reaches no Inbox.
+  saveAnswer = () => Response.json({ draft: null });
+  answer();
+  await until(() => !replyDraftUnsaved(), 'nothing left on its way');
+  expect(drafts.get(ONE)?.body).toBe(newest);
+  expect(keptInBrowser()).toEqual([]);
+}
+
+test.skipIf(!hasDom)('a reload with a save on its way, newer words queued behind it and more typed: the newest words are never lost', async () => {
+  await goneWithSavesOnTheirWay(true);
+});
+
+test.skipIf(!hasDom)('a reload with a save on its way and newer words queued behind it: the newest words are never lost', async () => {
+  await goneWithSavesOnTheirWay(false);
+});
+
+/** The browser's Web Locks, slow to say which pages are open (`letGo`): words a gone page kept come back late. */
+function slowLocks(): { letGo: () => void; restore: () => void } {
+  let letGo!: () => void;
+  const answered = new Promise<void>((done) => (letGo = done));
+  const restore = locksHeldBy(() => []);
+  const value = { request: () => new Promise(() => {}), query: async () => (await answered, { held: [], pending: [] }) };
+  Object.defineProperty(navigator, 'locks', { configurable: true, value });
+  return { letGo, restore };
+}
+
+/**
+ * Words a gone page kept (`kind`), a slow first read, and the person types in the box before it answers; `late`: they
+ * typed even before the kept words were back. The box holds both, the kept words first; returns the pane.
+ */
+async function keptBackWhileTyping(kind: 'failed' | 'conflict', late: boolean): Promise<HTMLElement> {
+  saveElsewhere(ONE, kind === 'failed' ? 'Older words.' : 'The iPad wrote this.');
+  keptByPage('gone', ONE, { kind, words: 'Older words. Newer words.', base: drafts.get(ONE)!.updated_at });
+  let letGo!: () => void;
+  readHeld = new Promise<void>((done) => (letGo = done));
+  const locks = late ? slowLocks() : null;
+  try {
+    const el = await open();
+    await reply(el);
+    typeOn(el, late ? 'Thanks.' : ' And k.');
+    await settle(4, 200);
+    locks?.letGo();
+    await settle(2);
+    letGo();
+    readHeld = null;
+    await until(() => (box(el)?.value ?? '').includes('Older words. Newer words.'), 'the kept words in the box');
+    expect(box(el)!.value.includes(late ? 'Thanks.' : 'And k.')).toBe(true);
+    return el;
+  } finally {
+    locks?.restore();
+  }
+}
+
+test.skipIf(!hasDom)('words a gone page kept that did not land, a slow first read, and a key typed: both are in the box and saved', async () => {
+  const el = await keptBackWhileTyping('failed', false);
+  await until(() => drafts.get(ONE)?.body === 'Older words. Newer words. And k.', 'both saved');
+  expect(box(el)!.value).toBe('Older words. Newer words. And k.');
+  await until(() => !replyDraftUnsaved() && keptInBrowser().length === 0, 'nothing left unsaved');
+  expect(el.querySelector('[data-draft-failed]') === null).toBe(true);
+});
+
+test.skipIf(!hasDom)('words a gone page kept that did not land, back only after the person typed: the box takes them first, then the typed words, and saves both', async () => {
+  const el = await keptBackWhileTyping('failed', true);
+  await until(() => drafts.get(ONE)?.body === 'Older words. Newer words.\n\nThanks.', 'both saved');
+  expect(box(el)!.value).toBe('Older words. Newer words.\n\nThanks.');
+  await until(() => !replyDraftUnsaved() && keptInBrowser().length === 0, 'nothing left unsaved');
+});
+
+/** After keptBackWhileTyping('conflict', …): the choice shows, the other draft stays, and the next key and Keep mine keep both. */
+async function keptConflictHolds(el: HTMLElement, typed: string) {
+  await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict');
+  expect(drafts.get(ONE)?.body).toBe('The iPad wrote this.');
+  typeOn(el, ' k');
+  await settle(2);
+  await act(async () => conflictButton(el, 'Keep mine').click());
+  await until(() => (drafts.get(ONE)?.body ?? '').includes('Older words. Newer words.'), 'Keep mine saved');
+  expect(drafts.get(ONE)!.body.includes(`${typed} k`)).toBe(true);
+  await until(() => !replyDraftUnsaved() && keptInBrowser().length === 0, 'nothing left unsaved');
+}
+
+test.skipIf(!hasDom)("a conflict's words a gone page kept, a slow first read, and a key typed: the next keys and Keep mine keep them", async () => {
+  await keptConflictHolds(await keptBackWhileTyping('conflict', false), 'And k.');
+});
+
+test.skipIf(!hasDom)("a conflict's words a gone page kept, back only after the person typed: the box takes them first, and Keep mine keeps both", async () => {
+  const el = await keptBackWhileTyping('conflict', true);
+  expect(box(el)!.value).toBe('Older words. Newer words.\n\nThanks.');
+  await keptConflictHolds(el, 'Thanks.');
+});
+
+test.skipIf(!hasDom)('no Web Locks: another tab whose heartbeat is fresh keeps its words; once it is older than 30 s, a new page takes them back', async () => {
+  expect(!!(navigator as unknown as { locks?: unknown }).locks).toBe(false);
+  saveElsewhere(ONE, 'Older words.');
+  keptByPage('tab-two', ONE, { kind: 'failed', words: 'Older words. From tab two.', base: drafts.get(ONE)!.updated_at });
+  localStorage.setItem(`${ALIVE}tab-two`, String(Date.now() - 5_000));
+  const el = await open();
+  await settle(4);
+  expect((box(el)?.value ?? '').includes('From tab two.')).toBe(false);
+  expect(saves.length).toBe(0);
+  expect(keptInBrowser().length).toBe(1);
+  // Tab two stops (ended while it sat hidden): its heartbeat ages past 30 s.
+  const next = await newPageAfterTabEnded();
+  await until(() => drafts.get(ONE)?.body === 'Older words. From tab two.', 'its words saved on the draft they were typed over');
+  await until(() => box(next)?.value === 'Older words. From tab two.', 'its words in the box');
+});
+
+test.skipIf(!hasDom)('no Web Locks: a page keeping words says it is open, again as the back/forward cache gives it back, and no more once it goes', async () => {
+  await typedThenFailed(noNetwork);
+  const page = keptInBrowser()[0]!.split(':')[1]!;
+  const fresh = () => Date.now() - Number(localStorage.getItem(`${ALIVE}${page}`) ?? 0) < 30_000;
+  expect(fresh()).toBe(true);
+  // Frozen in the back/forward cache a while, then shown again.
+  localStorage.setItem(`${ALIVE}${page}`, String(Date.now() - 60_000));
+  act(() => {
+    window.dispatchEvent(Object.defineProperty(new Event('pageshow'), 'persisted', { value: true }));
+  });
+  expect(fresh()).toBe(true);
+  // A reload: the page goes for good, so the next page takes its words at once.
+  act(() => {
+    window.dispatchEvent(new Event('pagehide'));
+  });
+  expect(localStorage.getItem(`${ALIVE}${page}`)).toBe(null);
+  const next = await newPageAfterTabEnded(ONE, false);
+  await until(() => box(next)?.value === 'Older words. Newer words.', 'the words back in the box');
+  saveAnswer = null;
+  window.dispatchEvent(new Event('online'));
+  await until(() => drafts.get(ONE)?.body === 'Older words. Newer words.', 'saved');
+  await until(() => !replyDraftUnsaved() && keptInBrowser().length === 0, 'nothing left unsaved');
 });

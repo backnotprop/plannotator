@@ -436,6 +436,8 @@ interface QueuedSave {
   taken?: boolean;
   /** Words that did not land, saved again (`retry`): sent on the draft they were typed over, never a newer one. */
   over?: { base: string | null; words?: string | null };
+  /** The thread's generation as it was queued: a Send or Discard since makes it nothing to send. */
+  generation: number;
 }
 
 export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {}) {
@@ -489,8 +491,6 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
    * A save refused because of it is not another window's doing: adopted, and the words saved again.
    */
   const ownClears = useRef(new Map<string, string>());
-  /** The words the last save queued here carries (or the draft read): the page's last save names them (`base_body`). */
-  const lastWords = useRef<string | null>(null);
   /** Per thread: the words of the last save this window sent, answered or not; the next save names them (`base_body`). */
   const sentWords = useRef(new Map<string, string>());
   /** Raised by each `reload`: only the newest read applies its answer. */
@@ -572,7 +572,6 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     baseKnown.set(target, draft?.updated_at ?? null);
     synced.current.set(target, draftKey(draft));
     syncedWords.current.set(target, draft?.body ?? null);
-    if (target === current.current) lastWords.current = draft?.body ?? null;
   };
   /** adopt, from this window's own save, Send, Discard or read-back (not from a `reload`). */
   const learn = (target: string, draft: InboxReplyDraft | null) => {
@@ -629,6 +628,18 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   const holdFailed = (target: string) => {
     const waiting = failedWords.get(target);
     if (waiting !== undefined && !conflicts.current.has(target)) heldFailed.current.set(target, waiting);
+  };
+  /** Words taken back from a gone page that the box the person typed in (before they came back) does not show. */
+  const notShown = (target: string, draft: InboxReplyDraft | null): string | undefined => {
+    const words = conflicts.current.get(target) ?? failedWords.get(target);
+    const mine = ownedBoxRef.current?.(target);
+    return words !== undefined && mine && onOfferRef.current && !mine.text.includes(words) && !(draft?.body ?? '').includes(words) ? words : undefined;
+  };
+  /** The box takes them as it takes an offered draft, the words typed there after them; their save or the conflict's choice follows. */
+  const takeLate = (target: string, words: string, draft: InboxReplyDraft | null) => {
+    offers.set(target, { ...(draft ?? { v: 1 as const, thread_id: target, created_at: '', updated_at: '' }), body: words });
+    offerFrom.set(target, '');
+    onOfferRef.current?.(target);
   };
   const show = (target: string, draft: InboxReplyDraft | null) => {
     if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target), failed: refusedThreads.has(target), offer: offers.get(target) ?? null, unsaved: unsavedOf(target) });
@@ -704,9 +715,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     unsaved += 1;
     unsavedChanged();
     const generation = generationOf(target);
-    const save: QueuedSave = { text, ops: composeReplyDraftFileOps(takeCarried(target), given), ...(over ? { over } : {}) };
+    const save: QueuedSave = { text, ops: composeReplyDraftFileOps(takeCarried(target), given), generation, ...(over ? { over } : {}) };
     queuedOf(target).push(save);
-    if (target === current.current) lastWords.current = text;
     /** No longer on its way. */
     const leave = () => {
       const list = queuedOf(target);
@@ -957,9 +967,12 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     holdFailed(threadId);
     setState({ loadedFor: null, draft: null, conflict: null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), unsaved: conflicts.current.get(threadId) ?? unsavedOf(threadId) });
     void chain.current.then(async () => {
+      let tookBack = false;
       try {
-        // Words an earlier page of this browser kept for the thread (a tab the browser ended) are this page's again.
-        await takeKeptBack(threadId);
+        // Words an earlier page of this browser kept for the thread (a tab the browser ended) are this page's again, and
+        // shown from now: a box opened after holds them.
+        tookBack = await takeKeptBack(threadId);
+        if (tookBack && live) setState((s) => ({ ...s, failed: refusedThreads.has(threadId), unsaved: conflicts.current.get(threadId) ?? unsavedOf(threadId) }));
         // An older Inbox answers 404 (caught below): no draft.
         const draft = await storeRef.current.read(threadId);
         if (!live) return;
@@ -969,12 +982,18 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         const waiting = failedWords.get(threadId);
         const change = ownedChange(threadId, draft, true);
         if (change === null) adopt(threadId, draft);
-        holdFailed(threadId);
+        // Words taken back after the person typed in the box are not held as shown there: the box takes them in below.
+        const late = tookBack && change !== 'edits' ? notShown(threadId, draft) : undefined;
+        if (late === undefined) holdFailed(threadId);
         setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), offer: offers.get(threadId) ?? null, unsaved: unsavedOf(threadId) });
-        if (change === 'typed') onOfferRef.current?.(threadId);
+        if (late === undefined && change === 'typed') onOfferRef.current?.(threadId);
         else if (waiting !== undefined) failedAfterRead(threadId, waiting, draft);
+        if (late !== undefined) takeLate(threadId, late, draft);
       } catch {
-        if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), unsaved: unsavedOf(threadId) });
+        if (!live) return;
+        const late = tookBack ? notShown(threadId, null) : undefined;
+        setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId), unsaved: unsavedOf(threadId) });
+        if (late !== undefined) takeLate(threadId, late, null);
       }
     });
     return () => {
@@ -1001,8 +1020,11 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       const open = current.current;
       const failed = failedWords.get(open);
       const failedOn = failedOver.get(open);
+      // The page goes: words queued behind a save on its way (never sent: not the last words sent) would never run.
+      const last = going ? queuedOf(open).at(-1) : undefined;
+      const unsent = last && last.generation === generationOf(open) && last.text !== sentWords.current.get(open) ? { threadId: open, text: last.text, files: NO_FILES, ops: NO_FILE_OPS, over: last.over } : null;
       // Words that did not land go on the draft they were typed over (not known: they wait for the person).
-      const next = pending.current ?? (failed !== undefined && failedOn && queuedOf(open).length === 0 ? { threadId: open, text: failed, files: NO_FILES, ops: NO_FILE_OPS, over: failedOn } : null);
+      const next = pending.current ?? unsent ?? (failed !== undefined && failedOn && queuedOf(open).length === 0 ? { threadId: open, text: failed, files: NO_FILES, ops: NO_FILE_OPS, over: failedOn } : null);
       if (!next || keptAlive.current || claimed.current.has(next.threadId) || conflicts.current.has(next.threadId) || offers.has(next.threadId)) return;
       // A save of the thread on its way (a desktop tab switch mid-save): these words go after it, in order, as any save
       // does; a keepalive beside it could land first and refuse it as another window's change. Kept in the browser
@@ -1021,15 +1043,19 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       pending.current = null;
       if (timer.current) clearTimeout(timer.current);
       const ops = composeReplyDraftFileOps(carried.get(next.threadId) ?? NO_FILE_OPS, next.ops);
-      const over = 'over' in next ? next.over : { base: baseOf(next.threadId), ...(syncedWords.current.has(next.threadId) ? { words: syncedWords.current.get(next.threadId) ?? null } : {}) };
-      // `base_body` names the words of this window's last save, which may have landed without its answer.
+      const given = 'over' in next ? next.over : undefined;
+      const over = given ?? { base: baseOf(next.threadId), ...(syncedWords.current.has(next.threadId) ? { words: syncedWords.current.get(next.threadId) ?? null } : {}) };
+      // The words go in the browser's keep (`carry` writes it) before the keepalive goes, whose answer is never read and
+      // which may not land: a tab ended loses none. The file changes are kept until the page comes back and reads it back.
+      if (next.text.trim() !== '') keepingMine.set(next.threadId, next.text);
+      carry(next.threadId, next.ops);
+      // `base_body`, as any save names it: the words of this window's last save SENT (it may have landed without its
+      // answer), never words queued behind it; words that did not land, saved again, name only themselves.
       void storeRef.current
-        .save(next.threadId, { body: next.text, base: over.base, baseBody: lastWords.current, files: ops, ...aimOf(next.threadId), ...quoteOf(next.threadId), ...replyMentionsSave(next.threadId, next.text) }, { keepalive: true })
+        .save(next.threadId, { body: next.text, base: over.base, baseBody: given ? next.text : (sentWords.current.get(next.threadId) ?? null), files: ops, ...aimOf(next.threadId), ...quoteOf(next.threadId), ...replyMentionsSave(next.threadId, next.text) }, { keepalive: true })
         .catch(() => {});
       sentWords.current.set(next.threadId, next.text);
       keptAlive.current = { threadId: next.threadId, text: next.text, ops, generation: generationOf(next.threadId), over };
-      // Kept until the page comes back and reads it back (or the page goes, and the next one reads the draft).
-      carry(next.threadId, next.ops);
     };
     // Back (the tab shown again, or from the back/forward cache): the keepalive's answer was never read, and the
     // `drafts` frames sent meanwhile may not be replayed. Read back what it saved; words it did not land are saved again.

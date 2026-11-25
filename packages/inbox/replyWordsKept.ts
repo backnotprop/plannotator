@@ -7,7 +7,9 @@
  *
  * Several tabs of one origin share the storage: each page holds a Web Lock named for it for its life, and a page takes
  * back only the words of a page that is gone (its lock is free; the browser frees it when a tab closes, crashes or is
- * ended). A browser without Web Locks takes back any other page's words, as before.
+ * ended). Without Web Locks (plain http on a LAN, as a phone's page) a page keeping words writes a heartbeat instead,
+ * every few seconds and as it hides or shows, and removes it as it goes for good: another page's words are taken back
+ * only once its heartbeat is gone or older than KEPT_ALIVE_MS.
  *
  * Kept at most 14 days, at most 20 entries and 200 KB in all (the oldest go first); a full or blocked storage keeps
  * nothing (the page still has the words). The words are never logged.
@@ -15,6 +17,11 @@
 
 const PREFIX = 'plannotator-inbox-reply-kept:';
 const LOCK_PREFIX = 'plannotator-inbox-reply-kept-page:';
+/** No Web Locks: a page's heartbeat (when it last said it is open), and how often it beats while it keeps words. */
+const ALIVE_PREFIX = 'plannotator-inbox-reply-kept-alive:';
+const BEAT_MS = 5_000;
+/** A page whose heartbeat is older than this (or gone) is gone: its words are free to take. */
+export const KEPT_ALIVE_MS = 30_000;
 /** The most entries kept, and their size in all (characters of key and value): the oldest go first. */
 const MAX_ENTRIES = 20;
 const MAX_TOTAL = 200_000;
@@ -65,16 +72,65 @@ const locks = (): Locks | null => {
   }
 };
 
-/** Held until the page is gone (a promise that never settles): another page reading the locks knows it is open. */
+let beating: ReturnType<typeof setInterval> | null = null;
+/** The page went for good (`pagehide`, not into the back/forward cache): it beats no more. */
+let gone = false;
+let listening = false;
+
+function beat(): void {
+  const storage = store();
+  if (!storage || gone) return;
+  try {
+    storage.setItem(ALIVE_PREFIX + page, String(Date.now()));
+  } catch {
+    // Full or blocked: nothing is kept here either.
+  }
+}
+
+function stopBeat(storage: Storage): void {
+  if (beating) clearInterval(beating);
+  beating = null;
+  remove(storage, ALIVE_PREFIX + page);
+}
+
+function listen(): void {
+  if (listening || typeof window === 'undefined') return;
+  listening = true;
+  // Back from the back/forward cache: the lock is taken again (the browser may have let it go), the heartbeat goes on.
+  window.addEventListener('pageshow', (event) => {
+    if (!event.persisted || locked !== page) return;
+    gone = false;
+    locked = null;
+    holdPageLock();
+  });
+  // Gone for good (a reload, a closed tab): no longer open, so the next page takes these words back at once.
+  window.addEventListener('pagehide', (event) => {
+    if (event.persisted) return;
+    gone = true;
+    const storage = store();
+    if (storage) stopBeat(storage);
+  });
+  document.addEventListener('visibilitychange', () => beating && beat());
+}
+
+/**
+ * Held until the page is gone (a promise that never settles): another page reading the locks knows it is open. Without
+ * Web Locks the page beats while it keeps words.
+ */
 function holdPageLock(): void {
+  listen();
   if (locked === page) return;
   locked = page;
+  const known = locks();
+  if (!known) {
+    beat();
+    beating ??= setInterval(beat, BEAT_MS);
+    return;
+  }
   try {
-    void locks()
-      ?.request(LOCK_PREFIX + page, () => new Promise<void>(() => {}))
-      .catch(() => {});
+    void known.request(LOCK_PREFIX + page, () => new Promise<void>(() => {})).catch(() => {});
   } catch {
-    // No locks: other pages take these words back as before.
+    // The lock could not be asked for: other pages read it as free.
   }
 }
 
@@ -113,6 +169,13 @@ const remove = (storage: Storage, key: string) => {
 /** Entries that cannot be read or are older than 14 days go; then at most MAX_ENTRIES and MAX_TOTAL, the oldest first. */
 function trim(storage: Storage): void {
   const now = Date.now();
+  // Another page's heartbeat that stopped (it is gone, or beats again once back) says nothing: it goes.
+  const stopped: string[] = [];
+  for (let i = 0; i < storage.length; i += 1) {
+    const key = storage.key(i);
+    if (key?.startsWith(ALIVE_PREFIX) && key !== ALIVE_PREFIX + page && now - (Number(storage.getItem(key)) || 0) > KEPT_ALIVE_MS) stopped.push(key);
+  }
+  for (const key of stopped) remove(storage, key);
   const kept = entries(storage).filter(({ key, entry }) => {
     if (entry && now - entry.at <= KEPT_MAX_AGE_MS) return true;
     remove(storage, key);
@@ -154,6 +217,9 @@ export async function keptWordsGone(threadId: string): Promise<(KeptWords & { ke
     // The locks could not be read: no page is known gone, so none is taken.
     if (!held) return null;
     for (const lock of held.held ?? []) if (lock.name?.startsWith(LOCK_PREFIX)) open.add(lock.name.slice(LOCK_PREFIX.length));
+  } else {
+    // No Web Locks: a page whose heartbeat is fresh is open.
+    for (const { entry } of theirs) if (Date.now() - (Number(storage.getItem(ALIVE_PREFIX + entry.page)) || 0) <= KEPT_ALIVE_MS) open.add(entry.page);
   }
   const gone = theirs.find(({ entry }) => !open.has(entry.page));
   return gone ? { kind: gone.entry.kind, words: gone.entry.words, base: gone.entry.base, key: gone.key } : null;
@@ -183,11 +249,20 @@ export function keepWords(threadId: string, kept: KeptWords): void {
 
 export function forgetWords(threadId: string): void {
   const storage = store();
-  if (storage) remove(storage, keyOf(threadId));
+  if (!storage) return;
+  remove(storage, keyOf(threadId));
+  // Nothing of this page's kept any more: its heartbeat stops (the next words kept start it again).
+  if (beating && !entries(storage).some(({ entry }) => entry?.page === page)) {
+    stopBeat(storage);
+    locked = null;
+  }
 }
 
-/** DOM tests: a new page (another id, its lock not taken yet, the sweep on load still to run). */
+/** DOM tests: a new page (another id, its lock not taken yet, no heartbeat, the sweep on load still to run). */
 export function newKeptPageForTests(): void {
+  if (beating) clearInterval(beating);
+  beating = null;
+  gone = false;
   page = newPageId();
   locked = null;
   swept = false;
