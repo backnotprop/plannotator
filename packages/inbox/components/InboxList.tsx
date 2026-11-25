@@ -5,10 +5,10 @@ import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
-import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { formatCount } from '../format';
 import { RowTagName, rowTintOf, tintProps, type ListTagColours, type RowTintProps } from '../parts/RowTint';
 import { RowAgents, RowAgentTiles } from './RowAgents';
+import { AnchoredMark } from './AnchoredThreads';
 import { RowPullsMark } from '../threadPulls/ThreadPulls';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
 import { RowTip } from './RowTip';
@@ -18,7 +18,7 @@ import { notePressPointer, pressRow } from '../starPress';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
 import { useNarrowerThan } from '../narrower';
-import { inboxRowArchived } from '@plannotator/core/inbox-types';
+import { inboxRowArchived, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { rowLabel, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
 import { HeldNoticeLine, HeldNoticeSaid, HoldViewOnBar, noticeLines, type ListNotice } from './HeldNoticeLine';
 import { listBarShows } from '../listNewState';
@@ -286,7 +286,7 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
       <RowAvatar row={row} size={24} />
       {!filtered && <RowProjectMark row={row} />}
       {(!filtered || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} />}
-      {scheduledOf(row) ? <ScheduledTile /> : <RowAgents participants={row.participants} agent={rowAgent(row)} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgents participants={row.participants} agent={rowAgent(row)} />}<AnchoredMark thread={row.thread_id} />
     </span>
   );
 }
@@ -307,7 +307,7 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
     <span className="ib-from ib-lead">
       {withProject && <RowProjectMark row={row} />}
       {(withProject || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} tip={tip} />}
-      {scheduledOf(row) ? <ScheduledTile /> : <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />}<AnchoredMark thread={row.thread_id} />
     </span>
   );
 }

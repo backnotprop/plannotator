@@ -97,6 +97,8 @@ export interface ThreadSlotHost {
   fullSidebar: boolean;
   setThreadFull: (on: boolean) => void;
   leaveFull: () => void;
+  /** This window is a thread tab (`#thread=<id>&alone`, Thread tabs on); `leaveFull` then shows the full Inbox. */
+  threadTab: boolean;
   showToast: (toast: Omit<InboxToastModel, 'id'>) => void;
   inboxLink: (href: string) => (() => void) | null;
   /** Fold a docked sidebar on screen when the list and `columns` thread columns (the open ones by default) fit only without it. */

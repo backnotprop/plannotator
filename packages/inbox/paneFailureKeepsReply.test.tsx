@@ -134,7 +134,7 @@ function hostFor(phone: boolean): ThreadSlotHost {
     patchQuestions: noop, onPickSaves: noop, afterWrite: async () => {}, rowPatches: new Map(), decideInThread: () => null,
     searchLanding: { current: null }, decideLanding: { current: null }, landed: noop,
     seenOnSight: noop, covered: false, panesOnScreen: createPanesOnScreen(), setOpenThreadCovered: noop, listTitle: 'Inbox', fullSidebar: true,
-    setThreadFull: noop, leaveFull: noop, showToast: noop, inboxLink: () => null,
+    setThreadFull: noop, leaveFull: noop, threadTab: false, showToast: noop, inboxLink: () => null,
     holdSidebarIfTight: noop, backFromFile: { current: null },
   };
 }

@@ -43,6 +43,20 @@ function secondPress(event: ReactMouseEvent<HTMLElement>, threadId: string): boo
   );
 }
 
+/**
+ * Thread tabs (threadTabs.ts): the window's say over a click on a thread's row before it opens (⌘/Ctrl-click opens a
+ * thread tab; a thread that has one is focused, never navigated to). True: the gate took the click. Set by App, null while
+ * the capability is off.
+ */
+let rowGate: ((event: ReactMouseEvent<HTMLElement>, threadId: string, open: () => void) => boolean) | null = null;
+export function setRowClickGate(gate: typeof rowGate): void {
+  rowGate = gate;
+}
+/** Thread tabs are on: a ⌘/Ctrl-click on a row (not while picking) is the row gate's (a thread tab), not a pick (useListPicks). */
+export function rowGateClaimsModClick(): boolean {
+  return rowGate !== null;
+}
+
 /** A click on a list row: its star unstars, the rest of the row opens the thread. */
 export function pressRow(event: ReactMouseEvent<HTMLElement>, threadId: string, onOpen: () => void, onUnstar?: () => void): void {
   if (secondPress(event, threadId)) return;
@@ -51,5 +65,6 @@ export function pressRow(event: ReactMouseEvent<HTMLElement>, threadId: string, 
     onUnstar();
     return;
   }
+  if (rowGate?.(event, threadId, onOpen)) return;
   onOpen();
 }

@@ -269,7 +269,8 @@ import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import { reactionSpeech } from './components/ReactionTray';
-import { inboxTabCount, setAppBadge, useTabCount } from './tabCount';
+import { AnchoredThreadsContext } from './components/AnchoredThreads';
+import { useThreadTabRouting } from './app/useThreadTabRouting';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
 import { actedSince, inputMark, lastInput } from './lastInput';
 import { backFocusTargets, focusKept, focusLost } from './backFocus';
@@ -417,17 +418,9 @@ function Inbox() {
   /** The latest list read's sections, for the event stream's `deliveries` (which reads again only while a delivery can move). */
   const latestSectionsRef = useRef<ListModel['sections'] | null>(null);
   latestSectionsRef.current = latest?.sections ?? null;
-  // The tab's count (tabCount.ts): every thread with news the person has not looked at, from the
-  // latest read (not the held list on screen, and not the sidebar's project filter).
   const faviconHref = useInboxFaviconHref();
   const faviconBadgeHref = useInboxFaviconBadgeHref();
   const faviconInUse = useInboxFavicon();
-  const tabCount = useMemo(() => (latest ? inboxTabCount(latest.sections) : 0), [latest]);
-  useTabCount(tabCount, faviconHref, faviconBadgeHref);
-  // The installed app's badge is shared by every window: only a window that has read a list writes it.
-  useEffect(() => {
-    if (latest) setAppBadge(tabCount);
-  }, [latest, tabCount]);
   /** The list on screen: held until the person acts (the "N new" notice). */
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
   const shownRef = useRef(shown);
@@ -694,7 +687,9 @@ function Inbox() {
   /** Each pane's thread on screen and whether anything covers it (panes/onScreen.ts). */
   const [panesOnScreen] = useState(createPanesOnScreen);
   const [openThreadCovered, setOpenThreadCovered] = useState(false);
+  const threadTabs = useThreadTabRouting({ settings, route, routeRef, sections: latest?.sections ?? null, heldTitle: openHeld?.thread.thread_name || openHeld?.thread.subject || '', faviconHref, faviconBadgeHref });
   const notifications = useInboxNotifications({
+    threadTabs: threadTabs.notify,
     settings: settings?.notifications ?? null,
     // Agent news rings the doorbell by its rules and the person's choice (sound.ts); notices it rang for are silent.
     onAgentNews: sound.arrived,
@@ -751,7 +746,7 @@ function Inbox() {
       // `data-local-link`: a link to an attached file, whose own click opens it as its tile does.
       if (!(link instanceof HTMLAnchorElement) || link.hasAttribute('download') || link.hasAttribute('data-local-link')) return;
       const open = inboxLink(link.getAttribute('href') ?? '');
-      if (!open) return;
+      if (!open || threadTabs.linkClick(event, link.getAttribute('href') ?? '', open)) return;
       if (isNewTabClick(event) || event.altKey) {
         // The browser's own new tab, which ui's handler on a bare `#thread=` link would cancel.
         event.stopPropagation();
@@ -772,7 +767,7 @@ function Inbox() {
     };
     window.addEventListener('click', onClick, true);
     return () => window.removeEventListener('click', onClick, true);
-  }, [inboxLink]);
+  }, [inboxLink, threadTabs.linkClick]);
 
   useEffect(() => {
     const onHash = () => {
@@ -3636,7 +3631,7 @@ function Inbox() {
     };
   }, [whatsNewVersion, whatsNewRetry]);
 
-  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
+  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleThreadTabs, toggleThreadTabsCountAnchored, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
@@ -4629,7 +4624,7 @@ function Inbox() {
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
   // The thread in full screen: only on a desktop thread beside the list (not a phone, a stacked window or a card's).
-  const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
+  const full = (threadFull || threadTabs.aloneThread !== null) && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
   // The Sidebar tip (sidebarTip.ts): once, beside the docked sidebar, at the reveals' calm moment. A desktop only.
   // Outside the line, and behind it: never on a load where the star ask is armed or another reveal showed, is
   // claiming or is open (it lets one that shares its moment go first, and stands down unclaimed).
@@ -4653,9 +4648,10 @@ function Inbox() {
   // The tip claimed or up: the load arms nothing else meanwhile and reads the line again (`lineBusy`), as a dialog's claim does.
   const sidebarTipBusy = sidebarTip.stage === 'claimed' || sidebarTip.stage === 'open';
   useEffect(() => setLineTipBusy(sidebarTipBusy), [sidebarTipBusy]);
-  threadFullRef.current = full;
+  threadFullRef.current = full && threadTabs.aloneThread === null; // A thread tab is always in full screen: Escape and ⌘B leave nothing there.
   // Every way out of full screen (‹ Inbox, Escape, ⌘B): the sidebar and the list come back as the window has room.
   const leaveFull = () => {
+    if (threadTabs.leaveAlone()) return;
     holdSidebarIfTight();
     setThreadFull(false);
   };
@@ -5065,6 +5061,7 @@ function Inbox() {
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleSystem={(next) => void toggleSystem(next)}
         onToggleChapterDiagrams={(next) => void toggleChapterDiagrams(next)}
+        onToggleThreadTabs={(next) => void toggleThreadTabs(next)} onToggleThreadTabsCountAnchored={(next) => void toggleThreadTabsCountAnchored(next)}
         systemProjects={systemProjects.projects}
         agents={agents}
         onAgents={setAgents}
@@ -5435,6 +5432,7 @@ function Inbox() {
               {/* What the last run connected and the notes written by themselves (ConnectLine), above the notification lines. */}
               {connectLineEl}
               {/* The first real thread's inline ask (the tour's, once) stands in for this line while it shows. */}
+              {threadTabs.banner}
               {notifications.ask && offerLinesFree && !(notifyAgain && notifyAgainThread !== null) ? (
                 <NotificationAsk
                   kind={notifications.ask}
@@ -5526,7 +5524,7 @@ function Inbox() {
             markRead, markUnread, acknowledge, markAction, archive, pinnedIds, pinsOn, machines, setPin, setPriority, snoozeOn, snooze, unsnooze,
             setMachineUpdateOpen, threadAgentContext, replyFor, setReplyFor, draftSignals, filesSignals, ask, askReply, setAskReply,
             patchQuestions, onPickSaves, afterWrite, rowPatches, decideInThread, searchLanding, decideLanding, landed,
-            seenOnSight, panesOnScreen, setOpenThreadCovered, listTitle, setThreadFull, leaveFull, showToast,
+            seenOnSight, panesOnScreen, setOpenThreadCovered, listTitle, setThreadFull, leaveFull, threadTab: threadTabs.aloneThread !== null, showToast,
             covered: !!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || feedbackOpen || compose !== null,
             fullSidebar: sidebarOpen && !sidebarHeld, inboxLink, holdSidebarIfTight, backFromFile,
           }}
@@ -5564,6 +5562,7 @@ function Inbox() {
     <LiveInitiativesContext.Provider value={liveTags}>
     <ThreadTagsContext.Provider value={threadTagsHost}>
     <SideButtonContext.Provider value={ask.sideButton}>
+    <AnchoredThreadsContext.Provider value={threadTabs.anchored}>
     <BesideContext.Provider value={!windowPanes.allowed ? null : besideOf(windowPanes,route.page === 'inbox' && !phone && !fileOpen && !fromCard && !stack.thread && !route.reviews && !route.full ? route.thread : null, holdSidebarIfTight, { toast: showToast, dismiss: (undo) => void (toastNow.current?.onUndo === undo && dismissToast()), rowOf: (id) => latestRows.get(id) ?? null })}>
     <div
       ref={rootRef}
@@ -6270,6 +6269,7 @@ function Inbox() {
       )}
     </div>
     </BesideContext.Provider>
+    </AnchoredThreadsContext.Provider>
     </SideButtonContext.Provider>
     </ThreadTagsContext.Provider>
     </LiveInitiativesContext.Provider>

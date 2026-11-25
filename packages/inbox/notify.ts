@@ -33,6 +33,7 @@ import { RANG_FOR_NOTHING, type RangFor, type RingNews } from './soundRing';
 import { inboxEventsServedBy } from './sharedEvents';
 import { signalNotificationClick } from './history';
 import { gestured } from './recentActs';
+import { notifiesThread, type NotifyRole } from './threadTabs';
 
 /** The one tag every Inbox notification carries: a new one replaces the last. */
 export const NOTIFICATION_TAG = 'plannotator-inbox';
@@ -281,6 +282,8 @@ export interface InboxWindowReport {
   id: string;
   permission: NotificationPermission | 'unsupported';
   origin: string;
+  /** The thread this window shows alone (a thread tab), while Thread tabs is on. */
+  aloneThread?: string | null;
 }
 
 /**
@@ -358,6 +361,11 @@ export function useInboxNotifications(options: {
   otherTabInFront?: () => boolean;
   /** The thread is open and visible (its pane mounted and not covered): a question in it raises nothing while in front. */
   threadOnScreen?: (threadId: string) => boolean;
+  /**
+   * Thread tabs (threadTabs.ts), only while the capability is on: `aloneThread`, the thread this tab shows alone (a thread
+   * tab notifies for it only), and `anchored`, the threads that have a thread tab (a main tab leaves them to it).
+   */
+  threadTabs?: NotifyRole;
 }): InboxNotifications {
   const [permission, setPermission] = useState(currentPermission);
   /** The Inbox holds a thread (a list read showed one): the plain ask and the blocked line wait for it. */
@@ -378,6 +386,9 @@ export function useInboxNotifications(options: {
   onSettingsRef.current = options.onSettings;
   const soundRef = useRef({ news: options.onAgentNews });
   soundRef.current = { news: options.onAgentNews };
+  const roleRef = useRef(options.threadTabs ?? null);
+  roleRef.current = options.threadTabs ?? null;
+  const aloneThread = options.threadTabs?.alone ?? null;
   const tabsRef = useRef({ onScreen: options.threadOnScreen, otherInFront: options.otherTabInFront });
   tabsRef.current = { onScreen: options.threadOnScreen, otherInFront: options.otherTabInFront };
   const messages = useRef(new Map<string, { threadId: string; author: InboxAuthor }>());
@@ -435,13 +446,13 @@ export function useInboxNotifications(options: {
   const reportWindow = useCallback(() => {
     void inboxApi
       // A tab listening to another tab's stream names it, so the server counts this tab under it (sharedEvents.ts).
-      .reportWindow({ window: windowId.current, permission: permissionRef.current, origin: window.location.origin, served_by: inboxEventsServedBy(), used: document.hasFocus() })
+      .reportWindow({ window: windowId.current, permission: permissionRef.current, origin: window.location.origin, served_by: inboxEventsServedBy(), used: document.hasFocus(), alone_thread: roleRef.current?.alone ?? null })
       .then((answer) => setReach(answer.notify_reach))
       .catch(() => {});
   }, []);
   useEffect(() => {
     reportWindow();
-  }, [permission, reportWindow]);
+  }, [permission, aloneThread, reportWindow]);
   // The window the person comes back to is the one they use: report it, so it is the one a thread is shown in.
   useEffect(() => {
     window.addEventListener('focus', reportWindow);
@@ -668,8 +679,10 @@ export function useInboxNotifications(options: {
       if (now !== 'granted') return;
       const front = pageInFront();
       // Another Inbox tab in front raises it (and knows what it has on screen).
-      if (!front && tabsRef.current.otherInFront?.() === true) return;
-      const items = notifiableItems([...threads.values()], (threadId) => front && tabsRef.current.onScreen?.(threadId) === true);
+      // A thread tab notifies for its own thread whatever other tab is in front; a main tab leaves anchored threads to theirs.
+      const role = roleRef.current;
+      if (!front && role?.alone == null && tabsRef.current.otherInFront?.() === true) return;
+      const items = notifiableItems([...threads.values()], (threadId) => front && tabsRef.current.onScreen?.(threadId) === true).filter((item) => !role || notifiesThread(role, item.threadId));
       if (items.length === 0) return;
       const rows = new Map(rowList.map((row) => [row.thread_id, row]));
       // Several tabs: each item goes to the first tab that claims it.
@@ -730,7 +743,7 @@ export function useInboxNotifications(options: {
     }
   }, []);
 
-  const windowReport = useCallback((): InboxWindowReport => ({ id: windowId.current, permission: permissionRef.current, origin: window.location.origin }), []);
+  const windowReport = useCallback((): InboxWindowReport => ({ id: windowId.current, permission: permissionRef.current, origin: window.location.origin, aloneThread: roleRef.current?.alone ?? null }), []);
   const dismissSlept = useCallback(() => setSlept(null), []);
 
   const setEnabled = useCallback(

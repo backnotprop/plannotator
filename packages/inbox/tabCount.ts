@@ -15,12 +15,17 @@
 import { useEffect, useRef } from 'react';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 
-/** Threads with agent messages the person has not looked at. */
-export function inboxTabCount(sections: readonly InboxListSection[]): number {
+const NONE: ReadonlySet<string> = new Set();
+
+/**
+ * Threads with agent messages the person has not looked at. `left`: threads left out (the ones with a thread tab,
+ * threadTabs.ts `excludedFromCounts`).
+ */
+export function inboxTabCount(sections: readonly InboxListSection[], left: ReadonlySet<string> = NONE): number {
   const counted = new Set<string>();
   for (const section of sections) {
     for (const row of section.threads) {
-      if (rowCounts(row)) counted.add(row.thread_id);
+      if (rowCounts(row) && !left.has(row.thread_id)) counted.add(row.thread_id);
     }
   }
   return counted.size;
@@ -178,7 +183,7 @@ type BaseIcon = { dataUrl: string; image: HTMLImageElement | null };
  * page (faviconChoice.ts): it becomes the plain icon, `badgeHref` (that
  * style's PNG) is what the badge is drawn over, again with no reload.
  */
-export function useTabCount(count: number, iconHref: string | null = null, badgeHref: string | null = null): void {
+export function useTabCount(count: number, iconHref: string | null = null, badgeHref: string | null = null, active = true): void {
   const original = useRef<{ title: string; href: string; type: string | null; badge: string } | null>(null);
   /** The icon the page loaded with: what the tab goes back to once `iconHref` is null again (a try put back). */
   const loaded = useRef<{ href: string; type: string | null; badge: string } | null>(null);
@@ -203,6 +208,8 @@ export function useTabCount(count: number, iconHref: string | null = null, badge
       base.current = null;
       drawn.current.clear();
     }
+    // A thread tab (useThreadTabIcon) owns the title and the icon.
+    if (!active) return;
     const start = original.current;
     document.title = tabTitle(start.title, count);
     if (!link) return;
@@ -234,7 +241,7 @@ export function useTabCount(count: number, iconHref: string | null = null, badge
     return () => {
       cancelled = true;
     };
-  }, [count, iconHref, badgeHref]);
+  }, [count, iconHref, badgeHref, active]);
 
   // Leave the tab as it was found when the window goes away (a test's unmount).
   useEffect(
@@ -276,4 +283,56 @@ async function loadBase(href: string): Promise<BaseIcon | null> {
   } catch {
     return null;
   }
+}
+
+/** The pip a thread tab's title starts with while its thread has news not looked at. */
+export const THREAD_TAB_UNSEEN_PIP = '●';
+
+/** A thread tab's title: the thread's name, after the pip while it has news not looked at. */
+export function threadTabTitle(name: string, unseen: boolean): string {
+  return unseen ? `${THREAD_TAB_UNSEEN_PIP} ${name}` : name;
+}
+
+/**
+ * A thread tab's title and favicon (threadTabs.ts): the title is the thread's name, after a pip while the thread has
+ * news not looked at (`threadTabTitle`); the icon is the thread's face (`faceSrc`, else the plain icon) with the
+ * open-question count as a badge (none at zero), nothing else drawn on it. Never touches the installed app's badge.
+ */
+export function useThreadTabIcon(active: boolean, title: string, faceSrc: string | null, count: number, unseen: boolean, iconHref: string | null, badgeHref: string | null): void {
+  useEffect(() => {
+    if (!active) return;
+    const before = document.title;
+    document.title = threadTabTitle(title, unseen);
+    return () => {
+      document.title = before;
+    };
+  }, [active, title, unseen]);
+  // The icon the tab had goes back when this tab stops being a thread tab.
+  useEffect(() => {
+    const link = iconLink();
+    if (!active || !link) return;
+    const plainHref = link.getAttribute('href') ?? '/favicon.png';
+    const plainType = link.getAttribute('type');
+    return () => setIcon(link, plainHref, plainType);
+  }, [active]);
+  useEffect(() => {
+    const link = iconLink();
+    if (!active || !link) return;
+    let cancelled = false;
+    void (async () => {
+      let base: CanvasImageSource | null = faceSrc ? await loadImage(faceSrc).catch(() => null) : null;
+      let dataUrl = base && faceSrc ? faceSrc : '';
+      if (!base) {
+        const plain = await loadBase(badgeHref ?? iconHref ?? '/favicon.png');
+        base = plain?.image ?? null;
+        dataUrl = plain?.dataUrl ?? '';
+      }
+      if (cancelled || !base) return;
+      const url = drawTabIcon(base, count, document) ?? (dataUrl.startsWith('data:') ? tabIconSvg(dataUrl, count) : null);
+      if (url) setIcon(link, url, null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active, faceSrc, count, iconHref, badgeHref]);
 }

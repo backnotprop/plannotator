@@ -22,6 +22,8 @@ export interface InboxEventWindow {
   id: string;
   permission: InboxWindowPermission;
   origin: string;
+  /** The thread this window shows alone (a thread tab), while Thread tabs is on. */
+  aloneThread?: string | null;
 }
 
 export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'runs', 'ships', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'machine', 'machines', 'cards', 'outbox', 'grid-seen', 'heartbeat'] as const;
@@ -59,7 +61,7 @@ export interface InboxEventHandlers {
   onShowArchived?: (value: unknown) => void;
   onAgentFaces?: (data: unknown) => void;
   onReactions?: (reactions: unknown, rev: unknown) => void;
-  onCapabilities?: (capabilities: { board?: { on: boolean }; decision_mode?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean }; experimental?: InboxExperimentalSettings }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; decision_mode?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; thread_tabs?: { on: boolean; count_anchored: boolean }; code_review?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean }; experimental?: InboxExperimentalSettings }) => void;
   onTailscale?: (tailscale: TailscaleSettings) => void;
   onMachine?: (frame: MachineRecordFrame) => void;
   onMachines?: (machines: MachineView[]) => void;
@@ -207,7 +209,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; decision_mode?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown }; experimental?: unknown };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; decision_mode?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; thread_tabs?: { on?: unknown; count_anchored?: unknown }; code_review?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown }; experimental?: unknown };
         const experimental = experimentalOfFrame(data.experimental);
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
@@ -217,6 +219,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.float_drafts?.on === 'boolean' ? { float_drafts: { on: data.float_drafts.on } } : {}),
           ...(typeof data.mark_read_warning?.on === 'boolean' ? { mark_read_warning: { on: data.mark_read_warning.on } } : {}),
           ...(typeof data.split_view?.on === 'boolean' ? { split_view: { on: data.split_view.on } } : {}),
+          ...(typeof data.thread_tabs?.on === 'boolean' && typeof data.thread_tabs.count_anchored === 'boolean' ? { thread_tabs: { on: data.thread_tabs.on, count_anchored: data.thread_tabs.count_anchored } } : {}),
           ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
           ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),
           ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
@@ -301,6 +304,7 @@ export function openInboxEventFrames(cursor: number, onFrame: (frame: InboxEvent
     query.set('window', win.id);
     query.set('permission', win.permission);
     query.set('origin', win.origin);
+    if (win.aloneThread) query.set('alone_thread', win.aloneThread);
   }
   const source = new EventSource(inboxUrl(`/events?${query}`));
   for (const name of INBOX_EVENT_FRAMES) {

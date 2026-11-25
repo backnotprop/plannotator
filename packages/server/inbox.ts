@@ -123,6 +123,7 @@ import {
   INBOX_TOOL_HOSTS,
   cookieHostState,
   inboxChapterDiagramsOn,
+  inboxThreadTabsOf,
   inboxDecisionModeEnvOff,
   inboxDecisionModeOn,
   loadConfig,
@@ -430,7 +431,7 @@ import { INBOX_WHATS_NEW_IMAGE_PATH, whatsNewImageRoute } from "./inbox-whats-ne
 /** What's new's releases panel (inbox-whats-new-releases.ts). */
 const INBOX_WHATS_NEW_RELEASES_PATH = "/api/inbox/whats-new/releases";
 import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical";
-import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
+import { createInboxWindows, parseWindowAloneThread, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
 import { inboxAppIconResponse } from "./inbox-app-icons";
 import { handleInboxTourRequest } from "./inbox-tour";
 import { framedWindowHeaders, NO_FRAME_ANCESTORS, resolveInboxFrameAncestors } from "./inbox-framing";
@@ -1390,7 +1391,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: which one, for a switch whose frame names it only then. */
-  const capabilityListeners = new Set<(changed?: "code_review" | "decision_mode" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => void>();
+  const capabilityListeners = new Set<(changed?: "code_review" | "decision_mode" | "float_drafts" | "mark_read_warning" | "split_view" | "thread_tabs" | "scheduled_threads" | "seam" | "experimental") => void>();
   /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
   const tailscaleListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -3625,6 +3626,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Thread tabs (config.json `inboxThreadTabs`, `inboxThreadTabsCountAnchored`; Settings → Capabilities, both off): a
+   * window preference, nothing an agent reads changes. `thread_tabs: { on?, count_anchored? }` saves the keys it names.
+   * `event: capabilities` names it only when it was the change, so every window follows at once.
+   */
+  const threadTabsState = () => inboxThreadTabsOf(loadConfig());
+  const threadTabsOn = () => threadTabsState().on;
+  const saveThreadTabs = (input: unknown, validateOnly = false) => {
+    const keys = input && typeof input === "object" && !Array.isArray(input) ? Object.keys(input) : [];
+    const record = (input ?? {}) as { on?: unknown; count_anchored?: unknown };
+    if (keys.length === 0 || keys.some((key) => key !== "on" && key !== "count_anchored") || (record.on !== undefined && typeof record.on !== "boolean") || (record.count_anchored !== undefined && typeof record.count_anchored !== "boolean")) {
+      throw new InboxError("validation_error", "thread_tabs: { on?: boolean, count_anchored?: boolean }.", { field: "thread_tabs" });
+    }
+    if (validateOnly) return threadTabsState();
+    const was = threadTabsState();
+    const next = { on: record.on ?? was.on, count_anchored: record.count_anchored ?? was.count_anchored };
+    saveConfig({ inboxThreadTabs: next.on, inboxThreadTabsCountAnchored: next.count_anchored });
+    const now = threadTabsState();
+    if (now.on !== next.on || now.count_anchored !== next.count_anchored) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was.on !== now.on || was.count_anchored !== now.count_anchored) for (const listener of capabilityListeners) listener("thread_tabs");
+    return now;
+  };
+
+  /**
    * The list's "Show archived" (approval "inbox-archived-group", off by default): one switch on every linked machine
    * (inbox-show-archived.ts). `event: show-archived` tells every window, and a linked machine that asks
    * (`show-archived=1`), which then reads this list and takes the newer switch.
@@ -4270,6 +4294,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...chapterDiagramsWire(),
     /** Thread panes (config.json `inboxSplitView`, Settings → General → Appearance): off unless the person turned them on. */
     split_view: { on: splitViewOn() },
+    /** Thread tabs (config.json `inboxThreadTabs`, `inboxThreadTabsCountAnchored`, Settings → Capabilities): both off unless turned on. */
+    thread_tabs: threadTabsState(),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. */
@@ -4405,6 +4431,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               permission: parseWindowPermission(url.searchParams.get("permission")),
               origin: parseWindowOrigin(url.searchParams.get("origin")),
               via,
+              aloneThread: threadTabsOn() ? parseWindowAloneThread(url.searchParams.get("alone_thread")) : null,
             })
           : () => {};
         // Whether a notification can reach the person: every window's Settings shows it live.
@@ -4485,13 +4512,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
         if (windowId || url.searchParams.get("reactions") === "1") reactionsListeners.add(onReactions);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
-        const onCapabilities = (changed?: "code_review" | "decision_mode" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => {
+        const onCapabilities = (changed?: "code_review" | "decision_mode" | "float_drafts" | "mark_read_warning" | "split_view" | "thread_tabs" | "scheduled_threads" | "seam" | "experimental") => {
           const floats = floatDraftsOn();
           // Decision mode: while off, and to the save that changed it (on is everyone's default: a window keeps what it
           // read), a linked computer's flip taken here too (saveDecisionMode says "decision_mode"). Grid (`experimental`,
           // which still carries decision_mode for an older window): only when it was the change.
           const deciding = decisionModeOn();
-          const frame = { board: { on: boardOn() }, ...(!deciding || changed === "decision_mode" ? { decision_mode: { on: deciding } } : {}), steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          const frame = { board: { on: boardOn() }, ...(!deciding || changed === "decision_mode" ? { decision_mode: { on: deciding } } : {}), steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "thread_tabs" ? { thread_tabs: threadTabsState() } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -6423,7 +6450,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A thread id, or any message's id (its thread).
         const threadId = ref ? (store.message(ref)?.thread_id ?? null) : null;
         if (!threadId || !store.thread(threadId)) return json({ error: `No thread ${ref || "named"} in this Inbox.`, code: "thread_unknown" }, 404);
-        const target = windows.lastUsed();
+        const target = windows.lastUsed(threadId);
         if (target) for (const listener of showListeners) listener(threadId, target);
         return json({ shown: target !== null, thread: threadId });
       }
@@ -7296,7 +7323,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           throw new InboxError("validation_error", "served_by: 8 to 64 letters, digits, - or _.", { field: "served_by" });
         }
         // `used` (additive): the window got focus, so `plannotator inbox --open <thread>` moves this one.
-        windows.report(windowId, { permission, origin: parseWindowOrigin(body.origin), via, servedBy, used: body.used === true });
+        // `alone_thread` (additive): the thread this tab shows alone (a thread tab), sent only while Thread tabs is on.
+        if (body.alone_thread !== undefined && body.alone_thread !== null && !parseWindowAloneThread(body.alone_thread)) {
+          throw new InboxError("validation_error", "alone_thread: a thread id or null.", { field: "alone_thread" });
+        }
+        const aloneThread = threadTabsOn() ? parseWindowAloneThread(body.alone_thread) : null;
+        windows.report(windowId, { permission, origin: parseWindowOrigin(body.origin), via, servedBy, used: body.used === true, aloneThread });
         return json({ notify_reach: windows.reach(notificationsState().enabled) });
       }
       if (path === "/api/inbox/restart") {
@@ -7561,6 +7593,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.float_drafts === undefined &&
           body.mark_read_warning === undefined &&
           body.split_view === undefined &&
+          body.thread_tabs === undefined &&
           body.code_review === undefined &&
           body.system === undefined &&
           body.scheduled_threads === undefined &&
@@ -7571,7 +7604,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, review_analysis, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, review_analysis, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, thread_tabs, code_review, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
@@ -7622,6 +7655,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.float_drafts !== undefined) saveFloatDrafts(body.float_drafts, true);
         if (body.mark_read_warning !== undefined) saveMarkReadWarning(body.mark_read_warning, true);
         if (body.split_view !== undefined) saveSplitView(body.split_view, true);
+        if (body.thread_tabs !== undefined) saveThreadTabs(body.thread_tabs, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.chapter_diagrams !== undefined) saveChapterDiagrams(body.chapter_diagrams, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
@@ -7658,6 +7692,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const floatDrafts = body.float_drafts === undefined ? { on: floatDraftsOn() } : saveFloatDrafts(body.float_drafts);
         const markReadWarning = body.mark_read_warning === undefined ? { on: markReadWarningOn() } : saveMarkReadWarning(body.mark_read_warning);
         const splitView = body.split_view === undefined ? { on: splitViewOn() } : saveSplitView(body.split_view);
+        const threadTabs = body.thread_tabs === undefined ? threadTabsState() : saveThreadTabs(body.thread_tabs);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const systemAnswer = { ...system.answer(body), ...answerInboxCapabilities(capabilities, body) };
         // Present while Code review is on, and always to the save that set it.
@@ -7669,7 +7704,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, review_analysis: reviewAnalysis, experimental, tour, board, decision_mode: decisionMode, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, review_analysis: reviewAnalysis, experimental, tour, board, decision_mode: decisionMode, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, thread_tabs: threadTabs, code_review: { on: codeReview.on }, ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {

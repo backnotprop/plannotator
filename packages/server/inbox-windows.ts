@@ -33,6 +33,7 @@ import type { InboxNotifyReach, InboxWindowPermission } from "@plannotator/core/
 export const WINDOW_GRACE_MS = 15_000;
 
 const WINDOW_ID = /^[A-Za-z0-9_-]{8,64}$/;
+const ALONE_THREAD = /^[A-Za-z0-9_.:-]{1,100}$/;
 const PERMISSIONS: readonly InboxWindowPermission[] = ["granted", "default", "denied", "unsupported"];
 
 /** A window id the page made (`crypto.randomUUID()` or similar), or null. */
@@ -57,6 +58,11 @@ export function parseWindowOrigin(value: unknown): string | null {
   }
 }
 
+/** A thread id a thread tab reported (`alone_thread`), or null. */
+export function parseWindowAloneThread(value: unknown): string | null {
+  return typeof value === "string" && ALONE_THREAD.test(value) ? value : null;
+}
+
 interface WindowRecord {
   streams: number;
   /** When this window's last stream closed (null: it never held one, or holds one now). */
@@ -70,20 +76,28 @@ interface WindowRecord {
   via: "local" | "tailnet";
   /** When the window last reported `used` (it had focus); 0 before that. */
   usedAt: number;
+  /** The thread this window shows alone (a thread tab, `#thread=<id>&alone`), or null for a main tab. */
+  aloneThread: string | null;
+  /** A report (POST) set `aloneThread`: a reconnect's URL, which may be older, no longer decides it. */
+  aloneReported: boolean;
   drop: ReturnType<typeof setTimeout> | null;
 }
 
 export interface InboxWindows {
   /** An event stream opened for `id`; call the answer when it closes. */
-  connect(id: string, report: { permission: InboxWindowPermission | null; origin: string | null; via: "local" | "tailnet" }): () => void;
+  connect(id: string, report: { permission: InboxWindowPermission | null; origin: string | null; via: "local" | "tailnet"; aloneThread?: string | null }): () => void;
   /**
    * The page's report: its permission (and origin) changed. `servedBy`: the
    * leader whose stream this follower tab listens to (absent or null for a
    * tab with its own stream). A report also takes back an earlier `gone`.
    */
-  report(id: string, report: { permission: InboxWindowPermission; origin: string | null; via: "local" | "tailnet"; servedBy?: string | null; used?: boolean }): void;
-  /** The open window on this computer the person used last (`plannotator inbox --open <thread>` moves it), or null. */
-  lastUsed(): string | null;
+  report(id: string, report: { permission: InboxWindowPermission; origin: string | null; via: "local" | "tailnet"; servedBy?: string | null; used?: boolean; aloneThread?: string | null }): void;
+  /**
+   * The open window on this computer the person used last (`plannotator inbox --open <thread>` moves it), or null.
+   * With `thread`: the thread tab showing it first (the last used of them), else a main tab. Never a window that shows
+   * another thread alone: a thread tab is only ever moved to its own thread.
+   */
+  lastUsed(thread?: string | null): string | null;
   /** The tab closed (its pagehide beacon, or the leader saw its lock released): it stops counting now. */
   leave(id: string): void;
   /** What Settings shows: open windows and how many can notify. */
@@ -146,7 +160,7 @@ export function createInboxWindows(options: { graceMs?: number; now?: () => numb
   const recordOf = (id: string, via: "local" | "tailnet"): WindowRecord => {
     let record = windows.get(id);
     if (!record) {
-      record = { streams: 0, streamEndedAt: null, servedBy: null, gone: false, permission: "unknown", origin: null, via, usedAt: 0, drop: null };
+      record = { streams: 0, streamEndedAt: null, servedBy: null, gone: false, permission: "unknown", origin: null, via, usedAt: 0, aloneThread: null, aloneReported: false, drop: null };
       windows.set(id, record);
     }
     return record;
@@ -159,6 +173,7 @@ export function createInboxWindows(options: { graceMs?: number; now?: () => numb
       // a report made since (POST) wins over it.
       if (record.permission === "unknown" && report.permission) record.permission = report.permission;
       if (record.origin === null && report.origin) record.origin = report.origin;
+      if (!record.aloneReported && report.aloneThread) record.aloneThread = report.aloneThread;
       record.via = report.via;
       record.gone = false;
       record.streams += 1;
@@ -194,6 +209,8 @@ export function createInboxWindows(options: { graceMs?: number; now?: () => numb
       record.via = report.via;
       record.gone = false;
       record.servedBy = report.servedBy && report.servedBy !== id ? report.servedBy : null;
+      record.aloneThread = report.aloneThread ?? null;
+      record.aloneReported = true;
       if (report.used) record.usedAt = now();
       // A report before the stream (or after it closed) is kept for the grace only
       // (a follower's, for as long as its leader is known: see scheduleDrop).
@@ -211,15 +228,18 @@ export function createInboxWindows(options: { graceMs?: number; now?: () => numb
     reach(enabled) {
       return { enabled, ...summary() };
     },
-    lastUsed() {
+    lastUsed(thread = null) {
       // Only this computer's windows: a window opened over the tailnet is another device's, never moved from here.
       // A tie goes to the window that opened later.
-      let best: [string, WindowRecord] | null = null;
-      for (const entry of windows) {
-        if (entry[1].via !== "local" || !isOpen(entry[1])) continue;
-        if (!best || entry[1].usedAt >= best[1].usedAt) best = entry;
-      }
-      return best ? best[0] : null;
+      const pick = (matches: (w: WindowRecord) => boolean): string | null => {
+        let best: [string, WindowRecord] | null = null;
+        for (const entry of windows) {
+          if (entry[1].via !== "local" || !isOpen(entry[1]) || !matches(entry[1])) continue;
+          if (!best || entry[1].usedAt >= best[1].usedAt) best = entry;
+        }
+        return best ? best[0] : null;
+      };
+      return (thread ? pick((w) => w.aloneThread === thread) : null) ?? pick((w) => w.aloneThread === null);
     },
     subscribe(listener) {
       listeners.add(listener);

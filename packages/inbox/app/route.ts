@@ -112,6 +112,11 @@ export interface Route {
   tag?: string | null;
   thread: string | null;
   /**
+   * A thread tab (`#thread=<id>&alone`, Settings → Capabilities → Thread tabs): this tab shows the thread only. The only
+   * marker, so a reload keeps the role. Read as set only with a thread; with the capability off it means nothing.
+   */
+  alone?: boolean;
+  /**
    * An attachment open beside the thread: `file=att_…`, `v=sent` for the version the agent sent, `at=` an annotation to show,
    * `linked=` a page the attached HTML page links to, shown read-only over it (its path in the page's folder, `#fragment` kept),
    * `view=full|side` the view it is shown in (fileView.ts; absent: the remembered choice, then the rule by kind),
@@ -237,6 +242,7 @@ export function routeOf(fullHash: string): Route {
     agent: fromReviews ? null : params.get('agent'),
     tag: fromReviews ? null : params.get('tag'),
     thread,
+    alone: thread ? params.has('alone') : false,
     ref: thread && !fileId && params.get('ref') && params.get('in') ? { path: params.get('ref')!, messageId: params.get('in')!, ...(Number(params.get('line')) > 0 ? { line: Number(params.get('line')) } : {}), ...(Number(params.get('to')) > 0 ? { lineEnd: Number(params.get('to')) } : {}) } : null,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,

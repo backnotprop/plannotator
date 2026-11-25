@@ -17,6 +17,8 @@ export function ThreadWait(props: {
   load: { state: 'failed' | 'missing' | 'refused'; error: string; waiting?: string | null } | null;
   onRetry: () => void;
   onClose: () => void;
+  /** A thread tab: the way to the full Inbox, in place of Close for a thread that is not there. */
+  onFull?: () => void;
   /** Called as it gives way (the thread landed, or it closed) while focus is inside it. */
   onFocusLeaving: () => void;
   /** The thread is on a linked machine that is away: its line ("MacBook asleep since 10:42 AM"), said in place of the failed read. */
@@ -40,9 +42,15 @@ export function ThreadWait(props: {
         {load?.state === 'missing' ? (
           <>
             <span>This thread is not in the Inbox. It may have been deleted.</span>
-            <button type="button" className="ib-btn" onClick={props.onClose} data-thread-wait-close="">
-              Close
-            </button>
+            {props.onFull ? (
+              <button type="button" className="ib-btn" onClick={props.onFull} data-thread-wait-full="">
+                Show full Inbox
+              </button>
+            ) : (
+              <button type="button" className="ib-btn" onClick={props.onClose} data-thread-wait-close="">
+                Close
+              </button>
+            )}
           </>
         ) : load?.state === 'refused' ? (
           // Linked machines: two of them claim this thread, so it opens on neither. Said plainly, not retried.

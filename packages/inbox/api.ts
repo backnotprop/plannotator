@@ -198,8 +198,6 @@ export interface MachineOffer {
 
 
 
-
-
 /** A held reply (`InboxHeldError`) is a Send that went into the outbox: the thread shows it as waiting, never as delivered. */
 function heldReply(cause: unknown): ReplyResult {
   if (cause instanceof InboxHeldError) return { reply: null, questions: [], replayed: false, held: cause.outbox };
@@ -419,6 +417,8 @@ export interface SettingsModel {
    * draws folded. Absent: on.
    */
   chapter_diagrams?: { on: boolean };
+  /** Thread tabs (config.json `inboxThreadTabs`, `inboxThreadTabsCountAnchored`): both off unless turned on; absent from an older Inbox. */
+  thread_tabs?: { on: boolean; count_anchored: boolean };
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
@@ -1550,7 +1550,7 @@ export const inboxApi = {
    * restarted under this tab (whose serverSession is new) so the count of
    * windows that may notify is right again.
    */
-  reportWindow: async (report: { window: string; permission: Exclude<InboxWindowPermission, 'unknown'>; origin: string; served_by?: string | null; used?: boolean }) =>
+  reportWindow: async (report: { window: string; permission: Exclude<InboxWindowPermission, 'unknown'>; origin: string; served_by?: string | null; used?: boolean; alone_thread?: string | null }) =>
     readJson<{ notify_reach: InboxNotifyReach }>(
       await fetch(inboxUrl('/window'), {
         method: 'POST',
