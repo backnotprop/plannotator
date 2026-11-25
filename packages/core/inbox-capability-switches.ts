@@ -10,8 +10,6 @@ export const INBOX_CAPABILITY_SWITCHES = [
   { key: "decision_mode", name: "Decision mode", agent: "decision_mode" },
   { key: "scheduled_threads", name: "Routines", agent: "routines" },
   { key: "code_review", name: "Code review", agent: "code_review" },
-  // Off: the Inbox for code review only (packages/server/inbox-review-only.ts); turning it off turns Code review on.
-  { key: "full_inbox", name: "Full Inbox", agent: "full_inbox" },
   { key: "chapter_diagrams", name: "Chapter diagrams", agent: "chapter_diagrams" },
   { key: "system", name: "System", agent: "system" },
   { key: "bro", name: "Bro mode", agent: "bro_mode" },
@@ -56,7 +54,6 @@ export const INBOX_CAPABILITY_SET_KEYS = [
   "steps",
   "scheduled_threads",
   "code_review",
-  "full_inbox",
   "chapter_diagrams",
   "bro",
   "float_drafts",

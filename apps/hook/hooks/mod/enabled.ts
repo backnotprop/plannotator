@@ -16,7 +16,7 @@
  * may import only its own files); `enabled.test.ts` keeps the two in step.
  */
 
-import { inboxReminderCustomText, inboxReminderRulesText } from './inbox-contract'
+import { inboxAgentWords, inboxReminderCustomText, inboxReminderRulesText, type InboxAgentWords } from './inbox-contract'
 
 /** The env override: true/false, or undefined when it does not decide (unset, empty, unrecognized). */
 export function parseClaudeModEnv(value: string | undefined): boolean | undefined {
@@ -179,7 +179,7 @@ export function resolveInboxToolEnabled(envValue: string | undefined, configText
 export function resolveInboxReminderEnabled(inboxToolEnv: string | undefined, configText: string | null | undefined): boolean {
   if (!resolveInboxToolEnabled(inboxToolEnv, configText)) return false
   if (!configText) return true
-  if (resolveInboxReviewOnlyEnabled(configText)) return false
+  if (!inboxAgentWordsOf(configText).reminder) return false
   let value: unknown
   try {
     value = (JSON.parse(configText) as Record<string, unknown> | null)?.inboxReminder
@@ -197,17 +197,16 @@ export function resolveInboxReminderEnabled(inboxToolEnv: string | undefined, co
 }
 
 /**
- * Whether the person uses the Inbox for code review only (config.json `inboxReviewOnly: true` with `inboxCodeReview:
- * true`): no reminder, and the agent tool's review-only lead. Mirrors `resolveInboxReviewOnly(config)` in
- * packages/shared/config.ts. Read once, at the first session.start, with the tool.
+ * This computer's agent words (`inboxAgentWords`, the contract's one resolver) from config.json's text: the mod's
+ * reading, the same as every other host's `inboxAgentWords(loadConfig())`. Read once, at the first session.start, with
+ * the tool. A config.json that does not read: the full Inbox's.
  */
-export function resolveInboxReviewOnlyEnabled(configText: string | null | undefined): boolean {
-  if (!configText) return false
+export function inboxAgentWordsOf(configText: string | null | undefined): InboxAgentWords {
+  if (!configText) return inboxAgentWords(null)
   try {
-    const config = JSON.parse(configText) as Record<string, unknown> | null
-    return config?.inboxReviewOnly === true && config?.inboxCodeReview === true
+    return inboxAgentWords(JSON.parse(configText) as Parameters<typeof inboxAgentWords>[0])
   } catch {
-    return false
+    return inboxAgentWords(null)
   }
 }
 

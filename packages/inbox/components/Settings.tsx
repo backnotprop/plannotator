@@ -46,7 +46,8 @@ import { systemStateWords } from '../system/projects';
 import { ScheduledSettingsRow } from '../scheduled/SettingsRow';
 import { usePhone } from '../phone';
 import { reviewOnlyOf } from '../reviewOnly';
-import { FullInboxRow } from './FullInboxRow';
+import { useFullInboxRow } from './FullInboxRow';
+import { LoadError } from './SettingsLoadError';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -102,6 +103,8 @@ export interface SettingsPageProps {
   onToggleBoard?: (next: boolean) => void;
   /** Settings → Capabilities → Code review (approval "inbox-code-review-direction"). Absent (or an Inbox without it): no row. */
   onToggleCodeReview?: (next: boolean) => void;
+  /** Settings → Capabilities → Full Inbox (FullInboxRow.tsx), while or once the Inbox was for code review only. Absent: no row. */
+  onToggleFullInbox?: (next: boolean) => void;
   /** Settings → Capabilities → System (approval "system-inbox"), under Code review and shown only while it is on; in 0.29 also only while System is on (SYSTEM_SETTINGS_ROW_VISIBLE). Absent: no row. */
   onToggleSystem?: (next: boolean) => void;
   /** System's projects with their drawing's state, listed under its switch while it is on; null until read. */
@@ -600,14 +603,14 @@ function CapabilitiesSection({
   onToggleExperimental?: (next: boolean, feature?: 'grid') => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
   experimentalHeading: RefObject<HTMLHeadingElement | null>;
-  /** Full Inbox (reviewOnly.ts): its row on top once chosen; while off (code review only), no Board, Checklist or Routines row. */
-  fullInbox?: { on: boolean; chosen?: true } | null;
+  /** Full Inbox and its switch (FullInboxRow.tsx): while it is off (code review only), no Code review, Board, Checklist or Routines row. */
+  fullInbox: Parameters<typeof useFullInboxRow>;
 }) {
-  const reviewOnly = fullInbox?.on === false;
+  const { reviewOnly, row: fullInboxRow } = useFullInboxRow(...fullInbox);
   const boardRow = board && onToggleBoard && !reviewOnly;
   const stepsRow = steps && onToggleSteps && !reviewOnly;
   const scheduledRow = scheduled && onToggleScheduled && !reviewOnly;
-  const codeReviewRow = codeReview && onToggleCodeReview;
+  const codeReviewRow = codeReview && onToggleCodeReview && !reviewOnly;
   // System's row (see SYSTEM_SETTINGS_ROW_VISIBLE): while hidden, it shows only once System is on, and then stays for
   // as long as Capabilities is open, so turning System off here does not pull the row out from under the click.
   const [systemRowSeen, setSystemRowSeen] = useState(false);
@@ -623,10 +626,10 @@ function CapabilitiesSection({
   const gridRow = experimental?.grid && onToggleExperimental;
   return (
     <>
-      {(fullInbox?.chosen || boardRow || stepsRow || decisionRow || scheduledRow || codeReviewRow) && (
+      {(fullInboxRow || boardRow || stepsRow || decisionRow || scheduledRow || codeReviewRow) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
-            {fullInbox?.chosen && <FullInboxRow saved={fullInbox.on} />}
+            {fullInboxRow}
             {boardRow && (
               <div className="ib-prow" data-settings-board="">
                 <span className="ib-txt">
@@ -818,7 +821,7 @@ function AgentsSection({
     return (
       <>
         <section className="ib-sgroup" aria-label="Agents">
-          <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} />
+          <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} reviewOnly={reviewOnlyOf(settings)} />
         </section>
       </>
     );
@@ -1336,7 +1339,7 @@ export function SettingsPage(props: SettingsPageProps) {
               experimental={experimental}
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}
-              fullInbox={settings?.full_inbox ?? null}
+              fullInbox={[settings?.full_inbox, props.onToggleFullInbox]}
             />
             </>
           ) : (
@@ -1479,21 +1482,6 @@ export function SettingsPage(props: SettingsPageProps) {
           {page}
         </div>
       </div>
-    </div>
-  );
-}
-
-function LoadError({ error, onRetry }: { error: string | null; onRetry?: () => void }) {
-  return (
-    <div className="ib-callout ib-err" role="alert" data-settings-load-error="">
-      <Icon name="xCircle" />
-      <span>
-        <b>Settings did not load.</b> {error} It may have stopped: run <code>plannotator inbox</code>, then{' '}
-        <button type="button" className="ib-lnk" onClick={onRetry}>
-          Try again
-        </button>
-        .
-      </span>
     </div>
   );
 }

@@ -411,8 +411,8 @@ import { farRemoteOf } from "./inbox-machine-agent-find";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
 import { capabilitySetKeysIn, createCapabilitySet } from "./inbox-capability-set";
-import { createReviewOnly } from "./inbox-review-only";
-import { hideInboxNotesForReviewOnly, restoreInboxNotesAfterReviewOnly } from "./inbox-review-only-notes";
+import { createReviewOnly, reviewOnlyShares } from "./inbox-review-only";
+import { createAgentNotes } from "./inbox-review-only-notes";
 import { nextSharedReactionsRev, settleSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
 import { mergePullBoards } from "./inbox-machine-pulls";
 import { doorRefusesBare, replyIsStale } from "./inbox-outbox";
@@ -1884,10 +1884,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     bridgePolls: (host, session) => pollingWakeHost(host) && live.pollsNow(host, session),
     sessionName: (session) => live.labelOf(session) ?? live.titleOf(session),
     t3WakeReaches: (session) => t3Wake.wakes(INBOX_T3_HOST, session),
-    // The Board: the card tool is listed and served only while the person has it on.
-    boardOn: () => boardOn(),
-    // Thread steps: the steps tool and field are listed and served only while the person has them on.
-    stepsOn: () => stepsOn(),
+    // The Board: the card tool is listed and served only while the person has it on (never while code review only).
+    boardOn: () => boardOn() && reviewOnly.words().action("card"),
+    // Thread steps: the steps tool and field are listed and served only while the person has them on (never while code review only).
+    stepsOn: () => stepsOn() && reviewOnly.words().action("steps"),
     // Routines: the routine tool is listed and served only while the person has them on.
     scheduledOn: () => scheduledCap.on(),
     scheduled: () => scheduled,
@@ -1915,8 +1915,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     codeReviewOn: () => codeReviewOn(),
     // The person's own Inbox rules and reminder reach MCP sessions too, read on every connection.
     inboxReminder: () => resolveInboxMcpReminder(loadConfig()),
-    // Code review only: the review-only rule in the instructions, read on every connection.
-    reviewOnly: () => reviewOnly.on(),
+    // This computer's agent words (inboxAgentWords; code review only's rule), read on every connection.
+    words: () => reviewOnly.words(),
     // Branch reviews: send_message's `branch` field is listed and served only while the person has it on.
     branches: branchService.mcp,
     walkthroughThread: (threadId) => pullOwners.started().get(threadId)?.kind === "walkthrough",
@@ -2614,21 +2614,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The note in each connected agent's instructions, written by itself for the agents proven to load it
   // (approval "inbox-agent-note-auto"; autoAddInboxNotes): at this start, and after each connecting run (an
   // agent connected by it can take one now). One pass at a time; the agents' model waits for the one going,
-  // so the window reads the notes it wrote.
-  let notesPass: Promise<void> = Promise.resolve();
-  // Code review only (inbox-review-only.ts): no note is written by itself. Read here, not through `reviewOnly`, which the start makes later.
-  const reviewOnlyNow = () => (options.reviewOnly ?? loadConfig().inboxReviewOnly === true) && (options.codeReview ?? loadConfig().inboxCodeReview === true);
-  const autoNotes = (): Promise<void> => {
-    notesPass = notesPass.then(async () => {
-      if (connectStop.signal.aborted || reviewOnlyNow()) return;
-      try {
-        await autoAddInboxNotes({ dataDir, selfCommand, environment: agentEnvironment });
-      } catch {
-        // Tried again at the next start or run.
-      }
-    });
-    return notesPass;
-  };
+  // so the window reads the notes it wrote. Every writer of the notes is in this one queue (inbox-review-only-notes.ts):
+  // the automatic add, code review only's pass (out while on, back with the full Inbox), and the person's own switch.
+  // Code review only is read here from config.json, not through `reviewOnly`, which the start makes later.
+  const reviewOnlyHere = () => options.reviewOnly ?? loadConfig().inboxReviewOnly === true;
+  const agentNotes = createAgentNotes({
+    dataDir,
+    environment: agentEnvironment,
+    reviewOnly: reviewOnlyHere,
+    load: () => loadConfig(),
+    save: (patch) => saveConfig(patch),
+    markAsked: (agents) => markNotesAsked(agents, { dataDir, selfCommand, environment: agentEnvironment }),
+    autoAdd: (mayWrite) => autoAddInboxNotes({ dataDir, selfCommand, environment: agentEnvironment }, mayWrite),
+    stopped: () => connectStop.signal.aborted,
+  });
+  const autoNotes = (): Promise<void> => agentNotes.auto();
+  // At every start: the notes are made to match the mode (retried until they do), then the automatic add.
+  void agentNotes.sync();
   void autoNotes();
   const connectAgents = (): Promise<InboxConnectReport> => {
     connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal })
@@ -2643,7 +2645,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   /** What the window reads about the agents: the records (paths shown with ~), the last run's report, and whether a run is going. */
   const agentsModel = async () => {
-    await notesPass;
+    await agentNotes.idle();
     const file = readInboxAgents(dataDir);
     const records = Object.fromEntries(
       Object.entries(file.agents).map(([id, record]) => [id, { ...record, path: displayPath(record!.path, agentEnvironment) }]),
@@ -2758,7 +2760,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (body.note && !agentSpec(agent).detect(agentEnvironment)) {
         problems.push(`${INBOX_AGENT_LABELS[agent]} was not found on this computer`);
       } else {
-        const change = body.note ? addInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment) : removeInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment);
+        // In the notes' one queue; code review only's list follows the person's choice (inbox-review-only-notes.ts).
+        const change = await agentNotes.person(agent as InboxNoteAgentId, () => (body.note ? addInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment) : removeInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment)));
         if (!change.ok) problems.push(change.reason);
         // Either way the person decided for this agent: a note turned off stays off (never written again by
         // itself, never asked again), and removing one turned on later never asks again.
@@ -2790,15 +2793,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const options = { dataDir, selfCommand, environment: agentEnvironment };
     // Read before adding: an agent whose note is added is no longer a candidate.
     const shown = (body.asked as InboxNoteAgentId[] | undefined) ?? (await noteCandidateIds(options));
-    const results = adding.map((agent) =>
-      // Never a note, written or to copy, for an agent that is not on this computer.
-      !agentSpec(agent).detect(agentEnvironment)
-        ? ({ ok: false, agent, reason: `${INBOX_AGENT_LABELS[agent]} was not found on this computer`, path: null } as const)
-        : agent === "cursor"
-          ? // Cursor keeps its rules in the app: nothing is written, the window shows the note to copy.
-            ({ ok: true, agent, action: "manual", path: null } as const)
-          : addInboxNote(agent, dataDir, agentEnvironment),
-    );
+    const results = [];
+    for (const agent of adding) {
+      results.push(
+        // Never a note, written or to copy, for an agent that is not on this computer.
+        !agentSpec(agent).detect(agentEnvironment)
+          ? ({ ok: false, agent, reason: `${INBOX_AGENT_LABELS[agent]} was not found on this computer`, path: null } as const)
+          : agent === "cursor"
+            ? // Cursor keeps its rules in the app: nothing is written, the window shows the note to copy.
+              ({ ok: true, agent, action: "manual", path: null } as const)
+            : // In the notes' one queue, as the Settings switch.
+              await agentNotes.person(agent, () => addInboxNote(agent, dataDir, agentEnvironment)),
+      );
+    }
     const failed = new Set(results.filter((result) => !result.ok).map((result) => result.agent));
     await markNotesAsked([...new Set([...shown, ...adding])].filter((id) => !failed.has(id)), options);
     if (body.seen === true) {
@@ -3651,7 +3658,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * submit_guide `review` field, no skill in the catalog) and the window
    * shows nothing new. Read on every request.
    */
-  const codeReviewOn = () => options.codeReview ?? loadConfig().inboxCodeReview === true;
+  // Code review only (inbox-review-only.ts) holds it on, whatever its own key says: the mode never hangs on a second switch.
+  const codeReviewOn = () => options.codeReview ?? (loadConfig().inboxCodeReview === true || reviewOnlyHere());
   const branchReviewsOn = () => codeReviewOn() && (options.branchReviews ?? loadConfig().inboxBranchReviews === true);
   /**
    * System (approval "system-inbox"): a drawing of each project, shown only while Code review is on. The one
@@ -3700,32 +3708,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     const on = (input as { on: boolean }).on;
     if (validateOnly) return { on: codeReviewOn() };
+    // Code review only holds it on: off changes nothing here (the Full Inbox switch is the one way out).
+    if (!on && reviewOnlyHere()) return { on: codeReviewOn() };
     const was = codeReviewOn();
     saveConfig({ inboxCodeReview: on });
     if ((loadConfig().inboxCodeReview === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     // Every window follows at once (its Settings switch, the review cards, the "/" list).
     if (was !== codeReviewOn()) for (const listener of capabilityListeners) listener("code_review");
-    // Code review only takes effect with Code review: the notes follow it either way.
-    void reviewOnly.syncNotes();
     return { on: codeReviewOn() };
   };
-  /** The Inbox for code review only (inbox-review-only.ts): Settings' Full Inbox row, the welcome, the notes. */
+  /** The Inbox for code review only (inbox-review-only.ts): Settings' Full Inbox row, the welcome, the agent words. */
   const reviewOnly = createReviewOnly({
     load: () => loadConfig(),
     save: (patch) => saveConfig(patch),
-    codeReviewOn,
-    turnOnCodeReview: () => saveCodeReview({ on: true }),
     fixed: options.reviewOnly,
-    notes: {
-      hide: () => hideInboxNotesForReviewOnly(dataDir, agentEnvironment),
-      restore: (agents) => restoreInboxNotesAfterReviewOnly(agents, dataDir, agentEnvironment),
-      auto: () => autoNotes(),
+    // Every flip: the notes are made to match (retried until they do), then the automatic add a full Inbox runs.
+    syncNotes: async () => {
+      await agentNotes.sync();
+      await autoNotes();
     },
     changed: () => {
       for (const listener of capabilityListeners) listener();
     },
   });
-  void reviewOnly.syncNotes();
 
   /** Capabilities on the seam (inbox-capability.ts; Plans): routed, answered in the settings and started through the list only. */
   const capabilities = inboxCapabilities({ dataDir, changed: () => capabilityListeners.forEach((listener) => listener("seam")) });
@@ -3783,6 +3788,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   const starAsk = createStarAsk({ store: configStarAskStore, run: runGh, enabled: () => starAskEnabled(), returning: () => true });
   const lineOffers: Partial<Record<RevealId, (state?: RevealState, now?: Date) => boolean>> = {
+    // The welcome to the code review Inbox (inbox-review-only.ts): while code review only, once `--review` asked for it.
+    review_welcome: () => reviewOnly.welcomeOpen(),
     code_review: codeReviewUndecided,
     board: boardUndecided,
     // Routines (shared/inbox/routines-intro.ts): offered here and never decided, no routine made, launches on, and three
@@ -3908,6 +3915,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The offers, each one's "undecided" while unshown. They read the state above (Routines' walk waits while the line
     // would refuse it anyway), so they come after it.
     for (const [id, undecided] of Object.entries(lineOffers)) open[id as RevealId] = !lineOfferSaved(id as RevealId)?.shownAt && undecided!(state, now);
+    // Code review only (inboxAgentWords): no dialog offers a full-Inbox feature (each stays open for the full Inbox).
+    const words = reviewOnly.words();
+    for (const id of Object.keys(open) as RevealId[]) if (open[id] && !words.reveal(id)) open[id] = false;
     // Read only while an entry that asks for heavy use is still open (a walk of every thread; a release build).
     state.heavy = snoozeIntroRelease && INBOX_REVEALS.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now);
     // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
@@ -4104,7 +4114,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The star ask (reveals.ts `aside`): armed beside `next` while the line is free; it moves no one.
       aside: snoozeIntroRelease ? revealAsideNow(state, now) : [],
       // Day 0's setup asks: this computer's, and its owner's on their other devices (owner ruling 2026-11-11).
-      setup: revealLineFree("setup", state, now),
+      // Code review only: no note is wanted, so the agent note's setup dialog never asks (inboxAgentWords `notes`).
+      setup: reviewOnly.words().notes && revealLineFree("setup", state, now),
       line: snoozeIntroRelease,
       // How long until a date can change the line (reveals.ts `revealAgainAt`: the gap's end, a Not now's, a tenure),
       // null when none can: a page left loaded asks again once, then, and keeps no other timer for the line.
@@ -4274,9 +4285,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     show_archived: { on: showArchived.state().on, rev: showArchived.state().rev },
     /** Code review (config.json `inboxCodeReview`): off unless the person turned it on. */
     code_review: { on: codeReviewOn() },
-    /** Full Inbox, off while the person uses it for code review only (inbox-review-only.ts); the welcome when it is due. */
+    /** Full Inbox, off while the person uses it for code review only (inbox-review-only.ts); `chosen` once they were. */
     ...reviewOnly.wire(),
-    ...reviewOnly.welcomeWire(),
     /** Capabilities on the seam (inbox-capability.ts): Plans' `plans: { on: true }`, only while on and only to a window on this computer (its routes answer nowhere else). */
     ...capabilitiesWire(capabilities, capable),
     /** System (config.json `inboxSystem`): its switch, present only while Code review is on (Settings shows the row only then). */
@@ -4506,7 +4516,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           // read), a linked computer's flip taken here too (saveDecisionMode says "decision_mode"). Grid (`experimental`,
           // which still carries decision_mode for an older window): only when it was the change.
           const deciding = decisionModeOn();
-          const frame = { board: { on: boardOn() }, ...(!deciding || changed === "decision_mode" ? { decision_mode: { on: deciding } } : {}), steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...(reviewOnly.chosen() ? reviewOnly.wire() : {}), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          const frame = { board: { on: boardOn() }, ...(!deciding || changed === "decision_mode" ? { decision_mode: { on: deciding } } : {}), steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...reviewOnly.wire(), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -5516,9 +5526,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       board: { on: boardOn, chosen: chosen((c) => c.inboxBoard), shared: () => INBOX_CARD_ACTION_ON && options.board === undefined, apply: (on) => saveBoard({ on }) },
       steps: { on: stepsOn, chosen: chosen((c) => c.inboxSteps), shared: () => options.steps === undefined, apply: (on) => saveSteps({ on }) },
       scheduled_threads: { on: scheduledCap.on, chosen: chosen((c) => c.inboxScheduledThreads), shared: () => options.scheduled === undefined && scheduledCap.wire().scheduled_threads !== undefined, apply: (on) => scheduledCap.answer({ scheduled_threads: { on } }) },
-      code_review: { on: codeReviewOn, chosen: chosen((c) => c.inboxCodeReview), shared: () => options.codeReview === undefined, apply: (on) => saveCodeReview({ on }) },
-      // The setting itself, not its effect (that also needs Code review, which is its own switch in the set).
-      full_inbox: { on: () => !reviewOnly.saved(), chosen: chosen((c) => c.inboxReviewOnly), shared: () => options.reviewOnly === undefined && options.codeReview === undefined, apply: (on) => reviewOnly.save({ on }) },
+      // Code review only holds Code review on here: neither given nor taken then (inbox-review-only.ts), so a linked computer is never changed by it, nor ends it.
+      code_review: { on: codeReviewOn, chosen: chosen((c) => c.inboxCodeReview), shared: () => options.codeReview === undefined && reviewOnlyShares("code_review", reviewOnly.on()), apply: (on) => saveCodeReview({ on }) },
       chapter_diagrams: { on: chapterDiagramsOn, chosen: chosen((c) => c.inboxChapterDiagrams), shared: () => options.chapterDiagrams === undefined, apply: (on) => saveChapterDiagrams({ on }) },
       bro: { on: broOn, chosen: chosen((c) => c.inboxBro), shared: () => true, apply: (on) => saveBro({ on }) },
       float_drafts: { on: floatDraftsOn, chosen: chosen((c) => c.inboxFloatDrafts), shared: () => true, apply: (on) => saveFloatDrafts({ on }) },
@@ -7580,7 +7589,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.split_view === undefined &&
           body.code_review === undefined &&
           body.full_inbox === undefined &&
-          body.review_welcome === undefined &&
           body.system === undefined &&
           body.scheduled_threads === undefined &&
           body.chapter_diagrams === undefined &&
@@ -7590,7 +7598,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, full_inbox, review_welcome, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, full_inbox, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
@@ -7642,7 +7650,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.split_view !== undefined) saveSplitView(body.split_view, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.full_inbox !== undefined) await reviewOnly.save(body.full_inbox, true);
-        if (body.review_welcome !== undefined && body.review_welcome !== true) throw new InboxError("validation_error", "review_welcome: true.", { field: "review_welcome" });
         if (body.chapter_diagrams !== undefined) saveChapterDiagrams(body.chapter_diagrams, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
@@ -7678,9 +7685,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const markReadWarning = body.mark_read_warning === undefined ? { on: markReadWarningOn() } : saveMarkReadWarning(body.mark_read_warning);
         const splitView = body.split_view === undefined ? { on: splitViewOn() } : saveSplitView(body.split_view);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
-        // Code review only (inbox-review-only.ts): after Code review, which turning it on may turn on too.
+        // Code review only (inbox-review-only.ts): after Code review; either way of it leaves Code review on.
         if (body.full_inbox !== undefined) await reviewOnly.save(body.full_inbox);
-        if (body.review_welcome === true) reviewOnly.welcomeSeen(true);
         const systemAnswer = { ...system.answer(body), ...answerInboxCapabilities(capabilities, body) };
         // Present while Code review is on, and always to the save that set it.
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };

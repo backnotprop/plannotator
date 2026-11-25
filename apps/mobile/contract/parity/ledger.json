@@ -23515,20 +23515,6 @@
       "ios": {
         "state": "not-started"
       }
-    },
-    {
-      "id": "undecided-setting-review-welcome",
-      "title": "setting:review_welcome",
-      "surface": [
-        "setting:review_welcome"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-25",
-      "ios": {
-        "state": "not-started"
-      }
     }
   ]
 }

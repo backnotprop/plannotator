@@ -7950,6 +7950,15 @@ dialog.ib-lvc .ib-lvc-frame .ib-listcol.ib-lo-list { position: relative; inset: 
 dialog.ib-rwel .ib-sw { width: 34px; height: 20px; border-radius: 999px; background: var(--muted); position: relative; border: 1px solid var(--border); flex: none; cursor: pointer; }
 dialog.ib-rwel .ib-sw[aria-checked="true"] { background: var(--primary); border-color: var(--primary); }
 dialog.ib-rwel .ib-sw:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* The knob is drawn here with the track, so the phone width's knob rule (inside its media query) never meets the desktop track. */
+dialog.ib-rwel .ib-sw::after { top: 2px; left: 2px; width: 14px; height: 14px; }
+dialog.ib-rwel .ib-sw[aria-checked="true"]::after { left: 16px; }
+/* A phone (`.ib-cro-phone`): the phone's switch, as Settings draws it there, and a hit area of 44 px or more around it. */
+dialog.ib-rwel.ib-cro-phone .ib-sw { width: 50px; height: 30px; }
+dialog.ib-rwel.ib-cro-phone .ib-sw::after { width: 24px; height: 24px; }
+dialog.ib-rwel.ib-cro-phone .ib-sw[aria-checked="true"]::after { left: 22px; }
+dialog.ib-rwel.ib-cro-phone .ib-sw::before { content: ""; position: absolute; inset: -8px -4px; }
+.ib-rwel-failed { margin: -8px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
 .ib-rwel-acts { justify-content: flex-end; }
 
 /* The tab icon dialog ("Which favicon do you prefer?", components/TabIconChoice.tsx; the owner approved the mock,

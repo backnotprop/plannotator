@@ -85,8 +85,20 @@ import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, drawnSection, listGroups, markHeldRowArchived, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, shownAfter, waitingCount, type OpenThread, priorityChangedRows } from './held';
 import { deliveriesReadList } from './rowDelivery';
 import { inboxAgentsWatched, setInboxAgents, inboxAgentsNow } from './agentsList';
-import { captureSettle, COVERED_LIST_SETTLES, listBody, playSettle, prefersReducedMotion, rowInSlot, SETTLE_AFTER_SIDEBAR_MS, SETTLE_BEAT_MS, SHOW_LIT_AFTER_SLIDE_MS, stopSettle, type SettleSnapshot } from './settle';
-import { ReviewWelcome, useReviewOnly } from './reviewOnly';
+import {
+  captureSettle,
+  COVERED_LIST_SETTLES,
+  listBody,
+  playSettle,
+  prefersReducedMotion,
+  rowInSlot,
+  SETTLE_AFTER_SIDEBAR_MS,
+  SETTLE_BEAT_MS,
+  SHOW_LIT_AFTER_SLIDE_MS,
+  stopSettle,
+  type SettleSnapshot,
+} from './settle';
+import { ReviewWelcome, reviewWelcomeClear, useReviewOnly, useReviewWelcome } from './reviewOnly';
 import { plural, shortAgentName, tildePath } from './format';
 import { copyMarkdown, threadMarkdown } from './copyMarkdown';
 import { shellLine, type ConnectContext } from './harnesses';
@@ -241,7 +253,7 @@ import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/Perso
 import { usePriorityReveal } from './components/usePriorityReveal';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
-import { CodeReviewOffer } from './components/CodeReviewOffer';
+import { CodeReviewOfferOpen } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
 import { TabIconChoice } from './components/TabIconChoice';
 import { useTabIconChoice } from './tabIconChoice';
@@ -3625,7 +3637,7 @@ function Inbox() {
     };
   }, [whatsNewVersion, whatsNewRetry]);
 
-  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
+  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleFullInbox, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
@@ -4481,21 +4493,21 @@ function Inbox() {
   }, [showTourEntry]);
   // Code review's one-time offer (approval "code-review-offer-card"; codeReviewOffer.ts): the line's day-0 slot, armed
   // from `reveal.next`, at once once the tour's screens are gone and the page is clear; the agent note waits for it.
-  const codeReviewOffer = useCodeReviewOffer({
-    due: lineLatch?.next === 'code_review',
+  // The welcome to the code review Inbox (reviewOnly.ts `useReviewWelcome`) goes the same way, on Reviews, first in the line.
+  const offerMoment = {
     blocked: updatingThisLoad.current || (lineKept ? soundDialog === 'open' || typeof agentNote === 'object' : soundDialog !== 'none' || agentNote !== 'none') || oneTimeDialogShownThisLoad(),
     tourScreen: showTourEntry || tourIntroShown || tourOn,
     thread: route.page === 'inbox' ? (route.thread ?? null) : null,
     rows: snoozeIntroRows,
-    clear: listIntroClear && updateDialog === null && !restarting,
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
     toast: toast !== null,
-    on: settings?.code_review?.on === true,
-  });
-  const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
+  };
+  const codeReviewOffer = useCodeReviewOffer({ ...offerMoment, due: lineLatch?.next === 'code_review', clear: listIntroClear && updateDialog === null && !restarting, on: settings?.code_review?.on === true });
+  const reviewWelcome = useReviewWelcome({ ...offerMoment, due: lineLatch?.next === 'review_welcome', clear: reviewWelcomeClear(route, { search: searchOpen, compose: compose !== null }) && updateDialog === null && !restarting, on: reviewOnly });
+  const offerLinesFree = linesFree && ![codeReviewOffer.stage, reviewWelcome.stage].some((stage) => stage === 'open' || stage === 'claimed');
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, routinesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, routinesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage, reviewWelcome.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -5055,6 +5067,7 @@ function Inbox() {
         onToggleFloatDrafts={(next) => void toggleFloatDrafts(next)}
         onToggleMarkReadWarning={(next) => void toggleMarkReadWarning(next)}
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
+        onToggleFullInbox={(next) => void toggleFullInbox(next)}
         onToggleSystem={(next) => void toggleSystem(next)}
         onToggleChapterDiagrams={(next) => void toggleChapterDiagrams(next)}
         systemProjects={systemProjects.projects}
@@ -5854,18 +5867,8 @@ function Inbox() {
           onTurnOn={() => turnOnFromReveal('board', boardReveal.close)}
         />
       )}
-      <ReviewWelcome due={settings?.review_welcome === true} fullInbox={settings?.full_inbox?.on === true} phone={phone} />
-      {codeReviewOffer.stage === 'open' && (
-        <CodeReviewOffer
-          phone={phone}
-          onClose={() => {
-            // Not now (Escape, a click outside): final, and the line's next offer waits three days.
-            void inboxApi.revealNotNow('code_review');
-            codeReviewOffer.close();
-          }}
-          onTurnOn={() => turnOnFromReveal('code_review', codeReviewOffer.close)}
-        />
-      )}
+      {reviewWelcome.stage === 'open' && <ReviewWelcome fullInbox={settings?.full_inbox?.on === true} phone={phone} onClose={reviewWelcome.close} />}
+      {codeReviewOffer.stage === 'open' && <CodeReviewOfferOpen phone={phone} close={codeReviewOffer.close} onTurnOn={() => turnOnFromReveal('code_review', codeReviewOffer.close)} />}
       {stepsReveal.stage === 'open' && (
         <ChecklistIntro
           phone={phone}

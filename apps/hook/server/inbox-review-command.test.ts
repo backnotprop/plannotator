@@ -8,11 +8,11 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { PlannotatorConfig } from "@plannotator/shared/config";
-import { REVIEW_CODE_REVIEW_ON, runInboxReviewCommand, type InboxReviewDeps } from "./inbox-review-command";
+import { REVIEW_CODE_REVIEW_ON, REVIEW_NOT_TURNED_ON, runInboxReviewCommand, type InboxReviewDeps } from "./inbox-review-command";
 
 const ENTRY = { url: "http://127.0.0.1:41234/", port: 41234, token: "tok" };
 
-function world(options: { firstRun: boolean; config?: PlannotatorConfig; running?: boolean; window?: boolean; saves?: boolean }) {
+function world(options: { firstRun: boolean; config?: PlannotatorConfig; running?: boolean; window?: boolean; saves?: boolean; marks?: boolean }) {
   let config: PlannotatorConfig = structuredClone(options.config ?? {});
   const log: string[] = [];
   const out: string[] = [];
@@ -20,7 +20,10 @@ function world(options: { firstRun: boolean; config?: PlannotatorConfig; running
   const posts: { url: string; body: unknown; auth: string | null }[] = [];
   const deps: InboxReviewDeps<typeof ENTRY> = {
     firstRun: options.firstRun,
-    markOn: () => void log.push(`markOn ${JSON.stringify(config)}`),
+    markOn: () => {
+      log.push(`markOn ${JSON.stringify(config)}`);
+      return options.marks !== false;
+    },
     load: () => structuredClone(config),
     save: (patch) => {
       log.push(`save ${JSON.stringify(patch)}`);
@@ -54,7 +57,9 @@ describe("a first run (the Inbox was never on here)", () => {
   test("code review only, Code review on and the welcome saved before the Inbox is turned on or started; then Reviews opens and agents are connected", async () => {
     const w = world({ firstRun: true });
     expect(await runInboxReviewCommand(w.deps)).toBe(0);
-    expect(w.log[0]).toBe(`save ${JSON.stringify({ inboxCodeReview: true, inboxReviewOnly: true, inboxReviewWelcome: { dueAt: "2026-11-25T10:00:00.000Z" } })}`);
+    // Code review's flip stamped too, so a linked computer's older flip never turns it back.
+    const at = Date.parse("2026-11-25T10:00:00.000Z");
+    expect(w.log[0]).toBe(`save ${JSON.stringify({ inboxCodeReview: true, inboxReviewOnly: true, inboxReviewWelcome: { dueAt: "2026-11-25T10:00:00.000Z" }, inboxCapabilityFlips: { code_review: { at, by: null } } })}`);
     // Turned on and started only after: both see code review only.
     expect(w.log[1]).toStartWith("markOn ");
     expect(JSON.parse(w.log[1]!.slice("markOn ".length))).toMatchObject({ inboxCodeReview: true, inboxReviewOnly: true });
@@ -70,6 +75,32 @@ describe("a first run (the Inbox was never on here)", () => {
     expect(w.log.filter((line) => !line.startsWith("save "))).toEqual([]);
     expect(w.err[0]).toStartWith("config_not_saved:");
     expect(w.out).toEqual([]);
+  });
+
+  test("the Inbox's mark cannot be written: nothing started, and it says so", async () => {
+    const w = world({ firstRun: true, marks: false });
+    expect(await runInboxReviewCommand(w.deps)).toBe(1);
+    expect(w.log.some((line) => line.startsWith("ensureInbox"))).toBe(false);
+    expect(w.err).toEqual([REVIEW_NOT_TURNED_ON]);
+    expect(w.out).toEqual([]);
+  });
+
+  test("the welcome's due time not read back as saved: nothing turned on or started", async () => {
+    const w = world({ firstRun: true });
+    const save = w.deps.save;
+    w.deps.save = (patch) => save({ ...patch, inboxReviewWelcome: undefined });
+    expect(await runInboxReviewCommand(w.deps)).toBe(1);
+    expect(w.log.some((line) => line.startsWith("markOn") || line.startsWith("ensureInbox"))).toBe(false);
+  });
+
+  test("someone who chose code review only, switched back to the full Inbox and later turned the Inbox off: not put back", async () => {
+    const w = world({ firstRun: true, config: { inboxCodeReview: true, inboxReviewOnly: false } });
+    expect(await runInboxReviewCommand(w.deps)).toBe(0);
+    expect(w.config().inboxReviewOnly).toBe(false);
+    expect(w.config().inboxReviewWelcome).toBeUndefined();
+    // Turned on again, as a plain `plannotator inbox` would; nothing said, Code review was on.
+    expect(w.log.some((line) => line.startsWith("markOn"))).toBe(true);
+    expect(w.err).toEqual([]);
   });
 });
 
@@ -106,7 +137,7 @@ describe("someone who already uses the Inbox", () => {
   test("no Inbox running: Code review on through config.json", async () => {
     const w = world({ firstRun: false });
     expect(await runInboxReviewCommand(w.deps)).toBe(0);
-    expect(w.log[0]).toBe(`save ${JSON.stringify({ inboxCodeReview: true })}`);
+    expect(w.log[0]).toBe(`save ${JSON.stringify({ inboxCodeReview: true, inboxCapabilityFlips: { code_review: { at: Date.parse("2026-11-25T10:00:00.000Z"), by: null } } })}`);
     expect(w.config().inboxReviewOnly).toBeUndefined();
   });
 });

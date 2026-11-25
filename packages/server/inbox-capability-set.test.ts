@@ -387,29 +387,6 @@ describe("one set of switches across linked computers", () => {
     });
     expect(readCapabilitySet(undefined)).toBeNull();
   });
-
-  test("Full Inbox (code review only, off): a switch on one computer applies on the other, and switching back does too", async () => {
-    // Full Inbox is on until the person chooses (the full Inbox is the default).
-    const laptop = computer(LAPTOP, {}, { defaults: ["full_inbox"] });
-    const studio = computer(STUDIO, {}, { defaults: ["full_inbox"] });
-    laptop.flip("full_inbox", false, 1_000);
-    await meet(laptop, studio);
-    expect([laptop.on.full_inbox, studio.on.full_inbox, studio.applied]).toEqual([false, false, ["full_inbox false"]]);
-    studio.flip("full_inbox", true, 2_000);
-    await meet(studio, laptop);
-    expect([laptop.on.full_inbox, studio.on.full_inbox, laptop.applied]).toEqual([true, true, ["full_inbox true"]]);
-  });
-
-  test("a linked Plannotator that does not have Full Inbox yet: its set is taken for the rest, and this computer's choice stands", async () => {
-    const laptop = computer(LAPTOP, { full_inbox: false });
-    const older = computer(STUDIO, {}, { defaults: ["full_inbox"] });
-    older.flip("board", true, 3_000);
-    const { full_inbox: _absent, ...olderWire } = older.set.wire() as Record<string, unknown>;
-    await laptop.set.take(olderWire as never);
-    expect([laptop.on.board, laptop.on.full_inbox, laptop.applied]).toEqual([true, false, ["board true"]]);
-    // What this computer gives names it; an older one reads by name and drops what it does not know.
-    expect(laptop.set.wire().full_inbox).toMatchObject({ on: false });
-  });
 });
 
 // ── Through a real link: which lists are taken, and the event that says a flip was made there ──

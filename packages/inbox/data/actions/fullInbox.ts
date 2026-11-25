@@ -1,24 +1,19 @@
 /**
- * The Inbox for code review only, from the window (reviewOnly.ts): Settings' Full Inbox row and the welcome dialog's
- * switch save `full_inbox: { on }`; the welcome is claimed once it shows (`review_welcome: true`). Every window,
- * this one included, takes the switch from `event: capabilities` (capabilities.ts); until the answer lands a switch
- * shows the person's choice, and a save that fails puts it back.
+ * The Inbox for code review only, from the window (reviewOnly.ts): Settings' Full Inbox row (data/actions/settings.ts
+ * `toggleFullInbox`) and the welcome dialog's switch save `full_inbox: { on }`. Every window, this one included, takes
+ * the switch from `event: capabilities` (capabilities.ts); until the answer lands a switch shows the person's choice,
+ * and a save that fails puts it back and says so.
  */
 import { useEffect, useState } from 'react';
 import { post } from '../../api';
 import { inboxUrl } from '../../inboxUrl';
 
-export function saveFullInbox(on: boolean): Promise<{ full_inbox?: { on: boolean } }> {
-  return post<{ full_inbox?: { on: boolean } }>(inboxUrl('/settings'), { full_inbox: { on } });
+export function saveFullInbox(on: boolean): Promise<{ full_inbox?: { on: boolean }; code_review?: { on: boolean } }> {
+  return post<{ full_inbox?: { on: boolean }; code_review?: { on: boolean } }>(inboxUrl('/settings'), { full_inbox: { on } });
 }
 
-/** The welcome showed in this window: it never shows again, here or anywhere. Nothing to say if it fails. */
-export function claimReviewWelcome(): void {
-  void post(inboxUrl('/settings'), { review_welcome: true }).catch(() => {});
-}
-
-/** A Full Inbox switch: what it shows (the person's choice until the save answers) and its toggle. */
-export function useFullInboxSwitch(saved: boolean): { on: boolean; failed: boolean; toggle: () => void } {
+/** The welcome's Full Inbox switch: what it shows (the person's choice until the save answers), its toggle, and whether the last save failed. */
+export function useFullInboxSwitch(saved: boolean, save: (on: boolean) => Promise<{ full_inbox?: { on: boolean } }> = saveFullInbox): { on: boolean; failed: boolean; toggle: () => void } {
   const [asked, setAsked] = useState<boolean | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => setAsked(null), [saved]);
@@ -27,9 +22,11 @@ export function useFullInboxSwitch(saved: boolean): { on: boolean; failed: boole
     const next = !on;
     setAsked(next);
     setFailed(false);
-    saveFullInbox(next).then(
+    save(next).then(
       (answer) => {
-        if (answer.full_inbox?.on !== next) setAsked(null);
+        if (answer.full_inbox?.on === next) return;
+        setAsked(null);
+        setFailed(true);
       },
       () => {
         setAsked(null);

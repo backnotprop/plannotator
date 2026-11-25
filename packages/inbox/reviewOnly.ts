@@ -2,21 +2,27 @@
  * The Inbox for code review only, in the window (packages/server/inbox-review-only.ts; the owner's mocks, rounds 1-3,
  * 2026-11-23): one setting, `full_inbox` in the settings, off while the person uses the Inbox for code review only.
  * Then Reviews is home (a load on the Inbox, or on a page only the full Inbox has, goes to Reviews in place), the
- * sidebar keeps Search, Reviews, Drafts while there are some, Usage, Feedback and Settings (sidebarItems.ts; the Inbox
- * row comes back while something there waits on the person), the tour's entry screen and the agent note's dialog stay
- * away, and Settings → Capabilities has the Full Inbox row (FullInboxRow.tsx) without Board, Checklist and Routines.
+ * sidebar loses what the full Inbox has (sidebarItems.ts; the Inbox row comes back while something there waits on the
+ * person), the tour's entry screen and the agent note's dialog stay away, Settings → Capabilities has the Full Inbox
+ * row (FullInboxRow.tsx) in place of Code review, Board, Checklist and Routines, and Settings → Agents has no Reminder
+ * switch (no reminder is sent while code review only). The welcome `plannotator inbox --review` asks for is a dialog
+ * of the line (`review_welcome`, `useReviewWelcome`).
  */
 import { useEffect, useRef } from 'react';
 import type { Route } from './app/route';
 import { writeRoute } from './app/writeRoute';
+import { useLineReveal } from './reveal';
+import type { CodeReviewOfferInput, CodeReviewOfferState } from './codeReviewOffer';
 
 declare module './api' {
-  // api.ts is at its size ceiling (tests/inbox-size-ceilings.json): the two fields are declared here.
+  // api.ts is at its size ceiling (tests/inbox-size-ceilings.json): the field is declared here.
   interface SettingsModel {
-    /** Full Inbox (config.json `inboxReviewOnly`): off while the person uses the Inbox for code review only. `chosen`: they chose either way once (the Settings row shows). Absent from an older Inbox: the full Inbox. */
+    /**
+     * Full Inbox (config.json `inboxReviewOnly`): off while the person uses the Inbox for code review only. `chosen`:
+     * they were in that mode at some point on this computer (Settings shows the row, so they can switch back). Absent
+     * from an older Inbox: the full Inbox.
+     */
     full_inbox?: { on: boolean; chosen?: true };
-    /** The welcome dialog `plannotator inbox --review` asked for is due on this load. */
-    review_welcome?: true;
   }
 }
 
@@ -62,4 +68,39 @@ export function useReviewOnlyHome(reviewOnly: boolean, route: Route): void {
     const home = reviewOnlyHome(latest.current);
     if (home) writeRoute(home, { replace: true });
   }, [reviewOnly]);
+}
+
+/** Reviews with nothing over it (no search, no new message): where the welcome may open. */
+export function reviewWelcomeClear(route: Pick<Route, 'page'>, over: { search: boolean; compose: boolean }): boolean {
+  return route.page === 'reviews' && !over.search && !over.compose;
+}
+
+/**
+ * The welcome to the code review Inbox as a dialog of the line (`review_welcome`, packages/shared/inbox/reveals.ts:
+ * first in the queue, no tenure), the way Code review's offer goes (codeReviewOffer.ts): armed from `reveal.next`, at
+ * once (`atOnce`) once Reviews is clear and settled, and it opens only after its claim (`POST /api/inbox/reveal`)
+ * answers that this is the first showing ever, so two tabs never both show it; the claim keeps the line's gap after
+ * it. `on`: still code review only (switched to the full Inbox meanwhile, it no longer opens). Closing it only closes
+ * it: the welcome has no Not now.
+ */
+export function useReviewWelcome(input: CodeReviewOfferInput): CodeReviewOfferState {
+  const latest = useRef(input);
+  latest.current = input;
+  const reveal = useLineReveal({
+    id: 'review_welcome',
+    due: input.due,
+    blocked: input.blocked,
+    thread: input.thread,
+    rows: input.rows,
+    clear: input.clear && !input.tourScreen,
+    place: input.place,
+    heldBack: input.heldBack,
+    toast: input.toast,
+    leaveCounts: () => false,
+    mayClaim: () => !latest.current.tourScreen,
+    holds: () => latest.current.on,
+    atOnce: true,
+  });
+  const settled = !input.due || input.blocked || !input.on || reveal.stage === 'shown';
+  return { stage: reveal.stage, close: reveal.close, settled };
 }

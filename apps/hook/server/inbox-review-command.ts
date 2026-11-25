@@ -1,11 +1,14 @@
 /**
  * `plannotator inbox --review`: the Inbox for code review (docs/agent-guides/inbox-review-only.md).
  *
- * Where the Inbox was never on (the `turned-on` mark, as a first `plannotator inbox` reads it), it turns Code review
- * on and the Inbox for code review only (config.json `inboxCodeReview`, `inboxReviewOnly`) and asks for the welcome
- * dialog (`inboxReviewWelcome.dueAt`), all before anything starts, so no agent session ever begins with the full
- * Inbox's words; then turns the Inbox on. Where it was on already (someone who uses the full Inbox), nothing of the
- * kind changes: only Code review turns on when it was off ("Code review is on.").
+ * Where the Inbox was never on (the `turned-on` mark, as a first `plannotator inbox` reads it) and the person never
+ * chose a mode (config.json `inboxReviewOnly` unset), it turns Code review on and the Inbox for code review only
+ * (config.json `inboxCodeReview`, `inboxReviewOnly`) and asks for the welcome dialog (`inboxReviewWelcome.dueAt`), all
+ * before anything starts and each read back, so no agent session ever begins with the full Inbox's words; then turns
+ * the Inbox on and reads that back too. Anyone else (someone who uses the full Inbox, or who chose code review only and
+ * later switched back to the full Inbox) keeps their mode: only Code review turns on when it was off ("Code review is
+ * on."). What it turns is stamped as the person's flip (`inboxCapabilityFlips`), so a linked computer's older flip never
+ * turns it back.
  *
  * Then, as `plannotator plans` shows Plans: starts the Inbox detached when it is not running, shows Reviews in the
  * window used last (else opens a new tab on `#reviews`), and prints the URL on stdout (the line before it on stderr).
@@ -22,8 +25,8 @@ export interface InboxReviewEntry {
 export interface InboxReviewDeps<E extends InboxReviewEntry = InboxReviewEntry> {
   /** The Inbox was never turned on here (`!isInboxTurnedOn(dataDir)`). */
   firstRun: boolean;
-  /** Turn the Inbox on here (`markInboxTurnedOn`). */
-  markOn: () => void;
+  /** Turn the Inbox on here (`markInboxTurnedOn`): false when its mark could not be written. */
+  markOn: () => boolean;
   load: () => PlannotatorConfig;
   save: (patch: Partial<PlannotatorConfig>) => unknown;
   /** The running Inbox, else null; never starts one. */
@@ -45,7 +48,7 @@ export const REVIEW_CODE_REVIEW_ON = "Code review is on.";
 const NOT_SAVED = "config_not_saved: config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.";
 
 /** Code review on through the running Inbox, so its open windows follow at once; else config.json, which a later start reads. */
-async function turnOnCodeReview(deps: Pick<InboxReviewDeps, "runningInbox" | "fetch" | "timeoutMs" | "save" | "load">): Promise<boolean> {
+async function turnOnCodeReview(deps: Pick<InboxReviewDeps, "runningInbox" | "fetch" | "timeoutMs" | "save" | "load" | "now">): Promise<boolean> {
   const running = await deps.runningInbox().catch(() => null);
   if (running) {
     try {
@@ -61,9 +64,17 @@ async function turnOnCodeReview(deps: Pick<InboxReviewDeps, "runningInbox" | "fe
       // Gone, or not answering: config.json below.
     }
   }
-  deps.save({ inboxCodeReview: true });
+  deps.save({ inboxCodeReview: true, ...codeReviewFlip(deps) });
   return deps.load().inboxCodeReview === true;
 }
+
+/** Code review's flip, stamped now (inbox-capability-set.ts reads it): a linked computer's older flip never turns it back off. */
+function codeReviewFlip(deps: Pick<InboxReviewDeps, "now">): Partial<PlannotatorConfig> {
+  return { inboxCapabilityFlips: { code_review: { at: (deps.now?.() ?? new Date()).getTime(), by: null } } };
+}
+
+/** The Inbox could not be turned on here (its mark not written). */
+export const REVIEW_NOT_TURNED_ON = "inbox_not_turned_on: the Inbox could not be turned on here (its data folder could not be written); nothing started.";
 
 /** Ask the running Inbox to show Reviews in the window used last; false: no window is open (or no answer). */
 async function showReviews(entry: InboxReviewEntry, deps: Pick<InboxReviewDeps, "fetch" | "timeoutMs">): Promise<boolean> {
@@ -85,16 +96,26 @@ async function showReviews(entry: InboxReviewEntry, deps: Pick<InboxReviewDeps, 
 export async function runInboxReviewCommand<E extends InboxReviewEntry>(deps: InboxReviewDeps<E>): Promise<number> {
   const out = deps.stdout ?? ((text: string) => void process.stdout.write(`${text}\n`));
   const err = deps.stderr ?? ((text: string) => void process.stderr.write(`${text}\n`));
-  if (deps.firstRun) {
+  // A first run is one where the person never chose a mode either: someone who switched back to the full Inbox (and
+  // later turned the Inbox off) is never put back into code review only by this command.
+  const firstRun = deps.firstRun && deps.load().inboxReviewOnly === undefined;
+  if (firstRun) {
     // Before the Inbox is on, before anything starts: no session ever starts with the full Inbox's words.
-    deps.save({ inboxCodeReview: true, inboxReviewOnly: true, inboxReviewWelcome: { dueAt: (deps.now?.() ?? new Date()).toISOString() } });
+    const dueAt = (deps.now?.() ?? new Date()).toISOString();
+    deps.save({ inboxCodeReview: true, inboxReviewOnly: true, inboxReviewWelcome: { dueAt }, ...codeReviewFlip(deps) });
     const saved = deps.load();
-    if (saved.inboxCodeReview !== true || saved.inboxReviewOnly !== true) {
+    if (saved.inboxCodeReview !== true || saved.inboxReviewOnly !== true || saved.inboxReviewWelcome?.dueAt !== dueAt) {
       err(NOT_SAVED);
       return 1;
     }
-    deps.markOn();
+    if (!deps.markOn()) {
+      err(REVIEW_NOT_TURNED_ON);
+      return 1;
+    }
     err(REVIEW_CODE_REVIEW_ON);
+  } else if (deps.firstRun && !deps.markOn()) {
+    err(REVIEW_NOT_TURNED_ON);
+    return 1;
   } else if (deps.load().inboxCodeReview !== true) {
     if (!(await turnOnCodeReview(deps))) {
       err(NOT_SAVED);

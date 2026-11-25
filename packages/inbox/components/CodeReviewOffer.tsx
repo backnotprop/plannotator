@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { inboxApi } from '../api';
 import { playCodeReviewArt } from '../codeReviewOfferArt';
 import { useReducedMotion } from '../tour/Tour';
 import { Modal } from './Updates';
@@ -33,6 +34,20 @@ export function CodeReviewOffer({ phone, onClose, onTurnOn }: { phone: boolean; 
         <p className="ib-cro-note">You can change this in Settings.</p>
       </div>
     </Modal>
+  );
+}
+
+/** App's offer, open: Not now (Escape, a click outside) is final, and the line's next offer waits three days. */
+export function CodeReviewOfferOpen({ phone, close, onTurnOn }: { phone: boolean; close: () => void; onTurnOn: () => void }) {
+  return (
+    <CodeReviewOffer
+      phone={phone}
+      onClose={() => {
+        void inboxApi.revealNotNow('code_review');
+        close();
+      }}
+      onTurnOn={onTurnOn}
+    />
   );
 }
 

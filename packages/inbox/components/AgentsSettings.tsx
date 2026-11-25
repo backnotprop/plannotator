@@ -643,10 +643,13 @@ export function AgentsSettings({
   onModel,
   context,
   launch,
+  reviewOnly,
 }: {
   model: InboxAgentsModel;
   onModel: (next: InboxAgentsModel) => void;
   context: ConnectContext | null;
+  /** The Inbox for code review only (reviewOnly.ts): no Reminder at session start rows. */
+  reviewOnly?: boolean;
   /** Starting agents from New message (`SettingsModel.launch`): its switch, and while on the launch rows. Absent: no launch rows. */
   launch?: InboxLaunchSettings | null;
 }) {
@@ -922,7 +925,8 @@ export function AgentsSettings({
         {shown.map((row) => (
           <Fragment key={row.id}>
           <AgentGroup
-            row={row}
+            // Code review only sends no reminder at session start (reviewOnly.ts): no switch that would read off and snap back.
+            row={reviewOnly ? { ...row, reminder: null } : row}
             noteText={model.note_text}
             pending={pending}
             busy={busy.has(row.id)}

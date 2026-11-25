@@ -41,7 +41,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig, resolveInboxReviewOnly, resolveInboxTool } from "../../packages/shared/config";
+import { loadConfig, resolveInboxTool } from "../../packages/shared/config";
 import { getPlannotatorDataDir } from "../../packages/shared/data-dir";
 import {
   discoverInboxTools,
@@ -52,7 +52,7 @@ import {
   type InboxWakeTarget,
 } from "../../packages/shared/inbox/agent-link";
 import { isInboxTurnedOn } from "../../packages/shared/inbox/turned-on";
-import { inboxAgentTool, type InboxReplyCommand, type InboxToolInfo } from "../../packages/shared/inbox/connection";
+import { inboxAgentTool, inboxAgentWords, type InboxReplyCommand, type InboxToolInfo } from "../../packages/shared/inbox/connection";
 import { createUserMessage, sessionCwd, type DshContext, type DshUserMessage } from "./plan-review";
 
 export const DSH_INBOX_HOST = "dsh";
@@ -413,7 +413,7 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
   }
 
   const toolsService = service<DshToolsService>(ctx, "tools");
-  const spec = inboxAgentTool(connection.tools, { reviewOnly: resolveInboxReviewOnly(loadConfig()) });
+  const spec = inboxAgentTool(connection.tools, { words: inboxAgentWords(loadConfig()) });
   if (spec && typeof toolsService?.register === "function") {
     try {
       toolsService.register({

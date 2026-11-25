@@ -1,10 +1,10 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { loadConfig, resolveInboxReviewOnly, resolveInboxTool } from "../../packages/shared/config";
+import { loadConfig, resolveInboxTool } from "../../packages/shared/config";
 import { getPlannotatorDataDir } from "../../packages/shared/data-dir";
 import { discoverInboxTools, InboxAgentConnection, InboxWake } from "../../packages/shared/inbox/agent-link";
 import { isInboxTurnedOn } from "../../packages/shared/inbox/turned-on";
-import { inboxAgentTool, type InboxToolInfo } from "../../packages/shared/inbox/connection";
+import { inboxAgentTool, inboxAgentWords, type InboxToolInfo } from "../../packages/shared/inbox/connection";
 import {
   inboxSessionOf,
   isOwnerTurn,
@@ -210,7 +210,7 @@ export class OpenClawInbox {
       if (this.now() - this.discoveredAt >= OPENCLAW_REDISCOVER_MS) void this.discover();
       return null;
     }
-    const spec = inboxAgentTool(this.connection.tools, { reviewOnly: resolveInboxReviewOnly(loadConfig()) });
+    const spec = inboxAgentTool(this.connection.tools, { words: inboxAgentWords(loadConfig()) });
     const entry = this.remember(ctx, owner);
     if (!spec || !entry) return null;
     const connection = this.connection;
