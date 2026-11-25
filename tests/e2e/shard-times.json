@@ -209,6 +209,7 @@
   "inbox-routine-editor.spec.ts": 14,
   "inbox-routines-machines.spec.ts": 60,
   "inbox-routine-row-run-ends.spec.ts": 20,
+  "inbox-routine-running-new.spec.ts": 30,
   "inbox-row-badges.spec.ts": 35,
   "inbox-row-lead.spec.ts": 3,
   "inbox-row-long-press.spec.ts": 11,
