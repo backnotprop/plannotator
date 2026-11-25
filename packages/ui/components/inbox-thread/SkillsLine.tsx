@@ -8,7 +8,8 @@
  * wraps between names, never inside one.
  *
  * `onOpen` (opt-in): each name is a button that opens that skill's file
- * (the Inbox's SkillFilePane), `from` the button pressed. Absent, the names
+ * (the Inbox's SkillFilePane), `from` the button pressed, named "Open <name>"
+ * as the chips in the words are. Absent, the names
  * are plain text, as before.
  */
 import type { InboxSkillsSplit } from '@plannotator/core/skill-reference-block';
@@ -23,7 +24,7 @@ export function SkillsLine({ split, onOpen }: { split: InboxSkillsSplit; onOpen?
         {split.skills.map((s, i) => (
           <span key={s.name}>
             {onOpen ? (
-              <button type="button" className="ib-skill-nm ib-skill-open" data-skill-name="" data-skill-open={s.name} data-skill-place="line" onClick={(event) => onOpen(s.name, event.currentTarget)}>
+              <button type="button" className="ib-skill-nm ib-skill-open" aria-label={`Open ${s.name}`} data-skill-name="" data-skill-open={s.name} data-skill-place="line" onClick={(event) => onOpen(s.name, event.currentTarget)}>
                 {s.name}
               </button>
             ) : (

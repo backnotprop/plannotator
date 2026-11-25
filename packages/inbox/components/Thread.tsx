@@ -5823,7 +5823,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       </ThreadSkillFilter.Provider>
     )}
     {!openAttachment && file === null && namedFile && (
-      <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />
+      <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} skillMessage={namedFile.skill ? thread.messages.find((m) => m.id === namedFile.messageId) : undefined} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />
     )}
     </>
     </ReuseContext.Provider>

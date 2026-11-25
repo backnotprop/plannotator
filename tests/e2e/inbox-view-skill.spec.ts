@@ -8,14 +8,17 @@
  * line; the chip opens the built-in skill's SKILL.md beside the thread (read only, "Plannotator skill"), Escape
  * gives focus back to the chip; the name on the skills line opens the person's own skill ("Your skill"), Close gives
  * focus back to the name; a skill moved out of the skill folders since says "is not on this computer."; on a phone
- * the name opens the file over the thread and Back returns to it.
+ * the name opens the file over the thread and Back returns to it. The chip's words still select (the message takes
+ * comments): a drag across the chip offers the comment toolbar and opens nothing, and a double-click selects the
+ * chip's words and leaves no file open. The chips' layer paints under a layer at the window's z 50 (the sidebar
+ * sheet's, the peek's and the tips' level).
  *
  * Whole-window shots, light and dark, land in .local/proof/view-skill/ (PLANNOTATOR_E2E_PROOF_DIR).
  * CI runs it; build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-view-skill.spec.ts`.
  */
 
-import { expect, test, type Browser, type Page } from './inbox-test';
+import { expect, test, type Browser, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -45,6 +48,15 @@ async function shot(page: Page, name: string): Promise<void> {
   }
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
 }
+
+/** The middle of `el`'s box: the pointer goes through a chip's button to the words, so presses land by place. */
+async function middleOf(el: Locator): Promise<{ x: number; y: number; left: number; right: number }> {
+  await el.scrollIntoViewIfNeeded();
+  const box = (await el.boundingBox())!;
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2, left: box.x + 2, right: box.x + box.width - 2 };
+}
+
+const selectedText = (page: Page) => page.evaluate(() => window.getSelection()?.toString() ?? '');
 
 test.describe.configure({ mode: 'serial' });
 
@@ -117,10 +129,48 @@ test('a computer: the chip and the skills line each open the skill beside the th
     await expect(chip).toHaveCount(1);
     await line.scrollIntoViewIfNeeded();
     await shot(page, '1-sent-chip-and-skills-line');
-
-    // The chip in the words: the built-in skill's text, read only, titled with its name.
-    await chip.click();
     const pane = page.locator('[data-skill-file="picture-it"]');
+
+    // The chip's words select as words do, and the message takes comments: a drag across the chip offers the
+    // comment toolbar and opens nothing.
+    const at = await middleOf(chip);
+    await page.mouse.move(at.left, at.y);
+    await page.mouse.down();
+    await page.mouse.move(at.right, at.y, { steps: 6 });
+    await page.mouse.up();
+    await expect(page.locator('.annotation-toolbar')).toBeVisible();
+    expect(await selectedText(page)).toContain('picture');
+    await page.waitForTimeout(300);
+    await expect(pane).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+    await expect(page.locator('.annotation-toolbar')).toHaveCount(0);
+
+    // A double-click selects the chip's words and leaves no file open (its first click's open is taken back).
+    await page.mouse.dblclick(at.x, at.y);
+    await expect(pane).toHaveCount(0);
+    await expect.poll(() => selectedText(page)).toContain('picture-it');
+    await expect(page.locator('.annotation-toolbar')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+
+    // The chips' layer sits in the thread's own stacking level: a layer at the window's z 50 (the sidebar sheet's,
+    // the peek's, a tip's) is above it. Read with the chip taking the pointer for a moment, so the hit test sees it.
+    const under = await chip.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      const cover = document.createElement('div');
+      cover.style.cssText = `position:fixed;z-index:50;left:${box.left - 4}px;top:${box.top - 4}px;width:${box.width + 8}px;height:${box.height + 8}px;`;
+      document.querySelector('.pn-inbox')!.appendChild(cover);
+      (button as HTMLElement).style.pointerEvents = 'auto';
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      (button as HTMLElement).style.pointerEvents = '';
+      cover.remove();
+      return hit === cover;
+    });
+    expect(under).toBe(true);
+
+    // A click on the chip in the words: the built-in skill's text, read only, titled with its name.
+    await page.mouse.click(at.x, at.y);
     await expect(pane.locator('[data-skill-doc]')).toContainText('Use HTML to help me understand');
     await expect(pane.locator('[data-header-from]')).toHaveText('Plannotator skill');
     await shot(page, '2-picture-it-open');

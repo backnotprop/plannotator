@@ -1,16 +1,43 @@
 /**
- * One skill's SKILL.md for the person to read (`GET /api/inbox/skills/file`, packages/server/inbox-skill-file.ts),
- * always from this computer's own Inbox: the skill a reply used was resolved where the person typed it. A thread on a
- * linked machine whose skill is not here reads that machine's own skill text instead (its `skills/content`, the
- * route its reply box pastes from: the instructions without their frontmatter).
+ * One skill's SKILL.md for the person to read, wherever it is: what works on one linked computer works on the others.
+ *
+ * A reply's skill was resolved where the person typed it, so when the message records where that was (`sent_from`:
+ * the thread's own machine, or the linked computer that forwarded it) that computer's copy is read first, even when
+ * this one has a different skill of the same name. Otherwise this computer's (`GET /api/inbox/skills/file`, the file
+ * as it is on disk), then the thread's machine, then every other linked computer. Another computer's copy comes
+ * through its door's `skills/content`, the route its reply box pastes from: the instructions without their
+ * frontmatter, cut at 20,000 characters (a cut copy shows as too large, never silently short). A human-only skill
+ * whose instructions went with the message is shown from what was sent when no computer has it now.
  */
+import { inboxSentFromOf } from '@plannotator/core/inbox-types';
+import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { normalizeSkillContent } from '@plannotator/ui/utils/skillCatalog';
 import { get } from '../api';
-import { inboxUrl } from '../inboxUrl';
+import { inboxUrl, linkedMachineFacts, linkedMachineIds, selfMachineName } from '../inboxUrl';
 
 export type SkillFileView =
   | { found: false }
-  | { found: true; name: string; source: 'plannotator' | 'own'; text: string | null; tooLarge: boolean; machine: string | null };
+  | {
+      found: true;
+      name: string;
+      source: 'plannotator' | 'own';
+      text: string | null;
+      tooLarge: boolean;
+      /** The linked computer it was read from; null: this one. */
+      machine: string | null;
+      /** No computer has it now: the instructions as the message carried them. */
+      sent?: true;
+    };
+
+/** Where the skill is read: a linked computer's id, or null for this one. */
+type Source = string | null;
+
+export interface SkillFileWhere {
+  /** The thread's machine; null: this computer. */
+  thread: string | null;
+  /** The person's message that used it: where it was written, and its body (its skills block). */
+  message?: { body: string; sent_from?: unknown } | null;
+}
 
 function viewOf(raw: unknown): SkillFileView {
   if (!raw || typeof raw !== 'object' || (raw as { found?: unknown }).found !== true) return { found: false };
@@ -26,20 +53,68 @@ function viewOf(raw: unknown): SkillFileView {
   };
 }
 
-/** `machine`: the thread's linked machine, read only when this computer has no such skill. Never throws. */
-export async function readSkillFile(name: string, machine: string | null): Promise<SkillFileView> {
-  let here: SkillFileView = { found: false };
+/**
+ * The computer the person typed the message on, when it says (`sent_from`): the thread's own machine (its window, or
+ * a device that reached it), or the linked computer that forwarded it, found by the name the thread's machine
+ * recorded. Undefined: it does not say, or that computer is not one this one knows.
+ */
+export function skillWrittenOn(sentFrom: unknown, thread: Source): Source | undefined {
+  const from = inboxSentFromOf(sentFrom);
+  if (!from) return undefined;
+  if (from.kind !== 'machine') return thread;
+  if (thread !== null && from.name === selfMachineName()) return null;
+  return linkedMachineIds().find((id) => id !== thread && linkedMachineFacts(id)?.name === from.name);
+}
+
+/** The instructions a message's skills block carried for `name` (a human-only skill's), as sent; null when none. */
+export function skillSentText(body: string, name: string): string | null {
+  const split = splitInboxSkillsBlock(body);
+  if (!split?.skills.some((skill) => skill.name === name && skill.included)) return null;
+  const lines = split.block.split('\n');
+  const begin = lines.indexOf(`--- BEGIN SKILL INSTRUCTIONS: ${name} ---`);
+  const end = begin < 0 ? -1 : lines.indexOf(`--- END SKILL INSTRUCTIONS: ${name} ---`, begin + 1);
+  if (end < 0) return null;
+  const section = lines.slice(begin + 1, end);
+  // The lines before the first blank one tell the agent what the section is; the skill's own text follows.
+  const text = section.slice(section.findIndex((line) => line.trim() === '') + 1).join('\n').trim();
+  return text || null;
+}
+
+async function readHere(name: string): Promise<SkillFileView> {
   try {
-    here = viewOf(await get<unknown>(inboxUrl(`/skills/file?name=${encodeURIComponent(name)}`)));
+    return viewOf(await get<unknown>(inboxUrl(`/skills/file?name=${encodeURIComponent(name)}`)));
   } catch {
-    // Unreadable here: as if missing, so the machine's copy is tried.
+    // Unreadable here: as if missing, so another computer's copy is tried.
+    return { found: false };
   }
-  if (here.found || !machine) return here;
+}
+
+async function readThere(name: string, machine: string): Promise<SkillFileView> {
   try {
     const there = normalizeSkillContent((await get<{ skill?: unknown }>(inboxUrl(`/skills/content?name=${encodeURIComponent(name)}`, undefined, machine))).skill);
-    if (there?.content) return { found: true, name, source: 'own', text: there.content, tooLarge: false, machine };
+    if (!there?.content) return { found: false };
+    return { found: true, name, source: 'own', text: there.truncated ? null : there.content, tooLarge: there.truncated, machine };
   } catch {
-    // Not there either.
+    // Not there, or that computer is not answering.
+    return { found: false };
   }
+}
+
+/** `name`'s file, read where the message was written first when it says, then here, then every linked computer. Never throws. */
+export async function readSkillFile(name: string, where: SkillFileWhere): Promise<SkillFileView> {
+  const order: Source[] = [];
+  const add = (source: Source | undefined) => {
+    if (source !== undefined && !order.includes(source)) order.push(source);
+  };
+  add(skillWrittenOn(where.message?.sent_from, where.thread));
+  add(null);
+  add(where.thread);
+  for (const id of linkedMachineIds()) add(id);
+  for (const source of order) {
+    const view = source === null ? await readHere(name) : await readThere(name, source);
+    if (view.found) return view;
+  }
+  const sent = where.message ? skillSentText(where.message.body, name) : null;
+  if (sent) return { found: true, name, source: 'own', text: sent, tooLarge: false, machine: null, sent: true };
   return { found: false };
 }

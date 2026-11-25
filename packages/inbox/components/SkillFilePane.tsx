@@ -3,40 +3,64 @@
  * skills line: its SKILL.md drawn as a document, read only (no comment tools: a comment on a skill's file is nothing
  * to send an agent). Titled with the skill's name and where it comes from ("Your skill", "Plannotator skill"). It
  * sits in the referenced file pane's frame (ReferencedFilePane opens it for a `skill` ref), so a phone, a narrow
- * window and the close and back controls are the same. A skill that is not on this computer says so calmly, in the
- * referenced file's own words. Only SKILL.md is shown: a link in it to another file of the skill is plain text.
+ * window and the close and back controls are the same. It is read where the reply was written when the message says,
+ * else here, else on a linked computer, else from what the message carried (data/skillFile.ts); one found nowhere
+ * says so calmly, in the referenced file's own words. Only SKILL.md is shown: a link in it to another file of the
+ * skill is plain text.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import { attachmentBlocks } from '../attachments';
-import { readSkillFile, type SkillFileView } from '../data/skillFile';
+import { readSkillFile, type SkillFileView, type SkillFileWhere } from '../data/skillFile';
 import { linkedMachineFacts, machineOf } from '../inboxUrl';
 import { Icon } from '../icons';
-import { returnFocusToSkillOpener } from '../skillOpener';
+import { holdSkillFile, returnFocusToSkillOpener } from '../skillOpener';
 import { FileName } from './FileName';
 import { Tip } from './Tip';
 
 const noop = () => {};
 const NO_ANNOTATIONS: [] = [];
 
-export function SkillFilePane({ threadId, name, phone, full, onClose }: { threadId: string; name: string; phone: boolean; full: boolean; onClose: () => void }) {
+export function SkillFilePane({
+  threadId,
+  name,
+  message,
+  phone,
+  full,
+  onClose,
+}: {
+  threadId: string;
+  name: string;
+  /** The person's message that used it: where it was written and what it carried (data/skillFile.ts). */
+  message?: SkillFileWhere['message'];
+  phone: boolean;
+  full: boolean;
+  onClose: () => void;
+}) {
   const [view, setView] = useState<SkillFileView | null>(null);
   const machine = machineOf(threadId);
+  const messageRef = useRef(message);
+  messageRef.current = message;
+  const sentKey = `${message?.body ?? ''}\u0000${JSON.stringify(message?.sent_from ?? null)}`;
   useEffect(() => {
     let live = true;
     setView(null);
-    void readSkillFile(name, machine).then((read) => live && setView(read));
+    void readSkillFile(name, { thread: machine, message: messageRef.current }).then((read) => live && setView(read));
     return () => {
       live = false;
     };
-  }, [name, machine]);
+  }, [name, machine, sentKey]);
 
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   const close = useCallback(() => {
     onClose();
     returnFocusToSkillOpener();
   }, [onClose]);
+  // Open while drawn: a double-click on its chip takes it back; another thread, or Back, forgets its opener (skillOpener.ts).
+  useLayoutEffect(() => holdSkillFile(threadId, name, () => closeRef.current()), [threadId, name]);
   const sectionRef = useRef<HTMLElement>(null);
   useEffect(() => {
     sectionRef.current?.focus({ preventScroll: true });

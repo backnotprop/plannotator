@@ -2332,9 +2332,12 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 /* A sent message's skill opens its file (SkillFilePane): the name on the line, and a button laid over each chip in the words (SkillChips.tsx). */
 .ib-skill-open { appearance: none; margin: 0; padding: 0; border: 0; border-radius: 3px; background: none; font: inherit; color: inherit; cursor: pointer; }
 .ib-skill-open:hover { color: var(--foreground); text-decoration-line: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: color-mix(in oklch, currentColor 45%, transparent); }
-.ib-skchips { position: relative; height: 0; z-index: 51; pointer-events: none; }
-.ib-skchip { position: absolute; appearance: none; margin: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; cursor: pointer; pointer-events: auto; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
-@media (hover: hover) { .ib-skchip:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); } }
+/* No z-index: the layer paints under the words in the thread's own stacking level, never over a sheet, the peek or a tip.
+   The pointer goes through it to the words (they select as words do); the body hears the click and the hover. */
+.ib-skchips { position: relative; height: 0; pointer-events: none; }
+.ib-skchip { position: absolute; appearance: none; margin: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; pointer-events: none; }
+.ib-skchip[data-hover] { background: color-mix(in oklch, var(--primary) 10%, transparent); }
+.ib-body[data-skill-hover], .ib-body[data-skill-hover] * { cursor: pointer; }
 
 /* A page beside the sidebar with a heading (Drafts) */
 .ib-dpage { padding: 28px 44px; flex: 1; min-width: 0; overflow-y: auto; }

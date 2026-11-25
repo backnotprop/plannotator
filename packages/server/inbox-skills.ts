@@ -108,7 +108,8 @@ export function inboxSkillsRoute(
   if (req.method !== "GET") return noStore(Response.json({ error: "Use GET." }, { status: 405 }));
   if (isCrossSiteRequest(req)) return noStore(Response.json(INBOX_CROSS_SITE_BODY, { status: 403 }));
   if (url.pathname === INBOX_SKILL_FILE_PATH) {
-    const catalog = inboxSkillEntries(options.codeReview === true, options.discovered ?? listReferenceSkills, options.routines === true);
+    // Every built-in, whatever the switches say today: its text ships here, and a reply sent while one was on names it.
+    const catalog = inboxSkillEntries(true, options.discovered ?? listReferenceSkills, true);
     return noStore(Response.json(inboxSkillFile(url.searchParams.get("name") ?? "", catalog, options.diagrams !== false)));
   }
   return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true, undefined, options.routines === true) : handleReferenceSkillContent(req));

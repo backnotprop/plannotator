@@ -12,6 +12,8 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PICTURE_IT_SKILL } from "@plannotator/core/picture-it-skill";
+import { CREATE_ROUTINE_SKILL } from "@plannotator/core/create-routine-skill";
+import { INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { INBOX_SKILL_FILE_MAX_BYTES } from "./inbox-skill-file";
 
@@ -52,26 +54,26 @@ function world() {
   // Not in any skill folder: a SKILL.md beside the home, and a project's own skill.
   write(join(root, "outside-skill", "SKILL.md"), "# Outside\n\nNever read.\n");
   write(join(root, "project", ".claude", "skills", "project-only", "SKILL.md"), "# Project\n");
-  const read = async (name: string, headers: Record<string, string> = { "Sec-Fetch-Site": "same-origin" }, method = "GET") => {
+  const read = async (name: string, headers: Record<string, string> = { "Sec-Fetch-Site": "same-origin" }, method = "GET", switches: { codeReview?: boolean; routines?: boolean } = {}) => {
     const req = new Request(`http://127.0.0.1/api/inbox/skills/file?name=${encodeURIComponent(name)}`, { method, headers });
-    const response = inboxSkillsRoute(req, new URL(req.url))!;
+    const response = inboxSkillsRoute(req, new URL(req.url), switches)!;
     return { status: response.status, cache: response.headers.get("cache-control"), body: (await response.json()) as Json };
   };
   return { root, home, claude, read };
 }
 
-test("a person's own skill answers its SKILL.md as it is on disk, its source, and how many other files it has", async () => {
+test("a person's own skill answers its SKILL.md as it is on disk and its source, and names none of its other files", async () => {
   const w = world();
   const answer = await w.read("readback");
   expect(answer.status).toBe(200);
   expect(answer.cache).toBe("no-store");
-  expect(answer.body).toEqual({ found: true, name: "readback", source: "own", root: "claude", text: README, other_files: 2 });
-  expect((await w.read("humanizer")).body).toMatchObject({ found: true, source: "own", root: "universal", text: "# Humanizer\n", other_files: 0 });
+  expect(answer.body).toEqual({ found: true, name: "readback", source: "own", root: "claude", text: README });
+  expect((await w.read("humanizer")).body).toEqual({ found: true, name: "humanizer", source: "own", root: "universal", text: "# Humanizer\n" });
 });
 
 test("a built-in skill answers Plannotator's own text; the person's skill of the same name wins", async () => {
   const w = world();
-  expect((await w.read("picture-it")).body).toEqual({ found: true, name: "picture-it", source: "plannotator", root: "plannotator", text: PICTURE_IT_SKILL.body, other_files: 0 });
+  expect((await w.read("picture-it")).body).toEqual({ found: true, name: "picture-it", source: "plannotator", root: "plannotator", text: PICTURE_IT_SKILL.body });
   write(join(w.claude, "picture-it", "SKILL.md"), "# My picture-it\n");
   expect((await w.read("picture-it")).body).toMatchObject({ found: true, source: "own", root: "claude", text: "# My picture-it\n" });
 });
@@ -103,7 +105,18 @@ test("a SKILL.md past the cap answers too_large with no text", async () => {
   const w = world();
   write(join(w.claude, "huge", "SKILL.md"), `# Huge\n\n${"x".repeat(INBOX_SKILL_FILE_MAX_BYTES)}`);
   const answer = await w.read("huge");
-  expect(answer.body).toEqual({ found: true, name: "huge", source: "own", root: "claude", too_large: true, other_files: 0 });
+  expect(answer.body).toEqual({ found: true, name: "huge", source: "own", root: "claude", too_large: true });
+});
+
+test("every built-in is found by its name whatever the Code review and Routines switches say; the person's own still wins", async () => {
+  const w = world();
+  const review = INBOX_REVIEW_SKILLS[0]!;
+  for (const switches of [{}, { codeReview: false, routines: false }, { codeReview: true, routines: true }]) {
+    expect((await w.read(review.name, undefined, undefined, switches)).body).toMatchObject({ found: true, source: "plannotator", root: "plannotator" });
+    expect((await w.read(CREATE_ROUTINE_SKILL.name, undefined, undefined, switches)).body).toMatchObject({ found: true, source: "plannotator", root: "plannotator" });
+  }
+  write(join(w.claude, review.name, "SKILL.md"), "# Mine\n");
+  expect((await w.read(review.name, undefined, undefined, { codeReview: false })).body).toEqual({ found: true, name: review.name, source: "own", root: "claude", text: "# Mine\n" });
 });
 
 test("another site is refused, and only GET reads", async () => {

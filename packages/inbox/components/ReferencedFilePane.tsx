@@ -75,11 +75,14 @@ function standIn(view: Extract<ReferencedFileView, { found: true }>, messageId: 
   };
 }
 
-type ReferencedFilePaneProps = Parameters<typeof ReferencedFile>[0];
+type ReferencedFilePaneProps = Parameters<typeof ReferencedFile>[0] & {
+  /** For a skill: the message that used it (`fileRef.messageId`), where it was written and what it carried. */
+  skillMessage?: Parameters<typeof SkillFilePane>[0]['message'];
+};
 
 /** A file the message names, or (`fileRef.skill`) a skill the person's message used, read only (SkillFilePane). */
-export function ReferencedFilePane(props: ReferencedFilePaneProps) {
-  if (props.fileRef.skill) return <SkillFilePane threadId={props.threadId} name={props.fileRef.path} phone={props.phone} full={props.full} onClose={props.onClose} />;
+export function ReferencedFilePane({ skillMessage, ...props }: ReferencedFilePaneProps) {
+  if (props.fileRef.skill) return <SkillFilePane threadId={props.threadId} name={props.fileRef.path} message={skillMessage} phone={props.phone} full={props.full} onClose={props.onClose} />;
   return <ReferencedFile {...props} />;
 }
 

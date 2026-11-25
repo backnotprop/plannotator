@@ -130,7 +130,7 @@ export function MessageBody({
   // A sent message's skill opens its file beside the thread; focus comes back to what opened it (skillOpener.ts).
   const openSkill = onOpenSkill
     ? (name: string, from: HTMLElement) => {
-        noteSkillOpener(from);
+        noteSkillOpener(from, message.thread_id);
         onOpenSkill(name);
       }
     : undefined;
@@ -220,13 +220,14 @@ export function MessageBody({
         renderDirectiveBlock={renderActions || renderRunBlock || noteBlocks.length > 0 ? directiveBlock : undefined}
       />
       )}
+      {/* Right after the words: the chips' buttons come in the words' order, before the names on the skills line. */}
+      {skills && openSkill && <SkillChips bodyRef={bodyRef} messageId={message.id} skills={skills.skills} onOpen={openSkill} />}
       {replyParts && sentAnswers && sentAnswers.length > 0 && <SentAnswers groups={sentAnswers} onJump={onJumpQuestion} />}
       {actionsSent && <ReplyActions actions={sentActions!} sent onJump={onJumpQuestion} />}
       {replyParts && restShown && <div data-sent-rest="">{readOnlyViewer(restBlocks, restShown)}</div>}
       {feedbackShown && <div data-reply-feedback="">{readOnlyViewer(feedbackBlocks, feedbackShown)}</div>}
       {pullDetails && <PullDetailsLine details={pullDetails} />}
       {skills && <SkillsLine split={skills} onOpen={openSkill} />}
-      {skills && openSkill && <SkillChips bodyRef={bodyRef} messageId={message.id} skills={skills.skills} onOpen={openSkill} />}
       {tagLabels && (
         <div className="ib-tg-marks" ref={tagLayerRef} aria-hidden="true" data-tag-marks="">
           {tagMarks.map((mark, index) => (
