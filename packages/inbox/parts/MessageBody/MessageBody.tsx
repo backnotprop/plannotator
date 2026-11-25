@@ -43,6 +43,7 @@ export function MessageBody({
   onOpenFileRef,
   onOpenInlineImage,
   onOpenOptionSet,
+  onOpenUncapturedImage,
   readOnly,
   movedThread,
   answers,
@@ -63,6 +64,7 @@ export function MessageBody({
   replyFiles,
   contextNotes,
   onTryPrototype,
+  onlyQuestion,
 }: MessageBodyProps) {
   const { skills, pullDetails, actionsSent, replyParts, ownReply, replyFileList, shown, noteBlocks, noteAtLine, notesRef, restShown, feedbackShown, blocks, restBlocks, feedbackBlocks } = useBodyText({ message, sentActions, sentAnswers, replyFiles, projectRoot, contextNotes });
   const refRepo = useRefRepo(repo);
@@ -90,7 +92,7 @@ export function MessageBody({
   // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
   const refCard = useRefHoverCards(bodyRef);
   const { refsOn, openFileRefRef } = useFileRefs({ message, projectRoot, onOpenFileRef, onOpenAttachment });
-  const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf, refOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet, openFileRefRef });
+  const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf, refOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet, onOpenUncapturedImage, openFileRefRef });
   // A code span's hover reads on the message's own machine, under its Code review switch (one set with this
   // computer's, `capability-set`; off there, it answers nothing): none for a machine too old to serve it.
   useLinkedReadsRev();
@@ -192,6 +194,7 @@ export function MessageBody({
         // `readOnly` is about the question cards (answerLocked locks them); with comments on, the text still takes them.
         readOnly={readOnly && !comments}
         questionAnswers={answers}
+        onlyQuestionKey={onlyQuestion}
         onAnswerQuestion={answerQuestion}
         renderQuestionFooter={renderFooter}
         // The Inbox records no decisions: a `Decision:` line an older agent wrote is context.

@@ -500,10 +500,20 @@ export interface PlannotatorConfig {
    * flag the person turns on). Read through `resolveExperimental`;
    * PLANNOTATOR_EXPERIMENTAL wins over this key. Written by the Inbox's
    * Settings → Capabilities → Experimental through POST /api/inbox/settings
-   * `{ experimental: { decision_mode, grid } }`. `grid`: the Inbox's Grid page
-   * (approval "inbox-agent-grid").
+   * `{ experimental: { grid } }`. `grid`: the Inbox's Grid page
+   * (approval "inbox-agent-grid"). `decisionMode`: the old place of Decision
+   * mode's switch, now `inboxDecisionMode`; read only as its fallback
+   * (`inboxDecisionModeOn`), never written.
    */
   experimental?: { decisionMode?: boolean; grid?: boolean };
+  /**
+   * Decision mode (the owner, 2026-11-24: "default on, switch off in capabilities, no longer experimental"): on
+   * unless false. On: a thread's open questions offer "Decide", one question at a time in a focused dialog, answers
+   * saved as drafts and sent only with the person's Send. A window feature only: nothing an agent
+   * reads. Written by Settings → Capabilities (`POST /api/inbox/settings` `{ decision_mode: { on } }`), read on every
+   * request through `inboxDecisionModeOn`.
+   */
+  inboxDecisionMode?: boolean;
   /**
    * The Board's one-time first-visit dialog (approval "inbox-board", intro
    * amendment): `shownAt` once a page on this computer or the owner's phone
@@ -2512,7 +2522,6 @@ export function resolveInboxPhones(
  * separate piece of work and can grow out of this table.
  */
 export const EXPERIMENTAL_FEATURES = {
-  "decision-mode": "decisionMode",
   grid: "grid",
 } as const;
 
@@ -2521,7 +2530,7 @@ export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURES;
 /**
  * What PLANNOTATOR_EXPERIMENTAL says about one feature, or undefined when it
  * says nothing. The variable is a comma list of feature names: a name listed
- * turns that feature on, a name with a leading `-` turns it off (`-decision-mode`);
+ * turns that feature on, a name with a leading `-` turns it off (`-grid`);
  * names are trimmed and compared case-insensitively, and unknown names are ignored.
  */
 export function parseExperimentalEnv(name: ExperimentalFeature, env: NodeJS.ProcessEnv = process.env): boolean | undefined {
@@ -2557,6 +2566,30 @@ export function savedExperimental(config: PlannotatorConfig, name: ExperimentalF
   const saved = config.experimental;
   if (!saved || typeof saved !== "object" || Array.isArray(saved)) return undefined;
   return parseConfigBoolean((saved as Record<string, unknown>)[EXPERIMENTAL_FEATURES[name]]);
+}
+
+/**
+ * Whether PLANNOTATOR_EXPERIMENTAL turns Decision mode off: its documented "minus" form (`-decision-mode`, any case,
+ * anywhere in the comma list) still does, now that the feature left Experimental. Any other mention of it (the plain
+ * `decision-mode`) is ignored, without error: it is on by default.
+ */
+export function inboxDecisionModeEnvOff(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.PLANNOTATOR_EXPERIMENTAL;
+  return !!raw && raw.split(",").some((part) => part.trim().toLowerCase() === "-decision-mode");
+}
+
+/**
+ * Whether the Inbox's Decision mode is on: off when PLANNOTATOR_EXPERIMENTAL says `-decision-mode`; else config.json
+ * `inboxDecisionMode` when it is a boolean; else the old experimental switch (`experimental.decisionMode`), so a
+ * choice made there is kept (false stays off, true stays on); else on.
+ */
+export function inboxDecisionModeOn(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (inboxDecisionModeEnvOff(env)) return false;
+  const saved = parseConfigBoolean(config.inboxDecisionMode);
+  if (saved !== undefined) return saved;
+  const old = config.experimental;
+  const legacy = old && typeof old === "object" && !Array.isArray(old) ? parseConfigBoolean((old as Record<string, unknown>).decisionMode) : undefined;
+  return legacy ?? true;
 }
 
 /** The PLANNOTATOR_INBOX_TAILSCALE override, or undefined when it does not decide. */
