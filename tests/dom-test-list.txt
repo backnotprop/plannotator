@@ -21,6 +21,7 @@ packages/ui/components/html-viewer/HtmlViewer.frameScale.test.tsx
 packages/ui/components/html-viewer/bridgeTouchSelection.test.tsx
 packages/ui/components/html-embed/HtmlEmbedBlock.test.tsx
 packages/ui/components/LazyBlockBoundary.test.tsx
+packages/ui/components/RegionBoundary.test.tsx
 packages/ui/components/inbox-thread/SnoozeMenu.test.tsx
 packages/ui/components/Viewer.vimMode.integration.test.tsx
 packages/ui/components/CodeFilePopout.lineScroll.test.tsx
@@ -95,6 +96,7 @@ packages/inbox/replyFeedback.test.tsx
 packages/inbox/replyFocusOnOpen.test.tsx
 packages/inbox/permissionFocus.test.tsx
 packages/inbox/replyBoxTyping.test.tsx
+packages/inbox/paneFailureKeepsReply.test.tsx
 packages/inbox/replyFootPhone.test.tsx
 packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
@@ -427,6 +429,7 @@ packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
 packages/review-editor/components/AllFilesCodeView.fileCommentAttachments.test.tsx
+packages/review-editor/components/AllFilesCodeView.retryClearsSelection.test.tsx
 packages/review-editor/components/DiffViewer.fileCommentAttachments.test.tsx
 packages/ui/utils/highlightCopy.test.ts
 packages/ui/components/Viewer.highlightCopy.test.tsx
