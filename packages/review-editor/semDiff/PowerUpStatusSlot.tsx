@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { PowerUpGuy } from '@plannotator/ui/components/agentFace/PowerUpGuy';
 import { POWER_UP_PROVIDER_NAMES } from '@plannotator/ui/components/settings/SemanticDiffsTab';
 import type { PowerUpConfig, PowerUpStatus } from './powerUp';
@@ -54,7 +54,9 @@ export const PowerUpStatusSlot: React.FC<{
   onSettings?: () => void;
   /** A phone's bar: the face alone, a button whose press opens the same words (and Retry) in the card. */
   compact?: boolean;
-}> = ({ status, provider, endpoint, onRetry, onSettings, compact = false }) => {
+  /** The key comes from PLANNOTATOR_OPINION_API_KEY (no settings page changes it); said where `onSettings` is absent. */
+  keyFromEnv?: boolean;
+}> = ({ status, provider, endpoint, onRetry, onSettings, compact = false, keyFromEnv = false }) => {
   const model = providerLabel(provider, endpoint);
   const state = statusKind(status);
   const text = statusText(state, status, model);
@@ -63,6 +65,16 @@ export const PowerUpStatusSlot: React.FC<{
   const [poke, setPoke] = useState(0);
   // A phone's card opens toward the room: from the face's left edge when the face is in the left half of the window.
   const [fromLeft, setFromLeft] = useState(false);
+  // A phone's card closes on a press anywhere else: a tap on iOS focuses nothing, so no blur would close it.
+  const slotRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (!compact || !card) return;
+    const outside = (event: PointerEvent) => {
+      if (!slotRef.current?.contains(event.target as Node | null)) setCard(false);
+    };
+    document.addEventListener('pointerdown', outside, true);
+    return () => document.removeEventListener('pointerdown', outside, true);
+  }, [compact, card]);
   const wake = () => {
     setCard(true);
     setPoke((n) => n + 1);
@@ -71,6 +83,7 @@ export const PowerUpStatusSlot: React.FC<{
   const retryButton = <button type="button" className="rounded px-1 hover:bg-muted hover:text-foreground" onClick={onRetry}>Retry</button>;
   return (
     <span
+      ref={slotRef}
       className={`relative flex items-center gap-1.5 text-xs text-muted-foreground${compact ? '' : ' px-1.5'}`}
       data-power-up-status={state}
       {...(compact
@@ -90,7 +103,7 @@ export const PowerUpStatusSlot: React.FC<{
           data-power-up-slot=""
           aria-label={text}
           aria-expanded={card}
-          className="relative flex h-[30px] min-w-[30px] items-center justify-center rounded outline-none after:absolute after:inset-x-0 after:-inset-y-[7px] after:content-[''] focus-visible:ring-1 focus-visible:ring-ring"
+          className="relative flex h-7 min-w-7 items-center justify-center rounded outline-none after:absolute after:inset-x-0 after:-inset-y-2 after:content-[''] focus-visible:ring-1 focus-visible:ring-ring"
           onClick={(event) => {
             if (card) return setCard(false);
             const box = event.currentTarget.getBoundingClientRect();
@@ -118,8 +131,8 @@ export const PowerUpStatusSlot: React.FC<{
           data-power-up-card=""
           className={`absolute ${compact && fromLeft ? 'left-0' : 'right-0'} top-full z-50 mt-1 flex w-max flex-col gap-0.5 rounded-md border border-border bg-popover px-2.5 py-2 text-xs text-popover-foreground shadow-md`}
         >
-          {compact && <span className="font-medium">{text}</span>}
-          <span className="font-medium">{state === 'unavailable' ? 'Power Up is unavailable' : 'Your diffs are powered up'}</span>
+          {/* One title: a phone's card says the bar's words, which its face alone does not show. */}
+          <span className="font-medium">{compact ? text : state === 'unavailable' ? 'Power Up is unavailable' : 'Your diffs are powered up'}</span>
           <span className="text-muted-foreground">Second opinion from {model}</span>
           <span className="max-w-64 text-muted-foreground">{title}</span>
           {onSettings ? (
@@ -127,7 +140,7 @@ export const PowerUpStatusSlot: React.FC<{
               Power Up settings
             </button>
           ) : (
-            <span className="mt-1 max-w-64 text-muted-foreground">Model and key: code review's Settings › Semantic diffs</span>
+            <span className="mt-1 max-w-64 text-muted-foreground">{keyFromEnv ? 'Provided by PLANNOTATOR_OPINION_API_KEY' : "Model and key: code review's Settings › Semantic diffs"}</span>
           )}
           {compact && state === 'unavailable' && <span className="mt-1 self-start">{retryButton}</span>}
         </span>

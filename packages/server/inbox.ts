@@ -6474,7 +6474,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Power Up's second opinion and its key (inbox-power-up.ts): code review's own paths, so the page's worker and the
       // shared settings need no fork. This computer's key, in the data dir code review reads; never a door's.
       if (path === "/api/sem-diff/opinion" || path === "/api/sem-diff/opinion/settings") {
-        return await powerUpRoute(req, path, { dataDir, serverSession, fromDoor: fromDeviceDoor.has(req) });
+        return await powerUpRoute(req, path, { dataDir, serverSession, fromDoor: fromDeviceDoor.has(req), fromCloudflare: fromCfDoor.has(req) });
       }
       if (path === CF_ACCESS_ROUTE || path.startsWith(`${CF_ACCESS_ROUTE}/`)) {
         if (fromCfDoor.has(req)) return json({ error: "Cloudflare settings change only on this computer or over your tailnet.", code: "local_only" }, 403);

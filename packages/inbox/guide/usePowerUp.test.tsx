@@ -1,16 +1,19 @@
 /**
- * Power Up in an Inbox reader (usePowerUp.ts, PowerUpMark.tsx): asked only while code review's Power Up switch is on
- * (config.json `diffOptions.powerUp`, read on any address) and a key is set; the mark in the review's bar sums every
- * file's status, says why when the provider failed, and Retry asks again; a phone shows the face alone, whose press
- * opens the same words. The provider is never called: the settings read is a stand-in fetch.
+ * Power Up in an Inbox reader (usePowerUp.ts, PowerUpMark.tsx): asked only once the page's first settings read is in
+ * and while code review's Power Up switch is on (config.json `diffOptions.powerUp`, read on any address) and a key is
+ * set; the mark in the review's bar sums the drawn views' statuses and says why when the provider failed; a view that
+ * goes (another chapter) takes its status with it; a phone shows the face alone, whose press opens one card that a
+ * press anywhere else closes. The provider is never called: the settings read is a stand-in fetch. That Retry asks
+ * again is AllFilesCodeView.hostSemantic.test.tsx's (the shared config and slot).
  */
 import { afterEach, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { configStore } from '@plannotator/ui/config';
 import type { SemDiffClient } from '@plannotator/review-editor/semDiff/semDiffClient';
-import { adoptSavedDiffOptions, resetInboxDiffOptionsForTests } from '../diffOptions';
-import { usePowerUp, type InboxPowerUp } from './usePowerUp';
+import { resetInboxDiffOptionsForTests } from '../diffOptions';
+import { resetReviewAnalysisForTests, waitForReviewAnalysis } from '../reviewAnalysis';
+import { usePowerUp, usePowerUpReport, type InboxPowerUp } from './usePowerUp';
 import { PowerUpMark } from './PowerUpMark';
 
 const hasDom = typeof document !== 'undefined';
@@ -18,13 +21,24 @@ const realFetch = globalThis.fetch;
 const roots: Root[] = [];
 const CLIENT = {} as SemDiffClient;
 
-function keySet(configured: boolean) {
+function keySet(configured: boolean, extra: Record<string, unknown> = {}) {
   const reads: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     reads.push(String(input));
-    return new Response(JSON.stringify({ configured, provider: configured ? 'custom' : null, ...(configured ? { endpoint: '127.0.0.1:4317' } : {}) }), { headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ configured, provider: configured ? 'custom' : null, ...(configured ? { endpoint: '127.0.0.1:4317' } : {}), ...extra }), { headers: { 'content-type': 'application/json' } });
   }) as unknown as typeof fetch;
   return reads;
+}
+
+async function settle() {
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+}
+
+async function render(node: HTMLElement, element: React.ReactElement) {
+  const root = createRoot(node);
+  roots.push(root);
+  await act(async () => root.render(element));
+  await settle();
 }
 
 async function reader(compact = false): Promise<{ seen: InboxPowerUp[]; node: HTMLElement }> {
@@ -36,10 +50,7 @@ async function reader(compact = false): Promise<{ seen: InboxPowerUp[]; node: HT
     seen.push(power);
     return <PowerUpMark power={power} compact={compact} />;
   }
-  const root = createRoot(node);
-  roots.push(root);
-  await act(async () => root.render(<Probe />));
-  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  await render(node, <Probe />);
   return { seen, node };
 }
 
@@ -50,11 +61,16 @@ afterEach(async () => {
   document.body.innerHTML = '';
   globalThis.fetch = realFetch;
   resetInboxDiffOptionsForTests();
+  resetReviewAnalysisForTests();
   configStore.seed('diffSemantic', true);
   configStore.seed('diffPowerUp', true);
 });
 
-test.skipIf(!hasDom)('with a key, the mark sums every file, says why a provider failed, and Retry asks again', async () => {
+const ok = (links: number) => ({ asking: 0, answered: 1, links, unavailable: null });
+const FAILED = { asking: 0, answered: 0, links: 0, unavailable: 'failed' as const };
+const TWO_LINKS = ok(2);
+
+test.skipIf(!hasDom)('with a key, the mark sums every drawn view and says why a provider failed', async () => {
   configStore.seed('diffSemantic', true);
   configStore.seed('diffPowerUp', true);
   const reads = keySet(true);
@@ -62,20 +78,58 @@ test.skipIf(!hasDom)('with a key, the mark sums every file, says why a provider 
   const power = () => seen.at(-1)!;
   expect(reads).toEqual(['/api/sem-diff/opinion/settings']);
   expect(power().powerUp?.active).toBe(true);
-  // Nothing shown until a file has said how it went.
+  // Nothing shown until a view has said how it went.
   expect(node.querySelector('[data-inbox-power-up]')).toBeNull();
   await act(async () => {
-    power().reportFor('src/cart.ts')({ asking: 0, answered: 1, links: 1, unavailable: null });
-    power().reportFor('src/tax.ts')({ asking: 0, answered: 1, links: 2, unavailable: null });
+    power().report('cart', ok(1));
+    power().report('tax', ok(2));
   });
   expect(node.querySelector('[data-power-up-status]')?.getAttribute('data-power-up-status')).toBe('powered');
   expect(node.textContent).toContain('Powered up · 3 links');
-  await act(async () => power().reportFor('src/tax.ts')({ asking: 0, answered: 0, links: 0, unavailable: 'refusedKey' }));
+  await act(async () => power().report('tax', { asking: 0, answered: 0, links: 0, unavailable: 'refusedKey' }));
   expect(node.textContent).toContain('Power Up: key refused');
-  const retries = power().powerUp!.retry;
-  const retry = [...node.querySelectorAll('button')].find((button) => button.textContent === 'Retry')!;
-  await act(async () => retry.click());
-  expect(power().powerUp!.retry).toBe(retries + 1);
+  expect([...node.querySelectorAll('button')].some((button) => button.textContent === 'Retry')).toBe(true);
+});
+
+test.skipIf(!hasDom)('a guide that changes chapters: a failure in a chapter no longer drawn does not stay on the mark', async () => {
+  configStore.seed('diffSemantic', true);
+  configStore.seed('diffPowerUp', true);
+  keySet(true);
+  const node = document.createElement('div');
+  document.body.appendChild(node);
+  let power: InboxPowerUp | null = null;
+  let showChapter: (chapter: number) => void = () => {};
+  // Each chapter's file view, wired as GuideReader's GuideDiff is (usePowerUpReport).
+  function FileView({ report, status }: { report: InboxPowerUp['report']; status: Parameters<InboxPowerUp['report']>[1] }) {
+    const onStatus = usePowerUpReport(report);
+    // As AllFilesCodeView does once its ask came back.
+    useEffect(() => {
+      if (status) onStatus?.(status);
+    }, [onStatus, status]);
+    return null;
+  }
+  function Guide() {
+    const current = usePowerUp(CLIENT);
+    power = current;
+    const [chapter, setChapter] = useState(1);
+    showChapter = setChapter;
+    return (
+      <>
+        <PowerUpMark power={current} compact={false} />
+        {chapter === 1 && <FileView key="one" report={current.report} status={FAILED} />}
+        {chapter === 2 && <FileView key="two" report={current.report} status={TWO_LINKS} />}
+      </>
+    );
+  }
+  await render(node, <Guide />);
+  await settle();
+  expect(power!.powerUp?.active).toBe(true);
+  expect(node.querySelector('[data-power-up-status]')?.getAttribute('data-power-up-status')).toBe('unavailable');
+  await act(async () => showChapter(2));
+  await settle();
+  expect(node.querySelector('[data-power-up-status]')?.getAttribute('data-power-up-status')).toBe('powered');
+  expect(node.textContent).toContain('Powered up · 2 links');
+  expect([...node.querySelectorAll('button')].some((button) => button.textContent === 'Retry')).toBe(false);
 });
 
 test.skipIf(!hasDom)('no key: nothing is asked and no mark is drawn', async () => {
@@ -87,30 +141,45 @@ test.skipIf(!hasDom)('no key: nothing is asked and no mark is drawn', async () =
   expect(node.querySelector('[data-inbox-power-up]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('a phone: the face alone in the bar; its press opens the same words', async () => {
+test.skipIf(!hasDom)('a phone: the face alone in the bar; its press opens one card, and a press anywhere else closes it', async () => {
   configStore.seed('diffSemantic', true);
   configStore.seed('diffPowerUp', true);
-  keySet(true);
+  keySet(true, { source: 'env' });
   const { seen, node } = await reader(true);
-  await act(async () => seen.at(-1)!.reportFor('src/cart.ts')({ asking: 0, answered: 1, links: 1, unavailable: null }));
+  await act(async () => seen.at(-1)!.report('cart', { asking: 0, answered: 0, links: 0, unavailable: 'refusedKey' }));
   const face = node.querySelector<HTMLButtonElement>('button[data-power-up-slot]')!;
-  expect(face.getAttribute('aria-label')).toBe('Powered up · 1 link');
+  expect(face.getAttribute('aria-label')).toBe('Power Up: key refused');
   expect(node.querySelector('[data-power-up-card]')).toBeNull();
-  expect(node.textContent).not.toContain('Powered up');
+  expect(node.textContent).not.toContain('Power Up');
   await act(async () => face.click());
-  expect(node.querySelector('[data-power-up-card]')?.textContent).toContain('Powered up · 1 link');
+  const card = node.querySelector('[data-power-up-card]')!;
+  // One title (the bar's words), not a second one under it.
+  expect([...card.querySelectorAll('.font-medium')].map((line) => line.textContent)).toEqual(['Power Up: key refused']);
+  // A key from the environment is not changed in code review's Settings: the card says where it comes from.
+  expect(card.textContent).toContain('PLANNOTATOR_OPINION_API_KEY');
+  expect(card.textContent).not.toContain("code review's Settings");
+  // Inside the card (Retry's row) keeps it open; a press on the page outside closes it, focus or not (iOS).
+  await act(async () => card.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+  expect(node.querySelector('[data-power-up-card]')).not.toBeNull();
+  await act(async () => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+  expect(node.querySelector('[data-power-up-card]')).toBeNull();
 });
 
 // Last: config.json's value, once adopted, stays this page's (the store's server value).
-test.skipIf(!hasDom)('Power Up off in code review (config.json, on another address): the reader asks no provider and shows no mark', async () => {
-  resetInboxDiffOptionsForTests();
+test.skipIf(!hasDom)('a slow first settings read: nothing is asked from the cookie meanwhile, and Power Up off in config.json stays off', async () => {
   configStore.seed('diffSemantic', true);
   configStore.seed('diffPowerUp', true);
   keySet(true);
-  // The first settings read: code review saved Power Up off; this address's cookie says nothing.
-  adoptSavedDiffOptions({ power_up: false });
+  // The page's first settings read is still out; this address's cookie says Power Up is on.
+  let answer: (settings: object) => void = () => {};
+  waitForReviewAnalysis(new Promise<object>((resolve) => (answer = resolve)));
   const { seen, node } = await reader();
-  await act(async () => seen.at(-1)!.reportFor('src/cart.ts')({ asking: 1, answered: 0, links: 0, unavailable: null }));
+  await settle();
+  expect(seen.every((power) => power.powerUp === null)).toBe(true);
+  // It answers: code review saved Power Up off.
+  await act(async () => answer({ diff_options: { power_up: false }, review_analysis: null }));
+  await settle();
+  await act(async () => seen.at(-1)!.report('cart', { asking: 1, answered: 0, links: 0, unavailable: null }));
   expect(seen.every((power) => power.powerUp === null)).toBe(true);
   expect(node.querySelector('[data-inbox-power-up]')).toBeNull();
 });

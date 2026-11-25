@@ -39,7 +39,7 @@ import { openedLinesQuote } from '../attachments';
 import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
 import { useSemDiffClient } from './useSemDiffClient';
 import type { GuideFileNote, GuideLineMark, GuideLineNote, GuideReaderProps, OnGuideLineMark } from './types';
-import { usePowerUp } from './usePowerUp';
+import { usePowerUp, usePowerUpReport, type InboxPowerUp } from './usePowerUp';
 import { PowerUpMark } from './PowerUpMark';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
@@ -151,11 +151,14 @@ export const GuideDiff: FC<
     /** Context notes on this file's lines (review-editor's seam). Absent: none, as before. */
     contextNotes?: AllFilesCodeViewProps['contextNotes'];
     renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
-    /** Power Up (usePowerUp.ts): asked about this file's unsure calls, its status reported. Absent: none. */
+    /** Power Up (usePowerUp.ts): asked about these files' unsure calls. Absent: none. */
     powerUp?: AllFilesCodeViewProps['powerUp'];
-    onPowerUpStatus?: AllFilesCodeViewProps['onPowerUpStatus'];
+    /** Hears this view's Power Up status under its own key, and null once it is no longer drawn. */
+    powerUpReport?: InboxPowerUp['report'];
   }
-> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, lineMarks, onLineMark, wholeFileNotes, contextNotes, renderContextNote, ...props }) => {
+> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, lineMarks, onLineMark, wholeFileNotes, contextNotes, renderContextNote, powerUpReport, ...props }) => {
+  // Power Up's status for this view only, taken back when it goes (another chapter), so a failure here never sticks.
+  const onPowerUpStatus = usePowerUpReport(powerUpReport);
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -177,6 +180,7 @@ export const GuideDiff: FC<
   return (
     <AllFilesCodeView
       {...props}
+      {...(onPowerUpStatus ? { onPowerUpStatus } : {})}
       {...(generated ?? {})}
       readOnly={!comments}
       commentOnly={!!comments}
@@ -656,7 +660,7 @@ function Reader({
       contextNotes?: AllFilesCodeViewProps['contextNotes'];
       renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
       powerUp?: AllFilesCodeViewProps['powerUp'];
-      onPowerUpStatus?: AllFilesCodeViewProps['onPowerUpStatus'];
+      powerUpReport?: InboxPowerUp['report'];
     } => ({
       ...(lineNotes ? { lineNotes: fileNotes(file.path) } : {}),
       ...(lineMarks ? { lineMarks: fileMarks(file.path) } : {}),
@@ -670,7 +674,7 @@ function Reader({
       ...(asItIs && { plainSeparators: true }),
       ...(fetchFileContent && { fetchFileContent }),
       ...(fetchFileContent && semDiffClient && !asItIs && { semDiffClient }),
-      ...(fetchFileContent && semDiffClient && !asItIs && power.powerUp && { powerUp: power.powerUp, onPowerUpStatus: power.reportFor(file.path) }),
+      ...(fetchFileContent && semDiffClient && !asItIs && power.powerUp && { powerUp: power.powerUp, powerUpReport: power.report }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
@@ -690,7 +694,7 @@ function Reader({
           }
         : {}),
     }),
-    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, power.powerUp, power.reportFor, fileOpenIn, lineNotes, fileNotes, lineMarks, fileMarks, onLineMark, wholeFileNotes, wholeNotesFor],
+    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, power.powerUp, power.report, fileOpenIn, lineNotes, fileNotes, lineMarks, fileMarks, onLineMark, wholeFileNotes, wholeNotesFor],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).

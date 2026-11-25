@@ -4,7 +4,7 @@
  * by a request that looks like the window's. Every test uses its own temp data dir.
  */
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { powerUpRoute } from "./inbox-power-up";
@@ -79,4 +79,48 @@ test("the key is removed only by the window's own request: its Origin and this r
   expect(existsSync(keyFile)).toBe(false);
   const read = (await (await powerUpRoute(request(path, "GET"), path, context)).json()) as { configured: boolean };
   expect(read.configured).toBe(false);
+});
+
+test("a new key is saved only by the window's own request, and the settings read never carries the key", async () => {
+  const { dataDir, keyFile } = dataDirWithKey();
+  const provider = fakeProvider();
+  const context = { dataDir, serverSession: SESSION, fromDoor: false, fetch: provider.fetchImpl };
+  const path = "/api/sem-diff/opinion/settings";
+  const newKey = { provider: "custom", url: "http://127.0.0.1:9/other", auth: "bearer", apiKey: "fake-replacement-key" };
+  const saved = () => readFileSync(keyFile, "utf8");
+  const before = saved();
+  // A program's bare call (no Origin), a page without this run's session, and one with another run's.
+  expect((await powerUpRoute(request(path, "POST", newKey, {}), path, context)).status).toBe(403);
+  expect((await powerUpRoute(request(path, "POST", newKey), path, context)).status).toBe(403);
+  expect((await powerUpRoute(request(path, "POST", { ...newKey, serverSession: "another-run" }), path, context)).status).toBe(403);
+  expect(saved()).toBe(before);
+  expect(provider.calls).toHaveLength(0);
+  const read = await (await powerUpRoute(request(path, "GET"), path, context)).text();
+  expect(JSON.parse(read)).toMatchObject({ configured: true, provider: "custom" });
+  expect(JSON.parse(read)).not.toHaveProperty("apiKey");
+  expect(read).not.toContain("fake-key-not-real");
+  // The key check's stand-in answer (the provider's probe).
+  const probe = (async () => Response.json({ result: { answers: { q: { noul: 0.97 } } } })) as unknown as typeof fetch;
+  const accepted = await powerUpRoute(request(path, "POST", { ...newKey, serverSession: SESSION }), path, { ...context, fetch: probe });
+  expect(((await accepted.json()) as { ok: boolean }).ok).toBe(true);
+  expect(saved()).toContain("fake-replacement-key");
+  // The window's session is the Inbox's: it never reaches the key file.
+  expect(saved()).not.toContain(SESSION);
+  expect(await (await powerUpRoute(request(path, "GET"), path, context)).text()).not.toContain("fake-replacement-key");
+});
+
+test("through the Cloudflare door: the person's window asks and reads, but the key is changed only here or over the tailnet", async () => {
+  const { dataDir, keyFile } = dataDirWithKey();
+  const provider = fakeProvider();
+  const context = { dataDir, serverSession: SESSION, fromDoor: false, fromCloudflare: true, fetch: provider.fetchImpl };
+  const path = "/api/sem-diff/opinion/settings";
+  const asked = await powerUpRoute(request("/api/sem-diff/opinion", "POST", question()), "/api/sem-diff/opinion", context);
+  expect(((await asked.json()) as { ok: boolean }).ok).toBe(true);
+  expect(provider.calls).toHaveLength(1);
+  expect(((await (await powerUpRoute(request(path, "GET"), path, context)).json()) as { configured: boolean }).configured).toBe(true);
+  const write = await powerUpRoute(request(path, "DELETE", { serverSession: SESSION }), path, context);
+  expect([write.status, ((await write.json()) as { code: string }).code]).toEqual([403, "local_only"]);
+  expect((await powerUpRoute(request(path, "POST", { provider: "custom", url: "http://127.0.0.1:9/x", auth: "bearer", apiKey: "fake-other", serverSession: SESSION }), path, context)).status).toBe(403);
+  expect(existsSync(keyFile)).toBe(true);
+  expect(readFileSync(keyFile, "utf8")).toContain("fake-key-not-real");
 });

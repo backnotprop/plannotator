@@ -12,7 +12,7 @@ export function PowerUpMark({ power, compact, host }: { power: InboxPowerUp; com
   if (!power.powerUp || !power.status) return null;
   const mark = (
     <span className="ib-powerup" data-inbox-power-up="">
-      <PowerUpStatusSlot status={power.status} provider={power.provider} {...(power.endpoint ? { endpoint: power.endpoint } : {})} onRetry={power.retry} compact={compact} />
+      <PowerUpStatusSlot status={power.status} provider={power.provider} {...(power.endpoint ? { endpoint: power.endpoint } : {})} onRetry={power.retry} compact={compact} keyFromEnv={power.keyFromEnv} />
     </span>
   );
   return host ? createPortal(mark, host) : mark;

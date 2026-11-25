@@ -1,38 +1,36 @@
 /**
- * Power Up in an Inbox reader (the PR page and a thread's guided review), as code review's App does it: one read of
- * `/api/sem-diff/opinion/settings` (the Inbox answers it from this computer's key, packages/server/inbox-power-up.ts),
- * read again on `POWER_UP_CHANGED_EVENT`, and a `PowerUpConfig` for AllFilesCodeView while semantic diffs are drawn
- * (`diffSemantic`), Power Up is on (`diffPowerUp`, config.json `diffOptions.powerUp`) and a key is set. Off in any of
- * them, nothing is asked and nothing is shown.
+ * Power Up in an Inbox reader (the PR page and a thread's guided review), through code review's own hook
+ * (review-editor's semDiff/usePowerUpConfig.ts): one read of `/api/sem-diff/opinion/settings` (the Inbox answers it from
+ * this computer's key, packages/server/inbox-power-up.ts), read again on `POWER_UP_CHANGED_EVENT`, and a
+ * `PowerUpConfig` for AllFilesCodeView while semantic diffs are drawn (`diffSemantic`), Power Up is on (`diffPowerUp`,
+ * config.json `diffOptions.powerUp`) and a key is set. Nothing is asked before the page's first settings read is in
+ * (reviewAnalysis.ts), so a slow read never lets the cookie's value ask. Off in any of them, nothing is asked or shown.
  *
- * The reader draws each file in its own AllFilesCodeView, so each file reports its own status (`reportFor(path)`);
- * the slot shows their sum. Links the person turned down in code review's list (a cookie) stay turned down here.
+ * The reader draws files in several AllFilesCodeViews; each drawn one reports its own status under its own key
+ * (`report(key, status)`) and takes it back when it goes (`report(key, null)`: another chapter, a closed section), so
+ * the slot sums only what is on the page and a failure in a file no longer drawn never sticks. Links the person
+ * turned down in code review's list (a cookie) stay turned down here.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useConfigValue } from '@plannotator/ui/config';
-import { POWER_UP_CHANGED_EVENT, type PowerUpProvider } from '@plannotator/ui/components/settings/SemanticDiffsTab';
+import type { PowerUpProvider } from '@plannotator/ui/components/settings/SemanticDiffsTab';
 import type { SemDiffClient } from '@plannotator/review-editor/semDiff/semDiffClient';
 import { readPowerUpRejected, type PowerUpConfig, type PowerUpStatus } from '@plannotator/review-editor/semDiff/powerUp';
-
-export const POWER_UP_SETTINGS_PATH = '/api/sem-diff/opinion/settings';
-
-interface Configured {
-  configured: boolean;
-  provider: PowerUpProvider | null;
-  endpoint?: string;
-  revision: number;
-}
+import { usePowerUpConfig } from '@plannotator/review-editor/semDiff/usePowerUpConfig';
+import { useReviewAnalysisRead } from '../reviewAnalysis';
 
 export interface InboxPowerUp {
-  /** For each file's AllFilesCodeView; null while Power Up is not asked. */
+  /** For each drawn AllFilesCodeView; null while Power Up is not asked. */
   powerUp: PowerUpConfig | null;
-  /** Each file's own status callback, the same function for a path while the reader lives. */
-  reportFor: (path: string) => (status: PowerUpStatus) => void;
-  /** Every file's status summed; null until a file reported, and while Power Up is not asked. */
+  /** A drawn file view's status under its own key; null when it is no longer drawn. The same function for the reader's life. */
+  report: (key: string, status: PowerUpStatus | null) => void;
+  /** The drawn views' statuses summed; null until one reported, and while Power Up is not asked. */
   status: PowerUpStatus | null;
   provider: PowerUpProvider | null;
   endpoint?: string;
+  /** The key comes from PLANNOTATOR_OPINION_API_KEY. */
+  keyFromEnv: boolean;
   retry: () => void;
 }
 
@@ -49,59 +47,38 @@ export function sumPowerUp(statuses: Iterable<PowerUpStatus>): PowerUpStatus | n
   return sum;
 }
 
+/**
+ * One drawn file view's side (GuideReader's GuideDiff): its status callback for AllFilesCodeView, under a key of its
+ * own, and its status taken back when the view goes (another chapter), so a failure there never sticks in the sum.
+ */
+export function usePowerUpReport(report: InboxPowerUp['report'] | undefined): ((status: PowerUpStatus) => void) | undefined {
+  const key = useId();
+  const onStatus = useMemo(() => (report ? (status: PowerUpStatus) => report(key, status) : undefined), [report, key]);
+  useEffect(() => (report ? () => report(key, null) : undefined), [report, key]);
+  return onStatus;
+}
+
 export function usePowerUp(client: SemDiffClient | null): InboxPowerUp {
   const semanticOn = useConfigValue('diffSemantic');
   const powerUpOn = useConfigValue('diffPowerUp');
-  const [configured, setConfigured] = useState<Configured>({ configured: false, provider: null, revision: 0 });
-  useEffect(() => {
-    if (!client) return;
-    let request = 0;
-    const load = () => {
-      const id = ++request;
-      fetch(POWER_UP_SETTINGS_PATH, { headers: { Accept: 'application/json' } })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: { configured?: unknown; provider?: PowerUpProvider | null; endpoint?: string } | null) => {
-          if (id !== request || !data || typeof data.configured !== 'boolean') return;
-          setConfigured((previous) => ({ configured: data.configured === true, provider: data.provider ?? null, ...(data.endpoint ? { endpoint: data.endpoint } : {}), revision: previous.revision + 1 }));
-        })
-        .catch(() => {});
-    };
-    load();
-    window.addEventListener(POWER_UP_CHANGED_EVENT, load);
-    return () => {
-      request++;
-      window.removeEventListener(POWER_UP_CHANGED_EVENT, load);
-    };
-  }, [client]);
+  const settled = useReviewAnalysisRead();
   const [rejected] = useState<readonly string[]>(() => readPowerUpRejected());
-  const [retries, setRetries] = useState(0);
-  const active = client != null && semanticOn && powerUpOn && configured.configured;
-  const powerUp = useMemo<PowerUpConfig | null>(
-    () => (active ? { active, rejected, provider: configured.provider, settingsRevision: configured.revision, retry: retries } : null),
-    [active, rejected, configured.provider, configured.revision, retries],
-  );
+  const { active, powerUp, settings, retry } = usePowerUpConfig({ client, on: settled && semanticOn && powerUpOn, rejected });
 
   const statuses = useRef(new Map<string, PowerUpStatus>());
   const [status, setStatus] = useState<PowerUpStatus | null>(null);
-  const callbacks = useRef(new Map<string, (status: PowerUpStatus) => void>());
-  const reportFor = useCallback((path: string) => {
-    let report = callbacks.current.get(path);
-    if (!report) {
-      report = (next: PowerUpStatus) => {
-        statuses.current.set(path, next);
-        setStatus(sumPowerUp(statuses.current.values()));
-      };
-      callbacks.current.set(path, report);
-    }
-    return report;
+  const report = useCallback((key: string, next: PowerUpStatus | null) => {
+    if (next) statuses.current.set(key, next);
+    else if (!statuses.current.delete(key)) return;
+    setStatus(sumPowerUp(statuses.current.values()));
   }, []);
-  const retry = useCallback(() => setRetries((n) => n + 1), []);
   return {
-    powerUp,
-    reportFor,
+    powerUp: active ? powerUp : null,
+    report,
     status: active ? status : null,
-    provider: configured.provider,
-    ...(configured.endpoint ? { endpoint: configured.endpoint } : {}),
+    provider: settings.provider,
+    ...(settings.endpoint ? { endpoint: settings.endpoint } : {}),
+    keyFromEnv: settings.source === 'env',
     retry,
   };
 }
