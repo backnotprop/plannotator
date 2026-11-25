@@ -110,6 +110,7 @@
   "inbox-launch-trust-compose.spec.ts": 15,
   "inbox-launch-trust.spec.ts": 10,
   "inbox-link-through.spec.ts": 150,
+  "inbox-linked-reads-machines.spec.ts": 90,
   "inbox-links-in-place.spec.ts": 310,
   "inbox-list-intro.spec.ts": 216,
   "inbox-list-new-pill.spec.ts": 27,
