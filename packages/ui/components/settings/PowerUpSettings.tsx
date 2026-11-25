@@ -207,8 +207,11 @@ function KeyField({
   placeholder,
   onFocus,
   controls,
+  wrap = false,
 }: {
   caption?: string;
+  /** A long value (the endpoint URL) wraps so all of it stays readable. */
+  wrap?: boolean;
   message?: string;
   label: string;
   value: string;
@@ -224,6 +227,7 @@ function KeyField({
   const field = (
     <TextField
       mono
+      wrap={wrap}
       secret={secret}
       placeholder={placeholder ?? (saved ? '••••••••' : '')}
       value={value}
@@ -347,8 +351,10 @@ function CustomKeyFields({ form, checking, showRemove, controls }: FieldsProps) 
         saved={false}
         placeholder="https://..."
         onFocus={form.onFocus}
+        wrap
       />
-      <span className="flex items-end gap-1.5">
+      {/* Captions on one line: the row aligns tops, and Auth's choice sits centred in a field's height. */}
+      <span className="flex items-start gap-1.5">
         <span className="min-w-0 flex-1">
           <KeyField
             controls={controls}
@@ -365,12 +371,14 @@ function CustomKeyFields({ form, checking, showRemove, controls }: FieldsProps) 
         </span>
         <span className="shrink-0">
           <Field caption={POWER_UP_WORDS.authCaption} labelsControl={false}>
-            <Segmented
-              label={POWER_UP_WORDS.authLabel}
-              value={form.inputs.customAuth}
-              options={POWER_UP_WORDS.authOptions}
-              onChange={(customAuth) => form.onInput({ customAuth })}
-            />
+            <span className="flex min-h-8 items-center">
+              <Segmented
+                label={POWER_UP_WORDS.authLabel}
+                value={form.inputs.customAuth}
+                options={POWER_UP_WORDS.authOptions}
+                onChange={(customAuth) => form.onInput({ customAuth })}
+              />
+            </span>
           </Field>
         </span>
       </span>

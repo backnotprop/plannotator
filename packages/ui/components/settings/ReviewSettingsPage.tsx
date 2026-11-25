@@ -271,13 +271,15 @@ export function PowerUpSection({ controls, opinionRoute, load = true, onChange =
   const motion = useConfigValue('diffPowerUpMotion');
   const state = usePowerUpSettings(opinionRoute, { load, onChange });
   const { configured } = state;
+  // A greyed switch shows off, like Show moved & renamed code; the saved choice is kept.
+  const disabled = !configured || !semantic || !semanticDiffEnabled;
   return (
     <Section
       id="powerUp"
       title={POWER_UP_WORDS.label}
       toggle={{
-        checked: powerUp && configured,
-        disabled: !configured || !semantic || !semanticDiffEnabled,
+        checked: powerUp && !disabled,
+        disabled,
         onChange: (on) => onChange('diffPowerUp', on),
         description: semanticDiffEnabled ? powerUpDescription(configured) : SEMANTIC_WORDS.offWhileMasterOff,
       }}

@@ -131,6 +131,12 @@ export interface ReviewSettingsTextFieldProps {
   secret?: boolean;
   /** Code-like values (keys, URLs, model names). */
   mono?: boolean;
+  /**
+   * A long value that must stay readable (an endpoint URL): it wraps onto more
+   * lines instead of running out of the field. Still one value: Enter submits
+   * the form, and line breaks are never typed into it.
+   */
+  wrap?: boolean;
   invalid?: boolean;
   describedBy?: string;
   onFocus?: () => void;
@@ -309,7 +315,65 @@ function ClassicSlider({ label, value, min, max, onChange, valueText, reset }: R
   );
 }
 
-function ClassicTextField({ label, value, onChange, placeholder, secret = false, mono = false, invalid = false, describedBy, onFocus, fontFamily, autoFocus, maxLength }: ReviewSettingsTextFieldProps) {
+/** The height that shows every line of a textarea (its border included). */
+function fitHeight(el: HTMLTextAreaElement) {
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+}
+
+/**
+ * A text field whose long value wraps (an endpoint URL in a narrow window):
+ * one line looks like any other field; a longer value grows the field so all
+ * of it, host first, stays in view.
+ */
+function ClassicWrapField({ label, value, onChange, placeholder, mono = false, invalid = false, describedBy, onFocus, fontFamily, autoFocus, maxLength }: ReviewSettingsTextFieldProps) {
+  const ref = React.useRef<HTMLTextAreaElement>(null);
+  React.useLayoutEffect(() => {
+    if (ref.current) fitHeight(ref.current);
+  }, [value]);
+  // Refit when the window changes the field's width (never on its own height change).
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fitHeight(el);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      className={`block min-h-8 w-full min-w-0 resize-none overflow-hidden rounded-md border bg-background px-2.5 py-[7px] leading-4 text-foreground outline-none [overflow-wrap:anywhere] ${invalid ? FIELD_INVALID : FIELD_RING} placeholder:text-muted-foreground/60 ${mono ? 'font-mono text-xs' : 'text-sm'}`}
+      style={fontFamily ? { fontFamily } : undefined}
+      autoComplete="off"
+      spellCheck={false}
+      placeholder={placeholder}
+      value={value}
+      // One value: a pasted line break is dropped, and Enter submits the form like any other field.
+      onChange={(e) => onChange(e.target.value.replace(/[\r\n]+/g, ''))}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+        e.preventDefault();
+        e.currentTarget.form?.requestSubmit();
+      }}
+      onFocus={onFocus}
+      aria-label={label}
+      aria-invalid={invalid || undefined}
+      aria-describedby={describedBy}
+      autoFocus={autoFocus}
+      maxLength={maxLength}
+    />
+  );
+}
+
+function ClassicTextField(props: ReviewSettingsTextFieldProps) {
+  if (props.wrap && !props.secret) return <ClassicWrapField {...props} />;
+  const { label, value, onChange, placeholder, secret = false, mono = false, invalid = false, describedBy, onFocus, fontFamily, autoFocus, maxLength } = props;
   return (
     <input
       className={`${FIELD} ${invalid ? FIELD_INVALID : FIELD_RING} placeholder:text-muted-foreground/60 ${mono ? 'font-mono text-xs' : ''}`}

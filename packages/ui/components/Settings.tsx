@@ -208,7 +208,7 @@ interface SettingsProps {
    *  readable Error, which the row shows. */
   onAgentToolChange?: (enabled: boolean) => Promise<void>;
   /** Current session is a local git review where since-base ISN'T offered
-   *  (base ref unresolvable) — the Review tab's Git section shows a note that
+   *  (base ref unresolvable) — Settings → Reviews' Git group shows a note that
    *  the Git-status preference can't take effect in THIS repo. */
   sinceBaseUnavailable?: boolean;
   /** The host is rendering its compact touch shell (review only). Display

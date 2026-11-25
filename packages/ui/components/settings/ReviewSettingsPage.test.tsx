@@ -405,6 +405,46 @@ describe.if(hasDom)('Settings → Reviews', () => {
     expect(scrolled).toEqual(['powerUp']);
   });
 
+  test('the section a link asked for is forgotten when Settings closes: the next opening starts at the top', async () => {
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.getAttribute('data-review-settings-section') ?? '?');
+    };
+    await mountSettings('review', 'reviews', 'powerUp');
+    expect(scrolled).toEqual(['powerUp']);
+    await click(document.querySelector<HTMLButtonElement>('button[aria-label="Close settings"]'));
+    expect(document.querySelector('[data-review-settings]')).toBeNull();
+
+    // Opened again with no link (the host's open signal goes off, then on with no tab).
+    const render = (open: boolean) => root?.render(<Settings taterMode={false} onTaterModeChange={() => {}} mode="review" externalOpen={open} />);
+    await act(async () => render(false));
+    await act(async () => render(true));
+    expect(activeSidebarTab()).toBe('Reviews');
+    expect(document.querySelector('[data-review-settings]')).not.toBeNull();
+    expect(scrolled).toEqual(['powerUp']);
+  });
+
+  test('a greyed Power Up switch shows off and keeps the saved choice', async () => {
+    globalThis.fetch = (async () => Response.json({ configured: true, provider: 'jev' })) as unknown as typeof fetch;
+    configStore.set('semanticDiffEnabled', true);
+    configStore.set('diffSemantic', true);
+    configStore.set('diffPowerUp', true);
+    await mountPage();
+    await showObserved();
+    expect(switchNamed('Power Up')?.disabled).toBe(false);
+    expect(switchNamed('Power Up')?.getAttribute('aria-checked')).toBe('true');
+
+    saved.clear();
+    await click(switchNamed('Semantic changes'));
+    expect(switchNamed('Power Up')?.disabled).toBe(true);
+    expect(switchNamed('Power Up')?.getAttribute('aria-checked')).toBe('false');
+    expect(saved.has('plannotator-diff-power-up')).toBe(false);
+    expect(configStore.get('diffPowerUp')).toBe(true);
+
+    await click(switchNamed('Semantic changes'));
+    expect(switchNamed('Power Up')?.getAttribute('aria-checked')).toBe('true');
+  });
+
   test('outside code review, "display" still opens Display', async () => {
     await mountSettings('plan', 'display');
     expect(activeSidebarTab()).toBe('Display');

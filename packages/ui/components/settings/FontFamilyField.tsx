@@ -5,13 +5,16 @@
  * pause (configStore.set writes the cookie and may POST /api/config), flushed
  * on unmount, and dropped when a built-in is picked mid-pause.
  *
- * Moved unchanged from Settings.tsx so Settings → Reviews (Code Font) and
- * Settings → Display (Document font) share it.
+ * Moved out of Settings.tsx so Settings → Reviews (Code Font) and Settings →
+ * Display (Document font) share its behaviour. Its look is the host's: without
+ * `controls` it draws Settings → Display's own controls, exactly as before the
+ * move (plan review and annotate's Document font row); Settings → Reviews
+ * passes its controls and draws its preview without a box.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { isFontInstalled } from '../../utils/fontDetect';
 import { MAX_FONT_FAMILY_LENGTH, normalizeFontFamilyName } from '../../utils/cssFontFamily';
-import { CLASSIC_REVIEW_SETTINGS_CONTROLS, type ReviewSettingsControls } from './reviewSettingsControls';
+import type { ReviewSettingsControls, ReviewSettingsNoteProps, ReviewSettingsSelectProps, ReviewSettingsTextFieldProps } from './reviewSettingsControls';
 
 /** Sentinel for the "Custom…" select option — never persisted as a font name. */
 const CUSTOM_FONT_SENTINEL = '__custom__';
@@ -25,13 +28,62 @@ function stackFamily(stack: string): string | undefined {
   return stack || undefined;
 }
 
+type FontFieldControls = Pick<ReviewSettingsControls, 'Select' | 'TextField' | 'Note'>;
+
+// Settings → Display's controls (the Document font row in plan review and
+// annotate). Their markup and classes must not change with Settings → Reviews.
+function DisplaySelect<T extends string>({ label, value, options, onChange, fontFamily }: ReviewSettingsSelectProps<T>) {
+  return (
+    <select
+      value={value}
+      aria-label={label}
+      onChange={(e) => onChange(e.target.value as T)}
+      className="w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground"
+      style={fontFamily ? { fontFamily } : undefined}
+    >
+      {options.map((opt) => (
+        <option key={opt.value} value={opt.value}>{opt.label}</option>
+      ))}
+    </select>
+  );
+}
+
+function DisplayTextField({ label, value, onChange, placeholder, fontFamily, autoFocus, maxLength }: ReviewSettingsTextFieldProps) {
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      aria-label={label}
+      maxLength={maxLength}
+      autoFocus={autoFocus}
+      spellCheck={false}
+      className="w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+      style={fontFamily ? { fontFamily } : undefined}
+    />
+  );
+}
+
+const DISPLAY_NOTE_TONE = { muted: 'text-muted-foreground', warning: 'text-warning', success: 'text-success' } as const;
+
+function DisplayNote({ tone = 'muted', ...rest }: ReviewSettingsNoteProps) {
+  return <span {...rest} className={DISPLAY_NOTE_TONE[tone]} />;
+}
+
+const DISPLAY_FONT_CONTROLS: FontFieldControls = { Select: DisplaySelect, TextField: DisplayTextField, Note: DisplayNote };
+
 export const FontFamilyField: React.FC<{
   label: string;
   description?: string;
   /** Draw the label and description above the select. Default true; false where the host's row draws them. */
   showLabel?: boolean;
-  /** The select, text field and status line. Default: classic Settings' (`CLASSIC_REVIEW_SETTINGS_CONTROLS`). */
-  controls?: Pick<ReviewSettingsControls, 'Select' | 'TextField' | 'Note'>;
+  /**
+   * The select, text field and status line of Settings → Reviews (its host's
+   * set). Without it: Settings → Display's own look, with an 11px status line
+   * and the preview in a light box.
+   */
+  controls?: FontFieldControls;
   value: string;
   onSave: (value: string) => void;
   options: readonly { value: string; label: string }[];
@@ -44,7 +96,7 @@ export const FontFamilyField: React.FC<{
   /** Load a built-in's web font for the preview, if it has one. */
   loadFont?: (value: string) => void;
   previewClassName?: string;
-}> = ({ label, description, showLabel = true, controls = CLASSIC_REVIEW_SETTINGS_CONTROLS, value, onSave, options, previewStack, previewText, customAriaLabel, customPlaceholder, notFoundText, loadFont, previewClassName = '' }) => {
+}> = ({ label, description, showLabel = true, controls, value, onSave, options, previewStack, previewText, customAriaLabel, customPlaceholder, notFoundText, loadFont, previewClassName = '' }) => {
   const isBuiltIn = (v: string) => options.some((opt) => opt.value === v);
   // Custom font: progressive disclosure. customFontMode keeps the input open
   // while the user picks "Custom…" or has a non-built-in font saved.
@@ -107,7 +159,8 @@ export const FontFamilyField: React.FC<{
     }, 400);
   };
 
-  const { Select, TextField, Note } = controls;
+  const displayLook = !controls;
+  const { Select, TextField, Note } = controls ?? DISPLAY_FONT_CONTROLS;
   return (
     <div className="space-y-2">
       {showLabel && (
@@ -145,7 +198,7 @@ export const FontFamilyField: React.FC<{
             autoFocus={!customFontDraft}
             fontFamily={stackFamily(previewStack(customFontDraft))}
           />
-          <div aria-live="polite">
+          <div className={displayLook ? 'text-[11px]' : undefined} aria-live="polite">
             {!normalizeFontFamilyName(customFontDraft) ? (
               <Note>Any font installed on this machine works — type its family name.</Note>
             ) : customFontInstalled === true ? (
@@ -156,12 +209,11 @@ export const FontFamilyField: React.FC<{
           </div>
         </div>
       )}
-      {/* The preview is plain text in the chosen font: no box around it. */}
+      {/* Settings → Reviews' preview is plain text in the chosen font; Display's keeps its box. */}
       {value && (
         <div
-          className={`text-xs text-muted-foreground ${previewClassName}`}
+          className={`text-xs text-muted-foreground ${displayLook ? 'px-1 py-1 rounded bg-muted/30 ' : ''}${previewClassName}`}
           style={stackStyle(previewStack(value))}
-          data-font-preview=""
         >
           {previewText}
         </div>
