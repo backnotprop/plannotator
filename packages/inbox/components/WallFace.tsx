@@ -4,7 +4,8 @@
  * stage on a quiet backdrop; what it draws is fitted whole and centred, never cropped mid-content:
  *
  * - a picture or a video: the whole frame, contained;
- * - an HTML page: the page drawn small on a landscape sheet (a frame that runs no script);
+ * - an HTML page, attached or a message's html block: the page drawn small on a landscape sheet (a frame that runs no
+ *   script); a block whose page draws nothing with no script keeps a quiet HTML card;
  * - a diagram: drawn small on a landscape sheet;
  * - Markdown and text: a small rendered page (the title in heading type, a few lines of body);
  * - a PDF: a page card with its name and page count (the Inbox has no PDF renderer, and adds none);
@@ -16,7 +17,7 @@
  * The name and the type sit under the stage, the same way for every kind (`wallTypeLabel`, wallFaceText.ts).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getFiletypeFromFileName } from '@pierre/diffs';
 import { ensureHighlight, highlightToHtml } from '@plannotator/ui/utils/codeHighlight';
 import { useFenceTheme } from '@plannotator/ui/hooks/useFenceTheme';
@@ -30,6 +31,7 @@ import { Icon } from '../icons';
 import { ArtifactDiagramFace } from './ArtifactDiagramFace';
 import { GuideFace, PageFrame, previewOf, typeMark, typedIcon } from './ArtifactsView';
 import type { GuideArtifact } from '../artifacts';
+import { htmlBlockPicture, useHtmlBlockSource } from '../htmlBlockSource';
 
 /** Text previews are read up to this size; a larger file keeps its card. */
 const TEXT_MAX = 256 * 1024;
@@ -178,6 +180,31 @@ function TableSheet({ text, tab }: { text: string; tab: boolean }) {
   );
 }
 
+/**
+ * An html block (not a file): the grid's still picture of its page, on a landscape sheet as an attached page's, its
+ * source read only once the tile is near (htmlBlockSource.ts); its page never runs here. Until then, and for a page
+ * that draws nothing with no script, a quiet HTML card.
+ */
+function HtmlBlockSheet({ row, near }: { row: InboxArtifactRow; near: boolean }) {
+  const source = useHtmlBlockSource(row, near);
+  const picture = useMemo(() => htmlBlockPicture(source), [source]);
+  if (near && picture !== null) {
+    return (
+      <span className="ib-wf-sheet ib-wf-page" data-face="html-block" data-html-picture="">
+        <PageFrame html={picture} />
+      </span>
+    );
+  }
+  return (
+    <span className="ib-wf-file" data-face="html-block">
+      <span className="ib-wf-file-ic">
+        <Icon name={typedIcon('html')} size={22} />
+      </span>
+      <span className="ib-wf-file-ext">HTML</span>
+    </span>
+  );
+}
+
 /** The face of one Wall artifact, inside its 4:3 stage. */
 export function WallFace({ row, near, guide, pages }: { row: InboxArtifactRow; near: boolean; guide: GuideArtifact | null; pages: number | null }) {
   const source = useInboxFileSource();
@@ -186,17 +213,7 @@ export function WallFace({ row, near, guide, pages }: { row: InboxArtifactRow; n
   const wantsText = kind === 'markdown' || kind === 'text' || kind === 'code' || kind === 'html' || kind === 'mermaid' || kind === 'graphviz';
   const preview = useText(attachment, near, wantsText);
   const [failed, setFailed] = useState(false);
-  if (row.html && !attachment) {
-    // An html block (not a file): a quiet HTML card, as an attached page's before its preview; its page never runs here.
-    return (
-      <span className="ib-wf-file" data-face="html-block">
-        <span className="ib-wf-file-ic">
-          <Icon name={typedIcon('html')} size={22} />
-        </span>
-        <span className="ib-wf-file-ext">HTML</span>
-      </span>
-    );
-  }
+  if (row.html && !attachment) return <HtmlBlockSheet row={row} near={near} />;
   if (!attachment || !kind) {
     return (
       <span className="ib-wf-sheet ib-wf-guide" data-face="guide">

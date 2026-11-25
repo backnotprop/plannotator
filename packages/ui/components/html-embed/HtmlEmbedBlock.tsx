@@ -14,8 +14,9 @@
  * background of its own (its document is transparent and takes the host's
  * theme and color-scheme), as tall as its page up to `EMBED_CLIP_PX`, then a
  * fade and "Show more". Under it one quiet line: "HTML · sandboxed", Code
- * (the fence's source in place of the page) and Full screen (the same page in
- * ui's popout, scrolling).
+ * (the fence's source in place of the page) and Full screen (the block opened
+ * big, `HtmlEmbedOpen`: ui's popout with Code and the pen in its title bar, the
+ * same view a host opens on its own, so the two cannot differ).
  *
  * Comments in place (the owner's pick "A · In place", 2026-11-20; a host
  * that passes `annotate`): a pen at the right end of that line. On, a click
@@ -28,7 +29,7 @@
  */
 
 import { Code, PenLine } from 'lucide-react';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   EMBED_SANDBOX,
   EMBED_THEME_TOKENS,
@@ -106,12 +107,19 @@ export interface HtmlEmbedAnnotate {
 }
 
 /**
- * The block drawn on its own, big (the Inbox's Artifacts: a block's tile opens it): the Full screen popout's frame
- * and title bar, the page whole at its own height (no clip), and the caption's tools in the title bar (Code, the
- * pen), the same state and comments as the block in the text. Absent: the block in the text, as always.
+ * The block drawn on its own, big (the block's own Full screen, and the Inbox's Artifacts: a block's tile opens it):
+ * the Full screen popout, the caption's tools in its title bar (Code, the pen), and the page in a frame that fills
+ * the rest and scrolls (`mode: 'full'`: a page taller than the cap, a `100vh` page, a wide table all read there),
+ * the same comments as the block in the text. Absent: the block in the text, as always.
  */
 export interface HtmlEmbedOpen {
   onClose(): void;
+  /**
+   * The page's URL the block in the text already has (its own Full screen): shown at once, never asked of the host
+   * again. Absent: the open view asks `frameUrl` itself. Either way it never waits behind the load gate (it is the
+   * person's own ask).
+   */
+  served?: string;
 }
 
 /** The annotatable frame (ui's HtmlViewer and its bridge): fetched only when a block is first annotated. */
@@ -258,6 +266,21 @@ function EmbedFrame({
 
 type Phase = 'far' | 'waiting' | 'loading' | 'ready' | 'failed';
 
+/** A box's height in pixels, kept as it resizes (undefined until it is drawn). */
+function useBoxHeight(box: HTMLElement | null): number | undefined {
+  const [height, setHeight] = useState<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (!box) return;
+    const read = () => setHeight(Math.max(0, Math.round(box.getBoundingClientRect().height)));
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(read);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [box]);
+  return height;
+}
+
 export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: HtmlEmbedHost; open?: HtmlEmbedOpen }) {
   const figureRef = useRef<HTMLElement>(null);
   // Open big (`open`): on screen by definition, and never waiting for a live slot.
@@ -270,6 +293,9 @@ export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: Html
   const [height, setHeight] = useState<number | undefined>(undefined);
   const [expanded, setExpanded] = useState(false);
   const [full, setFull] = useState(false);
+  // Full screen's own marker selection: a marker pressed there shows its comment there, and nothing behind the
+  // dialog (the host's comment list) is selected, focused or scrolled, as the Inbox's Artifacts open keeps its own.
+  const [fullSelected, setFullSelected] = useState<string | null>(null);
   const [forced, setForced] = useState(false);
   const releaseLoad = useRef<(() => void) | null>(null);
   // The host is read when a page is asked for: a new host object (a re-render) never reloads the page.
@@ -360,7 +386,28 @@ export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: Html
   }, []);
   const disarm = useCallback(() => setArmed(false), []);
 
-  // Near the screen: take a live slot (or wait for one), a load permit, then the page's URL.
+  // The block's own Full screen: the page it already has, and a selection of its own (`fullSelected`).
+  const fullOpen = useMemo<HtmlEmbedOpen>(
+    () => ({
+      onClose: () => {
+        setFull(false);
+        setFullSelected(null);
+      },
+      served: url ?? undefined,
+    }),
+    [url],
+  );
+  const fullHost = useMemo<HtmlEmbedHost>(
+    () => (annotate ? { ...host, annotate: { ...annotate, selectedId: fullSelected, onSelect: setFullSelected } } : host),
+    [host, annotate, fullSelected],
+  );
+  // Open big: the frame fills the box under the title bar (an annotatable frame is told its height in pixels).
+  const [fillBox, setFillBox] = useState<HTMLDivElement | null>(null);
+  const fill = useBoxHeight(fillBox);
+
+  // Near the screen: take a live slot (or wait for one), a load permit, then the page's URL. Open big, the person's
+  // own ask: no wait for a permit, and the page the block in the text already has (`served`) is not asked for again.
+  const served = open?.served ?? null;
   useEffect(() => {
     if (!near || showCode) return;
     let cancelled = false;
@@ -379,14 +426,17 @@ export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: Html
       }
       holdsLive = true;
       setPhase('loading');
-      void acquireEmbedLoad().then(async (release) => {
+      const permit: Promise<() => void> = big ? Promise.resolve(() => {}) : acquireEmbedLoad();
+      void permit.then(async (release) => {
         if (cancelled) return release();
         releaseLoad.current = release;
-        let next: string | null = null;
-        try {
-          next = await hostRef.current.frameUrl(block.content);
-        } catch {
-          next = null;
+        let next: string | null = served;
+        if (next === null) {
+          try {
+            next = await hostRef.current.frameUrl(block.content);
+          } catch {
+            next = null;
+          }
         }
         if (cancelled) return release();
         if (next === null) {
@@ -406,7 +456,7 @@ export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: Html
       if (holdsLive) releaseEmbedLive();
       setUrl(null);
     };
-  }, [near, showCode, forced, big, block.content]);
+  }, [near, showCode, forced, big, served, block.content]);
 
   // Loaded: the load permit goes back. Ready only once the page speaks (a frame the browser
   // refused loads too, blank, and never speaks).
@@ -494,6 +544,39 @@ export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: Html
     return null;
   }, [showCode, phase, block, height]);
 
+  // In the text the frame is as tall as its page; open big it fills the dialog under the bar and scrolls itself.
+  const mode: EmbedMode = big ? 'full' : 'inline';
+  const frameHeight = big ? fill : height;
+  const frame =
+    live && annotatable && annotate ? (
+      <Suspense fallback={big ? null : <div aria-hidden="true" style={{ height: height ?? EMBED_FIRST_HEIGHT }} />}>
+        <AnnotatableEmbedFrame
+          key={url}
+          html={block.content}
+          frameUrl={annotatableUrl}
+          theme={theme}
+          mode={mode}
+          title={title}
+          height={frameHeight}
+          onHeight={setHeight}
+          onEscape={escapePage}
+          onReady={annotatableReady}
+          armed={penOn}
+          onDisarm={disarm}
+          annotations={mine.own}
+          onAdd={addComment}
+          selectedId={selectedId}
+          onSelect={selectComment}
+          onUnanchored={setMissing}
+          allowImages={annotate.allowImages !== false}
+        />
+      </Suspense>
+    ) : live ? (
+      <EmbedFrame key={url} url={url} theme={theme} mode={mode} title={title} height={height} onHeight={setHeight} onEscape={escapePage} onLoaded={loaded} onReady={ready} />
+    ) : big ? null : (
+      <div aria-hidden="true" style={{ height: height ?? EMBED_FIRST_HEIGHT }} />
+    );
+
   const page = body ?? (
         <div className="relative">
           <div
@@ -506,44 +589,7 @@ export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: Html
               WebkitMaskImage: clipped ? 'linear-gradient(to bottom, black calc(100% - 72px), transparent)' : undefined,
             }}
           >
-            {live && annotatable && annotate ? (
-              <Suspense fallback={<div aria-hidden="true" style={{ height: height ?? EMBED_FIRST_HEIGHT }} />}>
-                <AnnotatableEmbedFrame
-                  key={url}
-                  html={block.content}
-                  frameUrl={annotatableUrl}
-                  theme={theme}
-                  title={title}
-                  height={height}
-                  onHeight={setHeight}
-                  onEscape={escapePage}
-                  onReady={annotatableReady}
-                  armed={penOn}
-                  onDisarm={disarm}
-                  annotations={mine.own}
-                  onAdd={addComment}
-                  selectedId={selectedId}
-                  onSelect={selectComment}
-                  onUnanchored={setMissing}
-                  allowImages={annotate.allowImages !== false}
-                />
-              </Suspense>
-            ) : live ? (
-              <EmbedFrame
-                key={url}
-                url={url}
-                theme={theme}
-                mode="inline"
-                title={title}
-                height={height}
-                onHeight={setHeight}
-                onEscape={escapePage}
-                onLoaded={loaded}
-                onReady={ready}
-              />
-            ) : (
-              <div aria-hidden="true" style={{ height: height ?? EMBED_FIRST_HEIGHT }} />
-            )}
+            {frame}
           </div>
           {clipped && (
             <div className="absolute inset-x-0 bottom-1 flex justify-center">
@@ -592,7 +638,7 @@ export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: Html
   const commentsAttr = mine.own.length > 0 ? mine.own.map((annotation) => annotation.id).join(' ') : undefined;
 
   if (open) {
-    // Big: Full screen's popout and title bar, the page whole below it, the caption's tools in the bar.
+    // Big: Full screen's popout and title bar with the caption's tools, the page's frame filling the rest and scrolling.
     return (
       <PopoutDialog open onClose={open.onClose} title={title} className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-none" dataAttributes={{ 'data-html-embed-open': '' }}>
         <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border pl-4 pr-12 text-xs font-medium text-foreground">
@@ -602,11 +648,15 @@ export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: Html
             {pen}
           </span>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto px-4">
-          <figure ref={figureRef} data-block-id={block.id} data-html-embed="" data-html-embed-phase={phaseAttr} data-html-embed-comments={commentsAttr} className="relative my-4">
-            {page}
-          </figure>
-        </div>
+        <figure ref={figureRef} data-block-id={block.id} data-html-embed="" data-html-embed-phase={phaseAttr} data-html-embed-comments={commentsAttr} className="relative m-0 flex min-h-0 flex-1 flex-col">
+          {body ? (
+            <div className="min-h-0 flex-1 overflow-auto p-4">{body}</div>
+          ) : (
+            <div ref={setFillBox} data-html-embed-fill="" className="relative min-h-0 flex-1 overflow-hidden">
+              {frame}
+            </div>
+          )}
+        </figure>
       </PopoutDialog>
     );
   }
@@ -637,20 +687,8 @@ export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: Html
         </button>
         {pen}
       </figcaption>
-      {full && url !== null && (
-        <PopoutDialog
-          open
-          onClose={() => setFull(false)}
-          title={title}
-          className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-none"
-          dataAttributes={{ 'data-html-embed-popout': '' }}
-        >
-          <div className="flex h-9 shrink-0 items-center border-b border-border pl-4 pr-12 text-xs font-medium text-foreground">{title}</div>
-          <div className="min-h-0 flex-1">
-            <EmbedFrame url={url} theme={theme} mode="full" title={title} onEscape={() => setFull(false)} />
-          </div>
-        </PopoutDialog>
-      )}
+      {/* Full screen is the block opened big, the one path the Inbox's Artifacts open too: Code and the pen in its bar. */}
+      {full && url !== null && <HtmlEmbedBlock block={block} host={fullHost} open={fullOpen} />}
     </figure>
   );
 }

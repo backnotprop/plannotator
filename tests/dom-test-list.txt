@@ -20,6 +20,7 @@ packages/ui/components/html-viewer/HtmlViewer.sandbox.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameScale.test.tsx
 packages/ui/components/html-viewer/bridgeTouchSelection.test.tsx
 packages/ui/components/html-embed/HtmlEmbedBlock.test.tsx
+packages/ui/components/html-embed/HtmlEmbedBlock.full.test.tsx
 packages/ui/components/LazyBlockBoundary.test.tsx
 packages/ui/components/RegionBoundary.test.tsx
 packages/ui/components/inbox-thread/SnoozeMenu.test.tsx
@@ -277,6 +278,7 @@ packages/inbox/priority.test.tsx
 packages/inbox/rowStar.test.tsx
 packages/inbox/artifactPins.test.tsx
 packages/inbox/htmlArtifactOpen.test.tsx
+packages/inbox/htmlBlockWallFace.test.tsx
 packages/inbox/filePinsReadFails.test.tsx
 packages/inbox/pinnedRowLabel.test.tsx
 packages/inbox/fileBack.test.tsx

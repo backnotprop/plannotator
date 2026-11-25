@@ -23502,6 +23502,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-get-artifacts-html",
+      "title": "door:GET artifacts/html",
+      "surface": [
+        "door:GET artifacts/html"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-artifacts-html",
+      "title": "window:/api/inbox/artifacts/html",
+      "surface": [
+        "window:/api/inbox/artifacts/html"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

@@ -12,6 +12,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import type { MessageActs, MessageActsRef } from './parts/messageActs';
+import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
 
 const hasDom = typeof document !== 'undefined';
 const { ArtifactsView, HtmlArtifactOpen } = (hasDom ? await import('./components/ArtifactsView') : {}) as typeof import('./components/ArtifactsView');
@@ -20,6 +21,7 @@ const { openHtmlArtifact, resetHtmlArtifactOpenForTest } = (hasDom ? await impor
 const { resetArtifactPinsForTest } = (hasDom ? await import('./artifactPins') : {}) as typeof import('./artifactPins');
 const { resetEmbedGateForTests } = (hasDom ? await import('@plannotator/ui/components/html-embed/loadGate') : {}) as typeof import('@plannotator/ui/components/html-embed/loadGate');
 const { parseMarkdownToBlocks } = (hasDom ? await import('@plannotator/ui/utils/parser') : {}) as typeof import('@plannotator/ui/utils/parser');
+const { HtmlEmbedBlock } = (hasDom ? await import('@plannotator/ui/components/html-embed/HtmlEmbedBlock') : {}) as typeof import('@plannotator/ui/components/html-embed/HtmlEmbedBlock');
 
 const THREAD = 'msg_01M6XV5A40WH334FPF7KQQH5S5';
 const EMBED_ID = '0123456789abcdef0123456789abcdef';
@@ -117,8 +119,10 @@ test("a block's tile is in the grid, in text, and opens the block's own page big
   expect(tiles()[0]!.textContent).toContain('Harbor · tide table');
   expect(tiles()[1]!.textContent).toContain('HTML block');
   for (const tile of tiles()) expect(tile.textContent).toContain('in text');
-  // The grid draws no live page: only the quiet frame that runs no script.
-  expect(document.querySelectorAll('[data-artifacts-view] iframe[sandbox=""]').length).toBe(2);
+  // The grid draws no live page: only the quiet frame that runs no script; the chart only its script draws keeps the mark.
+  expect(document.querySelectorAll('[data-artifacts-view] iframe[sandbox=""]').length).toBe(1);
+  expect(tiles()[0]!.querySelector('iframe[sandbox=""]')).not.toBeNull();
+  expect(tiles()[1]!.querySelector('iframe')).toBeNull();
   expect(embedded).toEqual([]);
 
   tiles()[1]!.focus();
@@ -169,4 +173,56 @@ test('opened from the Wall, closing goes back to the Wall; a block not in the th
   await act(async () => openHtmlArtifact(THREAD, `html:${THREAD}:ffffffffffffffff`));
   await settle();
   expect(opened()).toBeNull();
+});
+
+/** The title bar's tools of the open block, in order, as they look: which tool, its classes, its words. */
+const barTools = (dialog: HTMLElement) =>
+  [...dialog.querySelectorAll<HTMLElement>('[data-html-embed-code], [data-html-embed-annotate]')].map((tool) => [
+    tool.hasAttribute('data-html-embed-code') ? 'code' : 'pen',
+    tool.className,
+    tool.textContent,
+    tool.getAttribute('aria-pressed'),
+  ]);
+
+test("the block's own Full screen in the message is the view Artifacts opens: Code and the pen in its title bar, in the same order and look", async () => {
+  if (!hasDom) return;
+  // The view opened from Artifacts.
+  await mount(true);
+  await act(async () => tiles()[0]!.click());
+  await settle();
+  const fromArtifacts = barTools(opened()!);
+  expect(fromArtifacts.map(([tool]) => tool)).toEqual(['code', 'pen']);
+  await act(async () => opened()!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
+  await settle();
+  await act(async () => root!.unmount());
+  root = null;
+  document.body.innerHTML = '';
+
+  // The block in the message text, its Full screen pressed.
+  const block = parseMarkdownToBlocks(BODY, { frontmatter: false }).filter((b) => b.type === 'code')[0]!;
+  const embeds: HtmlEmbedHost = {
+    frameUrl: async () => `/api/inbox/embeds/${EMBED_ID}`,
+    author: 'Claude Code',
+    annotate: { frameUrl: async () => null, indexOf: () => 1, annotations: [], onAdd: () => true },
+  };
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.append(host);
+  await act(async () => {
+    root = createRoot(host!);
+    root.render(<HtmlEmbedBlock block={block} host={embeds} />);
+  });
+  await settle();
+  const inline = document.querySelector<HTMLElement>('figure[data-html-embed]')!;
+  await act(async () => inline.querySelector<HTMLButtonElement>('[data-html-embed-full]')!.click());
+  await settle();
+  const full = opened();
+  expect(full).not.toBeNull();
+  expect(barTools(full!)).toEqual(fromArtifacts);
+  expect(full!.querySelector('[data-html-embed-full]')).toBeNull();
+  // Closing leaves the block in the text as it was.
+  await act(async () => full!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
+  await settle();
+  expect(opened()).toBeNull();
+  expect(inline.isConnected).toBe(true);
 });

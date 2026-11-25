@@ -8,13 +8,16 @@
  * merged pins or the merged Wall without the other machine's pins and artifacts, or without their machine (so a
  * press or a tile would go to the wrong store); a pin made on the other computer not reaching this one; unpin not
  * landing; the other machine asleep: its pins dropped instead of shown as last known, or a press lost instead of
- * held and applied when it is back; and either direction working without the other.
+ * held and applied when it is back; and either direction working without the other. And a far html block's Wall
+ * tile: its source not readable through A's forward and B's door (`GET artifacts/html`), or the route's refusals not
+ * the statuses a request really gets (405, 403, 422, 404).
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxId, type InboxAttachment } from "@plannotator/core/inbox-types";
+import { inboxHtmlArtifactKey, inboxHtmlBlockHash } from "@plannotator/core/inbox-html-blocks";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer } from "./inbox";
@@ -166,4 +169,51 @@ describe("pinned artifacts across linked machines", () => {
       b.stop();
     }
   }, 150_000);
+
+  // The Wall's rows carry no source: a far html block's tile reads its own block on B, through A's forward and B's
+  // door. And every refusal is the status a request really gets from the server, not only the error it throws.
+  test("A's window reads B's html block through the forward and B's door; the route's refusals are 405, 403, 422 and 404", async () => {
+    const dataA = scratch("plannotator-artifact-html-linked-a-");
+    const dataB = scratch("plannotator-artifact-html-linked-b-");
+    const a = await start(dataA);
+    const b = await start(dataB, 60_000);
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+
+      const page = "<h2>Harbor · berth plan</h2><p>B1 MV Fernwood</p>";
+      const project = b.store.ensureProject({ name: "harbor", root: "/work/harbor" });
+      const message = b.store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses_harbor", name: "Claude Code" }, thread: "harbor", subject: "Berths", body: ["The plan:", "", "```html", page, "```"].join("\n") }).message;
+      const key = inboxHtmlArtifactKey(message.id, inboxHtmlBlockHash(page));
+      const query = `key=${encodeURIComponent(key)}`;
+
+      // A's Wall lists B's block with its machine; A's window reads its source on B.
+      await waitFor("B's html block on A's Wall", async () => ((await wall(a.port)).artifacts as Json[]).some((row) => row.key === key && row.machine === bId), 15_000);
+      const far = await fetch(`${at(a.port)}/api/inbox/m/${bId}/artifacts/html?${query}`);
+      expect(far.status).toBe(200);
+      expect(await far.json()).toEqual({ html: page });
+      // A block B does not hold: B's 404, through the forward.
+      const gone = inboxHtmlArtifactKey(message.id, inboxHtmlBlockHash("<p>never sent</p>"));
+      expect((await fetch(`${at(a.port)}/api/inbox/m/${bId}/artifacts/html?key=${encodeURIComponent(gone)}`)).status).toBe(404);
+      // B's own window reads it too; A's own route does not hold B's block.
+      expect((await fetch(`${at(b.port)}/api/inbox/artifacts/html?${query}`)).status).toBe(200);
+      const notHere = await fetch(`${at(a.port)}/api/inbox/artifacts/html?${query}`);
+      expect(notHere.status).toBe(404);
+      expect(((await notHere.json()) as Json).code).toBe("artifact_not_found");
+
+      // The refusals, as the server answers them.
+      expect((await fetch(`${at(b.port)}/api/inbox/artifacts/html?${query}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(405);
+      expect((await fetch(`${at(b.port)}/api/inbox/artifacts/html?${query}`, { headers: { "Sec-Fetch-Site": "cross-site", Origin: "https://elsewhere.example" } })).status).toBe(403);
+      const bad = await fetch(`${at(b.port)}/api/inbox/artifacts/html?key=${encodeURIComponent(`guide:${message.id}`)}`);
+      expect(bad.status).toBe(422);
+      expect(((await bad.json()) as Json).code).toBe("validation_error");
+      expect((await fetch(`${at(b.port)}/api/inbox/artifacts/html`)).status).toBe(422);
+      expect((await fetch(`${at(b.port)}/api/inbox/artifacts/html?key=${encodeURIComponent(gone)}`)).status).toBe(404);
+    } finally {
+      a.stop();
+      b.stop();
+    }
+  }, 90_000);
 });

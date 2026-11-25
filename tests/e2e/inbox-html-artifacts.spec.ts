@@ -2,13 +2,16 @@
  * A live html block of a message is an artifact of its thread (the owner, 2026-11-25: "I want to render html inline
  * still and offer same UX there. Can annotate inline and all. Ideally it would show in artifacts"): on the compiled
  * binary, a made-up thread whose message shows a picture and two html blocks, neither loading anything from the
- * web. The blocks stay live in the message exactly as before (Code, Full screen, the pen). Each is also in the
- * header's count, the thread's Artifacts grid (a quiet tile: the page's heading, else "HTML block") and the
- * Artifacts wall; its tile opens the block's own page big, with Code and the pen, never the file viewer. A comment
+ * web. The blocks stay live in the message (Code, Full screen, the pen); Full screen is the same view Artifacts
+ * opens, Code and the pen in its bar. Each is also in the header's count, the thread's Artifacts grid and the
+ * Artifacts wall (the page's heading, else "HTML block"; the page drawn small with no script, or the quiet HTML mark
+ * for a chart only its script draws); its tile opens the block's own page big, with Code and the pen, never the file viewer. A comment
  * made there is the message's own (the block in the text shows it, Send names "HTML block 1 in the message"), the
  * tile pins, the Wall's tile opens the same and closing goes back to the Wall, and a phone does the same. A block
  * that asks a made-up host for a picture, a stylesheet, a background and a prefetch asks it nothing from the grid
- * or the Wall. The block's own Full screen (unchanged) is shot beside the view opened from Artifacts.
+ * or the Wall, whose tile reads the block and draws its picture. The block's own Full screen is shot beside the view
+ * opened from Artifacts; in both the page's frame fills the dialog and scrolls (Full screen's mode), and a marker
+ * pressed in the block's own Full screen leaves it open, the focus in it and the thread behind it where it was.
  *
  * Whole-window PNGs, 1440 × 900 light and dark and a 390 × 844 phone, land in PLANNOTATOR_E2E_SHOTS_DIR (default
  * `.local/proof/html-artifacts`).
@@ -35,9 +38,35 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
 }
 
-/** Every request a frame of the page makes (a tile's picture, a block's page) goes to the Inbox itself or stays in the page: nothing from the web. */
-function offTheWeb(page: Page, origin: string): string[] {
+/**
+ * A block opened big: its frame fills the box under the dialog's bar (not its page's own height, which caps at
+ * 20,000 px and grows a `100vh` page), and its page is in Full screen's mode, so it scrolls in the frame, down and
+ * sideways (the message's mode hides both).
+ */
+async function expectFills(dialog: ReturnType<Page['locator']>, frame: ReturnType<Page['locator']>): Promise<void> {
+  const fill = dialog.locator('[data-html-embed-fill]');
+  await expect
+    .poll(async () => {
+      const [outer, inner] = await Promise.all([fill.boundingBox(), frame.boundingBox()]);
+      return !!outer && !!inner && outer.height > 300 && Math.abs(outer.height - inner.height) <= 2;
+    }, { timeout: 20_000 })
+    .toBe(true);
+  const page = (await (await frame.elementHandle())!.contentFrame())!;
+  await expect.poll(() => page.evaluate(() => [document.documentElement.getAttribute('data-pn-embed'), getComputedStyle(document.documentElement).overflowY !== 'hidden']), { timeout: 20_000 }).toEqual(['full', true]);
+}
+
+/**
+ * Every request a frame of the page makes (a tile's picture, a block's page) goes to the Inbox itself or stays in the
+ * page: nothing from the web. One the window's policy stopped in the browser (Chromium reports it failed with "csp":
+ * the Wall's still picture of the ledger page, whose links it never follows) never left, so it is not counted; that
+ * nothing reaches the host is guarded above, with the route.
+ */
+function offTheWeb(page: Page, origin: string): () => string[] {
   const out: string[] = [];
+  const stopped = new Set<string>();
+  page.on('requestfailed', (request) => {
+    if (request.failure()?.errorText === 'csp') stopped.add(request.url());
+  });
   page.on('request', (request) => {
     let framed = false;
     try {
@@ -50,7 +79,7 @@ function offTheWeb(page: Page, origin: string): string[] {
     const local = [origin, origin.replace('localhost', '127.0.0.1'), origin.replace('127.0.0.1', 'localhost')].some((own) => url.startsWith(own));
     if (framed && !local && !/^(?:data|blob|about):/.test(url)) out.push(url);
   });
-  return out;
+  return () => out.filter((url) => !stopped.has(url));
 }
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
@@ -174,7 +203,12 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await expect(tileFrame).toHaveAttribute('srcdoc', /^<meta http-equiv="x-dns-prefetch-control" content="off">/);
     await watch.waitForTimeout(2000);
     await watch.goto(`${url}#artifacts`);
-    await expect(watch.locator('[data-wall-artifact]').filter({ hasText: 'Ledger · export' })).toHaveCount(1, { timeout: 20_000 });
+    const ledgerCard = watch.locator('[data-wall-artifact]').filter({ hasText: 'Ledger · export' });
+    await expect(ledgerCard).toHaveCount(1, { timeout: 20_000 });
+    // The Wall draws the same still picture, its source read once the tile is near: the same frame, the same policy.
+    const wallFrame = ledgerCard.locator('[data-face="html-block"][data-html-picture] iframe');
+    await expect(wallFrame).toHaveAttribute('sandbox', '', { timeout: 20_000 });
+    await expect(wallFrame).toHaveAttribute('srcdoc', /^<meta http-equiv="x-dns-prefetch-control" content="off">/);
     await watch.waitForTimeout(2000);
     // Nothing reached the host; whatever the tile's page asked for, the window's policy stopped in the browser.
     expect(reached).toEqual([]);
@@ -195,14 +229,22 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await expect(inline.first()).toHaveAttribute('data-html-embed-phase', 'ready', { timeout: 20_000 });
     expect(await inline.first().locator('figcaption button').evaluateAll((buttons) => buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim()))).toEqual(['Code', 'Full screen', 'Annotate']);
     await shot(page, '01-thread-with-count-desktop');
-    // The block's own Full screen, unchanged, to set beside the one opened from Artifacts (03).
+    // The block's own Full screen is the view Artifacts opens (03): Code and the pen in its title bar, in that order.
     await inline.first().locator('[data-html-embed-full]').click();
-    const popout = page.locator('[data-popout]');
+    const popout = page.locator('[data-html-embed-open]');
     await expect(popout).toBeVisible();
-    await expect(page.locator('[data-html-embed-open]')).toHaveCount(0);
+    await expect(popout.locator('figure[data-html-embed]')).toHaveAttribute('data-html-embed-phase', 'ready', { timeout: 20_000 });
+    expect(await popout.locator('[data-html-embed-code], [data-html-embed-annotate]').evaluateAll((tools) => tools.map((t) => t.getAttribute('aria-label') ?? t.textContent?.trim()))).toEqual(['Code', 'Annotate']);
+    await expect(popout.locator('[data-html-embed-full]')).toHaveCount(0);
+    // Its page fills the dialog under the bar and scrolls there (Full screen's mode), never the message's frame.
+    const fullFrame = popout.locator('iframe[data-html-embed-frame="full"]');
+    await expect(fullFrame).toHaveCount(1);
+    await expectFills(popout, fullFrame);
     await shot(page, '01b-inline-full-screen-desktop');
     await popout.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(popout).toHaveCount(0);
+    // The block in the text is as it was.
+    await expect(inline.first()).toHaveAttribute('data-html-embed-phase', 'ready');
 
     await button.click();
     const tiles = page.locator('[data-artifacts-view] [data-artifact-tile]');
@@ -214,6 +256,9 @@ test('an html block is an artifact: the count, the grid, opened big with its too
       await expect(tiles.nth(i)).toHaveAttribute('data-artifact-kind', 'html-block');
       await expect(tiles.nth(i)).toContainText('in text');
     }
+    // The berth plan's still picture; the tide chart, which only its script draws, keeps the quiet HTML mark.
+    await expect(tiles.nth(1).locator('[data-html-picture] iframe')).toHaveAttribute('sandbox', '');
+    await expect(tiles.nth(2).locator('iframe')).toHaveCount(0);
     await shot(page, '02-grid-with-html-tiles-desktop');
 
     // The tile opens the block's own page, big, with its tools; never the file viewer.
@@ -226,6 +271,7 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await expect(pen).toHaveAccessibleName('Annotate');
     await expect(big.locator('[data-html-embed-code]')).toBeVisible();
     await expect(big.locator('[data-html-embed-full]')).toHaveCount(0);
+    await expectFills(big, big.locator('iframe[data-html-embed-frame="full"]'));
     await shot(page, '03-block-open-from-grid-desktop');
 
     // A comment on an element, as under the block in the text.
@@ -259,12 +305,52 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await page.goto(`${url}#thread=${sent.thread_id}`);
     await expect(inline.first()).toHaveAttribute('data-html-embed-comments', /\S/, { timeout: 20_000 });
 
+    // The pen in the block's own Full screen, as in Artifacts: its marker there opens its comment there only. Nothing
+    // behind the dialog is selected or takes the focus (which would close it), and the thread under it does not scroll.
+    await inline.first().scrollIntoViewIfNeeded();
+    const threadScroll = () =>
+      inline.first().evaluate((el) => {
+        for (let node = el.parentElement; node; node = node.parentElement) {
+          const overflow = getComputedStyle(node).overflowY;
+          if ((overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight) return node.scrollTop;
+        }
+        return window.scrollY;
+      });
+    const scrolledBefore = await threadScroll();
+    await inline.first().locator('[data-html-embed-full]').click();
+    await expect(popout).toBeVisible();
+    const fullPen = popout.locator('[data-html-embed-annotate]');
+    await expect(fullPen).toBeVisible();
+    const fullAnnotatable = popout.locator('[data-html-embed-annotatable] iframe');
+    await expect(fullAnnotatable).toHaveAttribute('sandbox', 'allow-scripts allow-forms', { timeout: 20_000 });
+    await expectFills(popout, fullAnnotatable);
+    const fullPage = (await (await fullAnnotatable.elementHandle())!.contentFrame())!;
+    const marker = fullPage.locator('[data-plannotator-marker]');
+    await expect(marker).toHaveCount(1, { timeout: 20_000 });
+    await fullPen.click();
+    await expect(fullPen).toHaveAttribute('aria-pressed', 'true');
+    await shot(page, '01c-inline-full-screen-pen-desktop');
+    await fullPen.click();
+    await marker.click();
+    await page.waitForTimeout(800);
+    await expect(popout).toBeVisible();
+    expect(await page.evaluate(() => !!document.activeElement?.closest('[data-html-embed-open]'))).toBe(true);
+    expect(await threadScroll()).toBe(scrolledBefore);
+    await popout.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(popout).toHaveCount(0);
+
     await page.goto(`${url}#artifacts`);
     const wall = page.locator('[data-wall-artifact]');
     // The harbor thread's three and the ledger page.
     await expect(wall).toHaveCount(4, { timeout: 20_000 });
     await expect(wall.filter({ hasText: 'Harbor · berth plan' })).toHaveCount(1);
     await expect(wall.filter({ hasText: 'HTML block' })).toHaveCount(1);
+    // Pictures, not blank cards: the berth plan and the ledger page drawn small; the script-drawn chart's mark.
+    for (const name of ['Harbor · berth plan', 'Ledger · export']) {
+      await expect(wall.filter({ hasText: name }).locator('[data-html-picture] iframe')).toHaveAttribute('sandbox', '', { timeout: 20_000 });
+    }
+    await expect(wall.filter({ hasText: 'HTML block' }).locator('[data-face="html-block"]')).toBeVisible();
+    await expect(wall.filter({ hasText: 'HTML block' }).locator('iframe')).toHaveCount(0);
     await shot(page, '06-artifacts-wall-desktop');
     // The Wall's tile opens the same, over its thread; closing goes back to the Wall.
     await wall.filter({ hasText: 'HTML block' }).locator('.ib-wall-tile').click();
@@ -292,10 +378,12 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await smallBig.getByRole('button', { name: 'Close', exact: true }).tap();
     await expect(smallBig).toHaveCount(0);
     await small.goto(`${url}#artifacts`);
-    await expect(small.locator('[data-wall-artifact]').filter({ hasText: 'Harbor · berth plan' })).toHaveCount(1, { timeout: 20_000 });
+    const smallBerths = small.locator('[data-wall-artifact]').filter({ hasText: 'Harbor · berth plan' });
+    await expect(smallBerths).toHaveCount(1, { timeout: 20_000 });
+    await expect(smallBerths.locator('[data-html-picture] iframe')).toHaveAttribute('sandbox', '', { timeout: 20_000 });
     await shot(small, '10-artifacts-wall-phone');
     await phone.close();
-    expect(smallWeb).toEqual([]);
+    await expect.poll(smallWeb).toEqual([]);
 
     // Send: the comment made big is the text's block's, as one made under it.
     await page.goto(`${url}#thread=${sent.thread_id}`);
@@ -307,7 +395,7 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     const feedback = reply.body as string;
     expect(feedback).toMatch(/HTML block 1 in the message, lines \d+–\d+/);
     expect(feedback).toContain('Hold B2 for the Quill Star until the tide check.');
-    expect(web).toEqual([]);
+    await expect.poll(web).toEqual([]);
     await context.close();
   } finally {
     await agent.close().catch(() => {});
