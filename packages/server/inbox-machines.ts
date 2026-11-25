@@ -36,7 +36,7 @@ import { INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, is
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { createMachinePulls } from "./inbox-machine-pulls";
-import { MACHINE_GUIDE_IMAGE_ROUTE, MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, machineLinkedPageAnswer, machineMarkdownImageAnswer } from "./inbox-machine-files";
+import { MACHINE_GUIDE_IMAGE_ROUTE, MACHINE_GUIDE_JSON_ROUTE, MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, machineGuideJsonAnswer, machineLinkedPageAnswer, machineMarkdownImageAnswer } from "./inbox-machine-files";
 import { farCsp, MACHINE_ASSET_ROUTE, MACHINE_PAGE_ROUTE, MACHINE_VIEW_ROUTE, machineAssetAnswer, machineAssetCsp, machinePageAnswer, machineViewAnswer } from "./inbox-machine-page";
 import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
 import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent-read";
@@ -1027,6 +1027,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         // A Markdown file's pictures and a document next to a file (inbox-machine-files.ts): as a local file's.
         if (MACHINE_MARKDOWN_IMAGE_ROUTE.test(route) || MACHINE_GUIDE_IMAGE_ROUTE.test(route)) return passAnswer(machineMarkdownImageAnswer(answer), { csp: MACHINE_IMAGE_CSP, head });
         if (MACHINE_LINKED_PAGE_ROUTE.test(route)) return passAnswer(await machineLinkedPageAnswer(answer, machine));
+        if (MACHINE_GUIDE_JSON_ROUTE.test(route)) return passAnswer(await machineGuideJsonAnswer(answer));
         // Its folder, read from an opaque origin as a local page's is: CORS reads (fonts, module scripts) as here,
         // under a local folder's CSP, never the far one.
         if (MACHINE_ASSET_ROUTE.test(route)) {

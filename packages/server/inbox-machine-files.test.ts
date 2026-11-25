@@ -13,7 +13,7 @@ import { INBOX_MESSAGE_IMAGE_CSP } from "@plannotator/shared/inbox/message-image
 import { doorRouteOf } from "./inbox-devices";
 import { INBOX_HTML_DOCUMENT_CSP } from "./inbox-attachments";
 import { InboxLinks } from "./inbox-links";
-import { MACHINE_IMAGE_MAX_BYTES, machineMarkdownImageAnswer } from "./inbox-machine-files";
+import { MACHINE_GUIDE_JSON_MAX_BYTES, MACHINE_IMAGE_MAX_BYTES, machineMarkdownImageAnswer } from "./inbox-machine-files";
 import { createInboxMachines } from "./inbox-machines";
 
 const FAR = "ibx_01K00000000000000000000000";
@@ -98,6 +98,15 @@ function farDoor() {
         if (name === "page.png") return new Response("<script>top.x()</script>", { headers: { ...HOSTILE, "Content-Type": "text/html" } });
         if (name === "huge.png") return new Response(streamed(MACHINE_IMAGE_MAX_BYTES + 10), { headers: { "Content-Type": "image/png" } });
         return Response.json({ reason: "too-large", error: "The file is larger than 10 MB" }, { status: 413 });
+      }
+      // Its JSON reads: a changed file's whole text, the package changes card.
+      if (route === `messages/${GUIDE}/guide/file` || route === `messages/${GUIDE}/guide/package-changes`) {
+        const name = path ?? url.searchParams.get("snapshot");
+        if (name === "src/app.ts" || name === GUIDE) return Response.json({ path: "src/app.ts", content: "export const harbor = 1;\n" }, { headers: HOSTILE });
+        if (name === "page.ts") return new Response("<script>top.x()</script>", { headers: { "Content-Type": "text/html" } });
+        if (name === "broken.ts") return new Response("{not json", { headers: { "Content-Type": "application/json" } });
+        if (name === "huge.ts") return new Response(streamed(MACHINE_GUIDE_JSON_MAX_BYTES + 10), { headers: { "Content-Type": "application/json" } });
+        return Response.json({ error: "Not a file the guide changes.", code: "guide_file_refused" }, { status: 404 });
       }
       if (route === `attachments/${MD}/linked-page`) {
         if (path === "notes.md") return Response.json({ serverSession: "far", path: "/work/docs/notes.md", name: "notes.md", html: null, text: "# Notes", url: "https://evil.example/" });
@@ -266,6 +275,25 @@ describe("a far guided review's pictures", () => {
     // Its own refusal (the preview's words) comes back as it said it.
     const refused = await get(reads("big.png")[0]!);
     expect([refused.status, ((await refused.json()) as { reason: string }).reason]).toEqual([413, "too-large"]);
+  });
+
+  test("its whole files and package changes: JSON under this computer's headers, read up to the cap and refused past it", async () => {
+    const { get } = await linkedInbox();
+    const file = (name: string) => `/api/inbox/m/${FAR}/messages/${GUIDE}/guide/file?path=${name}`;
+    const ok = await get(file("src/app.ts"));
+    expect([ok.status, await ok.json()]).toEqual([200, { path: "src/app.ts", content: "export const harbor = 1;\n" }]);
+    expect([ok.headers.get("content-type"), ok.headers.get("cache-control"), ok.headers.get("access-control-allow-origin"), ok.headers.get("content-disposition")]).toEqual(["application/json; charset=utf-8", "no-store", null, null]);
+    const cards = await get(`/api/inbox/m/${FAR}/messages/${GUIDE}/guide/package-changes?snapshot=${GUIDE}`);
+    expect(cards.status).toBe(200);
+    const huge = await get(file("huge.ts"));
+    expect([huge.status, ((await huge.json()) as { code: string }).code]).toEqual([413, "machine_answer_too_large"]);
+    for (const name of ["page.ts", "broken.ts"]) {
+      const odd = await get(file(name));
+      expect([name, odd.status, ((await odd.json()) as { code: string }).code]).toEqual([name, 502, "machine_answer_unreadable"]);
+    }
+    // Its own refusal comes back as it said it.
+    const refused = await get(file("other.ts"));
+    expect([refused.status, ((await refused.json()) as { code: string }).code]).toEqual([404, "guide_file_refused"]);
   });
 
   test("only this Inbox's window reads them: a bare call is refused, never asked of the far machine", async () => {
