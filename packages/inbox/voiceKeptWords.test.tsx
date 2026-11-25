@@ -105,11 +105,13 @@ afterEach(async () => {
   // The box's last save (sent as it unmounts) is answered by this test's fetch: one failing on the real fetch would
   // be kept for the thread and show in the next test's box.
   for (let i = 0; i < 100 && replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const left = replyDraftUnsaved();
   resetComposerState?.();
   resetMachineRoutes?.();
   clearLateVoiceMiss?.(THREAD);
   clearLateVoiceMiss?.(OTHER);
   while (restore.length > 0) restore.pop()!();
+  if (left) throw new Error('the test left a reply draft save on its way, or words not saved');
 });
 
 async function settle(): Promise<void> {
@@ -359,6 +361,9 @@ describe.skipIf(!hasDom)("the thread's reply box while it says Transcribing", ()
     expect(el.textContent).not.toContain(LATE_VOICE_MISSED);
     await openBox(el);
     expect(boxText(el)).toContain('dictated words');
+    // Discard lets them go: nothing is left kept in the page for the next test.
+    await act(async () => (el.querySelector('[data-reply-discard]') as HTMLButtonElement).click());
+    await settle();
   });
 
   test('another thread opened mid-recording: the mic stops, the other box starts clean, and what was said goes to its own draft', async () => {

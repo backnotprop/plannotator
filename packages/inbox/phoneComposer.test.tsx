@@ -107,8 +107,10 @@ afterEach(async () => {
   // The box's words the pane saves as it goes land on this stub before the real fetch is back: a save that did not
   // land is kept for its thread (the next test's box would show it).
   for (let i = 0; i < 100 && replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const left = replyDraftUnsaved();
   globalThis.fetch = savedFetch;
   setSessionLabels({});
+  if (left) throw new Error('the test left a reply draft save on its way, or words not saved');
 });
 
 async function settle(ms = 0) {

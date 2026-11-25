@@ -177,7 +177,9 @@ afterEach(async () => {
   // The box's last save (sent as it unmounts) is answered by this test's fetch: one failing on the real fetch would
   // be kept for the thread and show in the next test's box.
   for (let i = 0; i < 100 && mods.replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const left = mods.replyDraftUnsaved();
   globalThis.fetch = savedFetch;
+  if (left) throw new Error('the test left a reply draft save on its way, or words not saved');
 });
 
 async function wait(ms: number) {
