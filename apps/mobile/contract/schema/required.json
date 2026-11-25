@@ -458,6 +458,25 @@
       "session",
       "started_at"
     ],
+    "InboxGridNudge": [
+      "quiet_from"
+    ],
+    "InboxGridNudgeRow": [
+      "agent",
+      "last",
+      "seq",
+      "taken",
+      "to"
+    ],
+    "InboxGridNudgeRowAgent": [
+      "host",
+      "session"
+    ],
+    "InboxGridNudgeRowLast": [
+      "answered_at",
+      "at",
+      "quiet_from"
+    ],
     "InboxGuideCommentTarget": [
       "file",
       "line_end",

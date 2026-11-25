@@ -134,6 +134,7 @@ import { createInboxHandover, type InboxHandover } from "./handover";
 import { inboxTakeBackRefusal, type InboxHolder } from "./take-back";
 import { inboxWakeQuote } from "./wake-quote";
 import { planSkillReaction } from "./skill-reaction";
+import { planGridNudge } from "./grid-nudge-mark";
 import { laterActed, personActOfAnnotation, personActOfMessage, personActOfMessageLine, personActOfQuestion } from "./acted";
 import { isNewThreadFromMessageAsk } from "@plannotator/core/inbox-reply-quote";
 import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
@@ -467,6 +468,11 @@ export interface InboxReplyInput {
    * a typed `/<skill>` reply's; nothing here changes them. Anything but one emoji and a skill name is a `422`.
    */
   skill_reaction?: unknown;
+  /**
+   * Nudge pressed on a stale line of Grid (approval "inbox-agent-grid", round 4): `{ quiet_from }`, kept on the reply
+   * (`InboxMessage.nudge`). The words are the window's; nothing here changes them. Anything else is a `422`.
+   */
+  nudge?: unknown;
   /**
    * The person's verdict on the review this reply answers (code review in the
    * Inbox: Approve or Send feedback in the review's header). Only on a reply
@@ -4144,6 +4150,11 @@ export class InboxStore {
           const { skill_reaction: _skill, ...rest } = out;
           out = rest as InboxMessageWire;
         }
+        // A Grid nudge reads as its words to an agent: the mark is the window's.
+        if (message.nudge) {
+          const { nudge: _nudge, ...rest } = out;
+          out = rest as InboxMessageWire;
+        }
         if (message.ack !== undefined) {
           const { ack, ...rest } = out;
           out = { ...rest, ack: ack && ack.settled_seq != null && !ack.not_sent ? { label: ack.label, at: ack.at, reaction: ack.reaction ?? { emoji: "👍", label: INBOX_ACK_LABEL } } : null } as InboxMessageWire;
@@ -5478,6 +5489,7 @@ export class InboxStore {
     if (!Array.isArray(entries)) throw new InboxError("validation_error", "questions: must be a list.", { field: "questions" });
     const words = typeof input.words === "string" ? input.words : "";
     const skillReaction = planSkillReaction(input.skill_reaction);
+    const nudge = planGridNudge(input.nudge);
     // One Send to one session is one reply: the answers may be on any of the
     // session's messages in this thread. Each is planned against its own
     // message's questions (revisions included); nothing is written unless
@@ -5657,6 +5669,7 @@ export class InboxStore {
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
       ...(input.review_batch ? { review_batch: input.review_batch } : {}),
       ...(skillReaction ? { skill_reaction: skillReaction } : {}),
+      ...(nudge ? { nudge } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
     // a later reply never reaches the new owner before the hand-off does, and Undo can no longer

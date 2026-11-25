@@ -13,9 +13,12 @@
  */
 import type { InboxAgent, InboxAgentsGroup, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import type { GridPullIn, GridThreadIn } from '../../shared/inbox/grid';
+import { gridNudgeKeyRead } from '../../shared/inbox/grid-nudge-key';
 import { agentFinder, type ViewAgent } from '../agentsView/model';
+import { agentRowName, agentSessions, namedAgents } from '../agents/model';
+import type { OutboxView } from '../api';
 import type { MachinesModel } from '../machines';
-import { rowMachine } from '../machines';
+import { outboxLine, outboxPending, rowMachine } from '../machines';
 import { labelOfKey } from '../threadPulls/model';
 import { titleOf } from '../components/rowParts';
 
@@ -59,11 +62,51 @@ export interface GridInputs {
   labels?: Readonly<Record<string, string>>;
   /** The look this sitting compares with, per thread (the page keeps the first it read; grid/gridSeen.ts). */
   seenOf: (row: InboxListRow) => InboxListRow['grid_seen'] | undefined;
+  /** The writes this Inbox holds for other machines (the window's outbox): a held nudge counts as nudged. */
+  outbox?: ReadonlyMap<string, OutboxView>;
 }
 
-export function gridThreads({ sections, groups, machines, labels, seenOf }: GridInputs): GridThreadIn[] {
+/**
+ * The agent a nudge goes to, by its session on the thread's computer, as the Agents sidebar knows it: its name and
+ * whether its session is live. Null when the list does not name it there (its computer's agents not known, or not
+ * listed): its liveness is not known, so no Nudge is offered.
+ */
+function nudgeAgents(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel): (machine: string | null, session: string) => { name: string; live: boolean } | null {
+  const found = new Map<string, { name: string; live: boolean }>();
+  for (const { machine, agents } of namedAgents(groups, machines)) {
+    for (const agent of agents) {
+      const view = { name: agentRowName(agent), live: agent.live && agent.state !== 'ended' };
+      for (const session of agentSessions(agent)) if (!found.has(`${machine ?? ''}\u0000${session}`)) found.set(`${machine ?? ''}\u0000${session}`, view);
+    }
+  }
+  return (machine, session) => found.get(`${machine ?? ''}\u0000${session}`) ?? null;
+}
+
+/**
+ * Grid's nudges in this Inbox's outbox, by thread (their keys name it, grid-nudge-key.ts): one still waiting for its
+ * computer (held: when it was pressed, on this computer's clock, and the outbox's words), and one its computer refused
+ * when it got there (the outbox's words, and the quiet stretch's start on the thread's clock). Every window of this
+ * Inbox holds the same outbox, kept over a reload.
+ */
+function outboxNudges(outbox: ReadonlyMap<string, OutboxView> | undefined, machines: MachinesModel): Map<string, { held?: OutboxView; refused?: OutboxView; words: (entry: OutboxView) => string }> {
+  const out = new Map<string, { held?: OutboxView; refused?: OutboxView; words: (entry: OutboxView) => string }>();
+  for (const entry of outbox?.values() ?? []) {
+    const press = gridNudgeKeyRead(entry.key);
+    if (!press) continue;
+    const words = (e: OutboxView) => outboxLine(e, machines.all.find((m) => m.id === e.machine) ?? null)?.text ?? '';
+    const was = out.get(press.thread) ?? { words };
+    if (outboxPending(entry)) was.held = entry;
+    else if (entry.state === 'refused' && entry.notice && !entry.dismissed && (!was.refused || entry.queued_at > was.refused.queued_at)) was.refused = entry;
+    out.set(press.thread, was);
+  }
+  return out;
+}
+
+export function gridThreads({ sections, groups, machines, labels, seenOf, outbox }: GridInputs): GridThreadIn[] {
   const rows = gridRows(sections);
   const find = agentFinder({ sections, groups, machines, labels });
+  const nudgeAgentOf = nudgeAgents(groups, machines);
+  const outboxOf = outboxNudges(outbox, machines);
   const agents = rows.map((row) => find(row));
   const owners = pullOwners(rows);
   const clocks = new Map(machines.linked.flatMap((m) => (m.clock_ms ? [[m.id, m.clock_ms] as const] : [])));
@@ -85,10 +128,17 @@ export function gridThreads({ sections, groups, machines, labels, seenOf }: Grid
     const headline = row.pulls?.headline.key;
     const pulls = rowPulls(row)
       .filter((pull) => (owners.get(pull.key) ?? row.thread_id) === row.thread_id)
-      .map((pull) => (clock ? { ...pull, added_at: local(pull.added_at), read_at: local(pull.read_at) } : pull))
+      .map((pull) => (clock ? { ...pull, added_at: local(pull.added_at), read_at: local(pull.read_at), checks_at: local(pull.checks_at) } : pull))
       .sort((a, b) => Number(b.key === headline) - Number(a.key === headline));
     const seen = seenOf(row);
     const steps = row.steps_progress;
+    const nudge = row.grid_nudge;
+    const lastNudge = nudge?.last;
+    const held = outboxOf.get(row.thread_id);
+    const refusedKey = held?.refused ? gridNudgeKeyRead(held.refused.key) : null;
+    // A machine's agents are listed under its id once any is linked (agentFinder's rule).
+    const agentMachine = machines.all.length === 0 ? null : (row.machine ?? machines.self ?? null);
+    const to = nudge?.agent ? nudgeAgentOf(agentMachine, nudge.agent.session) : null;
     return [
       {
         id: row.thread_id,
@@ -112,6 +162,18 @@ export function gridThreads({ sections, groups, machines, labels, seenOf }: Grid
         pulls,
         steps: steps ? { done: steps.done, total: steps.total, doing: steps.doing, at: local(steps.at) } : null,
         seen: seen ? { through: seen.through - clock, at: seen.at - clock } : null,
+        nudge: nudge
+          ? {
+              to: nudge.to,
+              seq: nudge.seq,
+              // An Inbox before `taken` and `agent`: no nudge's agent is known, so none is offered.
+              taken: nudge.taken ?? 0,
+              agent: to,
+              last: lastNudge ? { at: local(lastNudge.at), quiet_from: local(lastNudge.quiet_from), answered_at: local(lastNudge.answered_at) } : null,
+              held: held?.held ? { at: held.held.queued_at, words: held.words(held.held) } : null,
+              refused: held?.refused && refusedKey ? { words: held.words(held.refused), quiet_from: refusedKey.quietFrom - clock } : null,
+            }
+          : null,
       },
     ];
   });

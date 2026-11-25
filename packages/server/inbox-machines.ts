@@ -61,6 +61,7 @@ import { createFarRoutines } from "./inbox-scheduled-machines";
 import { CAPABILITY_SET_MARK, type CapabilitySet } from "./inbox-capability-set";
 import type { SharedReactions } from "./inbox-reactions-shared";
 import { FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE } from "./inbox-far-tags";
+import { gridNudgeHeld } from "./inbox-grid-nudge";
 import { createLinkThrough, LINK_THROUGH_ASK_ROUTE, LINK_THROUGH_INTRODUCE_ROUTE, LINK_THROUGH_OFFER_ROUTE, LINK_THROUGH_ROUTES, LINK_THROUGH_WINDOW_ONLY, linkThroughAsks } from "./inbox-link-through";
 import type { LinkThroughView } from "@plannotator/core/inbox-link-through";
 
@@ -1123,7 +1124,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // A time already gone when it is asked for is the asker's to hear now. One that goes by in the queue is for that machine to settle.
     if (SNOOZE_ROUTE.test(route) && !outbox.get(String(body.idempotency_key)) && inboxSnoozeRefusal(body.until) === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
     // The window names the thread a write is about, so a held answer shows even where that thread cannot open.
-    const named = req.headers.get("X-Plannotator-Thread")?.trim() ?? "";
+    // Grid's Nudge names its thread in its key (inbox-grid-nudge.ts); one for a thread already waiting for that machine is
+    // the answer to a second (another window, a later turn, a reload): a thread is nudged once while its computer is away.
+    const nudge = body.nudge !== undefined && REPLY_ROUTE.test(route) ? gridNudgeHeld(outbox.list(machine, "pending"), String(body.idempotency_key ?? "")) : null;
+    if (nudge?.held) return outboxAnswer(nudge.held, false);
+    const named = req.headers.get("X-Plannotator-Thread")?.trim() || nudge?.thread || "";
     // Where the person was, when not at this window, said on so that machine's agent reads where they wrote it.
     const place = inboxForwardedPlace(context.sentFrom?.(req, via) ?? null);
     const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window, place);

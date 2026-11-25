@@ -367,6 +367,7 @@ import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createInboxGridSeen, gridSeenOf } from "./inbox-grid-seen";
 import { gridRowDecorator, gridRowStripped } from "./inbox-grid-row";
+import { gridNudgeReader, gridNudgeRefusal } from "./inbox-grid-nudge";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createShipReader } from "./inbox-ship-read";
 import { shipBinds, shipLaunchFailed, shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
@@ -1505,6 +1506,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullLooked = createInboxPullLooked(dataDir);
   // Grid's looks at this Inbox's threads (inbox-grid-seen.ts): inbox/grid-seen.json, written only when a window with Grid on sends one.
   const gridSeen = createInboxGridSeen(dataDir, (thread) => store.message(thread) !== null);
+  // Grid's Nudge on a row (inbox-grid-nudge.ts): kept for the server's life, each thread read again only when it changed.
+  const gridNudgeOf = gridNudgeReader(store);
   // PRs the person hid from Reviews, the PR board and the Inbox list (inbox-pull-hidden.ts): nothing is done on the forge.
   const pullHidden = createInboxPullHidden(dataDir);
   const pullHiddenChanged = () => {
@@ -2157,7 +2160,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return summary ? { ...row, pulls: summary } : row;
     };
     // Grid (approval "inbox-agent-grid", inbox-grid-row.ts): the thread's last look on Grid and its checklist's progress.
-    const withGrid = grid ? gridRowDecorator(gridSeen, stepsOn() ? store.allSteps() : null) : (row: InboxListRow) => row;
+    const withGrid = grid ? gridRowDecorator(gridSeen, stepsOn() ? store.allSteps() : null, gridNudgeOf) :(row: InboxListRow) => row;
     // `tags` (additive, approval "inbox-thread-tags"): the live tags a thread is in, on the window's and the phone's rows only.
     const tagsOf = store.allThreadTags();
     const withTags = (row: InboxListRow): InboxListRow => {
@@ -8534,6 +8537,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 throw new InboxError("thread_moved_on", "The agent wrote again after you read this thread; your reply was not sent. Read it again, then reply.");
               }
             }
+            // Grid's Nudge (inbox-grid-nudge.ts), held while this computer was away: refused when the work moved since
+            // its quiet stretch began (a step, a PR put on, a check run seen to start or end). A replay answers what it wrote.
+            if (body.nudge !== undefined) gridNudgeRefusal(store, threadPullStates, messageId, body);
             // The session that asked has ended and the person picked another
             // live session to take the reply: checked here as New message
             // checks its session (null: not live, 409 and nothing written).
@@ -8598,6 +8604,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 ...(body.author_only === true ? { author_only: true } : {}),
                 // A skill emoji pressed in the reaction tray: kept on the reply; the words are the window's `/<skill>` reply.
                 ...(body.skill_reaction !== undefined ? { skill_reaction: body.skill_reaction } : {}),
+                // Nudge pressed on Grid's stale line: kept on the reply; the words are the window's.
+                ...(body.nudge !== undefined ? { nudge: body.nudge } : {}),
               });
             } catch (error) {
               removeInboxAttachmentFiles(store.dir, attachments);

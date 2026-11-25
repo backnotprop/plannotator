@@ -103,6 +103,12 @@ export function drawMessageHead(d: MessageHeadData) {
                     {d.tagNames}
                   </span>
                 )}
+                {!isAgent && message.nudge && (
+                  // Nudge pressed on Grid's stale line (approval "inbox-agent-grid", round 4).
+                  <span className="ib-m-nudge" data-grid-nudge-mark="">
+                    <span className="ib-to-sep">·</span> Nudge from Grid
+                  </span>
+                )}
                 {!isAgent && message.board_request === true && (
                   <span className="ib-m-board" data-board-request="">
                     <span className="ib-to-sep">·</span>

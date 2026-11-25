@@ -23,44 +23,62 @@
  * its own computer). An end older than 7 days that no look ever showed (work
  * that ended before Grid could show it) is not drawn.
  *
- * Room for round 4 (being drawn, not built): a Stale group is one more
- * `GridGroup` in `GRID_GROUPS` and one more branch in `gridPlace`; a per-line
- * action (Nudge) is one more `GridAction` kind on `GridLine.actions`.
+ * Round 4 (approved 2026-11-24, built 2026-11-25): Stale, between Not moving
+ * and Landed. Open work with nothing happening for 3 hours (no step, push, test
+ * run or message) while its agent is still there, or a plan not started 12
+ * hours after it was made. Work that needs the person is never stale; anything
+ * happening brings it back to Moving. A stale line can be nudged (`GridAction`
+ * "nudge"): a reply from the person in its thread (grid-nudge.ts has its
+ * words). A nudged stretch stays on the bar as Stale after the work moves again.
  *
  * Pure: no runtime APIs, so the window and the tests share it.
  */
+import type { InboxGridNudgeRow } from "@plannotator/core/inbox-types";
 
-export type GridGroup = "you" | "move" | "quiet" | "land" | "plan" | "drop";
+export type GridGroup = "you" | "move" | "quiet" | "stale" | "land" | "plan" | "drop";
 
 /** The groups in page order, each with its heading. Landed's heading takes its word for when its work landed. */
 export const GRID_GROUPS: readonly { id: GridGroup; heading: string; count: string }[] = [
   { id: "you", heading: "Needs you", count: "need you" },
   { id: "move", heading: "Moving", count: "moving" },
   { id: "quiet", heading: "Not moving", count: "not moving" },
+  { id: "stale", heading: "Stale", count: "stale" },
   { id: "land", heading: "Landed", count: "landed" },
   { id: "plan", heading: "Not started", count: "not started" },
   { id: "drop", heading: "Dropped", count: "dropped" },
 ];
 
 /** A piece of a bar: where the work was, from when to when (ms). */
-export type GridPieceKind = "work" | "pr" | "wait" | "idle";
+export type GridPieceKind = "work" | "pr" | "wait" | "idle" | "stale";
 export interface GridPiece {
   kind: GridPieceKind;
   from: number;
   to: number;
 }
-export const GRID_PIECE_NAMES: Readonly<Record<GridPieceKind, string>> = { work: "Working", pr: "PR", wait: "Needs you", idle: "Not moving" };
+export const GRID_PIECE_NAMES: Readonly<Record<GridPieceKind, string>> = { work: "Working", pr: "PR", wait: "Needs you", idle: "Not moving", stale: "Stale" };
 
 export type GridDropWhy = "PR closed" | "agent ended" | "quiet 3 days";
 
-/** What a line can do. Today: open its thread. Round 4's Nudge is one more kind here. */
-export type GridAction = { kind: "open"; thread: string };
+/**
+ * What a line can do: open its thread; on a stale line whose thread names where a reply goes and whose agent there is
+ * live, nudge that agent (`agent`: its name). A nudge is a reply on message `to` (on the thread's own computer); its
+ * idempotency key (grid-nudge-key.ts) is made from `quietFrom` (on the thread's clock), `turn` (the three-hour turn of
+ * the stretch) and `taken` (the thread's nudges taken back), so a second press, a second window or a held copy writes
+ * it once, and a press after a Take back writes a new one.
+ */
+export type GridAction =
+  | { kind: "open"; thread: string }
+  | { kind: "nudge"; thread: string; to: string; seq: number; quietFrom: number; turn: number; taken: number; agent: string };
 
 export const GRID_MIN = 60_000;
 export const GRID_HOUR = 60 * GRID_MIN;
 export const GRID_DAY = 24 * GRID_HOUR;
 /** Open work with no movement this long is Not moving. */
 export const GRID_QUIET_MS = 20 * GRID_MIN;
+/** Open work with no movement this long is Stale (its agent still there); a nudge is offered again after as long. */
+export const GRID_STALE_MS = 3 * GRID_HOUR;
+/** A plan not started this long after it was made is Stale. */
+export const GRID_PLAN_STALE_MS = 12 * GRID_HOUR;
 /** Landed and Dropped stay at least this long, seen or not. */
 export const GRID_KEEP_MS = 3 * GRID_HOUR;
 /** Landed work unseen this long is only a count in the Since line. */
@@ -82,7 +100,24 @@ export interface GridPullIn {
   /** For a merged or closed PR: when the Inbox saw that state. */
   read_at: string | null;
   checks: "passing" | "failing" | "running" | null;
+  /**
+   * When the thread's computer saw its checks change (a push starts a run, a run ends), within minutes; null when it
+   * did not see it happen (no read close enough before it, or an older Inbox). Movement, as a step or a message is.
+   */
+  checks_at?: string | null;
   review: "approved" | "changes_requested" | "review_required" | null;
+}
+
+/**
+ * Nudge on one thread (the row's `grid_nudge`, core `InboxGridNudgeRow`), with what the window knows besides: the agent
+ * the nudge goes to (its name and whether its session is live: null when not known), a nudge for the thread held in
+ * this Inbox's outbox while its computer is away (`held`: when it was pressed, and what the outbox says), and one its
+ * computer refused when it got there (`refused`: the outbox's words, and the quiet stretch it was pressed in).
+ */
+export interface GridNudgeIn extends Omit<InboxGridNudgeRow, "agent"> {
+  agent: { name: string; live: boolean | null } | null;
+  held: { at: string; words: string } | null;
+  refused: { words: string; quiet_from: number } | null;
 }
 
 /** A thread's checklist as Grid reads it (the row's `steps_progress`). */
@@ -126,6 +161,8 @@ export interface GridThreadIn {
   steps: GridStepsIn | null;
   /** The person's last look at this line (`through`: its last landing or drop that look showed; `at`: when), ms. */
   seen: { through: number; at: number } | null;
+  /** Nudge (`GridNudgeIn`). Null from an Inbox that carries none: no Nudge. */
+  nudge: GridNudgeIn | null;
 }
 
 export interface GridLine {
@@ -146,9 +183,23 @@ export interface GridLine {
   planned: number | null;
   /** What it asks the person, under the name. */
   ask: string | null;
-  /** After the last piece: the PR's checks or review, or draft. */
-  detail: { words: string; bad: boolean } | null;
+  /**
+   * After the last piece: the PR's checks or review, or draft (`pr`: the PR it is about; `since`: when failing tests
+   * were seen to start failing, when known), or a stale plan's "not started".
+   */
+  detail: { words: string; bad: boolean; pr?: string | null; since?: number | null } | null;
   steps: GridStepsIn | null;
+  /** A stale line: when its quiet stretch began (its last movement, or when its plan was made). */
+  staleFrom: number | null;
+  /**
+   * The thread's last nudge: when, whether it was sent in the quiet stretch the line is in now ("Nudged 12 min ago"),
+   * and, for one still held for its computer, what the outbox says ("Will send when Mac mini is back").
+   */
+  nudged: { at: number; now: boolean; held: string | null } | null;
+  /** A held nudge its computer refused when it got there, pressed in the stretch the line is in now: the outbox's words. */
+  refused: string | null;
+  /** The agent a nudge goes to (it may not be the line's own agent after a hand-off), by name; null when not known. */
+  nudgeTo: string | null;
   actions: GridAction[];
   /** The order within its group. */
   at: number;
@@ -198,17 +249,24 @@ function prsOf(pulls: readonly GridPullIn[]): { label: string | null; at: number
 }
 
 function detailOf(open: readonly GridPullIn[]): GridLine["detail"] {
-  if (open.some((p) => p.checks === "failing")) return { words: "tests failing", bad: true };
+  const failing = open.find((p) => p.checks === "failing");
+  if (failing) return { words: "tests failing", bad: true, pr: failing.label, ...(failing.checks_at ? { since: ms(failing.checks_at) } : {}) };
   if (open.some((p) => p.checks === "running")) return { words: "tests running", bad: false };
   const first = open[0]!;
   if (first.review === "approved") return { words: "reviewed", bad: false };
   if (first.checks === "passing") return { words: "tests passing", bad: false };
-  return first.state === "draft" ? { words: "draft", bad: false } : null;
+  return first.state === "draft" ? { words: "draft", bad: false, pr: first.label } : null;
 }
 
-/** The bar: Working from the start, PR from when it was put on, and over them Needs you or Not moving to the end. */
-function piecesOf(start: number, prAt: number | null, end: number, over: GridPiece | null): GridPiece[] {
+/** The bar: Working from the start, PR from when it was put on, and over them a nudged stale stretch, then Needs you, Not moving or Stale to the end. */
+function piecesOf(start: number, prAt: number | null, end: number, ...overs: (GridPiece | null)[]): GridPiece[] {
   let pieces: GridPiece[] = prAt !== null && prAt < end ? [{ kind: "work", from: start, to: prAt }, { kind: "pr", from: prAt, to: end }] : [{ kind: "work", from: start, to: end }];
+  for (const over of overs) pieces = laid(pieces, over);
+  return pieces.filter((p) => p.to > p.from);
+}
+
+/** `over` laid on the pieces: what it covers is its kind. */
+function laid(pieces: GridPiece[], over: GridPiece | null): GridPiece[] {
   if (over && over.to > over.from) {
     const cut: GridPiece[] = [];
     for (const p of pieces) {
@@ -219,9 +277,16 @@ function piecesOf(start: number, prAt: number | null, end: number, over: GridPie
         if (p.to > over.to) cut.push({ kind: p.kind, from: over.to, to: p.to });
       }
     }
-    pieces = cut.filter((p, i) => !(i > 0 && cut[i - 1]!.kind === p.kind && cut[i - 1]!.to === p.from));
+    // Two pieces of one kind that meet are one.
+    const joined: GridPiece[] = [];
+    for (const p of cut.filter((piece) => piece.to > piece.from)) {
+      const was = joined.at(-1);
+      if (was && was.kind === p.kind && was.to === p.from) joined[joined.length - 1] = { ...was, to: p.to };
+      else joined.push(p);
+    }
+    return joined;
   }
-  return pieces.filter((p) => p.to > p.from);
+  return pieces;
 }
 
 export type GridPlace = { line: GridLine; place: "shown" | "earlier" | "counted" };
@@ -254,7 +319,20 @@ export function gridPlaceTimed(t: GridThreadIn, now: number): { placed: GridPlac
   const pr = prsOf(t.pulls);
   const prAt = pr?.at ?? null;
   const working = t.running || (t.agentState === "working" && t.agentHere);
-  const moved = Math.max(start, ms(t.last_agent_at) ?? start, ms(t.sent?.checked_at) ?? start, prAt ?? start, ms(t.steps?.at) ?? start);
+  const lastNudge = t.nudge?.last ?? null;
+  const lastAt = ms(lastNudge?.at);
+  // A nudge held for the thread's computer is a nudge sent, in every window and after a reload: it counts as nudged now.
+  const heldAt = ms(t.nudge?.held?.at);
+  const nudgeAt = heldAt !== null && (lastAt === null || heldAt > lastAt) ? heldAt : lastAt;
+  // The nudge's own delivery is not movement: the agent being handed the person's nudge has done nothing yet.
+  const sentIsNudge = lastAt !== null && t.sent !== null && ms(t.sent.at) === lastAt;
+  // A check run seen to start or end on an open PR is movement too (a push starts one).
+  const checksAt = Math.max(start, ...t.pulls.flatMap((p) => (inPlay(p.state) ? (ms(p.checks_at) ?? []) : [])));
+  const moved = Math.max(start, ms(t.last_agent_at) ?? start, (sentIsNudge ? null : ms(t.sent?.checked_at)) ?? start, prAt ?? start, ms(t.steps?.at) ?? start, checksAt);
+  // A nudged stretch the work came back from stays on the bar as Stale: from its start to the agent's first answer.
+  const nudgeFrom = ms(lastNudge?.quiet_from);
+  const nudgedStretch: GridPiece | null =
+    lastAt !== null && nudgeFrom !== null && moved > lastAt ? { kind: "stale", from: nudgeFrom, to: Math.min(ms(lastNudge?.answered_at) ?? moved, moved) } : null;
   const ask = askWords(t);
   const ended = t.session_ended || t.agentState === "ended";
   const unseen = (at: number) => t.seen === null || t.seen.through < at;
@@ -274,9 +352,27 @@ export function gridPlaceTimed(t: GridThreadIn, now: number): { placed: GridPlac
     ask: null,
     detail: pr?.detail ?? null,
     steps: t.steps,
+    staleFrom: null,
+    nudged: nudgeAt !== null ? { at: nudgeAt, now: nudgeAt >= moved, held: nudgeAt === heldAt ? t.nudge!.held!.words : null } : null,
+    refused: null,
+    nudgeTo: t.nudge?.agent?.name ?? null,
     actions: [{ kind: "open", thread: t.id }] as GridAction[],
   } satisfies Partial<GridLine>;
   const idleOver = (end: number): GridPiece | null => (!working && end - moved >= GRID_QUIET_MS ? { kind: "idle", from: moved, to: end } : null);
+  /**
+   * A stale line: its refusal, and its actions. Nudge, while its thread names where a reply goes, the agent it goes to
+   * is live (not known: no Nudge), none is held for its computer, none was refused in this stretch, and none went in
+   * the last three quiet hours.
+   */
+  const staleOf = (quietFrom: number): Pick<GridLine, "refused" | "actions"> => {
+    const nudge = t.nudge;
+    // A refusal of a nudge pressed in this stretch (its start the same to within a minute: clocks are read again).
+    const refused = nudge?.refused && Math.abs(nudge.refused.quiet_from - quietFrom) < GRID_MIN ? nudge.refused.words : null;
+    const again = nudgeAt === null || nudgeAt < quietFrom || now - nudgeAt >= GRID_STALE_MS;
+    if (!nudge || nudge.agent?.live !== true || nudge.held || refused || !again) return { refused, actions: base.actions };
+    const turn = Math.floor((now - quietFrom) / GRID_STALE_MS);
+    return { refused, actions: [...base.actions, { kind: "nudge", thread: t.id, to: nudge.to, seq: nudge.seq, quietFrom, turn, taken: nudge.taken, agent: nudge.agent.name }] };
+  };
 
   // The marks an ended line crosses: first sight, its 3 hours, 12 hours unseen, Earlier's week.
   const endMarks = (at: number) => [at + GRID_FIRST_SIGHT_MS, at + GRID_KEEP_MS, at + GRID_LANDED_MAX_MS, Math.max(at + GRID_KEEP_MS, t.seen?.at ?? 0) + GRID_EARLIER_MS];
@@ -284,12 +380,12 @@ export function gridPlaceTimed(t: GridThreadIn, now: number): { placed: GridPlac
 
   if (ask) {
     const since = ms(t.waiting_since) ?? moved;
-    return timed({ place: "shown", line: { ...base, group: "you", ask, pieces: piecesOf(start, prAt, now, { kind: "wait", from: since, to: now }), at: since } }, minute);
+    return timed({ place: "shown", line: { ...base, group: "you", ask, pieces: piecesOf(start, prAt, now, nudgedStretch, { kind: "wait", from: since, to: now }), at: since } }, minute);
   }
   if (pr?.state === "merged") {
     const at = pr.end ?? moved;
     if (t.seen === null && now - at >= GRID_FIRST_SIGHT_MS) return timed(null, Infinity);
-    const line: GridLine = { ...base, group: "land", fresh: unseen(at), unseen: unseen(at), merged: at, pieces: piecesOf(start, prAt, at, null), at };
+    const line: GridLine = { ...base, group: "land", fresh: unseen(at), unseen: unseen(at), merged: at, pieces: piecesOf(start, prAt, at, nudgedStretch), at };
     const until = next(...endMarks(at));
     if (unseen(at)) return timed({ place: now - at < GRID_LANDED_MAX_MS ? "shown" : "counted", line }, until);
     return timed(now - at < GRID_KEEP_MS ? { place: "shown", line } : afterSeen(at, line), until);
@@ -300,20 +396,33 @@ export function gridPlaceTimed(t: GridThreadIn, now: number): { placed: GridPlac
   else if (!working && now - moved >= GRID_DROP_QUIET_MS) dropped = { at: moved + GRID_DROP_QUIET_MS, why: "quiet 3 days" };
   if (dropped) {
     if (t.seen === null && now - dropped.at >= GRID_FIRST_SIGHT_MS) return timed(null, Infinity);
-    const line: GridLine = { ...base, group: "drop", detail: null, unseen: unseen(dropped.at), dropped, pieces: piecesOf(start, prAt, dropped.at, idleOver(dropped.at)), at: dropped.at };
+    const line: GridLine = { ...base, group: "drop", detail: null, unseen: unseen(dropped.at), dropped, pieces: piecesOf(start, prAt, dropped.at, nudgedStretch, idleOver(dropped.at)), at: dropped.at };
     return timed(unseen(dropped.at) || now - dropped.at < GRID_KEEP_MS ? { place: "shown", line } : afterSeen(dropped.at, line), next(...endMarks(dropped.at)));
   }
-  if (!t.last_agent_at && t.sent && !t.sent.checked_at && !working) {
-    const at = ms(t.sent.at) ?? start;
-    // Not started stays as it is until three quiet days drop it.
-    return timed({ place: "shown", line: { ...base, group: "plan", planned: at, pieces: [], at } }, next(moved + GRID_DROP_QUIET_MS));
+  if (!t.last_agent_at && t.sent && (!t.sent.checked_at || sentIsNudge) && !working) {
+    // A plan: the person's message no agent has read or answered (a nudge on it does not make it read). Its time is the
+    // plan's, not the nudge's.
+    const at = (sentIsNudge ? nudgeFrom : ms(t.sent.at)) ?? start;
+    if (now - at >= GRID_PLAN_STALE_MS) {
+      // Not started twelve hours on: Stale, the whole wait drawn as its stretch.
+      const line: GridLine = { ...base, group: "stale", planned: at, staleFrom: at, detail: { words: "not started", bad: false }, pieces: [{ kind: "stale", from: at, to: now }], ...staleOf(at), at };
+      return timed({ place: "shown", line }, minute);
+    }
+    // Not started stays as it is until twelve hours make it Stale (or three quiet days drop it).
+    return timed({ place: "shown", line: { ...base, group: "plan", planned: at, pieces: [], at } }, next(at + GRID_PLAN_STALE_MS, moved + GRID_DROP_QUIET_MS));
   }
-  // Every other thread with an agent is open work: Moving, then Not moving after 20 quiet minutes, then Dropped.
+  // Every other thread with an agent is open work: Moving, then Not moving after 20 quiet minutes, Stale after three
+  // quiet hours (its agent still there: an ended one is Dropped above), then Dropped after three quiet days.
   const quiet = !working && now - moved >= GRID_QUIET_MS;
+  const stale = !working && now - moved >= GRID_STALE_MS;
+  if (stale) {
+    const line: GridLine = { ...base, group: "stale", staleFrom: moved, pieces: piecesOf(start, prAt, now, nudgedStretch, { kind: "stale", from: moved, to: now }), ...staleOf(moved), at: moved };
+    return timed({ place: "shown", line }, minute);
+  }
   return timed(
     {
       place: "shown",
-      line: { ...base, group: quiet ? "quiet" : "move", pieces: piecesOf(start, prAt, now, quiet ? idleOver(now) : null), at: quiet ? moved : start },
+      line: { ...base, group: quiet ? "quiet" : "move", pieces: piecesOf(start, prAt, now, nudgedStretch, quiet ? idleOver(now) : null), at: quiet ? moved : start },
     },
     minute,
   );
@@ -330,6 +439,11 @@ export function gridSameIn(a: GridThreadIn, b: GridThreadIn): boolean {
       const p = x as GridThreadIn["pulls"];
       const q = y as GridThreadIn["pulls"];
       if (p.length !== q.length || p.some((pull, i) => !sameFlat(pull, q[i]!))) return false;
+    } else if (key === "nudge") {
+      const p = x as GridThreadIn["nudge"];
+      const q = y as GridThreadIn["nudge"];
+      const same = <T extends object>(u: T | null, v: T | null) => u === v || (!!u && !!v && sameFlat(u, v));
+      if (!p || !q || p.to !== q.to || p.seq !== q.seq || p.taken !== q.taken || !same(p.last, q.last) || !same(p.agent, q.agent) || !same(p.held, q.held) || !same(p.refused, q.refused)) return false;
     } else if (!x || !y || typeof x !== "object" || typeof y !== "object" || !sameFlat(x, y)) return false;
   }
   return Object.keys(a).length === Object.keys(b).length;
@@ -348,6 +462,8 @@ const ORDER: Readonly<Record<GridGroup, (a: GridLine, b: GridLine) => number>> =
   // PRs first, then the oldest start.
   move: (a, b) => Number(hasPr(b)) - Number(hasPr(a)) || a.at - b.at,
   quiet: (a, b) => a.at - b.at,
+  // The longest quiet first.
+  stale: (a, b) => a.at - b.at,
   land: (a, b) => b.at - a.at,
   plan: (a, b) => a.at - b.at,
   drop: (a, b) => b.at - a.at,
@@ -442,12 +558,20 @@ export function gridRounded(length: number): string {
   return `${Math.round(minutes / 30) / 2} h`;
 }
 
-/** A length as the readout says it: "40 min", "2 h 10 min" under three hours, then hours, then days. */
-export function gridExact(length: number): string {
+/**
+ * A length as the readout says it: "40 min", "2 h 10 min" under three hours, then hours, then days. `exact` (a stale
+ * line's readout and a nudge's words, round 4): to the minute and the hour all the way ("3 h 37 min", "1 d 6 h"), so a
+ * nudge never says a looser time than the line it was sent from.
+ */
+export function gridExact(length: number, exact = false): string {
   const minutes = Math.max(1, Math.floor(length / GRID_MIN));
   if (minutes < 60) return `${minutes} min`;
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
+  if (exact) {
+    if (h >= 24) return h % 24 ? `${Math.floor(h / 24)} d ${h % 24} h` : `${Math.floor(h / 24)} d`;
+    return m ? `${h} h ${m} min` : `${h} h`;
+  }
   if (h >= 48) return `${Math.floor(h / 24)} d`;
   if (h >= 24) return "1 d";
   return h < 3 && m ? `${h} h ${m} min` : `${h} h`;
@@ -468,15 +592,20 @@ export interface GridSaid {
 
 /**
  * The bar in words, at most three pieces (two on a phone when there are more): the oldest are cut, and `cut` says so
- * (the line starts with "…"; the readout has them all). On a desktop line the pieces also have to fit `room`
- * characters, keeping two at least.
+ * (the line starts with "…"; the readout has them all). On a desktop line the words also have to fit `room`
+ * characters: the pieces, the detail after the last one ("· tests failing", what makes a stale line stale) and a
+ * plan's "Planned 7:20 PM". The oldest pieces go first, down to the last one, so the detail is never what is cut.
  */
 export function gridSaid(line: GridLine, options: { phone: boolean; room?: number } = { phone: false }): { cut: boolean; pieces: GridSaid[] } {
   const all = line.pieces.map((p, i, list) => ({ kind: p.kind, name: GRID_PIECE_NAMES[p.kind], length: gridRounded(p.to - p.from), on: i === list.length - 1 && line.merged === null }));
   let shown = options.phone && all.length > 3 ? all.slice(-2) : all.slice(-3);
   const room = options.room ?? 50;
-  const width = (pieces: GridSaid[]) => pieces.reduce((n, p) => n + p.name.length + p.length.length + 4, pieces.length < all.length ? 3 : 0);
-  while (!options.phone && shown.length > 2 && width(shown) > room) shown = shown.slice(1);
+  const last = all.at(-1);
+  // The detail shows after the last piece while it is now (not after Needs you, which has its question under the name).
+  const detail = last?.on && last.kind !== "wait" && line.detail ? line.detail.words.length + 3 : 0;
+  const width = (pieces: GridSaid[]) =>
+    pieces.reduce((n, p) => n + p.name.length + p.length.length + 4, detail + (pieces.length < all.length ? 3 : line.planned !== null ? 19 : 0));
+  while (!options.phone && shown.length > 1 && width(shown) > room) shown = shown.slice(1);
   return { cut: shown.length < all.length, pieces: shown };
 }
 

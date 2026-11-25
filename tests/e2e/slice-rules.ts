@@ -132,6 +132,7 @@ export const SLICE_RULES: SliceRule[] = [
   },
 
   // --- Smaller areas named by their specs ---
+  { name: 'Grid', paths: ['packages/inbox/grid/**', 'packages/shared/inbox/grid*', 'packages/server/inbox-grid*'], specs: ['inbox-grid-*.spec.ts'] },
   { name: 'ref cards', paths: ['packages/server/ref-cards*', 'packages/shared/ref-cards*', 'packages/core/forge-ref*', 'packages/ui/components/RefHoverCard*', 'packages/ui/utils/refCard*', 'packages/inbox/pulls/refCardReviews*'], specs: ['ref-cards-review.spec.ts', 'inbox-ref-cards.spec.ts', 'inbox-open-in-refs.spec.ts', 'ref-card-click.spec.ts'] },
   { name: 'question card', paths: ['packages/ui/components/blocks/Question*', 'packages/ui/components/Question*'], specs: ['question-*.spec.ts'] },
   { name: 'chat window and Ask AI', paths: ['packages/ui/components/chat/**', 'packages/ai/**'], specs: ['chat-window.spec.ts', 'ask-ai-sanitize.spec.ts', 'annotate-ai-history.spec.ts'] },

@@ -2,9 +2,7 @@
  * The replies one Send makes (pure, for the tests): the agent messages it
  * answers, and which reply each waiting annotation rides.
  */
-import { inboxActionInDraft, inboxRemovedFrom, inboxWordsDefault, type InboxAnnotationRecord, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
-import { activeHandoff } from './tags';
-import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
+import { inboxActionInDraft, inboxTookOverReply, inboxWordsMessage, type InboxAnnotationRecord, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 
 /**
  * One reply of a Send: the message it answers, its picks and the questions it
@@ -122,18 +120,7 @@ export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = n
  * Null otherwise: a reply aimed elsewhere while the asker is live never takes over.
  */
 export function tookOverReply(thread: InboxThread): InboxMessageWire | null {
-  if (activeHandoff(thread)) return null;
-  for (let index = thread.messages.length - 1; index >= 0; index--) {
-    const m = thread.messages[index]!;
-    if (m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session) && !m.scheduled_change) return null;
-    if (!m.took_over || !m.to) continue;
-    // A session the person removed from the thread since holds it no more (core inbox-removed.ts).
-    if (inboxRemovedFrom(thread.messages, m.to.session)) return null;
-    // That session's latest since (the server's owner too): a stale tab's reply to another session does not take it.
-    const owner = m.to.session;
-    return thread.messages.slice(index + 1).filter((later) => later.to?.session === owner).at(-1) ?? m;
-  }
-  return null;
+  return inboxTookOverReply(thread.messages);
 }
 
 /**
@@ -144,21 +131,15 @@ export function tookOverReply(thread: InboxThread): InboxMessageWire | null {
  * another session (approval "inbox-tag-handoff"): then the new owner's latest
  * message after the hand-off, else the hand-off reply itself (a reply to it is
  * addressed as it is, to the new owner). So the former owner writing again
- * never takes the person's words back.
+ * never takes the person's words back. One rule with Grid's Nudge (core
+ * inbox-words-target.ts `inboxWordsMessage`), so a nudge goes where these
+ * words would.
  */
 export function wordsMessage(thread: InboxThread): InboxMessageWire {
-  const tookOver = tookOverReply(thread);
-  if (tookOver) return tookOver;
-  const handoff = activeHandoff(thread);
-  if (handoff) {
-    const owner = handoff.to!.session;
-    const after = thread.messages.slice(thread.messages.indexOf(handoff) + 1).filter((m) => m.author.kind === 'agent' && m.author.session === owner);
-    return after.at(-1) ?? handoff;
-  }
   // A permission prompt's question (launch, `perm:…`) takes only its own answer: the words go to the agent itself.
   // An agent's routine change line is a note, not its words: the person's words go past it. A script's post does
   // not steal the thread (`inboxWordsDefault`, the same rule as the asking session's).
-  return inboxWordsDefault(thread.messages, answersItself) ?? thread.messages[0]!;
+  return inboxWordsMessage(thread.messages, answersItself)!;
 }
 
 /** A message whose questions or action items the person answered in the draft (a saved pick, a Done). */

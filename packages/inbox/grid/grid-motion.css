@@ -1,0 +1,64 @@
+/* Grid's motion, Glint (approval "inbox-agent-grid", the life round; packages/inbox/grid/gridMotion.ts). The glint and
+   the mark's bob are Web Animations the walk starts on the light and the mark; the rare ones (a nudge, going stale, a
+   merge) are started by an attribute on the line. Only transform and opacity animate. Something moves only because
+   work moves: Not moving, Stale and Dropped lines stay still. With prefers-reduced-motion nothing here applies. */
+
+/* The light: white with a bright core, wide enough to read on the pale bars of the light theme; softer on dark bars,
+   where less light shows as much. */
+.ib-grid { --ib-grid-sheen: rgb(255 255 255); --ib-grid-sheen-edge: rgb(255 255 255 / 0.8); --ib-grid-sheen-w: 20px; }
+:root.dark .ib-grid, .dark .ib-grid { --ib-grid-sheen: rgb(255 255 255 / 0.5); --ib-grid-sheen-edge: rgb(255 255 255 / 0.55); --ib-grid-sheen-w: 17px; }
+
+/* The light's clip: as wide as the bar, on it. */
+.ib-grid-glc { position: absolute; top: 10px; height: 8px; overflow: hidden; border-radius: 4px; pointer-events: none; }
+.ib-grid[data-phone] .ib-grid-glc { top: 6px; }
+.ib-grid-glc > i { position: absolute; inset: 0; opacity: 0; background: linear-gradient(90deg, transparent calc(50% - var(--ib-grid-sheen-w)), var(--ib-grid-sheen-edge) calc(50% - 7px), var(--ib-grid-sheen) calc(50% - 2px), var(--ib-grid-sheen) calc(50% + 2px), var(--ib-grid-sheen-edge) calc(50% + 7px), transparent calc(50% + var(--ib-grid-sheen-w))); }
+/* A bar too short to cross: a brief brighter tip instead. */
+.ib-grid-glc[data-short] > i { background: var(--ib-grid-sheen); }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* A nudge: a warmer light along the stale bar toward its end, where the agent is, then a soft light there, once. */
+  .ib-grid-ln[data-nudging] .ib-grid-glc > i { background: linear-gradient(90deg, transparent calc(50% - 15px), color-mix(in oklab, var(--warning) 30%, var(--ib-grid-sheen)) 50%, transparent calc(50% + 15px)); animation: ib-grid-glint 1.1s cubic-bezier(0.65, 0, 0.35, 1) both; }
+  .ib-grid-ln[data-nudging] .ib-grid-bar::after { content: ''; position: absolute; top: -1px; right: -15px; width: 30px; height: 30px; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in oklab, var(--warning) 34%, transparent), transparent); opacity: 0; animation: ib-grid-ring 0.9s 0.9s ease-out both; }
+
+  /* Needs you: a calm amber breath on the waiting tip, every 3.4 s, all in step (gridMotion.ts keeps them so). Ten
+     breaths make one 34 s turn of the animation: the compositor runs it, and the main thread hears from it only at the
+     end of a turn, ten times less often than with one breath a turn. */
+  .ib-grid-ln[data-group="you"][data-vis] .ib-grid-seg[data-k="wait"][data-last]::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: min(16px, 100%); border-radius: inherit; background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--warning) 92%, white)); animation: ib-grid-breath 34s ease-in-out infinite; }
+
+  /* A line on its way to another group slides over the others, on the card's own colour. */
+  .ib-grid-ln[data-far] { z-index: 4; background: var(--card); box-shadow: 0 8px 18px -12px color-mix(in oklch, var(--foreground) 45%, transparent); }
+
+  /* Going Stale: the tail keeps its old light grey and lets it go to the stale colour. */
+  .ib-grid-ln[data-cool] .ib-grid-seg[data-k="stale"][data-last]::after { content: ''; position: absolute; inset: 0; border-radius: inherit; background: var(--ib-grid-idle); animation: ib-grid-cool 1.8s cubic-bezier(0.65, 0, 0.35, 1) both; }
+
+  /* A merge lands: the mark settles with a small overshoot, a soft purple light under it, once. */
+  .ib-grid-ln[data-landing] .ib-grid-bar > .ib-grid-pt { animation: ib-grid-settle 0.52s ease-out both; }
+  .ib-grid-ln[data-landing] .ib-grid-bar > .ib-grid-pt::before { content: ''; position: absolute; left: -10px; top: -10px; width: 34px; height: 34px; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in oklab, var(--ib-ref-merged) 32%, transparent), transparent); animation: ib-grid-ring 0.9s ease-out both; }
+}
+
+@keyframes ib-grid-glint {
+  0% { transform: translateX(calc(-50% - 17px)); opacity: 0; }
+  18% { opacity: 0.95; }
+  82% { opacity: 0.95; }
+  100% { transform: translateX(calc(50% + 17px)); opacity: 0; }
+}
+/* Ten breaths of 3.4 s (the timing function eases each half). */
+@keyframes ib-grid-breath {
+  0%, 10%, 20%, 30%, 40%, 50%, 60%, 70%, 80%, 90%, 100% { opacity: 0.25; }
+  5%, 15%, 25%, 35%, 45%, 55%, 65%, 75%, 85%, 95% { opacity: 1; }
+}
+@keyframes ib-grid-cool {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes ib-grid-ring {
+  0% { opacity: 0; transform: scale(0.5); }
+  20% { opacity: 0.95; }
+  100% { opacity: 0; transform: scale(1.4); }
+}
+@keyframes ib-grid-settle {
+  0% { transform: scale(0.55); }
+  45% { transform: scale(1.12); }
+  75% { transform: scale(0.97); }
+  100% { transform: none; }
+}

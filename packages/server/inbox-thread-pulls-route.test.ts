@@ -534,3 +534,29 @@ describe("what the owner's next wake says", () => {
     expect(threadPullsChangedForWake(w.store, w.thread, "ses_a")).toBeNull();
   });
 });
+
+describe("when checks were seen to change (Grid's movement, round 4)", () => {
+  test("a change found by a read close after the last one has that read's time; one found after a long gap has none, never a made-up one", async () => {
+    let checks: "running" | "failing" | "passing" = "running";
+    const w = world({ fixture: () => ({ "o/r#1": { state: "open", checks } }) });
+    w.agentAdd(w.thread, "o/r#1");
+    const read = async () => {
+      await w.states.refresh(w.store.threadPulls(w.thread), { refresh: true });
+      return w.states.live("github.com/o/r#1");
+    };
+    // The first read: no change seen, no time.
+    expect((await read())?.checks_at).toBeUndefined();
+    // Four minutes on, the run failed: seen now, to within the minutes between reads.
+    w.advance(4 * 60_000);
+    checks = "failing";
+    const failedAt = new Date(Date.parse("2026-11-08T10:00:00.000Z") + 4 * 60_000).toISOString();
+    expect((await read())?.checks_at).toBe(failedAt);
+    // Unchanged reads keep that time.
+    w.advance(4 * 60_000);
+    expect((await read())?.checks_at).toBe(failedAt);
+    // Nobody looked for an hour (no read), then a push started a run: when is not known, so no time is given.
+    w.advance(60 * 60_000);
+    checks = "running";
+    expect((await read())?.checks_at).toBeUndefined();
+  });
+});

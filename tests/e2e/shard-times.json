@@ -88,6 +88,7 @@
   "inbox-fullscreen-close.spec.ts": 8,
   "inbox-fullscreen-composer.spec.ts": 43,
   "inbox-fullscreen-keyboard.spec.ts": 36,
+  "inbox-grid-stale-nudge.spec.ts": 60,
   "inbox-guides.spec.ts": 36,
   "inbox-heavy-thread-budget.spec.ts": 39,
   "inbox-held-notice-line.spec.ts": 6,

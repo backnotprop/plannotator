@@ -48,6 +48,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/inbox-tidy.ts',
   'packages/core/inbox-types.ts',
   'packages/core/inbox-wire-models.ts',
+  'packages/core/inbox-words-target.ts',
   'packages/core/inline-markdown.ts',
   'packages/core/line-anchor.ts',
   'packages/core/markdown-structure.ts',

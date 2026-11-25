@@ -31,6 +31,7 @@ function thread(over: Partial<GridThreadIn> = {}): GridThreadIn {
     pulls: [],
     steps: null,
     seen: null,
+    nudge: null,
     ...over,
   };
 }
@@ -82,7 +83,8 @@ describe("groups", () => {
     const answered = thread({ section: "quiet", sent: null, last_agent_at: ago(2) });
     expect(groupOf(answered)).toBe("move");
     expect(groupOf({ ...answered, last_agent_at: ago(25) })).toBe("quiet");
-    expect(groupOf({ ...answered, created_at: ago(5000), last_agent_at: ago(3 * 24 * 60 - 1) })).toBe("quiet");
+    // Round 4: three quiet hours make it Stale, until the third quiet day.
+    expect(groupOf({ ...answered, created_at: ago(5000), last_agent_at: ago(3 * 24 * 60 - 1) })).toBe("stale");
     // Three quiet days: Dropped, not gone.
     const dropped = gridPlace({ ...answered, created_at: ago(5000), last_agent_at: ago(3 * 24 * 60 + 5) }, NOW)!;
     expect(dropped.line.group).toBe("drop");
@@ -182,7 +184,7 @@ describe("the page", () => {
       ["move", ["b"]],
       ["land", ["c"]],
     ]);
-    expect(model.counts).toEqual({ you: 1, move: 1, quiet: 0, land: 1, plan: 0, drop: 0 });
+    expect(model.counts).toEqual({ you: 1, move: 1, quiet: 0, stale: 0, land: 1, plan: 0, drop: 0 });
     expect(model.since).toEqual({ at: look.at, merged: 1, dropped: 0 });
     expect(model.earlier.map((l) => l.id)).toEqual(["e", "d"]);
     // The clock reaches back past the last look, six hours at least.
@@ -246,7 +248,7 @@ describe("the page", () => {
 describe("words", () => {
   test("lengths round as the line says them and as the readout does", () => {
     expect([gridRounded(32 * GRID_MIN), gridRounded(95 * GRID_MIN), gridRounded(130 * GRID_MIN), gridRounded(30 * GRID_HOUR), gridRounded(3 * GRID_DAY)]).toEqual(["32 min", "1.5 h", "2 h", "1 d", "3 d"]);
-    expect([gridExact(40 * GRID_MIN), gridExact(130 * GRID_MIN), gridExact(4 * GRID_HOUR + 5 * GRID_MIN)]).toEqual(["40 min", "2 h 10 min", "4 h"]);
+    expect([gridExact(40 * GRID_MIN), gridExact(130 * GRID_MIN), gridExact(4 * GRID_HOUR + 5 * GRID_MIN), gridExact(4 * GRID_HOUR)]).toEqual(["40 min", "2 h 10 min", "4 h", "4 h"]);
     expect([gridSpoken("1.5 h"), gridSpoken("1 h"), gridSpoken("32 min"), gridSpoken("3 d")]).toEqual(["1.5 hours", "1 hour", "32 minutes", "3 days"]);
   });
 
@@ -262,7 +264,7 @@ describe("words", () => {
   });
 
   test("checks and the review follow the last piece; a closed or merged PR has none", () => {
-    expect(gridPlace(thread({ pulls: [pull({ checks: "failing" })] }), NOW)!.line.detail).toEqual({ words: "tests failing", bad: true });
+    expect(gridPlace(thread({ pulls: [pull({ checks: "failing" })] }), NOW)!.line.detail).toEqual({ words: "tests failing", bad: true, pr: "#88" });
     expect(gridPlace(thread({ pulls: [pull({ checks: "passing", review: "approved" })] }), NOW)!.line.detail?.words).toBe("reviewed");
     expect(gridPlace(thread({ pulls: [pull({ state: "draft" })] }), NOW)!.line.detail?.words).toBe("draft");
     expect(gridPlace(thread({ pulls: [pull({ state: "merged", read_at: ago(5), checks: "failing" })] }), NOW)!.line.detail).toBeNull();

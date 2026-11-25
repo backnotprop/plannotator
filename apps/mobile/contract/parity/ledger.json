@@ -23502,6 +23502,132 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxgridnudge-quiet-from",
+      "title": "field:InboxGridNudge.quiet_from",
+      "surface": [
+        "field:InboxGridNudge.quiet_from"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-grid-nudge",
+      "title": "field:InboxListRow.grid_nudge",
+      "surface": [
+        "field:InboxListRow.grid_nudge"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-nudge",
+      "title": "field:InboxMessageWire.nudge",
+      "surface": [
+        "field:InboxMessageWire.nudge"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxgridnudgerow-agent",
+      "title": "field:InboxGridNudgeRow.agent",
+      "surface": [
+        "field:InboxGridNudgeRow.agent"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxgridnudgerow-last",
+      "title": "field:InboxGridNudgeRow.last",
+      "surface": [
+        "field:InboxGridNudgeRow.last"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxgridnudgerow-seq",
+      "title": "field:InboxGridNudgeRow.seq",
+      "surface": [
+        "field:InboxGridNudgeRow.seq"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxgridnudgerow-taken",
+      "title": "field:InboxGridNudgeRow.taken",
+      "surface": [
+        "field:InboxGridNudgeRow.taken"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxgridnudgerow-to",
+      "title": "field:InboxGridNudgeRow.to",
+      "surface": [
+        "field:InboxGridNudgeRow.to"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadpullssummaryitem-checks-at",
+      "title": "field:InboxThreadPullsSummaryItem.checks_at",
+      "surface": [
+        "field:InboxThreadPullsSummaryItem.checks_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
