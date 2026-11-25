@@ -88,8 +88,8 @@ export interface SettingsPageProps {
   context: ConnectContext | null;
   error: string | null;
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
-  /** Settings → Capabilities → Experimental: decision mode's switch, and Grid's (`feature`). Absent (or an Inbox that reports no experimental features): no Experimental group. */
-  onToggleExperimental?: (next: boolean, feature?: 'decision_mode' | 'grid') => void;
+  /** Settings → Capabilities → Experimental: decision mode's switch, and Grid's and Swarm's (`feature`). Absent (or an Inbox that reports no experimental features): no Experimental group. */
+  onToggleExperimental?: (next: boolean, feature?: 'decision_mode' | 'grid' | 'swarm') => void;
   /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184). Absent: no row. */
   onToggleCookieHost?: (next: boolean) => void;
   /** `#settings/experimental` (an old link): Capabilities scrolls to its Experimental group and focuses its heading. */
@@ -585,7 +585,7 @@ function CapabilitiesSection({
   floatDrafts: { on: boolean } | null;
   onToggleFloatDrafts?: (next: boolean) => void;
   experimental: InboxExperimentalSettings | null;
-  onToggleExperimental?: (next: boolean, feature?: 'decision_mode' | 'grid') => void;
+  onToggleExperimental?: (next: boolean, feature?: 'decision_mode' | 'grid' | 'swarm') => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
   experimentalHeading: RefObject<HTMLHeadingElement | null>;
 }) {
@@ -744,6 +744,20 @@ function CapabilitiesSection({
                 </span>
                 <span className="ib-ctl">
                   <Switch on={experimental.grid.on} labelledBy="ib-grid-label" disabled={experimental.grid.env !== null} onClick={() => onToggleExperimental(!experimental.grid!.on, 'grid')} />
+                </span>
+              </div>
+            )}
+            {decisionRow && experimental.swarm && (
+              // Swarm (docs/agent-guides/inbox-swarm.md): one set across linked computers, like every switch here.
+              <div className="ib-prow" data-settings-swarm="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-swarm-label">Swarm</span>
+                  <span className="ib-desc">
+                    {experimental.swarm.env !== null ? `PLANNOTATOR_EXPERIMENTAL turns it ${experimental.swarm.env ? 'on' : 'off'}.` : 'Several agents work one thread as a team, and talk to each other in its ghost thread.'}
+                  </span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={experimental.swarm.on} labelledBy="ib-swarm-label" disabled={experimental.swarm.env !== null} onClick={() => onToggleExperimental(!experimental.swarm!.on, 'swarm')} />
                 </span>
               </div>
             )}
@@ -1171,7 +1185,7 @@ export function SettingsPage(props: SettingsPageProps) {
         return !voice?.on ? 'Off' : voice.engine === 'api' ? 'API key' : 'Codex login';
       case 'capabilities': {
         // What is on, by name: "Off", "Board", "Decision mode", or "2 on".
-        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, codeReview?.on ? 'Code review' : null, experimental?.decision_mode.on ? 'Decision mode' : null, experimental?.grid?.on ? 'Grid' : null].filter((name): name is string => name !== null);
+        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, codeReview?.on ? 'Code review' : null, experimental?.decision_mode.on ? 'Decision mode' : null, experimental?.grid?.on ? 'Grid' : null, experimental?.swarm?.on ? 'Swarm' : null].filter((name): name is string => name !== null);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} on`;
       }
     }

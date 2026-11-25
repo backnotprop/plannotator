@@ -7,7 +7,7 @@
  */
 
 import { inboxAgentName, type InboxMessage, type InboxTag } from "@plannotator/core/inbox-types";
-import { sanitizeSwarmDoing, type InboxSwarmMember, type InboxSwarmMemberWire, type InboxSwarmRecord, type InboxThreadSwarm } from "@plannotator/core/inbox-swarm-types";
+import { INBOX_SWARM_PLAN_MAX, sanitizeSwarmDoing, type InboxSwarmMember, type InboxSwarmMemberWire, type InboxSwarmPlan, type InboxSwarmPlanPart, type InboxSwarmRecord, type InboxThreadSwarm } from "@plannotator/core/inbox-swarm-types";
 import { InboxError } from "./schema";
 import type { InboxStore } from "./store";
 import { inboxMessageStartsSwarm } from "./swarm-start";
@@ -44,7 +44,7 @@ export const SWARM_WORDS = {
   tooLong: `Too long: at most ${SWARM_SAY_MAX} characters.`,
   emptyDoing: "Write one line of what you are doing.",
   joined: (name: string, thread: string, again: boolean) => `${again ? "Already in" : "Joined"} the swarm of thread ${thread} as ${name}.`,
-  next: 'Next: `swarm doing "<one line>"` now and when it changes; `swarm status` shows every member; `swarm say "<text>" [--to <name>]` talks to them; `swarm leave` when you are done.',
+  next: 'Next: `swarm propose "<plan>"` puts the plan, or your part of it, in the thread; `swarm doing "<one line>"` now and when it changes; `swarm status` shows every member; `swarm say "<text>" [--to <name>]` talks to them; `swarm leave` when you are done.',
   said: (to: string) => `Said to ${to} in the ghost thread.`,
   saidAlone: "Said in the ghost thread. No other agent has joined yet: they read it when they join.",
   doing: (line: string) => `Your status: ${line}`,
@@ -53,6 +53,13 @@ export const SWARM_WORDS = {
   ghostNone: "Ghost thread: no messages yet.",
   ghostLatest: (shown: number, all: number) => (shown === all ? `Ghost thread (${all}):` : `Ghost thread, the latest ${shown} of ${all}:`),
   /** The wake's first line for a ghost message (one line, at most 300 characters). */
+  proposed: (thread: string, lines: number, first: boolean) =>
+    first
+      ? `Proposed: the plan is in thread ${thread} as your reply, ${lines} line${lines === 1 ? "" : "s"}. Work has started; the person changes it by replying there.`
+      : `Added to the plan in thread ${thread}: ${lines} line${lines === 1 ? "" : "s"}. A line for a name already in it replaced that line.`,
+  emptyPlan: 'Write the plan: one line per agent, "- <name>: <what it will do>", an indented line for a sub-agent.',
+  planLine: (n: number) => `Line ${n}: write "- <name>: <what it will do>".`,
+  planFull: (max: number) => `A plan holds at most ${max} lines.`,
   wake: (from: string, to: string = from) => `${from} wrote in the swarm's ghost thread. Answer only if it asks something or you have something they need: plannotator inbox swarm say "<text>" --to ${to}. Never reply only to acknowledge.`,
   wakePerson: "The person wrote to the swarm in the ghost thread. Answer with plannotator inbox swarm say; ask the person in the thread itself.",
 };
@@ -171,6 +178,78 @@ export function setSwarmDoing(store: InboxStore, threadId: string, session: stri
   return line;
 }
 
+/** A proposal's lines: the lines that are not list items are its one-line summary; each item is one agent's part. */
+export function parseSwarmPlan(text: string, proposer: string): { summary: string | null; parts: { who: string; does: string; for: string | null }[] } {
+  const parts: { who: string; does: string; for: string | null }[] = [];
+  const summary: string[] = [];
+  let parent: string | null = null;
+  text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .forEach((raw, i) => {
+      if (raw.trim() === "") return;
+      const item = /^(\s*)(?:[-*•]|\d+[.)])\s+(.*)$/.exec(raw);
+      if (!item) return void summary.push(raw.trim());
+      const colon = item[2]!.indexOf(":");
+      // Markdown emphasis around the name ("**Codex**: …", "**Codex:** …") is not part of it.
+      const who = colon > 0 ? memberName(item[2]!.slice(0, colon).replace(/[*_`]/g, "")) : "";
+      const does = colon > 0 ? sanitizeSwarmDoing(item[2]!.slice(colon + 1).replace(/^[\s*_]+/, "")) : "";
+      if (!who || !does) throw refuse("validation_error", SWARM_WORDS.planLine(i + 1));
+      // Indented: a sub-agent of the line above it, else of the agent proposing.
+      if (item[1]!.length > 0) return void parts.push({ who, does, for: parent ?? proposer });
+      parts.push({ who, does, for: null });
+      parent = who;
+    });
+  return { summary: sanitizeSwarmDoing(summary.join(" ")) || null, parts };
+}
+
+/** The plan as plain words: the card message's body, for any reader that does not draw the card. */
+export function swarmPlanText(plan: Pick<InboxSwarmPlan, "summary" | "parts">): string {
+  const top = plan.parts.filter((p) => !p.for || !plan.parts.some((o) => sameName(o.who, p.for!)));
+  const lines: string[] = [];
+  for (const part of top) {
+    lines.push(`- ${part.who}: ${part.does}`);
+    for (const sub of plan.parts.filter((p) => p !== part && p.for && sameName(p.for, part.who))) lines.push(`  - ${sub.who}: ${sub.does}`);
+  }
+  return [plan.summary ? `Swarm plan: ${plan.summary}` : "Swarm plan", lines.join("\n")].filter(Boolean).join("\n\n");
+}
+
+/**
+ * `swarm propose`: the caller's plan lines go into the swarm's one plan. The first proposal writes the plan card in the
+ * thread, as the caller's reply to the person's latest message (`swarm_plan`); later ones (another agent adding its
+ * part, or one changing its line) change the plan the card draws, never a second card. A line for a name already in
+ * the plan replaces that line; a summary given replaces the summary.
+ */
+export function proposeSwarm(store: InboxStore, threadId: string, caller: SwarmCaller, text: string, wakes = false): { plan: InboxSwarmPlan; lines: number; first: boolean } {
+  const swarm = onSwarm(store, threadId);
+  const me = memberOf(swarm, caller.session);
+  const asked = parseSwarmPlan(text, me.name);
+  if (asked.parts.length === 0 && !asked.summary) throw refuse("validation_error", SWARM_WORDS.emptyPlan);
+  const at = new Date().toISOString();
+  const was = swarm.plan && store.message(swarm.plan.message_id) ? swarm.plan : null;
+  const parts: InboxSwarmPlanPart[] = [...(was?.parts ?? [])];
+  for (const part of asked.parts) {
+    const line: InboxSwarmPlanPart = { who: part.who, does: part.does, ...(part.for ? { for: part.for } : {}), by: me.name, at };
+    const i = parts.findIndex((p) => sameName(p.who, part.who));
+    if (i >= 0) parts[i] = line;
+    else parts.push(line);
+  }
+  if (parts.length > INBOX_SWARM_PLAN_MAX) throw refuse("validation_error", SWARM_WORDS.planFull(INBOX_SWARM_PLAN_MAX));
+  const summary = asked.summary ?? was?.summary ?? null;
+  let messageId = was?.message_id ?? null;
+  if (!messageId) {
+    const root = store.message(threadId)!;
+    const ids = store.threadMessageIds(threadId);
+    // The reply to the person's latest words: the message the agents were handed.
+    const answers = [...ids].reverse().find((id) => store.message(id)?.author.kind === "person") ?? threadId;
+    const author: Extract<InboxMessage["author"], { kind: "agent" }> = { kind: "agent", host: caller.host, session: caller.session, name: me.name, ...(caller.machine ? { machine: caller.machine, ...(caller.machine_name ? { machine_name: caller.machine_name } : {}) } : {}) };
+    messageId = store.sendMessage({ author, body: swarmPlanText({ summary, parts }), swarm_plan: true, project_id: root.project_id, reply_to: answers, ...(wakes ? { wakes: true } : {}) }).message.id;
+  }
+  const plan: InboxSwarmPlan = { ...(summary ? { summary } : {}), parts, message_id: messageId, at: was?.at ?? at };
+  store.writeSwarm({ ...(store.swarmOf(threadId) ?? swarm), plan });
+  return { plan, lines: asked.parts.length, first: !was };
+}
+
 const tagOfMember = (m: InboxSwarmMember): InboxTag => ({ host: m.host, session: m.session, name: m.name, wakes: true, ...(m.machine ? { machine: m.machine } : {}) });
 
 /**
@@ -207,29 +286,33 @@ export function markGhostSeen(store: InboxStore, threadId: string): void {
 }
 
 /** The sessions the thread is addressed to (New message's `to` and every tag the person gave), each once. */
-function addressed(store: InboxStore, threadId: string): { session: string; host: string | null; name: string; machine_name: string | null }[] {
-  const out = new Map<string, { session: string; host: string | null; name: string; machine_name: string | null }>();
+function addressed(store: InboxStore, threadId: string): { session: string; host: string | null; name: string; machine: string | null }[] {
+  const out = new Map<string, { session: string; host: string | null; name: string; machine: string | null }>();
   for (const id of store.threadMessageIds(threadId)) {
     const message = store.message(id);
     if (!message || message.author.kind !== "person") continue;
-    const add = (session: string, host: string | null, name?: string | null) => {
-      if (!out.has(session)) out.set(session, { session, host, name: name || inboxAgentName({ kind: "agent", host, name: null }), machine_name: null });
+    // `machine`: an agent on a linked computer (its tag, or a hand-off's `to`); absent for this computer's.
+    const add = (session: string, host: string | null, name: string | null | undefined, machine: string | undefined) => {
+      if (!out.has(session)) out.set(session, { session, host, name: name || inboxAgentName({ kind: "agent", host, name: null }), machine: machine ?? null });
     };
-    if (message.to) add(message.to.session, message.to.host);
-    for (const tag of message.tags ?? []) add(tag.session, tag.host, tag.label ?? tag.name);
+    if (message.to) add(message.to.session, message.to.host, null, message.to.machine);
+    for (const tag of message.tags ?? []) add(tag.session, tag.host, tag.label ?? tag.name, tag.machine);
   }
   return [...out.values()];
 }
 
-/** `InboxThread.swarm`: the members (joined first, then the agents the thread names that have not joined) and the count. */
-export function swarmWire(store: InboxStore, threadId: string, live: SwarmLiveState): InboxThreadSwarm | undefined {
+/**
+ * `InboxThread.swarm`: the members (joined first, then the agents the thread names that have not joined), the count and
+ * the plan. `nameOf`: a linked computer's name, so an agent there that has not joined says its own computer.
+ */
+export function swarmWire(store: InboxStore, threadId: string, live: SwarmLiveState, nameOf?: (machine: string) => string | null): InboxThreadSwarm | undefined {
   const swarm = store.swarmOf(threadId);
   if (!swarm) return undefined;
   const joined: InboxSwarmMemberWire[] = swarm.members.map((m) => ({
     session: m.session,
     host: m.host,
     name: m.name,
-    ...(m.machine_name ? { machine_name: m.machine_name } : {}),
+    ...(m.machine_name || (m.machine && nameOf?.(m.machine)) ? { machine_name: m.machine_name || nameOf!(m.machine!)! } : {}),
     ...(m.for ? { for: m.for } : {}),
     joined: true,
     state: live(m, threadId),
@@ -241,8 +324,15 @@ export function swarmWire(store: InboxStore, threadId: string, live: SwarmLiveSt
   return {
     on: swarm.on,
     ghost_id: swarm.ghost_id,
-    members: [...joined, ...waiting.map((a) => ({ session: a.session, host: a.host, name: a.name, joined: false, state: live(a, threadId), doing: null }))],
+    members: [
+      ...joined,
+      ...waiting.map((a) => {
+        const machineName = a.machine ? (nameOf?.(a.machine) ?? null) : null;
+        return { session: a.session, host: a.host, name: a.name, ...(machineName ? { machine_name: machineName } : {}), joined: false, state: live(a, threadId), doing: null };
+      }),
+    ],
     ghost_unread: unread,
+    ...(swarm.plan && store.message(swarm.plan.message_id) ? { plan: swarm.plan } : {}),
   };
 }
 

@@ -22,6 +22,7 @@ import {
   joinSwarm,
   leaveSwarm,
   markGhostSeen,
+  proposeSwarm,
   saySwarm,
   setSwarmDoing,
   setSwarmOn,
@@ -41,7 +42,7 @@ export const INBOX_SWARM_ROUTE = "/api/inbox/swarm";
 /** The door route a linked computer's agent's swarm command arrives by (inbox-devices.ts `DOOR_OWN_ROUTES`). */
 export const FAR_SWARM_ROUTE = "swarm";
 
-export const SWARM_ACTIONS = ["join", "say", "doing", "status", "leave"] as const;
+export const SWARM_ACTIONS = ["join", "propose", "say", "doing", "status", "leave"] as const;
 export type SwarmAction = (typeof SWARM_ACTIONS)[number];
 
 /** What the command sends. `by`: the agent, as its shell names it (the agent door says it for a paired agent). */
@@ -72,6 +73,8 @@ export interface SwarmRouteContext {
   };
   /** Whether `session` is one of this computer's own (a linked computer may not speak for it). */
   ownSession?: (session: string) => boolean;
+  /** Whether this computer's connection of `session` wakes it with the person's reply (the plan card's `wakes`). */
+  wakes?: (session: string) => boolean;
   /** The Inbox's server session: a window write from a page of an earlier run is refused (409), as every window write is. */
   serverSession?: string;
 }
@@ -105,8 +108,13 @@ const callerOf = (ask: SwarmAsk): SwarmCaller => {
 /** The answer for an agent: `text` and the swarm. `caller.machine` set: the ask came from that linked computer. */
 export function swarmAgentAnswer(ctx: SwarmRouteContext, ask: SwarmAsk, caller: SwarmCaller, key: string | null = null): { text: string; swarm?: InboxThreadSwarm; thread_id?: string } {
   const { store } = ctx;
-  const wire = (threadId: string) => swarmWire(store, threadId, ctx.live)!;
+  const wire = (threadId: string) => swarmWire(store, threadId, ctx.live, ctx.far?.nameOf)!;
   switch (ask.action) {
+    case "propose": {
+      const threadId = callerSwarmThread(store, caller, ask.thread);
+      const proposed = proposeSwarm(store, threadId, caller, ask.text ?? "", !caller.machine && (ctx.wakes?.(caller.session) ?? false));
+      return { text: SWARM_WORDS.proposed(threadId, proposed.lines, proposed.first), swarm: wire(threadId), thread_id: threadId };
+    }
     case "join": {
       if (!ask.thread) throw new InboxError("validation_error", "thread: the thread's id (plannotator inbox swarm join <thread>).");
       const threadId = swarmThreadOf(store, ask.thread);
@@ -231,7 +239,7 @@ export async function swarmWindowRoute(req: Request, url: URL, ctx: SwarmRouteCo
   try {
     const threadId = swarmThreadOf(store, match[1]!);
     const read = (): SwarmGhostRead => {
-      const swarm = swarmWire(store, threadId, ctx.live) ?? null;
+      const swarm = swarmWire(store, threadId, ctx.live, ctx.far?.nameOf) ?? null;
       return { swarm, ghost: swarm?.ghost_id ? store.ghostMessages(swarm.ghost_id) : [] };
     };
     if (req.method === "GET") return Response.json(read());

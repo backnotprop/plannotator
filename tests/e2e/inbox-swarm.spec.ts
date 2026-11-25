@@ -1,9 +1,11 @@
 /**
  * Swarm, piece 1 (docs/agent-guides/inbox-swarm.md; approval "inbox-swarm-thread-ui"), in a real browser against the
- * compiled binary. Nothing is mocked: `plannotator inbox --background` under a temp data dir and a scratch HOME, Swarm
- * on by `PLANNOTATOR_EXPERIMENTAL=swarm`, and two live agent sessions in one project (the bridge's long-poll, as the
- * mod, Pi and OpenCode run it): Claude Code working, Codex idle.
+ * compiled binary. Nothing is mocked: `plannotator inbox --background` under a temp data dir and a scratch HOME, and
+ * two live agent sessions in one project (the bridge's long-poll, as the mod, Pi and OpenCode run it): Claude Code
+ * working, Codex idle.
  *
+ *  0. Swarm is off: the route refuses. Settings → Capabilities → Experimental: the Swarm row's switch turns it on,
+ *     saved in config.json as `experimental.swarm`.
  *  1. New message: Claude Code in To, Add an agent and Codex beside it, the Swarm badge pressed (`/swarm` in the
  *     words). Send: one thread, its root to Claude Code and tagging Codex, and a swarm.
  *  2. The agents join, say what they are doing and talk in the ghost thread through `POST /api/inbox/swarm` (what
@@ -14,6 +16,9 @@
  *     words reach the open thread by the stream (a `swarm` event) and the count comes back.
  *  4. A second swarm thread nobody has talked in yet: the empty ghost pane.
  *  5. A phone (390 × 844): the thread, and the ghost pane as its own page whose "‹ <thread title>" goes back.
+ *  6. The plan (`swarm propose`, what `plannotator inbox swarm propose` sends): in the quiet thread, Claude Code's
+ *     proposal is its first reply, drawn as the plan card, Codex "joining"; Codex joins and adds its lines, and the
+ *     same card changes in place, by the stream. A team of 20 in the first thread folds to six rows. The phone card.
  *
  * Proof, light and dark, in PLANNOTATOR_E2E_PROOF_DIR/swarm-piece-1/ (else .local/proof/swarm-piece-1/; CI keeps
  * .local/proof/ as the shard's artifact). Build the binary first (see inbox.spec.ts).
@@ -141,7 +146,6 @@ test.beforeAll(async () => {
     PLANNOTATOR_UPDATE_CHECK: '0',
     NO_ANON_PING: '1',
     PLANNOTATOR_INBOX_PHONES: '0',
-    PLANNOTATOR_EXPERIMENTAL: 'swarm',
     // The computer's name the status view shows beside each member's project (else the runner's host name).
     PLANNOTATOR_MACHINE_NAME: "Charlie's Mac",
   };
@@ -206,6 +210,36 @@ async function startSwarm(page: Page, words: string, proof?: string): Promise<st
     .not.toBe('');
   return id;
 }
+
+/** config.json's `experimental`, once it is written (a read between the switch and the save sees none yet). */
+const savedExperimental = () => {
+  try {
+    return (JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')) as { experimental?: unknown }).experimental;
+  } catch {
+    return undefined;
+  }
+};
+
+test('off by default; Settings → Capabilities → Experimental has the Swarm row, and its switch turns Swarm on', async ({ page }) => {
+  // Off: the route an agent's `plannotator inbox swarm` asks refuses.
+  const off = await fetch(new URL('/api/inbox/swarm', world.url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'status', by: CLAUDE }) });
+  expect([off.status, ((await off.json()) as { code?: string }).code]).toEqual([409, 'swarm_off']);
+
+  await openWindow(page, 1440, 900, '#settings/capabilities');
+  const row = page.locator('[data-settings-experimental] [data-settings-swarm]');
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await expect(row.locator('.ib-l')).toHaveText('Swarm');
+  await expect(row.locator('.ib-desc')).toHaveText('Several agents work one thread as a team, and talk to each other in its ghost thread.');
+  const sw = row.getByRole('switch', { name: 'Swarm' });
+  await expect(sw).toHaveAttribute('aria-checked', 'false');
+  await sw.click();
+  await expect(sw).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(savedExperimental).toEqual({ swarm: true });
+  // On at once, for agents too.
+  await expect.poll(async () => (await read<{ experimental?: { swarm?: { on: boolean } } }>('/api/inbox/settings')).experimental?.swarm?.on).toBe(true);
+  await row.scrollIntoViewIfNeeded();
+  await shot(page, '11-settings-swarm-on');
+});
 
 test('New message to two agents with Swarm on makes one swarm thread, its root to the first and tagging the other', async ({ page }) => {
   await openWindow(page, 1440, 900);
@@ -358,4 +392,136 @@ test('a phone: the swarm thread, then the ghost pane as its own page whose way b
   await back.click();
   await expect(pane).toHaveCount(0);
   await expect(summary).toBeVisible();
+});
+
+type ThreadRead = { thread: { messages: { id: string; swarm_plan?: true; reply_to: string | null; author: { kind: string; session?: string | null }; body: string }[]; swarm?: { plan?: { message_id: string; parts: { who: string }[] } } } };
+const partOf = (page: Page, who: string) => page.locator(`[data-swarm-plan] [data-swarm-plan-part="${who}"]`);
+
+/** The card's whole window, scrolled to it. */
+async function cardShot(page: Page, name: string): Promise<void> {
+  await page.locator('[data-swarm-plan]').scrollIntoViewIfNeeded();
+  await shot(page, name);
+}
+
+test("the plan: Claude Code's proposal is its first reply in the thread, drawn as the plan card while Codex is still joining", async ({ page }) => {
+  await swarmAsk(CLAUDE, { action: 'join', thread: quietId });
+  const proposed = await swarmAsk(CLAUDE, {
+    action: 'propose',
+    thread: quietId,
+    text: [
+      'Two parts: Claude Code reads the query plan, Codex times the export end to end. Work has started.',
+      '- Claude Code: Read the export query plan and find the step that takes the time',
+      '  - Explorer: List the indexes the export query can use',
+      "- Codex: Time each step of the nightly export on a copy of last night's data",
+    ].join('\n'),
+  });
+  expect(proposed.text).toContain('as your reply, 3 lines');
+  const read1 = await read<ThreadRead>(`/api/inbox/threads/${quietId}`);
+  const card = read1.thread.messages.filter((m) => m.swarm_plan);
+  // One message, Claude Code's reply to the person, its words the plan for any reader that does not draw the card.
+  expect(card).toHaveLength(1);
+  expect([card[0]!.author.session, card[0]!.reply_to, read1.thread.messages.indexOf(card[0]!)]).toEqual([CLAUDE.session, quietId, 1]);
+  expect(card[0]!.body).toContain('- Codex: Time each step');
+  expect(read1.thread.swarm?.plan?.message_id).toBe(card[0]!.id);
+
+  await openWindow(page, 1440, 900, `#thread=${quietId}`);
+  const drawn = page.locator(`[data-message-article="${card[0]!.id}"] [data-swarm-plan]`);
+  await expect(drawn).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('[data-swarm-plan]')).toHaveCount(1);
+  await expect(drawn.locator('.ib-sp-title')).toHaveText('Swarm plan');
+  await expect(drawn.locator('[data-swarm-plan-status]')).toHaveText(/^Started .+ · Codex is joining$/);
+  await expect(drawn.locator('[data-swarm-plan-count]')).toHaveText('3 parts');
+  await expect(drawn.locator('[data-swarm-plan-summary]')).toContainText('Work has started.');
+  await expect(partOf(page, 'Claude Code').locator('[data-swarm-plan-does]')).toHaveText('Read the export query plan and find the step that takes the time');
+  await expect(partOf(page, 'Claude Code').locator('.ib-sp-wh')).toHaveText("ledger · Charlie's Mac");
+  await expect(partOf(page, 'Explorer')).toHaveAttribute('data-depth', '1');
+  await expect(partOf(page, 'Explorer').locator('[data-swarm-plan-joining]')).toHaveText('sub-agent');
+  await expect(partOf(page, 'Codex').locator('[data-swarm-plan-joining]')).toHaveText('joining');
+  // No change controls in this piece: the card's only buttons are its fold (none at 3 parts) and the ghost thread.
+  await expect(drawn.locator('button')).toHaveCount(1);
+  await expect(drawn.locator('[data-swarm-plan-ghost]')).toBeVisible();
+  await expect(page.locator('.ib-toast')).toHaveCount(0, { timeout: 20_000 });
+  await cardShot(page, '08-plan-card-first-reply');
+});
+
+test('Codex joins and adds its lines: the same card changes in place, by the stream, and no second card is written', async ({ page }) => {
+  await openWindow(page, 1440, 900, `#thread=${quietId}`);
+  const card = page.locator('[data-swarm-plan]');
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  const before = (await read<ThreadRead>(`/api/inbox/threads/${quietId}`)).thread.messages.length;
+  await swarmAsk(CODEX, { action: 'join', thread: quietId });
+  const added = await swarmAsk(CODEX, {
+    action: 'propose',
+    thread: quietId,
+    text: ['- Codex: Time each step of the export, and the query alone, on last night\'s data', '  - Index check: Try the export with an index on refunds.created_at'].join('\n'),
+  });
+  expect(added.text).toContain('Added to the plan');
+  // The open window: no reload.
+  await expect(partOf(page, 'Codex').locator('[data-swarm-plan-does]')).toHaveText("Time each step of the export, and the query alone, on last night's data", { timeout: 20_000 });
+  await expect(partOf(page, 'Codex').locator('[data-swarm-plan-joining]')).toHaveCount(0);
+  await expect(partOf(page, 'Codex').locator('[data-swarm-plan-by]')).toHaveText('Added by Codex');
+  await expect(partOf(page, 'Index check')).toHaveAttribute('data-depth', '1');
+  await expect(card.locator('[data-swarm-plan-status]')).toHaveText(/ · everyone joined$/);
+  await expect(card.locator('[data-swarm-plan-count]')).toHaveText('4 parts');
+  await expect(page.locator('[data-swarm-plan]')).toHaveCount(1);
+  const after = await read<ThreadRead>(`/api/inbox/threads/${quietId}`);
+  expect([after.thread.messages.length, after.thread.messages.filter((m) => m.swarm_plan).length]).toEqual([before, 1]);
+  await cardShot(page, '09-plan-card-second-agent-added');
+});
+
+test('a team of 20: the band has no marks, six rows show, and "Show 14 more" opens the rest', async ({ page }) => {
+  const team = [
+    'Twenty parts across the refunds fix: the rounding, the short refunds, the re-sends and the checks.',
+    '- Claude Code: Rewrite the rounding in refunds.ts to whole cents',
+    '  - Rounding tests: Tests for every rounding rule in refunds.ts',
+    '  - Currency check: The three currencies that have no cents',
+    '- Codex: Find the refunds that went out short since Tuesday',
+    '  - Short list: Write them to refunds-short.csv',
+    '  - Amount check: The amount each one is short by',
+    '- Pi: Re-send the short refunds from refunds-short.csv',
+    '- OpenCode: The refunds page shows amounts in whole cents',
+    '- Cursor: The admin export of refunds',
+    '- Qwen Code: The nightly export of refunds',
+    '- Cline: The berth_rates migration that rounds the old rates',
+    '- Hermes Agent: The email a customer gets for a re-sent refund',
+    '- OpenClaw: The support macro for a short refund',
+    '- Antigravity: The refunds dashboard',
+    '- Claude Code 2: The invoices that use the same rounding',
+    '- Codex 2: The credit notes that use the same rounding',
+    '- Pi 2: The ledger entries for each re-send',
+    '- DeepSeek Harness: A load test of the re-send job',
+    '- Muse Code: The changelog line for the fix',
+    '- T3 Code: The release note for support',
+  ].join('\n');
+  expect((await swarmAsk(CLAUDE, { action: 'propose', thread: threadId, text: team })).text).toContain('20 lines');
+  await openWindow(page, 1440, 900, `#thread=${threadId}`);
+  const card = page.locator('[data-swarm-plan]');
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await expect(card.locator('[data-swarm-plan-count]')).toHaveText('20 parts');
+  await expect(card.locator('[data-swarm-plan-status]')).toHaveText(/ · 14 agents are joining$/);
+  await expect(card.locator('.ib-sp-band .ib-mk')).toHaveCount(0);
+  await expect(card.locator('[data-swarm-plan-part]')).toHaveCount(6);
+  const more = card.locator('[data-swarm-plan-more]');
+  await expect(more).toHaveText('Show 14 more');
+  await cardShot(page, '10-plan-card-long-team');
+  await more.click();
+  await expect(card.locator('[data-swarm-plan-part]')).toHaveCount(20);
+  await expect(more).toHaveText('Show fewer');
+  await cardShot(page, '10-plan-card-long-team-open');
+});
+
+test('a phone: the plan card fits the screen, each part in one column', async ({ page }) => {
+  await openWindow(page, 390, 844, `#thread=${quietId}`);
+  const card = page.locator('[data-swarm-plan]');
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await expect(partOf(page, 'Index check')).toBeVisible();
+  const fit = await page.evaluate(() => {
+    const box = document.querySelector('[data-swarm-plan]')!.getBoundingClientRect();
+    const row = document.querySelector('[data-swarm-plan-part="Claude Code"]')!;
+    const does = row.querySelector('[data-swarm-plan-does]')!.getBoundingClientRect();
+    const who = row.querySelector('.ib-sp-who')!.getBoundingClientRect();
+    return { inside: box.left >= 0 && box.right <= window.innerWidth + 0.5, stacked: who.top >= does.bottom - 0.5 };
+  });
+  expect(fit).toEqual({ inside: true, stacked: true });
+  await cardShot(page, '12-phone-plan-card');
 });

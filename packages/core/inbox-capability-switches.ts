@@ -13,6 +13,8 @@ export const INBOX_CAPABILITY_SWITCHES = [
   { key: "system", name: "System", agent: "system" },
   { key: "bro", name: "Bro mode", agent: "bro_mode" },
   { key: "float_drafts", name: "Float reply drafts", agent: "float_drafts" },
+  // An experimental one: the settings say it as `experimental.swarm`, and save it as `experimental: { swarm }`.
+  { key: "swarm", name: "Swarm", agent: "swarm" },
 ] as const;
 
 export type InboxCapabilitySwitchKey = (typeof INBOX_CAPABILITY_SWITCHES)[number]["key"];
@@ -39,7 +41,8 @@ export const INBOX_CAPABILITY_AGENT_IDS = INBOX_CAPABILITY_AGENT_SWITCHES.map((s
 /** `GET /api/inbox/capabilities`: each switch this Inbox offers now, and whether it is on. One it does not offer is absent. */
 export type InboxCapabilitySwitches = Partial<Record<InboxCapabilitySwitchKey, { on: boolean }>>;
 
-export const INBOX_CAPABILITY_SWITCH_KEYS: readonly string[] = INBOX_CAPABILITY_SWITCHES.map((s) => s.key);
+/** The keys an older linked computer's window may turn here as `{ <key>: { on } }` (an experimental one is not one). */
+export const INBOX_CAPABILITY_SWITCH_KEYS: readonly string[] = INBOX_CAPABILITY_SWITCHES.map((s) => s.key).filter((key) => key !== "swarm");
 
 /**
  * The switches that are one set across linked computers (docs/agent-guides/inbox-machines.md, "One set of
@@ -58,7 +61,11 @@ export const INBOX_CAPABILITY_SET_KEYS = [
   "float_drafts",
   "decision_mode",
   "grid",
+  "swarm",
 ] as const;
+
+/** The set's switches that are the settings' `experimental` ones (saved as `experimental: { <key>: boolean }`). */
+export const INBOX_CAPABILITY_EXPERIMENTAL_KEYS: readonly InboxCapabilitySetKey[] = ["decision_mode", "grid", "swarm"];
 
 export type InboxCapabilitySetKey = (typeof INBOX_CAPABILITY_SET_KEYS)[number];
 
@@ -67,7 +74,8 @@ export function inboxCapabilitySwitchesOf(settings: unknown): InboxCapabilitySwi
   const out: InboxCapabilitySwitches = {};
   if (!settings || typeof settings !== "object") return out;
   for (const { key } of INBOX_CAPABILITY_SWITCHES) {
-    const value = (settings as Record<string, unknown>)[key];
+    const experimental = (settings as { experimental?: Record<string, unknown> | null }).experimental;
+    const value = key === "swarm" ? experimental?.swarm : (settings as Record<string, unknown>)[key];
     if (value && typeof value === "object" && typeof (value as { on?: unknown }).on === "boolean") out[key] = { on: (value as { on: boolean }).on };
   }
   return out;

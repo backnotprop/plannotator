@@ -43,7 +43,9 @@ test("each subcommand's words and flags", () => {
   expect(parseSwarmCommand(["doing", "Berth screen", "--session", "ses_1", "--json"])).toEqual({ ok: true, call: { action: "doing", text: "Berth screen" }, session: "ses_1", json: true });
   expect(parseSwarmCommand(["status"])).toEqual({ ok: true, call: { action: "status" }, session: null, json: false });
   expect(parseSwarmCommand(["leave"])).toEqual({ ok: true, call: { action: "leave" }, session: null, json: false });
-  for (const argv of [["join"], ["join", "a", "b"], ["say"], ["say", "  "], ["doing", "x", "--to", "Codex"], ["leave", "now"], ["dance"], ["say", "x", "--loud"], ["join", "msg_1", "--as"]]) {
+  // The plan, its lines in one argument, as `swarm propose` sends it.
+  expect(parseSwarmCommand(["propose", "- Codex: Prices\n- Pi: Invoices", "--thread", "msg_1"])).toEqual({ ok: true, call: { action: "propose", text: "- Codex: Prices\n- Pi: Invoices", thread: "msg_1" }, session: null, json: false });
+  for (const argv of [["join"], ["join", "a", "b"], ["say"], ["say", "  "], ["doing", "x", "--to", "Codex"], ["leave", "now"], ["dance"], ["say", "x", "--loud"], ["join", "msg_1", "--as"], ["propose"], ["propose", "x", "--to", "Codex"]]) {
     expect([argv, parseSwarmCommand(argv).ok]).toEqual([argv, false]);
   }
 });
@@ -93,7 +95,7 @@ test("the agent tool does not grow: no swarm action, and no swarm words in its t
 
 test("the help names every subcommand that exists and none that does not", () => {
   for (const text of [INBOX_SWARM_USAGE, INBOX_SWARM_HELP_SECTION.join("\n")]) {
-    for (const sub of ["join", "doing", "status", "say", "leave"]) expect(text).toContain(`plannotator inbox swarm ${sub}`);
+    for (const sub of ["join", "propose", "doing", "status", "say", "leave"]) expect(text).toContain(`plannotator inbox swarm ${sub}`);
     for (const sub of ["add", "take", "done", "tasks"]) expect(text).not.toContain(`swarm ${sub}`);
   }
 });

@@ -27,6 +27,36 @@ export interface InboxSwarmMember {
   doing?: { text: string; at: string } | null;
 }
 
+/** One line of a swarm's plan (`swarm propose`): who does a part, and what. */
+export interface InboxSwarmPlanPart {
+  /** Who: an agent's name in the swarm (as `swarm status` shows it, `--as` when it joins), or one an agent brings in. */
+  who: string;
+  /** What it will do: one line, at most INBOX_SWARM_DOING_MAX characters. */
+  does: string;
+  /** A sub-agent: the agent it works for (its line was indented under that one). */
+  for?: string | null;
+  /** The member that wrote this line (its name). */
+  by: string;
+  at: string;
+}
+
+/**
+ * The swarm's plan (approval "inbox-swarm-thread-ui", the plan card): the proposal the first agent writes with `swarm
+ * propose`, and the lines the others add. The window draws it as a card in place of the words of `message_id`.
+ */
+export interface InboxSwarmPlan {
+  /** The plan in one line, when a proposal gave one (the latest that did). */
+  summary?: string | null;
+  parts: InboxSwarmPlanPart[];
+  /** The card's message: the agent reply the first proposal wrote in the thread (`InboxMessage.swarm_plan`). */
+  message_id: string;
+  /** The first proposal: the swarm started working then. */
+  at: string;
+}
+
+/** The most lines a plan keeps. */
+export const INBOX_SWARM_PLAN_MAX = 60;
+
 /** One thread's swarm (record kind `swarm`, its id the thread's). */
 export interface InboxSwarmRecord {
   /** The thread's id (one record per thread). */
@@ -41,6 +71,8 @@ export interface InboxSwarmRecord {
   person_seen_at?: string | null;
   /** The store's seq when it was last turned on (started, or turned back on): ghost words written before it wait for nobody. */
   on_seq?: number | null;
+  /** The plan (`swarm propose`); absent until an agent proposes one. */
+  plan?: InboxSwarmPlan | null;
   started_at: string;
   updated_at: string;
 }
@@ -65,6 +97,8 @@ export interface InboxThreadSwarm {
   members: InboxSwarmMemberWire[];
   /** Ghost messages the person has not looked at (the Ghost button's count). */
   ghost_unread?: number;
+  /** The plan the plan card draws; absent until an agent proposed one. */
+  plan?: InboxSwarmPlan | null;
 }
 
 /** The longest `swarm doing` line. */

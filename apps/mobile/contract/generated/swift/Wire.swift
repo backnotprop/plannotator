@@ -6254,6 +6254,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
   public var sentAgainTo: String?
   public var turnError: Bool?
   public var launchNote: Bool?
+  public var swarmPlan: Bool?
   public var guide: InboxGuideRef?
   public var guideReviewed: [Bool]?
   public var guideViewed: [String]?
@@ -6292,9 +6293,9 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["questions", "actions", "seq", "sent_annotations", "id", "project_id", "thread_id", "reply_to", "author", "subject", "body", "created_at", "resolved_at", "moved_to", "removed", "idempotency_key", "thread_name", "person_seen_seq", "person_read_seq", "person_read_at", "person_seen_before_read", "set_aside", "ship_note", "moved_note", "ghost_of", "reopened", "ack_of", "ack_reaction", "reask", "tidy", "agent_checked_seq", "agent_checked_at", "agent_checked_by", "attachments", "inline_images", "combine_left", "live_sites", "picture_it", "delivery", "taken_back_at", "read_by_agent", "cloud_wake", "t3_wait", "deliver_now_at", "deliver_now_by", "wait_started_at", "sent_again_to", "turn_error", "launch_note", "guide", "guide_reviewed", "guide_viewed", "review_verdict", "review_comments_of", "quote", "to", "base_path", "from_project", "wakes", "supersedes", "done", "action_report", "subject_question", "started_by_person", "board_request", "decision_ask", "rows_ask", "viewing", "sent_from", "launch", "scheduled_run", "scheduled_change", "named_by", "reply_thread", "thread_naming", "ack", "tags", "handoff", "took_over", "review_live", "review_anchor", "review_batch", "review_resolved", "skill_reaction"]
+  static let knownKeys: Set<String> = ["questions", "actions", "seq", "sent_annotations", "id", "project_id", "thread_id", "reply_to", "author", "subject", "body", "created_at", "resolved_at", "moved_to", "removed", "idempotency_key", "thread_name", "person_seen_seq", "person_read_seq", "person_read_at", "person_seen_before_read", "set_aside", "ship_note", "moved_note", "ghost_of", "reopened", "ack_of", "ack_reaction", "reask", "tidy", "agent_checked_seq", "agent_checked_at", "agent_checked_by", "attachments", "inline_images", "combine_left", "live_sites", "picture_it", "delivery", "taken_back_at", "read_by_agent", "cloud_wake", "t3_wait", "deliver_now_at", "deliver_now_by", "wait_started_at", "sent_again_to", "turn_error", "launch_note", "swarm_plan", "guide", "guide_reviewed", "guide_viewed", "review_verdict", "review_comments_of", "quote", "to", "base_path", "from_project", "wakes", "supersedes", "done", "action_report", "subject_question", "started_by_person", "board_request", "decision_ask", "rows_ask", "viewing", "sent_from", "launch", "scheduled_run", "scheduled_change", "named_by", "reply_thread", "thread_naming", "ack", "tags", "handoff", "took_over", "review_live", "review_anchor", "review_batch", "review_resolved", "skill_reaction"]
 
-  public init(questions: [InboxQuestion]? = nil, actions: [InboxQuestion]? = nil, seq: Int64? = nil, sentAnnotations: Double? = nil, id: MessageID, projectId: ProjectID, threadId: ThreadID, replyTo: String? = nil, author: InboxAuthor, subject: String? = nil, body: String, createdAt: String, resolvedAt: String? = nil, movedTo: InboxMovedTo? = nil, removed: [InboxRemoval]? = nil, idempotencyKey: String? = nil, threadName: String? = nil, personSeenSeq: Int64? = nil, personReadSeq: Int64? = nil, personReadAt: String? = nil, personSeenBeforeRead: Double? = nil, setAside: [String]? = nil, shipNote: InboxMessageWireShipNote? = nil, movedNote: InboxMovedNote? = nil, ghostOf: String? = nil, reopened: [String]? = nil, ackOf: String? = nil, ackReaction: InboxReaction? = nil, reask: [String]? = nil, tidy: InboxTidyMark? = nil, agentCheckedSeq: Int64? = nil, agentCheckedAt: String? = nil, agentCheckedBy: String? = nil, attachments: [InboxAttachment]? = nil, inlineImages: [InboxInlineImage]? = nil, combineLeft: InboxCombineLeft? = nil, liveSites: [InboxLiveSiteRef]? = nil, pictureIt: InboxPictureItPage? = nil, delivery: InboxDelivery? = nil, takenBackAt: String? = nil, readByAgent: InboxMessageWireReadByAgent? = nil, cloudWake: InboxCloudWake? = nil, t3Wait: InboxMessageWireT3Wait? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxMessageWireDeliverNowBy? = nil, waitStartedAt: String? = nil, sentAgainTo: String? = nil, turnError: Bool? = nil, launchNote: Bool? = nil, guide: InboxGuideRef? = nil, guideReviewed: [Bool]? = nil, guideViewed: [String]? = nil, reviewVerdict: InboxReviewVerdictRecord? = nil, reviewCommentsOf: [String]? = nil, quote: InboxReplyQuote? = nil, to: InboxAddressee? = nil, basePath: String? = nil, fromProject: InboxMessageWireFromProject? = nil, wakes: Bool? = nil, supersedes: [String]? = nil, done: [String]? = nil, actionReport: [String]? = nil, subjectQuestion: String? = nil, startedByPerson: Bool? = nil, boardRequest: Bool? = nil, decisionAsk: Bool? = nil, rowsAsk: Bool? = nil, viewing: InboxReplyViewing? = nil, sentFrom: InboxMessageWireSentFrom? = nil, launch: InboxLaunchRecord? = nil, scheduledRun: InboxScheduledRun? = nil, scheduledChange: InboxScheduledChange? = nil, namedBy: InboxMessageWireNamedBy? = nil, replyThread: String? = nil, threadNaming: InboxMessageWireThreadNaming? = nil, ack: InboxAck? = nil, tags: [InboxTag]? = nil, handoff: InboxHandoff? = nil, tookOver: Bool? = nil, reviewLive: InboxReviewLive? = nil, reviewAnchor: InboxReviewAnchor? = nil, reviewBatch: InboxReviewBatch? = nil, reviewResolved: InboxReviewResolved? = nil, skillReaction: InboxSkillReaction? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(questions: [InboxQuestion]? = nil, actions: [InboxQuestion]? = nil, seq: Int64? = nil, sentAnnotations: Double? = nil, id: MessageID, projectId: ProjectID, threadId: ThreadID, replyTo: String? = nil, author: InboxAuthor, subject: String? = nil, body: String, createdAt: String, resolvedAt: String? = nil, movedTo: InboxMovedTo? = nil, removed: [InboxRemoval]? = nil, idempotencyKey: String? = nil, threadName: String? = nil, personSeenSeq: Int64? = nil, personReadSeq: Int64? = nil, personReadAt: String? = nil, personSeenBeforeRead: Double? = nil, setAside: [String]? = nil, shipNote: InboxMessageWireShipNote? = nil, movedNote: InboxMovedNote? = nil, ghostOf: String? = nil, reopened: [String]? = nil, ackOf: String? = nil, ackReaction: InboxReaction? = nil, reask: [String]? = nil, tidy: InboxTidyMark? = nil, agentCheckedSeq: Int64? = nil, agentCheckedAt: String? = nil, agentCheckedBy: String? = nil, attachments: [InboxAttachment]? = nil, inlineImages: [InboxInlineImage]? = nil, combineLeft: InboxCombineLeft? = nil, liveSites: [InboxLiveSiteRef]? = nil, pictureIt: InboxPictureItPage? = nil, delivery: InboxDelivery? = nil, takenBackAt: String? = nil, readByAgent: InboxMessageWireReadByAgent? = nil, cloudWake: InboxCloudWake? = nil, t3Wait: InboxMessageWireT3Wait? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxMessageWireDeliverNowBy? = nil, waitStartedAt: String? = nil, sentAgainTo: String? = nil, turnError: Bool? = nil, launchNote: Bool? = nil, swarmPlan: Bool? = nil, guide: InboxGuideRef? = nil, guideReviewed: [Bool]? = nil, guideViewed: [String]? = nil, reviewVerdict: InboxReviewVerdictRecord? = nil, reviewCommentsOf: [String]? = nil, quote: InboxReplyQuote? = nil, to: InboxAddressee? = nil, basePath: String? = nil, fromProject: InboxMessageWireFromProject? = nil, wakes: Bool? = nil, supersedes: [String]? = nil, done: [String]? = nil, actionReport: [String]? = nil, subjectQuestion: String? = nil, startedByPerson: Bool? = nil, boardRequest: Bool? = nil, decisionAsk: Bool? = nil, rowsAsk: Bool? = nil, viewing: InboxReplyViewing? = nil, sentFrom: InboxMessageWireSentFrom? = nil, launch: InboxLaunchRecord? = nil, scheduledRun: InboxScheduledRun? = nil, scheduledChange: InboxScheduledChange? = nil, namedBy: InboxMessageWireNamedBy? = nil, replyThread: String? = nil, threadNaming: InboxMessageWireThreadNaming? = nil, ack: InboxAck? = nil, tags: [InboxTag]? = nil, handoff: InboxHandoff? = nil, tookOver: Bool? = nil, reviewLive: InboxReviewLive? = nil, reviewAnchor: InboxReviewAnchor? = nil, reviewBatch: InboxReviewBatch? = nil, reviewResolved: InboxReviewResolved? = nil, skillReaction: InboxSkillReaction? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.questions = questions
     self.actions = actions
     self.seq = seq
@@ -6344,6 +6345,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.sentAgainTo = sentAgainTo
     self.turnError = turnError
     self.launchNote = launchNote
+    self.swarmPlan = swarmPlan
     self.guide = guide
     self.guideReviewed = guideReviewed
     self.guideViewed = guideViewed
@@ -6433,6 +6435,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.sentAgainTo = try c.decodeIfPresent(String.self, forKey: WireKey("sent_again_to"))
     self.turnError = try c.decodeIfPresent(Bool.self, forKey: WireKey("turn_error"))
     self.launchNote = try c.decodeIfPresent(Bool.self, forKey: WireKey("launch_note"))
+    self.swarmPlan = try c.decodeIfPresent(Bool.self, forKey: WireKey("swarm_plan"))
     self.guide = try c.decodeIfPresent(InboxGuideRef.self, forKey: WireKey("guide"))
     self.guideReviewed = try c.decodeIfPresent([Bool].self, forKey: WireKey("guide_reviewed"))
     self.guideViewed = try c.decodeIfPresent([String].self, forKey: WireKey("guide_viewed"))
@@ -6522,6 +6525,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.sentAgainTo, forKey: WireKey("sent_again_to"))
     try c.encodeIfPresent(self.turnError, forKey: WireKey("turn_error"))
     try c.encodeIfPresent(self.launchNote, forKey: WireKey("launch_note"))
+    try c.encodeIfPresent(self.swarmPlan, forKey: WireKey("swarm_plan"))
     try c.encodeIfPresent(self.guide, forKey: WireKey("guide"))
     try c.encodeIfPresent(self.guideReviewed, forKey: WireKey("guide_reviewed"))
     try c.encodeIfPresent(self.guideViewed, forKey: WireKey("guide_viewed"))
@@ -10097,6 +10101,86 @@ public enum InboxSwarmMemberWireState: Codable, Hashable, Sendable, RawRepresent
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
+/// From `packages/core/inbox-swarm-types.ts`.
+public struct InboxSwarmPlan: Codable, Hashable, Sendable {
+  public var summary: String?
+  public var parts: [InboxSwarmPlanPart]
+  public var messageId: MessageID
+  public var at: String
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["summary", "parts", "message_id", "at"]
+
+  public init(summary: String? = nil, parts: [InboxSwarmPlanPart], messageId: MessageID, at: String, unknownFields: [String: JSONValue] = [:]) {
+    self.summary = summary
+    self.parts = parts
+    self.messageId = messageId
+    self.at = at
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.summary = try c.decodeIfPresent(String.self, forKey: WireKey("summary"))
+    self.parts = try c.decode([InboxSwarmPlanPart].self, forKey: WireKey("parts"))
+    self.messageId = try c.decode(MessageID.self, forKey: WireKey("message_id"))
+    self.at = try c.decode(String.self, forKey: WireKey("at"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encodeIfPresent(self.summary, forKey: WireKey("summary"))
+    try c.encode(self.parts, forKey: WireKey("parts"))
+    try c.encode(self.messageId, forKey: WireKey("message_id"))
+    try c.encode(self.at, forKey: WireKey("at"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `packages/core/inbox-swarm-types.ts`.
+public struct InboxSwarmPlanPart: Codable, Hashable, Sendable {
+  public var who: String
+  public var does: String
+  public var forValue: String?
+  public var by: String
+  public var at: String
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["who", "does", "for", "by", "at"]
+
+  public init(who: String, does: String, forValue: String? = nil, by: String, at: String, unknownFields: [String: JSONValue] = [:]) {
+    self.who = who
+    self.does = does
+    self.forValue = forValue
+    self.by = by
+    self.at = at
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.who = try c.decode(String.self, forKey: WireKey("who"))
+    self.does = try c.decode(String.self, forKey: WireKey("does"))
+    self.forValue = try c.decodeIfPresent(String.self, forKey: WireKey("for"))
+    self.by = try c.decode(String.self, forKey: WireKey("by"))
+    self.at = try c.decode(String.self, forKey: WireKey("at"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.who, forKey: WireKey("who"))
+    try c.encode(self.does, forKey: WireKey("does"))
+    try c.encodeIfPresent(self.forValue, forKey: WireKey("for"))
+    try c.encode(self.by, forKey: WireKey("by"))
+    try c.encode(self.at, forKey: WireKey("at"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
 /// From `packages/core/inbox-types.ts`.
 public struct InboxTag: Codable, Hashable, Sendable {
   public var host: String?
@@ -10674,16 +10758,18 @@ public struct InboxThreadSwarm: Codable, Hashable, Sendable {
   public var ghostId: String?
   public var members: [InboxSwarmMemberWire]
   public var ghostUnread: Double?
+  public var plan: InboxSwarmPlan?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["on", "ghost_id", "members", "ghost_unread"]
+  static let knownKeys: Set<String> = ["on", "ghost_id", "members", "ghost_unread", "plan"]
 
-  public init(on: Bool, ghostId: String? = nil, members: [InboxSwarmMemberWire], ghostUnread: Double? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(on: Bool, ghostId: String? = nil, members: [InboxSwarmMemberWire], ghostUnread: Double? = nil, plan: InboxSwarmPlan? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.on = on
     self.ghostId = ghostId
     self.members = members
     self.ghostUnread = ghostUnread
+    self.plan = plan
     self.unknownFields = unknownFields
   }
 
@@ -10693,6 +10779,7 @@ public struct InboxThreadSwarm: Codable, Hashable, Sendable {
     self.ghostId = try c.decodeIfPresent(String.self, forKey: WireKey("ghost_id"))
     self.members = try c.decode([InboxSwarmMemberWire].self, forKey: WireKey("members"))
     self.ghostUnread = try c.decodeIfPresent(Double.self, forKey: WireKey("ghost_unread"))
+    self.plan = try c.decodeIfPresent(InboxSwarmPlan.self, forKey: WireKey("plan"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -10702,6 +10789,7 @@ public struct InboxThreadSwarm: Codable, Hashable, Sendable {
     try c.encode(self.ghostId, forKey: WireKey("ghost_id"))
     try c.encode(self.members, forKey: WireKey("members"))
     try c.encodeIfPresent(self.ghostUnread, forKey: WireKey("ghost_unread"))
+    try c.encodeIfPresent(self.plan, forKey: WireKey("plan"))
     try WireKey.write(unknownFields, to: &c)
   }
 }

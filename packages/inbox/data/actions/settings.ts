@@ -69,8 +69,8 @@ export function useSettingsSaves(
   const toggleScheduled = (next: boolean) =>
     saveSetting((s) => ({ ...s, scheduled_threads: { ...s.scheduled_threads, on: next } }), () => scheduledApi.saveSwitch(next), (s, saved) => ({ ...s, scheduled_threads: saved.scheduled_threads ?? { on: next } }), reloadSkillCatalog);
 
-  /** One experimental switch: decision mode, or Grid (approval "inbox-agent-grid"); the other keeps what it was. */
-  const toggleExperimental = (next: boolean, feature: 'decision_mode' | 'grid' = 'decision_mode') =>
+  /** One experimental switch: decision mode, Grid (approval "inbox-agent-grid") or Swarm; the others keep what they were. */
+  const toggleExperimental = (next: boolean, feature: 'decision_mode' | 'grid' | 'swarm' = 'decision_mode') =>
     saveSetting(
       (s) => ({ ...s, experimental: { decision_mode: s.experimental?.decision_mode ?? { on: false, env: null }, ...(s.experimental?.grid ? { grid: s.experimental.grid } : {}), ...(s.experimental?.swarm ? { swarm: s.experimental.swarm } : {}), [feature]: { on: next, env: s.experimental?.[feature]?.env ?? null } } }),
       () => inboxApi.saveExperimental({ [feature]: next }),

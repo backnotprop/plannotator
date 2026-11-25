@@ -1942,6 +1942,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     machines: () => machines,
     farWakes,
     ownSession: (session) => live.allLive().some((entry) => entry.session === session),
+    wakes: (session) => live.wakesTagged(session),
     serverSession,
   });
   // `plannotator inbox capability` (inbox-capability-agent.ts): this computer's switches, turned through the settings
@@ -1950,7 +1951,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     resolveProject,
     here: () => inboxCapabilitySwitchesOf(settingsModel("local", false, null, false)),
     set: async (key, on) => {
-      const answer = await globalThis.fetch(`${baseUrl.replace(/\/+$/, "")}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [key]: { on } }) });
+      // Swarm is an experimental switch: saved as `experimental: { swarm }`, as its Settings row saves it.
+      const change = key === "swarm" ? { experimental: { swarm: on } } : { [key]: { on } };
+      const answer = await globalThis.fetch(`${baseUrl.replace(/\/+$/, "")}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(change) });
       const body = (await answer.json().catch(() => ({}))) as { code?: unknown; error?: unknown };
       if (!answer.ok) throw new InboxError(typeof body.code === "string" ? body.code : "validation_error", typeof body.error === "string" ? body.error : "The switch did not turn.");
       return inboxCapabilitySwitchesOf(settingsModel("local", false, null, false));
@@ -3456,7 +3459,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const decisionModeOn = () => resolveExperimental(loadConfig(), "decision-mode");
   /** Grid (approval "inbox-agent-grid"), off by default: its sidebar row is never saved while it is off. */
   const gridOn = () => resolveExperimental(loadConfig(), "grid");
-  /** Swarm (docs/agent-guides/inbox-swarm.md), off by default, with no Settings row: PLANNOTATOR_EXPERIMENTAL=swarm or config `experimental.swarm`. */
+  /** Swarm (docs/agent-guides/inbox-swarm.md), off by default: Settings → Capabilities → Experimental, config `experimental.swarm`, or PLANNOTATOR_EXPERIMENTAL=swarm. */
   const swarmOn = () => resolveExperimental(loadConfig(), "swarm");
   // Off, no ghost thread's words wait for any agent (store.ts `isSwarmMember`): no wake hands them.
   store.setSwarmSwitch(swarmOn);
@@ -4105,18 +4108,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
     // Grid (approval "inbox-agent-grid"): the window's page of work in flight, drawn from what the window already reads.
     grid: { on: gridOn(), env: parseExperimentalEnv("grid") ?? null },
-    // Swarm: read by the window only; no Settings row turns it (config.json or the env var). Off, it is not in the read.
-    ...(swarmOn() ? { swarm: { on: true, env: parseExperimentalEnv("swarm") ?? null } } : {}),
+    // Swarm (docs/agent-guides/inbox-swarm.md): its Settings row, and every swarm piece of the window.
+    swarm: { on: swarmOn(), env: parseExperimentalEnv("swarm") ?? null },
   });
 
-  /** Save `experimental: { decision_mode?, grid? }` (one switch or both). `validateOnly`: check and write nothing. */
+  /** Save `experimental: { decision_mode?, grid?, swarm? }` (one switch or more). `validateOnly`: check and write nothing. */
   const saveExperimental = (input: unknown, validateOnly = false) => {
-    const switches = { decision_mode: ["decision-mode", "decisionMode", "decision mode"], grid: ["grid", "grid", "Grid"] } as const;
+    const switches = { decision_mode: ["decision-mode", "decisionMode", "decision mode"], grid: ["grid", "grid", "Grid"], swarm: ["swarm", "swarm", "Swarm"] } as const;
     const named = input && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
     if (named.length === 0 || named.some(([key, value]) => !Object.hasOwn(switches, key) || typeof value !== "boolean")) {
-      throw new InboxError("validation_error", "experimental: { decision_mode?: boolean, grid?: boolean }.", { field: "experimental" });
+      throw new InboxError("validation_error", "experimental: { decision_mode?: boolean, grid?: boolean, swarm?: boolean }.", { field: "experimental" });
     }
-    const change: { decisionMode?: boolean; grid?: boolean } = {};
+    const change: { decisionMode?: boolean; grid?: boolean; swarm?: boolean } = {};
     for (const [key, on] of named as [keyof typeof switches, boolean][]) {
       const [feature, configKey, words] = switches[key];
       // The env var decides (like PLANNOTATOR_INBOX_TAILSCALE): saving to config.json would change nothing.
@@ -5494,7 +5497,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // One set of Capabilities switches across linked computers (inbox-capability-set.ts): a switch an env var, the build
   // or a test decides here is not shared. Taking a flip turns it as its Settings row does. `chosen`: its own key is
   // set (a choice from before flips were kept counts as a flip at time 0; an untouched default as none).
-  const experimentalFree = (feature: "decision-mode" | "grid") => parseExperimentalEnv(feature) === undefined;
+  const experimentalFree = (feature: "decision-mode" | "grid" | "swarm") => parseExperimentalEnv(feature) === undefined;
   const chosen = (read: (config: PlannotatorConfig) => unknown) => () => typeof read(loadConfig()) === "boolean";
   const capabilitySet = createCapabilitySet({
     switches: {
@@ -5507,6 +5510,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       float_drafts: { on: floatDraftsOn, chosen: chosen((c) => c.inboxFloatDrafts), shared: () => true, apply: (on) => saveFloatDrafts({ on }) },
       decision_mode: { on: decisionModeOn, chosen: chosen((c) => savedExperimental(c, "decision-mode")), shared: () => experimentalFree("decision-mode"), apply: (on) => saveExperimental({ decision_mode: on }) },
       grid: { on: gridOn, chosen: chosen((c) => savedExperimental(c, "grid")), shared: () => experimentalFree("grid"), apply: (on) => saveExperimental({ grid: on }) },
+      swarm: { on: swarmOn, chosen: chosen((c) => savedExperimental(c, "swarm")), shared: () => experimentalFree("swarm"), apply: (on) => saveExperimental({ swarm: on }) },
     },
     times: () => loadConfig().inboxCapabilityFlips,
     // Key by key under the config lock (saveConfig merges it), so a stamp saved meanwhile is never lost.
@@ -6256,7 +6260,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
       ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
       // Swarm (additive, only while its switch is on): the summary row, the Ghost button and the status view read it.
-      ...(swarmOn() && store.swarmOf(thread.thread_id) ? { swarm: swarmWire(store, thread.thread_id, swarmCtx.live) } : {}),
+      ...(swarmOn() && store.swarmOf(thread.thread_id) ? { swarm: swarmWire(store, thread.thread_id, swarmCtx.live, swarmCtx.far?.nameOf) } : {}),
     };
     // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
     // `attach_command` (with `run`): the host's attach command, there while the agent rests too.

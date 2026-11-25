@@ -4709,6 +4709,10 @@
           "type": "boolean",
           "const": true
         },
+        "swarm_plan": {
+          "type": "boolean",
+          "const": true
+        },
         "guide": {
           "anyOf": [
             {
@@ -7209,6 +7213,75 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-swarm-types.ts"
     },
+    "InboxSwarmPlan": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxSwarmPlanPart"
+          }
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "parts",
+        "message_id",
+        "at"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-swarm-types.ts"
+    },
+    "InboxSwarmPlanPart": {
+      "type": "object",
+      "properties": {
+        "who": {
+          "type": "string"
+        },
+        "does": {
+          "type": "string"
+        },
+        "for": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "by": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "who",
+        "does",
+        "by",
+        "at"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-swarm-types.ts"
+    },
     "InboxTag": {
       "type": "object",
       "properties": {
@@ -7681,6 +7754,16 @@
         },
         "ghost_unread": {
           "type": "number"
+        },
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxSwarmPlan"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

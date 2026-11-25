@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxThreadSwarm } from '@plannotator/core/inbox-swarm-types';
 import { FILE_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, mainWidthOf, paneGutters } from '../stack';
 import { useSwarmSwitch } from './swarmOn';
+import { shareThreadSwarm } from './swarmThreadShare';
 import { GhostButton } from './GhostButton';
 import { GhostPane } from './GhostPane';
 import { SwarmSummary } from './SwarmSummary';
@@ -71,6 +72,14 @@ export function useThreadSwarm(input: {
     if (input.fileOpen) input.closeFile();
     setOpen(true);
   };
+  // The plan card inside a message reads this read (swarmThreadShare.ts), and its Ghost thread opens the pane.
+  const showRef = useRef(show);
+  showRef.current = show;
+  const openGhost = useCallback(() => showRef.current(), []);
+  useLayoutEffect(() => {
+    shareThreadSwarm(threadId, swarm ? { swarm, openGhost, phone: input.phone } : null);
+  }, [threadId, swarm, openGhost, input.phone]);
+  useLayoutEffect(() => () => shareThreadSwarm(threadId, null), [threadId]);
   if (!swarm) return { open: false, beside: false, button: null, row: null, pane: null };
   return {
     open: shown,

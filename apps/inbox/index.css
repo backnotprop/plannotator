@@ -69,6 +69,7 @@
 /* Swarm (packages/inbox/swarm/): its pieces, and the Swarm badge with its motion. */
 @import "../../packages/inbox/swarm/swarm.css";
 @import "../../packages/inbox/swarm/swarmBadge.css";
+@import "../../packages/inbox/swarm/swarmPlan.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
 /* `:::run` and `:::secret` cards (packages/inbox/parts/RunBlocks/). */

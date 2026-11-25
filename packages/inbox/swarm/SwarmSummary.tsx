@@ -19,7 +19,8 @@ const ROW_MARKS = 4;
  * row with the members' marks, "N agents · X working · Y waiting on you" and a chevron. A press opens the status view
  * in place: each member with where it runs (its project · its computer), its state as quiet words, its `doing` line and
  * when, a sub-agent indented under the member it works for; its foot holds Add an agent (the reply's tag picker), Ghost
- * thread with its count, and Turn off. No task line and no plan card in this piece.
+ * thread with its count, and Turn off. No task line in this piece; the plan is its own card in the thread
+ * (SwarmPlanCard.tsx), never in the status view.
  */
 export function SwarmSummary({
   threadId,

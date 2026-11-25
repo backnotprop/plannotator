@@ -912,6 +912,17 @@
       "at",
       "text"
     ],
+    "InboxSwarmPlan": [
+      "at",
+      "message_id",
+      "parts"
+    ],
+    "InboxSwarmPlanPart": [
+      "at",
+      "by",
+      "does",
+      "who"
+    ],
     "InboxTag": [
       "host",
       "session",

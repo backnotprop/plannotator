@@ -781,6 +781,12 @@ export interface InboxMessage {
    */
   launch_note?: true;
   /**
+   * A swarm's plan card (docs/agent-guides/inbox-swarm.md): the agent reply its first `swarm propose` wrote. Its body
+   * is the plan as plain words, for any reader that does not know the card; the window draws the swarm's plan in its
+   * place while Swarm is on. Written only by the Inbox itself. Absent otherwise. Additive.
+   */
+  swarm_plan?: true;
+  /**
    * A guided review this message carries (submit_guide, PLAN step 5): the
    * snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on
    * every other message and on records older than step 5.

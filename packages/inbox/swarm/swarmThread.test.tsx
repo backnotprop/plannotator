@@ -273,7 +273,7 @@ test.skipIf(!hasDom)('the summary row replaces "N sessions"; its status view sho
   ]);
   expect(rows[0]!.querySelector('[data-swarm-doing]')?.textContent).toBe('Reading the refunds tests · just now');
   expect(rows[2]!.querySelector('[data-swarm-doing]')).toBeNull();
-  // No task line and no plan card in this piece; the foot holds its three actions.
+  // No task line in this piece, and the plan is not in the status view; the foot holds its three actions.
   const status = q('[data-swarm-status]')!;
   expect(status.textContent).not.toMatch(/Tasks/);
   expect(status.querySelector('[data-swarm-add]')?.textContent).toBe('Add an agent');

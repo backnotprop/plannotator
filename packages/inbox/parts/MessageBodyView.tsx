@@ -11,6 +11,7 @@ import { MessageBody } from './MessageBody/MessageBody';
 import { ReviewAnchorLine } from '../components/ReviewAnchorLine';
 import type { MessageActsRef } from './messageActs';
 import { farChangeMessage } from '../scheduled/farLinks';
+import { SwarmPlanSlot } from '../swarm/SwarmPlanCard';
 
 export type MessageBodyData = {
   message: InboxMessageWire;
@@ -43,14 +44,20 @@ export type MessageBodyData = {
 };
 
 export function drawMessageBody(d: MessageBodyData) {
-  const { acts } = d;
   const message = farChangeMessage(d.message, d.farMachine);
+  // A skill emoji's reply is drawn as its head line alone ("You 😵‍💫 /bro"): its words and skills block are not shown.
+  if (message.skill_reaction) return null;
+  // A swarm's plan card (`swarm propose`): the card while Swarm is on and the thread's read has its plan, else its words.
+  if (message.swarm_plan) return <SwarmPlanSlot message={message} fallback={wordsOf(d, message)} />;
+  return wordsOf(d, message);
+}
+
+function wordsOf(d: MessageBodyData, message: InboxMessageWire) {
+  const { acts } = d;
   const id = message.id;
   const isAgent = message.author.kind === 'agent';
   const questions = message.questions ?? [];
   const at = (key: string) => questions.findIndex((q) => q.key === key);
-  // A skill emoji's reply is drawn as its head line alone ("You 😵‍💫 /bro"): its words and skills block are not shown.
-  if (message.skill_reaction) return null;
   return (
     <>
       {message.review_anchor && <ReviewAnchorLine anchor={message.review_anchor} resolved={!!message.review_resolved} />}
