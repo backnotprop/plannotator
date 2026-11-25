@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { DiffViewer } from '../../components/DiffViewer';
+import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
 import { useReviewState } from '../ReviewStateContext';
 import { getReviewDiffPanelFilePath, type ReviewDiffPanelParams } from '../reviewPanelTypes';
 import { annotationMatchesPrScope } from '../../utils/annotationScope';
@@ -130,6 +131,9 @@ export const ReviewDiffBody: React.FC<{
   return (
     <div key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}:${state.feedbackDiffContext?.snapshotId ?? ''}`} className="h-full flex flex-col">
       <div className="flex-1 min-h-0 relative">
+      {/* A file whose diff throws while it draws says so here; the panels around it stay (ui's RegionBoundary). Try
+          again first clears the selection a "+" set (the app's, above the diff), which would fail it again. */}
+      <RegionBoundary name="Diff" onRetry={() => state.onLineSelection(null)}>
       <DiffViewer
         headerAccessory={switchControl}
         bodyOverride={originalView ? (
@@ -243,6 +247,7 @@ export const ReviewDiffBody: React.FC<{
           ? (view, how) => (how === 'chosen' ? state.markdownPreview!.choose : state.markdownPreview!.show)(file.path, view)
           : undefined}
       />
+      </RegionBoundary>
       </div>
     </div>
   );

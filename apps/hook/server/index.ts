@@ -269,6 +269,7 @@ import { inboxPairedRouteFetch, runInboxCallCommand } from "./inbox-call-command
 import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
+import { runInboxCapabilityCommand } from "./inbox-capability-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -471,6 +472,21 @@ const rawArgs = process.argv.slice(2);
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         ensureRunning: () => ensureInboxRunning(exportDataDir),
         ...(pairedRoute ? { fetchRoute: pairedRoute } : {}),
+      }),
+    );
+  }
+}
+// `plannotator inbox capability [<capability> on|off]`: the capability switches, a thin client over the Inbox's `/api/inbox/capability` (inbox-capability-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "capability") {
+    const capabilityDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxCapabilityCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(capabilityDataDir),
       }),
     );
   }

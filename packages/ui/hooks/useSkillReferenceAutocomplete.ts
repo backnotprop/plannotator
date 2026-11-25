@@ -103,8 +103,15 @@ export function useSkillReferenceAutocomplete(options: {
    * a deletion opens the list as a caret move does, as before.
    */
   quietOnDelete?: boolean;
+  /**
+   * Once a query character is typed, a row is active (opt-in; a one-line field where `/` only ever means a skill, the
+   * Inbox's saved-emoji name): the row named exactly what was typed, else the first. Enter and Tab take it, the arrows
+   * move from it; the list's order is unchanged. Typing re-filters and picks again. A bare trigger has no active row,
+   * so its Enter is the field's. Absent: the no-preselection invariant above, as before.
+   */
+  firstActive?: boolean;
 }): UseSkillReferenceAutocompleteResult {
-  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter, commands, onCommand, hostRowsFirst = false, quietOnDelete = false } = options;
+  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter, commands, onCommand, hostRowsFirst = false, quietOnDelete = false, firstActive = false } = options;
   // Seed from the memory cache only when the surface opted in — a disabled
   // composer must stay inert even after another surface warmed the catalog.
   const [fullCatalog, setCatalog] = useState<SkillCatalogEntry[]>(() =>
@@ -180,8 +187,15 @@ export function useSkillReferenceAutocomplete(options: {
 
   // Never let a stale activation point past the list (catalog refreshes can
   // shrink it without a query change). Out of range reads as "nothing active".
+  // `firstActive`: the row named exactly what was typed, else the first; a bare trigger (nothing typed yet) has none.
+  const defaultActive = useMemo(() => {
+    if (!firstActive || !trigger || trigger.query.length === 0 || items.length === 0) return null;
+    const exact = items.findIndex((row) => row.name === trigger.query);
+    const folded = exact >= 0 ? exact : items.findIndex((row) => row.name.toLowerCase() === trigger.query.toLowerCase());
+    return folded >= 0 ? folded : 0;
+  }, [firstActive, items, trigger]);
   const boundedActive =
-    activeIndex !== null && activeIndex >= 0 && activeIndex < items.length ? activeIndex : null;
+    activeIndex !== null && activeIndex >= 0 && activeIndex < items.length ? activeIndex : defaultActive;
 
   const readCaret = useCallback(() => {
     const el = textareaRef.current;

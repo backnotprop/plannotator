@@ -403,6 +403,19 @@ describe('the open thread', () => {
     expect(ids(settleThread(drawnWaiting, bySection(answered, other), 'open'))).toEqual(['new:other', 'sent:open']);
     expect(settlesOnBack(drawnWaiting, waitingOpen)).toBe(false);
   });
+
+  // The failure this guards: on a phone the person opened a routine's thread from Quiet and a run started while it was
+  // open (routineRunsEnter leaves the open thread's row alone). Back said no (nothing unseen, New waits on no one), so
+  // the row stayed folded in Quiet, and the next unchanged read never brought it in: folded for the whole run.
+  test("settlesOnBack: a routine's run that started while the thread was open brings its row from Quiet or Sent up under New", () => {
+    const quietOpen = r('open', 'billing-svc', 1, 'quiet', 0);
+    const runGoing = { ...r('open', 'billing-svc', 1, 'new', 0), unread: false, scheduled_running: true } as InboxListRow;
+    expect(settlesOnBack(bySection(quietOpen, other), runGoing)).toBe(true);
+    expect(ids(settleThread(bySection(quietOpen, other), bySection(runGoing, other), 'open'))).toEqual(['new:open,other']);
+    expect(settlesOnBack(bySection({ ...quietOpen, section: 'sent' }, other), runGoing)).toBe(true);
+    // Already drawn in New: as left.
+    expect(settlesOnBack(bySection({ ...quietOpen, section: 'new' }, other), runGoing)).toBe(false);
+  });
 });
 
 // The failure this guards (the owner, 2026-10-16: "When I create a new thread
