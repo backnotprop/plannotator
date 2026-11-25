@@ -1801,6 +1801,7 @@
       "prompts",
       "reaction_change",
       "reactions",
+      "review_analysis",
       "rows",
       "rows_undo",
       "scheduled_threads",
