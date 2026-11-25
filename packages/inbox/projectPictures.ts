@@ -14,6 +14,8 @@ interface KnownProject {
   /** Its folder and its git origin (`owner/repo`), for Ask an agent to draw it. */
   root?: string;
   repo?: string;
+  /** The look picked in its mark's picker: `hue:<n>`, `repo` or `github`. */
+  look?: string;
 }
 const projects = new Map<string, KnownProject>();
 let projectsVersion = 0;
@@ -110,7 +112,7 @@ export function sessionRecentTitles(sessions: readonly string[]): string[] {
 }
 
 /** The Inbox's projects as a list read brought them: their names and when each one's picture was set; `rows`: its sessions' projects. */
-export function learnProjects(list: readonly { id: string; name: string; picture?: number; root?: string; repo?: string }[], rows: readonly SessionsRow[] = []): void {
+export function learnProjects(list: readonly { id: string; name: string; picture?: number; root?: string; repo?: string; look?: string }[], rows: readonly SessionsRow[] = []): void {
   learnRecent(rows);
   let sessionsChanged = false;
   for (const row of rows) {
@@ -137,8 +139,9 @@ export function learnProjects(list: readonly { id: string; name: string; picture
     const picture = typeof project.picture === 'number' ? project.picture : undefined;
     const root = typeof project.root === 'string' ? project.root : (before?.root ?? undefined);
     const repo = typeof project.repo === 'string' ? project.repo : (before?.repo ?? undefined);
-    if (before && before.name === project.name && before.picture === picture && before.root === root && before.repo === repo) continue;
-    projects.set(project.id, { name: project.name, ...(picture !== undefined ? { picture } : {}), ...(root ? { root } : {}), ...(repo ? { repo } : {}) });
+    const look = typeof project.look === 'string' ? project.look : undefined;
+    if (before && before.name === project.name && before.picture === picture && before.root === root && before.repo === repo && before.look === look) continue;
+    projects.set(project.id, { name: project.name, ...(picture !== undefined ? { picture } : {}), ...(root ? { root } : {}), ...(repo ? { repo } : {}), ...(look ? { look } : {}) });
     changed = true;
   }
   if (changed) notifyProjects();
@@ -149,9 +152,26 @@ export function knownProjectName(projectId: string): string | null {
   return projects.get(projectId)?.name ?? null;
 }
 
-/** Whether the project has a picture someone set (the project menu offers to take it away). */
+/** Whether the project has a picture or a look someone set (the project menu and the picker offer to take it away). */
 export function hasSetPicture(projectId: string): boolean {
-  return projects.get(projectId)?.picture !== undefined;
+  const known = projects.get(projectId);
+  return known?.picture !== undefined || known?.look !== undefined;
+}
+
+/** The look picked for a project in its mark's picker (`hue:<n>`, `repo`, `github`), or null. */
+export function projectLookOf(projectId: string): string | null {
+  return projects.get(projectId)?.look ?? null;
+}
+
+/** The hue picked for a project's letters (0 to 7), or null: the name's own. */
+export function projectHueOf(projectId: string): number | null {
+  const hue = /^hue:([0-7])$/.exec(projects.get(projectId)?.look ?? '');
+  return hue ? Number(hue[1]) : null;
+}
+
+/** One picture source's address for the picker's place (`source=repo|github`), on the Inbox that has the project. */
+export function projectSourceUrl(projectId: string, source: 'repo' | 'github'): string {
+  return inboxUrl(`/projects/${encodeURIComponent(projectId)}/picture`, `source=${source}`, machineOf(projectId));
 }
 
 export function useKnownProjects(): number {
@@ -175,8 +195,11 @@ export function useKnownProjects(): number {
 export function projectPictureUrl(projectId: string, marks: MarksChoice): string | null {
   if (!projectId) return null;
   const set = projects.get(projectId)?.picture;
-  if (set === undefined && !marks.logo && !marks.github) return null;
-  return inboxUrl(`/projects/${encodeURIComponent(projectId)}/picture`, `v=${set ?? 0}-${marks.logo ? 1 : 0}${marks.github ? 1 : 0}${marks.logo ? '&logo=1' : ''}`, machineOf(projectId));
+  const look = projects.get(projectId)?.look;
+  // A picked hue is letters alone; a picked source is asked for whatever the switches say.
+  if (look?.startsWith('hue:')) return null;
+  if (set === undefined && !look && !marks.logo && !marks.github) return null;
+  return inboxUrl(`/projects/${encodeURIComponent(projectId)}/picture`, `v=${set ?? 0}-${marks.logo ? 1 : 0}${marks.github ? 1 : 0}${look ? `-${look}` : ''}${marks.logo ? '&logo=1' : ''}`, machineOf(projectId));
 }
 
 /** Tests only. */

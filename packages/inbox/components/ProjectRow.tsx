@@ -9,7 +9,7 @@ import { projectNameMatches } from '../projectCombine';
 import type { LabeledProject } from '../projectLabels';
 import type { ProjectAction } from '../projectMenu';
 import { ProjectTipText, Tip } from './Tip';
-import { LetterMark, ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
+import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
 import { ProjectIconDialog, type AgentIconPlace } from '../agents/AgentIconDialog';
 import { ProjectMarkPicker } from './ProjectMarkPicker';
 import { hasSetPicture, useKnownProjects } from '../projectPictures';
@@ -50,6 +50,8 @@ export interface ProjectRowProps {
    * keep a picture themselves; this is Remove picture (null). Resolves true once the list has it. Absent: neither.
    */
   onPicture?: (file: File | null) => Promise<boolean>;
+  /** The picker's hue or picture source for the project (`hue:<n>`, `repo`, `github`). Absent: none offered. */
+  onLook?: (look: string) => Promise<boolean>;
   /**
    * "+" beside ⋯ (approval "launch-create-clone", F1-F7): opens New message with a new session in this project. `tip`
    * is its tip and name ("New session in billing-svc", with the machine, and "starts when it's back" while asleep).
@@ -207,10 +209,10 @@ export function ProjectRow(props: ProjectRowProps) {
           projectId={project.id}
           name={project.name}
           hasPicture={pictures === 'set'}
-          letters={<LetterMark name={project.name} seed={project.id} size={20} />}
           paused={iconDialog !== null}
           onDialog={setIconDialog}
           onRemove={() => void props.onPicture?.(null)}
+          onLook={props.onLook ? (look) => void props.onLook!(look) : undefined}
         />
       )}
       {newSession && (

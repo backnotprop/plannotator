@@ -8,12 +8,13 @@
  * picker offering no way back to the letters once a picture is set; "Ask an agent to draw it" asking about another
  * project, sending the message itself, not naming the request, or leaving out what the window knows of the project
  * (its name, folder, origin and newest threads' titles, newest first, each one line and cut short); a linked machine's project kept on this computer;
- * an older machine's refusal shown as a bare error.
+ * an older machine's refusal shown as a bare error. The picker's outer arc: not all eight hues, a source offered that
+ * the project lacks or missing one it has, the wrong place checked, or a picked hue not kept or not drawn.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { act } from 'react';
@@ -42,6 +43,8 @@ const routes = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./in
 const own = (hasDom ? await import('./agents/ownIcons') : {}) as typeof import('./agents/ownIcons');
 const sets = (hasDom ? await import('./agents/iconSets') : {}) as typeof import('./agents/iconSets');
 const composer = (hasDom ? await import('./compose/openComposer') : {}) as typeof import('./compose/openComposer');
+const lookApi = (hasDom ? await import('./data/projectLookApi') : {}) as typeof import('./data/projectLookApi');
+const marksModule = (hasDom ? await import('./letterMarks') : {}) as typeof import('./letterMarks');
 
 const SELF = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const MINI = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAW';
@@ -70,7 +73,11 @@ function inboxes({ older = false } = {}) {
     const builtIn = createBuiltInIconSets();
     const fetcher = createIconSetFetcher({ dir: join(dir, 'icon-sets'), pointer: null, builtIn: builtIn.ids });
     const setsRoute = createInboxIconSets({ builtIn, fetcher, serverSession: 'srv', readBody, json }).route;
-    const folder = { id: project, name, root: `/work/${name}` };
+    // Its folder has a favicon: the repo's logo is one of its sources.
+    const root = join(dir, '..', name);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, 'favicon.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>');
+    const folder = { id: project, name, root };
     const animate = createInboxIconAnimate({
       inboxDir: dir,
       icons: store,
@@ -84,23 +91,33 @@ function inboxes({ older = false } = {}) {
     });
     // The project picture route as the Inbox answers it (packages/server/inbox.ts): Set picture's checks, the project back.
     const pictureRoute = async (req: Request, url: URL) => {
-      if (url.pathname !== `/api/inbox/projects/${project}/picture` || req.method !== 'POST') return null;
+      const use = { logo: false, github: false, repo: () => null };
+      if (url.pathname === `/api/inbox/projects/${project}/picture/sources`) return json(await pictures.sources(folder, use));
+      if (url.pathname !== `/api/inbox/projects/${project}/picture`) return null;
+      if (req.method === 'GET') {
+        const source = url.searchParams.get('source');
+        const picture = source === 'repo' || source === 'github' ? await pictures.source(folder, source, use) : await pictures.get(folder, use);
+        return picture ? new Response(picture.body, { headers: { 'content-type': picture.type } }) : new Response(null, { status: 204 });
+      }
       const body = await readBody(req);
-      if (body.picture === null) pictures.removeUpload(project);
+      if (body.look !== undefined) {
+        if (!pictures.setLook(project, body.look as never)) return json({ error: 'look', code: 'validation_error' }, 422);
+      } else if (body.picture === null) pictures.removeUpload(project);
       else {
         const data = /^data:image\/[a-z0-9.+-]+;base64,(.+)$/i.exec(String(body.picture));
         const saved = data ? pictures.setUpload(project, new Uint8Array(Buffer.from(data[1]!, 'base64'))) : null;
         if (!saved?.ok) return json({ error: 'Picture: a PNG, JPEG, GIF, WebP or SVG image.', code: 'validation_error' }, 422);
       }
       const at = pictures.uploadedAt(project);
-      return json({ project: { ...folder, ...(at !== undefined ? { picture: at } : {}) } });
+      const look = pictures.lookOf(project);
+      return json({ project: { ...folder, ...(at !== undefined ? { picture: at } : {}), ...(look ? { look } : {}) } });
     };
     const kept = async () => {
       const picture = await pictures.get({ id: project, root: '/nowhere' }, { logo: false, github: false, repo: () => null });
       return picture ? new TextDecoder().decode(picture.body) : null;
     };
     const handle = async (req: Request, url: URL) => (await iconsRoute(req, url)) ?? (await setsRoute(req, url)) ?? (await pictureRoute(req, url)) ?? (await animate.route(req, url)) ?? json({ error: 'not here' }, 404);
-    return { builtIn, folder, kept, handle, store };
+    return { builtIn, folder, kept, handle, store, pictures };
   };
   const here = make(HERE, 'billing');
   const there = make(THERE, 'infra');
@@ -150,9 +167,11 @@ afterEach(() => {
 });
 
 let removed: string[] = [];
+let looks: string[] = [];
 /** One project's sidebar row, with project marks on (Settings → Rows). */
 function mount(project: { id: string; name: string; root: string }) {
   removed = [];
+  looks = [];
   known.learnProjects([project]);
   const host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -173,6 +192,13 @@ function mount(project: { id: string; name: string; root: string }) {
           onAction={() => {}}
           onPicture={async (file) => {
             removed.push(file === null ? 'removed' : 'file');
+            return true;
+          }}
+          // As projectWrites.ts keeps a look: the Inbox's answer is the project the list then draws.
+          onLook={async (look) => {
+            looks.push(look);
+            const answer = await lookApi.setProjectLook(project.id, look);
+            if (answer.project) known.learnProjects([answer.project]);
             return true;
           }}
         />
@@ -222,7 +248,7 @@ test.if(hasDom)("the project's mark opens the picker; a set's icon becomes the p
   // With a picture set, the picker's first place puts the letters back.
   act(() => host.querySelector(`[data-project-icon="${HERE}"]`)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
   await settle();
-  expect([...document.querySelectorAll('[data-face-choice]')].map((el) => el.getAttribute('data-face-choice'))).toEqual(['letters', 'own', 'sets']);
+  expect([...document.querySelectorAll('[data-face-choice]')].map((el) => el.getAttribute('data-face-choice')).slice(0, 3)).toEqual(['letters', 'own', 'sets']);
   act(() => document.querySelector<HTMLButtonElement>('[data-face-choice="letters"]')!.click());
   await settle();
   expect(removed).toEqual(['removed']);
@@ -254,7 +280,7 @@ test.if(hasDom)('Set picture… opens the dialog on Your own…; Ask an agent to
   const request = /--request (ia_[0-9a-f]{24})/.exec(message.body)?.[1];
   expect(request).toBeDefined();
   expect(message.body).toContain('"billing"');
-  expect(message.body).toContain('/work/billing');
+  expect(message.body).toContain(here.folder.root);
   expect(message.body).toContain('acme/billing');
   // This project's threads only, newest first, each on one line and cut short.
   const ledger = message.body.indexOf('"Reconcile the ledger with the bank');
@@ -292,4 +318,32 @@ test.if(hasDom)("a linked machine's project is kept on that machine; an older ma
   await useSetIcon(refused, 'dcss', 'orc');
   expect(refused.querySelector('[data-icon-refused]')?.textContent).toBe('Mac mini needs an update to set this picture.');
   expect(document.querySelector('dialog[data-dialog="agent-icon"][open]')).not.toBeNull();
+});
+
+test.if(hasDom)("the picker's outer arc: the letters in all eight hues and the sources the project has; a hue is kept for the project and drawn", async () => {
+  const { here } = inboxes();
+  const host = mount(here.folder);
+  act(() => host.querySelector(`[data-project-icon="${HERE}"]`)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await settle();
+  const places = () => [...document.querySelectorAll('[data-face-choice]')].map((el) => el.getAttribute('data-face-choice'));
+  // Its folder has a logo, and its origin is not on GitHub: the repo's logo, no GitHub picture.
+  expect(places()).toEqual(['own', 'sets', 'hue:0', 'hue:1', 'hue:2', 'hue:3', 'hue:4', 'hue:5', 'hue:6', 'hue:7', 'repo']);
+  // Nothing picked and no picture: the name's own hue is the one checked.
+  const own = `hue:${marksModule.hueOf(HERE)}`;
+  expect(document.querySelector('[aria-checked="true"]')?.getAttribute('data-face-choice')).toBe(own);
+  const other = own === 'hue:3' ? 'hue:4' : 'hue:3';
+  act(() => document.querySelector<HTMLButtonElement>(`[data-face-choice="${other}"]`)!.click());
+  await settle();
+  expect(looks).toEqual([other]);
+  expect(here.pictures.lookOf(HERE)).toBe(other);
+  // The row's mark is drawn in that hue, and the picker now checks it and offers the letters back.
+  expect(host.querySelector('.ib-proj .ib-lm')?.getAttribute('data-hue')).toBe(other.slice(4));
+  act(() => host.querySelector(`[data-project-icon="${HERE}"]`)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await settle();
+  expect(document.querySelector('[aria-checked="true"]')?.getAttribute('data-face-choice')).toBe(other);
+  expect(places()[0]).toBe('letters');
+  // The repo's logo: the project's look in place of the hue.
+  act(() => document.querySelector<HTMLButtonElement>('[data-face-choice="repo"]')!.click());
+  await settle();
+  expect(here.pictures.lookOf(HERE)).toBe('repo');
 });

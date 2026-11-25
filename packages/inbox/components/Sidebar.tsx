@@ -125,8 +125,10 @@ export interface SidebarProps {
    * machine's projects only (names stay per machine). Resolves true once the list shows the new name.
    */
   onProjectRename?: (projectId: string, name: string | null) => Promise<boolean>;
-  /** The project menu's Set picture… (letter marks): an image as a data: URL, or null to take it away. This machine's projects only. */
+  /** The project's Remove picture (letter marks): null takes the picture or look away, on the Inbox that has the project. */
   onProjectPicture?: (projectId: string, file: File | null) => Promise<boolean>;
+  /** The project mark's picker: a hue or a picture source for the project (projectWrites.ts `setProjectLook`). */
+  onProjectLook?: (projectId: string, look: string) => Promise<boolean>;
   /** One step of combining: `from` into `into`. Resolves true once the list shows it. */
   onProjectCombine?: (pair: { from: string; into: string; intoName: string }) => Promise<boolean>;
   /** "+" on a project row (approval "launch-create-clone", F1-F7): New message with a new session there. Absent: no "+". */
@@ -879,6 +881,7 @@ export function Sidebar(props: SidebarProps) {
                   }
                   // A picture is kept by the Inbox that has the project: a linked machine's is sent there.
                   onPicture={props.onProjectPicture ? (file) => props.onProjectPicture!(project.id, file) : undefined}
+                  onLook={props.onProjectLook ? (look) => props.onProjectLook!(project.id, look) : undefined}
                   newSession={
                     props.onProjectNewSession
                       ? (() => {

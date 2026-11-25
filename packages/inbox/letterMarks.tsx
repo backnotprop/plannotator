@@ -15,7 +15,7 @@
  */
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import { lookMarks, useListLook, type ListLook, type MarksChoice, type MarksWhat } from './listLook';
-import { projectPictureUrl, useKnownProjects } from './projectPictures';
+import { projectHueOf, projectPictureUrl, useKnownProjects } from './projectPictures';
 
 export type { MarkStyle, MarksChoice, MarksWhat } from './listLook';
 
@@ -199,11 +199,11 @@ function SplitLetters({ text }: { text: string }) {
   );
 }
 
-/** A project's mark: its picture when it has one, else its letters (hued by the project id). */
+/** A project's mark: its picture when it has one, else its letters (in the hue picked for it, else hued by the project id). */
 export function ProjectMark({ projectId, name, size, solid = false, className }: { projectId: string; name: string; size: MarkSize; solid?: boolean; className?: string }) {
   const { marks, pictures } = useRowMarks();
   useKnownProjects();
-  return <LetterMark name={name} seed={projectId} size={size} solid={solid} className={className} picture={pictures ? projectPictureUrl(projectId, marks) : null} />;
+  return <LetterMark name={name} seed={projectId} size={size} solid={solid} className={className} hue={projectHueOf(projectId) ?? undefined} picture={pictures ? projectPictureUrl(projectId, marks) : null} />;
 }
 
 /** The colour alone (style "Dot"): an 8 px dot in the thread's hue. */

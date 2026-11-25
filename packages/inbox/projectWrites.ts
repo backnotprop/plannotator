@@ -2,8 +2,9 @@ import type { InboxAgent } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi } from './api';
 import { keepAgentName } from './agents/agentFaces';
 import { formatCount } from './format';
+import { setProjectLook as keepProjectLook } from './data/projectLookApi';
 import { projectRefusal } from './agents/iconTarget';
-import { pictureFromFile } from './projectPictures';
+import { learnProjects, pictureFromFile } from './projectPictures';
 import { errorToast } from './toastError';
 import type { InboxToastModel } from './components/Toast';
 import type { ListModel } from './api';
@@ -58,6 +59,19 @@ export function projectWrites({ showToast, dismissToast, refreshList, say, lates
     return true;
   };
 
+  /** The project mark's picker: a hue or a picture source. A refusal is the toast (an older linked machine named). */
+  const setProjectLook = async (projectId: string, look: string): Promise<boolean> => {
+    try {
+      const answer = await keepProjectLook(projectId, look);
+      if (answer.project) learnProjects([answer.project]);
+    } catch (cause) {
+      showToast(cause instanceof InboxApiError && cause.code === 'device_route_not_found' ? { icon: 'warn', lead: projectRefusal(projectId, cause), wrap: true } : errorToast(cause, 'The picture did not change.'));
+      return false;
+    }
+    await refreshList(false);
+    return true;
+  };
+
   const combineProjects = async (pairs: readonly { from: string; into: string; intoName: string }[]): Promise<string | null> => {
     const write = async (steps: readonly { project: string; into: string | null }[]) => {
       const done: { project: string; into: string | null }[] = [];
@@ -99,5 +113,7 @@ export function projectWrites({ showToast, dismissToast, refreshList, say, lates
     say(`${lead}.`);
     return failure;
   };
-  return { renameProject, renameAgent, setProjectPicture, combineProjects };
+  /** The sidebar's project picture props: Remove picture, and the mark picker's look. */
+  const projectPictureProps = { onProjectPicture: setProjectPicture, onProjectLook: setProjectLook };
+  return { renameProject, renameAgent, projectPictureProps, combineProjects };
 }
