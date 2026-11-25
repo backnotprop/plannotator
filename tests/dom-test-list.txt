@@ -160,6 +160,7 @@ packages/inbox/earlierComments.test.tsx
 packages/inbox/phoneStepping.test.tsx
 packages/inbox/touchStepping.test.tsx
 packages/inbox/htmlPageSize.test.tsx
+packages/inbox/htmlPageClear.test.tsx
 packages/inbox/imageSwipe.test.tsx
 packages/inbox/sharedPictureChoice.test.tsx
 packages/inbox/acceptStepsAside.test.tsx

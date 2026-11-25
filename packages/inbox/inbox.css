@@ -2428,8 +2428,8 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-contents-phone .ib-contents-list { padding: 0 6px 16px; }
 .ib-contents-phone nav button { min-height: 44px; font-size: var(--ib-fs-15, 15px); padding-top: 10px; padding-bottom: 10px; }
 .ib-htmlframe { position: absolute; inset: 0; }
-/* Full screen: an HTML page stops above the tools' control in its bottom right corner (AttachmentPane, `--ib-pageclear`),
-   so the page's own controls there are never under it. */
+/* Full screen on a phone: an HTML page stops above the toolbar in its bottom right corner (htmlPageFrame.ts,
+   `--ib-pageclear`), so the page's own controls there are never under it. A desktop's page runs to the window's foot. */
 .ib-view.ib-fullview .ib-htmlframe { bottom: var(--ib-pageclear, 0px); }
 /* An HTML page on a phone, part B "Fit the page" (pageSize.ts): one small icon in the page's top right corner (the
    owner's pick: "Just the icon no words"), a phone at Phone size, a laptop at Desktop size. It floats like the other
