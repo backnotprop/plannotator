@@ -8,9 +8,10 @@
  * shown by CSS on hover and focus (the list's rows once read layout inside each row; this page reads none).
  */
 import { memo, useId, type ReactNode } from 'react';
-import { GRID_GROUPS, GRID_PIECE_NAMES, gridExact, gridSaid, gridSpoken, type GridLine as Line, type GridPiece } from '../../shared/inbox/grid';
+import { GRID_GROUPS, GRID_PIECE_NAMES, gridExact, gridRounded, gridSaid, gridSpoken, type GridLine as Line, type GridPiece } from '../../shared/inbox/grid';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
+import { gridNudgeOf, type GridNudgeSent } from './gridNudge';
 
 export interface GridClock {
   from: number;
@@ -22,7 +23,7 @@ export interface GridClock {
 const pct = (clock: GridClock, ms: number) => Math.min(100, Math.max(0, ((ms - clock.from) / (clock.to - clock.from)) * 100));
 
 function Bar({ line, clock }: { line: Line; clock: GridClock }) {
-  if (line.planned !== null) {
+  if (line.planned !== null && line.pieces.length === 0) {
     return (
       <span className="ib-grid-bar" aria-hidden="true">
         <i className="ib-grid-pt ib-grid-plan" data-clip={line.planned < clock.from ? '' : undefined} style={{ left: `${pct(clock, line.planned)}%` }} />
@@ -30,6 +31,8 @@ function Bar({ line, clock }: { line: Line; clock: GridClock }) {
     );
   }
   const shown = line.pieces.filter((p) => p.to > clock.from);
+  // Glint's light (gridMotion.ts) crosses a Moving bar, a nudge's crosses a Stale one: a clip as wide as the bar shown.
+  const lit = (line.group === 'move' || line.group === 'stale') && shown.length > 0 ? { left: pct(clock, shown[0]!.from), right: pct(clock, shown.at(-1)!.to) } : null;
   return (
     <span className="ib-grid-bar" aria-hidden="true">
       {shown.map((p, i) => (
@@ -43,6 +46,11 @@ function Bar({ line, clock }: { line: Line; clock: GridClock }) {
           style={{ left: `${pct(clock, p.from)}%`, width: `max(3px, ${pct(clock, p.to) - pct(clock, p.from)}%)` }}
         />
       ))}
+      {lit && (
+        <span className="ib-grid-glc" data-short={lit.right - lit.left < 5 ? '' : undefined} style={{ left: `${lit.left}%`, width: `max(3px, ${lit.right - lit.left}%)` }}>
+          <i />
+        </span>
+      )}
       {line.merged !== null && line.merged > clock.from && (
         <span className="ib-grid-pt" style={{ left: `${pct(clock, line.merged)}%` }}>
           <RefMarkIcon kind="pr" state="merged" size={13} />
@@ -66,7 +74,7 @@ function Said({ line, clock, phone }: { line: Line; clock: GridClock; phone: boo
       </span>
     );
   }
-  if (line.planned !== null) {
+  if (line.planned !== null && line.pieces.length === 0) {
     return (
       <span className="ib-grid-pc" data-on="">
         <b>Planned</b> {clock.at(line.planned)}
@@ -74,12 +82,19 @@ function Said({ line, clock, phone }: { line: Line; clock: GridClock; phone: boo
     );
   }
   const { cut, pieces } = gridSaid(line, { phone });
+  // A plan gone stale: "Planned 7:20 PM › Stale 14 h · not started".
+  const planned = line.planned !== null && !cut;
   return (
     <>
       {cut && <span className="ib-grid-pc">…</span>}
+      {planned && (
+        <span className="ib-grid-pc">
+          Planned {clock.at(line.planned!)}
+        </span>
+      )}
       {pieces.map((p, i) => (
         <span key={i} className="ib-grid-pc" data-k={p.kind} data-on={p.on ? '' : undefined}>
-          {(i > 0 || cut) && <i className="ib-grid-ar">›</i>}
+          {(i > 0 || cut || planned) && <i className="ib-grid-ar">›</i>}
           <i className="ib-grid-sw" data-k={p.kind} />
           <b>{p.name}</b> {p.length}
           {p.on && p.kind !== 'wait' && line.detail && (
@@ -101,17 +116,23 @@ function Said({ line, clock, phone }: { line: Line; clock: GridClock; phone: boo
   );
 }
 
-/** The readout: every piece with its clock time, then the agent and its computer. */
-function Readout({ line, clock, computer }: { line: Line; clock: GridClock; computer: string | null }) {
-  const rows: { at: number; mark: ReactNode; what: string; how: string }[] = line.pieces.map((p: GridPiece, i) => ({
-    at: p.from,
-    mark: <i className="ib-grid-sw" data-k={p.kind} />,
-    what: p.kind === 'pr' && line.pr ? `PR ${line.pr}` : GRID_PIECE_NAMES[p.kind],
-    how: gridExact(p.to - p.from) + (p.kind === 'wait' && line.ask ? ` · ${line.ask}` : i === line.pieces.length - 1 && p.kind !== 'wait' && line.detail ? ` · ${line.detail.words}` : ''),
-  }));
+/** The readout: every piece with its clock time (a nudge at its own), then the agent and its computer. */
+function Readout({ line, clock, computer, nudged }: { line: Line; clock: GridClock; computer: string | null; nudged: { at: number; held: string | null } | null }) {
+  const rows: { at: number; mark: ReactNode; what: string; how: string }[] = [];
   if (line.planned !== null) rows.push({ at: line.planned, mark: null, what: 'Planned', how: '' });
+  line.pieces.forEach((p: GridPiece, i) =>
+    rows.push({
+      at: p.from,
+      mark: <i className="ib-grid-sw" data-k={p.kind} />,
+      what: p.kind === 'pr' && line.pr ? `PR ${line.pr}` : GRID_PIECE_NAMES[p.kind],
+      how: gridExact(p.to - p.from) + (p.kind === 'wait' && line.ask ? ` · ${line.ask}` : i === line.pieces.length - 1 && p.kind !== 'wait' && line.detail ? ` · ${line.detail.words}` : ''),
+    }),
+  );
+  // Nudged: to its agent, in the thread ("tide-ios, in the thread"); a held one says it waits for its computer.
+  if (nudged) rows.push({ at: nudged.at, mark: null, what: 'Nudged', how: nudged.held ?? `${line.agent?.name ?? 'its agent'}, in the thread` });
   if (line.merged !== null) rows.push({ at: line.merged, mark: <RefMarkIcon kind="pr" state="merged" size={12} />, what: 'Merged', how: line.pr ?? '' });
   if (line.dropped) rows.push({ at: line.dropped.at, mark: <Icon name="x" />, what: 'Dropped', how: line.dropped.why });
+  rows.sort((a, b) => a.at - b.at);
   return (
     <>
       {rows.map((r, i) => (
@@ -149,16 +170,23 @@ export interface GridLineProps {
   onTap: (id: string) => void;
   /** Watches the line on screen (gridSeen.ts): what the person was shown counts as seen. */
   observe?: (el: HTMLElement | null) => (() => void) | void;
+  /** The nudge this window sent on the line (gridNudge.ts), and the press. */
+  sent?: GridNudgeSent | null;
+  onNudge?: (line: Line) => void;
 }
+
+/** "Nudged just now", "Nudged 12 min ago". */
+const nudgedWords = (at: number, now: number) => (now - at < 60_000 ? 'Nudged just now' : `Nudged ${gridRounded(now - at)} ago`);
 
 /** The line as a screen reader says it: its name, its group, and the bar spelled out ("Working 2 hours, PR 40 minutes"). */
 export function gridLineSpoken(line: Line, clock: GridClock, phone: boolean): string {
   const group = GRID_GROUPS.find((g) => g.id === line.group)!.heading;
   let state: string;
   if (line.dropped) state = `Dropped ${clock.at(line.dropped.at)}, ${line.dropped.why}`;
-  else if (line.planned !== null) state = `Planned ${clock.at(line.planned)}`;
+  else if (line.planned !== null && line.pieces.length === 0) state = `Planned ${clock.at(line.planned)}`;
   else {
     const said = gridSaid(line, { phone }).pieces.map((p) => `${p.name} ${gridSpoken(p.length)}`);
+    if (line.planned !== null) said.unshift(`Planned ${clock.at(line.planned)}`);
     if (line.detail) said.push(line.detail.words);
     if (line.merged !== null) said.push(`Merged ${clock.at(line.merged)}`);
     state = said.join(', ');
@@ -166,10 +194,20 @@ export function gridLineSpoken(line: Line, clock: GridClock, phone: boolean): st
   return [`${line.name}${line.pr ? ` ${line.pr}` : ''}`, group, state, line.ask].filter(Boolean).join('. ');
 }
 
-export const GridLineView = memo(function GridLineView({ line, clock, phone, computer, open, onOpen, onTap, observe }: GridLineProps) {
+export const GridLineView = memo(function GridLineView({ line, clock, phone, computer, open, onOpen, onTap, observe, sent = null, onNudge }: GridLineProps) {
   const readoutId = useId();
   const thread = line.actions.find((a) => a.kind === 'open')?.thread ?? line.id;
   const words = <Said line={line} clock={clock} phone={phone} />;
+  // Nudge (round 4): offered on a stale line until this window's press of the same stretch went.
+  const action = gridNudgeOf(line);
+  const went = sent && !sent.failed ? sent : null;
+  const canNudge = !!action && !!onNudge && !(went && went.key === action.key);
+  // This window's press shows at once; the thread's own nudge once its row carries it.
+  const mine = went && line.group === 'stale' && (!line.nudged || went.at > line.nudged.at) ? went : null;
+  const nudged = mine ? { at: mine.at, held: mine.held } : line.nudged ? { at: line.nudged.at, held: null } : null;
+  const under = line.group !== 'stale' ? null : mine ? nudgedWords(mine.at, clock.to) : line.nudged?.now ? nudgedWords(line.nudged.at, clock.to) : null;
+  const failed = line.group === 'stale' && sent?.failed ? sent.failed : null;
+  const agentName = line.agent?.name ?? 'its agent';
   const who = line.agent && (
     <span className="ib-grid-who">
       <span className="ib-grid-mk">
@@ -192,6 +230,12 @@ export const GridLineView = memo(function GridLineView({ line, clock, phone, com
         <span className="ib-grid-t" title={line.name}>{line.name}</span>
         {line.pr && !phone && <span className="ib-grid-pn">{line.pr}</span>}
       </button>
+      {!phone && canNudge && (
+        // Shown on pointing or focus (CSS), at the end of the name: one press sends it, nothing to confirm.
+        <button type="button" className="ib-btn ib-grid-nudge" data-grid-nudge="" aria-label={`Nudge ${agentName}`} onClick={() => onNudge!(line)}>
+          Nudge
+        </button>
+      )}
       {!phone && who}
       <Bar line={line} clock={clock} />
       {phone ? (
@@ -212,18 +256,35 @@ export const GridLineView = memo(function GridLineView({ line, clock, phone, com
           {line.ask}
         </span>
       )}
+      {(under || failed) && (
+        <span className="ib-grid-ng" data-grid-nudged="" data-bad={failed && !under ? '' : undefined} role="status">
+          {under ?? failed}
+        </span>
+      )}
       {phone ? (
         open && (
           <span className="ib-grid-exp" data-grid-readout="" id={readoutId}>
-            <Readout line={line} clock={clock} computer={computer} />
-            <button type="button" className="ib-grid-ro ib-grid-ro-open" onClick={() => onOpen(thread)}>
-              Open thread <Icon name="chevR" />
-            </button>
+            <Readout line={line} clock={clock} computer={computer} nudged={nudged} />
+            {canNudge ? (
+              // A stale line: Nudge beside Open thread, on one row.
+              <span className="ib-grid-ro ib-grid-ro-acts">
+                <button type="button" className="ib-grid-ro-open" data-grid-nudge="" onClick={() => onNudge!(line)}>
+                  {`Nudge ${agentName}`}
+                </button>
+                <button type="button" className="ib-grid-ro-open" onClick={() => onOpen(thread)}>
+                  Open thread <Icon name="chevR" />
+                </button>
+              </span>
+            ) : (
+              <button type="button" className="ib-grid-ro ib-grid-ro-open" onClick={() => onOpen(thread)}>
+                Open thread <Icon name="chevR" />
+              </button>
+            )}
           </span>
         )
       ) : (
         <span className="ib-grid-pop" data-grid-readout="" id={readoutId}>
-          <Readout line={line} clock={clock} computer={computer} />
+          <Readout line={line} clock={clock} computer={computer} nudged={nudged} />
         </span>
       )}
     </div>

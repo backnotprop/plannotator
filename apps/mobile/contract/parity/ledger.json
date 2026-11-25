@@ -23487,6 +23487,48 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxgridnudge-quiet-from",
+      "title": "field:InboxGridNudge.quiet_from",
+      "surface": [
+        "field:InboxGridNudge.quiet_from"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-grid-nudge",
+      "title": "field:InboxListRow.grid_nudge",
+      "surface": [
+        "field:InboxListRow.grid_nudge"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-nudge",
+      "title": "field:InboxMessageWire.nudge",
+      "surface": [
+        "field:InboxMessageWire.nudge"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

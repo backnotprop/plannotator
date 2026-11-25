@@ -1,11 +1,13 @@
 /**
  * What a list row carries for Grid (approval "inbox-agent-grid"), on this Inbox's own rows: `grid_seen`, the person's
- * last look at the thread's line (inbox-grid-seen.ts), and `steps_progress`, its checklist as Grid reads it (only
- * while the Checklist switch is on: `lists` null otherwise). A linked machine's rows carry their own, from there, so
- * Grid draws a linked computer's work as this one's. One pass over the stored lists per list read.
+ * last look at the thread's line (inbox-grid-seen.ts), `steps_progress`, its checklist as Grid reads it (only while
+ * the Checklist switch is on: `lists` null otherwise), and `grid_nudge`, where a nudge goes and the last one sent
+ * (inbox-grid-nudge.ts; round 4). A linked machine's rows carry their own, from there, so Grid draws a linked
+ * computer's work as this one's. One pass over the stored lists per list read.
  */
 import { inboxStepsProgress, type InboxListRow, type InboxSteps } from "@plannotator/core/inbox-types";
 import type { InboxGridSeenStore } from "./inbox-grid-seen";
+import type { GridNudgeRow } from "./inbox-grid-nudge";
 
 /**
  * A row as a list read that did not ask for Grid gets it (`grid=1` absent): without Grid's fields, as before Grid. A
@@ -13,14 +15,18 @@ import type { InboxGridSeenStore } from "./inbox-grid-seen";
  */
 export function gridRowStripped<R extends InboxListRow>(row: R): R {
   const items = row.pulls?.items !== undefined;
-  if (!items && !("grid_seen" in row) && !("steps_progress" in row)) return row;
-  const { grid_seen: _seen, steps_progress: _steps, ...rest } = row;
+  if (!items && !("grid_seen" in row) && !("steps_progress" in row) && !("grid_nudge" in row)) return row;
+  const { grid_seen: _seen, steps_progress: _steps, grid_nudge: _nudge, ...rest } = row;
   if (!items) return rest as R;
   const { items: _items, ...pulls } = row.pulls!;
   return { ...rest, pulls } as R;
 }
 
-export function gridRowDecorator(seen: Pick<InboxGridSeenStore, "get">, lists: readonly InboxSteps[] | null): (row: InboxListRow) => InboxListRow {
+export function gridRowDecorator(
+  seen: Pick<InboxGridSeenStore, "get">,
+  lists: readonly InboxSteps[] | null,
+  nudgeOf: (threadId: string) => GridNudgeRow | undefined = () => undefined,
+): (row: InboxListRow) => InboxListRow {
   // The thread's latest list that holds steps (a thread may have one per agent session).
   const latest = new Map<string, InboxSteps>();
   for (const list of lists ?? []) {
@@ -31,7 +37,8 @@ export function gridRowDecorator(seen: Pick<InboxGridSeenStore, "get">, lists: r
   return (row) => {
     const look = seen.get(row.thread_id);
     const list = latest.get(row.thread_id);
-    if (!look && !list) return row;
+    const nudge = nudgeOf(row.thread_id);
+    if (!look && !list && !nudge) return row;
     const out: InboxListRow = { ...row };
     if (look) out.grid_seen = { through: look.through, at: look.at };
     if (list) {
@@ -39,6 +46,7 @@ export function gridRowDecorator(seen: Pick<InboxGridSeenStore, "get">, lists: r
       const at = list.steps.reduce((last, step) => (step.at > last ? step.at : last), list.steps[0]!.at);
       out.steps_progress = { done: progress.done, total: progress.total, doing: progress.doing, at };
     }
+    if (nudge) out.grid_nudge = nudge;
     return out;
   };
 }

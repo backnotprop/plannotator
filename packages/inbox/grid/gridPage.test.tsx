@@ -9,7 +9,10 @@
  *   "N more" never does, and a look is kept with the thread on its own computer (a linked one's through its forward,
  *   on its own clock); a look made elsewhere (the row's `grid_seen`) counts here;
  * - a screen reader missing the states or the times (the bar stays hidden from it);
- * - a click that does not open the thread; on a phone, a tap that does not open the readout with Open thread.
+ * - a click that does not open the thread; on a phone, a tap that does not open the readout with Open thread;
+ * - Nudge (round 4) sending anything but the exact words once, to the thread's own computer on its own clock, or
+ *   leaving its button after the press; on a phone, Nudge missing from what a tap opens;
+ * - Glint moving a line that is not Moving or not on screen, or moving anything while the tab is hidden.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -394,4 +397,86 @@ test.skipIf(!hasDom)('phone: a tap opens the readout under the line, with Open t
   expect(readout.textContent).toContain('Needs you');
   act(() => readout.querySelector<HTMLButtonElement>('.ib-grid-ro-open')!.click());
   expect(opened).toEqual(['msg_page']);
+});
+
+/** A linked computer's work, quiet 3 h 40 min on its own clock, its agent still there: a stale line Nudge can reach. */
+const farStale = () =>
+  row({
+    thread_id: 'msg_tide',
+    thread_name: 'Haptics on save',
+    ...far,
+    created_at: new Date(NOW - 300 * 60_000 + MINI_AHEAD).toISOString(),
+    last_at: new Date(NOW - 220 * 60_000 + MINI_AHEAD).toISOString(),
+    last_agent_at: new Date(NOW - 220 * 60_000 + MINI_AHEAD).toISOString(),
+    sent: { at: new Date(NOW - 230 * 60_000 + MINI_AHEAD).toISOString(), checked_at: new Date(NOW - 229 * 60_000 + MINI_AHEAD).toISOString() },
+    grid_nudge: { to: 'msg_tide_last', last: null },
+  });
+
+test.skipIf(!hasDom)("Nudge: one press sends the words once, on the thread's own computer and clock, and the line says Nudged just now", async () => {
+  fakeScreen();
+  const asked = requests();
+  const { host } = mount({ on: true, rows: [farStale()] });
+  await settle();
+  const line = () => host.querySelector('[data-grid-line="msg_tide"]')!;
+  expect(line().getAttribute('data-group')).toBe('stale');
+  expect(host.querySelector('[data-grid-counts]')!.textContent).toContain('1 stale');
+  const button = line().querySelector<HTMLButtonElement>('[data-grid-nudge]')!;
+  expect(button.getAttribute('aria-label')).toBe('Nudge ledger');
+  act(() => button.click());
+  await settle();
+  const sent = asked.filter((r) => r.url.includes('/reply'));
+  expect(sent.map((r) => r.url)).toEqual([`/api/inbox/m/${MINI}/messages/msg_tide_last/reply`]);
+  const body = sent[0]!.body as { words: string; idempotency_key: string; nudge: { quiet_from: string } };
+  expect(body.words).toBe('Haptics on save has been quiet for 3 h 40 min. Please finish it, or tell me in a few words why it stopped.');
+  // On the Mac mini's clock: when it last moved there, and the key built on it.
+  const quietFrom = NOW - 220 * 60_000 + MINI_AHEAD;
+  expect(Date.parse(body.nudge.quiet_from)).toBe(Date.parse(new Date(quietFrom).toISOString()));
+  expect(body.idempotency_key).toBe(`grid-nudge-msg_tide-${Date.parse(new Date(quietFrom).toISOString())}-1`);
+  // No second press: the button is gone, and the line says so.
+  expect(line().querySelector('[data-grid-nudge]')).toBeNull();
+  expect(line().querySelector('[data-grid-nudged]')!.textContent).toBe('Nudged just now');
+  expect(line().querySelector('[data-grid-readout]')!.textContent).toContain('Nudged');
+});
+
+test.skipIf(!hasDom)('Glint: only a Moving line on screen glints; a stale one never; nothing while the tab is hidden', async () => {
+  const screen = fakeScreen();
+  requests();
+  const { host } = mount({ on: true, rows: [farStale(), ...baseRows()] });
+  await settle();
+  screen.show(['msg_tide', 'msg_rate', 'msg_page']);
+  const glints = new Set<string>();
+  const watch = new MutationObserver((changes) => {
+    for (const c of changes) if (c.attributeName === 'data-glint' && (c.target as HTMLElement).hasAttribute('data-glint')) glints.add((c.target as HTMLElement).dataset.gridLine!);
+  });
+  watch.observe(host, { subtree: true, attributes: true, attributeFilter: ['data-glint'] });
+  // Two turns of the 1.7 s walk: the one Moving line on screen glints once (not twice within 7 s).
+  await settle(3600);
+  // msg_push moves too but was never on screen.
+  expect([...glints]).toEqual(['msg_rate']);
+  hidden = true;
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  glints.clear();
+  await settle(2000);
+  watch.disconnect();
+  expect([...glints]).toEqual([]);
+}, 15_000);
+
+test.skipIf(!hasDom)('Nudge on a phone: a tap on the stale line opens Nudge with Open thread', async () => {
+  fakeScreen();
+  const asked = requests();
+  const opened: string[] = [];
+  const { host } = mount({ on: true, phone: true, opened, rows: [farStale()] });
+  await settle();
+  const line = () => host.querySelector('[data-grid-line="msg_tide"]')!;
+  expect(line().querySelector('[data-grid-nudge]')).toBeNull();
+  act(() => line().querySelector<HTMLButtonElement>('.ib-grid-name')!.click());
+  const readout = line().querySelector('[data-grid-readout]')!;
+  const nudge = readout.querySelector<HTMLButtonElement>('[data-grid-nudge]')!;
+  expect(nudge.textContent).toBe('Nudge ledger');
+  act(() => nudge.click());
+  await settle();
+  expect(asked.filter((r) => r.url.includes('/reply')).length).toBe(1);
+  expect(opened).toEqual([]);
+  expect(line().querySelector('[data-grid-nudge]')).toBeNull();
+  expect(line().querySelector('[data-grid-nudged]')!.textContent).toBe('Nudged just now');
 });

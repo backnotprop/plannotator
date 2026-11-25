@@ -3161,6 +3161,19 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
+    "InboxGridNudge": {
+      "type": "object",
+      "properties": {
+        "quiet_from": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "quiet_from"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
     "InboxGuideCommentTarget": {
       "type": "object",
       "properties": {
@@ -3934,6 +3947,53 @@
             "total",
             "doing",
             "at"
+          ],
+          "additionalProperties": true
+        },
+        "grid_nudge": {
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string"
+            },
+            "last": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "at": {
+                      "type": "string"
+                    },
+                    "quiet_from": {
+                      "type": "string"
+                    },
+                    "answered_at": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "at",
+                    "quiet_from",
+                    "answered_at"
+                  ],
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "to",
+            "last"
           ],
           "additionalProperties": true
         },
@@ -5108,6 +5168,9 @@
         },
         "skill_reaction": {
           "$ref": "#/$defs/InboxSkillReaction"
+        },
+        "nudge": {
+          "$ref": "#/$defs/InboxGridNudge"
         }
       },
       "required": [

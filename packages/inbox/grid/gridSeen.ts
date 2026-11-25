@@ -95,6 +95,8 @@ export function useGridSeen(model: GridModel | null, clockOf: (machine: string |
           else if (target.dataset.gridLine) {
             if (shown) visible.current.add(target.dataset.gridLine);
             else visible.current.delete(target.dataset.gridLine);
+            // On screen at all: the motion (gridMotion.ts) glints and breathes only these.
+            target.toggleAttribute('data-vis', entry.isIntersecting);
           }
         }
         soon();

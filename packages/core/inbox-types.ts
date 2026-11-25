@@ -997,6 +997,18 @@ export interface InboxMessage {
    * never see it (they read the body).
    */
   skill_reaction?: InboxSkillReaction;
+  /**
+   * On a person's reply sent by pressing Nudge on a stale line of Grid (approval "inbox-agent-grid", round 4): the
+   * start of the quiet stretch it was sent in, so the window marks the reply "Nudge from Grid" and Grid keeps that
+   * stretch on the line's bar. The body is the nudge's words. Absent on every other message; agents never see it (they
+   * read the body).
+   */
+  nudge?: InboxGridNudge;
+}
+
+/** A Grid nudge's mark on its reply (`InboxMessage.nudge`): when the quiet stretch it was sent in began (ISO). */
+export interface InboxGridNudge {
+  quiet_from: string;
 }
 
 /** A skill emoji's reply (`InboxMessage.skill_reaction`): one emoji (`isInboxReactionEmoji`) and a skill name (`isInboxReactionSkill`). */
@@ -2092,6 +2104,13 @@ export interface InboxListRow extends InboxThreadSummary {
    * Only while that machine's Checklist switch is on; a linked machine's rows carry their own. Absent otherwise.
    */
   steps_progress?: { done: number; total: number; doing: string | null; at: string };
+  /**
+   * Grid's Nudge (approval "inbox-agent-grid", round 4), on a read that asks for Grid: `to`, the message a nudge
+   * replies to (the thread's newest agent message, else its first), and `last`, the latest nudge among the thread's
+   * last messages (its time, the quiet stretch it was sent in, and the agent's first message after it; null while
+   * unanswered). Absent on a thread with no message to reply to, and from an older Inbox (no Nudge there).
+   */
+  grid_nudge?: { to: string; last: { at: string; quiet_from: string; answered_at: string | null } | null };
   /**
    * The thread's open PRs that are not hidden (keys; the server's inbox-pull-hidden.ts): the row menu's and the picks'
    * "Hide pull request". Only on this Inbox's own rows of the list the window and the phone read; absent when none.

@@ -458,6 +458,9 @@
       "session",
       "started_at"
     ],
+    "InboxGridNudge": [
+      "quiet_from"
+    ],
     "InboxGuideCommentTarget": [
       "file",
       "line_end",
@@ -551,6 +554,15 @@
     "InboxListRowAck": [
       "at",
       "label"
+    ],
+    "InboxListRowGridNudge": [
+      "last",
+      "to"
+    ],
+    "InboxListRowGridNudgeLast": [
+      "answered_at",
+      "at",
+      "quiet_from"
     ],
     "InboxListRowGridSeen": [
       "at",

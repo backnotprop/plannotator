@@ -364,6 +364,7 @@ import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createInboxGridSeen, gridSeenOf } from "./inbox-grid-seen";
 import { gridRowDecorator, gridRowStripped } from "./inbox-grid-row";
+import { gridNudgeReader } from "./inbox-grid-nudge";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createShipReader } from "./inbox-ship-read";
 import { shipBinds, shipLaunchFailed, shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
@@ -2154,7 +2155,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return summary ? { ...row, pulls: summary } : row;
     };
     // Grid (approval "inbox-agent-grid", inbox-grid-row.ts): the thread's last look on Grid and its checklist's progress.
-    const withGrid = grid ? gridRowDecorator(gridSeen, stepsOn() ? store.allSteps() : null) : (row: InboxListRow) => row;
+    const withGrid = grid ? gridRowDecorator(gridSeen, stepsOn() ? store.allSteps() : null, gridNudgeReader(store)) : (row: InboxListRow) => row;
     // `tags` (additive, approval "inbox-thread-tags"): the live tags a thread is in, on the window's and the phone's rows only.
     const tagsOf = store.allThreadTags();
     const withTags = (row: InboxListRow): InboxListRow => {
@@ -8535,6 +8536,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 ...(body.author_only === true ? { author_only: true } : {}),
                 // A skill emoji pressed in the reaction tray: kept on the reply; the words are the window's `/<skill>` reply.
                 ...(body.skill_reaction !== undefined ? { skill_reaction: body.skill_reaction } : {}),
+                // Nudge pressed on Grid's stale line: kept on the reply; the words are the window's.
+                ...(body.nudge !== undefined ? { nudge: body.nudge } : {}),
               });
             } catch (error) {
               removeInboxAttachmentFiles(store.dir, attachments);

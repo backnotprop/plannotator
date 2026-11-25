@@ -13,6 +13,9 @@
   --ib-grid-pr: color-mix(in oklab, var(--ib-ref-open) 46%, var(--card));
   --ib-grid-wait: color-mix(in oklab, var(--warning) 62%, var(--card));
   --ib-grid-idle: color-mix(in oklch, var(--foreground) 15%, var(--card));
+  /* Stale (round 4): a warm brown-grey tail, and its words in sand; Needs you keeps the stronger amber. */
+  --ib-grid-stale: color-mix(in oklab, color-mix(in oklab, var(--warning) 30%, var(--foreground)) 34%, var(--card));
+  --ib-grid-sand: color-mix(in oklab, color-mix(in oklab, var(--warning) 38%, var(--foreground)) 82%, var(--card));
   padding-top: 16px;
   font-size: var(--ib-fs-13-5, 13.5px);
   container-type: inline-size;
@@ -29,6 +32,7 @@
 .ib-grid-ans { margin: 0; display: inline-flex; flex-wrap: wrap; align-items: baseline; font-weight: 500; }
 .ib-grid-a { white-space: nowrap; }
 .ib-grid-a[data-you] { color: var(--ib-grid-amber); font-weight: 650; }
+.ib-grid-a[data-stale] { color: var(--ib-grid-sand); font-weight: 600; }
 .ib-grid-dot { font-style: normal; margin: 0 9px; color: var(--ib-grid-mut); font-weight: 400; }
 
 /* The Since line and the clock. */
@@ -51,12 +55,13 @@
 .ib-grid-vl .ib-grid-nowl { left: 100%; width: 1.5px; margin-left: -1px; background: var(--primary); opacity: 0.5; }
 .ib-grid-gh { position: relative; display: flex; align-items: flex-end; height: 34px; margin: 0; padding-bottom: 5px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; color: var(--ib-grid-mut); }
 .ib-grid-gh[data-you] { color: var(--ib-grid-amber); font-weight: 600; }
+.ib-grid-gh[data-stale] { color: var(--ib-grid-sand); font-weight: 600; }
 .ib-grid-n { margin-left: 7px; font-variant-numeric: tabular-nums; opacity: 0.75; font-weight: 400; }
 
 /* A line: the name, the agent, the bar, the bar in words; what it asks under the name. */
 .ib-grid-ln { position: relative; min-height: 28px; margin: 0 -8px; padding: 0 8px; border-radius: 7px; }
 .ib-grid-ln:hover, .ib-grid-ln:focus-within { background: var(--ib-hover); z-index: 2; }
-.ib-grid-name { display: flex; align-items: baseline; gap: 7px; min-width: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.ib-grid-name { grid-column: 1; grid-row: 1; display: flex; align-items: baseline; gap: 7px; min-width: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .ib-grid-name::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
 .ib-grid-name:focus-visible { outline: none; }
 .ib-grid-name:focus-visible .ib-grid-t { text-decoration: underline; text-underline-offset: 3px; }
@@ -69,6 +74,17 @@
 .ib-grid-mk > * { transform: scale(0.62); }
 .ib-grid-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-grid-q { grid-column: 1 / -1; margin: -3px 0 5px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--ib-grid-amber); }
+/* A thread's message sent by Grid's Nudge: "to tide-ios · Nudge from Grid" (parts/MessageHead.tsx). */
+.ib-m-nudge { margin-left: 4px; color: var(--muted-foreground); }
+/* Nudged (round 4): under the name, in grey; a nudge that did not go says why, in the closed colour. */
+.ib-grid-ng { grid-column: 1 / -1; margin: -3px 0 5px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-grid-mut); }
+.ib-grid-ng[data-bad] { color: var(--ib-ref-closed); }
+/* Nudge: at the end of the name, shown while the line is pointed at or holds focus; above the name's whole-line hit. */
+.pn-inbox .ib-grid-nudge { display: none; grid-column: 1; grid-row: 1; justify-self: end; align-self: center; position: relative; z-index: 1; height: 24px; padding: 0 10px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--foreground); box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 8%, transparent); cursor: pointer; }
+.pn-inbox .ib-grid-nudge:hover { background: color-mix(in oklch, var(--card) 94%, var(--foreground)); }
+.ib-grid-ln:hover > .ib-grid-nudge, .ib-grid-ln:focus-within > .ib-grid-nudge { display: inline-flex; }
+/* The name gives the button its room while it shows, so a long name ends in "…" before it. */
+.ib-grid-ln:has(> .ib-grid-nudge):is(:hover, :focus-within) > .ib-grid-name { padding-right: 78px; }
 
 /* The bar: pieces at percentages of the clock; the merge mark, the cross and the plan's ring on it. */
 .ib-grid-bar { position: relative; height: 28px; overflow: hidden; }
@@ -81,6 +97,7 @@
 .ib-grid-seg[data-k="pr"], .ib-grid-sw[data-k="pr"] { background: var(--ib-grid-pr); }
 .ib-grid-seg[data-k="wait"], .ib-grid-sw[data-k="wait"] { background: var(--ib-grid-wait); }
 .ib-grid-seg[data-k="idle"], .ib-grid-sw[data-k="idle"] { background: var(--ib-grid-idle); }
+.ib-grid-seg[data-k="stale"], .ib-grid-sw[data-k="stale"] { background: var(--ib-grid-stale); }
 .ib-grid-pt { position: absolute; top: 7px; margin-left: -7px; line-height: 0; background: var(--card); border-radius: 50%; }
 .ib-grid-x { background: none; color: var(--ib-grid-mut); }
 .ib-grid-x .ib-ic { width: 13px; height: 13px; }
@@ -96,6 +113,7 @@
 .ib-grid-pc[data-on] { color: var(--foreground); }
 .ib-grid-pc[data-on] b { font-weight: 600; }
 .ib-grid-pc[data-on][data-k="wait"] { color: var(--ib-grid-amber); }
+.ib-grid-pc[data-on][data-k="stale"] { color: var(--ib-grid-sand); }
 .ib-grid-pc .ib-refmark, .ib-grid-pc .ib-ic { display: inline-block; vertical-align: -2px; margin-right: 4px; width: 12px; height: 12px; }
 .ib-grid-pc [data-bad] { color: var(--ib-ref-closed); }
 .ib-grid-ar { font-style: normal; margin: 0 6px; opacity: 0.55; color: var(--ib-grid-mut); font-weight: 400; }
@@ -148,3 +166,6 @@
 .ib-grid[data-phone] .ib-grid-ro { min-height: 26px; }
 .ib-grid[data-phone] .ib-grid-ro-open { display: flex; gap: 4px; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: var(--primary); font-weight: 550; cursor: pointer; position: relative; z-index: 1; }
 .ib-grid[data-phone] .ib-grid-ro-open .ib-ic { width: 12px; height: 12px; }
+/* A stale line's readout: Nudge and Open thread on one row. */
+.ib-grid[data-phone] .ib-grid-ro-acts { display: flex; gap: 22px; }
+.ib-grid[data-phone] .ib-grid-ro-acts > .ib-grid-ro-open { width: auto; min-height: 26px; }

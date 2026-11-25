@@ -89,6 +89,8 @@ export function gridThreads({ sections, groups, machines, labels, seenOf }: Grid
       .sort((a, b) => Number(b.key === headline) - Number(a.key === headline));
     const seen = seenOf(row);
     const steps = row.steps_progress;
+    const nudge = row.grid_nudge;
+    const lastNudge = nudge?.last;
     return [
       {
         id: row.thread_id,
@@ -112,6 +114,9 @@ export function gridThreads({ sections, groups, machines, labels, seenOf }: Grid
         pulls,
         steps: steps ? { done: steps.done, total: steps.total, doing: steps.doing, at: local(steps.at) } : null,
         seen: seen ? { through: seen.through - clock, at: seen.at - clock } : null,
+        nudge: nudge
+          ? { to: nudge.to, last: lastNudge ? { at: local(lastNudge.at), quiet_from: local(lastNudge.quiet_from), answered_at: local(lastNudge.answered_at) } : null }
+          : null,
       },
     ];
   });
