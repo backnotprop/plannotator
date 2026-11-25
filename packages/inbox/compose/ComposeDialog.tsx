@@ -681,7 +681,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const saved = draftSnapshot(draft);
   const dirty = !untouched && (isDirty({ body, session: chosen, files: uploadIds, threadName, board: boardRequest }, saved, draft !== null) || files.uploading);
   // A draft from the first key: saved after a pause in typing, and as the page hides or goes (composeAutosave.ts).
-  const autosave = useComposeAutosave({ id: draftId.current, fresh: !request.draft, keeps: keepsDrafts, unsaved: dirty, empty, ready: !files.uploading && busy === null && !conflict && body.length <= INBOX_DRAFT_BODY_MAX, written: [body, threadName, uploadIds.join(','), chosen ?? '', boardRequest].join('\u0000'), input: () => draftInput(draft?.updated_at ?? null), onSaved: setDraft });
+  const autosave = useComposeAutosave({ id: draftId.current, opened: request.draft?.updated_at ?? null, fresh: !request.draft, keeps: keepsDrafts, unsaved: dirty, empty, ready: !files.uploading && busy === null && !conflict && body.length <= INBOX_DRAFT_BODY_MAX, written: [body, threadName, uploadIds.join(','), chosen ?? '', boardRequest].join('\u0000'), input: (base) => draftInput(base), onDraft: setDraft });
   const projectName = current?.name ?? null;
 
   // ── the dialog ──
@@ -801,12 +801,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setNameError(named.error);
       return;
     }
-    const held = draft;
     setBusy('send');
     try {
-      // A save of the draft on its way lands first: the Send takes the draft it holds (or made), and none lands after.
+      // A save on its way lands first: the Send takes the draft the Inbox holds (none once deleted), and none lands after.
       await autosave.settle();
-      const draft = held ?? (autosave.saved() ? { id: draftId.current } : null);
+      const draft = autosave.base() !== null ? { id: draftId.current } : null;
       // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
       const words = !box
         ? body
@@ -981,7 +980,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         : null;
     return { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}), ...(keptStart ? { start: keptStart } : {}) };
   };
-  const save = async (base: string | null = draft?.updated_at ?? null): Promise<DraftView | null> => {
+  const save = async (base?: string | null): Promise<DraftView | null> => {
     if (empty) return null;
     if (files.uploading) {
       setError('Wait for the files to finish uploading.');
@@ -995,8 +994,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
     setBusy('save');
     setError(null);
     try {
-      const result = await inboxApi.saveDraft(draftId.current, draftInput(base));
-      setDraft(result.draft);
+      const result = await autosave.settle().then(() => inboxApi.saveDraft(draftId.current, draftInput(base === undefined ? autosave.base() : base)));
+      autosave.landed(result.draft);
       setConflict(null);
       return result.draft;
     } catch (cause) {
@@ -1028,7 +1027,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       voice.session.cancel();
     }
     if (busy) return;
-    const result = await save(conflict ? conflict.updated_at : (draft?.updated_at ?? null));
+    const result = await save(conflict ? conflict.updated_at : undefined); // Keep mine: over the other window's draft.
     if (result) props.onSaved(result);
   };
 
@@ -1483,7 +1482,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
                 type="button"
                 className="ib-lnk"
                 onClick={() => {
-                  setDraft(conflict);
+                  autosave.landed(conflict);
                   setBody(conflict.body);
                   setNameState(threadNameStateOf(conflict));
                   setChosen(conflict.to?.session ?? null);
