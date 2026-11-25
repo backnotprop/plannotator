@@ -81,6 +81,14 @@ export function inboxHtmlBlockHash(source: string): string {
 const TITLE_MAX = 120;
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
+/**
+ * A-Z to a-z and nothing else: the same length as the source, so an index into it is an index into the source
+ * (`toLowerCase` turns "İ" into two code units, and every later index drifts). Tag and attribute names are ASCII.
+ */
+function asciiLower(text: string): string {
+  return text.replace(/[A-Z]+/g, (run) => run.toLowerCase());
+}
+
 /** How much of a page its name is read from, and how much of a heading: a name is short, and a block may be huge. */
 const TITLE_SCAN = 64 * 1024;
 const TITLE_INNER = 1024;
@@ -93,7 +101,7 @@ const TITLE_TAG = /<(h[1-6]|title|script|style|template)(?=[\s/>]|$)/y;
  */
 function titleInner(source: string): string | null {
   const text = source.length > TITLE_SCAN ? source.slice(0, TITLE_SCAN) : source;
-  const lower = text.toLowerCase();
+  const lower = asciiLower(text);
   const unclosed = new Set<string>();
   let title: string | null = null;
   let at = 0;
@@ -149,32 +157,139 @@ export function inboxHtmlBlockTitle(source: string): string | null {
 }
 
 /** Elements that are never drawn, with all they hold: a script's page draws nothing until its script runs. */
-const UNDRAWN = ["script", "style", "template", "title"] as const;
-/** Elements that draw something with no text: a picture, a drawn shape of an svg, a form's box. Not `<canvas>`: only a script draws on one. */
-const DRAWS_WITHOUT_TEXT = /<(?:img|picture|path|rect|circle|ellipse|line|polyline|polygon|use|image|input|select|textarea|progress|meter)(?=[\s/>])/i;
-const NO_TEXT_ENTITY = /&(?:nbsp|#160|#x0*a0|zwsp|#8203|#x200b);/gi;
+const UNDRAWN = new Set(["script", "style", "template", "title"]);
+/** Elements that draw something with no words: a picture, a drawn shape of an svg, a form's box. Not `<canvas>`: only a script draws on one. */
+const DRAWS_WITHOUT_TEXT = new Set(["img", "picture", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "use", "image", "input", "select", "textarea", "progress", "meter"]);
+/** Tags that are no box of the page's own: a stylesheet has nothing of theirs to paint. */
+const NOT_A_BOX = new Set(["html", "head", "body", "meta", "link", "base", "br", "wbr"]);
+/** Named characters that draw no ink: the spaces of every width and the zero-width ones (lowercased). */
+const BLANK_ENTITIES = new Set([
+  "nbsp", "ensp", "emsp", "emsp13", "emsp14", "numsp", "puncsp", "thinsp", "hairsp", "mediumspace", "thinspace", "thickspace",
+  "verythinspace", "negativethinspace", "negativemediumspace", "negativethickspace", "negativeverythinspace", "zerowidthspace",
+  "zwnj", "zwj", "nobreak", "tab", "newline", "af", "it", "ic", "invisibletimes", "invisiblecomma", "applyfunction",
+]);
+/** A character that draws ink: not a space of any width (`\s` holds the no-break, en, em, thin and hair spaces) nor a zero-width one. */
+const INK = /[^\s​-‍⁠-⁤﻿]/;
+const CHAR_REF = /&(?:#x([0-9a-f]{1,8})|#([0-9]{1,10})|([a-z][a-z0-9]{0,31}));?/gi;
+/** A declaration that paints with no words: a background, a border, a shadow, an outline, words of its own (`content`). */
+const PAINTS = /(?:^|[;{\s])(?:background(?:-color|-image)?|border(?:-(?:top|right|bottom|left|block|inline)(?:-(?:start|end))?)?(?:-(?:width|style|color))?|box-shadow|outline(?:-(?:width|style|color))?|content)\s*:([^;}]*)/g;
+const PAINTS_NOTHING = /^\s*(?:none|transparent|0(?:px)?|initial|unset|inherit|normal|hidden|""|'')?\s*(?:!\s*important)?\s*$/;
+/** A rule whose paint is the whole frame's flat colour (no drawing), or no rule of boxes at all (an at-rule, a keyframe). */
+const NO_DRAWING_SELECTOR = /^(?:(?:html|body|:root|\*)(?:\s*,\s*(?:html|body|:root|\*))*|(?:from|to|[\d.]+%)(?:\s*,\s*(?:from|to|[\d.]+%))*|@.*)$/s;
+
+function isSpace(code: number): boolean {
+  return code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d;
+}
+
+function isTagEnd(text: string, i: number): boolean {
+  const ch = text[i];
+  return ch === "/" || ch === ">" || isSpace(text.charCodeAt(i));
+}
+
+/**
+ * The tag that opens at `lt` as the browser reads it: its name, whether it closes, its attributes (a quoted value
+ * may hold a `>`), and the index of its `>`. Null when it never ends: the rest of the page is inside it.
+ */
+function readTag(lower: string, lt: number): { end: number; name: string; closing: boolean; attrs: Map<string, string> } | null {
+  const n = lower.length;
+  let i = lt + 1;
+  const closing = lower[i] === "/";
+  if (closing) i++;
+  const nameAt = i;
+  while (i < n && !isTagEnd(lower, i)) i++;
+  const name = lower.slice(nameAt, i);
+  const attrs = new Map<string, string>();
+  for (;;) {
+    while (i < n && (lower[i] === "/" || isSpace(lower.charCodeAt(i)))) i++;
+    if (i >= n) return null;
+    if (lower[i] === ">") return { end: i, name, closing, attrs };
+    const attrAt = i++;
+    while (i < n && lower[i] !== "=" && !isTagEnd(lower, i)) i++;
+    const attr = lower.slice(attrAt, i);
+    while (i < n && isSpace(lower.charCodeAt(i))) i++;
+    let value = "";
+    if (lower[i] === "=") {
+      i++;
+      while (i < n && isSpace(lower.charCodeAt(i))) i++;
+      const quote = lower[i];
+      if (quote === '"' || quote === "'") {
+        const close = lower.indexOf(quote, i + 1);
+        if (close === -1) return null;
+        value = lower.slice(i + 1, close);
+        i = close + 1;
+      } else {
+        const valueAt = i;
+        while (i < n && lower[i] !== ">" && !isSpace(lower.charCodeAt(i))) i++;
+        value = lower.slice(valueAt, i);
+      }
+    }
+    if (!attrs.has(attr)) attrs.set(attr, value);
+  }
+}
+
+function declarationsPaint(declarations: string): boolean {
+  for (const match of declarations.matchAll(PAINTS)) if (!PAINTS_NOTHING.test(match[1]!)) return true;
+  return false;
+}
+
+/** Whether a stylesheet paints a box of the page (a CSS-only drawing): a rule that paints, other than the frame's own colour. */
+function stylesheetPaints(css: string): boolean {
+  let text = "";
+  for (let at = 0; ; ) {
+    const open = css.indexOf("/*", at);
+    if (open === -1) {
+      text += css.slice(at);
+      break;
+    }
+    text += `${css.slice(at, open)} `;
+    const close = css.indexOf("*/", open + 2);
+    if (close === -1) break;
+    at = close + 2;
+  }
+  for (const rule of text.split("}")) {
+    const brace = rule.lastIndexOf("{");
+    if (brace === -1) continue;
+    const selector = rule.slice(rule.lastIndexOf("{", brace - 1) + 1, brace).trim();
+    if (selector === "" || NO_DRAWING_SELECTOR.test(selector)) continue;
+    if (declarationsPaint(rule.slice(brace))) return true;
+  }
+  return false;
+}
+
+/** A character reference as ink ("?") or no ink (" "); an unknown name stays as written (the browser draws it). */
+function inkOfReference(whole: string, hex: string | undefined, dec: string | undefined, name: string | undefined): string {
+  if (name !== undefined) return BLANK_ENTITIES.has(name.toLowerCase()) ? " " : whole;
+  const code = hex !== undefined ? Number.parseInt(hex, 16) : Number(dec);
+  if (!Number.isInteger(code) || code > 0x10ffff) return "?";
+  return INK.test(String.fromCodePoint(code)) ? "?" : " ";
+}
 
 /**
  * Whether a block's page, drawn with no script (the tiles' still picture: a frame that runs none), shows anything:
- * words outside its scripts, styles, templates, title and comments, or an element that draws without words (an
- * image, an svg shape, a form's box). A page that a script draws (a chart into an empty `<svg>` or a `<canvas>`)
- * shows nothing there, and its tile shows the quiet HTML mark instead of a blank box. One pass of indexOf, no
- * regex that can backtrack over the whole page.
+ * words outside its scripts, styles, templates, title and comments (a space of any width, written or as an entity,
+ * is no word); an element that draws without words (an image, an svg shape, a form's box, not a hidden input); or
+ * a CSS drawing (an element whose `style` paints a background, a border, a shadow or an outline, or any box of the
+ * page while a stylesheet has such a rule). A page that a script draws (a chart into an empty `<svg>` or a
+ * `<canvas>`) shows nothing there, and its tile shows the quiet HTML mark instead of a blank box. One pass, the tag
+ * read as the browser does (a quoted attribute may hold a `>`), no regex that can backtrack over the whole page.
  */
 export function inboxHtmlBlockDrawsStill(source: string): boolean {
-  const lower = source.toLowerCase();
-  let kept = "";
+  const lower = asciiLower(source);
+  let words = "";
+  let css = "";
+  let box = false;
   let at = 0;
-  for (;;) {
+  while (at < lower.length) {
     const lt = lower.indexOf("<", at);
     if (lt === -1) {
-      kept += source.slice(at);
+      words += source.slice(at);
       break;
     }
-    kept += source.slice(at, lt);
+    words += source.slice(at, lt);
+    const next = lower[lt + 1] ?? "";
     // "1 < 2": a `<` that opens no tag is a word.
-    if (!/[a-z/!?]/.test(lower[lt + 1] ?? "")) {
-      kept += "<";
+    if (!((next >= "a" && next <= "z") || next === "/" || next === "!" || next === "?")) {
+      words += "<";
       at = lt + 1;
       continue;
     }
@@ -184,24 +299,36 @@ export function inboxHtmlBlockDrawsStill(source: string): boolean {
       at = end + 3;
       continue;
     }
-    const tag = UNDRAWN.find((name) => lower.startsWith(name, lt + 1) && /[\s/>]/.test(lower[lt + 1 + name.length] ?? ">"));
-    if (tag) {
-      const close = lower.indexOf(`</${tag}`, lt);
+    if (next === "!" || next === "?") {
+      // A doctype, `<?xml …?>`: read to its first `>`, as the browser does.
+      const end = lower.indexOf(">", lt);
+      if (end === -1) break;
+      at = end + 1;
+      continue;
+    }
+    const tag = readTag(lower, lt);
+    if (!tag) break;
+    at = tag.end + 1;
+    // A tag is no words: a space keeps the words on either side apart.
+    words += " ";
+    if (tag.closing) continue;
+    if (UNDRAWN.has(tag.name)) {
+      const close = lower.indexOf(`</${tag.name}`, at);
       if (close === -1) break;
+      if (tag.name === "style") css += `${lower.slice(at, close)}}`;
       const end = lower.indexOf(">", close);
       if (end === -1) break;
       at = end + 1;
       continue;
     }
-    const end = lower.indexOf(">", lt);
-    if (end === -1) break;
-    const element = source.slice(lt, end + 1);
-    if (DRAWS_WITHOUT_TEXT.test(element)) return true;
-    // A tag is no words: a space keeps the words on either side apart.
-    kept += " ";
-    at = end + 1;
+    if (NOT_A_BOX.has(tag.name)) continue;
+    box = true;
+    if (DRAWS_WITHOUT_TEXT.has(tag.name) && !(tag.name === "input" && tag.attrs.get("type")?.trim() === "hidden")) return true;
+    const style = tag.attrs.get("style");
+    if (style && declarationsPaint(style)) return true;
   }
-  return /\S/.test(kept.replace(NO_TEXT_ENTITY, " "));
+  if (INK.test(words.replace(CHAR_REF, inkOfReference))) return true;
+  return box && css !== "" && stylesheetPaints(css);
 }
 
 /** ```html (any case), a word after it allowed: the fences the message draws as live pages (ui's `isHtmlEmbedLanguage`). */

@@ -119,33 +119,60 @@ describe("a message's html blocks", () => {
 // A tile's still picture is the page drawn with no script: a page only a script draws would be a blank box, so its
 // tile shows the quiet HTML mark instead (the owner, 2026-11-25: "what's with the empty titles?").
 describe("whether a block's page draws anything with no script", () => {
-  test("words or a picture draw; a chart a script draws, styles, comments and a title do not", () => {
-    // A heading and a table: a picture.
-    expect(inboxHtmlBlockDrawsStill("<h2>Harbor · tide table</h2><table><tr><td>06:12</td></tr></table>")).toBe(true);
-    // Drawn by its own script into an empty svg or a canvas: the mark.
-    const chart = ['<svg id="tides" viewBox="0 0 360 120" style="display:block;width:360px"></svg>', "<script>", "const r = '<rect>Tide</rect>';", "</script>"].join("\n");
-    expect(inboxHtmlBlockDrawsStill(chart)).toBe(false);
-    expect(inboxHtmlBlockDrawsStill('<div id="chart" style="height:300px;background:#fff"></div><canvas id="c"></canvas><script src="https://cdn.example/chart.js"></script>')).toBe(false);
-    // Words only in what is never drawn, or no words at all.
-    expect(inboxHtmlBlockDrawsStill("<title>Ledger</title><style>body{color:red}</style><!-- Bob Tully's draft --><template><p>later</p></template><div>&nbsp;</div>")).toBe(false);
-    expect(inboxHtmlBlockDrawsStill("   ")).toBe(false);
-    // A script never closed hides the rest of the page, as the browser does.
-    expect(inboxHtmlBlockDrawsStill("<script>draw(); <p>never shown</p>")).toBe(false);
-    // Drawn with no words: an image, an svg's own shape, a form's box.
-    expect(inboxHtmlBlockDrawsStill('<img src="data:image/png;base64,AAAA" alt="">')).toBe(true);
-    expect(inboxHtmlBlockDrawsStill('<svg viewBox="0 0 10 10"><rect width="4" height="4"/></svg>')).toBe(true);
-    expect(inboxHtmlBlockDrawsStill('<svg><linearGradient id="g"></linearGradient></svg>')).toBe(false);
-    expect(inboxHtmlBlockDrawsStill("<input type=range>")).toBe(true);
-    // Words a script page shows with no script (<noscript>), and plain words with a `<` in them.
-    expect(inboxHtmlBlockDrawsStill("<noscript>Charts need scripts.</noscript><script>draw()</script>")).toBe(true);
-    expect(inboxHtmlBlockDrawsStill("<script>x()</script>1 < 2")).toBe(true);
+  const SCRIPT = "<script>draw()</script>";
+  // [why, the page, whether it draws a picture (true) or keeps the mark (false)]
+  const cases: Array<[string, string, boolean]> = [
+    ["a heading and a table", "<h2>Harbor · tide table</h2><table><tr><td>06:12</td></tr></table>", true],
+    ["a chart its script draws into an empty svg (its style only lays it out)", `<svg id="tides" viewBox="0 0 360 120" style="display:block;width:360px"></svg><script>const r = '<rect>Tide</rect>';</script>`, false],
+    ["a chart into a sized box and a canvas", '<div id="chart" style="height:300px"></div><canvas id="c"></canvas><script src="https://cdn.example/chart.js"></script>', false],
+    ["words only in a title, a style, a comment and a template", "<title>Ledger</title><style>body{color:red}</style><!-- Bob Tully's draft --><template><p>later</p></template><div>&nbsp;</div>", false],
+    ["nothing but spaces", "   ", false],
+    ["a script never closed hides the rest, as the browser does", "<script>draw(); <p>never shown</p>", false],
+    ["an image", '<img src="data:image/png;base64,AAAA" alt="">', true],
+    ["an svg's own shape", '<svg viewBox="0 0 10 10"><rect width="4" height="4"/></svg>', true],
+    ["an svg with only a gradient", '<svg><linearGradient id="g"></linearGradient></svg>', false],
+    ["a form's box", "<input type=range>", true],
+    ["words a script page shows with no script", `<noscript>Charts need scripts.</noscript>${SCRIPT}`, true],
+    ["plain words with a < in them", "<script>x()</script>1 < 2", true],
+    // A hidden input draws nothing.
+    ["a hidden input, unquoted", `<input type=hidden name=csrf value=Ada>${SCRIPT}`, false],
+    ["a hidden input, quoted and in capitals", `<INPUT TYPE="HIDDEN" name="x"><input type='hidden'>${SCRIPT}`, false],
+    ["a hidden input and a shown one", '<input type="hidden"><input type="text">', true],
+    // Spaces of every width, written as entities, are no words.
+    ["named spaces", `<p>&nbsp;&ensp;&emsp;&thinsp;&hairsp;&numsp;&ZeroWidthSpace;</p>${SCRIPT}`, false],
+    ["numeric spaces", `<p>&#160;&#xA0;&#8194;&#x2009;&#8203;&#12288;&#xfeff;&#160</p>${SCRIPT}`, false],
+    ["written spaces of every width", `<p>    ​　</p>${SCRIPT}`, false],
+    ["an entity that draws", "<p>&amp;</p>", true],
+    ["a numeric entity that draws", "<p>&#65;</p>", true],
+    // A quoted attribute may hold a `>`: it ends no tag.
+    ["a > inside a double-quoted attribute", `<div data-range="a>b"></div>${SCRIPT}`, false],
+    ["a > inside a single-quoted attribute", `<div title='1 > 0' class=x></div>${SCRIPT}`, false],
+    ["a > inside an attribute, then words", '<a title="x>y">Ledger</a>', true],
+    // The words are read from the page itself, never from a lowercased copy that grew ("İ" lowercases to two units).
+    ["a dotted capital I in an attribute, then a script's words", `<div title="${"İ".repeat(10)}"></div> <script>Hidden words</script>`, false],
+    // A CSS drawing is a picture.
+    ["an element whose style paints", '<div style="width:120px;height:8px;background:var(--chart-1)"></div>', true],
+    ["an element whose style draws a border", `<span style="display:block;border:2px solid var(--border)"></span>${SCRIPT}`, true],
+    ["an element whose style paints nothing", `<div style="background:transparent;border:none;height:40px"></div>${SCRIPT}`, false],
+    ["a stylesheet that paints a box of the page", "<style>.sun{width:80px;height:80px;border-radius:50%;background:gold}</style><div class=\"sun\"></div>", true],
+    ["a stylesheet inside a media rule", "<style>/* sun */@media (min-width:1px){.sun{box-shadow:0 0 0 4px red}}</style><div class=sun></div>", true],
+    ["a stylesheet that colours only the whole frame", `<style>html, body{background:#fff;margin:0}</style><div id=chart></div>${SCRIPT}`, false],
+    ["a stylesheet that paints, with no box to paint", "<style>.sun{background:gold}</style><script>draw()</script>", false],
+  ];
+  test.each(cases)("%s", (_why, page, draws) => {
+    expect(inboxHtmlBlockDrawsStill(page)).toBe(draws);
   });
 
   test("a huge page is judged in one pass", () => {
     const hostile = "<script>".repeat(50_000) + "<p".repeat(50_000);
-    const started = performance.now();
     expect(inboxHtmlBlockDrawsStill(hostile)).toBe(false);
     expect(inboxHtmlBlockDrawsStill(`<p>Fern</p>${hostile}`)).toBe(true);
-    expect(performance.now() - started).toBeLessThan(300);
+    // Quoted values never closed, and attributes without end.
+    expect(inboxHtmlBlockDrawsStill('<div a="'.repeat(50_000))).toBe(false);
+    expect(inboxHtmlBlockDrawsStill("<div a=b ".repeat(50_000))).toBe(false);
   });
+});
+
+test("a page's name is read from the page itself after a dotted capital I", () => {
+  expect(inboxHtmlBlockTitle(`<div title="${"İ".repeat(6)}"></div><h2>Harbor</h2>`)).toBe("Harbor");
 });

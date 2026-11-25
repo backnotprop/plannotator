@@ -20,6 +20,7 @@ packages/ui/components/html-viewer/HtmlViewer.sandbox.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameScale.test.tsx
 packages/ui/components/html-viewer/bridgeTouchSelection.test.tsx
 packages/ui/components/html-embed/HtmlEmbedBlock.test.tsx
+packages/ui/components/html-embed/HtmlEmbedBlock.full.test.tsx
 packages/ui/components/LazyBlockBoundary.test.tsx
 packages/ui/components/RegionBoundary.test.tsx
 packages/ui/components/inbox-thread/SnoozeMenu.test.tsx

@@ -221,7 +221,7 @@ test('an html fence draws as a live, sandboxed page that loads from the web and 
     // Full screen: the same page, large (the block opened big, as from Artifacts); Escape closes it and the thread stays open.
     await embed.locator('[data-html-embed-full]').click();
     const popout = page.locator('[data-html-embed-open]');
-    await expect(popout.locator('iframe[data-html-embed-frame]')).toHaveAttribute('sandbox', 'allow-scripts allow-forms');
+    await expect(popout.locator('iframe[data-html-embed-frame="full"]')).toHaveAttribute('sandbox', 'allow-scripts allow-forms');
     await page.keyboard.press('Escape');
     await expect(popout).toHaveCount(0);
     await expect(message).toBeVisible();

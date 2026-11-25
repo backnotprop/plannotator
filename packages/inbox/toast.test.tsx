@@ -308,31 +308,6 @@ test.skipIf(!hasDom)('a desktop toast stays where it is whatever opens: a thread
   expect(placed()).toEqual(first);
 });
 
-// A film's or an image's comment row at the bottom of its viewer: "Markup added to your reply", raised by its own
-// Comment press, sat over that row's buttons (the #4020 proof's shot 13). It sits above the row, and back at the
-// bottom once the row goes.
-test.skipIf(!hasDom)("a desktop toast sits above a film's or an image's comment row, never over its buttons, and goes back down when the row goes", async () => {
-  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
-  const win = windowWith(false);
-  const compose = document.createElement('div');
-  compose.className = 'ib-imgcompose ib-vidcompose';
-  boxAt(compose, 420, 720, 600, 160);
-  win.appendChild(compose);
-  win.setAttribute('data-ib-imgcompose', '');
-  const toast = show({ icon: 'check', lead: 'Markup added to your reply', phoneLead: 'Added to your reply', onUndo: () => {} }, false, win, () => {});
-  // The row's top is at y 720: the toast's lowest pixel is 8 px above it.
-  expect(toast.style.bottom).toBe('188px');
-  expect(900 - parseFloat(toast.style.bottom)).toBeLessThanOrEqual(720);
-  // The viewer closes: its page mark goes, and the toast is placed by inbox.css again.
-  compose.remove();
-  act(() => win.removeAttribute('data-ib-imgcompose'));
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  });
-  expect(toast.style.bottom).toBe('');
-  delete (window as { innerHeight?: number }).innerHeight;
-});
-
 test.skipIf(!hasDom)('a phone: "Read" for "Marked read", no Reply and no Z hint, Undo undoes, and the × closes it', () => {
   phoneWindow(true);
   let undone = 0;

@@ -10,7 +10,8 @@
  * tile pins, the Wall's tile opens the same and closing goes back to the Wall, and a phone does the same. A block
  * that asks a made-up host for a picture, a stylesheet, a background and a prefetch asks it nothing from the grid
  * or the Wall, whose tile reads the block and draws its picture. The block's own Full screen is shot beside the view
- * opened from Artifacts.
+ * opened from Artifacts; in both the page's frame fills the dialog and scrolls (Full screen's mode), and a marker
+ * pressed in the block's own Full screen leaves it open, the focus in it and the thread behind it where it was.
  *
  * Whole-window PNGs, 1440 × 900 light and dark and a 390 × 844 phone, land in PLANNOTATOR_E2E_SHOTS_DIR (default
  * `.local/proof/html-artifacts`).
@@ -35,6 +36,23 @@ async function shot(page: Page, name: string): Promise<void> {
     await page.screenshot({ path: join(shotsDir, `${name}-${scheme}.png`) });
   }
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+}
+
+/**
+ * A block opened big: its frame fills the box under the dialog's bar (not its page's own height, which caps at
+ * 20,000 px and grows a `100vh` page), and its page is in Full screen's mode, so it scrolls in the frame, down and
+ * sideways (the message's mode hides both).
+ */
+async function expectFills(dialog: ReturnType<Page['locator']>, frame: ReturnType<Page['locator']>): Promise<void> {
+  const fill = dialog.locator('[data-html-embed-fill]');
+  await expect
+    .poll(async () => {
+      const [outer, inner] = await Promise.all([fill.boundingBox(), frame.boundingBox()]);
+      return !!outer && !!inner && outer.height > 300 && Math.abs(outer.height - inner.height) <= 2;
+    }, { timeout: 20_000 })
+    .toBe(true);
+  const page = (await (await frame.elementHandle())!.contentFrame())!;
+  await expect.poll(() => page.evaluate(() => [document.documentElement.getAttribute('data-pn-embed'), getComputedStyle(document.documentElement).overflowY !== 'hidden']), { timeout: 20_000 }).toEqual(['full', true]);
 }
 
 /** Every request a frame of the page makes (a tile's picture, a block's page) goes to the Inbox itself or stays in the page: nothing from the web. */
@@ -209,6 +227,10 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await expect(popout.locator('figure[data-html-embed]')).toHaveAttribute('data-html-embed-phase', 'ready', { timeout: 20_000 });
     expect(await popout.locator('[data-html-embed-code], [data-html-embed-annotate]').evaluateAll((tools) => tools.map((t) => t.getAttribute('aria-label') ?? t.textContent?.trim()))).toEqual(['Code', 'Annotate']);
     await expect(popout.locator('[data-html-embed-full]')).toHaveCount(0);
+    // Its page fills the dialog under the bar and scrolls there (Full screen's mode), never the message's frame.
+    const fullFrame = popout.locator('iframe[data-html-embed-frame="full"]');
+    await expect(fullFrame).toHaveCount(1);
+    await expectFills(popout, fullFrame);
     await shot(page, '01b-inline-full-screen-desktop');
     await popout.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(popout).toHaveCount(0);
@@ -240,6 +262,7 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await expect(pen).toHaveAccessibleName('Annotate');
     await expect(big.locator('[data-html-embed-code]')).toBeVisible();
     await expect(big.locator('[data-html-embed-full]')).toHaveCount(0);
+    await expectFills(big, big.locator('iframe[data-html-embed-frame="full"]'));
     await shot(page, '03-block-open-from-grid-desktop');
 
     // A comment on an element, as under the block in the text.
@@ -272,6 +295,40 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     // The same block in the text holds the comment made big.
     await page.goto(`${url}#thread=${sent.thread_id}`);
     await expect(inline.first()).toHaveAttribute('data-html-embed-comments', /\S/, { timeout: 20_000 });
+
+    // The pen in the block's own Full screen, as in Artifacts: its marker there opens its comment there only. Nothing
+    // behind the dialog is selected or takes the focus (which would close it), and the thread under it does not scroll.
+    await inline.first().scrollIntoViewIfNeeded();
+    const threadScroll = () =>
+      inline.first().evaluate((el) => {
+        for (let node = el.parentElement; node; node = node.parentElement) {
+          const overflow = getComputedStyle(node).overflowY;
+          if ((overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight) return node.scrollTop;
+        }
+        return window.scrollY;
+      });
+    const scrolledBefore = await threadScroll();
+    await inline.first().locator('[data-html-embed-full]').click();
+    await expect(popout).toBeVisible();
+    const fullPen = popout.locator('[data-html-embed-annotate]');
+    await expect(fullPen).toBeVisible();
+    const fullAnnotatable = popout.locator('[data-html-embed-annotatable] iframe');
+    await expect(fullAnnotatable).toHaveAttribute('sandbox', 'allow-scripts allow-forms', { timeout: 20_000 });
+    await expectFills(popout, fullAnnotatable);
+    const fullPage = (await (await fullAnnotatable.elementHandle())!.contentFrame())!;
+    const marker = fullPage.locator('[data-plannotator-marker]');
+    await expect(marker).toHaveCount(1, { timeout: 20_000 });
+    await fullPen.click();
+    await expect(fullPen).toHaveAttribute('aria-pressed', 'true');
+    await shot(page, '01c-inline-full-screen-pen-desktop');
+    await fullPen.click();
+    await marker.click();
+    await page.waitForTimeout(800);
+    await expect(popout).toBeVisible();
+    expect(await page.evaluate(() => !!document.activeElement?.closest('[data-html-embed-open]'))).toBe(true);
+    expect(await threadScroll()).toBe(scrolledBefore);
+    await popout.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(popout).toHaveCount(0);
 
     await page.goto(`${url}#artifacts`);
     const wall = page.locator('[data-wall-artifact]');

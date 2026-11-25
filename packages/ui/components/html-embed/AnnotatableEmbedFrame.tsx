@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { buildEmbedDocument, EMBED_SANDBOX, embedFragment, embedThemeMessage, readEmbedMessage, type EmbedTheme } from '@plannotator/core/html-embed';
+import { buildEmbedDocument, EMBED_SANDBOX, embedFragment, embedThemeMessage, readEmbedMessage, type EmbedMode, type EmbedTheme } from '@plannotator/core/html-embed';
 import type { Annotation } from '../../types';
 import { HtmlViewer, type HtmlViewerFrame } from '../html-viewer/HtmlViewer';
 import type { ViewerHandle } from '../Viewer';
@@ -39,6 +39,7 @@ export function AnnotatableEmbedFrame({
   html,
   frameUrl,
   theme,
+  mode = 'inline',
   title,
   height,
   onHeight,
@@ -57,6 +58,8 @@ export function AnnotatableEmbedFrame({
   html: string;
   frameUrl: (document: string) => Promise<string | null>;
   theme: EmbedTheme;
+  /** `full`: open big, the frame `height` tall and the page scrolling in it (the embed's own Full screen mode). */
+  mode?: EmbedMode;
   title: string;
   height?: number;
   onHeight: (height: number) => void;
@@ -81,7 +84,7 @@ export function AnnotatableEmbedFrame({
   // The embed's own document, with our <head> closed so the viewer's bridge lands in it, ahead of the page.
   const page = useMemo(() => buildEmbedDocument(html, { closeHead: true }), [html]);
   // The theme the page starts with rides in the address, as the embed's (no flash); later ones go by message.
-  const [start] = useState(() => embedFragment(theme, 'inline'));
+  const [start] = useState(() => embedFragment(theme, mode));
   const spoke = useRef(false);
   const themeRef = useRef(theme);
   themeRef.current = theme;

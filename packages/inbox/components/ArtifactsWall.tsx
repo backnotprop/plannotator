@@ -16,6 +16,7 @@ import { inboxApi } from '../api';
 import type { Route } from '../app/route';
 import { htmlArtifactName, originOf, type Artifact } from '../artifacts';
 import { openHtmlArtifact } from '../htmlArtifactOpen';
+import { noteWallMachines } from '../htmlBlockSource';
 import { useArtifactPins } from '../artifactPins';
 import { dayWords, formatCount, plural } from '../format';
 import { Icon } from '../icons';
@@ -173,6 +174,7 @@ export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi
       void read({ pinned, type, archived, limit: Math.min(INBOX_ARTIFACTS_PAGE_MAX, Math.max(INBOX_ARTIFACTS_PAGE, limit)) }).then(
         (answer) => {
           if (at !== reads.current) return;
+          noteWallMachines(answer);
           loaded.current = answer.artifacts.length;
           setFailed(false);
           setPage({ rows: answer.artifacts, next: answer.next_cursor, counts: answer.counts });
@@ -207,6 +209,7 @@ export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi
       (answer) => {
         setMore(false);
         if (at !== reads.current) return;
+        noteWallMachines(answer);
         setPage((now) => (now ? { rows: [...now.rows, ...answer.artifacts], next: answer.next_cursor, counts: answer.counts } : now));
         loaded.current += answer.artifacts.length;
       },
