@@ -6874,7 +6874,6 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-dm-sentline b { color: var(--foreground); font-weight: 650; }
 .ib-dm-main { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 28px 40px 18px; display: flex; flex-direction: column; justify-content: safe center; gap: 12px; }
 .ib-dm-card:not([data-has-picture]) .ib-dm-main { max-width: 920px; margin: 0 auto; width: 100%; box-sizing: border-box; }
-.ib-dm-pics { flex: 0 0 48%; min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 20px; border-right: 1px solid var(--border); background: color-mix(in oklab, var(--muted) 55%, var(--card)); }
 .pn-inbox .ib-dm-hero { position: relative; flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; border-radius: var(--ib-lr-md, 9px); overflow: hidden; cursor: zoom-in; }
 .ib-dm-hero img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
 .ib-dm-zoom { position: absolute; right: 10px; bottom: 10px; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px; background: var(--card); box-shadow: var(--ib-float-shadow); font-size: var(--ib-fs-13, 13px); font-weight: 600; }
@@ -6940,23 +6939,13 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-dm-confirm1 > span { flex: 1 1 260px; min-width: 0; }
 .pn-inbox .ib-btn.ib-dm-danger { background: var(--destructive); border-color: var(--destructive); color: var(--destructive-foreground, #fff); font-weight: 600; }
 .pn-inbox .ib-dm-confirm1 .ib-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-/* Picture choices: the thread card's own tiles (ui QuestionPictureTiles), at the dialog's size. */
-.ib-dm-tiles { min-width: 0; }
-.ib-dm-tiles [data-question-tiles] { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 10px; margin: 0; }
-.ib-dm-tiles [data-question-tile] { border-radius: var(--ib-lr-md, 9px); border: 1px solid var(--border); background: var(--card); }
-.ib-dm-tiles [data-question-tile]:hover { border-color: color-mix(in oklab, var(--primary) 45%, var(--border)); }
-.ib-dm-tiles [data-question-tile][data-question-tile-recommended] { border-color: color-mix(in oklab, var(--primary) 40%, var(--border)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 25%, transparent); }
-.ib-dm-tiles [data-question-tile][data-question-tile-checked] { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); background: color-mix(in oklab, var(--primary) 7%, var(--card)); }
-.ib-dm-tiles [data-question-tile-picture] { aspect-ratio: auto; height: 230px; padding: 8px; box-sizing: border-box; border-bottom-color: var(--border); background: color-mix(in oklab, var(--muted) 55%, var(--card)); }
-.ib-dm-tiles [data-question-tile-caption] { padding: 9px 11px 11px; gap: 8px; }
-.ib-dm-tiles [data-question-part="choice"] { display: flex; flex-direction: column; gap: 3px; font-size: var(--ib-fs-13, 13px); }
-.ib-dm-tiles [data-question-tile-label] { font-size: var(--ib-fs-14-5, 14.5px); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
-.ib-dm-tiles [data-question-tile-description] { font-size: var(--ib-fs-13, 13px); line-height: 1.4; }
-.ib-dm-tiles .ib-dm-rec { align-self: flex-start; margin-top: 4px; font-size: var(--ib-fs-12, 12px); }
-.pn-inbox .ib-dm-tiles [data-question-zoom] { right: 7px; top: 7px; width: 30px; height: 30px; border-radius: 8px; background: var(--card); box-shadow: var(--ib-float-shadow); }
 .ib-dm-more { display: flex; flex-wrap: wrap; gap: 4px; margin-left: -10px; }
 .ib-dm-more .ib-dm-lnk { color: var(--muted-foreground); }
-.ib-dm-nav { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding-top: 12px; flex: none; }
+.ib-dm-nav { position: relative; z-index: 2; display: flex; align-items: center; gap: 16px; padding: 0 22px 16px; flex: none; }
+.ib-dm-navsp { flex: 1 1 auto; }
+.ib-dm-send { flex: none; gap: 6px; }
+/* The thread's own question card inside the dialog: the card's width, no extra margin above it. */
+.ib-dm-qcard .question-block { margin-top: 4px; }
 .ib-dm-after { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-dm-banner { position: absolute; left: 50%; top: 14px; z-index: 3; translate: -50% 0; display: flex; align-items: center; gap: 8px; max-width: min(640px, calc(100% - 40px)); padding: 10px 14px; border-radius: var(--ib-lr-md, 9px); background: color-mix(in oklab, var(--warning, oklch(0.8 0.15 80)) 22%, var(--card)); font-size: var(--ib-fs-14, 14px); box-shadow: var(--ib-float-shadow); }
 .ib-dm-card:has(.ib-dm-banner) .ib-dm-main { padding-top: 66px; }
@@ -7012,9 +7001,11 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-dm-scope { display: none; }
   .pn-inbox .ib-dm-x { width: 44px; height: 44px; }
   .ib-dm-strip { padding: 4px 16px 10px; }
-  .ib-dm-stage { padding: 0 8px max(8px, env(safe-area-inset-bottom)); }
+  .ib-dm-stage { padding: 0 8px 8px; }
+  .ib-dm-nav { gap: 4px; padding: 0 8px max(8px, env(safe-area-inset-bottom)); }
+  .ib-dm-nav .ib-dm-lnk { min-height: 44px; min-width: 44px; justify-content: center; }
+  .ib-dm-send { min-height: 44px; }
   .ib-dm-card { flex-direction: column; overflow-y: auto; }
-  .ib-dm-pics { flex: none; max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--border); padding: 12px; }
   .ib-dm-main { padding: 18px 16px 14px; overflow: visible; }
   .ib-dm-prompt { font-size: var(--ib-fs-22, 22px); }
   .ib-dm-choices.ib-dm-two { flex-direction: column; }
@@ -7024,9 +7015,6 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-dm-ctx { max-height: none; }
   .ib-dm-peek { display: none; }
   .ib-dm-all { grid-template-columns: 1fr; }
-  .ib-dm-tiles [data-question-tiles] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ib-dm-tiles [data-question-tile-picture] { height: 150px; }
-  .pn-inbox .ib-dm-tiles [data-question-zoom]::before { inset: -7px; }
   .pn-inbox .ib-dm-confirm1 .ib-btn { min-height: 44px; }
 }
 
