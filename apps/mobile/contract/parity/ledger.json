@@ -23496,6 +23496,7 @@
         "door:GET canvases",
         "door:GET threads/:id/canvas",
         "door:GET threads/:id/canvas/files/:id",
+        "window:/api/inbox/canvas/agent",
         "window:/api/inbox/canvas/jobs/:id",
         "window:/api/inbox/canvases",
         "window:/api/inbox/threads/:id/canvas",

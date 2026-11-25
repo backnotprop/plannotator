@@ -199,6 +199,7 @@
       "/api/inbox/board/intro",
       "/api/inbox/bridge/event",
       "/api/inbox/bridge/poll",
+      "/api/inbox/canvas/agent",
       "/api/inbox/canvas/jobs/:id",
       "/api/inbox/canvases",
       "/api/inbox/capabilities",
