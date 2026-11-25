@@ -23,14 +23,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { actionSavesSettled } from './actionSaves';
 import { adoptPageSession, inboxApi, pageServerSession } from './api';
 import { selfMachineId } from './inboxUrl';
+import { pageBuild } from '@plannotator/ui/utils/pageBuild';
 import { unsentReply } from './unsent';
 
-declare const __APP_VERSION__: string;
-
-/** The release this page was built from, or null where nothing defines it (a test, a tool that bundles it bare). */
-export function pageBuild(): string | null {
-  return typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : null;
-}
+/** The release this page was built from (the build's one read of it, shared with the failure box's Copy error). */
+export { pageBuild };
 
 /** How long a read of the Inbox's health may take (a check, and Reload's): a stalled phone connection never holds either. */
 export const STALE_HEALTH_MS = 3_000;

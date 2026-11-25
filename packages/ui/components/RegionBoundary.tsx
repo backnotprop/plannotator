@@ -33,8 +33,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { reloadAfterFlush } from '../utils/beforeReload';
-
-declare const __APP_VERSION__: string | undefined;
+import { pageBuild } from '../utils/pageBuild';
 
 export interface RegionBoundaryProps {
   /** The region, in the copied report ("Diff", "Thread pane"). */
@@ -153,7 +152,7 @@ class Boundary extends React.Component<RegionBoundaryProps, BoundaryState> {
 }
 
 function appVersion(): string {
-  return typeof __APP_VERSION__ === 'string' && __APP_VERSION__ ? __APP_VERSION__ : 'unknown';
+  return pageBuild() || 'unknown';
 }
 
 /** An address with a query or a hash (any scheme, `blob:http:` too), up to a space, a quote or a bracket. */

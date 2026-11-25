@@ -128,9 +128,10 @@ test("the review window's guide, Unified: the + on context lines after a fold, a
         if (landed > 0) test.info().annotations.push({ type: 'note', description: 'the semantic note had landed before the pending half' });
       } else {
         release();
-        await expect
-          .poll(() => page.locator('[data-semantic-file-badge="pending"]').count(), { timeout: 30_000, message: 'the semantic note lands' })
-          .toBe(0);
+        // The guide's own file header: the review's panes behind the guide keep badges of their own, which can stay
+        // pending (a pane not drawn does not work its files out), so a page-wide count never settles.
+        await expect(shell.locator('[data-semantic-file-badge]:not([data-semantic-file-badge="pending"])'), 'the semantic note lands').toHaveCount(1, { timeout: 30_000 });
+        await expect(shell.locator('[data-semantic-file-badge="pending"]'), 'the semantic note lands').toHaveCount(0);
       }
       const cases: [number, Kind, string][] = [
         [phase.hunk, 'context', 'the first context line after a fold'],

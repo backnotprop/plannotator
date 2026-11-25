@@ -170,6 +170,9 @@ async function nothingBroke(page: Page, what: string): Promise<void> {
 
 async function open(page: Page, surface: Surface): Promise<void> {
   const { thread, message } = world.sent[surface];
+  // A fresh load each case: a goto to the address already open only moves the hash, the diff keeps the last case's
+  // scroll, and the rows it scrolled past are not drawn (the diff is virtualized), line 1's among them.
+  await page.goto('about:blank');
   if (surface === 'reader') {
     await page.goto(`${world.url}#thread=${thread}&guide=${message}`);
   } else {
