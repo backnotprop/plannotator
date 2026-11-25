@@ -13,7 +13,8 @@
  *     tide-ios is handed it. A Moving line's light runs meanwhile (so the reduced-motion case below means something).
  *  2. Phone: no Nudge until a line is tapped; a tap on Nightly summary opens its readout on the page's own ground
  *     (no panel) with "Nudge wrangler" beside Open thread; one tap sends one reply with the approved words.
- *  3. Reduced motion: none of Grid's own animations runs, pointed at or not.
+ *  3. Reduced motion (run last, so it never stops the case below): none of Grid's own animations runs, pointed at or
+ *     not; any that does is named in the failure.
  *  4. Mini asleep: a nudge on its Offline sync is held: "Nudged just now", the readout says it waits, and a second
  *     window offers no second Nudge. Its work moves while it sleeps; back, it refuses the nudge, and the line says
  *     "Not delivered: …" in the status grey (the window's list read held where it was, so the line is still Stale when
@@ -342,34 +343,6 @@ test('phone: a tap opens the stale line on the page\'s ground with Nudge beside 
   expect(errors).toEqual([]);
 });
 
-test('reduced motion: none of Grid\'s own animations runs, pointed at or not', async ({ browser }) => {
-  test.setTimeout(60_000);
-  const page = await open(browser, { reducedMotion: 'reduce' });
-  // Grid's own: its CSS animations (`ib-grid-*`) and the Web Animations gridMotion.ts starts (the light, the mark, a
-  // sliding line, heading or "N more"). The sidebar's agent marks and anything else on the page are not Grid's.
-  const moving = () =>
-    page.evaluate(() =>
-      document.getAnimations().filter((a) => {
-        if (a.playState !== 'running') return false;
-        if ((a as CSSAnimation).animationName?.startsWith('ib-grid')) return true;
-        const target = (a.effect as KeyframeEffect | null)?.target as Element | null;
-        return !!target?.matches('.ib-grid-glc > i, .ib-grid-mk, [data-grid-line], [data-grid-group] > .ib-grid-gh, [data-grid-group] > .ib-grid-door');
-      }).length,
-    );
-  const counts: number[] = [];
-  // Three turns of the glint's walk, then pointing at a Moving line and a Needs-you one.
-  for (let i = 0; i < 20; i++) {
-    counts.push(await moving());
-    await page.waitForTimeout(250);
-  }
-  await lineOf(page, studio.seeded.threads['Rate limit the export']!).locator('.ib-grid-t').hover();
-  await lineOf(page, studio.seeded.threads['Pagination cursors']!).locator('.ib-grid-t').hover();
-  counts.push(await moving());
-  expect(counts.every((n) => n === 0)).toBe(true);
-  await shot(page, '07-desktop-reduced-motion', ['light']);
-  expect(errors).toEqual([]);
-});
-
 test('Mini asleep: the nudge is held and nudged in every window; refused when Mini is back because its work moved, said in the status grey', async ({ browser }) => {
   test.setTimeout(180_000);
   const page = await open(browser);
@@ -426,5 +399,43 @@ test('Mini asleep: the nudge is held and nudged in every window; refused when Mi
   await shot(page, '09-desktop-nudge-refused');
   // Nothing landed in Mini's thread.
   expect((await read<{ thread: { messages: { nudge?: unknown }[] } }>(mini, `/api/inbox/threads/${sync}`)).thread.messages.filter((m) => m.nudge)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+// Last, so the cases above run whatever it finds (the spec is serial).
+test('reduced motion: none of Grid\'s own animations runs, pointed at or not', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const page = await open(browser, { reducedMotion: 'reduce' });
+  // Grid's own: its CSS animations (`ib-grid-*`) and the Web Animations gridMotion.ts starts (the light, the mark, a
+  // sliding line, heading or "N more"). The sidebar's agent marks and anything else on the page are not Grid's. Each
+  // one running is named (its kind, name and target), so a failure says what moved.
+  const moving = () =>
+    page.evaluate(() =>
+      document
+        .getAnimations()
+        .filter((a) => {
+          if (a.playState !== 'running') return false;
+          if ((a as CSSAnimation).animationName?.startsWith('ib-grid')) return true;
+          const target = (a.effect as KeyframeEffect | null)?.target as Element | null;
+          return !!target?.matches('.ib-grid-glc > i, .ib-grid-mk, [data-grid-line], [data-grid-group] > .ib-grid-gh, [data-grid-group] > .ib-grid-door');
+        })
+        .map((a) => {
+          const effect = a.effect as KeyframeEffect | null;
+          const target = effect?.target as Element | null;
+          const name = (a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.id;
+          return `${a.constructor.name} ${name || '(no name)'} on ${target?.tagName.toLowerCase()}.${[...(target?.classList ?? [])].join('.')}${effect?.pseudoElement ?? ''} ${JSON.stringify(effect?.getKeyframes().slice(0, 2) ?? [])}`;
+        }),
+    );
+  const seen = new Set<string>();
+  // Three turns of the glint's walk, then pointing at a Moving line and a Needs-you one.
+  for (let i = 0; i < 20; i++) {
+    for (const one of await moving()) seen.add(one);
+    await page.waitForTimeout(250);
+  }
+  await lineOf(page, studio.seeded.threads['Rate limit the export']!).locator('.ib-grid-t').hover();
+  await lineOf(page, studio.seeded.threads['Pagination cursors']!).locator('.ib-grid-t').hover();
+  for (const one of await moving()) seen.add(one);
+  expect([...seen]).toEqual([]);
+  await shot(page, '07-desktop-reduced-motion', ['light']);
   expect(errors).toEqual([]);
 });
