@@ -1,7 +1,8 @@
 /**
- * Decision mode (experimental, approval "inbox-decision-mode") on a running
- * Inbox: the gate (config.json `experimental.decisionMode`, the
- * PLANNOTATOR_EXPERIMENTAL override, Settings' POST), `GET
+ * Decision mode (approval "inbox-decision-mode"; on unless Settings →
+ * Capabilities turns it off) on a running Inbox: the switch (config.json
+ * `inboxDecisionMode`, the old `experimental.decisionMode` kept, the
+ * PLANNOTATOR_EXPERIMENTAL=-decision-mode override, Settings' POST), `GET
  * /api/inbox/decisions` (its guards, its order, its liveness through the
  * existing picks and reply routes), and that the phone door leaves it out.
  * Every test runs under its own temp data dir.
@@ -69,48 +70,43 @@ async function decisions(server: InboxServer, query = ""): Promise<InboxDecision
   return (await res.json()) as InboxDecisionsModel;
 }
 
-describe("the gate", () => {
-  test("off by default: the route does not exist and Settings says so", async () => {
+describe("the switch (Settings → Capabilities, on unless turned off)", () => {
+  test("on by default: the route answers and Settings says on, with nothing saved", async () => {
     const { server } = await setup();
+    expect((await fetch(`${base(server)}/api/inbox/decisions`)).status).toBe(200);
+    const settings = (await (await fetch(`${base(server)}/api/inbox/settings`)).json()) as { decision_mode: unknown; experimental: { grid: unknown } };
+    expect(settings.decision_mode).toEqual({ on: true, env: null });
+    expect(settings.experimental.grid).toEqual({ on: false, env: null });
+  });
+
+  test("turned off and on again: the route follows at once, config.json keeps its other keys, a bad body is refused", async () => {
+    const { server, dataDir } = await setup();
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ experimental: { otherFlag: true }, inboxTextSize: 13 }));
+    const off = await post(server, "/api/inbox/settings", { decision_mode: { on: false } });
+    expect(off.status).toBe(200);
+    expect(((await off.json()) as { decision_mode: unknown }).decision_mode).toEqual({ on: false, env: null });
     const res = await fetch(`${base(server)}/api/inbox/decisions`);
     expect(res.status).toBe(404);
     expect(((await res.json()) as { code: string }).code).toBe("not_found");
-    const settings = (await (await fetch(`${base(server)}/api/inbox/settings`)).json()) as { experimental: unknown };
-    expect(settings.experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: false, env: null } });
-  });
-
-  test("Settings turns it on and off, applied at once, and refuses a bad body", async () => {
-    const { server } = await setup();
-    const on = await post(server, "/api/inbox/settings", { experimental: { decision_mode: true } });
-    expect(on.status).toBe(200);
-    expect(((await on.json()) as { experimental: unknown }).experimental).toEqual({ decision_mode: { on: true, env: null }, grid: { on: false, env: null } });
+    const saved = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8"));
+    expect(saved.inboxDecisionMode).toBe(false);
+    expect(saved.experimental).toEqual({ otherFlag: true });
+    expect(saved.inboxTextSize).toBe(13);
+    expect((await post(server, "/api/inbox/settings", { decision_mode: { on: true } })).status).toBe(200);
     expect((await fetch(`${base(server)}/api/inbox/decisions`)).status).toBe(200);
-    for (const bad of [true, { decision_mode: "yes" }, { decision_mode: true, other: true }, { grid: 1 }, {}, []]) {
-      const refused = await post(server, "/api/inbox/settings", { experimental: bad });
-      expect(refused.status).toBe(422);
-    }
+    for (const bad of [true, { on: "yes" }, { on: true, other: true }, {}, []]) expect((await post(server, "/api/inbox/settings", { decision_mode: bad })).status).toBe(422);
     // Another site's page cannot switch it.
-    const cross = await post(server, "/api/inbox/settings", { experimental: { decision_mode: false } }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" });
+    const cross = await post(server, "/api/inbox/settings", { decision_mode: { on: false } }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" });
     expect(cross.status).toBe(403);
-    const stale = await fetch(`${base(server)}/api/inbox/settings`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ serverSession: "not-this-one", experimental: { decision_mode: false } }),
-    });
-    expect(stale.status).toBe(409);
-    await post(server, "/api/inbox/settings", { experimental: { decision_mode: false } });
-    expect((await fetch(`${base(server)}/api/inbox/decisions`)).status).toBe(404);
+    expect((await fetch(`${base(server)}/api/inbox/decisions`)).status).toBe(200);
   });
 
-  test("switching decision mode keeps the other experimental flags in config.json", async () => {
+  test("an old experimental choice is kept: off stays off, and an older window's experimental save still switches it", async () => {
     const { server, dataDir } = await setup();
-    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ experimental: { otherFlag: true }, inboxTextSize: 13 }));
-    for (const on of [true, false]) {
-      expect((await post(server, "/api/inbox/settings", { experimental: { decision_mode: on } })).status).toBe(200);
-      const saved = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8"));
-      expect(saved.experimental).toEqual({ otherFlag: true, decisionMode: on });
-      expect(saved.inboxTextSize).toBe(13);
-    }
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ experimental: { decisionMode: false } }));
+    expect((await fetch(`${base(server)}/api/inbox/decisions`)).status).toBe(404);
+    expect((await post(server, "/api/inbox/settings", { experimental: { decision_mode: true } })).status).toBe(200);
+    expect((await fetch(`${base(server)}/api/inbox/decisions`)).status).toBe(200);
   });
 
   test("Grid's switch (approval \"inbox-agent-grid\") saves on its own, off by default, and keeps decision mode", async () => {
@@ -126,22 +122,19 @@ describe("the gate", () => {
     delete process.env.PLANNOTATOR_EXPERIMENTAL;
   });
 
-  test("PLANNOTATOR_EXPERIMENTAL decides over config.json, both ways", async () => {
+  test("PLANNOTATOR_EXPERIMENTAL=-decision-mode still turns it off and locks the switch; the plain name changes nothing", async () => {
     const { server, dataDir } = await setup({ on: true });
     process.env.PLANNOTATOR_EXPERIMENTAL = "other-thing, -decision-mode";
     expect((await fetch(`${base(server)}/api/inbox/decisions`)).status).toBe(404);
-    const settings = (await (await fetch(`${base(server)}/api/inbox/settings`)).json()) as { experimental: unknown };
-    expect(settings.experimental).toEqual({ decision_mode: { on: false, env: false }, grid: { on: false, env: null } });
-    process.env.PLANNOTATOR_EXPERIMENTAL = " Decision-Mode ";
-    // While the env var decides, the switch is locked: a save is refused (409, like Over your tailnet) and writes nothing.
+    const settings = (await (await fetch(`${base(server)}/api/inbox/settings`)).json()) as { decision_mode: unknown };
+    expect(settings.decision_mode).toEqual({ on: false, env: false });
+    // Locked: turning it on is refused (409) and writes nothing, nor anything else in the same request.
     const before = readFileSync(join(dataDir, "config.json"), "utf8");
-    const locked = await post(server, "/api/inbox/settings", { experimental: { decision_mode: false } });
+    const locked = await post(server, "/api/inbox/settings", { decision_mode: { on: true }, text_size: 12 });
     expect(locked.status).toBe(409);
     expect(((await locked.json()) as { code: string }).code).toBe("experimental_env_decides");
     expect(readFileSync(join(dataDir, "config.json"), "utf8")).toBe(before);
-    // Nothing else in the same request is saved either.
-    expect((await post(server, "/api/inbox/settings", { experimental: { decision_mode: true }, text_size: 12 })).status).toBe(409);
-    expect(readFileSync(join(dataDir, "config.json"), "utf8")).toBe(before);
+    process.env.PLANNOTATOR_EXPERIMENTAL = " Decision-Mode ";
     expect((await fetch(`${base(server)}/api/inbox/decisions`)).status).toBe(200);
   });
 });
