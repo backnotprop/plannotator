@@ -70,13 +70,13 @@ import { BRANCH_FIELD, branchReportOf, checkBranchSend, planBranchSend, type Bra
 import { inboxBranchReportedLine, inboxBranchSameLine } from "@plannotator/core/inbox-branch-reports";
 import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpContext, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "canvas", "get_guide_brief", "submit_guide", "card", "steps", "routine"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps", "routine"] as const;
 
 /**
  * The tools this Inbox serves with the Board on (and steps off): every one,
  * except `card` while INBOX_CARD_ACTION_ON holds it back in the code.
  */
-export const INBOX_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = INBOX_MCP_TOOLS.filter((name) => name !== "steps" && name !== "routine" && name !== "canvas" && (name !== "card" || INBOX_CARD_ACTION_ON));
+export const INBOX_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = INBOX_MCP_TOOLS.filter((name) => name !== "steps" && name !== "routine" && (name !== "card" || INBOX_CARD_ACTION_ON));
 
 /**
  * The tools an Inbox serves by default: the Board is off until the person
@@ -86,11 +86,9 @@ export const INBOX_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = I
  */
 export const INBOX_DEFAULT_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = INBOX_SERVED_TOOLS.filter((name) => name !== "card");
 
-/** The tools an Inbox serves for the person's switches, in tools/list order (the canvas, config.json `inboxCanvas`, after thread_pulls). */
-export function inboxServedTools(switches: { board: boolean; steps: boolean; scheduled?: boolean; canvas?: boolean }): (typeof INBOX_MCP_TOOLS)[number][] {
-  const served = switches.board ? INBOX_SERVED_TOOLS : INBOX_DEFAULT_SERVED_TOOLS;
-  const listed = switches.canvas ? served.flatMap((name) => (name === "thread_pulls" ? (["thread_pulls", "canvas"] as const) : [name])) : served;
-  return [...listed, ...(switches.steps ? (["steps"] as const) : []), ...(switches.scheduled ? (["routine"] as const) : [])];
+/** The tools an Inbox serves for the person's switches, in tools/list order. */
+export function inboxServedTools(switches: { board: boolean; steps: boolean; scheduled?: boolean }): (typeof INBOX_MCP_TOOLS)[number][] {
+  return [...(switches.board ? INBOX_SERVED_TOOLS : INBOX_DEFAULT_SERVED_TOOLS), ...(switches.steps ? (["steps"] as const) : []), ...(switches.scheduled ? (["routine"] as const) : [])];
 }
 
 
@@ -364,10 +362,6 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * the states as stored, and nothing is read.
    */
   pulls?: InboxPullsMcpLive;
-  /** A thread's canvas (packages/server/inbox-canvas.ts). Absent: no `canvas` tool. */
-  canvas?: { register(server: McpServer): void };
-  /** The canvas switch (config.json `inboxCanvas`, off unless on): the `canvas` tool is listed only while it is on. */
-  canvasOn?: () => boolean;
   /** The host of a project's git remote, for a short `group/project!45` (inbox-thread-pulls.ts `parseProjectPullRefs`). Absent: gitlab.com. */
   projectHost?: ProjectHostOf;
   /** Ship: the shipping agent's `thread_pulls` `ship` (inbox-mcp-pulls.ts). */
@@ -1659,9 +1653,6 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
 
   // A thread's PRs (approval "inbox-pr-binding"): packages/server/inbox-mcp-pulls.ts. Always served.
   registerInboxThreadPullsTool(server, context);
-
-  // A thread's canvas: packages/server/inbox-canvas.ts. Only while the person has it on (Settings → Capabilities).
-  if (context.canvasOn?.()) context.canvas?.register(server);
 
   // Guided reviews (step 5): packages/server/inbox-guides.ts.
   registerInboxGuideTools(server, context);

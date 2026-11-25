@@ -226,7 +226,8 @@ import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-r
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { createInboxCanvas } from "./inbox-canvas";
-import { canvasSwitch, INBOX_CANVAS_OFF_ANSWER, INBOX_CANVAS_OFF_TEXT } from "./inbox-canvas-switch";
+import { canvasAgentRoute, INBOX_CANVAS_AGENT_ROUTE } from "./inbox-canvas-agent";
+import { canvasSwitch, INBOX_CANVAS_OFF_ANSWER } from "./inbox-canvas-switch";
 import { capabilityNoteOf, postCapabilityNotes } from "./inbox-capability-note";
 import { capabilityRoute, type InboxCapabilityContext } from "./inbox-capability-agent";
 import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
@@ -1888,8 +1889,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     stepsOn: () => stepsOn(),
     // Routines: the routine tool is listed and served only while the person has them on.
     scheduledOn: () => scheduledCap.on(),
-    // The canvas: the canvas tool is listed and served only while the person has it on.
-    canvasOn: () => canvasCap.on(),
     scheduled: () => scheduled,
     routineGrants: () => routineGrants,
     // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
@@ -4897,9 +4896,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             ? INBOX_STEPS_OFF_TEXT
             : call.params?.name === "routine" && !scheduledCap.on()
               ? INBOX_SCHEDULED_OFF_TEXT
-              : call.params?.name === "canvas" && !canvasCap.on()
-                ? INBOX_CANVAS_OFF_TEXT
-                : null;
+              : null;
     return text ? json({ jsonrpc: "2.0", id: call.id, result: { content: [{ type: "text", text }], isError: true } }) : null;
   };
 
@@ -5883,7 +5880,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const localOnly = () =>
     json({ error: "This answers only on this computer, not over the tailnet.", code: "local_only" }, 403);
 
-  /** A thread's canvas (inbox-canvas.ts): its routes, the agent's `canvas` tool and its frames, all only while the canvas is on. */
+  /** A thread's canvas (inbox-canvas.ts): its routes, the agent's `plannotator inbox canvas` and its frames, all only while the canvas is on. */
   const canvas = createInboxCanvas({
     store,
     serverSession,
@@ -5892,7 +5889,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     sessionMismatch: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null),
     on: () => canvasCap.on(),
   });
-  mcpContext.canvas = canvas;
   /**
    * A thread's PRs in the window (approval "inbox-pr-binding", inbox-thread-pulls.ts): the read, and the person's
    * add and remove from the popover.
@@ -7495,6 +7491,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // An agent's `plannotator inbox capability` (inbox-capability-agent.ts): this computer's own, never a device door's.
       if (path === "/api/inbox/capability") {
         const answer = await capabilityRoute(req, url, capabilityAgent, readBody, fromDeviceDoor.has(req));
+        if (answer) return answer;
+      }
+      // An agent's `plannotator inbox canvas` (inbox-canvas-agent.ts): this computer's own, only while the canvas is on.
+      if (path === INBOX_CANVAS_AGENT_ROUTE) {
+        const answer = await canvasAgentRoute(req, url, { canvas, on: () => canvasCap.on(), readBody, fromDeviceDoor: fromDeviceDoor.has(req) });
         if (answer) return answer;
       }
       if (path === "/api/inbox/settings") {

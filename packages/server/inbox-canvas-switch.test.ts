@@ -1,7 +1,8 @@
 /**
  * The canvas as a capability (Settings → Capabilities → Canvas, config.json `inboxCanvas`, off by default):
- * the switch's save, the agent's tool listed only while it is on, and an off Inbox that touches no stored canvas.
- * The routes' refusal and the tool call's refusal on a running Inbox: inbox-canvas-capability.test.ts.
+ * the switch's save, no canvas action in the agent tool whatever is on (agents have `plannotator inbox canvas`,
+ * inbox-canvas-agent.test.ts), and an off Inbox that touches no stored canvas. The routes' refusal on a running Inbox:
+ * inbox-canvas-capability.test.ts.
  */
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync } from "node:fs";
@@ -10,7 +11,7 @@ import { join } from "node:path";
 import { CANVAS_GONE_KEEP_MS } from "@plannotator/shared/inbox/canvas/store";
 import { createInboxCanvas } from "./inbox-canvas";
 import { canvasSwitch } from "./inbox-canvas-switch";
-import { createInboxMcpServer, INBOX_DEFAULT_SERVED_TOOLS, INBOX_SERVED_TOOLS, inboxServedTools, type InboxMcpContext } from "./inbox-mcp";
+import { createInboxMcpServer, INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_TOOLS, INBOX_SERVED_TOOLS, inboxServedTools, type InboxMcpContext } from "./inbox-mcp";
 
 function canvasIn(dir: string, on: () => boolean) {
   let deleted: () => void = () => {};
@@ -66,22 +67,18 @@ describe("the canvas switch", () => {
   });
 });
 
-describe("the agent's canvas tool, only while the canvas is on", () => {
-  test("not served by default; with the switch on it is listed right after thread_pulls", () => {
-    expect(INBOX_SERVED_TOOLS).not.toContain("canvas");
-    expect(INBOX_DEFAULT_SERVED_TOOLS).not.toContain("canvas");
-    expect(inboxServedTools({ board: false, steps: false })).not.toContain("canvas");
-    const on = inboxServedTools({ board: false, steps: false, canvas: true });
-    expect(on[on.indexOf("thread_pulls") + 1]).toBe("canvas");
-    expect(on.filter((name) => name === "canvas")).toHaveLength(1);
+describe("the canvas is a command, never an action of the agent tool (the owner, 2026-11-24)", () => {
+  test("no tool list names it, with every switch on or off", () => {
+    expect(INBOX_MCP_TOOLS as readonly string[]).not.toContain("canvas");
+    expect(INBOX_SERVED_TOOLS as readonly string[]).not.toContain("canvas");
+    expect(INBOX_DEFAULT_SERVED_TOOLS as readonly string[]).not.toContain("canvas");
+    for (const board of [false, true]) for (const steps of [false, true]) for (const scheduled of [false, true]) expect(inboxServedTools({ board, steps, scheduled }) as string[]).not.toContain("canvas");
   });
 
-  test("a session made while it is off has no canvas tool; one made while it is on has it", () => {
-    const dir = mkdtempSync(join(tmpdir(), "canvas-switch-"));
-    const { canvas } = canvasIn(dir, () => true);
-    const tools = (on: boolean) => Object.keys((createInboxMcpServer({ canvas, canvasOn: () => on } as unknown as InboxMcpContext) as unknown as { _registeredTools: Record<string, unknown> })._registeredTools);
-    expect(tools(false)).not.toContain("canvas");
-    expect(tools(true)).toContain("canvas");
+  test("a session made with the canvas on registers no canvas tool", () => {
+    const tools = Object.keys((createInboxMcpServer({} as unknown as InboxMcpContext) as unknown as { _registeredTools: Record<string, unknown> })._registeredTools);
+    expect(tools).toContain("thread_pulls");
+    expect(tools).not.toContain("canvas");
   });
 });
 

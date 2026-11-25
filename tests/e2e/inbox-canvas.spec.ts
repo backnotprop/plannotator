@@ -2,14 +2,16 @@
  * The thread canvas as a capability (Settings → Capabilities → Canvas, config.json `inboxCanvas`, off by default;
  * docs/agent-guides/inbox-canvas.md), proved in a real browser against the compiled binary. Nothing is mocked: the
  * binary runs `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR, a simulated agent writes through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts), and Chromium drives the window. HOME is the scratch folder.
+ * `plannotator inbox mcp` (scripts/inbox-sim.ts) and works the canvas with the binary's own `plannotator inbox canvas`
+ * (a command, not an action of the agent tool), and Chromium drives the window. HOME is the scratch folder.
  *
  * What regresses if this fails:
  *  1. Off (the default): a pen in a thread's header or reply box, or any of the canvas's code fetched, for a person
- *     who never turned it on; the agent's canvas action not refused.
+ *     who never turned it on; the agent's canvas command not refused.
  *  2. On: the Settings row not turning the pens on; the canvas not opening over the window, not keeping a shape drawn
- *     on it, or not showing the agent's change as it lands.
- *  3. The reply box's pen: a sketch sent from it not reaching the agent as the person's reply with the picture.
+ *     on it, or not showing the agent's change as it lands; the agent's tool gaining a canvas action.
+ *  3. The reply box's pen: a sketch sent from it not reaching the agent as the person's reply with the picture and
+ *     the line that points at `plannotator inbox canvas --help`.
  *  4. A phone: no pen, or a canvas that does not open.
  *  5. Off again: the pens staying.
  *
@@ -34,8 +36,6 @@ interface World {
   url: string;
   project: string;
   claude: SimAgent;
-  /** The agent's session after the canvas is on: a session's tools are listed once, at its start. */
-  drawer: SimAgent | null;
   context: BrowserContext;
   page: Page;
   errors: string[];
@@ -61,6 +61,15 @@ async function fetchedScriptHas(marker: string): Promise<boolean> {
     if (code.includes(marker)) return true;
   }
   return false;
+}
+
+/** The agent's session, as its shell would name it to `plannotator inbox canvas`. */
+const AGENT_SESSION = 'claude-code:6f1d2c3b-4a5e-4f60-8b7c-9d0e1f2a3b4c';
+
+/** An agent's `plannotator inbox canvas …`, run as its shell runs it: the answer's text, or the refusal on stderr. */
+function canvasCommand(args: string[]): { status: number; out: string; err: string } {
+  const run = spawnSync(binary, ['inbox', 'canvas', ...args], { env: world.env, encoding: 'utf8', timeout: 60_000 });
+  return { status: run.status ?? -1, out: run.stdout, err: run.stderr };
 }
 
 /** The canvas's own code: its pens and layer (canvas/CanvasParts.tsx) and the editor (canvas/CanvasBoard.tsx). */
@@ -132,14 +141,13 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const project = scratchProject(join(root, 'src'), 'checkout');
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const sent = await claude.send({ project_path: project, subject: 'Checkout latency: where the fraud check goes', thread: 'checkout', body: 'Checkout takes 1.8 s at p95. Sketch where you want the fraud check and I will draw the flow beside it.' });
-  world = { env, url, project, claude, drawer: null, context, page, errors, scripts, threadId: sent.thread_id as string };
+  world = { env, url, project, claude, context, page, errors, scripts, threadId: sent.thread_id as string };
 });
 
 test.afterAll(async () => {
   try {
     if (!world) return;
     await world.claude.close().catch(() => {});
-    await world.drawer?.close().catch(() => {});
     await world.context.close();
   } finally {
     await removeInboxScratch();
@@ -147,7 +155,7 @@ test.afterAll(async () => {
 });
 
 test('off by default: the switch is off, a thread has no pen, none of the canvas is fetched, and the agent is refused', async () => {
-  const { page, claude } = world;
+  const { page } = world;
   await page.goto(`${world.url}#settings/capabilities`);
   const row = page.locator('[data-settings-canvas]');
   await expect(row).toBeVisible();
@@ -165,7 +173,10 @@ test('off by default: the switch is off, a thread has no pen, none of the canvas
   expect(await fetchedScriptHas(CANVAS_CODE)).toBe(false);
   await shot(page, '02-thread-off');
 
-  await expect(claude.canvas({ thread_id: world.threadId })).rejects.toThrow(/canvas_off/);
+  const refused = canvasCommand([world.threadId, '--session', AGENT_SESSION]);
+  expect(refused.status).toBe(1);
+  expect(refused.out).toBe('');
+  expect(refused.err).toMatch(/^canvas_off: /);
 });
 
 test('on: the Settings row turns it on, and the thread has its pen in the header and in the reply box', async () => {
@@ -175,7 +186,13 @@ test('on: the Settings row turns it on, and the thread has its pen in the header
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
   await shot(page, '03-settings-on');
-  world.drawer = await SimAgent.connect({ binary, env: world.env, name: 'Claude Code', host: 'claude-code' });
+  // A session that starts now still has no canvas action: the canvas is the command.
+  const fresh = await SimAgent.connect({ binary, env: world.env, name: 'Claude Code', host: 'claude-code' });
+  try {
+    expect((await fresh.listTools()).map((tool) => tool.name)).not.toContain('canvas');
+  } finally {
+    await fresh.close();
+  }
 
   await page.goto(`${world.url}#thread=${world.threadId}`);
   await expect(page.locator('[data-thread-sketch]')).toBeVisible();
@@ -205,10 +222,20 @@ test("the canvas opens over the window, keeps a shape drawn on it, and shows the
   // A click on empty canvas lets go of the new shape, so a later Send is the whole canvas.
   await page.mouse.click(area.x + area.width * 0.6, area.y + area.height * 0.75);
 
-  const drawer = world.drawer!;
-  const read = await drawer.canvas({ thread_id: world.threadId });
-  await drawer.canvas({ thread_id: world.threadId, base: read.rev as number, do: [{ add: 'note', text: 'Fraud check: before the charge', at: [Math.round(area.width * 0.25) + 320, Math.round(area.height * 0.3)] }] });
+  // The agent reads the canvas as text, then adds a note beside the person's box and ties the box to it.
+  const read = canvasCommand([world.threadId, '--session', AGENT_SESSION]);
+  expect(read.status, read.err).toBe(0);
+  const rev = Number(/^Canvas of thread \S+, rev (\d+)/m.exec(read.out)![1]);
+  const box = /^box (\S+) /m.exec(read.out)![1]!;
+  const changes = [
+    { add: 'note', text: 'Fraud check: before the charge', at: [Math.round(area.width * 0.25) + 320, Math.round(area.height * 0.3)] },
+    { connect: box, to: 'Fraud check: before the charge' },
+  ];
+  const changed = canvasCommand([world.threadId, '--session', AGENT_SESSION, '--base', String(rev), '--do', JSON.stringify(changes)]);
+  expect(changed.status, changed.err).toBe(0);
+  expect(changed.out).toMatch(/^Done: the canvas is now rev \d+/m);
   await expect(layer.locator('[data-canvas-note]')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => (await storedShapes()).some((element) => element.type === 'arrow'), { timeout: 15_000 }).toBe(true);
   await expect(layer.locator('[data-canvas-undo]')).toBeVisible();
   await expect.poll(async () => (await storedShapes()).some((element) => element.text?.includes('Fraud check')), { timeout: 15_000 }).toBe(true);
   await shot(page, '07-agent-sketch');
@@ -228,10 +255,13 @@ test("the reply box's pen: a sketch sent from the canvas reaches the agent as th
   await shot(page, '09-reply-with-sketch');
   await layer.locator('[data-canvas-send]').click();
 
-  const reply = await world.drawer!.nextReply(world.threadId, 30);
+  const reply = await world.claude.nextReply(world.threadId, 30);
   const said = JSON.stringify(reply);
   expect(said).toContain('Here is where I want it: before the charge.');
   expect(said).toMatch(/canvas(-selection)?\.png/);
+  // What the agent reads with it points at the command's own help, and names no tool action.
+  expect(said).toContain('plannotator inbox canvas --help');
+  expect(said).not.toContain('canvas {');
   if (await layer.count()) await layer.locator('[data-canvas-close]').click();
   await expect(page.locator('.ib-pane').getByText('Here is where I want it: before the charge.').first()).toBeVisible();
   await shot(page, '10-reply-sent');

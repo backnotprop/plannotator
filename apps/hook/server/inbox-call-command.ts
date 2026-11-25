@@ -186,7 +186,7 @@ export function parseCallCommand(argv: readonly string[], actions: readonly stri
   // switch is the Inbox's, not known here), so an agent with them off reads no word of it.
   if (!actions.includes(action)) {
     // A paired agent's list (INBOX_AGENT_CALL_ACTIONS) names them all, as its usage does.
-    const named = actions === INBOX_CALL_ACTIONS || actions === INBOX_LOCAL_CALL_ACTIONS ? actions.filter((name) => name !== "steps" && name !== "routine" && name !== "canvas" && name !== INBOX_AGENT_FETCH_FILE) : actions;
+    const named = actions === INBOX_CALL_ACTIONS || actions === INBOX_LOCAL_CALL_ACTIONS ? actions.filter((name) => name !== "steps" && name !== "routine" && name !== INBOX_AGENT_FETCH_FILE) : actions;
     return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${named.join(", ")}.` };
   }
   if (more.length > 0) return { ok: false, code: "usage", error: "inbox call takes one JSON argument (quote it), or - to read it from stdin." };
@@ -305,8 +305,7 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   }
   if (!answer) return refused("inbox_no_answer", "Plannotator Inbox gave no answer.");
   if (answer.error) return refused("inbox_error", answer.error.message ?? "The Inbox refused the call.");
-  // A canvas answer is its text (the reading, one line per thing); its structured part only repeats the rev.
-  return printResult(answer.result as CallResult | undefined, out, err, deps.text === true || parsed.action === "canvas");
+  return printResult(answer.result as CallResult | undefined, out, err, deps.text === true);
 }
 
 type CallResult = { content?: { text?: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };

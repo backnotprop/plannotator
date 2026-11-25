@@ -112,9 +112,15 @@ export function inboxViewingLine(message: { viewing?: InboxReplyViewing | null }
 }
 
 /**
+ * The one line an agent is handed with a reply sent from the thread's canvas, under what the person drew or picked:
+ * where the how-to is (`plannotator inbox canvas --help`). Words agents act on: the owner's to approve.
+ */
+export const INBOX_CANVAS_REPLY_HOW = "(To read or change the canvas: plannotator inbox canvas --help)";
+
+/**
  * What an agent reads for a reply sent from the thread's canvas (prototype): that it came from the canvas and at
- * which revision, the things the person drew or picked, one line each as the `canvas` action reads them, and the
- * call that changes them. The pictures are the reply's attachments. Empty when the reply has none.
+ * which revision, the things the person drew or picked, one line each as `plannotator inbox canvas` reads them, and
+ * where the how-to is (`INBOX_CANVAS_REPLY_HOW`). The pictures are the reply's attachments. Empty when the reply has none.
  */
 export function inboxSketchBlock(message: { thread_id?: string; sketch?: InboxReplySketch | null }): string {
   const sketch = message.sketch;
@@ -125,10 +131,7 @@ export function inboxSketchBlock(message: { thread_id?: string; sketch?: InboxRe
     sketch.kind === "selection"
       ? `(Sent from this thread's canvas, rev ${sketch.rev}. They selected ${count === 1 ? "one thing" : `${count} things`} on it and ask you to work on ${count === 1 ? "it" : "them"}; the attached picture shows only ${count === 1 ? "it" : "them"}.)`
       : `(Sent from this thread's canvas, rev ${sketch.rev}: what they drew, as text. The attached pictures show it.)`;
-  // A selection is a request to work on it: the call is offered. A drawing is something to look at: the call is only how, if asked.
-  const how = `canvas {"thread_id": "${message.thread_id}", "base": ${sketch.rev}, "do": [...]}`;
-  const call = !message.thread_id ? "" : sketch.kind === "selection" ? `(To change it there: ${how}. Your change lands on their canvas in place.)` : `(Change it only if asked: ${how})`;
-  return [head, sketch.reading.trimEnd(), call].filter(Boolean).join("\n");
+  return [head, sketch.reading.trimEnd(), message.thread_id ? INBOX_CANVAS_REPLY_HOW : ""].filter(Boolean).join("\n");
 }
 
 /**

@@ -1,11 +1,12 @@
 /**
  * Plannotator Inbox: a thread's canvas, a capability off by default
- * (inbox-canvas-switch.ts; the routes and the tool exist only while it is on).
+ * (inbox-canvas-switch.ts; the routes answer only while it is on).
  *
  * Every thread can hold one canvas: an Excalidraw scene the person draws on
  * in the window (packages/inbox/canvas) and an agent reads and changes with
- * the `canvas` tool. The scene is Excalidraw's own JSON, stored beside the
- * thread (packages/shared/inbox/canvas/store.ts).
+ * `plannotator inbox canvas` (a command, not an action of the agent tool:
+ * inbox-canvas-agent.ts is its route). The scene is Excalidraw's own JSON,
+ * stored beside the thread (packages/shared/inbox/canvas/store.ts).
  *
  * The server never loads Excalidraw. It reads the scene as text and applies an
  * agent's changes itself (shared/inbox/canvas/reading.ts, apply.ts). Two
@@ -14,18 +15,17 @@
  * windows' streams; the window answers on `/api/inbox/canvas/jobs/<id>`), and
  * falls back to the last picture a window stored when none is open.
  *
- * The rule the tool is built around: an agent never replaces what the person
+ * The rule the command is built around: an agent never replaces what the person
  * just did without knowing. Every change names the revision the agent last
  * read (`base`). A change to a thing someone else changed after that is
  * refused whole, with their change shown. A change to anything else lands,
  * and every answer opens with what others changed since the agent's last look.
  */
-import type { McpServer } from "@modelcontextprotocol/server";
-import * as z from "zod";
 import { gunzipSync } from "node:zlib";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxAgentName, type InboxReplySketch } from "@plannotator/core/inbox-types";
 import { applyOps, mermaidTexts, RefError, resolveThing } from "@plannotator/shared/inbox/canvas/apply";
+import { canvasReadCommand } from "@plannotator/shared/inbox/canvas/command";
 import { mergeSave, sameAuthor, sinceLines, undoneLine, type CanvasAuthor, type CanvasLogEntry, type CanvasUndone } from "@plannotator/shared/inbox/canvas/changes";
 import { countWords, lineOf, readThings, thingsOf, type Thing } from "@plannotator/shared/inbox/canvas/reading";
 import { asScene, lookOf, pictureTiles, unionBox, type Box, type CanvasElement, type CanvasScene } from "@plannotator/shared/inbox/canvas/scene";
@@ -53,30 +53,21 @@ import {
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { decodePng, encodePng } from "./inbox-icon-trim";
-import { fail, guarded, okComplete } from "./inbox-mcp-result";
 
-const CANVAS_VERBS = [
-  '{"add": "box", "text": "...", "rightOf": "<thing>"}  kinds: box, ellipse, diamond, note, text, frame ("title" works too), mermaid (text is a flowchart or sequence diagram; an open Inbox window draws it, so it is refused while none is open). Place (add and move): near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "size": [width, height] and "color": black, gray, red, pink, violet, blue, teal, green, yellow, orange.',
-  '{"connect": "<thing>", "to": "<thing>", "label": "..."} (or {"from": "<thing>", "to": "<thing>"}; the arrow points at "to")   {"set": "<thing>", "text": "...", "color": "..."}',
-  '{"move": "<thing>", "below": "<thing>"}   {"remove": "<thing>"}   {"frame": ["<thing>", ...], "title": "..."}',
-  '{"replace": "<thing>", "with": [add and connect changes]}  a frame: what it holds is replaced; a list of things: they are.',
-];
-const CANVAS_BASE_RULE =
-  'Send "base": the rev of your last answer about this canvas. A change lands only on things an answer has shown you as they are now: if someone changed one since, or you were never shown it, nothing changes and the answer shows it, after which the same change goes through. A call with no session is remembered by nothing, so its base must be the current rev.';
+/** What `plannotator inbox canvas` asks (inbox-canvas-agent.ts checks it). `by`: the agent, as its shell names it. */
+export interface CanvasAgentAsk {
+  thread_id: string;
+  in?: string;
+  things?: string[];
+  after_thing?: string;
+  picture?: true | string | string[];
+  base?: number;
+  do?: unknown;
+  by?: { host?: string; session?: string; name?: string };
+}
 
-export const INBOX_CANVAS_DESCRIPTION = [
-  "A thread's canvas: a shared Excalidraw drawing the person sketches on, which you read and change. With only thread_id it answers the canvas as text, one line per thing, and its rev.",
-  '"picture": true also writes a PNG of it and gives the path; "picture": "<thing>" (or a list) is that part only. "in": "<frame>" reads one frame.',
-  `"do": [...] changes it, all or nothing. ${CANVAS_BASE_RULE} Name a thing by the id at the start of its line, or by its words (one just added too). Each change has one verb:`,
-  ...CANVAS_VERBS,
-  "The person sees your change on the canvas at once and can undo it; nothing is sent to them.",
-].join("\n");
-
-/** The `do` field: the whole grammar, so an agent that sees only the fields (the `plannotator_inbox` tool) can write a change. */
-export const INBOX_CANVAS_DO_DESCRIPTION = [
-  `Changes to the canvas, all or nothing. ${CANVAS_BASE_RULE} Name a thing by the id at the start of its line, or by its words (one just added too). One verb per change:`,
-  ...CANVAS_VERBS,
-].join("\n");
+/** The answer: the text the agent reads, and the canvas's rev (and the pictures' paths). Not ok: nothing changed. */
+export type CanvasAgentAnswer = { ok: boolean; code?: string; text: string; structured: Record<string, unknown> };
 
 const PICTURE_WAIT_MS = 8_000;
 const MERMAID_WAIT_MS = 12_000;
@@ -101,10 +92,11 @@ export interface InboxCanvas {
   route(req: Request, path: string): Promise<Response | null>;
   /** A window's stream: called for every canvas frame until the returned function is called. */
   listen(send: (event: string, data: unknown) => void): () => void;
-  register(server: McpServer): void;
+  /** An agent's `plannotator inbox canvas`: a read, a picture, or a change (inbox-canvas-agent.ts is its route). */
+  agent(ask: CanvasAgentAsk): Promise<CanvasAgentAnswer>;
   /** What a reply sent from the canvas carries for the agent (`body.sketch` of the reply route), checked and worded here. */
   replySketch(threadId: string, raw: unknown): InboxReplySketch | undefined;
-  /** For tests and the route: the tool's three jobs. */
+  /** For tests and the route: the command's three jobs. */
   read(threadId: string, viewer: CanvasAuthor, options?: { in?: string; after?: string; things?: string[] }): string;
   /** The reply that carried `sketch` is stored and went to `session`: what it lists is shown to that session. */
   replyShown(threadId: string, sketch: InboxReplySketch, session: string): void;
@@ -188,7 +180,7 @@ export function createInboxCanvas(options: {
     }
     markCanvasTold(dir, threadId, key, looksIn(scene, ids));
   };
-  const readCall = (threadId: string, more: Record<string, unknown> = {}) => `canvas ${JSON.stringify({ thread_id: threadId, ...more })}`;
+  const readCall = canvasReadCommand;
 
   /** Exactly what each Undo took back and what the person kept (changes.ts `undoneLine`); each thing is in the list that follows, as it is now. */
   const undoneLines = (entries: CanvasLogEntry[]) => entries.map(undoneLine);
@@ -231,7 +223,7 @@ export function createInboxCanvas(options: {
     }
     const head = opening(threadId, viewer, meta.rev, scene, things);
     if (things.length === 0) {
-      return [...head, `Canvas of thread ${threadId}, rev ${meta.rev}: empty. Add to it with "do" and "base": ${meta.rev}, or wait for the person to draw.`].join("\n");
+      return [...head, `Canvas of thread ${threadId}, rev ${meta.rev}: empty. Add to it with --base ${meta.rev} --do, or wait for the person to draw.`].join("\n");
     }
     // `things`: exactly these, by id (a refusal names the ones it could not list this way).
     let only: Set<string> | undefined;
@@ -340,10 +332,10 @@ export function createInboxCanvas(options: {
     const key = sessionOf(viewer);
     const refuse = (text: string, at = rev) => ({ ok: false, rev: at, text });
     if (!Number.isInteger(base)) {
-      return refuse(`Nothing changed. "do" needs "base": the rev of your last answer about this canvas. Read it first: ${readCall(threadId)}`);
+      return refuse(`Nothing changed. --do needs --base: the rev of your last answer about this canvas. Read it first: ${readCall(threadId)}`);
     }
     if ((base as number) > rev || (base as number) < 0) {
-      return refuse(`Nothing changed. "base": ${String(base)} is not a rev of this canvas (it is at rev ${rev}). Read it: ${readCall(threadId)}`);
+      return refuse(`Nothing changed. --base ${String(base)} is not a rev of this canvas (it is at rev ${rev}). Read it: ${readCall(threadId)}`);
     }
     const wanted = mermaidTexts(ops);
     let mermaid: Map<string, CanvasElement[]> | undefined;
@@ -367,9 +359,9 @@ export function createInboxCanvas(options: {
       const since = sinceLines(log, base as number, null);
       return refuse(
         [
-          `Nothing changed. This call names no session, so nothing is remembered between your calls, and "base" must be the canvas's current rev (${now0}), not ${String(base)}.`,
+          `Nothing changed. This call names no session, so nothing is remembered between your calls, and --base must be the canvas's current rev (${now0}), not ${String(base)}.`,
           ...(since.lines.length > 0 ? [`Changed since rev ${String(base)}:`, ...since.lines, ...(since.cut ? [`  More changed after rev ${since.through}.`] : [])] : []),
-          `Read it as it is now, then send your change with "base": ${now0}: ${readCall(threadId)}`,
+          `Read it as it is now, then send your change with --base ${now0}: ${readCall(threadId)}`,
         ].join("\n"),
         now0,
       );
@@ -431,7 +423,7 @@ export function createInboxCanvas(options: {
             `Nothing changed. ${clashes.size === 1 ? "A thing you are changing is" : `${clashes.size} things you are changing are`} not as you were last shown ${clashes.size === 1 ? "it" : "them"}:`,
             ...listed.map(([, c]) => c.line),
             ...(rest.length > 0 ? [`  and ${rest.length} more. See exactly those first: ${readCall(threadId, { things: rest })}`] : []),
-            `That stays as it is. If your change still makes sense with this in view, send it again with "base": ${now0}; ${ask}.`,
+            `That stays as it is. If your change still makes sense with this in view, send it again with --base ${now0}; ${ask}.`,
           ].join("\n"),
           now0,
         );
@@ -766,61 +758,35 @@ export function createInboxCanvas(options: {
       // The store held things this window did not (an agent's change landed meanwhile): the window takes the merged scene.
       return json({ serverSession: options.serverSession, rev: committed.rev, ...(merged.kept > 0 && body.have !== committed.rev ? { scene: merged.scene } : {}) });
     },
-    register(server) {
-      server.registerTool(
-        "canvas",
-        {
-          title: "A thread's canvas",
-          description: INBOX_CANVAS_DESCRIPTION,
-          inputSchema: z
-            .object({
-              thread_id: z.string().describe("Thread or message id."),
-              in: z.string().optional().describe("The canvas action: read only this frame (its id or title). With only thread_id the action answers the thread's canvas (the drawing the person sketches on) as text, one line per thing, and its rev."),
-              things: z.array(z.string()).optional().describe("Read exactly these things, by id (a refusal that could not list every thing gives this call)."),
-              after_thing: z.string().optional().describe("Continue a long reading of the canvas after this thing id (a cut reading ends with the exact call)."),
-              picture: z.union([z.boolean(), z.string(), z.array(z.string())]).optional().describe('true: a PNG of the whole canvas. A thing or a list of things: a PNG of that part. The answer gives the file path.'),
-              base: z.number().int().optional().describe('With "do": the rev your last answer about this canvas gave (with no session: the current rev).'),
-              do: z.array(z.record(z.string(), z.unknown())).optional().describe(INBOX_CANVAS_DO_DESCRIPTION),
-              project_path: z.string().optional(),
-              agent_session: z.string().optional(),
-              agent_name: z.string().optional(),
-              agent_host: z.string().optional(),
-            })
-            .strict(),
-          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-        },
-        async (input) =>
-          guarded(async () => {
-            const threadId = threadOf(input.thread_id ?? "");
-            const session = input.agent_session?.trim();
-            const viewer: CanvasAuthor = {
-              kind: "agent",
-              // One line, a sane length: this name is drawn on the person's canvas.
-              name: inboxAgentName({ kind: "agent", host: input.agent_host?.trim() || null, name: inboxStoredAgentName(input.agent_name) }).replace(/\s+/g, " ").slice(0, 60),
-              ...(session ? { key: session } : {}),
-            };
-            if (input.do !== undefined) {
-              const result = await apply(threadId, viewer, input.base, input.do);
-              // The window that waits for this agent's change is told when one was refused instead.
-              if (!result.ok) emit("canvas", { thread_id: threadId, rev: result.rev, by: viewer.name || "An agent", refused: true, elements: [] });
-              // A refusal is an error to the caller (a script's exit code, a tool's red result): nothing changed.
-              if (!result.ok) return fail("canvas_unchanged", result.text);
-              return okComplete(result.text, { thread_id: threadId, rev: result.rev, changed: true });
-            }
-            try {
-              if (input.picture !== undefined && input.picture !== false) {
-                const drawn = await picture(threadId, input.picture);
-                const text = read(threadId, viewer, { in: input.in });
-                const head = `Picture${drawn.only ? ` of ${drawn.named.slice(0, 8).join(", ")}` : " of the whole canvas"}: ${(drawn.paths ?? [drawn.path]).join(", ")}${drawn.note}`;
-                return okComplete(`${head}\n${text}`, { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev, picture: drawn.path, ...(drawn.paths ? { pictures: drawn.paths } : {}) });
-              }
-              return okComplete(read(threadId, viewer, { in: input.in, after: input.after_thing, things: input.things }), { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev });
-            } catch (error) {
-              if (error instanceof RefError) throw new InboxError("validation_error", error.message);
-              throw error;
-            }
-          }),
-      );
+    async agent(ask) {
+      const threadId = threadOf(ask.thread_id ?? "");
+      const session = ask.by?.session?.trim();
+      const viewer: CanvasAuthor = {
+        kind: "agent",
+        // One line, a sane length: this name is drawn on the person's canvas.
+        name: inboxAgentName({ kind: "agent", host: ask.by?.host?.trim() || null, name: inboxStoredAgentName(ask.by?.name) }).replace(/\s+/g, " ").slice(0, 60),
+        ...(session ? { key: session } : {}),
+      };
+      if (ask.do !== undefined) {
+        const result = await apply(threadId, viewer, ask.base, ask.do);
+        // The window that waits for this agent's change is told when one was refused instead.
+        if (!result.ok) emit("canvas", { thread_id: threadId, rev: result.rev, by: viewer.name || "An agent", refused: true, elements: [] });
+        // A refusal is an error to the caller (the command's exit code): nothing changed.
+        if (!result.ok) return { ok: false, code: "canvas_unchanged", text: result.text, structured: { thread_id: threadId, rev: result.rev } };
+        return { ok: true, text: result.text, structured: { thread_id: threadId, rev: result.rev, changed: true } };
+      }
+      try {
+        if (ask.picture !== undefined) {
+          const drawn = await picture(threadId, ask.picture);
+          const text = read(threadId, viewer, { in: ask.in });
+          const head = `Picture${drawn.only ? ` of ${drawn.named.slice(0, 8).join(", ")}` : " of the whole canvas"}: ${(drawn.paths ?? [drawn.path]).join(", ")}${drawn.note}`;
+          return { ok: true, text: `${head}\n${text}`, structured: { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev, picture: drawn.path, ...(drawn.paths ? { pictures: drawn.paths } : {}) } };
+        }
+        return { ok: true, text: read(threadId, viewer, { in: ask.in, after: ask.after_thing, things: ask.things }), structured: { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev } };
+      } catch (error) {
+        if (error instanceof RefError) throw new InboxError("validation_error", error.message);
+        throw error;
+      }
     },
   };
 }

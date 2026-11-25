@@ -1069,7 +1069,7 @@ export function applyOps(scene: CanvasScene, ops: unknown, ctx: ApplyContext): A
   const errors: string[] = [];
   const listed = new Set<string>();
   if (!Array.isArray(ops) || ops.length === 0) {
-    return { ok: false, scene, done, errors: ['"do" is a list of changes, for example [{"add": "note", "text": "…", "near": "<thing>"}]'], touched: work.touched, added: work.added, direct: work.direct };
+    return { ok: false, scene, done, errors: ['--do is a list of changes, for example [{"add": "note", "text": "…", "near": "<thing>"}]'], touched: work.touched, added: work.added, direct: work.direct };
   }
   if (ops.length > 200) return { ok: false, scene, done, errors: ['at most 200 changes in one call'], touched: work.touched, added: work.added, direct: work.direct };
   ops.forEach((op, i) => {

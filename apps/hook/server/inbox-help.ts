@@ -190,22 +190,6 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       SHIP_HELP_LINE,
     ],
   },
-  // A thread's canvas: packages/server/inbox-canvas.ts. Shown only while the person has it on (`canvas`).
-  canvas: {
-    args: ["thread_id", "in", "things", "after_thing", "picture", "base", "do"],
-    lines: [
-      "`canvas`: A thread's canvas, a shared Excalidraw drawing the person sketches on and you read and change. With only `thread_id` it answers the canvas as text, one line per thing, each opening with an id, and the canvas's `rev`. Every answer opens with what others changed since your last look.",
-      "- `in`: read one frame (its id or title). `things`: read exactly these things, by id (a refusal that could not list every thing gives this call). `after_thing`: continue a long reading (a cut reading ends with the exact call).",
-      "- `picture`: `true` writes a PNG of the whole canvas and gives its path; a thing or a list of things gives that part only. Freehand strokes drawn near each other are one `sketch` thing, so a drawing is one picture.",
-      "- `do` with `base` (the rev of your last answer; with no session, the current rev): changes, all or nothing. A change lands only on things an answer has shown you as they are now; otherwise nothing changes and the answer shows them, after which the same change goes through. Name a thing by the id at the start of its line, or by its words; a name that fits two things is refused with both. One verb per change:",
-      "  - `{\"add\": \"box\", \"text\": \"…\", \"rightOf\": \"<thing>\"}`: `box`, `ellipse`, `diamond`, `note`, `text`, `frame` or `mermaid` (`text` is a mermaid flowchart or sequence diagram; an open Inbox window draws it as real shapes; other kinds are refused). Place (`add` and `move`) with `near`, `rightOf`, `leftOf`, `above`, `below`, `in` (a frame) or `\"at\": [x, y]`; optional `\"size\": [width, height]` and `color` (black, gray, red, pink, violet, blue, teal, green, yellow, orange).",
-      "  - `{\"connect\": \"<thing>\", \"to\": \"<thing>\", \"label\": \"…\"}` (or `{\"from\": …, \"to\": …}`; the arrow points at `to`), `{\"set\": \"<thing>\", \"text\": \"…\", \"color\": \"…\"}`, `{\"move\": \"<thing>\", \"below\": \"<thing>\"}`, `{\"remove\": \"<thing>\"}`, `{\"frame\": [\"<thing>\", …], \"title\": \"…\"}`.",
-      "  - `{\"replace\": \"<thing>\", \"with\": [add and connect changes]}`: a frame keeps its place and what it holds is replaced; a list of things is replaced where they were.",
-      "- A name may be loose (part of a thing's words, in any order, with a kind word such as note or frame) where exactly one thing fits, and the answer says how it was read; `set`, `remove` and `replace` take only an id or a thing's whole words. The answer also says what the board decided for you: which side `near` chose, a frame that grew.",
-      "- The person can undo a change of yours with one press; your next call opens with \"The person undid your change (rev N)\".",
-      "- If someone changed a thing you are changing since your `base`, nothing changes and the answer shows what they did. The person sees your change on the canvas at once; nothing is sent to them.",
-    ],
-  },
   get_guide_brief: {
     args: [],
     lines: [
@@ -375,6 +359,8 @@ function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false, br
 
 /** `plannotator inbox --help`'s one line for `plannotator routine`, shown with Routines on or off. */
 export const INBOX_ROUTINE_COMMAND_LINE = "  plannotator routine --help      Routines: work an agent runs on a schedule, each run reporting in the Inbox.";
+/** The canvas command's line in "Commands and flags", only while the person has the canvas on (inbox-canvas-command.ts). */
+export const INBOX_CANVAS_COMMAND_LINE = "  plannotator inbox canvas --help  A thread's canvas, the drawing the person sketches on: read it, picture it, change it.";
 
 export function formatInboxHelp(options: InboxHelpOptions): string {
   const board = INBOX_CARD_ACTION_ON && options.board === true;
@@ -481,7 +467,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     // Every tool this Inbox serves (`card` only while the Board is on and INBOX_CARD_ACTION_ON lets it ship).
     // `steps` only while the person has thread steps on.
-    ...inboxServedTools({ board, steps, scheduled, canvas }).flatMap((name) => toolBlock(name, steps, codeReview, branchReviews)),
+    ...inboxServedTools({ board, steps, scheduled }).flatMap((name) => toolBlock(name, steps, codeReview, branchReviews)),
     "## Threads",
     "",
     "Where send_message (and submit_guide) puts a message; the first rule that applies wins:",
@@ -655,7 +641,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     `${self} inbox call [--session <id>] <action> [<json> | -]`,
     "```",
     "",
-    `- Actions: ${INBOX_CALL_ACTIONS.filter((action) => (steps || action !== "steps") && (scheduled || action !== "routine") && (canvas || action !== "canvas")).map(code).join(", ")}, with the arguments above as one JSON object. \`-\` reads the JSON from stdin, for PowerShell and for loops, where quoting JSON is painful. A stopped Inbox starts in the background.`,
+    `- Actions: ${INBOX_CALL_ACTIONS.filter((action) => (steps || action !== "steps") && (scheduled || action !== "routine")).map(code).join(", ")}, with the arguments above as one JSON object. \`-\` reads the JSON from stdin, for PowerShell and for loops, where quoting JSON is painful. A stopped Inbox starts in the background.`,
     "- stdout is the result as one JSON value (the tool's structured result), so `jq` and scripts can read it. On failure stdout is empty, stderr says `<code>: <message>`, and the exit code is 1 (refused, or no Inbox) or 2 (bad usage: an unknown action, bad JSON). Test the exit code before you use the output.",
     "- Pass an `idempotency_key` on each `send_message` and `card` create, so a rerun cannot post twice. Only those two take one; moving a card again changes nothing.",
     "- Who you are: a Tidy gives you the exact `--session` value; pass it on every call. Otherwise the call is the session this shell names, and the same as your tool: your threads and cards, your name, the person's reply reaches you. Claude Code, Pi, Codex, Qwen Code and DeepSeek Harness each name theirs. A DeepSeek Harness subagent's shell names the session the subagent works for only while Plannotator's plugin runs its Inbox connection in that DSH (the inbox tool on, and the Inbox run once; the shell then has `DSH_PLANNOTATOR_SESSION_ID`); otherwise it names the subagent's own session. With neither, it is nobody in particular: `read_thread` and `card list` show every thread and card in the project, and a reply cannot find you. In a Claude Code or Pi session, a call with no `project_path` files under your session's project, as your tool does, whatever folder the shell is in; name `project_path` only for another project. The JSON cannot name a session. `session_ambiguous` means this shell was started inside another agent and carries both: pass `--session` with your own. `session_mismatch` means your `--session` is not the session this shell names, and nothing was sent. Never drop `--session` to get past it, that writes as the session the shell names: if the value is from your own Tidy, this shell is older than your session, so use a new shell or unset the variable the error names.",
@@ -666,6 +652,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     INBOX_COMMAND_USAGE,
     // Thread steps from a shell, only while the person has them on.
     ...(steps ? ["", "  plannotator inbox steps [--session <id>] <thread> --json '<list>'", "                                  Your steps in a thread (see steps); '-' reads the list from stdin."] : []),
+    // A thread's canvas, only while the person has it on: its own --help is the how-to (inbox-canvas-command.ts).
+    ...(canvas ? ["", INBOX_CANVAS_COMMAND_LINE] : []),
     // Routines from a shell: one line whatever the setting, so an agent asked for one finds the command (its help says
     // they must be on). Not on Windows, where there are no routines.
     ...(ctx.platform !== "windows" ? ["", INBOX_ROUTINE_COMMAND_LINE] : []),

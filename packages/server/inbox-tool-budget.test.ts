@@ -53,3 +53,9 @@ test("with the Board, the Checklist and Routines on, the agent tool's descriptio
 test("the agent tool has no capability action: not in the contract's actions, the bundled list or the Inbox's tools", () => {
   for (const actions of [INBOX_TOOL_ACTIONS, MOD_TOOL_ACTIONS, INBOX_MCP_TOOLS, INBOX_DEFAULT_TOOLS.map((tool) => tool.name)]) expect(actions).not.toContain("capability");
 });
+
+// The canvas is `plannotator inbox canvas`, taught by its --help and the line a canvas reply carries (the owner,
+// 2026-11-24: no new action and no new description on the agent tool).
+test("the agent tool has no canvas action: not in the contract's actions, the bundled list or the Inbox's tools", () => {
+  for (const actions of [INBOX_TOOL_ACTIONS, MOD_TOOL_ACTIONS, INBOX_MCP_TOOLS, INBOX_DEFAULT_TOOLS.map((tool) => tool.name)]) expect(actions as readonly string[]).not.toContain("canvas");
+});

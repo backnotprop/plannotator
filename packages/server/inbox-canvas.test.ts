@@ -121,7 +121,7 @@ describe("what the agent was shown", () => {
     for (const label of labels) rev = t.person(`${label} edited`, `${label} again`);
     const added = await t.canvas.apply(THREAD, b, rev, [{ add: "note", text: "unrelated" }]);
     expect(added.ok).toBe(true);
-    expect(added.text).toContain("For the rest: canvas");
+    expect(added.text).toContain(`For the rest: plannotator inbox canvas ${THREAD}`);
     const untold = labels.map((l) => `${l} again`).filter((l) => !added.text.includes(JSON.stringify(l)));
     expect(untold.length).toBeGreaterThan(0);
     const result = await t.canvas.apply(THREAD, b, added.rev, [{ set: untold[0]!, text: "overwritten" }]);
@@ -244,7 +244,7 @@ describe("what the second review broke", () => {
     expect(more.ok).toBe(true);
     // The agent is shown all 320 (two pages of the reading and the rest).
     let page = t.canvas.read(THREAD, agent("a"));
-    for (let guard = 0; guard < 10 && /after_thing":"([^"]+)"/.test(page); guard++) page = t.canvas.read(THREAD, agent("a"), { after: /after_thing":"([^"]+)"/.exec(page)![1]! });
+    for (let guard = 0; guard < 10 && /--after '?([^\s']+)/.test(page); guard++) page = t.canvas.read(THREAD, agent("a"), { after: /--after '?([^\s']+)/.exec(page)![1]! });
     const scene = readCanvasScene(t.dir, THREAD);
     for (const el of scene.elements) if (el.type === "rectangle") Object.assign(el, { y: el.y + 500, version: (el.version ?? 1) + 1, versionNonce: 5 });
     const rev = commitCanvas(t.dir, THREAD, scene, { kind: "person" }, new Date()).rev;
@@ -262,7 +262,7 @@ describe("what the second review broke", () => {
     const change = labels.map((label) => ({ set: label, color: "red" }));
     const first = await t.canvas.apply(THREAD, agent("a"), rev, change);
     expect(first.ok).toBe(false);
-    const rest = JSON.parse(/See exactly those first: canvas (\{.*\})/.exec(first.text)![1]!) as { things: string[] };
+    const rest = { things: /See exactly those first: plannotator inbox canvas \S+ --things '?([^\s']+)/.exec(first.text)![1]!.split(",") };
     expect(rest.things.length).toBe(15);
     t.canvas.read(THREAD, agent("a"), { things: rest.things });
     expect((await t.canvas.apply(THREAD, agent("a"), rev, change)).ok).toBe(true);
@@ -417,7 +417,7 @@ describe("what the recheck found (round 4)", () => {
     const whole = t.canvas.read(THREAD, agent("a"));
     expect(whole).not.toContain(long);
     const call = whole.split("\n").find((l) => l.includes("All of a thing's words"))!;
-    const id = /"things":\["([^"]+)"\]/.exec(call)![1]!;
+    const id = /--things '?([^\s',]+)/.exec(call)![1]!;
     expect(t.canvas.read(THREAD, agent("a"), { things: [id] })).toContain(JSON.stringify(long));
   });
 

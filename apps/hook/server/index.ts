@@ -270,6 +270,7 @@ import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runInboxCapabilityCommand } from "./inbox-capability-command";
+import { runInboxCanvasCommand } from "./inbox-canvas-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -487,6 +488,20 @@ const rawArgs = process.argv.slice(2);
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(capabilityDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox canvas <thread> …`: a thread's canvas, a thin client over the Inbox's `/api/inbox/canvas/agent` (inbox-canvas-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "canvas") {
+    const canvasDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxCanvasCommand(args.slice(2), {
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(canvasDataDir),
       }),
     );
   }
@@ -918,7 +933,7 @@ const stepsOnForHelp = () => loadConfig().inboxSteps === true;
 const scheduledOnForHelp = () => process.platform !== "win32" && loadConfig({ quiet: true }).inboxScheduledThreads === true;
 /** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
 const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
-/** The person turned the canvas on (config.json `inboxCanvas`): only then does the guide name the `canvas` action. */
+/** The person turned the canvas on (config.json `inboxCanvas`): only then does the guide name `plannotator inbox canvas`. */
 const canvasOnForHelp = () => loadConfig().inboxCanvas === true;
 
 if (isTopLevelHelpInvocation(args)) {

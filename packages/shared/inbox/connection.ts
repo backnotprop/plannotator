@@ -67,7 +67,6 @@ export const INBOX_TOOL_ACTIONS = [
   'resolve_message',
   'snooze_thread',
   'thread_pulls',
-  'canvas',
   'submit_guide',
   'get_guide_brief',
   'card',
@@ -538,7 +537,7 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
  * Routines on, its line would pass Claude Code's 2,048 and cut off the
  * `--help` line; `plannotator routine --help` says the rest.
  */
-export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls', 'routine', 'canvas']
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls', 'routine']
 
 /**
  * Before saying something was never discussed (approved 2026-11-15): the MCP search tool's description and --help's

@@ -1,18 +1,13 @@
 /**
  * Settings → Capabilities → Canvas (config.json `inboxCanvas`): a canvas in every thread (inbox-canvas.ts), off
  * unless the person turned it on. Off: no pen in the window, the canvas routes refuse (`409 canvas_off`, as Code
- * review's do), no `canvas` tool in an agent's tools/list and a call to it answers `INBOX_CANVAS_OFF_TEXT`, a reply's
- * `sketch` is dropped, no canvas frame reaches a window. Stored canvases stay on disk untouched. Read on every request.
- * Bun only (the Inbox): no Pi twin.
+ * review's do), `plannotator inbox canvas` included (inbox-canvas-agent.ts), a reply's `sketch` is dropped, no canvas
+ * frame reaches a window. Stored canvases stay on disk untouched. Read on every request. Bun only (the Inbox): no Pi twin.
  */
 
 import { InboxError } from "@plannotator/shared/inbox/schema";
 
-/** What a `canvas` tool call gets while the person has the canvas off: nothing is read or written. */
-export const INBOX_CANVAS_OFF_TEXT =
-  "canvas_off: The person's canvas is off, so nothing was read or changed. They turn it on in the Plannotator Inbox's Settings → Capabilities; agents get the canvas action in their next session.";
-
-/** A canvas route's answer while the canvas is off. */
+/** A canvas route's answer while the canvas is off (the agent's command prints it as `canvas_off: …`). */
 export const INBOX_CANVAS_OFF_ANSWER = { error: "The canvas is off in this Inbox (Settings → Capabilities).", code: "canvas_off" } as const;
 
 export interface CanvasSwitchDeps {
