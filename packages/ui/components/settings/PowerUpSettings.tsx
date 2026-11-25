@@ -2,11 +2,10 @@
  * Power Up's rows on Settings → Reviews: the model (provider) form, its key
  * check, Motion and the sentence about what is sent. Moved from the former
  * Semantic diffs tab (`SemanticDiffsTab`) unchanged in behaviour; the opinion
- * settings route and the row and segmented controls come from the host.
+ * settings route, every control and the setting writer come from the host.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { configStore } from '../../config';
-import type { ReviewSettingsControls } from './reviewSettingsControls';
+import { writeReviewSettingToStore, type ReviewSettingChange, type ReviewSettingsControls } from './reviewSettingsControls';
 import {
   POWER_UP_PROVIDER_NAMES,
   POWER_UP_WORDS,
@@ -182,22 +181,19 @@ function keyRowHint(
   provider: Provider,
   endpoint: string | null,
   saved: boolean,
+  { Note }: ReviewSettingsControls,
 ): React.ReactNode {
   if (check.kind === 'ok') return keyWorks(check.ms);
   if (check.kind === 'error' && check.failure === 'noAnswer') {
     return (
-      <span className="text-warning" data-power-up-key-failure="noAnswer">
+      <Note tone="warning" data-power-up-key-failure="noAnswer">
         {failureText(provider, check.failure, endpoint)}
-      </span>
+      </Note>
     );
   }
   if (check.kind === 'checking') return POWER_UP_WORDS.checking;
   return saved ? POWER_UP_WORDS.keptHere : addKeyHint(provider, endpoint);
 }
-
-const INPUT_BASE = 'h-7 w-full min-w-0 rounded-md border bg-background px-2 font-mono text-xs outline-none';
-const INPUT_RING = 'border-border focus:ring-1 focus:ring-ring';
-const INPUT_WARN = 'border-warning ring-1 ring-warning focus:ring-2 focus:ring-warning';
 
 function KeyField({
   caption,
@@ -210,7 +206,7 @@ function KeyField({
   saved,
   placeholder,
   onFocus,
-  className,
+  controls,
 }: {
   caption?: string;
   message?: string;
@@ -222,33 +218,24 @@ function KeyField({
   saved: boolean;
   placeholder?: string;
   onFocus: () => void;
-  className: string;
+  controls: ReviewSettingsControls;
 }) {
-  const hint = placeholder ?? (saved ? '••••••••' : '');
-  const ringClass = flagged ? INPUT_WARN : INPUT_RING;
-  return (
-    <label className={`flex flex-col gap-1 ${className}`}>
-      {caption && <span className="text-xs font-medium text-foreground">{caption}</span>}
-      <input
-        className={`${INPUT_BASE} ${ringClass}`}
-        style={flagged ? { outlineColor: 'var(--warning)' } : undefined}
-        type={secret ? 'password' : 'text'}
-        autoComplete="off"
-        spellCheck={false}
-        placeholder={hint}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={onFocus}
-        aria-label={label}
-        aria-invalid={flagged || undefined}
-        aria-describedby={message ? KEY_MESSAGE_ID : undefined}
-      />
-    </label>
+  const { Field, TextField } = controls;
+  const field = (
+    <TextField
+      mono
+      secret={secret}
+      placeholder={placeholder ?? (saved ? '••••••••' : '')}
+      value={value}
+      onChange={onChange}
+      onFocus={onFocus}
+      label={label}
+      invalid={flagged}
+      describedBy={message ? KEY_MESSAGE_ID : undefined}
+    />
   );
+  return caption ? <Field caption={caption}>{field}</Field> : field;
 }
-
-const ACTION_BTN =
-  'h-7 shrink-0 whitespace-nowrap rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground';
 
 function SaveActions({
   checking,
@@ -256,27 +243,25 @@ function SaveActions({
   complete,
   showRemove,
   onRemove,
+  controls,
 }: {
   checking: boolean;
   saved: boolean;
   complete: boolean;
   showRemove: boolean;
   onRemove: () => void;
+  controls: ReviewSettingsControls;
 }) {
+  const { Button } = controls;
   return (
     <>
-      <button
-        type="submit"
-        className={`${ACTION_BTN} disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}
-        disabled={checking || showRemove}
-        data-power-up-key-save=""
-      >
+      <Button type="submit" disabled={checking || showRemove} data-power-up-key-save="">
         {saveButtonLabel(checking, saved, complete)}
-      </button>
+      </Button>
       {showRemove && (
-        <button type="button" className={ACTION_BTN} onClick={onRemove} data-power-up-key-remove="">
+        <Button type="button" onClick={onRemove} data-power-up-key-remove="">
           {POWER_UP_WORDS.remove}
-        </button>
+        </Button>
       )}
     </>
   );
@@ -284,68 +269,74 @@ function SaveActions({
 
 type FieldsProps = { form: PowerUpFormProps; checking: boolean; showRemove: boolean; controls: ReviewSettingsControls };
 
-function ApiKeyFields({ form, checking, showRemove }: FieldsProps) {
+function ApiKeyFields({ form, checking, showRemove, controls }: FieldsProps) {
   const flagged = isKeyFieldFlagged(form.failure, !form.inputs.apiKey);
   return (
     <span className="flex items-end gap-1.5">
-      <KeyField
-        className="w-full"
-        label={form.provider === 'jev' && form.activeEndpoint ? POWER_UP_WORDS.apiKey : PROVIDER_SETTINGS[form.provider].label}
-        value={form.inputs.apiKey}
-        onChange={(apiKey) => form.onInput({ apiKey })}
-        secret
-        flagged={flagged}
-        message={flagged ? form.fieldMessage ?? undefined : undefined}
-        saved={form.saved}
-        onFocus={form.onFocus}
-      />
-      <SaveActions checking={checking} saved={form.saved} complete={form.complete} showRemove={showRemove} onRemove={form.onRemove} />
+      <span className="min-w-0 flex-1">
+        <KeyField
+          controls={controls}
+          label={form.provider === 'jev' && form.activeEndpoint ? POWER_UP_WORDS.apiKey : PROVIDER_SETTINGS[form.provider].label}
+          value={form.inputs.apiKey}
+          onChange={(apiKey) => form.onInput({ apiKey })}
+          secret
+          flagged={flagged}
+          message={flagged ? form.fieldMessage ?? undefined : undefined}
+          saved={form.saved}
+          onFocus={form.onFocus}
+        />
+      </span>
+      <SaveActions controls={controls} checking={checking} saved={form.saved} complete={form.complete} showRemove={showRemove} onRemove={form.onRemove} />
     </span>
   );
 }
 
-function ClefKeyFields({ form, checking, showRemove }: FieldsProps) {
+function ClefKeyFields({ form, checking, showRemove, controls }: FieldsProps) {
   const missingAccount = form.failure === 'missing' && !form.inputs.accountId;
   const tokenFlagged = isKeyFieldFlagged(form.failure, !form.inputs.apiToken);
   return (
     <span className="flex items-end gap-1.5">
-      <KeyField
-        className="w-[96px] shrink-0"
-        caption={POWER_UP_WORDS.accountIdCaption}
-        label={POWER_UP_WORDS.accountIdLabel}
-        value={form.inputs.accountId}
-        onChange={(accountId) => form.onInput({ accountId })}
-        secret={false}
-        flagged={missingAccount}
-        message={missingAccount ? POWER_UP_WORDS.addAccountId : undefined}
-        saved={form.saved}
-        onFocus={form.onFocus}
-      />
-      <KeyField
-        className="min-w-0 flex-1"
-        caption={POWER_UP_WORDS.tokenCaption}
-        label={PROVIDER_SETTINGS.clef.label}
-        value={form.inputs.apiToken}
-        onChange={(apiToken) => form.onInput({ apiToken })}
-        secret
-        flagged={tokenFlagged}
-        message={tokenFlagged ? form.fieldMessage ?? undefined : undefined}
-        saved={form.saved}
-        onFocus={form.onFocus}
-      />
-      <SaveActions checking={checking} saved={form.saved} complete={form.complete} showRemove={showRemove} onRemove={form.onRemove} />
+      <span className="min-w-0 flex-1">
+        <KeyField
+          controls={controls}
+          caption={POWER_UP_WORDS.accountIdCaption}
+          label={POWER_UP_WORDS.accountIdLabel}
+          value={form.inputs.accountId}
+          onChange={(accountId) => form.onInput({ accountId })}
+          secret={false}
+          flagged={missingAccount}
+          message={missingAccount ? POWER_UP_WORDS.addAccountId : undefined}
+          saved={form.saved}
+          onFocus={form.onFocus}
+        />
+      </span>
+      <span className="min-w-0 flex-1">
+        <KeyField
+          controls={controls}
+          caption={POWER_UP_WORDS.tokenCaption}
+          label={PROVIDER_SETTINGS.clef.label}
+          value={form.inputs.apiToken}
+          onChange={(apiToken) => form.onInput({ apiToken })}
+          secret
+          flagged={tokenFlagged}
+          message={tokenFlagged ? form.fieldMessage ?? undefined : undefined}
+          saved={form.saved}
+          onFocus={form.onFocus}
+        />
+      </span>
+      <SaveActions controls={controls} checking={checking} saved={form.saved} complete={form.complete} showRemove={showRemove} onRemove={form.onRemove} />
     </span>
   );
 }
 
 function CustomKeyFields({ form, checking, showRemove, controls }: FieldsProps) {
-  const { Segmented } = controls;
+  const { Segmented, Field } = controls;
   const urlFlagged = form.failure === 'invalidUrl' || (form.failure === 'missing' && !form.inputs.customUrl.trim());
   const keyFlagged = isKeyFieldFlagged(form.failure, !form.inputs.apiKey.trim());
   return (
     <div className="flex flex-col gap-2">
       <KeyField
-        className="w-full"
+        controls={controls}
         caption={POWER_UP_WORDS.endpointCaption}
         label={POWER_UP_WORDS.endpointLabel}
         value={form.inputs.customUrl}
@@ -358,42 +349,47 @@ function CustomKeyFields({ form, checking, showRemove, controls }: FieldsProps) 
         onFocus={form.onFocus}
       />
       <span className="flex items-end gap-1.5">
-        <KeyField
-          className="min-w-0 flex-1"
-          caption={POWER_UP_WORDS.modelCaption}
-          label={POWER_UP_WORDS.modelLabel}
-          value={form.inputs.customModel}
-          onChange={(customModel) => form.onInput({ customModel })}
-          secret={false}
-          flagged={false}
-          saved={false}
-          placeholder="jev-1.14.0"
-          onFocus={form.onFocus}
-        />
-        <span className="flex shrink-0 flex-col gap-1">
-          <span className="text-xs font-medium text-foreground">{POWER_UP_WORDS.authCaption}</span>
-          <Segmented
-            label={POWER_UP_WORDS.authLabel}
-            value={form.inputs.customAuth}
-            options={POWER_UP_WORDS.authOptions}
-            onChange={(customAuth) => form.onInput({ customAuth })}
+        <span className="min-w-0 flex-1">
+          <KeyField
+            controls={controls}
+            caption={POWER_UP_WORDS.modelCaption}
+            label={POWER_UP_WORDS.modelLabel}
+            value={form.inputs.customModel}
+            onChange={(customModel) => form.onInput({ customModel })}
+            secret={false}
+            flagged={false}
+            saved={false}
+            placeholder="jev-1.14.0"
+            onFocus={form.onFocus}
           />
+        </span>
+        <span className="shrink-0">
+          <Field caption={POWER_UP_WORDS.authCaption} labelsControl={false}>
+            <Segmented
+              label={POWER_UP_WORDS.authLabel}
+              value={form.inputs.customAuth}
+              options={POWER_UP_WORDS.authOptions}
+              onChange={(customAuth) => form.onInput({ customAuth })}
+            />
+          </Field>
         </span>
       </span>
       <span className="flex items-end gap-1.5">
-        <KeyField
-          className="min-w-0 flex-1"
-          caption={POWER_UP_WORDS.apiKey}
-          label={PROVIDER_SETTINGS.custom.label}
-          value={form.inputs.apiKey}
-          onChange={(apiKey) => form.onInput({ apiKey })}
-          secret
-          flagged={keyFlagged}
-          message={keyFlagged ? form.fieldMessage ?? undefined : undefined}
-          saved={form.saved}
-          onFocus={form.onFocus}
-        />
-        <SaveActions checking={checking} saved={form.saved} complete={form.complete} showRemove={showRemove} onRemove={form.onRemove} />
+        <span className="min-w-0 flex-1">
+          <KeyField
+            controls={controls}
+            caption={POWER_UP_WORDS.apiKey}
+            label={PROVIDER_SETTINGS.custom.label}
+            value={form.inputs.apiKey}
+            onChange={(apiKey) => form.onInput({ apiKey })}
+            secret
+            flagged={keyFlagged}
+            message={keyFlagged ? form.fieldMessage ?? undefined : undefined}
+            saved={form.saved}
+            onFocus={form.onFocus}
+          />
+        </span>
+        <SaveActions controls={controls} checking={checking} saved={form.saved} complete={form.complete} showRemove={showRemove} onRemove={form.onRemove} />
       </span>
     </div>
   );
@@ -416,21 +412,22 @@ const PROVIDER_OPTIONS = (Object.keys(POWER_UP_PROVIDER_NAMES) as Provider[]).ma
 }));
 
 function ManualProviderRows({ form, controls }: { form: PowerUpFormProps; controls: ReviewSettingsControls }) {
-  const { Row, Segmented } = controls;
+  const { Row, Segmented, Note } = controls;
   const checking = form.check.kind === 'checking';
   const showRemove = form.saved && !form.complete;
-  const wide = form.provider === 'clef' || form.provider === 'custom';
   return (
     <>
       <Row title={POWER_UP_WORDS.model} hint={modelRowHint(form)}>
         <Segmented label={POWER_UP_WORDS.model} value={form.provider} options={PROVIDER_OPTIONS} onChange={form.onSelectProvider} />
       </Row>
+      {/* The key form is wider than a row's end: it always sits under its title, at full width. */}
       <Row
+        wide
         title={rowTitle(form.provider, form.activeEndpoint)}
-        hint={keyRowHint(form.check, form.provider, form.activeEndpoint, form.saved)}
+        hint={keyRowHint(form.check, form.provider, form.activeEndpoint, form.saved, controls)}
       >
         <form
-          className={`flex max-w-full flex-col gap-1 ${wide ? 'w-[340px]' : 'w-[280px]'}`}
+          className="flex w-full flex-col gap-1"
           data-power-up-key-set={form.saved ? '' : undefined}
           onSubmit={(e) => {
             e.preventDefault();
@@ -446,9 +443,9 @@ function ManualProviderRows({ form, controls }: { form: PowerUpFormProps; contro
         >
           <ProviderFields form={form} checking={checking} showRemove={showRemove} controls={controls} />
           {form.fieldMessage && (
-            <span id={KEY_MESSAGE_ID} className="text-xs text-warning" data-power-up-key-failure="">
+            <Note tone="warning" id={KEY_MESSAGE_ID} data-power-up-key-failure="">
               {form.fieldMessage}
-            </span>
+            </Note>
           )}
         </form>
       </Row>
@@ -475,8 +472,19 @@ export interface PowerUpSettingsState {
   form: PowerUpFormProps;
 }
 
-/** The provider and key form's state, read from and written to the host's opinion settings route. */
-export function usePowerUpSettings(route: string): PowerUpSettingsState {
+export interface PowerUpSettingsOptions {
+  /** Read the route only once this is true (the Power Up section is on screen). Default true. */
+  load?: boolean;
+  /** Writes `diffPowerUp` on after a key works. Default: the config store. */
+  onChange?: ReviewSettingChange;
+}
+
+/**
+ * The provider and key form's state, read from and written to the host's
+ * opinion settings route. The route is read once, the first time `load` is
+ * true, never on every open of a page that has not shown Power Up yet.
+ */
+export function usePowerUpSettings(route: string, { load: shouldLoad = true, onChange = writeReviewSettingToStore }: PowerUpSettingsOptions = {}): PowerUpSettingsState {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [configured, setConfigured] = useState(false);
   const [savedProvider, setSavedProvider] = useState<Provider | null>(null);
@@ -525,8 +533,8 @@ export function usePowerUpSettings(route: string): PowerUpSettingsState {
   }, [hydrateCustom, route]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (shouldLoad) void load();
+  }, [load, shouldLoad]);
 
   const changed = () => window.dispatchEvent(new Event(POWER_UP_CHANGED_EVENT));
 
@@ -566,7 +574,7 @@ export function usePowerUpSettings(route: string): PowerUpSettingsState {
       setSavedProvider(provider);
       setConfigured(true);
       setEditing(false);
-      configStore.set('diffPowerUp', true);
+      onChange('diffPowerUp', true);
       changed();
     } catch {
       setCheck({ kind: 'error', failure: 'noAnswer' });
@@ -633,12 +641,14 @@ export function PowerUpRows({
   state,
   motion,
   controls,
+  onChange = writeReviewSettingToStore,
 }: {
   state: PowerUpSettingsState;
   motion: 'still' | 'stream';
   controls: ReviewSettingsControls;
+  onChange?: ReviewSettingChange;
 }) {
-  const { Row, Segmented } = controls;
+  const { Row, Segmented, Note } = controls;
   const { available, envConfigured, form } = state;
   if (available === false) {
     return <Row title={POWER_UP_WORDS.model} hint={POWER_UP_WORDS.unavailable} />;
@@ -655,14 +665,14 @@ export function PowerUpRows({
           label={POWER_UP_WORDS.motion}
           value={motion}
           options={POWER_UP_WORDS.motionOptions}
-          onChange={(v) => configStore.set('diffPowerUpMotion', v)}
+          onChange={(v) => onChange('diffPowerUpMotion', v)}
         />
       </Row>
-      <p className="pt-1 text-xs leading-relaxed text-muted-foreground" data-power-up-footer="">
+      <Note data-power-up-footer="">
         {form.savedProvider
           ? powerUpFooter(form.savedProvider, form.savedEndpoint)
           : powerUpFooter(form.provider, form.activeEndpoint)}
-      </p>
+      </Note>
     </>
   );
 }

@@ -11,6 +11,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { isFontInstalled } from '../../utils/fontDetect';
 import { MAX_FONT_FAMILY_LENGTH, normalizeFontFamilyName } from '../../utils/cssFontFamily';
+import { CLASSIC_REVIEW_SETTINGS_CONTROLS, type ReviewSettingsControls } from './reviewSettingsControls';
 
 /** Sentinel for the "Custom…" select option — never persisted as a font name. */
 const CUSTOM_FONT_SENTINEL = '__custom__';
@@ -20,9 +21,17 @@ function stackStyle(stack: string): React.CSSProperties | undefined {
   return stack ? { fontFamily: stack } : undefined;
 }
 
+function stackFamily(stack: string): string | undefined {
+  return stack || undefined;
+}
+
 export const FontFamilyField: React.FC<{
   label: string;
-  description: string;
+  description?: string;
+  /** Draw the label and description above the select. Default true; false where the host's row draws them. */
+  showLabel?: boolean;
+  /** The select, text field and status line. Default: classic Settings' (`CLASSIC_REVIEW_SETTINGS_CONTROLS`). */
+  controls?: Pick<ReviewSettingsControls, 'Select' | 'TextField' | 'Note'>;
   value: string;
   onSave: (value: string) => void;
   options: readonly { value: string; label: string }[];
@@ -35,7 +44,7 @@ export const FontFamilyField: React.FC<{
   /** Load a built-in's web font for the preview, if it has one. */
   loadFont?: (value: string) => void;
   previewClassName?: string;
-}> = ({ label, description, value, onSave, options, previewStack, previewText, customAriaLabel, customPlaceholder, notFoundText, loadFont, previewClassName = '' }) => {
+}> = ({ label, description, showLabel = true, controls = CLASSIC_REVIEW_SETTINGS_CONTROLS, value, onSave, options, previewStack, previewText, customAriaLabel, customPlaceholder, notFoundText, loadFont, previewClassName = '' }) => {
   const isBuiltIn = (v: string) => options.some((opt) => opt.value === v);
   // Custom font: progressive disclosure. customFontMode keeps the input open
   // while the user picks "Custom…" or has a non-built-in font saved.
@@ -98,17 +107,21 @@ export const FontFamilyField: React.FC<{
     }, 400);
   };
 
+  const { Select, TextField, Note } = controls;
   return (
     <div className="space-y-2">
-      <div>
-        <div className="text-sm font-medium">{label}</div>
-        <div className="text-xs text-muted-foreground">{description}</div>
-      </div>
-      <select
+      {showLabel && (
+        <div>
+          <div className="text-sm font-medium">{label}</div>
+          <div className="text-xs text-muted-foreground">{description}</div>
+        </div>
+      )}
+      <Select
         value={customActive ? CUSTOM_FONT_SENTINEL : value}
-        aria-label={label}
-        onChange={(e) => {
-          if (e.target.value === CUSTOM_FONT_SENTINEL) {
+        label={label}
+        options={[...options, { value: CUSTOM_FONT_SENTINEL, label: 'Custom…' }]}
+        onChange={(next) => {
+          if (next === CUSTOM_FONT_SENTINEL) {
             setCustomFontMode(true);
           } else {
             // Cancel any in-flight debounced custom save so a stale timer
@@ -116,46 +129,39 @@ export const FontFamilyField: React.FC<{
             cancelPendingFontSave();
             setCustomFontMode(false);
             setCustomFontDraft('');
-            onSave(e.target.value);
+            onSave(next);
           }
         }}
-        className="w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground"
-        style={value && !customActive ? stackStyle(previewStack(value)) : undefined}
-      >
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-        <option value={CUSTOM_FONT_SENTINEL}>Custom…</option>
-      </select>
+        fontFamily={value && !customActive ? stackFamily(previewStack(value)) : undefined}
+      />
       {customActive && (
         <div className="space-y-1">
-          <input
-            type="text"
+          <TextField
             value={customFontDraft}
-            onChange={(e) => handleCustomFontInput(e.target.value)}
+            onChange={handleCustomFontInput}
             placeholder={customPlaceholder}
-            aria-label={customAriaLabel}
+            label={customAriaLabel}
             maxLength={MAX_FONT_FAMILY_LENGTH}
             autoFocus={!customFontDraft}
-            spellCheck={false}
-            className="w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
-            style={stackStyle(previewStack(customFontDraft))}
+            fontFamily={stackFamily(previewStack(customFontDraft))}
           />
-          <div className="text-[11px]" aria-live="polite">
+          <div aria-live="polite">
             {!normalizeFontFamilyName(customFontDraft) ? (
-              <span className="text-muted-foreground">Any font installed on this machine works — type its family name.</span>
+              <Note>Any font installed on this machine works — type its family name.</Note>
             ) : customFontInstalled === true ? (
-              <span className="text-success">✓ Found on this machine</span>
+              <Note tone="success">✓ Found on this machine</Note>
             ) : customFontInstalled === false ? (
-              <span className="text-warning">{notFoundText}</span>
+              <Note tone="warning">{notFoundText}</Note>
             ) : null}
           </div>
         </div>
       )}
+      {/* The preview is plain text in the chosen font: no box around it. */}
       {value && (
         <div
-          className={`text-xs text-muted-foreground px-1 py-1 rounded bg-muted/30 ${previewClassName}`}
+          className={`text-xs text-muted-foreground ${previewClassName}`}
           style={stackStyle(previewStack(value))}
+          data-font-preview=""
         >
           {previewText}
         </div>

@@ -2,11 +2,15 @@
  * Every word on Settings → Reviews (`ReviewSettingsPage`): section titles,
  * row labels and hints, the option lists, and the Power Up form's messages.
  * One module so a host (classic code review today, the Inbox next) draws the
- * same words. The diff gear's own option lists (background strength, change
- * marks, changed words, minimap) stay in `DiffDisplayOptions.tsx`, so the gear
- * and this page can never disagree.
+ * same words. The rows the diff gear also draws take their names from
+ * `../diffDisplayModel.ts`, and their option lists from
+ * `DiffDisplayOptions.tsx`, so the gear and this page can never disagree.
+ *
+ * Importable from other packages as
+ * `@plannotator/ui/components/settings/reviewSettingsWords`.
  */
 import { modKeyWord } from '../../utils/platform';
+import { DIFF_DISPLAY_LABELS } from '../diffDisplayModel';
 
 export const REVIEW_SETTINGS_TAB_LABEL = 'Reviews';
 
@@ -16,18 +20,16 @@ export const SECTION_WORDS = {
     description: 'The same choices as the gear above the diff.',
     compactDescription: 'This layout shows unified diffs for the session; your desktop preference is unchanged.',
   },
+  /** The heading of the standalone `SemanticDiffsTab` (the page's section is the Semantic changes switch). */
   semantic: {
     title: 'Semantic diffs',
     description: 'Labels what each change really is: moved, renamed, reformatted, extracted.',
   },
-  powerUp: { title: 'Power Up' },
   callFlow: {
-    title: 'Call flow',
     description: 'Diffs for function call stacks across git commits. 22 languages supported (AST-based, built using Tree-sitter).',
     note: 'Call flow is syntactic. It does not use type resolution or runtime traces, so treat it as navigation context—not proof that a path executes.',
   },
   packages: {
-    title: 'Package changes',
     description: 'Added, removed and changed dependencies above package.json and lockfile diffs.',
   },
   files: { title: 'Files and defaults' },
@@ -39,18 +41,18 @@ export const DISPLAY_WORDS = {
     { value: 'split' as const, label: 'Split' },
     { value: 'unified' as const, label: 'Unified' },
   ],
-  wrap: 'Wrap long lines',
-  lineNumbers: 'Line numbers',
-  backgrounds: 'Backgrounds',
-  backgroundStrength: 'Background strength',
-  minimap: 'Minimap',
-  changeMarks: 'Change marks',
-  changedWords: 'Changed words',
-  tabSize: 'Tab size',
-  decreaseTabSize: 'Decrease tab size',
-  increaseTabSize: 'Increase tab size',
-  wholeFile: 'Whole file',
-  hideWhitespace: 'Hide whitespace',
+  wrap: DIFF_DISPLAY_LABELS.wrap,
+  lineNumbers: DIFF_DISPLAY_LABELS.lineNumbers,
+  backgrounds: DIFF_DISPLAY_LABELS.backgrounds,
+  backgroundStrength: DIFF_DISPLAY_LABELS.backgroundStrength,
+  minimap: DIFF_DISPLAY_LABELS.minimap,
+  changeMarks: DIFF_DISPLAY_LABELS.changeMarks,
+  changedWords: DIFF_DISPLAY_LABELS.changedWords,
+  tabSize: DIFF_DISPLAY_LABELS.tabSize,
+  decreaseTabSize: DIFF_DISPLAY_LABELS.decreaseTabSize,
+  increaseTabSize: DIFF_DISPLAY_LABELS.increaseTabSize,
+  wholeFile: DIFF_DISPLAY_LABELS.wholeFile,
+  hideWhitespace: DIFF_DISPLAY_LABELS.hideWhitespace,
 } as const;
 
 export const FONT_WORDS = {
@@ -106,8 +108,10 @@ export const TOKEN_HOVER_DELAY_OPTIONS = [
 export const SEMANTIC_WORDS = {
   master: 'Semantic changes',
   masterDescription: 'Organize added, changed, moved, and removed functions, classes, and other named code. Enabled by default.',
-  moved: 'Show moved & renamed code',
+  moved: DIFF_DISPLAY_LABELS.moved,
   movedDescription: 'Draw moved, renamed, reformatted, extracted and inlined code as what it is.',
+  /** Under Show moved & renamed code and Power Up while the master switch is off: they stay, greyed. */
+  offWhileMasterOff: 'Off while Semantic changes is off.',
 } as const;
 
 export const CALL_FLOW_WORDS = { label: 'Call flow' } as const;

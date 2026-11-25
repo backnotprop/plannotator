@@ -117,12 +117,16 @@ const LEGACY_REVIEW_TAB_SECTION: Record<LegacyReviewSettingsTab, ReviewSettingsS
   analysis: 'semantic',
 };
 
-/** Where an outside link to a Settings tab lands: in code review, an old review tab id opens Reviews. */
+/**
+ * Where an outside link to a Settings tab lands: in code review, an old review
+ * tab id opens Reviews at the section it held; `reviews` opens it at `section`.
+ */
 export function resolveSettingsTab(
   tab: 'reviews' | LegacyReviewSettingsTab,
   mode: 'plan' | 'annotate' | 'review',
+  section?: ReviewSettingsSectionId,
 ): { tab: SettingsTab; section?: ReviewSettingsSectionId } {
-  if (tab === 'reviews') return { tab: 'reviews' };
+  if (tab === 'reviews') return { tab: 'reviews', section };
   if (mode !== 'review') return { tab: tab === 'display' ? 'display' : 'general' };
   return { tab: 'reviews', section: LEGACY_REVIEW_TAB_SECTION[tab] };
 }
@@ -175,6 +179,8 @@ interface SettingsProps {
   externalOpen?: boolean;
   /** The tab to open on: `reviews`, or an old code-review tab id, which lands on Reviews (resolveSettingsTab). */
   externalTab?: 'reviews' | LegacyReviewSettingsTab;
+  /** With `externalTab="reviews"`: the Reviews section to open at (the Power Up status link passes `powerUp`). */
+  externalSection?: ReviewSettingsSectionId;
   onExternalClose?: () => void;
   /** Available AI providers (from /api/ai/capabilities). */
   aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>;
@@ -659,7 +665,7 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, externalTab, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, externalTab, externalSection, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
   const autoUpdate = useConfigValue('autoUpdate');
   const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
@@ -789,14 +795,21 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   useEffect(() => {
     if (externalOpen) {
       if (externalTab) {
-        const landing = resolveSettingsTab(externalTab, mode);
+        const landing = resolveSettingsTab(externalTab, mode, externalSection);
         setActiveTab(landing.tab);
         setReviewSection(landing.section);
       }
       setShowDialog(true);
       onExternalClose?.();
     }
-  }, [externalOpen, externalTab, onExternalClose, mode]);
+  }, [externalOpen, externalTab, externalSection, onExternalClose, mode]);
+
+  // A link's section is for that opening only: closing forgets it, so the next opening starts at the top.
+  const wasShowing = useRef(false);
+  useEffect(() => {
+    if (wasShowing.current && !showDialog) setReviewSection(undefined);
+    wasShowing.current = showDialog;
+  }, [showDialog]);
 
   useEffect(() => {
     if (showDialog) {

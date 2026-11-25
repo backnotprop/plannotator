@@ -40,8 +40,11 @@ export interface VcsReviewSettingsDescriptor {
  * 'sections'.
  */
 
-/** Store seam for tests (fresh ConfigStoreForTest); production always uses the singleton. */
-type PanelViewConfigStore = typeof configStore;
+/**
+ * Store seam: tests pass a fresh ConfigStoreForTest; Settings → Reviews passes
+ * the singleton's `get` with its host's writer, so a host routes these writes.
+ */
+type PanelViewConfigStore = Pick<typeof configStore, 'get' | 'set'>;
 
 export function setReviewPanelView(
   view: 'sections' | 'tree',

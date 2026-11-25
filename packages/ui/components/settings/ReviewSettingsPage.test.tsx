@@ -2,8 +2,11 @@
  * Settings → Reviews (`ReviewSettingsPage`): one page for reading a review,
  * which replaced classic code review's Review, Editor, Semantic diffs and
  * Analysis tabs. Each section's controls still write their own setting's
- * existing key; the master Semantic changes switch hides what depends on it;
- * and an old tab id still lands on Reviews.
+ * existing key, or go through the host's writer when it passes one; the
+ * master Semantic changes switch greys (never hides) what depends on it; a
+ * host leaves out the rows it cannot honour; Power Up's key route is read
+ * only once its section is on screen; and an outside link lands on Reviews at
+ * the section it named.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -20,15 +23,36 @@ import { CLASSIC_REVIEW_SETTINGS_CONTROLS } from './reviewSettingsControls';
 
 const hasDom = typeof document !== 'undefined';
 const realFetch = globalThis.fetch;
+const realObserver = globalThis.IntersectionObserver;
+const realScrollIntoView = hasDom ? Element.prototype.scrollIntoView : undefined;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 /** What the page saved, by storage key (the storage seam; the default backend is cookies). */
 const saved = new Map<string, string>();
 const TOUCHED: SettingName[] = [
-  'diffStyle', 'diffOverflow', 'semanticDiffEnabled', 'diffSemantic', 'callFlowEnabled',
+  'diffStyle', 'diffOverflow', 'semanticDiffEnabled', 'diffSemantic', 'callFlowEnabled', 'diffPowerUp',
   'diffPowerUpMotion', 'reviewAutoViewed', 'reviewPanelView', 'defaultDiffType', 'tokenHoverTrigger',
+  'tokenHoverDelay', 'diffFontSize', 'diffTabSize', 'reviewDefaults',
 ];
 let restore: Map<SettingName, unknown>;
+
+/** IntersectionObserver stand-in: nothing is on screen until `showObserved()`. */
+let observed: Array<() => void> = [];
+class ObserverStandIn {
+  constructor(private readonly callback: IntersectionObserverCallback) {}
+  observe(target: Element) {
+    observed.push(() => this.callback([{ isIntersecting: true, target } as unknown as IntersectionObserverEntry], this as unknown as IntersectionObserver));
+  }
+  unobserve() {}
+  disconnect() {}
+  takeRecords() { return []; }
+}
+async function showObserved() {
+  await act(async () => {
+    for (const fire of observed) fire();
+    await new Promise((r) => setTimeout(r, 10));
+  });
+}
 
 async function mountPage(props: Partial<React.ComponentProps<typeof ReviewSettingsPage>> = {}) {
   host = document.createElement('div');
@@ -40,12 +64,41 @@ async function mountPage(props: Partial<React.ComponentProps<typeof ReviewSettin
   await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
 }
 
-async function mountSettings(mode: 'plan' | 'review', externalTab?: React.ComponentProps<typeof Settings>['externalTab']) {
+async function mountSettings(
+  mode: 'plan' | 'review',
+  externalTab?: React.ComponentProps<typeof Settings>['externalTab'],
+  externalSection?: React.ComponentProps<typeof Settings>['externalSection'],
+) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root?.render(<Settings taterMode={false} onTaterModeChange={() => {}} mode={mode} externalOpen externalTab={externalTab} />);
+    root?.render(<Settings taterMode={false} onTaterModeChange={() => {}} mode={mode} externalOpen externalTab={externalTab} externalSection={externalSection} />);
+  });
+}
+
+async function remount(props: Partial<React.ComponentProps<typeof ReviewSettingsPage>> = {}) {
+  await act(async () => root?.unmount());
+  root = null;
+  host?.remove();
+  await mountPage(props);
+}
+
+async function slide(label: string, value: number) {
+  const input = document.querySelector<HTMLInputElement>(`input[type="range"][aria-label="${label}"]`);
+  if (!input) throw new Error(`no slider "${label}"`);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, String(value));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+async function choose(label: string, value: string) {
+  const select = document.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`);
+  if (!select) throw new Error(`no select "${label}"`);
+  await act(async () => {
+    select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
   });
 }
 
@@ -69,6 +122,8 @@ describe.if(hasDom)('Settings → Reviews', () => {
     setStorageBackend({ getItem: (k) => saved.get(k) ?? null, setItem: (k, v) => void saved.set(k, v), removeItem: (k) => void saved.delete(k) });
     restore = new Map(TOUCHED.map((k) => [k, configStore.get(k)]));
     globalThis.fetch = (async () => Response.json({ configured: false, provider: null })) as unknown as typeof fetch;
+    observed = [];
+    globalThis.IntersectionObserver = ObserverStandIn as unknown as typeof IntersectionObserver;
   });
 
   afterEach(async () => {
@@ -81,6 +136,8 @@ describe.if(hasDom)('Settings → Reviews', () => {
     for (const [k, v] of restore) configStore.set(k, v as never);
     resetStorageBackend();
     globalThis.fetch = realFetch;
+    globalThis.IntersectionObserver = realObserver;
+    Element.prototype.scrollIntoView = realScrollIntoView!;
   });
 
   test('the sections come in the agreed order', async () => {
@@ -110,32 +167,42 @@ describe.if(hasDom)('Settings → Reviews', () => {
     expect(switchNamed('Wrap long lines')).not.toBeNull();
   });
 
-  test('Semantic diffs: the master switch writes its key, and off hides the moved-code switch and Power Up', async () => {
+  test('Semantic diffs: the master switch writes its key; off greys the moved-code switch and Power Up, and the key form stays usable', async () => {
     configStore.set('semanticDiffEnabled', true);
     configStore.set('diffSemantic', true);
     saved.clear();
     await mountPage();
-    expect(switchNamed('Show moved & renamed code')).not.toBeNull();
-    expect(section('powerUp')).not.toBeNull();
+    await showObserved();
+    expect(switchNamed('Show moved & renamed code')?.disabled).toBe(false);
 
     await click(switchNamed('Show moved & renamed code'));
     expect(saved.get('plannotator-diff-semantic')).toBe('false');
+    await click(switchNamed('Show moved & renamed code'));
 
     await click(switchNamed('Semantic changes'));
     expect(saved.get('plannotator-semantic-diff-enabled')).toBe('false');
-    expect(switchNamed('Show moved & renamed code')).toBeNull();
-    expect(section('powerUp')).toBeNull();
-    // Layers that do not depend on it stay.
-    expect(switchNamed('Call flow')).not.toBeNull();
-    expect(section('files')).not.toBeNull();
+    // Still there, greyed, saying why.
+    const moved = switchNamed('Show moved & renamed code');
+    expect(moved?.disabled).toBe(true);
+    expect(moved?.getAttribute('aria-checked')).toBe('false');
+    expect(moved?.textContent).toContain('Off while Semantic changes is off.');
+    const powerUp = switchNamed('Power Up');
+    expect(powerUp?.disabled).toBe(true);
+    expect(powerUp?.textContent).toContain('Off while Semantic changes is off.');
+    // A key can still be added or removed.
+    const key = section('powerUp')?.querySelector<HTMLInputElement>('input[aria-label="TypeSafe API key"]');
+    expect(key?.disabled).toBe(false);
+    expect(section('powerUp')?.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false);
+    // Layers that do not depend on it stay as they were.
+    expect(switchNamed('Call flow')?.disabled).toBe(false);
 
     await click(switchNamed('Semantic changes'));
     expect(saved.get('plannotator-semantic-diff-enabled')).toBe('true');
-    expect(switchNamed('Show moved & renamed code')).not.toBeNull();
-    expect(section('powerUp')).not.toBeNull();
+    expect(switchNamed('Show moved & renamed code')?.disabled).toBe(false);
+    expect(switchNamed('Show moved & renamed code')?.getAttribute('aria-checked')).toBe('true');
   });
 
-  test('Power Up: reads the host route it is given, stays off without a key, and Motion writes its key', async () => {
+  test('Power Up: reads the host route only once its section is on screen, stays off without a key, and Motion writes its key', async () => {
     const asked: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       asked.push(String(input));
@@ -144,10 +211,110 @@ describe.if(hasDom)('Settings → Reviews', () => {
     configStore.set('diffPowerUpMotion', 'still');
     saved.clear();
     await mountPage({ opinionRoute: '/host/opinion-route' });
+    expect(asked).toEqual([]);
+    await showObserved();
+    expect(asked).toEqual(['/host/opinion-route']);
+    await showObserved();
     expect(asked).toEqual(['/host/opinion-route']);
     expect(switchNamed('Power Up')?.disabled).toBe(true);
     await click(radio('Motion', 'Stream'));
     expect(saved.get('plannotator-diff-power-up-motion')).toBe('stream');
+  });
+
+  test('Hover cards: the delay is greyed while the trigger is Off, and both write their keys', async () => {
+    configStore.set('tokenHoverTrigger', 'hover');
+    configStore.set('tokenHoverDelay', 300);
+    saved.clear();
+    await mountPage();
+    const delayButtons = () => [...(radioGroup('How long the pointer rests before a card is requested')?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [])];
+    expect(delayButtons().length).toBe(3);
+    expect(delayButtons().every((b) => !b.disabled)).toBe(true);
+    await click(radio('How long the pointer rests before a card is requested', 'Relaxed'));
+    expect(saved.get('plannotator-token-hover-delay')).toBe('700');
+
+    await click(radio('Hover cards', 'Off'));
+    expect(saved.get('plannotator-token-hover-trigger')).toBe('off');
+    expect(delayButtons().every((b) => b.disabled)).toBe(true);
+    expect(radioGroup('How long the pointer rests before a card is requested')?.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  test('Code Font Size writes its key, and Reset clears it', async () => {
+    configStore.set('diffFontSize', '');
+    saved.clear();
+    await mountPage();
+    await slide('Code Font Size', 16);
+    expect(saved.get('plannotator-diff-font-size')).toBe('16px');
+    expect(section('display')?.textContent).toContain('16px');
+    const reset = [...section('display')!.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Reset');
+    await click(reset ?? null);
+    expect(configStore.get('diffFontSize')).toBe('');
+  });
+
+  test('Tab size steps within 1 to 8 and writes its key', async () => {
+    configStore.set('diffTabSize', 7);
+    saved.clear();
+    await mountPage();
+    const increase = document.querySelector<HTMLButtonElement>('button[aria-label="Increase tab size"]');
+    await click(increase);
+    expect(saved.get('plannotator-diff-tab-size')).toBe('8');
+    expect(increase?.disabled).toBe(true);
+  });
+
+  test('a host writer receives every write the page makes, and the store is left to it', async () => {
+    configStore.set('diffOverflow', 'scroll');
+    configStore.set('defaultDiffType', 'since-base');
+    configStore.set('reviewPanelView', 'sections');
+    saved.clear();
+    const writes: Array<[string, unknown]> = [];
+    await mountPage({ onChange: (key, value) => void writes.push([key, value]) });
+    await showObserved();
+    await click(switchNamed('Wrap long lines'));
+    await click(document.querySelector<HTMLButtonElement>('button[aria-label="Decrease tab size"]'));
+    await click(radio('Motion', 'Stream'));
+    await click(switchNamed('Semantic changes'));
+    await click(switchNamed('Call flow'));
+    await choose('Default diff view (Jujutsu)', 'jj-line');
+    // The coupled Git setter writes the pair through the host too.
+    await choose('Default diff view (Git)', 'uncommitted');
+    const keys = writes.map(([k]) => k);
+    expect(keys).toContain('diffOverflow');
+    expect(keys).toContain('diffTabSize');
+    expect(keys).toContain('diffPowerUpMotion');
+    expect(keys).toContain('semanticDiffEnabled');
+    expect(keys).toContain('callFlowEnabled');
+    expect(writes.find(([k]) => k === 'reviewDefaults')?.[1]).toEqual({ ...configStore.get('reviewDefaults'), jj: { defaultDiffType: 'jj-line' } });
+    expect(writes).toContainEqual(['defaultDiffType', 'uncommitted']);
+    expect(writes).toContainEqual(['reviewPanelView', 'tree']);
+    expect(saved.size).toBe(0);
+    expect(configStore.get('diffOverflow')).toBe('scroll');
+  });
+
+  test('the Jujutsu default diff writes its own key', async () => {
+    configStore.set('reviewDefaults', {});
+    saved.clear();
+    await mountPage();
+    await choose('Default diff view (Jujutsu)', 'jj-evolog');
+    expect(JSON.parse(saved.get('plannotator-review-defaults') ?? '{}')).toEqual({ jj: { defaultDiffType: 'jj-evolog' } });
+  });
+
+  test('a host leaves out the rows it cannot honour; the rest stay', async () => {
+    await mountPage();
+    expect(switchNamed('Hide whitespace')).not.toBeNull();
+    expect(radioGroup('Minimap')).not.toBeNull();
+    expect(radioGroup('Hover cards')).not.toBeNull();
+    expect(document.querySelector('select[aria-label="Default diff view (Git)"]')).not.toBeNull();
+
+    await remount({ rows: { hideWhitespace: false, minimap: false, hoverCards: false, defaultDiffViews: false } });
+    expect(switchNamed('Hide whitespace')).toBeNull();
+    expect(radioGroup('Minimap')).toBeNull();
+    expect(radioGroup('Hover cards')).toBeNull();
+    expect(radioGroup('How long the pointer rests before a card is requested')).toBeNull();
+    expect(radioGroup('Default file grouping')).toBeNull();
+    expect(document.querySelector('select[aria-label="Default diff view (Git)"]')).toBeNull();
+    expect(document.querySelector('select[aria-label="Default diff view (Jujutsu)"]')).toBeNull();
+    expect(switchNamed('Wrap long lines')).not.toBeNull();
+    expect(switchNamed('Whole file')).not.toBeNull();
+    expect(switchNamed('Auto-mark viewed')).not.toBeNull();
   });
 
   test('Call flow: its switch writes its key, and its caveat is one plain line', async () => {
@@ -215,13 +382,28 @@ describe.if(hasDom)('Settings → Reviews', () => {
     expect(tabs.indexOf('Comments')).toBe(tabs.indexOf('Reviews') + 1);
   });
 
-  for (const old of ['semantic', 'analysis', 'review', 'display', 'reviews'] as const) {
-    test(`an outside link to the old "${old}" tab opens Reviews`, async () => {
+  for (const [old, landing] of [['semantic', 'semantic'], ['analysis', 'semantic'], ['review', 'files'], ['display', null], ['reviews', null]] as const) {
+    test(`an outside link to the old "${old}" tab opens Reviews ${landing ? `scrolled to ${landing}` : 'at the top'}`, async () => {
+      const scrolled: string[] = [];
+      Element.prototype.scrollIntoView = function (this: Element) {
+        scrolled.push(this.getAttribute('data-review-settings-section') ?? '?');
+      };
       await mountSettings('review', old);
       expect(activeSidebarTab()).toBe('Reviews');
       expect(document.querySelector('[data-review-settings]')).not.toBeNull();
+      expect(scrolled).toEqual(landing ? [landing] : []);
     });
   }
+
+  test('the Power Up status link opens Reviews at Power Up', async () => {
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.getAttribute('data-review-settings-section') ?? '?');
+    };
+    await mountSettings('review', 'reviews', 'powerUp');
+    expect(activeSidebarTab()).toBe('Reviews');
+    expect(scrolled).toEqual(['powerUp']);
+  });
 
   test('outside code review, "display" still opens Display', async () => {
     await mountSettings('plan', 'display');

@@ -1,13 +1,46 @@
 /**
  * The controls Settings → Reviews draws with. `ReviewSettingsPage` never
- * styles a section, row, switch or segmented control itself: the host passes
- * them, so classic code review and the Inbox show the same page in their own
- * settings look. `CLASSIC_REVIEW_SETTINGS_CONTROLS` is classic code review's set.
+ * styles a control itself: the host passes every one (section, row, group,
+ * switch, segmented control, select, stepper, slider, text field, field
+ * caption, button, note), so classic code review and the Inbox show the same
+ * page in their own settings look. `CLASSIC_REVIEW_SETTINGS_CONTROLS` is
+ * classic code review's set; a host can spread it and replace only some.
+ *
+ * Classic's rows follow one rule: in a section narrower than 26rem every row
+ * puts its control under its title; wider, every control sits at the row's
+ * end. A `wide` row (a form) always puts it underneath, at full width.
  */
 import React from 'react';
+import { configStore } from '../../config';
+import type { SettingName } from '../../config/settings';
+import type { SettingValue } from '../../config/configStore';
 import { AnalysisLayerToggle } from '../AnalysisLayerToggle';
 
 export type ReviewSettingsSectionId = 'display' | 'semantic' | 'powerUp' | 'callFlow' | 'packages' | 'files';
+
+/**
+ * Writes one setting. A host routes the page's writes through it (the Inbox
+ * also saves diff options to its own settings route); the default writes the
+ * config store, like code review's gear.
+ */
+export type ReviewSettingChange = <K extends SettingName>(key: K, value: SettingValue<K>) => void;
+export const writeReviewSettingToStore: ReviewSettingChange = (key, value) => configStore.set(key, value);
+
+/**
+ * The rows a host can honour. Each defaults to shown; a host turns off a row
+ * whose setting it does not apply (the Inbox has no minimap, no whitespace
+ * hiding, no hover cards and no local default diff).
+ */
+export interface ReviewSettingsRows {
+  /** Hide whitespace (needs the local repository). */
+  hideWhitespace: boolean;
+  /** Minimap (needs the diff overview strip). */
+  minimap: boolean;
+  /** Hover cards and their delay (need ripgrep and a local checkout). */
+  hoverCards: boolean;
+  /** Files and defaults' Git and Jujutsu groups: default file grouping and default diff view. */
+  defaultDiffViews: boolean;
+}
 
 export interface ReviewSettingsSwitchProps {
   checked: boolean;
@@ -20,7 +53,9 @@ export interface ReviewSettingsSwitchProps {
 export interface ReviewSettingsRowProps {
   title: string;
   hint?: React.ReactNode;
-  /** The row's control, drawn at the end of the row (below it when the row is narrow). */
+  /** The control is a form or a full-width field: always draw it under the title, at full width. */
+  wide?: boolean;
+  /** The row's control. */
   children?: React.ReactNode;
 }
 
@@ -50,17 +85,97 @@ export interface ReviewSettingsSectionProps {
   children?: React.ReactNode;
 }
 
+/** A titled group of rows inside a section (Git, Jujutsu). `id` names it for `aria-labelledby`. */
+export interface ReviewSettingsGroupProps {
+  id: string;
+  title: string;
+  children?: React.ReactNode;
+}
+
+export interface ReviewSettingsSelectProps<T extends string> {
+  label: string;
+  value: string;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+  /** Draw the select in this `font-family` (a font preview). */
+  fontFamily?: string;
+}
+
+export interface ReviewSettingsStepperProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+  decreaseLabel: string;
+  increaseLabel: string;
+}
+
+export interface ReviewSettingsSliderProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+  /** The value as words, beside the slider ("13px", "Auto"). */
+  valueText: string;
+  /** A button that clears the value back to its default; omitted while it is the default. */
+  reset?: { label: string; onReset: () => void };
+}
+
+export interface ReviewSettingsTextFieldProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  secret?: boolean;
+  /** Code-like values (keys, URLs, model names). */
+  mono?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
+  onFocus?: () => void;
+  fontFamily?: string;
+  autoFocus?: boolean;
+  maxLength?: number;
+}
+
+/** A small caption over one control (Endpoint URL, Auth). */
+export interface ReviewSettingsFieldProps {
+  caption: string;
+  /** The caption labels a single text field inside (clicking it focuses the field). Default true. */
+  labelsControl?: boolean;
+  children?: React.ReactNode;
+}
+
+export type ReviewSettingsButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'className' | 'style'>;
+
+/** A line of small text: a caveat, a status, a field's message. */
+export interface ReviewSettingsNoteProps extends Omit<React.HTMLAttributes<HTMLElement>, 'className' | 'style'> {
+  tone?: 'muted' | 'warning' | 'success';
+}
+
 export interface ReviewSettingsControls {
   Section: React.ComponentType<ReviewSettingsSectionProps>;
   Row: React.ComponentType<ReviewSettingsRowProps>;
+  Group: React.ComponentType<ReviewSettingsGroupProps>;
   Switch: React.ComponentType<ReviewSettingsSwitchProps>;
   Segmented: <T extends string>(props: ReviewSettingsSegmentedProps<T>) => React.ReactElement | null;
+  Select: <T extends string>(props: ReviewSettingsSelectProps<T>) => React.ReactElement | null;
+  Stepper: React.ComponentType<ReviewSettingsStepperProps>;
+  Slider: React.ComponentType<ReviewSettingsSliderProps>;
+  TextField: React.ComponentType<ReviewSettingsTextFieldProps>;
+  Field: React.ComponentType<ReviewSettingsFieldProps>;
+  Button: React.ComponentType<ReviewSettingsButtonProps>;
+  Note: React.ComponentType<ReviewSettingsNoteProps>;
 }
 
 function ClassicSection({ id, title, description, toggle, first = false, children }: ReviewSettingsSectionProps) {
   const headingId = `review-settings-${id}`;
   return (
-    <section aria-labelledby={headingId} className={first ? 'space-y-1' : 'space-y-1 border-t border-border pt-4'}>
+    <section
+      aria-labelledby={headingId}
+      className={`@container/review-settings ${first ? 'space-y-1' : 'space-y-1 border-t border-border pt-4'}`}
+    >
       {toggle ? (
         <AnalysisLayerToggle
           checked={toggle.checked}
@@ -80,15 +195,28 @@ function ClassicSection({ id, title, description, toggle, first = false, childre
   );
 }
 
-function ClassicRow({ title, hint, children }: ReviewSettingsRowProps) {
+const ROW_INLINE =
+  '@min-[26rem]/review-settings:flex-row @min-[26rem]/review-settings:items-center @min-[26rem]/review-settings:justify-between @min-[26rem]/review-settings:gap-4';
+
+function ClassicRow({ title, hint, wide = false, children }: ReviewSettingsRowProps) {
   return (
-    <div className="flex min-h-11 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-1">
-      <div className="min-w-[10rem] flex-1">
+    <div className={`flex min-h-11 flex-col justify-center gap-2 py-1 ${wide ? '' : ROW_INLINE}`} data-review-settings-row={wide ? 'wide' : ''}>
+      <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-foreground">{title}</div>
         {hint && <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{hint}</div>}
       </div>
-      {children && <div className="max-w-full shrink-0">{children}</div>}
+      {children && <div className={wide ? 'w-full' : 'max-w-full @min-[26rem]/review-settings:shrink-0'}>{children}</div>}
     </div>
+  );
+}
+
+function ClassicGroup({ id, title, children }: ReviewSettingsGroupProps) {
+  const headingId = `settings-review-${id}`;
+  return (
+    <section aria-labelledby={headingId} className="pt-2">
+      <h4 id={headingId} className="text-sm font-semibold text-foreground">{title}</h4>
+      {children}
+    </section>
   );
 }
 
@@ -127,9 +255,118 @@ function ClassicSegmented<T extends string>({ label, value, options, onChange, d
   );
 }
 
+const FIELD = 'h-8 w-full min-w-0 rounded-md border bg-background px-2.5 text-sm text-foreground outline-none';
+const FIELD_RING = 'border-border focus:ring-1 focus:ring-ring';
+const FIELD_INVALID = 'border-warning ring-1 ring-warning focus:ring-2 focus:ring-warning';
+
+function ClassicSelect<T extends string>({ label, value, options, onChange, fontFamily }: ReviewSettingsSelectProps<T>) {
+  return (
+    <select
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value as T)}
+      className={`${FIELD} ${FIELD_RING} px-2`}
+      style={fontFamily ? { fontFamily } : undefined}
+    >
+      {options.map((opt) => (
+        <option key={opt.value} value={opt.value}>{opt.label}</option>
+      ))}
+    </select>
+  );
+}
+
+function ClassicStepper({ label, value, min, max, onChange, decreaseLabel, increaseLabel }: ReviewSettingsStepperProps) {
+  const btn = 'h-6 px-2 text-xs rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent';
+  return (
+    <div className="inline-flex items-center gap-px rounded-md bg-muted/60 p-px" role="group" aria-label={label}>
+      <button type="button" onClick={() => onChange(value - 1)} disabled={value <= min} aria-label={decreaseLabel} className={btn}>−</button>
+      <span className="w-6 text-center text-xs tabular-nums" data-diff-tab-size={value}>{value}</span>
+      <button type="button" onClick={() => onChange(value + 1)} disabled={value >= max} aria-label={increaseLabel} className={btn}>+</button>
+    </div>
+  );
+}
+
+function ClassicSlider({ label, value, min, max, onChange, valueText, reset }: ReviewSettingsSliderProps) {
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="h-1.5 min-w-0 flex-1 cursor-pointer accent-primary"
+      />
+      <span className="min-w-[4ch] text-right text-xs tabular-nums text-muted-foreground">{valueText}</span>
+      {reset && (
+        <button type="button" onClick={reset.onReset} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+          {reset.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ClassicTextField({ label, value, onChange, placeholder, secret = false, mono = false, invalid = false, describedBy, onFocus, fontFamily, autoFocus, maxLength }: ReviewSettingsTextFieldProps) {
+  return (
+    <input
+      className={`${FIELD} ${invalid ? FIELD_INVALID : FIELD_RING} placeholder:text-muted-foreground/60 ${mono ? 'font-mono text-xs' : ''}`}
+      style={fontFamily ? { fontFamily } : undefined}
+      type={secret ? 'password' : 'text'}
+      autoComplete="off"
+      spellCheck={false}
+      placeholder={placeholder}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={onFocus}
+      aria-label={label}
+      aria-invalid={invalid || undefined}
+      aria-describedby={describedBy}
+      autoFocus={autoFocus}
+      maxLength={maxLength}
+    />
+  );
+}
+
+function ClassicField({ caption, labelsControl = true, children }: ReviewSettingsFieldProps) {
+  const Tag = labelsControl ? 'label' : 'div';
+  return (
+    <Tag className="flex min-w-0 flex-col gap-1">
+      <span className="text-xs font-medium text-foreground">{caption}</span>
+      {children}
+    </Tag>
+  );
+}
+
+function ClassicButton(props: ReviewSettingsButtonProps) {
+  return (
+    <button
+      type="button"
+      {...props}
+      className="h-8 shrink-0 whitespace-nowrap rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+    />
+  );
+}
+
+const NOTE_TONE = { muted: 'text-muted-foreground', warning: 'text-warning', success: 'text-success' } as const;
+
+function ClassicNote({ tone = 'muted', ...rest }: ReviewSettingsNoteProps) {
+  return <span {...rest} className={`block text-xs leading-relaxed ${NOTE_TONE[tone]}`} />;
+}
+
 export const CLASSIC_REVIEW_SETTINGS_CONTROLS: ReviewSettingsControls = {
   Section: ClassicSection,
   Row: ClassicRow,
+  Group: ClassicGroup,
   Switch: ClassicSwitch,
   Segmented: ClassicSegmented,
+  Select: ClassicSelect,
+  Stepper: ClassicStepper,
+  Slider: ClassicSlider,
+  TextField: ClassicTextField,
+  Field: ClassicField,
+  Button: ClassicButton,
+  Note: ClassicNote,
 };

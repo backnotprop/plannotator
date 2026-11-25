@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ReviewSettingsPage } from './ReviewSettingsPage';
-import { CLASSIC_REVIEW_SETTINGS_CONTROLS } from './reviewSettingsControls';
-import { SEM_DIFF_OPINION_SETTINGS_ROUTE } from './PowerUpSettings';
+import { SemanticDiffsTab } from './SemanticDiffsTab';
 
-// Power Up's form, formerly the Semantic diffs tab, now on Settings → Reviews.
+// Power Up's form through the public SemanticDiffsTab export (the same parts
+// Settings → Reviews draws; ReviewSettingsPage.test.tsx covers the page).
 
 const hasDom = typeof document !== 'undefined';
 const KEY = 'tsk-never-shown-again';
@@ -46,7 +45,7 @@ async function mount() {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => root?.render(<ReviewSettingsPage controls={CLASSIC_REVIEW_SETTINGS_CONTROLS} opinionRoute={SEM_DIFF_OPINION_SETTINGS_ROUTE} />));
+  await act(async () => root?.render(<SemanticDiffsTab />));
   await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 }
 
@@ -101,7 +100,8 @@ describe('Settings › Reviews › Power Up', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     const token = host!.querySelector<HTMLInputElement>('input[aria-label="Workers AI token"]')!;
     expect(document.getElementById(token.getAttribute('aria-describedby')!)?.textContent).toBe('No credit left on this Clef account');
-    expect(host!.querySelector('form')!.className).toContain('w-[340px]');
+    const form = host!.querySelector('form')!;
+    expect(form.contains(token) && form.contains(host!.querySelector('input[aria-label="Cloudflare account ID"]'))).toBe(true);
   });
 
   test.skipIf(!hasDom)('env-configured systemone endpoint enables Power Up and hides key input and Remove', async () => {
