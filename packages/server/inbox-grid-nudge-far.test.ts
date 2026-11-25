@@ -82,7 +82,8 @@ describe("a nudge on another computer's thread", () => {
       expect((await nudge("grid-nudge-far-1")).status).toBe(200);
       expect(nudgesOnMini().length).toBe(1);
       const first = nudgesOnMini()[0]!;
-      expect([first.author.kind, first.body, first.to?.session]).toEqual(["person", words, "ses_tide"]);
+      // A reply to the agent's last message there, so it goes to that agent (ses_tide) as a typed reply would.
+      expect([first.author.kind, first.body, first.reply_to]).toEqual(["person", words, failing.id]);
       expect("nudge" in mini.store.agentThread(opened.thread_id)!.messages.at(-1)!).toBe(false);
       await waitFor("the nudge on Studio's Grid read", async () => (await gridRow(studio.port, opened.thread_id))?.grid_nudge?.last?.at === first.created_at, 20_000);
 
