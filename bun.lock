@@ -297,7 +297,7 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.33",
+      "version": "0.25.34",
       "dependencies": {
         "croner": "11.0.0",
       },

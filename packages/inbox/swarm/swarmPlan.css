@@ -6,11 +6,13 @@
   box-shadow: 0 0 0 1px color-mix(in oklch, oklch(0.62 0.13 285) 30%, var(--border)); }
 
 /* ── The band: the Swarm mark, "Swarm plan", the one line that work has started, the count of parts ── */
+/* Dark is the window's default; light is `:root.light` (ThemeProvider), or a light island's `.ib-lightscope.light`. */
 .ib-sp-band { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 2px; padding: 11px 16px;
+  background: linear-gradient(115deg, oklch(0.34 0.075 305), oklch(0.33 0.065 255) 38%, oklch(0.33 0.055 190) 68%, oklch(0.34 0.05 105));
+  color: oklch(0.91 0.06 290); }
+:root.light .ib-sp-band, .ib-lightscope.light .ib-sp-band {
   background: linear-gradient(115deg, oklch(0.95 0.045 305), oklch(0.955 0.04 255) 38%, oklch(0.965 0.045 185) 68%, oklch(0.97 0.055 100));
   color: oklch(0.32 0.15 285); }
-.dark .ib-sp-band { background: linear-gradient(115deg, oklch(0.34 0.075 305), oklch(0.33 0.065 255) 38%, oklch(0.33 0.055 190) 68%, oklch(0.34 0.05 105));
-  color: oklch(0.91 0.06 290); }
 .ib-swarm-plan[data-off] .ib-sp-band { filter: saturate(0.35); }
 .ib-sp-mark { display: inline-flex; align-self: center; }
 .ib-sp-title { font-size: var(--ib-fs-15, 15px); font-weight: 650; white-space: nowrap; }

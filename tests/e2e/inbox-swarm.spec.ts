@@ -440,6 +440,15 @@ test("the plan: Claude Code's proposal is its first reply in the thread, drawn a
   // No change controls in this piece: the card's only buttons are its fold (none at 3 parts) and the ghost thread.
   await expect(drawn.locator('button')).toHaveCount(1);
   await expect(drawn.locator('[data-swarm-plan-ghost]')).toBeVisible();
+  // The band follows the theme: its dark gradient is not the light one.
+  const bandIn = async (scheme: 'light' | 'dark') => {
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+    await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains('light'))).toBe(scheme === 'light');
+    return drawn.locator('.ib-sp-band').evaluate((el) => getComputedStyle(el).backgroundImage);
+  };
+  const [light, dark] = [await bandIn('light'), await bandIn('dark')];
+  expect(dark).not.toBe(light);
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await expect(page.locator('.ib-toast')).toHaveCount(0, { timeout: 20_000 });
   await cardShot(page, '08-plan-card-first-reply');
 });
