@@ -91,6 +91,7 @@
   "inbox-guides.spec.ts": 36,
   "inbox-heavy-thread-budget.spec.ts": 39,
   "inbox-held-notice-line.spec.ts": 6,
+  "inbox-html-artifacts.spec.ts": 80,
   "inbox-html-fit.spec.ts": 43,
   "inbox-html-links.spec.ts": 34,
   "inbox-html-phone.spec.ts": 87,

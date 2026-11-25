@@ -6,7 +6,8 @@
  * file. After the thread is read the Inbox keeps the video as a file of the
  * thread, so the header's count, the thread's Artifacts grid, the viewer,
  * a pin and the Artifacts wall all hold it. The html block stays a live page
- * in the text and is not an artifact (it is not a file). "Open" under the
+ * in the text and is an artifact of its own, not a file (its own spec:
+ * inbox-html-artifacts.spec.ts). "Open" under the
  * player in the body opens the viewer, where a comment takes its moment and a
  * frame is drawn on; Send carries both under "(video in your … message)".
  *
@@ -166,18 +167,19 @@ test('a video played in a message is an artifact: the count, the grid, the viewe
     const page = await context.newPage();
     await page.goto(`${url}#thread=${sent.thread_id}`);
     const button = page.locator('[data-artifacts-button]');
-    // The picture (captured at send), the video (captured once the thread is read) and the attached notes.
-    await expect(button).toHaveAttribute('aria-label', 'Artifacts, 3', { timeout: 20_000 });
+    // The picture (captured at send), the video (captured once the thread is read), the html block and the attached notes.
+    await expect(button).toHaveAttribute('aria-label', 'Artifacts, 4', { timeout: 20_000 });
     await expect(page.locator(`[data-message-id="${sent.message_id}"] video[data-inline-media="video"]`)).toBeVisible();
     await shot(page, '01-thread-with-count-desktop');
 
     await button.click();
     const tiles = page.locator('[data-artifacts-view] [data-artifact-tile]');
-    await expect(tiles).toHaveCount(3);
+    await expect(tiles).toHaveCount(4);
     await expect(tiles.nth(0)).toContainText('berths.png');
     await expect(tiles.nth(1)).toContainText('walkthrough.webm');
     await expect(tiles.nth(1)).toContainText('in text');
-    await expect(tiles.nth(2)).toContainText('notes.md');
+    await expect(tiles.nth(2)).toContainText('HTML block');
+    await expect(tiles.nth(3)).toContainText('notes.md');
     await shot(page, '02-thread-artifacts-grid-desktop');
 
     await tiles.nth(1).click();
@@ -197,7 +199,7 @@ test('a video played in a message is an artifact: the count, the grid, the viewe
 
     await page.goto(`${url}#artifacts`);
     const wall = page.locator('[data-wall-artifact]');
-    await expect(wall).toHaveCount(4, { timeout: 20_000 });
+    await expect(wall).toHaveCount(5, { timeout: 20_000 });
     await expect(wall.filter({ hasText: 'walkthrough.webm' })).toHaveCount(1);
     await shot(page, '05-artifacts-wall-desktop');
 

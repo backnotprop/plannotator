@@ -38,7 +38,7 @@ import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, pa
 import { PrototypeWindow, openingOption, type PrototypeOption } from './PrototypeWindow';
 import { prototypeNames, questionPrototypePages } from '../prototypes';
 import { artifactKey, artifactOfFile, newestViewableFile, openArtifactKey, threadArtifacts } from '../artifacts';
-import { ArtifactsView } from './ArtifactsView';
+import { ArtifactsView, HtmlArtifactOpen } from './ArtifactsView';
 import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
 import { threadLinks } from '../threadLinks';
 import { useDefaultRefHost } from '../defaultRefHost';
@@ -5282,12 +5282,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
         <SendingReply sends={sendsDrawn} held={outbox} machine={machine} />
         {showNew && !phone && newPill}
-        <div className="ib-sr" aria-live="polite" data-fold-live="">
-          {announced}
-        </div>
+        <div className="ib-sr" aria-live="polite" data-fold-live="">{announced}</div>
         {/* The room a step of the middle fold borrows (roomRef, shrinkRoom). */}
         <div className="ib-fold-room" ref={roomRef} aria-hidden="true" data-fold-room="" />
       </div>
+      {/* An html block opened big from the Artifacts grid or wall (HtmlArtifactOpen.tsx), with the message's own comments. */}
+      <HtmlArtifactOpen threadId={thread.thread_id} messages={thread.messages} commentsOf={(m) => ((m.author.kind === 'agent' || !isInboxNote(m)) && liveMessage(m) ? (messageComments.get(m.id) ?? NO_ANNOTATIONS) : null)} acts={acts} />
       {artifactsOn && !phone && <ArtifactsBar onBack={() => onArtifacts?.(false)}>{viewSwitch}</ArtifactsBar>}
       {linksOn && (
         <div className="ib-pbody ib-artbody">

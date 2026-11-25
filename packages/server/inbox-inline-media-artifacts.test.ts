@@ -18,12 +18,13 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxThreadArtifactRefs } from "@plannotator/core/inbox-artifact-pins";
+import { inboxHtmlArtifactKey, inboxHtmlBlockHash } from "@plannotator/core/inbox-html-blocks";
 import { inboxId, type InboxAttachment } from "@plannotator/core/inbox-types";
 import { inboxBlobPath, inboxBlobsDir, writeBlob } from "@plannotator/shared/inbox/attachments";
 import { captureInboxInlineImages } from "@plannotator/shared/inbox/inline-images";
 import { captureInboxInlineMedia } from "@plannotator/shared/inbox/inline-media-capture";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxWallEntries } from "./inbox-artifact-pins";
+import { inboxArtifactsPage, inboxWallEntries } from "./inbox-artifact-pins";
 import { createInboxImageCapture } from "./inbox-message-images";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
@@ -91,10 +92,12 @@ test("a read captures the text's sound and video as files of the thread: artifac
   // The Inbox's own copy: the sent version opens even once the file is gone.
   expect(readFileSync(inboxBlobPath(store.dir, film.sent_sha256))).toEqual(mp4());
 
-  // The thread's artifacts: the picture, the film (the attached copy folded into it) and the recording; the html block is not a file.
+  // The thread's artifacts: the picture, the film (the attached copy folded into it) and the recording, then the html
+  // block (not a file: no record, its key its message's and its source's).
   const refs = inboxThreadArtifactRefs([kept]);
-  expect(refs.map((ref) => ref.key)).toEqual(kept.inline_images!.map((record) => record.id));
+  expect(refs.map((ref) => ref.key)).toEqual([...kept.inline_images!.map((record) => record.id), inboxHtmlArtifactKey(kept.id, inboxHtmlBlockHash("<p>Tide table</p>"))]);
   expect(refs.every((ref) => ref.inline)).toBe(true);
+  expect(refs.at(-1)!.attachment).toBeNull();
   capture.stop();
 });
 
@@ -254,4 +257,65 @@ test("a question's card never takes a film the message plays as one of its pictu
   const decision = store.openDecisions().find((d) => d.message.id === message.id);
   expect(decision).toBeDefined();
   expect(decision!.pictures.inline.map((picture) => picture.ref)).toEqual(["berth.png"]);
+});
+
+const TIDES = "<h2>Harbor · tide table</h2>\n<table><tr><td>06:12</td><td>12:30</td></tr></table>";
+const BERTHS = '<div id="chart"></div>\n<script src="https://cdn.example/chart.js"></script>';
+const TWO_BLOCKS = ["The berth plan:", "", "![Berth plan](berth.png)", "", "![Walkthrough](walkthrough.mp4)", "", "```html", TIDES, "```", "", "```html", BERTHS, "```"].join("\n");
+
+test("an agent's html blocks are artifacts beside its picture and film: in the text, their own keys, the Wall's words", async () => {
+  const { store, repo } = world();
+  const message = store.sendMessage({ project_id: repo.id, author: agent, body: TWO_BLOCKS }).message;
+  const capture = createInboxImageCapture(store);
+  capture.schedule(message.thread_id);
+  await capture.idle();
+  capture.stop();
+  const kept = store.message(message.id)!;
+  const tides = inboxHtmlArtifactKey(kept.id, inboxHtmlBlockHash(TIDES));
+  const berths = inboxHtmlArtifactKey(kept.id, inboxHtmlBlockHash(BERTHS));
+  const refs = store.threadArtifactRefs(message.thread_id);
+  expect(refs.map((ref) => ref.key)).toEqual([...kept.inline_images!.map((record) => record.id), tides, berths]);
+  expect(refs.map((ref) => ref.attachment?.kind ?? (ref.html ? "html" : null))).toEqual(["image", "video", "html", "html"]);
+  expect(refs.every((ref) => ref.inline)).toBe(true);
+  // A second read: the same keys.
+  expect(store.threadArtifactRefs(message.thread_id).map((ref) => ref.key)).toEqual(refs.map((ref) => ref.key));
+
+  // The Wall lists them as pages, with the page's heading (or none) and size; the page itself never travels there.
+  const page = await inboxArtifactsPage(store, new URL("http://127.0.0.1/api/inbox/artifacts"));
+  const rows = page.artifacts.filter((row) => row.key.startsWith("html:"));
+  expect(rows.map((row) => [row.key, row.type, row.html, row.attachment])).toEqual([
+    [tides, "pages", { title: "Harbor · tide table", size: Buffer.byteLength(TIDES) }, null],
+    [berths, "pages", { title: null, size: Buffer.byteLength(BERTHS) }, null],
+  ]);
+  expect(page.counts.types.pages).toBe(2);
+  expect(JSON.stringify(rows)).not.toContain("chart.js");
+
+  // The person's own text (it quotes what it answers) holds no artifact.
+  const reply = store.sendMessage({ project_id: repo.id, author: { kind: "person" }, body: "```html\n<p>pasted</p>\n```", reply_to: message.id }).message;
+  expect(inboxThreadArtifactRefs([store.message(reply.id)!])).toEqual([]);
+});
+
+test("a pin on an html block is taken, kept across a restart and a reread, and a block that is not there is refused", async () => {
+  const { dataDir, now, store, repo } = world();
+  const message = store.sendMessage({ project_id: repo.id, author: agent, body: TWO_BLOCKS }).message;
+  const berths = inboxHtmlArtifactKey(message.id, inboxHtmlBlockHash(BERTHS));
+  store.setArtifactPinned(message.thread_id, berths, true);
+  // A read that captures the film adds records to the message: the block's pin stays.
+  const capture = createInboxImageCapture(store);
+  capture.schedule(message.thread_id);
+  await capture.idle();
+  capture.stop();
+  expect(store.threadArtifactPins(message.thread_id).map((pin) => pin.key)).toEqual([berths]);
+  const reopened = InboxStore.open(dataDir, { now });
+  expect(reopened.threadArtifactPins(message.thread_id).map((pin) => pin.key)).toEqual([berths]);
+  expect(inboxWallEntries(reopened, false).filter((entry) => entry.pinnedAt !== null).map((entry) => entry.ref.key)).toEqual([berths]);
+  let code = "ok";
+  try {
+    reopened.setArtifactPinned(message.thread_id, inboxHtmlArtifactKey(message.id, inboxHtmlBlockHash("<p>never sent</p>")), true);
+  } catch (error) {
+    code = (error as { code?: string }).code ?? "thrown";
+  }
+  expect(code).toBe("artifact_not_found");
+  reopened.setArtifactPinned(message.thread_id, berths, false);
+  expect(reopened.artifactPins()).toEqual([]);
 });
