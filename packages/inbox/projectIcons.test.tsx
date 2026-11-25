@@ -1,12 +1,13 @@
 /**
  * A project's picture from the icon dialog (components/ProjectRow.tsx, ProjectMarkPicker.tsx, agents/AgentIconDialog.tsx
- * `ProjectIconDialog`, agents/iconTarget.ts, agents/AnimateIt.tsx), through the Inbox's real routes (icon sets,
- * uploaded pictures, project pictures, icon requests) on temp folders behind a fetch stand-in: no Inbox is started.
+ * `ProjectIconDialog`, agents/iconTarget.ts, agents/DrawIt.tsx), through the Inbox's real routes (icon sets, uploaded
+ * pictures, project pictures, icon requests) on temp folders behind a fetch stand-in: no Inbox is started.
  *
  * What this catches: the project mark opening the project instead of the picker; Use this icon keeping a face, another
  * icon's bytes, or a one-colour icon that vanishes on a dark sidebar; Set picture… opening a bare file picker; the
- * picker offering no way back to the letters once a picture is set; Animate it asking about another project, sending
- * the message itself, or not naming the request; a linked machine's project kept on this computer;
+ * picker offering no way back to the letters once a picture is set; "Ask an agent to draw it" asking about another
+ * project, sending the message itself, not naming the request, or leaving out what the window knows of the project
+ * (its name, folder, origin and newest threads' titles, newest first, each one line and cut short); a linked machine's project kept on this computer;
  * an older machine's refusal shown as a bare error.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -227,8 +228,17 @@ test.if(hasDom)("the project's mark opens the picker; a set's icon becomes the p
   expect(removed).toEqual(['removed']);
 });
 
-test.if(hasDom)('Set picture… opens the dialog on Your own…; Animate it on a set icon asks about this project and opens New message to pick an agent', async () => {
+test.if(hasDom)('Set picture… opens the dialog on Your own…; Ask an agent to draw it asks about this project and opens New message to pick an agent, filled in with what the window knows', async () => {
   const { here } = inboxes();
+  const row = (id: string, subject: string, at: string, project = { id: HERE, name: 'billing' }) => ({ thread_id: id, project, thread_name: null, subject, last_at: at, author: { kind: 'agent', session: 'ses_x' } });
+  known.learnProjects(
+    [{ ...here.folder, repo: 'acme/billing' }],
+    [
+      row('thr_1', 'Retry the failed invoices', '2026-11-20T10:00:00.000Z'),
+      row('thr_2', `Reconcile the ledger\nwith the bank ${'x'.repeat(120)}`, '2026-11-24T10:00:00.000Z'),
+      row('thr_3', 'Another project thread', '2026-11-25T10:00:00.000Z', { id: THERE, name: 'infra' }),
+    ],
+  );
   const host = mount(here.folder);
   act(() => host.querySelector<HTMLButtonElement>(`[data-pmore="${HERE}"]`)!.click());
   await settle();
@@ -236,27 +246,31 @@ test.if(hasDom)('Set picture… opens the dialog on Your own…; Animate it on a
   await settle();
   const dialog = document.querySelector<HTMLElement>('dialog[data-dialog="agent-icon"][open]')!;
   expect(dialog.querySelector('.ib-agi-drop')).not.toBeNull();
-  act(() => dialog.querySelector<HTMLButtonElement>('[data-agi-place="sets"]')!.click());
-  await settle();
-  act(() => dialog.querySelector<HTMLButtonElement>('.am-sets-tab[data-set="dcss"]')!.click());
-  await settle();
-  act(() => dialog.querySelector<HTMLButtonElement>('.am-sets-i[data-set-icon="orc"]')!.click());
-  await settle();
-  act(() => dialog.querySelector<HTMLButtonElement>('[data-animate-go]')!.click());
+  act(() => dialog.querySelector<HTMLButtonElement>('[data-draw-go]')!.click());
   await settle();
   expect(document.querySelector('dialog[data-dialog="agent-icon"]')).toBeNull();
   expect(opened).toHaveLength(1);
   const message = opened[0]!;
   const request = /--request (ia_[0-9a-f]{24})/.exec(message.body)?.[1];
   expect(request).toBeDefined();
-  expect(message.body).toContain('one of my projects');
-  expect(message.files).toHaveLength(1);
+  expect(message.body).toContain('"billing"');
+  expect(message.body).toContain('/work/billing');
+  expect(message.body).toContain('acme/billing');
+  // This project's threads only, newest first, each on one line and cut short.
+  const ledger = message.body.indexOf('"Reconcile the ledger with the bank');
+  expect(ledger).toBeGreaterThan(-1);
+  expect(ledger).toBeLessThan(message.body.indexOf('"Retry the failed invoices"'));
+  expect(message.body).not.toContain('Another project thread');
+  expect(message.body).not.toContain('x'.repeat(100));
+  // The tile the icon is drawn on, and the hand-back with this request's id.
+  expect(message.body).toContain('<rect width="64" height="64" rx="14"/>');
+  expect(message.body).toContain(`plannotator inbox icon set <file.svg> --request ${request}`);
   expect(message.to).toBe('pick');
   // The request names this project: its hand-back becomes the picture.
-  const animated = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#0f766e"/></svg>';
-  const answer = (await (await fetch('/api/inbox/icon-animate', { method: 'POST', body: JSON.stringify({ request, picture: `data:image/svg+xml;base64,${btoa(animated)}` }) })).json()) as { applied: boolean; target: string };
+  const drawn = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#0f766e"/></svg>';
+  const answer = (await (await fetch('/api/inbox/icon-animate', { method: 'POST', body: JSON.stringify({ request, picture: `data:image/svg+xml;base64,${btoa(drawn)}` }) })).json()) as { applied: boolean; target: string };
   expect(answer).toMatchObject({ applied: true, target: 'project' });
-  expect(await here.kept()).toBe(animated);
+  expect(await here.kept()).toBe(drawn);
 });
 
 test.if(hasDom)("a linked machine's project is kept on that machine; an older machine is named as needing an update", async () => {

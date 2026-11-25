@@ -236,7 +236,7 @@ export function ProjectRow(props: ProjectRowProps) {
     </>
   );
   // Outside the row and its menu: a press or a long press in the dialog is never the row's.
-  const dialog = iconDialog && <ProjectIconDialog place={iconDialog} project={project.id} name={project.name} onClose={() => setIconDialog(null)} />;
+  const dialog = iconDialog && <ProjectIconDialog place={iconDialog} project={project.id} name={project.name} folder={project.root || null} onClose={() => setIconDialog(null)} />;
   if (props.phone)
     return (
       <>

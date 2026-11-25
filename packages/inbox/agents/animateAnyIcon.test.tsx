@@ -5,7 +5,9 @@
  *
  * What this catches: "Animate it" missing from the page of an uploaded picture or a set's icon, or shown in a grid; a
  * press on a previewed icon that asks before keeping it, or keeps another; a press that asks about another icon than
- * the one shown, or attaches another picture; "Use the original" not putting a set's icon back.
+ * the one shown, or attaches another picture; "Use the original" not putting a set's icon back. "Ask an agent to draw
+ * it" (DrawIt.tsx) missing from Your own…, asking about another agent, leaving out its project and threads, or
+ * changing the icon before the hand-back.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -231,4 +233,34 @@ test.if(hasDom)('after a hand-back for a set icon, "Use the original" puts that 
   act(() => strip.querySelector<HTMLButtonElement>('[data-animate-undo]')!.click());
   await settle();
   expect(faces.agentFaceOf('ses_a')).toBe('set:dcss/orc');
+});
+
+test.if(hasDom)('"Ask an agent to draw it" under Your own…: asks about this agent, names it, and opens New message to pick an agent; its hand-back is the agent’s icon', async () => {
+  inbox();
+  const known = await import('../projectPictures');
+  known.resetKnownProjectsForTests();
+  known.learnProjects(
+    [{ id: 'prj_costs', name: 'aws/costs', root: '/work/aws/costs' }],
+    [{ thread_id: 'thr_c', project: { id: 'prj_costs', name: 'aws/costs' }, thread_name: null, subject: 'Cut the RDS reserved spend', last_at: '2026-11-24T10:00:00.000Z', author: { kind: 'agent', session: 'ses_a' } }],
+  );
+  const host = mount();
+  const dialog = await openDialog(host, 'own');
+  act(() => dialog.querySelector<HTMLButtonElement>('[data-draw-go]')!.click());
+  await settle();
+  expect(document.querySelector('dialog[data-dialog="agent-icon"]')).toBeNull();
+  expect(opened).toHaveLength(1);
+  expect(opened[0]!.subject).toBe('Draw an icon');
+  expect(opened[0]!.body).toContain('"Invoice retries"');
+  // Its project and its own threads, so the person usually just presses Send.
+  expect(opened[0]!.body).toContain('"aws/costs"');
+  expect(opened[0]!.body).toContain('/work/aws/costs');
+  expect(opened[0]!.body).toContain('"Cut the RDS reserved spend"');
+  expect((opened[0] as { to?: unknown }).to).toBe('pick');
+  const request = /--request (ia_[0-9a-f]{24})/.exec(opened[0]!.body)![1];
+  expect(opened[0]!.body).toContain('<rect width="64" height="64" rx="14"/>');
+  // Nothing changes until the agent hands its drawing back.
+  expect(faces.agentFaceOf('ses_a')).toBe('agent');
+  const drawn = SVG('#7c3aed');
+  const answer = (await (await fetch('/api/inbox/icon-animate', { method: 'POST', body: JSON.stringify({ request, picture: `data:image/svg+xml;base64,${btoa(drawn)}` }) })).json()) as { applied: boolean; target: string };
+  expect(answer).toMatchObject({ applied: true, target: 'agent' });
 });

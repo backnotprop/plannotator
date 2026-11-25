@@ -8,7 +8,7 @@
  */
 import { InboxApiError } from '../apiError';
 import { inboxApi } from '../api';
-import { askIconAnimate } from '../data/iconApi';
+import { askIconAnimate, askIconDraw } from '../data/iconApi';
 import { linkedMachineFacts, machineOf } from '../inboxUrl';
 import { learnProjects, pictureFromFile } from '../projectPictures';
 import { errorText } from '../toastError';
@@ -17,7 +17,8 @@ import { isOwnFace, type AgentFace } from './faceChoices';
 import { isSetFace, setFaceParts, setIconSrc, setLookOf } from './iconSets';
 import { ownIconSrc } from './ownIcons';
 
-export type IconTarget = { kind: 'agent'; agent: AgentFaceRef } | { kind: 'project'; project: string; name: string };
+/** `folder`: the project's folder, named to the agent asked to draw its picture. */
+export type IconTarget = { kind: 'agent'; agent: AgentFaceRef } | { kind: 'project'; project: string; name: string; folder: string | null };
 
 /** A project shows no face: the dialog's parts read this as "nothing picked". */
 export const PROJECT_NO_FACE: AgentFace = 'agent';
@@ -77,6 +78,13 @@ function agentOf(agent: AgentFaceRef): { agent: string; sessions: string[] } {
 /** Animate it: a request about `icon` for the target. Resolves to its id. */
 export async function askAnimate(target: IconTarget, icon: string): Promise<string> {
   const answer = await askIconAnimate(target.kind === 'agent' ? { icon, ...agentOf(target.agent) } : { icon, project: target.project });
+  if (typeof answer.request !== 'string') throw new Error('no request');
+  return answer.request;
+}
+
+/** Ask an agent to draw it: a request for the target. Resolves to its id. */
+export async function askDraw(target: IconTarget): Promise<string> {
+  const answer = await askIconDraw(target.kind === 'agent' ? agentOf(target.agent) : { project: target.project });
   if (typeof answer.request !== 'string') throw new Error('no request');
   return answer.request;
 }

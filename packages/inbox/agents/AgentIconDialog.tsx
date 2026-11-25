@@ -3,6 +3,7 @@ import { HostMark, Icon } from '../icons';
 import { Modal } from '../components/Updates';
 import { ProjectMark } from '../letterMarks';
 import type { AgentFaceRef } from './agentFaces';
+import { DrawIt } from './DrawIt';
 import { isOwnFace, type AgentFace } from './faceChoices';
 import { OWN_LABEL, SETS_LABEL } from './FaceFan';
 import { OwnIconsBody } from './OwnIconsBody';
@@ -21,7 +22,7 @@ export type AgentIconPlace = 'own' | 'sets';
  * "Use this icon" or "Animate it". Opened on the place of the icon the agent shows, it starts on that icon's page. One
  * size in both places, so a switch moves no edge; on a phone it is a full-height sheet. No shortcut: its keys are the
  * dialog's own. `shared`: a linked machine's agent (AgentMark.tsx): Sets alone, only its built-in sets, no switch,
- * opened on the grid, and its pages without "Animate it".
+ * opened on the grid, and its pages without "Animate it". "Your own…" ends with "Ask an agent to draw it" (DrawIt.tsx).
  */
 export function AgentIconDialog({ place, agent, host, name, face, shared = false, onClose }: { place: AgentIconPlace; agent: AgentFaceRef; host: string | null; name: string; face: AgentFace; shared?: boolean; onClose: () => void }) {
   return <IconDialog place={place} target={{ kind: 'agent', agent }} host={host} name={name} face={face} shared={shared} onClose={onClose} />;
@@ -32,8 +33,8 @@ export function AgentIconDialog({ place, agent, host, name, face, shared = false
  * menu's Set picture…, on the grid of either place. Use this icon keeps the icon's bytes as the project's picture
  * (iconTarget.ts), on the Inbox that has the project, a linked machine's too.
  */
-export function ProjectIconDialog({ place, project, name, onClose }: { place: AgentIconPlace; project: string; name: string; onClose: () => void }) {
-  return <IconDialog place={place} target={{ kind: 'project', project, name }} host={null} name={name} face={PROJECT_NO_FACE} onClose={onClose} />;
+export function ProjectIconDialog({ place, project, name, folder, onClose }: { place: AgentIconPlace; project: string; name: string; folder: string | null; onClose: () => void }) {
+  return <IconDialog place={place} target={{ kind: 'project', project, name, folder }} host={null} name={name} face={PROJECT_NO_FACE} onClose={onClose} />;
 }
 
 function IconDialog({ place, target, host, name, face, shared = false, onClose }: { place: AgentIconPlace; target: IconTarget; host: string | null; name: string; face: AgentFace; shared?: boolean; onClose: () => void }) {
@@ -95,7 +96,7 @@ function IconDialog({ place, target, host, name, face, shared = false, onClose }
         {page && (preview || inUse) ? (
           <SelectedIcon target={target} host={host} name={name} face={preview ?? face} previewing={!!preview} shared={shared} onBack={toGrid} onDone={onClose} />
         ) : on === 'own' ? (
-          <OwnIconsBody face={face} onPick={onPick} />
+          <OwnIconsBody face={face} onPick={onPick} draw={<DrawIt target={target} name={name} onDone={onClose} />} />
         ) : (
           <SetsBody face={face} builtInOnly={shared} onPick={onPick} />
         )}

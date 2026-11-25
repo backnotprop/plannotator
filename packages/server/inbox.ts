@@ -2045,7 +2045,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const repo = repos.peek(project.root);
       // Its tags, additive and only when there are any.
       const tags = tagsOf?.(project.id) ?? [];
-      return { ...project, ...(tags.length > 0 ? { tags } : {}), ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host, ...(gitlabRemote(repo.host) ? { repo_forge: "gitlab" as const } : {}) } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
+      return { ...project, ...(tags.length > 0 ? { tags } : {}), ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host, repo: repo.display, ...(gitlabRemote(repo.host) ? { repo_forge: "gitlab" as const } : {}) } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 
