@@ -136,7 +136,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   useEffect(() => {
     if (loaded.current || draft.loadedFor !== threadId) return;
     loaded.current = true;
-    const body = draft.conflict ?? draft.draft?.body ?? '';
+    // As the thread's box: a conflict's words, else words whose save did not land, else the draft.
+    const body = draft.conflict ?? draft.unsaved ?? draft.draft?.body ?? '';
     setText(body);
     textRef.current = body;
     const kept = draft.draft?.files ?? [];

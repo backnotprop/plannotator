@@ -178,12 +178,12 @@ function boundedString(value: unknown, field: string, max = MAX_TEXT_LENGTH): st
   return value.slice(0, max);
 }
 
-function boundedRaw(value: unknown): string {
+function boundedRaw(value: unknown, maxLength: number): string {
   if (typeof value !== "string") {
     throw new Error("CallDiff worker response is missing its raw diff.");
   }
-  if (value.length > MAX_RAW_LENGTH) {
-    throw new Error("CallDiff raw diff exceeded Plannotator's 1 MB limit.");
+  if (value.length > maxLength) {
+    throw new Error(`CallDiff raw diff exceeded Plannotator's ${maxLength / (1024 * 1024)} MB limit.`);
   }
   return value;
 }
@@ -207,7 +207,10 @@ function boundedRelativeFile(value: unknown): string | undefined {
 }
 
 /** Parse and bound the untrusted JSON emitted by the isolated Node worker. */
-export function parseCallDiffWorkerResult(value: unknown): ParsedCallDiffWorkerResult {
+export function parseCallDiffWorkerResult(
+  value: unknown,
+  { maxRawLength = MAX_RAW_LENGTH, maxNodes = MAX_NODES }: { maxRawLength?: number; maxNodes?: number } = {},
+): ParsedCallDiffWorkerResult {
   if (!isRecord(value) || value.protocol !== 1 || value.ok !== true) {
     const message = isRecord(value) && typeof value.message === "string"
       ? value.message.slice(0, MAX_TEXT_LENGTH)
@@ -230,7 +233,7 @@ export function parseCallDiffWorkerResult(value: unknown): ParsedCallDiffWorkerR
 
   let nodeCount = 0;
   const parseNode = (candidate: unknown, depth: number): CallFlowNode => {
-    if (!isRecord(candidate) || depth > MAX_TREE_DEPTH || ++nodeCount > MAX_NODES) {
+    if (!isRecord(candidate) || depth > MAX_TREE_DEPTH || ++nodeCount > maxNodes) {
       throw new Error("CallDiff result exceeded Plannotator's tree limits.");
     }
     const status = candidate.status;
@@ -259,14 +262,14 @@ export function parseCallDiffWorkerResult(value: unknown): ParsedCallDiffWorkerR
     };
   };
 
-  const raw = boundedRaw(value.result.ascii);
+  const raw = boundedRaw(value.result.ascii, maxRawLength);
   const trees = boundedTreeCandidates.map((candidate): CallFlowTree => {
     if (!isRecord(candidate)) throw new Error("CallDiff worker returned an invalid tree.");
     const entry = boundedString(candidate.entry, "tree entry");
     const tree = parseNode(candidate.tree, 0);
     const treeRaw = typeof candidate.ascii === "string"
       && candidate.ascii.length > 0
-      && candidate.ascii.length <= MAX_RAW_LENGTH
+      && candidate.ascii.length <= maxRawLength
         ? candidate.ascii
         : undefined;
     const rawOffset = treeRaw ? raw.indexOf(treeRaw) : -1;

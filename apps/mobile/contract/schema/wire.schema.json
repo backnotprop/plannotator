@@ -1411,6 +1411,9 @@
             }
           ]
         },
+        "standalone": {
+          "type": "boolean"
+        },
         "made_read": {
           "type": "boolean"
         },
@@ -1699,6 +1702,9 @@
           "type": "string"
         },
         "session": {
+          "type": "string"
+        },
+        "machine": {
           "type": "string"
         }
       },
@@ -2448,6 +2454,12 @@
                   "type": "null"
                 }
               ]
+            },
+            "machine": {
+              "type": "string"
+            },
+            "machine_name": {
+              "type": "string"
             }
           },
           "required": [
@@ -3878,6 +3890,53 @@
         "pulls": {
           "$ref": "#/$defs/InboxThreadPullsSummary"
         },
+        "grid_seen": {
+          "type": "object",
+          "properties": {
+            "through": {
+              "type": "number"
+            },
+            "at": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "through",
+            "at"
+          ],
+          "additionalProperties": true
+        },
+        "steps_progress": {
+          "type": "object",
+          "properties": {
+            "done": {
+              "type": "number"
+            },
+            "total": {
+              "type": "integer"
+            },
+            "doing": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "done",
+            "total",
+            "doing",
+            "at"
+          ],
+          "additionalProperties": true
+        },
         "hide_pulls": {
           "type": "array",
           "items": {
@@ -4005,6 +4064,10 @@
               "type": "null"
             }
           ]
+        },
+        "scheduled_running": {
+          "type": "boolean",
+          "const": true
         },
         "combining": {
           "type": "boolean",
@@ -4406,6 +4469,27 @@
           "items": {
             "type": "string"
           }
+        },
+        "ship_note": {
+          "type": "object",
+          "properties": {
+            "ship": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "stop",
+                "watch"
+              ],
+              "x-open": true
+            }
+          },
+          "required": [
+            "ship",
+            "kind"
+          ],
+          "additionalProperties": true
         },
         "moved_note": {
           "anyOf": [
@@ -5021,6 +5105,9 @@
               "type": "null"
             }
           ]
+        },
+        "skill_reaction": {
+          "$ref": "#/$defs/InboxSkillReaction"
         }
       },
       "required": [
@@ -5778,6 +5865,9 @@
           "type": "string"
         },
         "label": {
+          "type": "string"
+        },
+        "skill": {
           "type": "string"
         }
       },
@@ -6983,6 +7073,23 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
+    "InboxSkillReaction": {
+      "type": "object",
+      "properties": {
+        "emoji": {
+          "type": "string"
+        },
+        "skill": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "emoji",
+        "skill"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
     "InboxSupersededBy": {
       "type": "object",
       "properties": {
@@ -7106,6 +7213,9 @@
         },
         "handed_away": {
           "type": "boolean"
+        },
+        "machine": {
+          "type": "string"
         }
       },
       "required": [
@@ -7358,11 +7468,83 @@
             "state"
           ],
           "additionalProperties": true
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxThreadPullsSummaryItem"
+          }
         }
       },
       "required": [
         "count",
         "headline"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-thread-pulls.ts"
+    },
+    "InboxThreadPullsSummaryItem": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/InboxThreadPullState"
+        },
+        "added_at": {
+          "type": "string"
+        },
+        "read_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checks": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "failing",
+                "passing",
+                "running"
+              ],
+              "x-open": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "approved",
+                "changes_requested",
+                "review_required"
+              ],
+              "x-open": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "state",
+        "added_at",
+        "read_at",
+        "checks",
+        "review"
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-thread-pulls.ts"
@@ -7480,6 +7662,169 @@
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
+    },
+    "LinkThroughPairView": {
+      "type": "object",
+      "properties": {
+        "a": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "additionalProperties": true
+        },
+        "c": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "additionalProperties": true
+        },
+        "status": {
+          "$ref": "#/$defs/LinkThroughStatus"
+        },
+        "waiting_for": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "why": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "a",
+        "c",
+        "status",
+        "waiting_for",
+        "why"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-link-through.ts"
+    },
+    "LinkThroughRowView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "via": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "additionalProperties": true
+        },
+        "status": {
+          "$ref": "#/$defs/LinkThroughStatus"
+        },
+        "waiting_for": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "why": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "via",
+        "status",
+        "waiting_for",
+        "why"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-link-through.ts"
+    },
+    "LinkThroughStatus": {
+      "type": "string",
+      "enum": [
+        "failed",
+        "idle",
+        "linking",
+        "waiting"
+      ],
+      "x-open": true,
+      "x-source": "packages/core/inbox-link-through.ts"
+    },
+    "LinkThroughView": {
+      "type": "object",
+      "properties": {
+        "pairs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LinkThroughPairView"
+          }
+        },
+        "through": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LinkThroughRowView"
+          }
+        }
+      },
+      "required": [
+        "pairs",
+        "through"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-link-through.ts"
     },
     "ListModel": {
       "type": "object",
@@ -7860,6 +8205,12 @@
               "type": "null"
             }
           ]
+        },
+        "clock_ms": {
+          "type": "integer"
+        },
+        "link_through": {
+          "$ref": "#/$defs/LinkThroughView"
         }
       },
       "required": [

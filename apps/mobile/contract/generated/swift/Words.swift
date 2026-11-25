@@ -117,6 +117,8 @@ public enum Words {
   public static let hostOpenclaw = "OpenClaw"
   /// host.hermes: packages/core/inbox-types.ts INBOX_HOST_NAMES hermes
   public static let hostHermes = "Hermes Agent"
+  /// host.orca: packages/core/inbox-types.ts INBOX_HOST_NAMES orca
+  public static let hostOrca = "Orca"
   /// host.cloud: packages/core/inbox-types.ts INBOX_HOST_NAMES cloud
   public static let hostCloud = "Cloud agent"
   /// host.cloud-claude: packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-claude
@@ -178,6 +180,7 @@ public enum Words {
     "muse": hostMuse,
     "openclaw": hostOpenclaw,
     "hermes": hostHermes,
+    "orca": hostOrca,
     "cloud": hostCloud,
     "cloud-claude": hostCloudClaude,
     "cloud-grok": hostCloudGrok,

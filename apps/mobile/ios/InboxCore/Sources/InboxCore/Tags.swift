@@ -58,11 +58,17 @@ public enum TagRules {
   /// `TAG_UPDATE_WORDS`.
   public static let updateWords = "Update Plannotator to tag this session"
 
-  /// `agentName`: an MCP agent's own name, else its host's, else "An agent".
+  /// `agentName`: an MCP agent's own name, else its host's, else "An agent". An agent that named itself by its
+  /// host's id ("gemini") reads by its product's name ("Gemini CLI").
   public static func agentName(_ host: String?, _ name: String? = nil) -> String {
-    if let name, !name.isEmpty { return name }
-    if let host, !host.isEmpty { return Words.hosts[host] ?? host }
+    if let name, !name.isEmpty { return knownAgentLabel(name) ?? name }
+    if let host, !host.isEmpty { return Words.hosts[host] ?? knownAgentLabel(host) ?? host }
     return "An agent"
+  }
+
+  /// `knownAgentLabel`: the product name of a known agent id in any case ("gemini" → "Gemini CLI"), else nil.
+  static func knownAgentLabel(_ id: String) -> String? {
+    Words.agents[id.lowercased()]
   }
 
   // MARK: The mention grammar

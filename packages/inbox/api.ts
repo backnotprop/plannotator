@@ -16,8 +16,8 @@ import type { SystemModel } from '@plannotator/system';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
-import { createListReader, type ListReadAnswer } from './listRead';
-import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
+import { createListReader, listGridAsked, type ListReadAnswer } from './listRead';
+import { inboxUrl, isContested, localRoute, machineOf, rememberArtifactMachines, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -485,7 +485,7 @@ export function inboxAskOn(settings: Pick<SettingsModel, 'via'> | null | undefin
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
 export interface InboxExperimentalSettings {
-  decision_mode: { on: boolean; env: boolean | null };
+  decision_mode: { on: boolean; env: boolean | null }; /** Grid (approval "inbox-agent-grid"); absent from an older Inbox. */ grid?: { on: boolean; env: boolean | null };
 }
 
 /** One live agent session of a thread's project (New message, record 5.x). */
@@ -919,11 +919,11 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Plannotator-Load': pageLoad, ...(machine ? threadHeader(path) : {}), ...(zipped ? { 'Content-Encoding': 'gzip' } : {}) },
     body: zipped ?? text,
-    ...(init.keepalive && text.length <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
+    ...(init.keepalive && (zipped ? zipped.byteLength : new TextEncoder().encode(text).length) <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
   });
   if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
   if (machine && response.status === 202) {
-    const held = (await response.json().catch(() => ({}))) as { outbox?: OutboxView; machine?: MachineView | null };
+    const held = (await response.clone().json().catch(() => ({}))) as { outbox?: OutboxView; machine?: MachineView | null };
     if (held.outbox) {
       const entry = held.outbox;
       // Still on its way: held. A key sent before and already settled (replayed) says how it ended instead.
@@ -1222,7 +1222,7 @@ export function saveRecentSearch(input: { q: string } | { clear: true }): Promis
 
 /** The window's list reads (listRead.ts): `since` names the list it holds; empty asks for the whole list. */
 const listReader = createListReader<ListModel>((since) =>
-  get<ListReadAnswer<ListModel>>(inboxUrl(`/threads?archived=exclude&snoozed=exclude&machines=1&since=${encodeURIComponent(since)}`)),
+  get<ListReadAnswer<ListModel>>(inboxUrl(`/threads?archived=exclude&snoozed=exclude&machines=1${listGridAsked() ? '&grid=1' : ''}&since=${encodeURIComponent(since)}`)),
 );
 
 /** Tests only: the next list read is a whole one. */
@@ -1303,7 +1303,7 @@ export const inboxApi = {
   startTidy: (input: { sessions: readonly string[]; idempotency_key: string; project: string | null; surface: 'list' | 'board'; thread_ids?: readonly string[]; words?: string }, machine?: string | null) =>
     post<{ run: InboxTidyRun | null; asked: string[] }>(inboxUrl('/tidy', undefined, machine), { ...input, sessions: [...input.sessions], ...(input.thread_ids ? { thread_ids: [...input.thread_ids] } : {}) }),
   saveCookieHost: (on: boolean) => post<{ cookie_host: InboxCookieHost }>(inboxUrl('/settings'), { cookie_host: on }),
-  saveExperimental: (change: { decision_mode: boolean }) =>
+  saveExperimental: (change: { decision_mode?: boolean; grid?: boolean }) =>
     post<{ experimental: InboxExperimentalSettings }>(inboxUrl('/settings'), { experimental: change }),
   /** The Board on or off (Settings → Capabilities): agents get the card action from their next session. */
   saveBoard: (on: boolean) => post<{ board: { on: boolean } }>(inboxUrl('/settings'), { board: { on } }),
@@ -1482,14 +1482,14 @@ export const inboxApi = {
        */
       quote?: { of: string; words?: string; time?: string };
       /** The answer carries the thread as a read of it would (`thread_read`): the Send's last reply asks, and reads nothing after. */
-      with_thread?: boolean;
+      with_thread?: boolean; /** New thread from this message: no #tag read, no still-open line, no length noted. */ author_only?: boolean; /** A skill emoji pressed: drawn as one line (thread/skillReaction.ts). */ skill_reaction?: { emoji: string; skill: string };
     },
   ) =>
     // To another machine: the newest seq the person saw there rides along (rule 11), and a reply its Inbox has not
     // confirmed yet is held (`held`): the Send went into this Inbox's outbox, not into the thread.
     post<ReplyResult>(messageUrl(messageId, `/reply`), { ...input, ...seenThrough(messageId) }).then(
       (result) => {
-        noteReplySent(input.words);
+        if (input.author_only !== true) noteReplySent(input.words);
         // Only this Inbox's own thread, read as `thread` reads one; a linked machine's thread is read after, as before.
         const read = result.thread_read && !machineOf(messageId) && result.thread_read.thread?.thread_id ? threadModelOf(result.thread_read.thread.thread_id, result.thread_read) : undefined;
         const { thread_read: _read, ...rest } = result;
@@ -1874,8 +1874,8 @@ export const inboxApi = {
   },
   /** The person looked at Dropped: an agent's drops there are seen. */
   seeDrops: (ids: readonly string[], machine?: string | null) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen', undefined, machine), { cards: [...ids] }),
-  /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order. This machine's threads only. */
-  artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
+  /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order: this machine's, then each linked machine's (`machine`). */
+  artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins', 'machines=1')).then(rememberArtifactMachines),
   /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */
   agentFaces: () => get<unknown>(inboxUrl('/agent-faces')),
   /**
@@ -1898,16 +1898,16 @@ export const inboxApi = {
   /** "Get": download a fetchable set into this Inbox's data folder (a stopped one resumes). */
   getIconSet: (id: string) => post<{ set?: unknown }>(inboxUrl('/icon-sets'), { get: id }),
   /** Pin one artifact of a thread (its key: an attachment id, or `guide:<message id>`), or unpin it. */
-  setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins'), { thread_id: threadId, key, pinned }),
+  setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins', undefined, machineOf(threadId)), { thread_id: threadId, key, pinned }),
   /** The Artifacts wall: a page of every thread's artifacts, newest first. */
   artifacts: (query: { pinned?: boolean; type?: InboxArtifactType | null; archived?: boolean; cursor?: string | null; limit?: number }, signal?: AbortSignal) => {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ machines: '1' });
     if (query.pinned) params.set('pinned', '1');
     if (query.type) params.set('type', query.type);
     params.set('archived', query.archived ? 'include' : 'exclude');
     if (query.cursor) params.set('cursor', query.cursor);
     if (query.limit) params.set('limit', String(query.limit));
-    return get<InboxArtifactsPage & { serverSession: string }>(inboxUrl('/artifacts', params.toString()), signal);
+    return get<InboxArtifactsPage & { serverSession: string }>(inboxUrl('/artifacts', params.toString()), signal).then(rememberArtifactMachines);
   },
   /** Star or unstar, on the thread's own machine (approval "inbox-linked-marks"). */
   pin: (threadId: string, pinned: boolean) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(threadUrl(threadId, '/pin'), { pinned }),
