@@ -22,6 +22,7 @@ import {
   CALL_FLOW_LANGUAGES,
   getCallFlowLanguage,
   getCallFlowLanguageForPath,
+  getCallFlowPatchFiles,
   getCallFlowPatchLanguageUsage,
 } from "./call-flow-languages";
 import type { CallFlowLanguageDefinition, CallFlowLanguageId } from "./call-flow-languages";
@@ -69,6 +70,8 @@ const CORE_PRUNED_PACKAGES = [
 ] as const;
 
 const WORKER_TIMEOUT_MS = 45_000;
+// Estimate 15 ms per candidate path, leaving headroom for worker startup/output.
+const FULL_REPO_PATH_BUDGET = Math.floor(WORKER_TIMEOUT_MS * 0.75 / 15);
 const GIT_TIMEOUT_MS = 20_000;
 const DEFAULT_OUTPUT_MIB = 12;
 const MAX_PROCESS_OUTPUT_BYTES = DEFAULT_OUTPUT_MIB * 1024 * 1024;
@@ -1322,6 +1325,15 @@ async function gitRaw(cwd: string, args: readonly string[]): Promise<string> {
   return result.stdout;
 }
 
+export function selectCallFlowPaths(paths: readonly string[], rawPatch: string): { paths: readonly string[]; message?: string } {
+  if (paths.length <= FULL_REPO_PATH_BUDGET) return { paths };
+  const changed = new Set(getCallFlowPatchFiles(rawPatch));
+  return {
+    paths: paths.filter((path) => changed.has(path)),
+    message: `Call flow is limited to changed files: the ${paths.length}-file snapshots exceed the full-repository analysis budget. Cross-file callers outside the diff are not included.`,
+  };
+}
+
 async function snapshotPathsForLanguages(
   plan: SnapshotPlan,
   languageIds: ReadonlySet<CallFlowLanguageId>,
@@ -1374,7 +1386,14 @@ async function executeCallFlowAnalysis(
         diagnostics: [],
       };
     }
-    return await executeWorker(runtime, plan, paths, analyzedLanguageIds, signal);
+    const scope = selectCallFlowPaths(paths, input.rawPatch);
+    const result = await executeWorker(runtime, plan, scope.paths, analyzedLanguageIds, signal);
+    if (!scope.message) return result;
+    return {
+      ...result,
+      message: [scope.message, result.message].filter(Boolean).join(" "),
+      diagnostics: [...result.diagnostics, { level: "warning", message: scope.message }],
+    };
   } finally {
     plan?.cleanup();
   }
