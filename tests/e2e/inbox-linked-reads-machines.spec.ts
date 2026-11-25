@@ -229,9 +229,22 @@ function watch(on: Page): void {
     if (message.type() !== 'error') return;
     // A read of Laptop failing while the spec stopped it on purpose is the browser's network log, not the window's.
     if (laptopDown && /Failed to load resource/.test(message.text())) return;
-    errors.push(`console: ${message.text()}`);
+    // A failed load names its resource only in its location: kept, so a failure here says which read it was.
+    const at = message.location().url;
+    errors.push(`console: ${message.text()}${at ? ` (${at.replace(/^https?:\/\/[^/]+/, '')})` : ''}`);
   });
   on.on('request', (request) => requests.push(`${request.method()} ${new URL(request.url()).pathname}`));
+}
+
+/**
+ * Open `hash` (a thread of `thread`'s machine) in `on` as a person does from the list: the window is loaded and its
+ * list names the thread's machine first. A link opened cold reads the thread on this Inbox before that list lands (a
+ * 404, then the read on its machine: panes/paneReads.ts, proved in inbox-machines.spec.ts 2d), and Ask reads it too.
+ */
+async function openFromList(on: Page, thread: string, hash: string): Promise<void> {
+  if (!on.url().startsWith(studio.url)) await on.goto(studio.url);
+  await expect(on.locator(`[data-thread-id="${thread}"]`).first()).toBeAttached({ timeout: 20_000 });
+  await on.goto(`${studio.url}#${hash}`);
 }
 
 let far: Far;
@@ -279,7 +292,7 @@ test.afterAll(async () => {
 });
 
 test("1. Laptop's checklist on its thread in Studio's window, by Laptop's switch; it moves when Laptop's agent changes a step", async () => {
-  await page.goto(`${studio.url}#thread=${far.harbor.thread}`);
+  await openFromList(page, far.harbor.thread, `thread=${far.harbor.thread}`);
   const button = page.locator('[data-steps-button]');
   await expect(button).toBeVisible({ timeout: 20_000 });
   // A step in progress: the button's spinner and its count (the pie shows only when none is worked on).
@@ -448,7 +461,7 @@ test("6. A phone at 390: Laptop's checklist and its review, the same way", async
   try {
     const on = await phone.newPage();
     watch(on);
-    await on.goto(`${studio.url}#thread=${far.harbor.thread}`);
+    await openFromList(on, far.harbor.thread, `thread=${far.harbor.thread}`);
     await expect(on.locator('[data-steps-button] [data-steps-pie="2/3"]')).toBeVisible({ timeout: 20_000 });
     await shoot(on, '07-phone-steps');
     await on.goto(`${studio.url}#thread=${far.review.thread}&guide=${far.review.message}`);
@@ -475,7 +488,7 @@ test('7. An older peer: no checklist, arrows, picture preview or Viewed on its t
   const there = await threadsOn(old);
   await expect.poll(async () => JSON.stringify(await read(studio, '/api/inbox/threads?machines=1')).includes(there.review.thread), { timeout: 20_000 }).toBe(true);
   const asked = requests.length;
-  await page.goto(`${studio.url}#thread=${there.harbor.thread}`);
+  await openFromList(page, there.harbor.thread, `thread=${there.harbor.thread}`);
   await expect(page.getByText('Bob Tully asked for the tide sync.').first()).toBeVisible({ timeout: 20_000 });
   await page.waitForTimeout(1_500);
   await expect(page.locator('[data-steps-button]')).toHaveCount(0);
