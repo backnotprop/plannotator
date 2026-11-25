@@ -454,6 +454,7 @@ packages/review-editor/components/TokenHoverCard.test.tsx
 packages/review-editor/components/tokenHoverAffordance.test.tsx
 packages/review-editor/utils/stitchTokenIdentifier.test.ts
 packages/review-editor/utils/diffSelection.test.ts
+packages/review-editor/utils/diffSelectionForeignNode.test.ts
 packages/review-editor/hooks/useAutoViewed.test.tsx
 packages/review-editor/hooks/useHiddenViewedFiles.hook.test.tsx
 packages/review-editor/hooks/useReviewProgress.test.tsx
