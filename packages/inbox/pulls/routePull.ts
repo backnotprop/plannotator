@@ -67,7 +67,8 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
       .then((answer) => {
         if (controller.signal.aborted) return;
         if (answer.unreadable) unanswered(answer.pull, 'unread');
-        else setGot({ key, pull: answer.pull, as: 'read' });
+        // "None" never takes away a copy this page drew (what is open stays open); one it never had stays none.
+        else setGot((was) => ({ key, pull: answer.pull ?? (was?.key === key ? was.pull : null), as: 'read' }));
       })
       .catch(() => {
         if (!controller.signal.aborted) unanswered(null, 'failed');

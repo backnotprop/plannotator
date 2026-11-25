@@ -84,6 +84,8 @@ let serverPull: Record<string, InboxPull> = {};
 /** The forge does not answer the server's read of one PR (`unreadable`); `pullReads`: how many times the page asked. */
 let forgeQuiet = false;
 let pullReads = 0;
+/** The diff read fails too (the forge is down and no patch was read since the page opened). */
+let diffDown = false;
 /** This Inbox's ships (`GET /api/inbox/ships`): what the Reviews row's "Merged <time>" reads. */
 let ships: InboxShipView[] = [];
 
@@ -97,6 +99,7 @@ beforeEach(() => {
   serverPull = {};
   forgeQuiet = false;
   pullReads = 0;
+  diffDown = false;
   ships = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
@@ -105,6 +108,7 @@ beforeEach(() => {
     if (url.pathname.endsWith('/pulls/details')) return Response.json({ serverSession: 's', key: url.searchParams.get('key'), description: null, labels: [], reviewers: [], checks: [], comments: [] });
     if (url.pathname.endsWith('/pulls/diff')) {
       const key = url.searchParams.get('key')!;
+      if (diffDown) return Response.json({ error: 'gh could not read the diff.', code: 'pull_diff_failed' }, { status: 502 });
       const patch = 'diff --git a/src/retry.ts b/src/retry.ts\n--- a/src/retry.ts\n+++ b/src/retry.ts\n@@ -12 +12 @@\n-a\n+b\n';
       return Response.json({ serverSession: 's', key, scope: 'layer', base: 'main', head: 'y', patch, head_sha: SHA, state: forgeState[key] ?? 'open', merged_at: null });
     }
@@ -421,6 +425,56 @@ test.skipIf(!hasDom)('a page whose copy is the server’s open one asks again at
   await act(async () => read({ ...model }));
   await settle();
   expect(pullReads).toBe(asked);
+});
+
+test.skipIf(!hasDom)('opened while GitHub does not answer (an offline restart), then back online: the page stays and says merged', async () => {
+  // The Inbox restarted offline: its list names nothing, its kept copy is the page's, the diff cannot be read.
+  forgeQuiet = true;
+  diffDown = true;
+  serverPull[theirs.key] = { ...theirs, state: 'merged', checks: null };
+  const offline: InboxPullsAnswer = { ...base, pulls: [] };
+  function Page() {
+    const [shown, setShown] = useState(offline);
+    read = setShown;
+    return <PullReview model={shown} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />;
+  }
+  mount(<Page />);
+  await settle(20);
+  expect(!!$('[data-pull-review-unread]')).toBe(true);
+  expect(refState()).toBe('merged');
+  // Back online: the window's list reads again (signed in, the PR still gone from it), and a focus.
+  forgeQuiet = false;
+  diffDown = false;
+  await act(async () => read({ ...base, pulls: base.pulls.filter((p) => p.key !== theirs.key) }));
+  await fire('focus');
+  await settle(20);
+  expect(!!$('[data-pull-review-unread]')).toBe(false);
+  expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
+  expect(refState()).toBe('merged');
+});
+
+test.skipIf(!hasDom)('a page drawn from the server’s copy stays when a later ask answers none (a PR never drawn keeps today’s words: above)', async () => {
+  serverPull[theirs.key] = { ...theirs, state: 'merged', checks: null };
+  let model = without(theirs.key);
+  function Page() {
+    const [shown, setShown] = useState(model);
+    read = setShown;
+    return <PullReview model={shown} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />;
+  }
+  forgeQuiet = true;
+  mount(<Page />);
+  for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+  await settle();
+  expect(refState()).toBe('merged');
+  // The next ask answers none (the server kept nothing for it): the page keeps what it drew.
+  forgeQuiet = false;
+  delete serverPull[theirs.key];
+  model = { ...model };
+  await act(async () => read(model));
+  await fire('focus');
+  expect(!!$('[data-stub-reader]')).toBe(true);
+  expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
+  expect(refState()).toBe('merged');
 });
 
 /** A phone's window for `run` (usePhone's media queries), the desktop's again after. */
