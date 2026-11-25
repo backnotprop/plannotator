@@ -49,8 +49,7 @@
  * Storage is the host's (`store`, @plannotator/core/inbox-reply-draft's
  * `ReplyDraftStore`); this Inbox's is HTTP (replyDraftHttp.ts).
  */
-import { machineOf } from './inboxUrl';
-import { keepRemoteWords, remoteKept, remoteWords, remoteWordsToSave } from './remoteReplyWords';
+import { isRemoteThread, keepRemoteWords, remoteKept, remoteWords, remoteWordsToSave, setRemoteThreads } from './remoteReplyWords';
 import { clearLateVoiceMiss, noteLateVoiceMiss } from './lateVoice';
 import { spaced } from './voiceField';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -183,8 +182,8 @@ const discards = new Map<string, number>();
 const discardsOf = (threadId: string) => discards.get(threadId) ?? 0;
 /** A linked computer's thread whose draft is not kept there (machineDrafts.ts): dictated words for its closed box wait in this page for the box. */
 const heldVoice = new Map<string, string[]>();
-/** Words the box shows for the thread that no draft holds: a save that did not land, or another machine's thread. */
-const unsavedOf = (threadId: string): string | null => failedWords.get(threadId) ?? (machineOf(threadId) ? remoteWords.get(threadId) : undefined) ?? null;
+/** Words the box shows for the thread that no draft holds: a save that did not land, or a remote thread's kept words. */
+const unsavedOf = (threadId: string): string | null => failedWords.get(threadId) ?? (isRemoteThread(threadId) ? remoteWords.get(threadId) : undefined) ?? null;
 /** Per thread: the `updated_at` of the draft this page last knew (the draft words kept here were typed over). */
 const baseKnown = new Map<string, string | null>();
 /** Per thread: the words of a Keep mine on its way: kept in the browser until a save lands (replyWordsKept.ts). */
@@ -201,7 +200,7 @@ const remoteWaiting = new Set<string>();
  */
 function syncKept(): void {
   const want = new Map<string, KeptWords>();
-  for (const [id, words] of remoteWords) if (machineOf(id)) want.set(id, { kind: 'remote', words, base: baseKnown.get(id) ?? null });
+  for (const [id, words] of remoteWords) if (isRemoteThread(id)) want.set(id, { kind: 'remote', words, base: baseKnown.get(id) ?? null });
   for (const [id, words] of failedWords) want.set(id, { kind: 'failed', words, base: failedOver.get(id)?.base ?? null });
   // The box's newer words on their way win over older ones that did not land (those come back once these end).
   for (const [id, words] of keepingMine) want.set(id, { kind: 'failed', words, base: failedOver.has(id) ? failedOver.get(id)!.base : (baseKnown.get(id) ?? null) });
@@ -230,7 +229,7 @@ async function takeKeptBack(threadId: string): Promise<boolean> {
   const found = await keptWordsGone(threadId);
   if (!found || conflictWords.has(threadId) || failedWords.has(threadId) || remoteWords.has(threadId)) return false;
   const { key, ...kept } = found;
-  if (kept.kind === 'remote' && !machineOf(threadId)) {
+  if (kept.kind === 'remote' && !isRemoteThread(threadId)) {
     lookedForKept.delete(threadId);
     remoteWaiting.add(threadId);
     return false;
@@ -422,6 +421,8 @@ export interface ReplyDraftOptions {
   canPersist?: (threadId: string) => boolean;
   /** Told when `canPersist` may answer otherwise (its answer stops it): the words that waited are saved once. */
   onPersistenceChange?: (listener: () => void) => () => void;
+  /** Threads known to live elsewhere (default none): only theirs are words kept here while `canPersist` says no. */
+  isRemote?: (threadId: string) => boolean;
 }
 
 /** What the box did with another window's newer words (`onWords`). */
@@ -455,7 +456,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   onOfferRef.current = options.onOffer;
   const canPersistRef = useRef(options.canPersist);
   canPersistRef.current = options.canPersist;
-  const keeps = (target: string) => canPersistRef.current?.(target) ?? true;
+  if (options.isRemote) setRemoteThreads(options.isRemote);
+  const keeps =(target: string) => canPersistRef.current?.(target) ?? true;
   const readDraft = (target: string) => readStoredDraft(storeRef.current, target);
   const chain = useRef<Promise<void>>(Promise.resolve());
   /** The save waiting for the pause in typing: the words, the box's files (for the long pastes' places) and the changes since the last. */
@@ -1018,10 +1020,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       flush();
     };
   }, [threadId, flush]);
-  // Another machine's words an earlier page kept, for a thread not known as that machine's when it opened: looked for
-  // again once it is (a render after the machine's rows came).
+  // Remote words an earlier page kept, for a thread not yet known as remote when it opened: looked for again once it is.
   useEffect(() => {
-    if (!remoteWaiting.has(threadId) || !machineOf(threadId)) return;
+    if (!remoteWaiting.has(threadId) || !isRemoteThread(threadId)) return;
     remoteWaiting.delete(threadId);
     void takeKeptBack(threadId).then((took) => took && saveRemote.current(threadId));
   });
@@ -1425,7 +1426,6 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
    * machine's thread): read after a Send's claim, whose save of them may have landed (then none is left: the draft holds them).
    */
   const unsavedNow = useCallback((): string | null => conflicts.current.get(current.current) ?? unsavedOf(current.current), []);
-
   /**
    * Before a reload (the stale page notice, stalePage.ts): the box's words (`text`, null for a closed box) and files
    * (`draftFiles`) are saved now, with this window's file changes still waiting (`carried`), and every save is

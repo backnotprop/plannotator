@@ -11,5 +11,8 @@ export function keepsReplyDraft(threadId: string | null | undefined): boolean {
   return hasMachineMark(machineOf(threadId), 'reply-drafts');
 }
 
-/** What the Inbox hands the reply draft client (replyDraft.ts): which threads' drafts are kept, and when that may change. */
-export const replyDraftHost = { canPersist: keepsReplyDraft, onPersistenceChange: onLinkedMachines } as const;
+/**
+ * What the Inbox hands the reply draft client (replyDraft.ts): which threads' drafts are kept, when that may change,
+ * and which threads live on a linked machine (their words wait in the page while that machine keeps no draft).
+ */
+export const replyDraftHost = { canPersist: keepsReplyDraft, onPersistenceChange: onLinkedMachines, isRemote: (threadId: string) => machineOf(threadId) !== null } as const;

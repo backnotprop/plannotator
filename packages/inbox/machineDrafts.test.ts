@@ -57,6 +57,11 @@ describe('where a reply draft is kept', () => {
     expect(keepsReplyDraft('msg_unlisted')).toBe(false);
   });
 
+  test("the client is told which threads live on a linked machine, whether or not it keeps drafts: its words wait in the page only for those", () => {
+    machines();
+    expect(['msg_local', 'msg_newer', 'msg_older', 'msg_unlisted'].map(replyDraftHost.isRemote)).toEqual([false, true, true, true]);
+  });
+
   test('a mark is asked one way: this Inbox (no machine, or its own id) takes every mark; a linked one as its list says', () => {
     machines();
     expect([null, SELF, NEWER, OLDER, UNLISTED, 'ibx_01HZZZZZZZZZZZZZZZZZZZZZZZ'].map((id) => hasMachineMark(id, 'reply-drafts'))).toEqual([true, true, true, false, false, false]);

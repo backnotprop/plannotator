@@ -145,7 +145,7 @@ describe("a reply draft on a linked machine's thread, two real Inboxes linked bo
       expect(sent.status).toBe(200);
       const reply = ((await sent.json()) as Json).reply;
       expect(await draftThere(there)).toBeNull();
-      const taken = await windowPost(here, `/api/inbox/m/${there.id}/messages/${reply.id}/take-back`, {}, there.message.thread);
+      const taken = await windowPost(here, `/api/inbox/m/${there.id}/messages/${reply.id}/take-back`, { idempotency_key: `take-back-${here.name}` }, there.message.thread);
       expect(taken.status).toBe(200);
       expect((await draftThere(there))?.body).toBe(`Ship it from the ${here.name}`);
       expect((await draftHere(here, there))?.body).toBe(`Ship it from the ${here.name}`);
