@@ -26,7 +26,7 @@ type Layout = 'split' | 'unified';
 async function waitFor(check: () => boolean, what: string) {
   const start = Date.now();
   while (!check()) {
-    if (Date.now() - start > 5_000) throw new Error(`timed out waiting for ${what}`);
+    if (Date.now() - start > 4_000) throw new Error(`timed out waiting for ${what}`);
     await new Promise((done) => setTimeout(done, 10));
   }
 }
@@ -94,6 +94,49 @@ describe.if(hasDom)('a line selection with foreign nodes in the diff', () => {
       }
     });
   }
+
+  for (const layout of ['split', 'unified'] as const) {
+    test(`${layout}: a node before the gutter column does not empty the diff when it draws again`, async () => {
+      const view = await mount(layout);
+      try {
+        for (const code of view.root()!.querySelectorAll('[data-code]')) code.prepend(foreignNode());
+        // A new version of the file, drawn on the same instance: the library writes rows into its columns again.
+        const next = parseDiffFromFile({ name: 'rows.ts', contents: OLD }, { name: 'rows.ts', contents: NEW.replace("row11 = 'same'", "row11 = 'edited'") });
+        view.instance.render({ fileDiff: next, forceRender: true });
+        await waitFor(() => view.column().textContent?.includes("row11 = 'edited'") === true, 'the new version drawn in the code column');
+        const shown = view.column().querySelectorAll(':scope > [data-content] > [data-line]').length;
+        expect(shown, 'rows in the shown content column').toBeGreaterThanOrEqual(12);
+        view.instance.setSelectedLines({ start: 11, end: 11, side: 'additions' });
+        await waitFor(() => view.selected(11), 'new line 11 drawn selected');
+      } finally {
+        view.cleanUp();
+      }
+    });
+  }
+
+  test('a line that can no longer be drawn does not leave the old line highlighted', async () => {
+    const patch = [
+      'diff --git a/rows.ts b/rows.ts',
+      '--- a/rows.ts',
+      '+++ b/rows.ts',
+      '@@ -40,3 +40,3 @@',
+      " const row40 = 'same';",
+      "-const row41 = 'old';",
+      "+const row41 = 'new';",
+      " const row42 = 'same';",
+      '',
+    ].join('\n');
+    const view = await mount('unified', parsePatchFiles(patch)[0]!.files[0]!);
+    try {
+      view.instance.setSelectedLines({ start: 41, end: 41, side: 'additions' });
+      await waitFor(() => view.selected(41), 'new line 41 drawn selected');
+      view.instance.setSelectedLines({ start: 10, end: 10, side: 'additions' });
+      await new Promise((done) => setTimeout(done, 50));
+      expect(view.root()!.querySelectorAll('[data-selected-line]').length).toBe(0);
+    } finally {
+      view.cleanUp();
+    }
+  });
 
   test('a selection naming a line a partial diff does not show is not drawn, and does not throw', async () => {
     const patch = [
