@@ -1646,8 +1646,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
               Cancel
             </button>
             <h2 id={titleId}>{title}</h2>
-            {/* Only when nothing can be sent, and a saved draft that has not changed has nothing to save. */}
-            {saveOffered && (!draft || dirty) && (
+            {/* Only when nothing can be sent; a saved draft that has not changed has nothing to save, unless dictated words are on their way. */}
+            {saveOffered && (!draft || dirty || voice.busy) && (
               <button type="button" className="ib-cp-barb ib-strong" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
                 Save draft
               </button>

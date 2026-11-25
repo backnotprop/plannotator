@@ -13,7 +13,7 @@
  * Nothing is mocked: `plannotator inbox --background` under a temp HOME and
  * PLANNOTATOR_DATA_DIR. Build the binary first (see inbox.spec.ts).
  *
- * The last test leaves whole-window PNGs of what New message shows once a
+ * The last two tests leave whole-window PNGs of what New message shows once a
  * pause saved it (desktop light and dark, a phone) in
  * <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/never-lose-words/.
  */
@@ -116,14 +116,14 @@ async function shot(page: Page, name: string, scheme: 'light' | 'dark'): Promise
   await page.screenshot({ path: join(proofDir, `${name}-${scheme}.png`) });
 }
 
-test('proof: what New message shows once a pause saved it, desktop light and dark and a phone (whole window)', async ({ browser }: { browser: Browser }) => {
+test('proof: what New message shows once a pause saved it, desktop light and dark (whole window)', async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await desktop.newPage();
   page.on('dialog', (dialog) => void dialog.accept());
   try {
     await page.goto(url);
-    await page.locator('.ib-side [data-open-compose]').click();
+    await page.locator('.ib-side [data-open-compose]').click({ timeout: 15_000 });
     const dialog = page.locator('dialog[data-compose]');
     const text = dialog.getByRole('textbox', { name: 'Message' });
     await expect(text).toBeFocused();
@@ -140,15 +140,21 @@ test('proof: what New message shows once a pause saved it, desktop light and dar
   } finally {
     await desktop.close();
   }
+});
+
+test('proof: what New message shows on a phone once a pause saved it (whole window)', async ({ browser }: { browser: Browser }) => {
+  mkdirSync(proofDir, { recursive: true });
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const handset = await phone.newPage();
   handset.on('dialog', (dialog) => void dialog.accept());
   try {
-    await handset.goto(url);
-    await handset.locator('[data-open-compose]:visible').first().click();
+    // This Inbox has no thread, so a phone's list shows the welcome with no New message in its header: the Drafts page has it.
+    await handset.goto(`${url}#drafts`);
+    await expect(handset.locator('[data-drafts-page]')).toBeVisible();
+    await handset.locator('.ib-drafts .ib-lhead-compose').click({ timeout: 15_000 });
     const sheet = handset.locator('dialog[data-compose]');
     const field = sheet.locator('[data-compose-text] textarea');
-    await field.tap();
+    await field.tap({ timeout: 15_000 });
     const words = 'Charlie Dunn: hold the export until the totals match.';
     await field.pressSequentially(words, { delay: 5 });
     await expect.poll(draftBodies, { timeout: 10_000 }).toContain(words);
