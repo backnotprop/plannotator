@@ -89,6 +89,12 @@ const INDICATORS = [
   },
 ];
 
+/** The gear's option lists, also drawn by Settings → Reviews (settings/ReviewSettingsPage) so both say the same. */
+export const DIFF_BACKGROUND_STRENGTH_OPTIONS = INTENSITY;
+export const DIFF_CHANGED_WORDS_OPTIONS = LINE_DIFF;
+export const DIFF_MINIMAP_OPTIONS = MINIMAP;
+export const DIFF_CHANGE_MARK_OPTIONS = INDICATORS;
+
 function Segmented<T extends string>({ options, value, onChange, label, stretch = false }: {
   options: { value: T; label: string; icon?: React.ReactNode }[];
   value: T;

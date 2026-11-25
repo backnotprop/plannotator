@@ -853,6 +853,7 @@ packages/review-editor/components/image-diff/ImageStage.test.tsx
 packages/review-editor/workspace/ReviewWorkspace.test.tsx
 packages/review-editor/workspace/JumpHistoryFloat.test.tsx
 packages/ui/components/settings/SemanticDiffsTab.test.tsx
+packages/ui/components/settings/ReviewSettingsPage.test.tsx
 packages/inbox/data/queries/heldThreadOpen.test.tsx
 packages/inbox/inlineReuseMark.test.tsx
 packages/ui/components/Viewer.blockRedraws.test.tsx

@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { SemanticDiffsTab } from './SemanticDiffsTab';
+import { ReviewSettingsPage } from './ReviewSettingsPage';
+import { CLASSIC_REVIEW_SETTINGS_CONTROLS } from './reviewSettingsControls';
+import { SEM_DIFF_OPINION_SETTINGS_ROUTE } from './PowerUpSettings';
+
+// Power Up's form, formerly the Semantic diffs tab, now on Settings → Reviews.
 
 const hasDom = typeof document !== 'undefined';
 const KEY = 'tsk-never-shown-again';
@@ -42,7 +46,7 @@ async function mount() {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => root?.render(<SemanticDiffsTab />));
+  await act(async () => root?.render(<ReviewSettingsPage controls={CLASSIC_REVIEW_SETTINGS_CONTROLS} opinionRoute={SEM_DIFF_OPINION_SETTINGS_ROUTE} />));
   await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 }
 
@@ -55,7 +59,7 @@ async function type(label: string, value: string) {
   });
 }
 
-describe('Settings › Semantic diffs › Power Up', () => {
+describe('Settings › Reviews › Power Up', () => {
   test.skipIf(!hasDom)('off until a key works; a refused key says why; a kept key is never shown again', async () => {
     server();
     await mount();
@@ -117,7 +121,7 @@ describe('Settings › Semantic diffs › Power Up', () => {
     expect(host!.textContent).toContain('inference.baseten.co · decision-models/baseten-mammoth-27b-latest');
     expect(host!.textContent).toContain('PLANNOTATOR_OPINION_API_KEY');
     expect(host!.textContent).toContain('code is sent to inference.baseten.co');
-    expect(host!.querySelector('input')).toBeNull();
+    expect(host!.querySelector('[data-power-up-settings] input')).toBeNull();
     expect(host!.querySelector('[data-power-up-key-remove]')).toBeNull();
   });
 
