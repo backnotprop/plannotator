@@ -3145,9 +3145,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       claimed = true;
       if (box.open) {
         if (words !== '' || replyFiles.draftFiles().length > 0) draftSavedAs = savedAs;
-      } else if ((replyDraft.conflict ?? replyDraft.unsaved ?? null) !== null) {
-        // Words another window's change, or a save that did not land, left unsaved here: they go, and the draft stays.
-        words = (replyDraft.conflict ?? replyDraft.unsaved ?? '').trim();
+      } else if (replyDraft.unsavedNow() !== null) {
+        // Words left unsaved here as they are after the claim (which saves what it can): they go, and the draft stays.
+        words = (replyDraft.unsavedNow() ?? '').trim();
       } else {
         // The box is closed: the words as the draft holds them now (another window may have changed them).
         const fresh = await replyDraft.reload();

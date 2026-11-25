@@ -1204,6 +1204,12 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   const waiting = useCallback(() => pending.current !== null, []);
 
   /**
+   * The open thread's words kept here and not saved, as they are now (a conflict's, a save that did not land, another
+   * machine's thread): read after a Send's claim, whose save of them may have landed (then none is left: the draft holds them).
+   */
+  const unsavedNow = useCallback((): string | null => conflicts.current.get(current.current) ?? unsavedOf(current.current), []);
+
+  /**
    * Before a reload (the stale page notice, stalePage.ts): the box's words (`text`, null for a closed box) and files
    * (`draftFiles`) are saved now, with this window's file changes still waiting (`carried`), and every save is
    * answered. A save the Inbox refused earlier (it restarted under the page) is made again. True when the Inbox holds
@@ -1264,7 +1270,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     return draft ? { draft, typed, from } : null;
   }, []);
 
-  return { ...state, restoreOffer, save, flush, discard, sent, waiting, claim, release, reload, keepMine, takeTheirs, expectOwnClear, boxTook, heldOf, withMyChanges, settle, aim, quote };
+  return { ...state, restoreOffer, save, flush, discard, sent, waiting, unsavedNow, claim, release, reload, keepMine, takeTheirs, expectOwnClear, boxTook, heldOf, withMyChanges, settle, aim, quote };
 }
 
 /** The thread's draft in the store (null: none), or undefined when it could not be read. */

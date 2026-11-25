@@ -57,8 +57,12 @@ let signal: Signal;
 /** A draft as another window or device saves it (the store's compare-and-set skipped: it is theirs). */
 function saveElsewhere(thread: string, body: string) {
   clock += 1;
-  drafts.set(thread, { v: 1, thread_id: thread, body, created_at: '2026-11-02T10:10:00.000Z', updated_at: new Date(Date.UTC(2026, 10, 2, 11, 0, clock)).toISOString() });
+  // The server keeps the draft's files: a save names only the files it changes.
+  const files = drafts.get(thread)?.files;
+  drafts.set(thread, { v: 1, thread_id: thread, body, created_at: '2026-11-02T10:10:00.000Z', updated_at: new Date(Date.UTC(2026, 10, 2, 11, 0, clock)).toISOString(), ...(files ? { files } : {}) });
 }
+/** Every reply the window sent, as sent. */
+let replies: Record<string, unknown>[] = [];
 
 function storeSave(thread: string, input: Record<string, unknown>): Response {
   const current = drafts.get(thread) ?? null;
@@ -80,6 +84,7 @@ beforeEach(() => {
   if (!hasDom) return;
   drafts = new Map();
   saves = [];
+  replies = [];
   saveAnswer = null;
   readHeld = null;
   signal = createSignal();
@@ -99,6 +104,15 @@ beforeEach(() => {
       return Response.json({ serverSession: 's', draft: drafts.get(thread) ?? null });
     }
     if (/\/draft\/delete$/.test(path)) return Response.json({ ok: true, deleted: true });
+    if (/\/messages\/[^/]+\/reply$/.test(path) && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      replies.push(body);
+      // The server's clear: the draft named by its `updated_at`, or ('') one holding exactly these words and no file.
+      const kept = drafts.get(ONE);
+      const clear = body.clear_draft;
+      if (kept && typeof clear === 'string' && (clear === kept.updated_at || (clear === '' && kept.body.trim() === String(body.words ?? '').trim() && !kept.files?.length))) drafts.delete(ONE);
+      return Response.json({ reply: { id: 'msg_reply' }, questions: [], replayed: false });
+    }
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [] });
     return Response.json({});
@@ -514,6 +528,33 @@ test.skipIf(!hasDom)('words that did not land, the thread left and opened again,
   expect(drafts.get(ONE)?.body).toBe('Older words. Newer words. And k.');
   expect(box(el)!.value).toBe('Older words. Newer words. And k.');
   await until(() => !replyDraftUnsaved(), 'nothing left unsaved');
+});
+
+test.skipIf(!hasDom)('Send from a closed box after a save did not land: the Send takes the draft as saved then, its files too, and clears it', async () => {
+  saveElsewhere(ONE, 'Older words.');
+  drafts.set(ONE, { ...drafts.get(ONE)!, files: [{ upload_id: 'upl_shot', name: 'shot.png', size: 10, kind: 'image', sha256: 'a'.repeat(64), created_at: '2026-11-02T10:00:00.000Z', media_type: 'image/png' }] });
+  const el = await open();
+  await until(() => box(el)?.value === 'Older words.', 'the draft back in the box');
+  saveAnswer = noNetwork;
+  typeOn(el, ' Newer words.');
+  await until(() => el.querySelector('[data-draft-failed]') !== null, '"Not saved"');
+  // Closed (Escape keeps the words as the draft): the foot's Send carries them.
+  await act(async () => {
+    box(el)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  await until(() => box(el) === null, 'the box closed');
+  saveAnswer = null;
+  const send = el.querySelector<HTMLButtonElement>('[data-foot-buttons] button.ib-pri');
+  expect(!!send).toBe(true);
+  await act(async () => send!.click());
+  await until(() => replies.length === 1, 'the Send');
+  expect(replies[0]!.words).toBe('Older words. Newer words.');
+  expect(replies[0]!.uploads).toEqual(['upl_shot']);
+  await until(() => !drafts.has(ONE), 'the draft cleared by the Send');
+  await settle(6);
+  // Sent: the words do not come back as a draft.
+  expect(box(el) === null || !box(el)!.value.includes('Newer words.')).toBe(true);
+  expect(drafts.has(ONE)).toBe(false);
 });
 
 test.skipIf(!hasDom)('the page hidden while its save did not land: the words are sent again as it hides', async () => {
