@@ -10,6 +10,8 @@ import type { SentAnswerGroup } from '../../sentReply';
 import type { FileRef } from '../../fileRefs';
 
 export interface MessageBodyProps {
+  /** Draw only this question's card (decision mode, one question at a time); absent: the whole message. */
+  onlyQuestion?: string;
   /** A question with a prototype (an option's, or one for all) was asked to open it (its key). Absent: no "Try prototype" tab. */
   onTryPrototype?: (key: string) => void;
   /**
@@ -55,6 +57,12 @@ export interface MessageBodyProps {
    * like any image of the body.
    */
   onOpenOptionSet?: (key: string, image: InboxInlineImage, choice: number) => void;
+  /**
+   * An image the body shows whose file the store has not captured yet (no `inline_images` record) was opened: the
+   * host shows it (decision mode: its own viewer, inside its modal dialog, so the picture is never behind it).
+   * Absent: the plain lightbox over the page.
+   */
+  onOpenUncapturedImage?: (src: string, alt: string) => void;
   readOnly: boolean;
   /** The thread's questions moved to another thread (its root's `moved_to`): a card the archive closed reads "Closed". */
   movedThread?: boolean;

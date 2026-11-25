@@ -23489,6 +23489,20 @@
       }
     },
     {
+      "id": "undecided-setting-decision-mode",
+      "title": "setting:decision_mode",
+      "surface": [
+        "setting:decision_mode"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-window-api-inbox-skills-file",
       "title": "window:/api/inbox/skills/file",
       "surface": [
