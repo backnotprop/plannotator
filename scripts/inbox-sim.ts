@@ -103,6 +103,11 @@ export class SimAgent {
     return this.call('card', { ...input, agent_name: this.name, agent_host: this.host });
   }
 
+  /** The canvas action (a thread's Excalidraw canvas, while the person has it on): a reading, or `do` changes on `base`; a refusal throws. */
+  canvas(input: { thread_id: string; base?: number; do?: Record<string, unknown>[]; in?: string }): Promise<Structured> {
+    return this.call('canvas', { ...input, agent_name: this.name, agent_host: this.host });
+  }
+
   /** get_guide_brief: the method, the guide's shape, the diff steps, the rules and a worked example call. */
   guideBrief(): Promise<Structured> {
     return this.call('get_guide_brief', {});
