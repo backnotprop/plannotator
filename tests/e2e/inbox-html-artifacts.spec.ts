@@ -55,9 +55,18 @@ async function expectFills(dialog: ReturnType<Page['locator']>, frame: ReturnTyp
   await expect.poll(() => page.evaluate(() => [document.documentElement.getAttribute('data-pn-embed'), getComputedStyle(document.documentElement).overflowY !== 'hidden']), { timeout: 20_000 }).toEqual(['full', true]);
 }
 
-/** Every request a frame of the page makes (a tile's picture, a block's page) goes to the Inbox itself or stays in the page: nothing from the web. */
-function offTheWeb(page: Page, origin: string): string[] {
+/**
+ * Every request a frame of the page makes (a tile's picture, a block's page) goes to the Inbox itself or stays in the
+ * page: nothing from the web. One the window's policy stopped in the browser (Chromium reports it failed with "csp":
+ * the Wall's still picture of the ledger page, whose links it never follows) never left, so it is not counted; that
+ * nothing reaches the host is guarded above, with the route.
+ */
+function offTheWeb(page: Page, origin: string): () => string[] {
   const out: string[] = [];
+  const stopped = new Set<string>();
+  page.on('requestfailed', (request) => {
+    if (request.failure()?.errorText === 'csp') stopped.add(request.url());
+  });
   page.on('request', (request) => {
     let framed = false;
     try {
@@ -70,7 +79,7 @@ function offTheWeb(page: Page, origin: string): string[] {
     const local = [origin, origin.replace('localhost', '127.0.0.1'), origin.replace('127.0.0.1', 'localhost')].some((own) => url.startsWith(own));
     if (framed && !local && !/^(?:data|blob|about):/.test(url)) out.push(url);
   });
-  return out;
+  return () => out.filter((url) => !stopped.has(url));
 }
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
@@ -374,7 +383,7 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await expect(smallBerths.locator('[data-html-picture] iframe')).toHaveAttribute('sandbox', '', { timeout: 20_000 });
     await shot(small, '10-artifacts-wall-phone');
     await phone.close();
-    expect(smallWeb).toEqual([]);
+    await expect.poll(smallWeb).toEqual([]);
 
     // Send: the comment made big is the text's block's, as one made under it.
     await page.goto(`${url}#thread=${sent.thread_id}`);
@@ -386,7 +395,7 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     const feedback = reply.body as string;
     expect(feedback).toMatch(/HTML block 1 in the message, lines \d+–\d+/);
     expect(feedback).toContain('Hold B2 for the Quill Star until the tide check.');
-    expect(web).toEqual([]);
+    await expect.poll(web).toEqual([]);
     await context.close();
   } finally {
     await agent.close().catch(() => {});
