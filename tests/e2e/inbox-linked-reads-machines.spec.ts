@@ -282,7 +282,9 @@ test("1. Laptop's checklist on its thread in Studio's window, by Laptop's switch
   await page.goto(`${studio.url}#thread=${far.harbor.thread}`);
   const button = page.locator('[data-steps-button]');
   await expect(button).toBeVisible({ timeout: 20_000 });
-  await expect(button.locator('[data-steps-pie="1/3"]')).toHaveCount(1);
+  // A step in progress: the button's spinner and its count (the pie shows only when none is worked on).
+  await expect(button).toContainText('1/3');
+  await expect(button.locator('[data-step-mark="doing"]')).toHaveCount(1);
   // Read on Laptop, through the forward: Studio's own Steps switch is off.
   expect(requests).toContain(`GET /api/inbox/m/${laptop.id}/threads/${far.harbor.thread}/steps`);
   await button.click();
@@ -294,7 +296,8 @@ test("1. Laptop's checklist on its thread in Studio's window, by Laptop's switch
 
   // Laptop's agent moves a step: the open thread's checklist follows with no reload.
   await steps(far.agent, far.harbor.thread, CHECKLIST('done'));
-  await expect(button.locator('[data-steps-pie="2/3"]')).toHaveCount(1, { timeout: 20_000 });
+  await expect(button).toContainText('2/3', { timeout: 20_000 });
+  await expect(button.locator('[data-steps-pie="2/3"]')).toHaveCount(1);
   await button.click();
   await expect(panel.locator('[data-step-status="done"]')).toHaveCount(2);
   await page.keyboard.press('Escape');

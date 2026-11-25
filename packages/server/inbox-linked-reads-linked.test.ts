@@ -297,6 +297,8 @@ describe("a linked computer's reads of the other's threads, two real Inboxes lin
   test("Viewed, one file's change: held while that machine is away, then lands once; a tick before it and one made there meanwhile both stay", async () => {
     for (const [here, there] of both()) {
       const route = `/api/inbox/m/${there.id}/messages/${there.review.message}/guide/viewed`;
+      // This computer's own review, as it was: no tick of the other's lands here.
+      const ownBefore = viewedThere(here);
       // Online: it lands there at once.
       const now = await windowPost(here, route, { path: "src/retry.ts", viewed: true });
       expect(now.status).toBe(200);
@@ -321,7 +323,7 @@ describe("a linked computer's reads of the other's threads, two real Inboxes lin
       // Every tick: the one before, the one made there meanwhile, and both held ones; none undone, none twice.
       expect(viewedThere(there)).toEqual(["NOTES.md", "assets/chart.png", "package.json", "src/retry.ts"]);
       expect(new Set(there.server.store.message(there.review.message)!.guide_viewed).size).toBe(4);
-      expect(viewedThere(here)).toEqual([]);
+      expect(viewedThere(here)).toEqual(ownBefore);
     }
   }, 240_000);
 
