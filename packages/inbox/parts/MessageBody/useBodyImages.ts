@@ -11,6 +11,7 @@ import type { RefObject } from 'react';
 import type { MessageBodyProps } from './types';
 import { inboxEmbedUrl } from '../../data/actions/embed';
 import type { OpenFileRefRef } from './useFileRefs';
+import { mediaOpenTarget, syncMediaOpen } from './mediaOpen';
 
 /** The body's pictures: where they load from, their boxes, and what opens one (the viewer, or the lightbox). */
 export function useBodyImages({
@@ -127,6 +128,11 @@ export function useBodyImages({
     if (body) syncMessageImages(body, (img) => imageOf(img.getAttribute('src')), openPictures.current);
   }, [imageOf]);
   useLayoutEffect(fitImages);
+  // A sound or video the text plays: "Open" under it, into the viewer, once the Inbox keeps its file (mediaOpen.ts).
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (body) syncMediaOpen(body, (src) => (openImageRef.current ? imageOf(src) : null));
+  });
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
@@ -142,6 +148,14 @@ export function useBodyImages({
     // Load does not bubble: a capture listener on the body hears every image in it.
     body.addEventListener('load', onLoad, true);
     const onMore = (event: MouseEvent) => {
+      const media = mediaOpenTarget(event.target);
+      if (media) {
+        event.preventDefault();
+        event.stopPropagation();
+        const image = imageOf(media.getAttribute('src'));
+        if (image) openImageRef.current?.(image);
+        return;
+      }
       const img = toggleMessageImage(event.target, openPictures.current);
       if (!img) return;
       event.preventDefault();
@@ -161,7 +175,7 @@ export function useBodyImages({
       window.removeEventListener('resize', fitImages);
       observer?.disconnect();
     };
-  }, [fitImages, markButton]);
+  }, [fitImages, markButton, imageOf]);
   const onImageRef = useRef(onImage);
   onImageRef.current = onImage;
   const onImageClick = useCallback((src: string, alt: string) => (onImageRef.current ? onImageRef.current(src, alt) : void openImage(src, alt)), [openImage]);

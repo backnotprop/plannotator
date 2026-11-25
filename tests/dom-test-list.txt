@@ -98,6 +98,8 @@ packages/inbox/permissionFocus.test.tsx
 packages/inbox/replyBoxTyping.test.tsx
 packages/inbox/paneFailureKeepsReply.test.tsx
 packages/inbox/replyFootPhone.test.tsx
+packages/inbox/replyDraftNeverLost.test.tsx
+packages/inbox/composeAutosave.test.tsx
 packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
 packages/inbox/updates.test.tsx
@@ -273,6 +275,7 @@ packages/inbox/pinnedThreads.test.tsx
 packages/inbox/priority.test.tsx
 packages/inbox/rowStar.test.tsx
 packages/inbox/artifactPins.test.tsx
+packages/inbox/htmlArtifactOpen.test.tsx
 packages/inbox/filePinsReadFails.test.tsx
 packages/inbox/pinnedRowLabel.test.tsx
 packages/inbox/fileBack.test.tsx
@@ -460,6 +463,7 @@ packages/review-editor/components/tokenHoverAffordance.test.tsx
 packages/review-editor/utils/stitchTokenIdentifier.test.ts
 packages/review-editor/utils/diffSelection.test.ts
 packages/review-editor/utils/diffSelectionForeignNode.test.ts
+packages/review-editor/utils/diffRowsForeignNode.test.ts
 packages/review-editor/hooks/useAutoViewed.test.tsx
 packages/review-editor/hooks/useHiddenViewedFiles.hook.test.tsx
 packages/review-editor/hooks/useReviewProgress.test.tsx
@@ -684,6 +688,7 @@ packages/inbox/pickQueue.test.tsx
 packages/inbox/pickSaveReads.test.tsx
 packages/inbox/listDeltaWindow.test.tsx
 packages/inbox/linkedMachines.test.tsx
+packages/inbox/linkThroughRows.test.tsx
 packages/inbox/machineUpdate.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
