@@ -56,6 +56,7 @@ export const ROUTE_FILES = [
   'packages/server/inbox-embeds.ts',
   'packages/server/inbox-feedback.ts',
   'packages/server/inbox-guides.ts',
+  'packages/server/inbox-icon-animate.ts',
   'packages/server/inbox-icon-sets.ts',
   'packages/server/inbox-launch.ts',
   'packages/server/inbox-linear-key.ts',
