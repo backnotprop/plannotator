@@ -61,6 +61,8 @@ export const PowerUpStatusSlot: React.FC<{
   const title = statusTitle(state, status.links, model);
   const [card, setCard] = useState(false);
   const [poke, setPoke] = useState(0);
+  // A phone's card opens toward the room: from the face's left edge when the face is in the left half of the window.
+  const [fromLeft, setFromLeft] = useState(false);
   const wake = () => {
     setCard(true);
     setPoke((n) => n + 1);
@@ -89,7 +91,12 @@ export const PowerUpStatusSlot: React.FC<{
           aria-label={text}
           aria-expanded={card}
           className="relative flex h-[30px] min-w-[30px] items-center justify-center rounded outline-none after:absolute after:inset-x-0 after:-inset-y-[7px] after:content-[''] focus-visible:ring-1 focus-visible:ring-ring"
-          onClick={() => (card ? setCard(false) : wake())}
+          onClick={(event) => {
+            if (card) return setCard(false);
+            const box = event.currentTarget.getBoundingClientRect();
+            setFromLeft(box.left + box.width / 2 < window.innerWidth / 2);
+            wake();
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Escape' && card) {
               event.stopPropagation();
@@ -109,7 +116,7 @@ export const PowerUpStatusSlot: React.FC<{
         <span
           role={compact ? 'dialog' : 'tooltip'}
           data-power-up-card=""
-          className="absolute right-0 top-full z-50 mt-1 flex w-max flex-col gap-0.5 rounded-md border border-border bg-popover px-2.5 py-2 text-xs text-popover-foreground shadow-md"
+          className={`absolute ${compact && fromLeft ? 'left-0' : 'right-0'} top-full z-50 mt-1 flex w-max flex-col gap-0.5 rounded-md border border-border bg-popover px-2.5 py-2 text-xs text-popover-foreground shadow-md`}
         >
           {compact && <span className="font-medium">{text}</span>}
           <span className="font-medium">{state === 'unavailable' ? 'Power Up is unavailable' : 'Your diffs are powered up'}</span>
