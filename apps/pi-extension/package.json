@@ -68,14 +68,14 @@
     "prepublishOnly": "cd ../.. && bun run build:viewer-pin && bun run build:pi"
   },
   "dependencies": {
-    "@joplin/turndown-plugin-gfm": "^1.0.68",
+    "@joplin/turndown-plugin-gfm": "^1.0.71",
     "@pierre/diffs": "1.7.0-beta.3",
     "@plannotator/webtui": "0.1.0",
     "chokidar": "^5.0.0",
     "diff": "^8.0.4",
     "parse5": "^7.3.0",
     "picomatch": "4.0.7",
-    "turndown": "^7.2.4"
+    "turndown": "^7.2.5"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.79.1"
