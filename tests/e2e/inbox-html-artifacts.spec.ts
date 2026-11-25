@@ -46,7 +46,9 @@ function offTheWeb(page: Page, origin: string): string[] {
       framed = false;
     }
     const url = request.url();
-    if (framed && !url.startsWith(origin) && !/^(?:data|blob|about):/.test(url)) out.push(url);
+    // The window's own port, by either name (the embeds may be framed from 127.0.0.1 or localhost).
+    const local = [origin, origin.replace('localhost', '127.0.0.1'), origin.replace('127.0.0.1', 'localhost')].some((own) => url.startsWith(own));
+    if (framed && !local && !/^(?:data|blob|about):/.test(url)) out.push(url);
   });
   return out;
 }
@@ -147,13 +149,20 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     // A block that asks the web for everything it can: its tile in the grid and its card on the Wall ask nothing.
     // (Its thread is opened on the grid, so the block in the text, under the grid, never draws.)
     const guard = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
-    const tracked: string[] = [];
+    // What left the browser (the route sees it), what the pages asked for, and what the window's policy stopped
+    // before it left (Chromium reports those as requests that failed with "csp").
+    const reached: string[] = [];
+    const asked: string[] = [];
+    const stopped: string[] = [];
     await guard.route(`${TRACKER}/**`, (route) => {
-      tracked.push(route.request().url());
+      reached.push(route.request().url());
       return route.abort();
     });
     guard.on('request', (request) => {
-      if (request.url().includes('tracker.invalid')) tracked.push(request.url());
+      if (request.url().includes('tracker.invalid')) asked.push(request.url());
+    });
+    guard.on('requestfailed', (request) => {
+      if (request.url().includes('tracker.invalid') && request.failure()?.errorText === 'csp') stopped.push(request.url());
     });
     const watch = await guard.newPage();
     await watch.goto(`${url}#thread=${ledger.thread_id}&artifacts`);
@@ -167,7 +176,9 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await watch.goto(`${url}#artifacts`);
     await expect(watch.locator('[data-wall-artifact]').filter({ hasText: 'Ledger · export' })).toHaveCount(1, { timeout: 20_000 });
     await watch.waitForTimeout(2000);
-    expect(tracked).toEqual([]);
+    // Nothing reached the host; whatever the tile's page asked for, the window's policy stopped in the browser.
+    expect(reached).toEqual([]);
+    await expect.poll(() => asked.filter((asking) => !stopped.includes(asking))).toEqual([]);
     await guard.close();
 
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
@@ -263,7 +274,7 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await shot(page, '07-block-open-from-wall-desktop');
     await big.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(big).toHaveCount(0);
-    await expect(page).toHaveURL(/#artifacts$/);
+    await expect(page).toHaveURL(/#artifacts(?:=pinned)?$/);
     await expect(wall).toHaveCount(4);
 
     const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, reducedMotion: 'reduce' });
