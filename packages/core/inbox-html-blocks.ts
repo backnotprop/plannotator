@@ -148,6 +148,62 @@ export function inboxHtmlBlockTitle(source: string): string | null {
   return words.length > TITLE_MAX ? `${words.slice(0, TITLE_MAX - 1).trimEnd()}…` : words;
 }
 
+/** Elements that are never drawn, with all they hold: a script's page draws nothing until its script runs. */
+const UNDRAWN = ["script", "style", "template", "title"] as const;
+/** Elements that draw something with no text: a picture, a drawn shape of an svg, a form's box. Not `<canvas>`: only a script draws on one. */
+const DRAWS_WITHOUT_TEXT = /<(?:img|picture|path|rect|circle|ellipse|line|polyline|polygon|use|image|input|select|textarea|progress|meter)(?=[\s/>])/i;
+const NO_TEXT_ENTITY = /&(?:nbsp|#160|#x0*a0|zwsp|#8203|#x200b);/gi;
+
+/**
+ * Whether a block's page, drawn with no script (the tiles' still picture: a frame that runs none), shows anything:
+ * words outside its scripts, styles, templates, title and comments, or an element that draws without words (an
+ * image, an svg shape, a form's box). A page that a script draws (a chart into an empty `<svg>` or a `<canvas>`)
+ * shows nothing there, and its tile shows the quiet HTML mark instead of a blank box. One pass of indexOf, no
+ * regex that can backtrack over the whole page.
+ */
+export function inboxHtmlBlockDrawsStill(source: string): boolean {
+  const lower = source.toLowerCase();
+  let kept = "";
+  let at = 0;
+  for (;;) {
+    const lt = lower.indexOf("<", at);
+    if (lt === -1) {
+      kept += source.slice(at);
+      break;
+    }
+    kept += source.slice(at, lt);
+    // "1 < 2": a `<` that opens no tag is a word.
+    if (!/[a-z/!?]/.test(lower[lt + 1] ?? "")) {
+      kept += "<";
+      at = lt + 1;
+      continue;
+    }
+    if (lower.startsWith("<!--", lt)) {
+      const end = lower.indexOf("-->", lt + 4);
+      if (end === -1) break;
+      at = end + 3;
+      continue;
+    }
+    const tag = UNDRAWN.find((name) => lower.startsWith(name, lt + 1) && /[\s/>]/.test(lower[lt + 1 + name.length] ?? ">"));
+    if (tag) {
+      const close = lower.indexOf(`</${tag}`, lt);
+      if (close === -1) break;
+      const end = lower.indexOf(">", close);
+      if (end === -1) break;
+      at = end + 1;
+      continue;
+    }
+    const end = lower.indexOf(">", lt);
+    if (end === -1) break;
+    const element = source.slice(lt, end + 1);
+    if (DRAWS_WITHOUT_TEXT.test(element)) return true;
+    // A tag is no words: a space keeps the words on either side apart.
+    kept += " ";
+    at = end + 1;
+  }
+  return /\S/.test(kept.replace(NO_TEXT_ENTITY, " "));
+}
+
 /** ```html (any case), a word after it allowed: the fences the message draws as live pages (ui's `isHtmlEmbedLanguage`). */
 function isHtmlFence(language: string): boolean {
   return language.trim().split(/\s+/, 1)[0]?.toLowerCase() === "html";

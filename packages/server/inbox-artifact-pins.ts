@@ -8,9 +8,11 @@
  *   GET  /api/inbox/artifact-pins   `{ pins: [{ key, thread_id, pinned_at }] }`, in pin order
  *   POST /api/inbox/artifact-pins   `{ thread_id, key, pinned: boolean }`: pin or unpin one artifact; `{ pins }`
  *   GET  /api/inbox/artifacts       the Wall: every thread's artifacts, newest first, paged, with filters
+ *   GET  /api/inbox/artifacts/html  `?key=html:<message id>:<hash>`: one html block's source, for its Wall tile's still picture
  *
  * `?machines=1` on either GET: across linked machines too (inbox-artifacts-merged.ts). A linked machine's window
- * pins this Inbox's artifacts through its door (`POST artifact-pins`) and reads its Wall (`GET artifacts`).
+ * pins this Inbox's artifacts through its door (`POST artifact-pins`) and reads its Wall (`GET artifacts`) and its
+ * html blocks' sources (`GET artifacts/html`, through the window's forward `/api/inbox/m/<machine>/…`).
  *
  * Not the sidebar's thread pins (inbox-pins.ts): another file, other routes.
  * A change tells every window (`event: artifact-pins` on the window's stream).
@@ -30,6 +32,7 @@ import {
   type InboxArtifactType,
 } from "@plannotator/core/inbox-artifact-pins";
 import { displayInboxSubject, inboxRowArchived, type InboxListRow, type InboxMessage } from "@plannotator/core/inbox-types";
+import { readInboxHtmlArtifactKey } from "@plannotator/core/inbox-html-blocks";
 import { inboxAttachmentState } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -38,6 +41,21 @@ import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 
 export const INBOX_ARTIFACT_PINS_PATH = "/api/inbox/artifact-pins";
 export const INBOX_ARTIFACTS_PATH = "/api/inbox/artifacts";
+export const INBOX_ARTIFACT_HTML_PATH = "/api/inbox/artifacts/html";
+
+/**
+ * One html block's source, by its artifact key, as the Wall lists it (its thread's artifacts here): the Wall's rows
+ * carry no source (a page of 60 tiles would carry every block), so a tile reads its own once it nears the screen.
+ * `422` a key that is not an html block's, `404 artifact_not_found` one this Inbox does not hold (any more).
+ */
+export function inboxArtifactHtmlSource(store: InboxStore, key: string | null): string {
+  const named = readInboxHtmlArtifactKey(key);
+  if (!named) throw new InboxError("validation_error", "key: an html block's key, html:<message id>:<hash>.", { field: "key" });
+  const message = store.message(named.messageId);
+  const ref = message ? store.threadArtifactRefs(message.thread_id).find((r) => r.key === key && r.html) : undefined;
+  if (!ref?.html) throw new InboxError("artifact_not_found", `No html block ${key}.`);
+  return ref.html.content;
+}
 
 interface WallEntry {
   ref: InboxArtifactRef<InboxMessage>;
@@ -174,6 +192,12 @@ export function createInboxArtifactPins(options: {
   const merged = (url: URL) => machines !== undefined && url.searchParams.get("machines") === "1";
 
   const route = async (req: Request, url: URL): Promise<Response | null> => {
+    if (url.pathname === INBOX_ARTIFACT_HTML_PATH) {
+      // A read as the Wall's own: GET, and never for another site (a block's page may hold what the person keeps private).
+      if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+      if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
+      return json({ html: inboxArtifactHtmlSource(store, url.searchParams.get("key")) });
+    }
     if (url.pathname === INBOX_ARTIFACTS_PATH) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);

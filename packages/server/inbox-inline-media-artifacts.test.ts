@@ -24,7 +24,8 @@ import { inboxBlobPath, inboxBlobsDir, writeBlob } from "@plannotator/shared/inb
 import { captureInboxInlineImages } from "@plannotator/shared/inbox/inline-images";
 import { captureInboxInlineMedia } from "@plannotator/shared/inbox/inline-media-capture";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxArtifactsPage, inboxWallEntries } from "./inbox-artifact-pins";
+import { createInboxArtifactPins, inboxArtifactHtmlSource, inboxArtifactsPage, inboxWallEntries } from "./inbox-artifact-pins";
+import { doorRouteOf } from "./inbox-devices";
 import { createInboxImageCapture } from "./inbox-message-images";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
@@ -318,4 +319,38 @@ test("a pin on an html block is taken, kept across a restart and a reread, and a
   expect(code).toBe("artifact_not_found");
   reopened.setArtifactPinned(message.thread_id, berths, false);
   expect(reopened.artifactPins()).toEqual([]);
+});
+
+// The Wall's rows carry no source; a tile reads its own block for its still picture, as the Wall's own reads go: the
+// window's GET (never another site's), and a linked computer's window through the door (never a phone's).
+test("an html block's source is read by its key for its Wall tile: the window's GET only, a linked computer through the door", async () => {
+  const { store, repo } = world();
+  const message = store.sendMessage({ project_id: repo.id, author: agent, body: TWO_BLOCKS }).message;
+  const tides = inboxHtmlArtifactKey(message.id, inboxHtmlBlockHash(TIDES));
+  const json = (body: unknown, status = 200) => Response.json(body, { status });
+  const { route } = createInboxArtifactPins({ store, serverSession: "s", readBody: async () => ({}), json });
+  const ask = (key: string, init: RequestInit = {}) =>
+    route(new Request(`http://127.0.0.1/api/inbox/artifacts/html?key=${encodeURIComponent(key)}`, init), new URL(`http://127.0.0.1/api/inbox/artifacts/html?key=${encodeURIComponent(key)}`));
+  const read = await ask(tides, { headers: { "sec-fetch-site": "same-origin" } });
+  expect(read!.status).toBe(200);
+  expect(await read!.json()).toEqual({ html: TIDES });
+  expect((await ask(tides, { headers: { "sec-fetch-site": "cross-site" } }))!.status).toBe(403);
+  expect((await ask(tides, { method: "POST" }))!.status).toBe(405);
+  const refused = (key: string | null) => {
+    try {
+      inboxArtifactHtmlSource(store, key);
+      return "ok";
+    } catch (error) {
+      return (error as { code?: string }).code ?? "thrown";
+    }
+  };
+  // Not an html block's key; a block the message never had; the person's own text (it holds no artifact).
+  expect(refused(null)).toBe("validation_error");
+  expect(refused(`guide:${message.id}`)).toBe("validation_error");
+  expect(refused(inboxHtmlArtifactKey(message.id, inboxHtmlBlockHash("<p>never sent</p>")))).toBe("artifact_not_found");
+  const reply = store.sendMessage({ project_id: repo.id, author: { kind: "person" }, body: "```html\n<p>pasted</p>\n```", reply_to: message.id }).message;
+  expect(refused(inboxHtmlArtifactKey(reply.id, inboxHtmlBlockHash("<p>pasted</p>")))).toBe("artifact_not_found");
+  // A linked computer's window reads it through the door; a phone's token does not reach it.
+  expect(doorRouteOf("GET", "artifacts/html", true)?.windowPath).toBe("/api/inbox/artifacts/html");
+  expect(doorRouteOf("GET", "artifacts/html", false)).toBeNull();
 });

@@ -2,13 +2,15 @@
  * A live html block of a message is an artifact of its thread (the owner, 2026-11-25: "I want to render html inline
  * still and offer same UX there. Can annotate inline and all. Ideally it would show in artifacts"): on the compiled
  * binary, a made-up thread whose message shows a picture and two html blocks, neither loading anything from the
- * web. The blocks stay live in the message exactly as before (Code, Full screen, the pen). Each is also in the
- * header's count, the thread's Artifacts grid (a quiet tile: the page's heading, else "HTML block") and the
- * Artifacts wall; its tile opens the block's own page big, with Code and the pen, never the file viewer. A comment
+ * web. The blocks stay live in the message (Code, Full screen, the pen); Full screen is the same view Artifacts
+ * opens, Code and the pen in its bar. Each is also in the header's count, the thread's Artifacts grid and the
+ * Artifacts wall (the page's heading, else "HTML block"; the page drawn small with no script, or the quiet HTML mark
+ * for a chart only its script draws); its tile opens the block's own page big, with Code and the pen, never the file viewer. A comment
  * made there is the message's own (the block in the text shows it, Send names "HTML block 1 in the message"), the
  * tile pins, the Wall's tile opens the same and closing goes back to the Wall, and a phone does the same. A block
  * that asks a made-up host for a picture, a stylesheet, a background and a prefetch asks it nothing from the grid
- * or the Wall. The block's own Full screen (unchanged) is shot beside the view opened from Artifacts.
+ * or the Wall, whose tile reads the block and draws its picture. The block's own Full screen is shot beside the view
+ * opened from Artifacts.
  *
  * Whole-window PNGs, 1440 × 900 light and dark and a 390 × 844 phone, land in PLANNOTATOR_E2E_SHOTS_DIR (default
  * `.local/proof/html-artifacts`).
@@ -174,7 +176,12 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await expect(tileFrame).toHaveAttribute('srcdoc', /^<meta http-equiv="x-dns-prefetch-control" content="off">/);
     await watch.waitForTimeout(2000);
     await watch.goto(`${url}#artifacts`);
-    await expect(watch.locator('[data-wall-artifact]').filter({ hasText: 'Ledger · export' })).toHaveCount(1, { timeout: 20_000 });
+    const ledgerCard = watch.locator('[data-wall-artifact]').filter({ hasText: 'Ledger · export' });
+    await expect(ledgerCard).toHaveCount(1, { timeout: 20_000 });
+    // The Wall draws the same still picture, its source read once the tile is near: the same frame, the same policy.
+    const wallFrame = ledgerCard.locator('[data-face="html-block"][data-html-picture] iframe');
+    await expect(wallFrame).toHaveAttribute('sandbox', '', { timeout: 20_000 });
+    await expect(wallFrame).toHaveAttribute('srcdoc', /^<meta http-equiv="x-dns-prefetch-control" content="off">/);
     await watch.waitForTimeout(2000);
     // Nothing reached the host; whatever the tile's page asked for, the window's policy stopped in the browser.
     expect(reached).toEqual([]);
@@ -195,14 +202,18 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await expect(inline.first()).toHaveAttribute('data-html-embed-phase', 'ready', { timeout: 20_000 });
     expect(await inline.first().locator('figcaption button').evaluateAll((buttons) => buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim()))).toEqual(['Code', 'Full screen', 'Annotate']);
     await shot(page, '01-thread-with-count-desktop');
-    // The block's own Full screen, unchanged, to set beside the one opened from Artifacts (03).
+    // The block's own Full screen is the view Artifacts opens (03): Code and the pen in its title bar, in that order.
     await inline.first().locator('[data-html-embed-full]').click();
-    const popout = page.locator('[data-popout]');
+    const popout = page.locator('[data-html-embed-open]');
     await expect(popout).toBeVisible();
-    await expect(page.locator('[data-html-embed-open]')).toHaveCount(0);
+    await expect(popout.locator('figure[data-html-embed]')).toHaveAttribute('data-html-embed-phase', 'ready', { timeout: 20_000 });
+    expect(await popout.locator('[data-html-embed-code], [data-html-embed-annotate]').evaluateAll((tools) => tools.map((t) => t.getAttribute('aria-label') ?? t.textContent?.trim()))).toEqual(['Code', 'Annotate']);
+    await expect(popout.locator('[data-html-embed-full]')).toHaveCount(0);
     await shot(page, '01b-inline-full-screen-desktop');
     await popout.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(popout).toHaveCount(0);
+    // The block in the text is as it was.
+    await expect(inline.first()).toHaveAttribute('data-html-embed-phase', 'ready');
 
     await button.click();
     const tiles = page.locator('[data-artifacts-view] [data-artifact-tile]');
@@ -214,6 +225,9 @@ test('an html block is an artifact: the count, the grid, opened big with its too
       await expect(tiles.nth(i)).toHaveAttribute('data-artifact-kind', 'html-block');
       await expect(tiles.nth(i)).toContainText('in text');
     }
+    // The berth plan's still picture; the tide chart, which only its script draws, keeps the quiet HTML mark.
+    await expect(tiles.nth(1).locator('[data-html-picture] iframe')).toHaveAttribute('sandbox', '');
+    await expect(tiles.nth(2).locator('iframe')).toHaveCount(0);
     await shot(page, '02-grid-with-html-tiles-desktop');
 
     // The tile opens the block's own page, big, with its tools; never the file viewer.
@@ -265,6 +279,12 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await expect(wall).toHaveCount(4, { timeout: 20_000 });
     await expect(wall.filter({ hasText: 'Harbor · berth plan' })).toHaveCount(1);
     await expect(wall.filter({ hasText: 'HTML block' })).toHaveCount(1);
+    // Pictures, not blank cards: the berth plan and the ledger page drawn small; the script-drawn chart's mark.
+    for (const name of ['Harbor · berth plan', 'Ledger · export']) {
+      await expect(wall.filter({ hasText: name }).locator('[data-html-picture] iframe')).toHaveAttribute('sandbox', '', { timeout: 20_000 });
+    }
+    await expect(wall.filter({ hasText: 'HTML block' }).locator('[data-face="html-block"]')).toBeVisible();
+    await expect(wall.filter({ hasText: 'HTML block' }).locator('iframe')).toHaveCount(0);
     await shot(page, '06-artifacts-wall-desktop');
     // The Wall's tile opens the same, over its thread; closing goes back to the Wall.
     await wall.filter({ hasText: 'HTML block' }).locator('.ib-wall-tile').click();
@@ -292,7 +312,9 @@ test('an html block is an artifact: the count, the grid, opened big with its too
     await smallBig.getByRole('button', { name: 'Close', exact: true }).tap();
     await expect(smallBig).toHaveCount(0);
     await small.goto(`${url}#artifacts`);
-    await expect(small.locator('[data-wall-artifact]').filter({ hasText: 'Harbor · berth plan' })).toHaveCount(1, { timeout: 20_000 });
+    const smallBerths = small.locator('[data-wall-artifact]').filter({ hasText: 'Harbor · berth plan' });
+    await expect(smallBerths).toHaveCount(1, { timeout: 20_000 });
+    await expect(smallBerths.locator('[data-html-picture] iframe')).toHaveAttribute('sandbox', '', { timeout: 20_000 });
     await shot(small, '10-artifacts-wall-phone');
     await phone.close();
     expect(smallWeb).toEqual([]);

@@ -21,7 +21,7 @@
  * "Everything else"; with nothing pinned the grid is as it always was.
  */
 
-import { forwardRef, useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { useShortcutScope } from '../panes/scope';
 import {
   formatInboxVideoTime,
@@ -33,6 +33,7 @@ import {
 } from '@plannotator/core/inbox-types';
 import { artifactKey, artifactsNewestFirst, htmlArtifactName, type Artifact, type FileArtifact, type GuideArtifact, type HtmlArtifact } from '../artifacts';
 import { openHtmlArtifact } from '../htmlArtifactOpen';
+import { htmlBlockPicture } from '../htmlBlockSource';
 // What an html block's tile opens, drawn by its thread (Thread.tsx reads it from here).
 export { HtmlArtifactOpen } from './HtmlArtifactOpen';
 import { readableVersion } from '../attachments';
@@ -333,16 +334,16 @@ function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean })
 }
 
 /**
- * An html block's face: its page drawn small as an attached page's is (`PageFrame`: no script, nothing from the web),
- * only once the tile is near; until then, and on the Wall (no source there), the typed face of an HTML file. A
- * dns-prefetch hint is not covered by the policy, so the page is told first not to prefetch (as plans/planContent.tsx).
+ * An html block's face: its page drawn small as an attached page's is (`PageFrame`: no script, nothing from the web,
+ * no prefetch: htmlBlockSource.ts `htmlBlockPicture`), only once the tile is near; until then, and for a page that
+ * draws nothing with no script (a chart its script draws), the typed face of an HTML file, never a blank box.
  */
-const NO_PREFETCH = '<meta http-equiv="x-dns-prefetch-control" content="off">';
 export function HtmlBlockFace({ source, near }: { source: string | null; near: boolean }) {
+  const picture = useMemo(() => htmlBlockPicture(source), [source]);
   return (
-    <span className="ib-art-prev ib-art-f-page" data-face="html-block">
-      {near && source !== null ? (
-        <PageFrame html={`${NO_PREFETCH}${source}`} />
+    <span className="ib-art-prev ib-art-f-page" data-face="html-block" data-html-picture={near && picture !== null ? '' : undefined}>
+      {near && picture !== null ? (
+        <PageFrame html={picture} />
       ) : (
         <span className="ib-art-typed">
           <Icon name={typedIcon('html')} size={26} />

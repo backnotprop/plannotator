@@ -14,8 +14,9 @@
  * background of its own (its document is transparent and takes the host's
  * theme and color-scheme), as tall as its page up to `EMBED_CLIP_PX`, then a
  * fade and "Show more". Under it one quiet line: "HTML · sandboxed", Code
- * (the fence's source in place of the page) and Full screen (the same page in
- * ui's popout, scrolling).
+ * (the fence's source in place of the page) and Full screen (the block opened
+ * big, `HtmlEmbedOpen`: ui's popout with Code and the pen in its title bar, the
+ * same view a host opens on its own, so the two cannot differ).
  *
  * Comments in place (the owner's pick "A · In place", 2026-11-20; a host
  * that passes `annotate`): a pen at the right end of that line. On, a click
@@ -270,6 +271,7 @@ export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: Html
   const [height, setHeight] = useState<number | undefined>(undefined);
   const [expanded, setExpanded] = useState(false);
   const [full, setFull] = useState(false);
+  const fullOpen = useMemo<HtmlEmbedOpen>(() => ({ onClose: () => setFull(false) }), []);
   const [forced, setForced] = useState(false);
   const releaseLoad = useRef<(() => void) | null>(null);
   // The host is read when a page is asked for: a new host object (a re-render) never reloads the page.
@@ -637,20 +639,8 @@ export function HtmlEmbedBlock({ block, host, open }: { block: Block; host: Html
         </button>
         {pen}
       </figcaption>
-      {full && url !== null && (
-        <PopoutDialog
-          open
-          onClose={() => setFull(false)}
-          title={title}
-          className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-none"
-          dataAttributes={{ 'data-html-embed-popout': '' }}
-        >
-          <div className="flex h-9 shrink-0 items-center border-b border-border pl-4 pr-12 text-xs font-medium text-foreground">{title}</div>
-          <div className="min-h-0 flex-1">
-            <EmbedFrame url={url} theme={theme} mode="full" title={title} onEscape={() => setFull(false)} />
-          </div>
-        </PopoutDialog>
-      )}
+      {/* Full screen is the block opened big, the one path the Inbox's Artifacts open too: Code and the pen in its bar. */}
+      {full && url !== null && <HtmlEmbedBlock block={block} host={host} open={fullOpen} />}
     </figure>
   );
 }

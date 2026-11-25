@@ -275,6 +275,7 @@ packages/inbox/priority.test.tsx
 packages/inbox/rowStar.test.tsx
 packages/inbox/artifactPins.test.tsx
 packages/inbox/htmlArtifactOpen.test.tsx
+packages/inbox/htmlBlockWallFace.test.tsx
 packages/inbox/filePinsReadFails.test.tsx
 packages/inbox/pinnedRowLabel.test.tsx
 packages/inbox/fileBack.test.tsx

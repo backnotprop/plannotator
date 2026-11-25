@@ -901,6 +901,22 @@
       "relay": true
     },
     {
+      "name": "GET artifacts/html",
+      "method": "GET",
+      "path": "artifacts/html",
+      "params": [],
+      "call": "getArtifactsHtml",
+      "window": "/api/inbox/artifacts/html",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "GET events",
       "method": "GET",
       "path": "events",

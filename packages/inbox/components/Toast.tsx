@@ -192,17 +192,61 @@ function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone:
  * most 520 px wide and 16 px from each side (inbox.css), whatever is open
  * (owner, 2026-10-18: a toast is brief, so it may cover Reply or a file's
  * strip for a moment rather than move around them; kept with the two-line
- * cap below, design record "inbox-toasts-break-fixes").
+ * cap below, design record "inbox-toasts-break-fixes"). One exception: an
+ * image's or a film's comment row (`.ib-imgcompose`), whose own press raises
+ * "Markup added to your reply": the toast sits 8 px above it, never over its
+ * Comment button (`useComposerFloor`).
  */
 function DesktopToast({ toast, onDismiss, onHold }: { toast: InboxToastModel; onDismiss?: () => void; onHold?: (held: boolean) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const swipe = useSwipeAway(ref, onDismiss, onHold);
+  const floor = useComposerFloor(ref);
   useFit(ref, toast, false, !!onDismiss && !!toast.onUndo);
   return (
-    <div ref={ref} className={toastClass(toast, false, !!onDismiss)} data-inbox-toast="" {...swipe}>
+    <div ref={ref} className={toastClass(toast, false, !!onDismiss)} data-inbox-toast="" style={floor !== null ? { bottom: `${floor}px` } : undefined} {...swipe}>
       <ToastBody toast={toast} phone={false} onDismiss={onDismiss} />
     </div>
   );
+}
+
+/**
+ * How far above the window's bottom a desktop toast sits while an image's or a film's comment row is on screen: 8 px
+ * over its top, measured while the toast is up and again when the row comes or goes (its page mark on `.pn-inbox`,
+ * pageMarks.ts `markImageComposer`: one attribute, not every change of the page), grows (a drawing's chip, more
+ * lines) or the window resizes. Null with no row: inbox.css places it.
+ */
+function useComposerFloor(ref: RefObject<HTMLDivElement | null>): number | null {
+  const [floor, setFloor] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let watched: HTMLElement | null = null;
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());
+    const measure = () => {
+      const row = [...document.querySelectorAll<HTMLElement>(PHONE_FLOOR_OWN)].find((node) => {
+        const box = node.getBoundingClientRect();
+        return box.width > 0 && box.height > 0;
+      });
+      if (row !== watched) {
+        if (watched) resize?.unobserve(watched);
+        if (row) resize?.observe(row);
+        watched = row ?? null;
+      }
+      if (!row) return setFloor(null);
+      const container = el.offsetParent instanceof HTMLElement ? el.offsetParent.getBoundingClientRect().bottom : window.innerHeight;
+      setFloor(Math.max(0, Math.round(container - restingTop(row))) + 8);
+    };
+    measure();
+    const marks = typeof MutationObserver === 'undefined' ? null : new MutationObserver(measure);
+    marks?.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-ib-imgcompose'] });
+    window.addEventListener('resize', measure);
+    return () => {
+      marks?.disconnect();
+      resize?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [ref]);
+  return floor;
 }
 
 /** The most lines a toast's words take (design record "inbox-toasts-break-fixes"): an error, then any other toast. */
