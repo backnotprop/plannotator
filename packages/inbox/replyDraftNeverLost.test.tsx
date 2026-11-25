@@ -1157,3 +1157,85 @@ test.skipIf(!hasDom)('no Web Locks: a page keeping words says it is open, again 
   await until(() => drafts.get(ONE)?.body === 'Older words. Newer words.', 'saved');
   await until(() => !replyDraftUnsaved() && keptInBrowser().length === 0, 'nothing left unsaved');
 });
+
+/** A phone with the Inbox out of reach: "Ship it" typed, its save did not land, and "Not saved" shows. */
+async function shipItNotSaved(): Promise<HTMLElement> {
+  const el = await open();
+  await reply(el);
+  saveAnswer = noNetwork;
+  typeOn(el, 'Ship it');
+  await until(() => el.querySelector('[data-draft-failed]') !== null, '"Not saved"');
+  return el;
+}
+/** The words this browser keeps for its threads now. */
+const keptWordsHere = () => keptInBrowser().map((key) => (JSON.parse(localStorage.getItem(key)!) as { words: string }).words);
+/** The page shown again with no `visibilitychange` (the page that hid is gone). */
+const visibleAgain = () => Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+
+test.skipIf(!hasDom)('words typed on after ones that did not land, the page gone inside the pause, its keepalive lost: a new page has the newer words back, "Not saved"', async () => {
+  const el = await shipItNotSaved();
+  typeOn(el, ' tomorrow.');
+  act(() => {
+    window.dispatchEvent(new Event('pagehide'));
+  });
+  expect(keptWordsHere()).toEqual(['Ship it tomorrow.']);
+  await settle(2);
+  const next = await newPageAfterTabEnded();
+  await until(() => box(next)?.value === 'Ship it tomorrow.', 'the newer words back in the box');
+  await until(() => next.querySelector('[data-draft-failed]') !== null, '"Not saved"');
+  saveAnswer = null;
+  typeOn(next, ' OK');
+  await until(() => drafts.get(ONE)?.body === 'Ship it tomorrow. OK', 'saved');
+  await until(() => !replyDraftUnsaved() && keptInBrowser().length === 0, 'nothing left unsaved');
+});
+
+test.skipIf(!hasDom)('words typed on after ones that did not land, the page hidden with a save on its way, and the tab ended: a new page has the newest words back', async () => {
+  const el = await shipItNotSaved();
+  let answer!: () => void;
+  const slow = new Promise<void>((done) => (answer = done));
+  // The Inbox takes the next save and never answers it while the page lives.
+  saveAnswer = async () => (await slow, Response.json({ draft: null }));
+  try {
+    typeOn(el, ' tomorrow');
+    // Past the pause in typing: its save is on its way.
+    await settle(4, 200);
+    typeOn(el, '.');
+    pageVisibility('hidden');
+    expect(keptWordsHere()).toEqual(['Ship it tomorrow.']);
+  } finally {
+    visibleAgain();
+  }
+  const next = await newPageAfterTabEnded();
+  await until(() => box(next)?.value === 'Ship it tomorrow.', 'the newest words back in the box');
+  saveAnswer = null;
+  typeOn(next, ' OK');
+  await until(() => drafts.get(ONE)?.body === 'Ship it tomorrow. OK', 'saved');
+  // The gone page's save answers (a real browser runs nothing after it): what that page still sends reaches no Inbox.
+  saveAnswer = () => Response.json({ draft: null });
+  answer();
+  await until(() => !replyDraftUnsaved(), 'nothing left on its way');
+  expect(drafts.get(ONE)?.body).toBe('Ship it tomorrow. OK');
+});
+
+test.skipIf(!hasDom)('words typed on after ones that did not land, sent as the page hid and landed: kept in the browser meanwhile, and nothing comes back once read back', async () => {
+  const el = await shipItNotSaved();
+  saveAnswer = null;
+  try {
+    typeOn(el, ' tomorrow.');
+    pageVisibility('hidden');
+    await until(() => drafts.get(ONE)?.body === 'Ship it tomorrow.', 'the keepalive landed', 300);
+    expect(keptWordsHere()).toEqual(['Ship it tomorrow.']);
+    pageVisibility('visible');
+    await until(() => keptInBrowser().length === 0, 'the kept words let go once read back');
+    await until(() => !replyDraftUnsaved(), 'nothing left unsaved');
+    expect(el.querySelector('[data-draft-failed]') === null).toBe(true);
+  } finally {
+    visibleAgain();
+  }
+  const next = await newPageAfterTabEnded();
+  await until(() => box(next)?.value === 'Ship it tomorrow.', 'the saved draft in the box');
+  await settle(4);
+  expect(next.querySelector('[data-draft-failed]') === null).toBe(true);
+  expect(keptInBrowser()).toEqual([]);
+  expect(drafts.get(ONE)?.body).toBe('Ship it tomorrow.');
+});

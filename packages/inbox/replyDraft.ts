@@ -208,8 +208,9 @@ const remoteWaiting = new Set<string>();
 function syncKept(): void {
   const want = new Map<string, KeptWords>();
   for (const [id, words] of remoteWords) if (machineOf(id)) want.set(id, { kind: 'remote', words, base: null });
-  for (const [id, words] of keepingMine) want.set(id, { kind: 'failed', words, base: baseKnown.get(id) ?? null });
   for (const [id, words] of failedWords) want.set(id, { kind: 'failed', words, base: failedOver.get(id)?.base ?? null });
+  // The box's newer words on their way win over older ones that did not land (those come back once these end).
+  for (const [id, words] of keepingMine) want.set(id, { kind: 'failed', words, base: failedOver.has(id) ? failedOver.get(id)!.base : (baseKnown.get(id) ?? null) });
   for (const [id, words] of conflictWords) want.set(id, { kind: 'conflict', words, base: baseKnown.get(id) ?? null });
   for (const [id, kept] of want) {
     const was = keptHere.get(id);
