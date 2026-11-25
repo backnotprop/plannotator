@@ -370,6 +370,12 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST capabilities": "set",
   "POST link-back": "set",
   "POST unlink": "set",
+  // Link two computers through a third (inbox-link-through.ts), each sent by the Inbox itself, never through the
+  // forward. An ask is held until the broker is back (one job per pair there, so a second copy changes nothing); a
+  // link code and the introduction carrying it are wanted now or not at all (a code lives 10 minutes).
+  "POST link-through-ask": "set",
+  "POST link-through-offer": "now",
+  "POST link-through-introduce": "now",
   // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.
   "POST update": "set",
 };

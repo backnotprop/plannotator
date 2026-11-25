@@ -33,6 +33,7 @@ import type { InboxPeerTransport } from "./inbox-transport";
 import { farArchivedPage, type FarArchived } from "./inbox-archived-merged";
 import { readShowArchived, type InboxShowArchived } from "./inbox-show-archived";
 import { readSharedReactions, type SharedReactions } from "./inbox-reactions-shared";
+import { readLinkThroughWire, type LinkThroughWire } from "@plannotator/core/inbox-link-through";
 import { readCapabilitySet, type CapabilitySet } from "./inbox-capability-set";
 import { readFarArtifactPins } from "./inbox-artifacts-merged";
 import type { InboxArtifactPin } from "@plannotator/core/inbox-artifact-pins";
@@ -80,7 +81,7 @@ export interface PeerRecord {
  * thread's tag): this Inbox asks for each (`<event>=1` on its stream), reads that machine's list again when one comes,
  * and tells its own windows the same event (approval "inbox-linked-marks"). A new mark adds its event here.
  */
-export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags", "show-archived", "grid-seen", "artifact-pins", "reactions", "capability-set"] as const;
+export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags", "show-archived", "grid-seen", "artifact-pins", "reactions", "links", "capability-set"] as const;
 export type PeerRereadEvent = (typeof PEER_REREAD_EVENTS)[number];
 const isRereadEvent = (event: string): event is PeerRereadEvent => (PEER_REREAD_EVENTS as readonly string[]).includes(event);
 
@@ -110,6 +111,8 @@ export interface PeerList {
   capability_set: CapabilitySet | null;
   /** The artifacts pinned there (its list's `artifact_pins`, mark `artifact-pins`), in its own order; none from an older Inbox. */
   artifact_pins: InboxArtifactPin[];
+  /** The computers it is linked to and the links it is making between them (its list's `link_through`, mark `link-through`); null from an older Inbox. */
+  link_through: LinkThroughWire | null;
   /**
    * How far its clock runs ahead of this one's (ms, whole minutes; 0 within two minutes), from its list's `now` as it
    * arrived: Grid measures that machine's quiet time against its own clock. 0 from an Inbox before `now`.
@@ -575,6 +578,7 @@ export class PeerLink {
       reactions: readSharedReactions(list.reactions),
       capability_set: readCapabilitySet(list.capability_set),
       artifact_pins: readFarArtifactPins(list.artifact_pins),
+      link_through: readLinkThroughWire(list.link_through),
       clock_ms: peerClockMs(list.now, Date.now()),
     };
     this.options.onChange();

@@ -51,7 +51,7 @@ import { linkedToMachines } from './linkedToMachines';
 import { useLinkedTarget } from './useLinkedTarget';
 import type { ComposeHeld, ComposeJoined, ComposeSent } from './composeResults';
 export type { ComposeHeld, ComposeJoined, ComposeSent };
-import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
+import { InboxComposerField } from '../components/ComposerField';
 import { ARM_MS } from '../components/PermissionCard';
 import { VoiceFoot } from '../components/VoiceMic';
 import { useVoiceSession } from '../voice';
@@ -109,11 +109,11 @@ import { ReviewRows } from './ReviewRows';
 import { ComposeNotes } from '../parts/ComposeNotes';
 import { LaunchTipCard } from './LaunchTipCard';
 import { LAUNCH_TIP_SAID, LAUNCH_TIP_TIMES, launchTipPlace, launchTipPlainOpen, type LaunchTipPlace } from './launchTip';
+import { useComposeAutosave } from './composeAutosave';
+import { useComposeCaretMenu } from './composeCaretMenu';
 
 /** How long after the last keystroke a pasted link is read. */
 const REVIEW_LINK_PAUSE_MS = 300;
-/** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
-const PHONE_SKILL_LIST_HEIGHT = 198;
 
 export interface ComposeRequest {
   /** A draft to reopen (the Drafts page). */
@@ -683,6 +683,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const empty = untouched || (body.trim() === '' && files.files.length === 0 && threadName.trim() === '');
   const saved = draftSnapshot(draft);
   const dirty = !untouched && (isDirty({ body, session: chosen, files: uploadIds, threadName, board: boardRequest }, saved, draft !== null) || files.uploading);
+  // A draft from the first key: saved after a pause in typing, and as the page hides or goes (composeAutosave.ts).
+  const autosave = useComposeAutosave({ id: draftId.current, opened: request.draft?.updated_at ?? null, fresh: !request.draft, keeps: keepsDrafts, unsaved: dirty, empty, ready: !files.uploading && busy === null && !conflict && body.length <= INBOX_DRAFT_BODY_MAX, written: [body, threadName, uploadIds.join(','), chosen ?? '', boardRequest].join('\u0000'), input: (base) => draftInput(base), onDraft: setDraft });
   const projectName = current?.name ?? null;
 
   // ── the dialog ──
@@ -725,7 +727,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // "inbox-compose-escape-keeps"). A failed save keeps compose open and says why, so the words are never lost.
     // An empty compose (a draft emptied too) is never kept, so it just closes; a reopened draft emptied this way stays
     // saved as it was. No drafts (the tour): nothing to keep.
-    if (keepsDrafts && dirty && !empty) {
+    if (keepsDrafts && (dirty || autosave.saved()) && !empty) {
       void keepDraft();
       return;
     }
@@ -804,6 +806,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
     }
     setBusy('send');
     try {
+      // A save on its way lands first: the Send takes the draft the Inbox holds (none once deleted), and none lands after.
+      await autosave.settle();
+      const draft = autosave.mayHold() ? { id: draftId.current } : null;
       // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
       const words = !box
         ? body
@@ -951,7 +956,36 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
 
   // ── drafts ──
-  const save = async (base: string | null = draft?.updated_at ?? null): Promise<DraftView | null> => {
+  /** A draft save's input: what is written now, against `base` (the draft's `updated_at` this dialog knows). */
+  const draftInput = (base: string | null) => {
+    const to = target ? draftTo(target) : chosen && draft?.to?.session === chosen ? draft.to : null;
+    // A draft keeps the project a new session would start in, not the start itself: reopened, To is chosen again.
+    const project = target
+      ? { id: target.project.id, root: target.project.root, name: target.project.name }
+      : start?.folder
+        ? // A folder picked in "Another folder…" is no project yet: its path (absolute when that machine's home is known) and name.
+          { id: null, root: untildePath(start.folder, startHome), name: start.project.name }
+      : start && !start.scratch
+        ? { id: start.project.id, root: start.project.root, name: start.project.name }
+      : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
+    // A long paste keeps where it goes back in the words, so a reopened draft still offers Put back.
+    const pasted = new Map(files.pastedDraft(body).map((file) => [file.upload_id, file]));
+    const draftFiles = uploadIds.map((id) => pasted.get(id) ?? id);
+    // A folder that is no project yet (Another folder…, Create a folder) is kept as the pick itself, so it comes back (D8).
+    const keptStart =
+      start?.folder && !target
+        ? {
+            agent: start.agent,
+            machine: start.machine,
+            folder: start.folder,
+            name: start.project.name,
+            ...(start.create ? { create: true as const } : {}),
+            ...(start.clone ? { clone: { url: start.clone.url, ...(start.clone.branch ? { branch: start.clone.branch } : {}) } } : {}),
+          }
+        : null;
+    return { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}), ...(keptStart ? { start: keptStart } : {}) };
+  };
+  const save = async (base?: string | null): Promise<DraftView | null> => {
     if (empty) return null;
     if (files.uploading) {
       setError('Wait for the files to finish uploading.');
@@ -965,33 +999,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
     setBusy('save');
     setError(null);
     try {
-      const to = target ? draftTo(target) : chosen && draft?.to?.session === chosen ? draft.to : null;
-      // A draft keeps the project a new session would start in, not the start itself: reopened, To is chosen again.
-      const project = target
-        ? { id: target.project.id, root: target.project.root, name: target.project.name }
-        : start?.folder
-          ? // A folder picked in "Another folder…" is no project yet: its path (absolute when that machine's home is known) and name.
-            { id: null, root: untildePath(start.folder, startHome), name: start.project.name }
-        : start && !start.scratch
-          ? { id: start.project.id, root: start.project.root, name: start.project.name }
-        : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
-      // A long paste keeps where it goes back in the words, so a reopened draft still offers Put back.
-      const pasted = new Map(files.pastedDraft(body).map((file) => [file.upload_id, file]));
-      const draftFiles = uploadIds.map((id) => pasted.get(id) ?? id);
-      // A folder that is no project yet (Another folder…, Create a folder) is kept as the pick itself, so it comes back (D8).
-      const keptStart =
-        start?.folder && !target
-          ? {
-              agent: start.agent,
-              machine: start.machine,
-              folder: start.folder,
-              name: start.project.name,
-              ...(start.create ? { create: true as const } : {}),
-              ...(start.clone ? { clone: { url: start.clone.url, ...(start.clone.branch ? { branch: start.clone.branch } : {}) } } : {}),
-            }
-          : null;
-      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}), ...(keptStart ? { start: keptStart } : {}) });
-      setDraft(result.draft);
+      const result = await autosave.settle().then(() => inboxApi.saveDraft(draftId.current, draftInput(base === undefined ? autosave.base() : base)));
+      autosave.landed(result.draft);
       setConflict(null);
       return result.draft;
     } catch (cause) {
@@ -1023,7 +1032,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       voice.session.cancel();
     }
     if (busy) return;
-    const result = await save(conflict ? conflict.updated_at : (draft?.updated_at ?? null));
+    const result = await save(conflict ? conflict.updated_at : undefined); // Keep mine: over the other window's draft.
     if (result) props.onSaved(result);
   };
 
@@ -1060,28 +1069,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
     }
   };
 
-  // The skill picker's room. A desktop: the whole window (the visual viewport), so the picker floats over
-  // everything in the dialog, the footer included, and past the dialog's bottom edge when it needs to; it is
-  // in the dialog's top layer and painted after the footer, so nothing covers it. A phone (a full-screen
-  // sheet): below its top bar, above its footer and the keyboard.
-  const caretMenu = useMemo<CaretMenuOptions>(
-    () => ({
-      prefer: phone ? 'above' : 'below',
-      maxListHeight: phone ? PHONE_SKILL_LIST_HEIGHT : undefined,
-      bounds: () => {
-        const viewport = window.visualViewport;
-        const seen = viewport ? { top: viewport.offsetTop, bottom: viewport.offsetTop + viewport.height } : { top: 0, bottom: window.innerHeight };
-        if (!phone) return seen;
-        const dialog = dialogRef.current;
-        if (!dialog) return null;
-        const box = dialog.getBoundingClientRect();
-        const bar = dialog.querySelector('.ib-cp-bar')?.getBoundingClientRect();
-        const foot = dialog.querySelector('.ib-cp-foot')?.getBoundingClientRect();
-        return { top: Math.max(seen.top, bar ? bar.bottom : box.top), bottom: Math.min(foot ? foot.top : box.bottom, seen.bottom) };
-      },
-    }),
-    [phone],
-  );
+  // The skill picker's room (composeCaretMenu.ts).
+  const caretMenu = useComposeCaretMenu(phone, dialogRef);
 
   // ── keys ──
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDialogElement>) => {
@@ -1514,7 +1503,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
                 type="button"
                 className="ib-lnk"
                 onClick={() => {
-                  setDraft(conflict);
+                  autosave.landed(conflict);
                   setBody(conflict.body);
                   setNameState(threadNameStateOf(conflict));
                   setChosen(conflict.to?.session ?? null);
@@ -1679,8 +1668,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
               Cancel
             </button>
             <h2 id={titleId}>{title}</h2>
-            {/* Only when nothing can be sent, and a saved draft that has not changed has nothing to save. */}
-            {saveOffered && (!draft || dirty) && (
+            {/* Only when nothing can be sent; a saved draft that has not changed has nothing to save, unless dictated words are on their way. */}
+            {saveOffered && (!draft || dirty || voice.busy) && (
               <button type="button" className="ib-cp-barb ib-strong" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
                 Save draft
               </button>

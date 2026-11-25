@@ -34,6 +34,7 @@ const mods = (hasDom
       ...(await import('@base-ui/react/menu')),
       ...(await import('../components/Thread')),
       ...(await import('../app/route')),
+      ...(await import('../replyDraft')),
     }
   : {}) as typeof import('./useReplyFloaters') &
   typeof import('./model') &
@@ -43,7 +44,8 @@ const mods = (hasDom
   typeof import('../data/threadMentionRefs') &
   typeof import('@base-ui/react/menu') &
   typeof import('../components/Thread') &
-  typeof import('../app/route');
+  typeof import('../app/route') &
+  typeof import('../replyDraft');
 
 const PROJECT = { id: 'prj_1', name: 'billing' };
 const T0 = '2026-11-07T10:00:00.000Z';
@@ -166,13 +168,18 @@ beforeEach(() => {
   root = createRoot(host);
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
   root = null;
   host = null;
+  // The box's last save (sent as it unmounts) is answered by this test's fetch: one failing on the real fetch would
+  // be kept for the thread and show in the next test's box.
+  for (let i = 0; i < 100 && mods.replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const left = mods.replyDraftUnsaved();
   globalThis.fetch = savedFetch;
+  if (left) throw new Error('the test left a reply draft save on its way, or words not saved');
 });
 
 async function wait(ms: number) {

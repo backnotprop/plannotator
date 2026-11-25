@@ -162,7 +162,7 @@ import {
   type TagOption,
 } from '../tags';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
-import { TAG_TOKEN_CLASS } from './ComposerField';
+import { TAG_TOKEN_CLASS, ThreadSkillFilter } from './ComposerField';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { type ActionMark } from './ActionChecklist';
@@ -208,7 +208,8 @@ import { ThreadBarTitle } from '../thread/ThreadBarTitle';
 import { SkipChip } from '../parts/SkipChip';
 import { namedTagOptions, useThreadSessions } from '../thread/useThreadSessions';
 import { measureOpenPlaces } from '../thread/openPlaces';
-import { takeMergedFiles as takeMergedFilesInto, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
+import { takeMergedFiles as takeMergedFilesInto, takeOffered, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
+import { caretToEndOnFirstFocus, focusReplyEnd as focusReplyEndOf } from '../thread/replyCaret';
 import { readFeedbackTexts } from '../data/queries/feedbackTexts';
 import { ReplyTextField } from '../parts/ReplyTextField';
 import { ReviewContextLine } from '../thread/ReviewContextLine';
@@ -394,8 +395,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted),
     onWords: (threadId, draft, was) => takeTheirWords.current(threadId, draft, was),
     ownedBox: (threadId) => ownedBox.current(threadId),
+    onOffer: (threadId) => threadId === threadRef.current.thread_id && boxRef.current.open && takeOffered(offerHost(), true),
   });
-  const keptWords = (replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '';
+  const keptWords = (replyDraft.conflict ?? replyDraft.unsaved ?? replyDraft.draft?.body)?.trim() ?? '';
   /** Whether a Send carries words: the box's, or (the box closed) those kept as its draft. */
   const hasWords = box.open ? boxHasWords : keptWords !== '';
   /** The words a Send carries, as they are now: the box's, or (the box closed) those kept as its draft. */
@@ -1540,6 +1542,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (previous !== thread.thread_id && !machineOf(previous)) landLater(previous, replyFiles.detach());
     setPending(new Map());
     setBox({ open: false, text: '' });
+    ownedFor.current = null;
     replyFiles.reset();
     setError(sendErrors.get(thread.thread_id) ?? null);
     sendErrors.delete(thread.thread_id);
@@ -2006,7 +2009,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // From a file in full screen, back beside the thread first, even with the box open (the composer opens it behind the file).
     // A file full screen is all a narrow window shows, so this leaves it: an unsaved comment on it waits as its draft.
     if (file && shownFull) (phone || fileStacked ? () => fileToThread(writeReplyFromFile) : writeReplyFromFile)();
-    else if (box.open) textRef.current?.focus();
+    else if (box.open) focusReplyEnd();
     else openBox();
   };
   /** The file O opens: its tile shows the O keycap. */
@@ -2235,7 +2238,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (replyDraft.loadedFor !== thread.thread_id || restoredFor.current === thread.thread_id) return;
     restoredFor.current = thread.thread_id;
     // Words a conflict left unsaved here come back before the draft another window holds.
-    const kept = replyDraft.conflict ?? replyDraft.draft?.body ?? null;
+    const kept = replyDraft.conflict ?? replyDraft.unsaved ?? replyDraft.draft?.body ?? null;
     if (kept === null || replyDraft.offer) return;
     const current = boxRef.current;
     if (current.open && current.text.trim()) return;
@@ -2729,7 +2732,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setNewMessage(null);
     setRoute((current) => ({ ...current, open: false, error: null }));
     // A draft's words come back as they were; the picks are listed beside them, never written in.
-    const kept = replyDraft.conflict ?? replyDraft.draft?.body ?? '';
+    const kept = replyDraft.conflict ?? replyDraft.unsaved ?? replyDraft.draft?.body ?? '';
     const text = kept.trim() ? kept : '';
     setBox({ open: true, text });
     // Its files come back as tiles (Cancel, another thread or a reload took them out of the box, never the draft), with
@@ -2763,18 +2766,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       else requestAnimationFrame(() => textRef.current?.focus());
     } else openBox();
   };
-  const focusReplyEnd = () =>
-    requestAnimationFrame(() => {
-      const text = textRef.current;
-      if (!text) return;
-      text.focus();
-      text.setSelectionRange(text.value.length, text.value.length);
-      text.scrollTop = text.scrollHeight;
-      // The words scroll in the box's capped region (approval "inbox-reply-box", D1), not in the field: their end, and
-      // the caret there, are brought to the region's bottom.
-      const region = text.closest<HTMLElement>('[data-reply-scroll]');
-      if (region) region.scrollTop += text.getBoundingClientRect().bottom - region.getBoundingClientRect().bottom;
-    });
+  const focusReplyEnd = () => focusReplyEndOf(textRef);
   /**
    * From full screen to the thread, on the device's own route: beside the thread where there is room (as
    * Write the reply goes), else the file closes (a phone's or a stacked window's Back to the thread). A
@@ -2808,6 +2800,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const earlier = unconfirmed.get(thread.thread_id);
     if (earlier && text.trim() !== earlier.words) forgetUnconfirmed(earlier, text.trim() === '' ? 'emptied' : 'edited');
     if (behind && !boxRef.current.open) restoringRef.current = true;
+    // The person wrote here: from now a draft read with other words waits for their next edit (an untouched box takes it).
+    ownedFor.current = thread.thread_id;
     setBox({ open: true, text });
     // Open now, for the rest of this event: an `openBehind` after it (a paste in full screen's card) keeps these words.
     boxRef.current = liveBox(true);
@@ -3152,9 +3146,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       claimed = true;
       if (box.open) {
         if (words !== '' || replyFiles.draftFiles().length > 0) draftSavedAs = savedAs;
-      } else if (replyDraft.conflict !== null) {
-        // Words another window's change left unsaved here: they go, and the newer draft stays.
-        words = replyDraft.conflict.trim();
+      } else if (replyDraft.unsavedNow() !== null) {
+        // Words left unsaved here as they are after the claim (which saves what it can): they go, and the draft stays.
+        words = (replyDraft.unsavedNow() ?? '').trim();
       } else {
         // The box is closed: the words as the draft holds them now (another window may have changed them).
         const fresh = await replyDraft.reload();
@@ -3888,7 +3882,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           phone,
           reply: {
             to: replyTo,
-            value: box.open ? '' : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
+            value: box.open ? '' : (replyDraft.conflict ?? replyDraft.unsaved ?? replyDraft.draft?.body ?? ''),
             words: box.open ? replyText : undefined, hasWords,
             onChange: (text) => changeReply(text, true),
             quote: quote && quotedMessage ? { message: quotedMessage, words: quote.words, onRemove: () => setQuote(null) } : null,
@@ -3980,10 +3974,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const { quote: arrowQuote, aim: session } = arrowReply(thread.messages, message, words, !!quoteRef.current);
     if (arrowQuote !== undefined) setQuote(arrowQuote);
     if (words) window.getSelection()?.removeAllRanges();
-    if (!pillActive || !session) {
-      openBox();
-      return;
-    }
+    // The box open already: focus goes to it, the caret after its words (never left on the arrow, where keys are shortcuts).
+    if (!pillActive || !session) return boxRef.current.open ? focusReplyEnd() : openBox();
     aimReply([session]);
     setRcptOpen(false);
     if (boxRef.current.open) {
@@ -4008,22 +4000,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   /** The live-session choice open under the box: it stands in for the box's Send and bin. */
   const routeChoiceOpen = route.open && asking;
-  const restoreDraft = () => {
-    const offered = replyDraft.restoreOffer();
-    if (!offered) return;
-    const { draft } = offered;
-    if (offered.typed) {
-      const typed = replyText.get();
-      const text = draft.body.trim() && typed.trim() ? `${draft.body.trimEnd()}\n\n${typed.trimStart()}` : draft.body.trim() ? draft.body : typed;
-      takeDraftFiles(draftFilesWithMine(draft.files ?? []), text, 'add');
-      changeReply(text, true);
-      focusReplyEnd();
-    } else {
-      setBox({ open: true, text: draft.body });
-      takeDraftFiles(draft.files ?? [], draft.body);
-    }
-    announce('Your saved draft is in the reply.');
-  };
+  const offerHost = () => ({ replyDraft, replyText, setBox, takeDraftFiles, draftFilesWithMine, changeReply, focusReplyEnd, announce, textRef });
+  const restoreDraft = () => takeOffered(offerHost());
   /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box. */
   const discardMine = () => {
     const draft = replyDraft.takeTheirs();
@@ -4289,7 +4267,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // While a Send is on its way the box takes no words: these wait for it to end.
     if (!replyWords || sending) return;
     onReplyWordsTaken?.();
-    const kept = boxRef.current.open ? boxRef.current.text : replyDraft.conflict ?? replyDraft.draft?.body ?? '';
+    const kept = boxRef.current.open ? boxRef.current.text : replyDraft.conflict ?? replyDraft.unsaved ?? replyDraft.draft?.body ?? '';
     changeReply(kept.trim() ? `${kept.trimEnd()}\n\n${replyWords}` : replyWords);
     // changeReply reads this render's Send state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5423,9 +5401,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               {...boxDrop.handlers}
               // A press beside the text (the row of chips under it) puts the caret in the reply.
               onMouseDown={(event) => focusReplyFromBox(event, textRef.current)}
-              onFocus={(event) => {
-                if ((event.target as EventTarget) === textRef.current) ownedFor.current = thread.thread_id;
-              }}
+              // A box put back holding words has its caret at their start: its first focus by a key lands after them.
+              onFocus={(event) => caretToEndOnFirstFocus(event.target, textRef.current)}
               // A paste that carries files (a screenshot, a copied image) attaches them; text pastes as text.
               onPaste={(event) => {
                 if (replyFiles.paste(event)) setError(null);
@@ -5773,6 +5750,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     </section>
     {protoWindow}{swarmUi.pane}
     {openAttachment && (
+      <ThreadSkillFilter.Provider value={skillFilter}>
       <AttachmentPane
         ref={paneRef}
         pageStart={pageStart}
@@ -5833,9 +5811,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         onToast={onToast}
         questions={fileQuestions}
         onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus, view: currentView, set: setFor(attachmentId) }, { replace: true })}
-        onClose={() => {
-          onOpenFile(null);
-        }}
+        onClose={() => onOpenFile(null)}
         strip={{
           picks: picksCount,
           annotations: records.length,
@@ -5843,6 +5819,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }}
         composer={composer}
       />
+      </ThreadSkillFilter.Provider>
     )}
     {!openAttachment && file === null && namedFile && (
       <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />

@@ -226,7 +226,7 @@ export function PullsPage(given: PullsPageProps) {
     });
   }, [system?.open]);
   const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
-  const shipping = useShipping(answer, phone, props.onToast);
+  const shipping = useShipping(answer, phone, props.onToast, state.reload);
 
   const list = (
     <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-pulls-list="">

@@ -60,6 +60,7 @@
     "./inbox-push": "./inbox-push.ts",
     "./inbox-door-version": "./inbox-door-version.ts",
     "./inbox-wire-models": "./inbox-wire-models.ts",
+    "./inbox-link-through": "./inbox-link-through.ts",
     "./inbox-answers": "./inbox-answers.ts",
     "./inbox-cloud": "./inbox-cloud.ts",
     "./inbox-personal-agents": "./inbox-personal-agents.ts",

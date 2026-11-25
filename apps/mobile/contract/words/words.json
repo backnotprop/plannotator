@@ -298,6 +298,11 @@
       "parts": [],
       "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES hermes"
     },
+    "host.orca": {
+      "text": "Orca",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES orca"
+    },
     "host.cloud": {
       "text": "Cloud agent",
       "parts": [],

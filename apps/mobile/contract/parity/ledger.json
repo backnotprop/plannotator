@@ -23139,10 +23139,10 @@
       }
     },
     {
-      "id": "undecided-door-post-swarm",
-      "title": "door:POST swarm",
+      "id": "undecided-door-post-link-through-ask",
+      "title": "door:POST link-through-ask",
       "surface": [
-        "door:POST swarm"
+        "door:POST link-through-ask"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23153,10 +23153,10 @@
       }
     },
     {
-      "id": "undecided-window-api-inbox-swarm",
-      "title": "window:/api/inbox/swarm",
+      "id": "undecided-door-post-link-through-introduce",
+      "title": "door:POST link-through-introduce",
       "surface": [
-        "window:/api/inbox/swarm"
+        "door:POST link-through-introduce"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23167,10 +23167,10 @@
       }
     },
     {
-      "id": "undecided-record-swarm",
-      "title": "record:swarm",
+      "id": "undecided-door-post-link-through-offer",
+      "title": "door:POST link-through-offer",
       "surface": [
-        "record:swarm"
+        "door:POST link-through-offer"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23181,10 +23181,10 @@
       }
     },
     {
-      "id": "undecided-enum-inboxswarmmemberwire-state-idle",
-      "title": "enum:InboxSwarmMemberWire.state.idle",
+      "id": "undecided-window-api-inbox-machines-link-through",
+      "title": "window:/api/inbox/machines/link-through",
       "surface": [
-        "enum:InboxSwarmMemberWire.state.idle"
+        "window:/api/inbox/machines/link-through"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23195,10 +23195,10 @@
       }
     },
     {
-      "id": "undecided-enum-inboxswarmmemberwire-state-waiting",
-      "title": "enum:InboxSwarmMemberWire.state.waiting",
+      "id": "undecided-frame-links",
+      "title": "frame:links",
       "surface": [
-        "enum:InboxSwarmMemberWire.state.waiting"
+        "frame:links"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23209,10 +23209,10 @@
       }
     },
     {
-      "id": "undecided-enum-inboxswarmmemberwire-state-working",
-      "title": "enum:InboxSwarmMemberWire.state.working",
+      "id": "undecided-enum-linkthroughstatus-failed",
+      "title": "enum:LinkThroughStatus.failed",
       "surface": [
-        "enum:InboxSwarmMemberWire.state.working"
+        "enum:LinkThroughStatus.failed"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23223,10 +23223,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxmessagewire-ghost-of",
-      "title": "field:InboxMessageWire.ghost_of",
+      "id": "undecided-enum-linkthroughstatus-idle",
+      "title": "enum:LinkThroughStatus.idle",
       "surface": [
-        "field:InboxMessageWire.ghost_of"
+        "enum:LinkThroughStatus.idle"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23237,10 +23237,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxswarmmemberwire-doing",
-      "title": "field:InboxSwarmMemberWire.doing",
+      "id": "undecided-enum-linkthroughstatus-linking",
+      "title": "enum:LinkThroughStatus.linking",
       "surface": [
-        "field:InboxSwarmMemberWire.doing"
+        "enum:LinkThroughStatus.linking"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23251,10 +23251,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxswarmmemberwire-for",
-      "title": "field:InboxSwarmMemberWire.for",
+      "id": "undecided-enum-linkthroughstatus-waiting",
+      "title": "enum:LinkThroughStatus.waiting",
       "surface": [
-        "field:InboxSwarmMemberWire.for"
+        "enum:LinkThroughStatus.waiting"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23265,10 +23265,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxswarmmemberwire-host",
-      "title": "field:InboxSwarmMemberWire.host",
+      "id": "undecided-field-linkthroughpairview-a",
+      "title": "field:LinkThroughPairView.a",
       "surface": [
-        "field:InboxSwarmMemberWire.host"
+        "field:LinkThroughPairView.a"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23279,10 +23279,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxswarmmemberwire-joined",
-      "title": "field:InboxSwarmMemberWire.joined",
+      "id": "undecided-field-linkthroughpairview-c",
+      "title": "field:LinkThroughPairView.c",
       "surface": [
-        "field:InboxSwarmMemberWire.joined"
+        "field:LinkThroughPairView.c"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23293,10 +23293,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxswarmmemberwire-machine-name",
-      "title": "field:InboxSwarmMemberWire.machine_name",
+      "id": "undecided-field-linkthroughpairview-status",
+      "title": "field:LinkThroughPairView.status",
       "surface": [
-        "field:InboxSwarmMemberWire.machine_name"
+        "field:LinkThroughPairView.status"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23307,10 +23307,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxswarmmemberwire-name",
-      "title": "field:InboxSwarmMemberWire.name",
+      "id": "undecided-field-linkthroughpairview-waiting-for",
+      "title": "field:LinkThroughPairView.waiting_for",
       "surface": [
-        "field:InboxSwarmMemberWire.name"
+        "field:LinkThroughPairView.waiting_for"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23321,10 +23321,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxswarmmemberwire-session",
-      "title": "field:InboxSwarmMemberWire.session",
+      "id": "undecided-field-linkthroughpairview-why",
+      "title": "field:LinkThroughPairView.why",
       "surface": [
-        "field:InboxSwarmMemberWire.session"
+        "field:LinkThroughPairView.why"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23335,10 +23335,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxswarmmemberwire-state",
-      "title": "field:InboxSwarmMemberWire.state",
+      "id": "undecided-field-linkthroughrowview-id",
+      "title": "field:LinkThroughRowView.id",
       "surface": [
-        "field:InboxSwarmMemberWire.state"
+        "field:LinkThroughRowView.id"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23349,10 +23349,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxthread-swarm",
-      "title": "field:InboxThread.swarm",
+      "id": "undecided-field-linkthroughrowview-name",
+      "title": "field:LinkThroughRowView.name",
       "surface": [
-        "field:InboxThread.swarm"
+        "field:LinkThroughRowView.name"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23363,10 +23363,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxthreadswarm-ghost-id",
-      "title": "field:InboxThreadSwarm.ghost_id",
+      "id": "undecided-field-linkthroughrowview-status",
+      "title": "field:LinkThroughRowView.status",
       "surface": [
-        "field:InboxThreadSwarm.ghost_id"
+        "field:LinkThroughRowView.status"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23377,10 +23377,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxthreadswarm-ghost-unread",
-      "title": "field:InboxThreadSwarm.ghost_unread",
+      "id": "undecided-field-linkthroughrowview-via",
+      "title": "field:LinkThroughRowView.via",
       "surface": [
-        "field:InboxThreadSwarm.ghost_unread"
+        "field:LinkThroughRowView.via"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23391,10 +23391,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxthreadswarm-members",
-      "title": "field:InboxThreadSwarm.members",
+      "id": "undecided-field-linkthroughrowview-waiting-for",
+      "title": "field:LinkThroughRowView.waiting_for",
       "surface": [
-        "field:InboxThreadSwarm.members"
+        "field:LinkThroughRowView.waiting_for"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23405,10 +23405,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxthreadswarm-on",
-      "title": "field:InboxThreadSwarm.on",
+      "id": "undecided-field-linkthroughrowview-why",
+      "title": "field:LinkThroughRowView.why",
       "surface": [
-        "field:InboxThreadSwarm.on"
+        "field:LinkThroughRowView.why"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23419,10 +23419,10 @@
       }
     },
     {
-      "id": "undecided-door-get-threads-id-swarm",
-      "title": "door:GET threads/:id/swarm",
+      "id": "undecided-field-linkthroughview-pairs",
+      "title": "field:LinkThroughView.pairs",
       "surface": [
-        "door:GET threads/:id/swarm"
+        "field:LinkThroughView.pairs"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23433,10 +23433,10 @@
       }
     },
     {
-      "id": "undecided-door-post-threads-id-swarm",
-      "title": "door:POST threads/:id/swarm",
+      "id": "undecided-field-linkthroughview-through",
+      "title": "field:LinkThroughView.through",
       "surface": [
-        "door:POST threads/:id/swarm"
+        "field:LinkThroughView.through"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23447,24 +23447,10 @@
       }
     },
     {
-      "id": "undecided-window-api-inbox-threads-id-swarm",
-      "title": "window:/api/inbox/threads/:id/swarm",
+      "id": "undecided-field-machineview-link-through",
+      "title": "field:MachineView.link_through",
       "surface": [
-        "window:/api/inbox/threads/:id/swarm"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-24",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
-      "id": "undecided-field-inboxtag-cloud-wake",
-      "title": "field:InboxTag.cloud_wake",
-      "surface": [
-        "field:InboxTag.cloud_wake"
+        "field:MachineView.link_through"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -23484,6 +23470,356 @@
       "mobile": "undecided",
       "why": "",
       "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-scheduled-running",
+      "title": "field:InboxListRow.scheduled_running",
+      "surface": [
+        "field:InboxListRow.scheduled_running"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-threads-id-swarm",
+      "title": "door:GET threads/:id/swarm",
+      "surface": [
+        "door:GET threads/:id/swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-swarm",
+      "title": "door:POST swarm",
+      "surface": [
+        "door:POST swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-swarm",
+      "title": "door:POST threads/:id/swarm",
+      "surface": [
+        "door:POST threads/:id/swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-swarm",
+      "title": "window:/api/inbox/swarm",
+      "surface": [
+        "window:/api/inbox/swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-swarm",
+      "title": "window:/api/inbox/threads/:id/swarm",
+      "surface": [
+        "window:/api/inbox/threads/:id/swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-record-swarm",
+      "title": "record:swarm",
+      "surface": [
+        "record:swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxswarmmemberwire-state-idle",
+      "title": "enum:InboxSwarmMemberWire.state.idle",
+      "surface": [
+        "enum:InboxSwarmMemberWire.state.idle"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxswarmmemberwire-state-waiting",
+      "title": "enum:InboxSwarmMemberWire.state.waiting",
+      "surface": [
+        "enum:InboxSwarmMemberWire.state.waiting"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxswarmmemberwire-state-working",
+      "title": "enum:InboxSwarmMemberWire.state.working",
+      "surface": [
+        "enum:InboxSwarmMemberWire.state.working"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-ghost-of",
+      "title": "field:InboxMessageWire.ghost_of",
+      "surface": [
+        "field:InboxMessageWire.ghost_of"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarmmemberwire-doing",
+      "title": "field:InboxSwarmMemberWire.doing",
+      "surface": [
+        "field:InboxSwarmMemberWire.doing"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarmmemberwire-for",
+      "title": "field:InboxSwarmMemberWire.for",
+      "surface": [
+        "field:InboxSwarmMemberWire.for"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarmmemberwire-host",
+      "title": "field:InboxSwarmMemberWire.host",
+      "surface": [
+        "field:InboxSwarmMemberWire.host"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarmmemberwire-joined",
+      "title": "field:InboxSwarmMemberWire.joined",
+      "surface": [
+        "field:InboxSwarmMemberWire.joined"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarmmemberwire-machine-name",
+      "title": "field:InboxSwarmMemberWire.machine_name",
+      "surface": [
+        "field:InboxSwarmMemberWire.machine_name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarmmemberwire-name",
+      "title": "field:InboxSwarmMemberWire.name",
+      "surface": [
+        "field:InboxSwarmMemberWire.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarmmemberwire-session",
+      "title": "field:InboxSwarmMemberWire.session",
+      "surface": [
+        "field:InboxSwarmMemberWire.session"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxswarmmemberwire-state",
+      "title": "field:InboxSwarmMemberWire.state",
+      "surface": [
+        "field:InboxSwarmMemberWire.state"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxtag-cloud-wake",
+      "title": "field:InboxTag.cloud_wake",
+      "surface": [
+        "field:InboxTag.cloud_wake"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthread-swarm",
+      "title": "field:InboxThread.swarm",
+      "surface": [
+        "field:InboxThread.swarm"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadswarm-ghost-id",
+      "title": "field:InboxThreadSwarm.ghost_id",
+      "surface": [
+        "field:InboxThreadSwarm.ghost_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadswarm-ghost-unread",
+      "title": "field:InboxThreadSwarm.ghost_unread",
+      "surface": [
+        "field:InboxThreadSwarm.ghost_unread"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadswarm-members",
+      "title": "field:InboxThreadSwarm.members",
+      "surface": [
+        "field:InboxThreadSwarm.members"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxthreadswarm-on",
+      "title": "field:InboxThreadSwarm.on",
+      "surface": [
+        "field:InboxThreadSwarm.on"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
       "ios": {
         "state": "not-started"
       }

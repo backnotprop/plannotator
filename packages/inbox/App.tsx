@@ -67,7 +67,7 @@ import {
   type WhatsNewReleasesModel,
 } from './api';
 import { listReadRefused, readFirstList } from './firstListRead';
-import { adoptRestartedInbox, type RestartHello } from './sessionAdopt';
+import { adoptRestartedInbox, inboxReconnected, type RestartHello } from './sessionAdopt';
 import { newRecordBatch, noteOwnRecord, noteRecord } from './openThreadReads';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { createOwnSaves } from './ownSaves';
@@ -1730,8 +1730,8 @@ function Inbox() {
         onConnect: (hello) => {
           // A (re)connect: what happened while the stream was away is not known here; no held thread is drawn from as current.
           staleThreads(queryClient);
-          // The Inbox restarted under this page: when it is provably the same one, writes go on without a reload.
-          if (hello) void adoptAfterRestart(hello);
+          // A restarted Inbox, provably the same one: writes go on without a reload; then unsaved reply drafts save again.
+          void (hello ? adoptAfterRestart(hello) : Promise.resolve()).finally(inboxReconnected);
           // `event: deliveries` carries no record, so the cursor never replays one sent before this connect.
           listAfterEvents(80);
           reportWindow();

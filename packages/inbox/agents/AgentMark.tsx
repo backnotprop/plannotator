@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import type { InboxAgent } from '@plannotator/core/inbox-types';
+import { inboxMarkFaceHost, isInboxMarkFace, type InboxAgent } from '@plannotator/core/inbox-types';
 import { HostMark } from '../icons';
 import { keepAgentFace, useAgentFace } from './agentFaces';
 import { agentFaceSources, loadAgentFaceArt } from './faceArtLoad';
@@ -38,7 +38,7 @@ export type AgentMarkSize = 24 | 44;
 
 export function AgentMark({
   id,
-  host,
+  host: ownHost,
   name,
   agent,
   picks = 'all',
@@ -64,7 +64,10 @@ export function AgentMark({
   const rex = rexMark && size === 24 ? <RexMark mark={rexMark} seed={id} size={24} side /> : null;
   // Agent icons "From the project name" (Settings → Rows): no face picked draws the project's tile (projectFace.tsx).
   const projectDefault = useProjectDefault(id);
-  const face = shownAgentFace(kept, projectDefault);
+  const shown = shownAgentFace(kept, projectDefault);
+  // Another host's mark (`mark:<host>`): drawn as that host's own mark, its rig and all, here and in the picker.
+  const host = isInboxMarkFace(shown) ? inboxMarkFaceHost(shown) : ownHost;
+  const face = isInboxMarkFace(shown) ? 'agent' : shown;
   // The project's tile is a still in the mark's place; with nothing to draw, the agent's own mark, alive as ever.
   const project = useAgentProjectTile(face === 'project' ? id : null);
   const tiled = face === 'project' && project !== null;

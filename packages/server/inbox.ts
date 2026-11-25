@@ -362,7 +362,7 @@ import { themeChooserLook, themeChooserOpen } from "@plannotator/shared/inbox/th
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
-import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { createInboxPulls, InboxPullsError, linkInboxPulls, linkUnlistedPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
 import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
@@ -373,7 +373,7 @@ import { gridRowDecorator, gridRowStripped } from "./inbox-grid-row";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createShipReader } from "./inbox-ship-read";
 import { shipBinds, shipLaunchFailed, shipSessionEnded, shipShipper, type InboxShipAgentDeps } from "./inbox-ship-agent";
-import { inboxNoticeOf, type InboxShip } from "@plannotator/core/inbox-pull-handoff";
+import { inboxNoticeOf, shipActive, shipsMergedShown, type InboxShip } from "@plannotator/core/inbox-pull-handoff";
 import { createInboxShipRoutes } from "./inbox-ship-routes";
 import { createInboxShipStore } from "./inbox-ship-store";
 import { createInboxShipWatch, shipEndedWaiting } from "./inbox-ship-watch";
@@ -475,8 +475,11 @@ import { createInboxSessionLabels } from "./inbox-session-labels";
  */
 const BRIDGE_WAKING_HOSTS: ReadonlySet<string> = new Set(INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host)));
 
-/** A host whose session's bridge may poll: T3 Code's too, for a thread whose Claude runs the Claude Code mod. */
-const pollingWakeHost = (host: string): boolean => BRIDGE_WAKING_HOSTS.has(host) || host === INBOX_T3_HOST;
+/**
+ * A host whose session's bridge may poll: T3 Code's too, for a thread whose Claude runs the Claude Code mod, and
+ * Orca's, for a chat whose plugin polls as it. Only a session that polls now is woken (`live.pollsNow`).
+ */
+const pollingWakeHost = (host: string): boolean => BRIDGE_WAKING_HOSTS.has(host) || host === INBOX_T3_HOST || host === "orca";
 
 /** Where a request came in: the window's loopback port, or the tailnet-only listener `tailscale serve` points at. */
 type RequestVia = "local" | "tailnet";
@@ -4493,6 +4496,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A `machines` snapshot opens every stream: a resync, never a notification.
         const sendMachine = (frame: MachineFrame) => send(`event: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`);
         const stopMachines = url.searchParams.get("machines") === "1" ? machines.subscribe(sendMachine) : () => {};
+        // This Inbox's links moved (one linked, unlinked, asleep or back, or a link through it under way): a linked
+        // computer that asks (`links=1`) reads this list again for its `link_through` (inbox-link-through.ts).
+        const stopLinks = url.searchParams.get("links") === "1" && fromDeviceDoor.get(req)?.platform === MACHINE_PLATFORM ? machines.onLinks(() => send(`event: links\ndata: {}\n\n`)) : () => {};
         if (url.searchParams.get("machines") === "1") sendMachine({ event: "machines", data: { machines: machines.machinesView() } });
         // A window hears its heartbeat (a named frame, so the page sees it and can tell a dead connection from a
         // quiet Inbox); the phone's door, a linked machine and agents keep the comment line, as before.
@@ -4532,6 +4538,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           tailscaleListeners.delete(onTailscale);
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
+          stopLinks();
           leave();
         };
         req.signal.addEventListener("abort", () => {
@@ -5752,6 +5759,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const replyDrafts = createInboxReplyDrafts({
     store,
     serverSession,
+    // A page an earlier run of this data folder served keeps saving reply drafts (a compare-and-set): typing is never lost.
+    follows,
     readBody: (req) => readBody(req),
     json,
     onChange: (threadId) => {
@@ -6503,8 +6512,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const agents = withRexPlaces(listed, phone ? null : thisComputersWindow(req, via) ? "here" : "away");
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts), the
         // artifacts pinned here (mark `artifact-pins`): that machine's windows show them on this Inbox's threads, and the
-        // saved reaction emoji (inbox-reactions-shared.ts), and the capability switches with their flips (inbox-capability-set.ts).
-        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState(), capability_set: capabilitySet.wire() } : {}) };
+        // saved reaction emoji (inbox-reactions-shared.ts), the capability switches with their flips (inbox-capability-set.ts),
+        // and the computers this one is linked to (link-through).
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState(), capability_set: capabilitySet.wire(), link_through: machines.linkThroughWire() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
@@ -6888,8 +6898,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (row && !inboxRowArchived(row)) started.set(threadId, { ...start, name: row.thread_name ?? row.subject });
         }
         const allOwners = new Map([...branchOwners, ...pullOwners.all()]);
+        // The PRs whose ship merged and still says so, here and on each linked machine (that machine's as last read,
+        // never waited for; a linked machine reading this list gets this machine's own).
+        const shipList = [...ships.all(), ...(byWindow ? machines.mergedShips() : [])];
+        const shipMerged = shipsMergedShown(shipList);
+        // A PR seen landed before its ship's watch marks it merged keeps its row in between.
+        const shipGoing = new Set(shipList.filter(shipActive).map((ship) => ship.key));
+        // A teammate's PR leaves the list once merged: the thread the person tied it to keeps it while Merged shows.
+        linkUnlistedPulls(shipMerged.keys(), links, pullLinkStore, owners);
         const rows = reviewRowsShown(
-          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true }),
+          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true, shipMerged, shipActive: shipGoing }),
           hiddenKeys,
           (key) => links[key]?.thread_id ?? allOwners.get(key)?.thread_id ?? null,
         );

@@ -836,7 +836,7 @@ const ReviewApp: React.FC = () => {
   const semanticDiffUsable = semDiffClient != null;
   const diffSemanticOn = useConfigValue('diffSemantic');
   const diffPowerUpOn = useConfigValue('diffPowerUp');
-  const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: PowerUpProvider | null; revision: number }>({ configured: false, provider: null, revision: 0 });
+  const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: PowerUpProvider | null; endpoint?: string; revision: number }>({ configured: false, provider: null, revision: 0 });
   useEffect(() => {
     if (!semDiffClient) return;
     let request = 0;
@@ -844,7 +844,7 @@ const ReviewApp: React.FC = () => {
       const id = ++request;
       fetch('/api/sem-diff/opinion/settings')
         .then((res) => (res.ok ? res.json() : null))
-        .then((data: { configured: boolean; provider: PowerUpProvider | null } | null) => {
+        .then((data: { configured: boolean; provider: PowerUpProvider | null; endpoint?: string } | null) => {
           if (id === request && data) setPowerUpConfigured((previous) => ({ ...data, revision: previous.revision + 1 }));
         })
         .catch(() => {});
@@ -6143,6 +6143,7 @@ const ReviewApp: React.FC = () => {
                   <PowerUpStatusSlot
                     status={powerUpStatus}
                     provider={powerUpConfigured.provider}
+                    endpoint={powerUpConfigured.endpoint}
                     onRetry={() => setPowerUpRetry((n) => n + 1)}
                     onSettings={() => setOpenSettingsMenu('semantic')}
                   />

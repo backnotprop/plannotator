@@ -7,7 +7,8 @@
  *
  * Each spec says what it proves in its own header comment. A new
  * `tests/e2e/*.spec.ts` runs in the `chromium` project with no edit to this
- * file; name it `*-webkit.spec.ts` to run it in the `webkit` project only.
+ * file; name it `*-webkit.spec.ts` to run it in the `webkit` project only, or
+ * `*-firefox.spec.ts` for the `firefox` project only.
  */
 import { defineConfig } from '@playwright/test';
 import { quarantineFilter } from './quarantine';
@@ -20,6 +21,8 @@ process.env.PLANNOTATOR_SPACES_URL = 'http://127.0.0.1:9';
 const OWN_CONFIG = ['inbox-thread-parity.spec.ts'];
 /** Specs that run in the `webkit` project only. */
 const WEBKIT_ONLY = '*-webkit.spec.ts';
+/** Specs that run in the `firefox` project only. */
+const FIREFOX_ONLY = '*-firefox.spec.ts';
 
 export default defineConfig({
   testDir: '.',
@@ -45,9 +48,11 @@ export default defineConfig({
     launchOptions: { args: ['--use-mock-keychain', '--password-store=basic'] },
   },
   projects: [
-    // Every spec but the WebKit-only ones, in Chromium. A project's testIgnore replaces the top-level one, so it repeats OWN_CONFIG.
-    { name: 'chromium', testIgnore: [...OWN_CONFIG, WEBKIT_ONLY] },
+    // Every spec but the WebKit-only and Firefox-only ones, in Chromium. A project's testIgnore replaces the top-level one, so it repeats OWN_CONFIG.
+    { name: 'chromium', testIgnore: [...OWN_CONFIG, WEBKIT_ONLY, FIREFOX_ONLY] },
     // The WebKit-only specs, and a few that run in WebKit too (diagram remote loads, math labels in diagrams, the toolstrip's right-to-left check, …). No Chromium flags here: WebKit refuses them.
     { name: 'webkit', testMatch: [WEBKIT_ONLY, 'diagram-remote-loads.spec.ts', 'diagram-math-labels.spec.ts', 'toolstrip-rtl.spec.ts', 'inbox-inline-html.spec.ts', 'inbox-debug-log.spec.ts', 'inbox-links-in-place.spec.ts', 'inbox-reuse-attachments.spec.ts', 'inbox-inline-media.spec.ts', 'pele-labels.spec.ts'], use: { browserName: 'webkit', launchOptions: { args: [] } } },
+    // The Firefox-only specs (the + on a diff line, the owner's Firefox report of 2026-11-24). No Chromium flags here either.
+    { name: 'firefox', testMatch: [FIREFOX_ONLY], use: { browserName: 'firefox', launchOptions: { args: [] } } },
   ],
 });
