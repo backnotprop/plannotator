@@ -529,6 +529,59 @@
       "relay": true
     },
     {
+      "name": "GET threads/:id/canvas",
+      "method": "GET",
+      "path": "threads/{thread}/canvas",
+      "params": [
+        "thread"
+      ],
+      "call": "getThreadCanvas",
+      "window": "/api/inbox/threads/{thread}/canvas",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET threads/:id/canvas/files/:id",
+      "method": "GET",
+      "path": "threads/{thread}/canvas/files/{file}",
+      "params": [
+        "thread",
+        "file"
+      ],
+      "call": "getThreadCanvasFile",
+      "window": "/api/inbox/threads/{thread}/canvas/files/{file}",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET canvases",
+      "method": "GET",
+      "path": "canvases",
+      "params": [],
+      "call": "getCanvases",
+      "window": "/api/inbox/canvases",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "GET pulls/risk",
       "method": "GET",
       "path": "pulls/risk",

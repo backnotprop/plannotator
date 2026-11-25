@@ -42,6 +42,8 @@ const COLLECTIONS: Record<string, { word: string; param: string }> = {
   combine: { word: 'combine', param: 'combine' },
   actions: { word: 'action', param: 'action' },
   scheduled: { word: 'routine', param: 'routine' },
+  // A canvas's pictures' files (`threads/:id/canvas/files/:id`).
+  files: { word: 'file', param: 'file' },
 };
 
 /**

@@ -23493,6 +23493,9 @@
       "id": "canvas",
       "title": "A thread's canvas: the Excalidraw drawing the person and agents share, its pens, its mark and a reply sent from it (a capability, off by default)",
       "surface": [
+        "door:GET canvases",
+        "door:GET threads/:id/canvas",
+        "door:GET threads/:id/canvas/files/:id",
         "window:/api/inbox/canvas/jobs/:id",
         "window:/api/inbox/canvases",
         "window:/api/inbox/threads/:id/canvas",

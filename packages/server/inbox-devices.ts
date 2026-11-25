@@ -278,6 +278,12 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^pulls$/, window: () => "/api/inbox/pulls", machineOnly: true },
   // Branch reviews (mark `branches`): a linked machine's Reviews lists the branches agents reported here.
   { method: "GET", route: /^reviews\/branches$/, window: () => "/api/inbox/reviews/branches", machineOnly: true },
+  // A thread's canvas (inbox-canvas.ts; mark `canvas`), the read path: a linked machine's window reads the canvas of a
+  // thread that lives here, its pictures' files, and which threads hold one. Only while the canvas is on (one set of
+  // switches; off, `409 canvas_off`). Its writes are not carried yet (inbox-canvas.md, "Not done").
+  { method: "GET", route: /^threads\/([^/]+)\/canvas$/, window: (m) => `/api/inbox/threads/${m[1]}/canvas`, machineOnly: true },
+  { method: "GET", route: /^threads\/([^/]+)\/canvas\/files\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}/canvas/files/${m[2]}`, machineOnly: true },
+  { method: "GET", route: /^canvases$/, window: () => "/api/inbox/canvases", machineOnly: true },
   { method: "GET", route: /^pulls\/(risk|details|diff|file|repo-files|repo-file|avatar|media|media\/sizes)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   { method: "POST", route: /^pulls\/(close|reopen|merge|owner)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   // Ship (approval "inbox-ship-mode"): a ship lives on the machine of its agent's thread; a window on either ships,

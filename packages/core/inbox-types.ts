@@ -3754,8 +3754,10 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * `ships/stop`), so a linked machine's Reviews draws them and offers its agents in Ship's list.
  * `link-through`: its list names the computers it is linked to (`link_through`), and its door brokers, makes the
  * link code for, and takes, a link between two computers linked to one (core inbox-link-through.ts).
+ * `canvas`: its door answers a linked machine's reads of its threads' canvases (`threads/:id/canvas`, its files,
+ * `canvases`; inbox-canvas.ts in the server). Not yet its writes: a window offers no pen on its threads until then.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through", "canvas"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

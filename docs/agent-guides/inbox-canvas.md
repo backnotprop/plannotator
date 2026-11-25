@@ -1,6 +1,6 @@
 ## A thread's canvas
 
-Every thread of this computer's Inbox can hold one canvas: a real Excalidraw scene that the person draws on and an agent reads and changes. Local threads only, no linked machines, no phone relay, no approval record yet.
+Every thread of this computer's Inbox can hold one canvas: a real Excalidraw scene that the person draws on and an agent reads and changes. A pen on this computer's threads only for now (a linked computer's door answers its canvas reads; the rest is under "Not done"), no phone relay, no approval record yet.
 
 ### The switch
 
@@ -62,5 +62,7 @@ A deleted thread's canvas folder is moved to `inbox/canvas/.gone/<thread>-<time>
 
 ### Not done
 
+**Linked computers, the read path only.** A thread's canvas lives with the thread, on its own computer. That computer's door answers a linked machine's reads (`GET threads/:id/canvas` with its `look` and `since`, `GET threads/:id/canvas/files/:id`, `GET canvases`; `machineOnly`, so a phone gets the door's 404; `packages/server/inbox-canvas-door.test.ts`), and its list carries the mark `canvas` (`INBOX_LINKED_MARKS`), so a window can tell an older computer, which has no canvas, and offer it no pen. Still to do before a far thread shows a pen (`useThreadCanvas.tsx` keeps `!machineOf`): the window's canvas calls through the forward (`/api/inbox/m/<machine>/…`, `canvasApi.ts`) and the far `canvases` mark read; the writes on the door (`POST threads/:id/canvas`, `/undo`, `/picture`) with their rule-8 kinds in `DOOR_WRITES` (a save is a `set` the outbox holds while that computer sleeps, so no edit is lost, and the board says it is waiting); the far computer's `event: canvas` reaching this window (a re-read event in `PEER_REREAD_EVENTS`); the far computer's drawing jobs (`canvas-job`: a picture, a mermaid) answered by a window on another computer, or the far agent's `--picture` and mermaid refused there with no window of its own; and two Inboxes in a browser spec, both directions.
+
 A close-page save of a scene over 64 KB (browsers cap what a closing page sends; the save made as the tab is put away, compressed, covers most closes), 
-Linked machines (the canvas routes are not on the device door's allowlist, `packages/server/inbox-devices.ts`, and the window's canvas calls do not route by machine; uploads already do), the phone relay, storage accounting and a sweep of `.gone`, an approval record, a DOM test for the lazy part's failure. A paired cloud agent's `--picture` answers a path on the person's computer, which it cannot open.
+the phone relay, storage accounting and a sweep of `.gone`, an approval record, a DOM test for the lazy part's failure. A paired cloud agent's `--picture` answers a path on the person's computer, which it cannot open.
