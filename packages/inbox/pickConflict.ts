@@ -43,3 +43,29 @@ export function onPickConflict(cause: unknown, tries: number, rule: PickConflict
   // Changed again under every retry (both windows still answering): the Inbox's answer is drawn, never the raw refusal.
   return tries < PICK_CONFLICT_RETRIES ? { action: 'retry', revision } : { action: 'adopt' };
 }
+
+/**
+ * One answer's save under the rule above, as the thread and decision mode both run it. `save` goes at `revision`;
+ * refused because another window's answer landed first, `landed` hears the revision the Inbox holds now, and the save
+ * goes again at it (`retry`) or stops for the Inbox's answer (`adopted`). `newer`: a newer answer of the question
+ * waits, which decides instead (`newer`). Any other refusal is thrown.
+ */
+export async function saveOverConflicts<T>(
+  save: (revision: number, tries: number) => Promise<T>,
+  revision: number,
+  hooks: { landed: (revision: number) => void; newer: () => boolean },
+): Promise<{ saved: T } | { stood: 'newer' | 'adopted' }> {
+  for (let tries = 0; ; tries += 1) {
+    try {
+      return { saved: await save(revision, tries) };
+    } catch (cause) {
+      const conflict = onPickConflict(cause, tries);
+      if (!conflict) throw cause;
+      const now = conflictRevision(cause)!;
+      hooks.landed(now);
+      if (hooks.newer()) return { stood: 'newer' };
+      if (conflict.action !== 'retry') return { stood: 'adopted' };
+      revision = now;
+    }
+  }
+}
