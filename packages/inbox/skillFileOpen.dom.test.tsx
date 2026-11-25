@@ -251,7 +251,10 @@ test.skipIf(!hasDom)("a double-click on the chip takes back its first click's op
   await pressWords(words, 1);
   await settle(() => pane() !== null);
   expect(pane()).not.toBeNull();
-  await pressWords(words, 2);
+  // The open moved the words (the file took half the window): the second press lands outside the message.
+  const elsewhere = document.createElement('div');
+  document.body.appendChild(elsewhere);
+  await pressWords(elsewhere, 2);
   await settle(() => pane() === null);
   expect(pane()).toBeNull();
   expect(window.getSelection()!.toString()).toBe('/picture-it');

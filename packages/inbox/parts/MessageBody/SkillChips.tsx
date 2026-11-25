@@ -150,7 +150,9 @@ export function SkillChips({
     const onPointerLeave = () => setHover(null);
     body.addEventListener('pointerdown', onPointerDown, true);
     body.addEventListener('mouseup', onMouseUp, true);
-    body.addEventListener('mousedown', onMouseDown, true);
+    // On the document: the open may have moved this message out from under the pointer before the second press.
+    const doc = body.ownerDocument;
+    doc.addEventListener('mousedown', onMouseDown, true);
     body.addEventListener('click', onClick);
     body.addEventListener('pointermove', onPointerMove, { passive: true });
     body.addEventListener('pointerleave', onPointerLeave);
@@ -161,7 +163,7 @@ export function SkillChips({
       if (frame) cancelAnimationFrame(frame);
       body.removeEventListener('pointerdown', onPointerDown, true);
       body.removeEventListener('mouseup', onMouseUp, true);
-      body.removeEventListener('mousedown', onMouseDown, true);
+      doc.removeEventListener('mousedown', onMouseDown, true);
       body.removeEventListener('click', onClick);
       body.removeEventListener('pointermove', onPointerMove);
       body.removeEventListener('pointerleave', onPointerLeave);
