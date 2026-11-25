@@ -11,6 +11,9 @@
  */
 import { inboxSentFromOf } from '@plannotator/core/inbox-types';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
+import { INBOX_BUILTIN_SKILL_ROOT } from '@plannotator/core/inbox-review';
+import { inboxBuiltinSkillContent } from '@plannotator/core/inbox-skills-compose';
+import type { SkillCatalogEntry } from '@plannotator/core/skill-references-render';
 import { normalizeSkillContent } from '@plannotator/ui/utils/skillCatalog';
 import { get } from '../api';
 import { inboxUrl, linkedMachineFacts, linkedMachineIds, selfMachineName } from '../inboxUrl';
@@ -89,30 +92,70 @@ async function readHere(name: string): Promise<SkillFileView> {
   }
 }
 
-async function readThere(name: string, machine: string): Promise<SkillFileView> {
-  try {
-    const there = normalizeSkillContent((await get<{ skill?: unknown }>(inboxUrl(`/skills/content?name=${encodeURIComponent(name)}`, undefined, machine))).skill);
+/** How long another computer's copy is waited for: one asleep or slow never holds the pane. */
+export const SKILL_FILE_FAR_MS = 3000;
+
+/** A skill built into Plannotator: another computer's `skills/content` never serves one, and it is never "Your skill". */
+export function builtinSkillName(name: string): boolean {
+  return inboxBuiltinSkillContent({ name, root: INBOX_BUILTIN_SKILL_ROOT } as SkillCatalogEntry, true) !== undefined;
+}
+
+async function readThere(name: string, machine: string, losers: AbortSignal, ms: number): Promise<SkillFileView> {
+  const own = new AbortController();
+  const stop = () => own.abort();
+  losers.addEventListener('abort', stop, { once: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // Its own short wait, kept even when the read does not hear its abort.
+  const late = new Promise<SkillFileView>((resolve) => {
+    timer = setTimeout(() => {
+      own.abort();
+      resolve({ found: false });
+    }, ms);
+  });
+  const read = (async (): Promise<SkillFileView> => {
+    const raw = (await get<{ skill?: unknown }>(inboxUrl(`/skills/content?name=${encodeURIComponent(name)}`, undefined, machine), own.signal)).skill;
+    const there = normalizeSkillContent(raw);
     if (!there?.content) return { found: false };
-    return { found: true, name, source: 'own', text: there.truncated ? null : there.content, tooLarge: there.truncated, machine };
-  } catch {
-    // Not there, or that computer is not answering.
-    return { found: false };
+    // The far side's own word when it gives one, else the name's: a built-in is never "Your skill".
+    const said = (raw as { source?: unknown }).source;
+    const source = said === 'plannotator' || said === 'own' ? said : builtinSkillName(name) ? 'plannotator' : 'own';
+    return { found: true, name, source, text: there.truncated ? null : there.content, tooLarge: there.truncated, machine };
+  })().catch((): SkillFileView => ({ found: false })); // Not there, or that computer is not answering.
+  try {
+    return await Promise.race([read, late]);
+  } finally {
+    clearTimeout(timer);
+    losers.removeEventListener('abort', stop);
   }
 }
 
-/** `name`'s file, read where the message was written first when it says, then here, then every linked computer. Never throws. */
-export async function readSkillFile(name: string, where: SkillFileWhere): Promise<SkillFileView> {
+/**
+ * `name`'s file, read where the message was written first when it says, then here, then the thread's machine, then
+ * every other linked computer. Every computer is asked at once and the first found in that order is kept (the rest
+ * are dropped); only a linked computer online now is asked, each for `farMs` at most, and none for a built-in.
+ * Never throws.
+ */
+export async function readSkillFile(name: string, where: SkillFileWhere, farMs = SKILL_FILE_FAR_MS): Promise<SkillFileView> {
   const order: Source[] = [];
+  const builtin = builtinSkillName(name);
   const add = (source: Source | undefined) => {
-    if (source !== undefined && !order.includes(source)) order.push(source);
+    if (source === undefined || order.includes(source)) return;
+    if (source !== null && (builtin || linkedMachineFacts(source)?.state !== 'online')) return;
+    order.push(source);
   };
   add(skillWrittenOn(where.message?.sent_from, where.thread));
   add(null);
   add(where.thread);
   for (const id of linkedMachineIds()) add(id);
-  for (const source of order) {
-    const view = source === null ? await readHere(name) : await readThere(name, source);
-    if (view.found) return view;
+  const losers = new AbortController();
+  const reads = order.map((source) => (source === null ? readHere(name) : readThere(name, source, losers.signal, farMs)));
+  try {
+    for (const read of reads) {
+      const view = await read;
+      if (view.found) return view;
+    }
+  } finally {
+    losers.abort();
   }
   const sent = where.message ? skillSentText(where.message.body, name) : null;
   if (sent) return { found: true, name, source: 'own', text: sent, tooLarge: false, machine: null, sent: true };

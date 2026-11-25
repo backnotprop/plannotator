@@ -8,13 +8,14 @@
  * press; a message that takes comments offers its comment tools). The body hears the press instead: a plain click or
  * tap on a chip opens it; a press that moved or left a selection opens nothing; a double-click's second press takes
  * back the open its first click made and selects the chip's words, wherever the open moved the text to. On a mouse
- * the chip shows a pointer and a chip's hover wash. The layer adds no stacking level: it paints under the words, in
- * the thread's own. Only a sent message has them; the reply box's chip is part of the words being written.
+ * the chip shows a pointer and a chip's hover wash. The layer adds no stacking level (no z-index): being positioned,
+ * it paints above the words' in-flow text, within the thread's own level, so never over a sheet, the peek or a tip;
+ * its hover wash is see-through. Only a sent message has them; the reply box's chip is part of the words being written.
  */
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { InboxSkillReference } from '@plannotator/core/skill-reference-block';
 import { skillReferenceSpots } from '../../skillHighlight';
-import { takeBackSkillFile } from '../../skillOpener';
+import { openSkillFile, takeBackSkillFile } from '../../skillOpener';
 
 interface ChipPlace {
   name: string;
@@ -104,7 +105,7 @@ export function SkillChips({
     const buttonOf = (chip: ChipPlace) => layer.querySelector<HTMLElement>(`[data-skill-spot="${chip.spot}"][data-skill-place="words"]`);
     let press: { x: number; y: number; touch: boolean } | null = null;
     let selected = false;
-    let opened: { name: string; spot: number; at: number } | null = null;
+    let opened: { id: number; spot: number; at: number } | null = null;
     const onPointerDown = (event: PointerEvent) => {
       press = { x: event.clientX, y: event.clientY, touch: event.pointerType === 'touch' };
     };
@@ -117,7 +118,7 @@ export function SkillChips({
       if (event.detail < 2 || event.button !== 0 || !opened || Date.now() - opened.at > DOUBLE_CLICK_MS) return;
       const was = opened;
       opened = null;
-      takeBackSkillFile(was.name);
+      takeBackSkillFile(was.id);
       // The open may have moved the words: select the chip's own, not whatever is under the pointer now.
       const spot = skillReferenceSpots(body, skills)[was.spot];
       if (!spot) return;
@@ -139,8 +140,7 @@ export function SkillChips({
       if ((event.target as Element | null)?.closest?.('a, button, input, textarea, select, [data-question-option]')) return;
       const button = buttonOf(chip);
       if (!button) return;
-      opened = { name: chip.name, spot: chip.spot, at: Date.now() };
-      openRef.current(chip.name, button);
+      opened = { id: openSkillFile(() => openRef.current(chip.name, button)), spot: chip.spot, at: Date.now() };
     };
     const onPointerMove = (event: PointerEvent) => {
       if (event.pointerType === 'touch') return;

@@ -53,14 +53,12 @@ export function SkillFilePane({
     };
   }, [name, machine, sentKey]);
 
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
   const close = useCallback(() => {
     onClose();
     returnFocusToSkillOpener();
   }, [onClose]);
-  // Open while drawn: a double-click on its chip takes it back; another thread, or Back, forgets its opener (skillOpener.ts).
-  useLayoutEffect(() => holdSkillFile(threadId, name, () => closeRef.current()), [threadId, name]);
+  // Open while drawn: another thread, or Back, forgets its opener (skillOpener.ts).
+  useLayoutEffect(() => holdSkillFile(threadId), [threadId]);
   const sectionRef = useRef<HTMLElement>(null);
   useEffect(() => {
     sectionRef.current?.focus({ preventScroll: true });

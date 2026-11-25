@@ -8,9 +8,10 @@
  * line; the chip opens the built-in skill's SKILL.md beside the thread (read only, "Plannotator skill"), Escape
  * gives focus back to the chip; the name on the skills line opens the person's own skill ("Your skill"), Close gives
  * focus back to the name; a skill moved out of the skill folders since says "is not on this computer."; on a phone
- * the name opens the file over the thread and Back returns to it. The chip's words still select (the message takes
- * comments): a drag across the chip offers the comment toolbar and opens nothing, and a double-click selects the
- * chip's words and leaves no file open. The chips' layer paints under a layer at the window's z 50 (the sidebar
+ * the name, and a tap on the chip in the words, open the file over the thread and Back returns to it; a scroll that
+ * starts on the chip opens nothing. The chip's words still select (the message takes comments): a drag across the
+ * chip offers the comment toolbar and opens nothing, and a double-click selects the chip's words and leaves no file
+ * open, nor an entry the browser's Back would open it from. The chips' layer paints under a layer at the window's z 50 (the sidebar
  * sheet's, the peek's and the tips' level).
  *
  * Whole-window shots, light and dark, land in .local/proof/view-skill/ (PLANNOTATOR_E2E_PROOF_DIR).
@@ -153,12 +154,23 @@ test('a computer: the chip and the skills line each open the skill beside the th
     await expect.poll(() => selectedText(page)).not.toContain('picture');
 
     // A double-click selects the chip's words and leaves no file open (its first click's open is taken back).
+    // An entry of this same thread under it first, so the browser's Back below stays on the thread.
+    const threadHash = await page.evaluate(() => {
+      window.history.pushState(null, '', window.location.hash);
+      return window.location.hash;
+    });
     await page.mouse.dblclick(at.x, at.y);
     await expect(pane).toHaveCount(0);
     await expect.poll(() => selectedText(page)).toContain('picture-it');
     await expect(page.locator('.annotation-toolbar')).toBeVisible();
     await page.keyboard.press('Escape');
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe(threadHash);
+    // History is as it was before the double-click: the browser's Back opens no skill file.
+    await page.evaluate(() => window.history.back());
+    await page.waitForTimeout(500);
+    await expect(pane).toHaveCount(0);
+    expect(await page.evaluate(() => window.location.hash)).toBe(threadHash);
 
     // The chips' layer sits in the thread's own stacking level: a layer at the window's z 50 (the sidebar sheet's,
     // the peek's, a tip's) is above it. Read with the chip taking the pointer for a moment, so the hit test sees it.
@@ -224,6 +236,40 @@ test('a phone: the name on the skills line opens the skill over the thread, and 
     await pane.locator('[data-ref-back]').tap();
     await expect(pane).toHaveCount(0);
     await expect(line).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test('a phone: a tap on the chip in the words opens the skill over the thread; a scroll that starts on the chip opens nothing', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(`${world.url}#thread=${threadId}`);
+    const chip = page.locator('[data-skill-chips] [data-skill-open="picture-it"]').last();
+    await expect(chip).toHaveCount(1);
+    const pane = page.locator('[data-skill-file="picture-it"]');
+
+    // A tap on the chip's words (its button lets the finger through to them): the file opens over the thread.
+    let at = await middleOf(chip);
+    await page.touchscreen.tap(at.x, at.y);
+    await expect(pane.locator('[data-skill-doc]')).toContainText('Use HTML to help me understand');
+    await shot(page, 'phone-3-chip-tapped');
+    await pane.locator('[data-ref-back]').tap();
+    await expect(pane).toHaveCount(0);
+    await expect(chip).toBeVisible();
+
+    // A finger that lands on the chip and scrolls the thread: a scroll, never an open.
+    at = await middleOf(chip);
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x, y: at.y }] });
+    for (let i = 1; i <= 8; i += 1) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: at.x, y: at.y - 25 * i }] });
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(500);
+    await expect(pane).toHaveCount(0);
   } finally {
     await context.close();
   }

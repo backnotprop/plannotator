@@ -5,7 +5,8 @@
  * The reply box's chip is the words being written: it has no such control.
  *
  * The failures this catches: the chip or the name drawn as plain text again (nothing opens), a click that selected
- * words opening the file, a double-click leaving the file open and its words unselected, the chips' buttons coming
+ * words opening the file, a double-click leaving the file open and its words unselected (or an entry the browser's
+ * Back reopens it from), an offline or silent linked computer holding the pane, a built-in asked of another computer, the chips' buttons coming
  * after the skills line in the tab order, comment tools on a skill's file, focus going back to a stale chip after
  * Back or another thread, a linked computer's skill reading as missing (either way round), the copy from where the
  * reply was not written winning, a cut copy shown as whole, and an open control creeping into the reply box.
@@ -13,7 +14,7 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No Inbox is started: fetch is stubbed.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { act, useState } from 'react';
+import { act, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { composeInboxSkillsBlock } from '@plannotator/core/inbox-skills-compose';
@@ -29,6 +30,9 @@ const catalog = (hasDom ? await import('@plannotator/ui/utils/skillCatalog') : {
 const { readSkillFile } = (hasDom ? await import('./data/skillFile') : {}) as typeof import('./data/skillFile');
 const { resetMachineRoutes, setSelfMachine } = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./inboxUrl');
 const { skillOpenerNow } = (hasDom ? await import('./skillOpener') : {}) as typeof import('./skillOpener');
+const routes = (hasDom
+  ? { ...(await import('./app/route')), ...(await import('./app/writeRoute')), ...(await import('./app/focus')) }
+  : {}) as typeof import('./app/route') & typeof import('./app/writeRoute') & typeof import('./app/focus');
 
 const ID = 'msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ';
 const OTHER_THREAD = 'msg_01K7YYYYYYYYYYYYYYYYYYYYYY';
@@ -47,6 +51,9 @@ let host: HTMLElement | null = null;
 let root: Root | null = null;
 const restores: (() => void)[] = [];
 const asked: string[] = [];
+/** The reads of an asleep computer that were dropped (aborted). */
+const dropped: string[] = [];
+const ASLEEP = 'ibx_01K7CCCCCCCCCCCCCCCCCCCCCC';
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -59,10 +66,20 @@ beforeEach(() => {
   };
   THERE = {};
   const realFetch = globalThis.fetch;
-  globalThis.fetch = ((input: RequestInfo | URL) => {
+  dropped.length = 0;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     asked.push(`${url.pathname}${url.search}`);
     const name = url.searchParams.get('name') ?? '';
+    // An asleep computer: its door never answers; the read is only ever dropped.
+    if (url.pathname.startsWith(`/api/inbox/m/${ASLEEP}/`)) {
+      return new Promise<Response>((_, reject) =>
+        init?.signal?.addEventListener('abort', () => {
+          dropped.push(`${url.pathname}${url.search}`);
+          reject(new DOMException('Aborted', 'AbortError'));
+        }),
+      );
+    }
     if (url.pathname === '/api/inbox/skills/file') return Promise.resolve(json(HERE[name] ?? { found: false }));
     if (url.pathname === `/api/inbox/m/${STUDIO}/skills/content`) {
       const skill = THERE[name];
@@ -140,13 +157,44 @@ function Harness({ message }: { message: InboxMessageWire }) {
   );
 }
 
-async function draw(message: InboxMessageWire) {
+/** The same, opened and closed through the window's address as the Inbox does (a new entry, `closeTo`). */
+function RoutedHarness({ message }: { message: InboxMessageWire }) {
+  const [ref, setRef] = useState(() => routes.readRoute().ref ?? null);
+  useEffect(() => {
+    const read = () => setRef(routes.readRoute().ref ?? null);
+    window.addEventListener('hashchange', read);
+    window.addEventListener('popstate', read);
+    return () => {
+      window.removeEventListener('hashchange', read);
+      window.removeEventListener('popstate', read);
+    };
+  }, []);
+  return (
+    <>
+      <MessageBody
+        message={message}
+        projectRoot="/work/harbor"
+        onOpenAttachment={() => {}}
+        onOpenSkill={(name) => routes.writeRoute({ ...routes.readRoute(), ref: { path: name, messageId: ID, skill: true } })}
+        readOnly={false}
+        answers={new Map()}
+        onPick={() => {}}
+        footerFor={() => null}
+      />
+      {ref?.skill && (
+        <ReferencedFilePane threadId={ID} fileRef={ref} skillMessage={message} phone={false} full={false} onOpen={() => {}} onClose={() => routes.closeTo({ ...routes.readRoute(), ref: null })} onAttached={() => {}} />
+      )}
+    </>
+  );
+}
+
+async function draw(message: InboxMessageWire, routed = false) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
   await act(async () => {
     root = createRoot(host!);
-    root.render(<Harness message={message} />);
+    root.render(routed ? <RoutedHarness message={message} /> : <Harness message={message} />);
   });
   await settle(() => host!.querySelector('[data-skill-chips] [data-skill-open]') !== null);
 }
@@ -245,20 +293,50 @@ test.skipIf(!hasDom)('a plain click on the chip in the words opens it; a click t
   expect(pane()!.getAttribute('data-skill-file')).toBe('picture-it');
 });
 
-test.skipIf(!hasDom)("a double-click on the chip takes back its first click's open and selects the chip's words", async () => {
-  await draw(sent('/picture-it show me how it works', [SKILLS[0]!]));
+test.skipIf(!hasDom)("a double-click on the chip takes back its first click's open and selects the chip's words; the browser's Back then opens no file", async () => {
+  const href = window.location.href;
+  restores.push(() => window.history.replaceState(null, '', href));
+  window.history.replaceState(null, '', `#thread=${ID}`);
+  const before = window.location.hash;
+  await draw(sent('/picture-it show me how it works', [SKILLS[0]!]), true);
   const words = wordsWith('/picture-it');
   await pressWords(words, 1);
   await settle(() => pane() !== null);
   expect(pane()).not.toBeNull();
+  expect(window.location.hash).not.toBe(before);
   // The open moved the words (the file took half the window): the second press lands outside the message.
   const elsewhere = document.createElement('div');
   document.body.appendChild(elsewhere);
   await pressWords(elsewhere, 2);
-  await settle(() => pane() === null);
+  await settle(() => pane() === null && window.location.hash === before);
   expect(pane()).toBeNull();
+  expect(window.location.hash).toBe(before);
   expect(window.getSelection()!.toString()).toBe('/picture-it');
   expect(skillOpenerNow()).toBeNull();
+
+  // History is as it was before the first click: Back never lands on the open the double-click took back.
+  await act(async () => window.history.back());
+  for (let i = 0; i < 10; i++) await act(async () => new Promise((r) => setTimeout(r, 20)));
+  expect(pane()).toBeNull();
+  expect(window.location.hash).not.toContain('skill');
+});
+
+test.skipIf(!hasDom)("a double-click on the chip of a file already open changes nothing: the file stays, history stays", async () => {
+  const href = window.location.href;
+  restores.push(() => window.history.replaceState(null, '', href));
+  window.history.replaceState(null, '', `#thread=${ID}`);
+  await draw(sent('/picture-it show me how it works', [SKILLS[0]!]), true);
+  const words = wordsWith('/picture-it');
+  await pressWords(words, 1);
+  await settle(() => pane()?.querySelector('[data-skill-doc]') !== null);
+  const open = window.location.hash;
+  // Some time later: a double-click on the same chip, its first click opening what is open already.
+  await act(async () => new Promise((r) => setTimeout(r, 600)));
+  await pressWords(words, 1);
+  await pressWords(words, 2);
+  for (let i = 0; i < 6; i++) await act(async () => new Promise((r) => setTimeout(r, 20)));
+  expect(window.location.hash).toBe(open);
+  expect(pane()).not.toBeNull();
 });
 
 test.skipIf(!hasDom)("the name on the skills line opens that skill too, named as the chips are, after them in the tab order; Close gives focus back to the name", async () => {
@@ -355,13 +433,13 @@ test.skipIf(!hasDom)("the linked computer's thread, replied to in its own window
   const message = { body: sent('$readback', [SKILLS[1]!]).body, sent_from: { kind: 'here' } };
   const view = await readSkillFile('readback', { thread: STUDIO, message });
   expect(view).toMatchObject({ found: true, machine: STUDIO, text: '# Readback\n\nStudio says it back to Bob Tully.\n' });
-  expect(asked).toEqual([studioContent('readback')]);
+  expect(asked[0]).toBe(studioContent('readback'));
 
-  // Typed here and forwarded: this computer's own file.
+  // Typed here and forwarded: this computer's own file, though the thread's machine has one too.
   asked.length = 0;
   const here = await readSkillFile('readback', { thread: STUDIO, message: { ...message, sent_from: { kind: 'machine', name: 'Harbor Mac' } } });
   expect(here).toMatchObject({ found: true, machine: null, text: expect.stringContaining('Say back what Charlie Dunn asked for.') });
-  expect(asked).toEqual(['/api/inbox/skills/file?name=readback']);
+  expect(asked[0]).toBe('/api/inbox/skills/file?name=readback');
 
   // Not here: the thread's machine is read.
   asked.length = 0;
@@ -378,4 +456,61 @@ test.skipIf(!hasDom)("a linked computer's copy cut at its cap shows as too large
   const message = { body: sent('/drawn-only', [{ name: 'drawn-only', root: 'claude', humanOnly: true }]).body };
   expect(await readSkillFile('drawn-only', { thread: null, message })).toEqual({ found: true, name: 'drawn-only', source: 'own', text: 'Draw it as pictures for Bob Tully.', tooLarge: false, machine: null, sent: true });
   expect(await readSkillFile('drawn-only', { thread: null, message: null })).toEqual({ found: false });
+});
+
+// A second linked computer, "Attic", asleep: its door never answers.
+function linkAttic(state: string) {
+  setSelfMachine(SELF, [
+    { id: SELF, self: true, name: 'Harbor Mac' },
+    { id: STUDIO, name: 'Studio', list_cursor: 1, state: 'online' },
+    { id: ASLEEP, name: 'Attic', list_cursor: 1, state },
+  ]);
+}
+const atticContent = (name: string) => `/api/inbox/m/${ASLEEP}/skills/content?name=${name}`;
+
+test.skipIf(!hasDom)("a reply written on a linked computer that is offline now: the pane shows this computer's copy at once, never waiting on that one", async () => {
+  linkAttic('offline');
+  const message = sent('$readback it', [SKILLS[1]!], { sent_from: { kind: 'machine', name: 'Attic' } } as Partial<InboxMessageWire>);
+  await draw(message);
+  await act(async () => chip('readback')!.click());
+  await settle(() => pane()?.querySelector('[data-skill-doc]') !== null);
+  expect(pane()!.textContent).toContain('Say back what Charlie Dunn asked for.');
+  // Offline, or still connecting: not asked at all.
+  expect(asked.filter((path) => path.startsWith(`/api/inbox/m/${ASLEEP}/`))).toEqual([]);
+  linkAttic('connecting');
+  asked.length = 0;
+  expect(await readSkillFile('readback', { thread: null, message })).toMatchObject({ found: true, machine: null });
+  expect(asked.filter((path) => path.startsWith(`/api/inbox/m/${ASLEEP}/`))).toEqual([]);
+});
+
+test.skipIf(!hasDom)('linked computers are asked at once: the first found in order wins, one that does not answer is waited on only briefly and dropped', async () => {
+  linkAttic('online');
+  // Online but not answering, and where the reply was written: read first, so waited on for its short time only.
+  const written = { body: sent('$readback', [SKILLS[1]!]).body, sent_from: { kind: 'machine', name: 'Attic' } };
+  const started = Date.now();
+  expect(await readSkillFile('readback', { thread: null, message: written }, 80)).toMatchObject({ found: true, machine: null, text: expect.stringContaining('Charlie Dunn') });
+  expect(Date.now() - started).toBeLessThan(2000);
+  expect(asked.slice(0, 2)).toEqual([atticContent('readback'), '/api/inbox/skills/file?name=readback']);
+  expect(dropped).toEqual([atticContent('readback')]);
+
+  // Found here, ahead of it in the order: returned at once, and its read dropped.
+  asked.length = 0;
+  dropped.length = 0;
+  expect(await readSkillFile('readback', { thread: null, message: { body: written.body } })).toMatchObject({ found: true, machine: null });
+  expect(asked).toContain(atticContent('readback'));
+  expect(dropped).toEqual([atticContent('readback')]);
+
+  // Not here: the next in order that has it (Studio) is kept, however Attic fares.
+  asked.length = 0;
+  THERE = { 'fern-check': { content: '# Fern check\n' } };
+  expect(await readSkillFile('fern-check', { thread: null, message: null }, 80)).toMatchObject({ found: true, machine: STUDIO, source: 'own' });
+});
+
+test.skipIf(!hasDom)("a built-in skill is never asked of another computer (its door never serves one), so it is never another computer's \"Your skill\"", async () => {
+  linkStudio();
+  THERE = { 'picture-it': { content: '# Someone else\n' } };
+  expect(await readSkillFile('picture-it', { thread: STUDIO, message: null })).toMatchObject({ found: true, source: 'plannotator', machine: null });
+  delete HERE['picture-it'];
+  expect(await readSkillFile('picture-it', { thread: STUDIO, message: null })).toEqual({ found: false });
+  expect(asked.filter((path) => path.includes('/skills/content'))).toEqual([]);
 });
