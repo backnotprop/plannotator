@@ -15,13 +15,16 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAuthor, InboxMessageWire, InboxProject, InboxReplyDraft, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAuthor, InboxMessageWire, InboxProject, InboxReplyDraft, InboxReplyDraftRow, InboxThread } from '@plannotator/core/inbox-types';
 import type { Signal } from './signal';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+const { FloaterBox } = (hasDom ? await import('./floaters/FloaterBox') : {}) as typeof import('./floaters/FloaterBox');
+const { ChatWindowStore } = (hasDom ? await import('@plannotator/ui/components/chat') : {}) as typeof import('@plannotator/ui/components/chat');
 const { replyDraftUnsaved, resetReplyDraftPageForTests } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
 const { createSignal } = (hasDom ? await import('./signal') : {}) as typeof import('./signal');
+const { keepWords } = (hasDom ? await import('./replyWordsKept') : {}) as typeof import('./replyWordsKept');
 const { inboxReconnected } = (hasDom ? await import('./sessionAdopt') : {}) as typeof import('./sessionAdopt');
 const { rememberMachine, resetMachineRoutes } = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./inboxUrl');
 
@@ -119,10 +122,17 @@ beforeEach(() => {
   }) as typeof fetch;
 });
 
+/** Floating draft windows a test opened (unmounted with the pane). */
+const floaters: { root: Root; host: HTMLElement }[] = [];
+
 afterEach(async () => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
+  for (const floater of floaters.splice(0)) {
+    act(() => floater.root.unmount());
+    floater.host.remove();
+  }
   root = null;
   host = null;
   saveAnswer = null;
@@ -696,6 +706,245 @@ test.skipIf(!hasDom)("another computer's thread, and the tab ended: a new page h
     expect(keptInBrowser()).toEqual([]);
   } finally {
     resetMachineRoutes();
+  }
+});
+
+/** Escape closes the box (its words stay as the draft). */
+async function closeBox(el: HTMLElement) {
+  await act(async () => {
+    box(el)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  await until(() => box(el) === null, 'the box closed');
+}
+
+test.skipIf(!hasDom)('words that did not land, the box closed, and another device saves: the words are never saved over its draft, the conflict shows', async () => {
+  const el = await typedThenFailed(noNetwork);
+  await closeBox(el);
+  // The iPad saves while the box is closed, and this window reads it.
+  saveElsewhere(ONE, 'The iPad wrote this.');
+  await act(async () => signal.emit());
+  await settle(4);
+  // The network is back: whatever is retried never lands over the iPad's draft.
+  saveAnswer = null;
+  window.dispatchEvent(new Event('online'));
+  await settle(6);
+  expect(drafts.get(ONE)?.body).toBe('The iPad wrote this.');
+  // Both are kept: the box opens with this window's words and the choice.
+  await reply(el);
+  await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict');
+  expect(box(el)!.value).toBe('Older words. Newer words.');
+  // A new page after the tab ended has the same choice, never a quiet save over the iPad's draft.
+  const next = await newPageAfterTabEnded();
+  await settle(6);
+  expect(drafts.get(ONE)?.body).toBe('The iPad wrote this.');
+  await until(() => next.querySelector('[data-draft-conflict]') !== null, 'the conflict on a new page');
+  expect(box(next)!.value).toBe('Older words. Newer words.');
+  await act(async () => conflictButton(next, 'Keep mine').click());
+  await until(() => drafts.get(ONE)?.body === 'Older words. Newer words.', 'Keep mine saved');
+});
+
+/** A thread's floating draft window, beside the thread pane (another thread is open there). */
+async function openFloater(id = ONE): Promise<HTMLElement> {
+  const floaterHost = document.createElement('div');
+  floaterHost.className = 'pn-inbox';
+  document.body.appendChild(floaterHost);
+  const floaterRoot = createRoot(floaterHost);
+  const row = { thread_id: id, subject: 'Retry worker', thread_name: null, project: { id: PROJECT.id, name: PROJECT.name }, author: A, unseen: 0, unsent: { reply_at: drafts.get(id)?.updated_at ?? null, picks: 0, comments: 0 }, reply_preview: drafts.get(id)?.body ?? null } as unknown as InboxReplyDraftRow;
+  act(() => floaterRoot.render(<FloaterBox row={row} phone={false} frame={new ChatWindowStore()} takeFocus={false} onMinimize={() => {}} onPutAway={() => {}} onOpenThread={() => {}} onSent={() => {}} onDiscarded={() => {}} onGone={() => {}} />));
+  floaters.push({ root: floaterRoot, host: floaterHost });
+  await settle();
+  return floaterHost;
+}
+const floaterBox = () => document.querySelector<HTMLTextAreaElement>(`[data-rf-box="${ONE}"] textarea`);
+
+test.skipIf(!hasDom)("words that did not land, then the thread's floating draft: it shows them, and its next key saves them, never the older draft", async () => {
+  const el = await typedThenFailed(noNetwork);
+  act(() => draw(TWO));
+  await settle();
+  // Still no network as the floating window opens: its own try of the words does not land either.
+  await openFloater();
+  await until(() => floaterBox() !== null && floaterBox()!.readOnly === false, 'the floating box');
+  await settle(4);
+  expect(floaterBox()!.value).toBe('Older words. Newer words.');
+  saveAnswer = null;
+  const field = floaterBox()!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    field.focus();
+    setter.call(field, `${field.value} Floated.`);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await until(() => (drafts.get(ONE)?.body ?? '').includes('Floated.'), 'the floating save', 2000);
+  expect(drafts.get(ONE)?.body).toBe('Older words. Newer words. Floated.');
+  expect(el.querySelector('[data-draft-conflict]') === null).toBe(true);
+});
+
+/** Keys typed at the end of the floating window's words. */
+function typeInFloater(words: string) {
+  const field = floaterBox()!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    field.focus();
+    setter.call(field, `${field.value}${words}`);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+test.skipIf(!hasDom)('words that did not land stay when another box of the thread saves other words: their next try is the conflict, never lost or saved over', async () => {
+  saveElsewhere(ONE, 'Older words.');
+  const el = await open();
+  await until(() => box(el)?.value === 'Older words.', 'the draft back in the box');
+  // The thread's floating window, open from before: it shows the older draft.
+  await openFloater();
+  await until(() => floaterBox()?.value === 'Older words.' && floaterBox()!.readOnly === false, 'the floating box');
+  saveAnswer = noNetwork;
+  typeOn(el, ' Newer words.');
+  await until(() => el.querySelector('[data-draft-failed]') !== null, '"Not saved"');
+  await closeBox(el);
+  saveAnswer = null;
+  typeInFloater(' From the corner.');
+  await until(() => drafts.get(ONE)?.body === 'Older words. From the corner.', 'the floating save');
+  // The words the pane's box typed still wait.
+  expect(replyDraftUnsaved()).toBe(true);
+  window.dispatchEvent(new Event('online'));
+  await settle(6);
+  expect(drafts.get(ONE)?.body).toBe('Older words. From the corner.');
+  await reply(el);
+  await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict');
+  expect(box(el)!.value).toBe('Older words. Newer words.');
+  await act(async () => conflictButton(el, 'Keep mine').click());
+  await until(() => drafts.get(ONE)?.body === 'Older words. Newer words.', 'Keep mine saved');
+});
+
+/** Another page's entry, as that page keeps it (`at`: when its words last changed). */
+function keptByPage(page: string, thread: string, kept: { kind: 'conflict' | 'failed' | 'remote'; words: string; base: string | null }, at = Date.now()) {
+  localStorage.setItem(`plannotator-inbox-reply-kept:${page}:${thread}`, JSON.stringify({ ...kept, thread, page, at }));
+}
+/** The browser's Web Locks, as the pages holding theirs say (`open`: the page ids still open). */
+function locksHeldBy(open: () => string[]): () => void {
+  const had = Object.getOwnPropertyDescriptor(navigator, 'locks');
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: () => new Promise(() => {}), query: async () => ({ held: open().map((page) => ({ name: `plannotator-inbox-reply-kept-page:${page}` })), pending: [] }) },
+  });
+  return () => (had ? Object.defineProperty(navigator, 'locks', had) : delete (navigator as unknown as { locks?: unknown }).locks);
+}
+
+test.skipIf(!hasDom)("two tabs: another tab still open keeps its words; once it is gone, a new page takes them back", async () => {
+  saveElsewhere(ONE, 'Older words.');
+  const base = drafts.get(ONE)!.updated_at;
+  keptByPage('tab-two', ONE, { kind: 'failed', words: 'Older words. From tab two.', base });
+  let tabsOpen = ['tab-two'];
+  const restore = locksHeldBy(() => tabsOpen);
+  try {
+    const el = await open();
+    await settle(4);
+    expect((box(el)?.value ?? '').includes('From tab two.')).toBe(false);
+    expect(saves.length).toBe(0);
+    expect(keptInBrowser().length).toBe(1);
+    // Tab two is gone (closed, crashed or ended by the browser).
+    tabsOpen = [];
+    const next = await newPageAfterTabEnded();
+    await until(() => drafts.get(ONE)?.body === 'Older words. From tab two.', 'its words saved on the draft they were typed over');
+    await until(() => box(next)?.value === 'Older words. From tab two.', 'its words in the box');
+  } finally {
+    restore();
+  }
+});
+
+test.skipIf(!hasDom)('kept words older than 14 days go as a page loads; words the draft holds now go without a conflict', async () => {
+  saveElsewhere(ONE, 'Older words. And the iPad went on.');
+  keptByPage('gone-a', ONE, { kind: 'failed', words: 'Older words.', base: 'x' });
+  keptByPage('gone-b', TWO, { kind: 'failed', words: 'Weeks old.', base: null }, Date.now() - 15 * 24 * 60 * 60 * 1000);
+  const el = await open();
+  await settle(6);
+  expect(el.querySelector('[data-draft-conflict]') === null).toBe(true);
+  expect(el.querySelector('[data-draft-failed]') === null).toBe(true);
+  expect(box(el)?.value).toBe('Older words. And the iPad went on.');
+  expect(keptInBrowser()).toEqual([]);
+  expect(saves.length).toBe(0);
+});
+
+test.skipIf(!hasDom)('kept words with no base come back "Not saved" and are never saved on their own; the next key saves them', async () => {
+  keptByPage('gone', ONE, { kind: 'failed', words: 'Typed before the tab ended.', base: null });
+  const el = await open();
+  await until(() => box(el)?.value === 'Typed before the tab ended.', 'the words back in the box');
+  await until(() => el.querySelector('[data-draft-failed]') !== null, '"Not saved"');
+  window.dispatchEvent(new Event('online'));
+  await settle(6);
+  expect(saves.length).toBe(0);
+  typeOn(el, ' Then a key.');
+  await until(() => drafts.get(ONE)?.body === 'Typed before the tab ended. Then a key.', 'saved by the key');
+  await until(() => !replyDraftUnsaved(), 'nothing left unsaved');
+});
+
+test.skipIf(!hasDom)('the words kept in the browser are capped: 20 entries and 200 KB at most, the oldest go first', async () => {
+  for (let i = 0; i < 25; i += 1) keepWords(`thr_${i}`, { kind: 'failed', words: `Words ${i}.`, base: null });
+  expect(keptInBrowser().length).toBe(20);
+  expect(keptInBrowser().some((key) => key.endsWith(':thr_0'))).toBe(false);
+  expect(keptInBrowser().some((key) => key.endsWith(':thr_24'))).toBe(true);
+  for (let i = 0; i < 5; i += 1) keepWords(`big_${i}`, { kind: 'failed', words: 'w'.repeat(60_000), base: null });
+  const size = keptInBrowser().reduce((sum, key) => sum + key.length + (localStorage.getItem(key)?.length ?? 0), 0);
+  expect(size <= 200_000).toBe(true);
+  expect(keptInBrowser().some((key) => key.endsWith(':big_4'))).toBe(true);
+  // A full storage keeps nothing more, and says nothing.
+  const setItem = Storage.prototype.setItem;
+  Storage.prototype.setItem = () => {
+    throw new DOMException('full', 'QuotaExceededError');
+  };
+  try {
+    expect(() => keepWords('thr_full', { kind: 'failed', words: 'More.', base: null })).not.toThrow();
+  } finally {
+    Storage.prototype.setItem = setItem;
+  }
+});
+
+test.skipIf(!hasDom)("another computer's words kept by a gone page, for a thread opened before it is known as that computer's: they come back once it is", async () => {
+  const MAC = `ibx_01K${'0'.repeat(22)}M`;
+  keptByPage('gone', TWO, { kind: 'remote', words: 'Words for the Mac mini thread.', base: null });
+  try {
+    const el = await open(TWO);
+    await settle(4);
+    rememberMachine([TWO], MAC);
+    act(() => draw(TWO));
+    await settle(4);
+    await reply(el);
+    expect(box(el)!.value).toBe('Words for the Mac mini thread.');
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-reply-discard]')!.click());
+    await settle(2);
+  } finally {
+    resetMachineRoutes();
+  }
+});
+
+test.skipIf(!hasDom)('the page hidden while a save is on its way: the words typed since go after it, and no false conflict shows', async () => {
+  const el = await open();
+  await reply(el);
+  let letGo!: () => void;
+  const held = new Promise<void>((done) => (letGo = done));
+  let started = false;
+  saveAnswer = async (thread, body) => {
+    if (!started) {
+      started = true;
+      await held;
+    }
+    return storeSave(thread, body);
+  };
+  try {
+    typeOn(el, 'Words on their way.');
+    await until(() => started, 'the first save on its way');
+    typeOn(el, ' Then more.');
+    // A desktop tab switch with that save still on its way.
+    pageVisibility('hidden');
+    await settle(2);
+    letGo();
+    await until(() => drafts.get(ONE)?.body === 'Words on their way. Then more.', 'both saved, in order', 2000);
+    pageVisibility('visible');
+    await settle(4);
+    expect(el.querySelector('[data-draft-conflict]') === null).toBe(true);
+    expect(box(el)!.value).toBe('Words on their way. Then more.');
+  } finally {
+    pageVisibility('visible');
   }
 });
 

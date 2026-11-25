@@ -174,6 +174,11 @@ export function useComposeAutosave(options: ComposeAutosaveOptions) {
     saved: () => made.current,
     /** The `updated_at` the dialog's next save goes on (null: no draft on the Inbox as far as it knows). */
     base: () => base.current,
+    /**
+     * The Inbox may hold this dialog's draft: a save of it landed, or one got no answer (it may have landed). A Send
+     * names the draft then, so a draft it left behind never comes back after sending (the Inbox ignores an id it lacks).
+     */
+    mayHold: () => base.current !== null || (unanswered.current !== null && unanswered.current !== 'deleted'),
     /** The dialog's own save landed, or it took the other window's draft: its saves go on that one. */
     landed,
     /** Before a Send or the dialog's own save: no quiet save starts, and every one on its way is answered. */

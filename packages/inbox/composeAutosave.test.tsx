@@ -335,3 +335,16 @@ test.skipIf(!hasDom)('a Send after a pause saved the words takes that draft, and
   await wait(COMPOSE_AUTOSAVE_MS + 200);
   expect(saves.length).toBe(after);
 });
+
+test.skipIf(!hasDom)('a Send after a pause save that landed without its answer still names that draft, so it does not stay behind', async () => {
+  await open({ session: 'ses_1' });
+  loseAnswers = 1;
+  await type('Ship it.');
+  await until(() => saves.length === 1, 'the draft saved', COMPOSE_AUTOSAVE_MS + 1500);
+  expect(drafts.has(saves[0]!.id)).toBe(true);
+  await act(async () => {
+    field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+  });
+  await until(() => sent.length === 1, 'the Send');
+  expect(sent[0]!.draft_id).toBe(saves[0]!.id);
+});

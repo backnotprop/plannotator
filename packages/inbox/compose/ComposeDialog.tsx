@@ -805,7 +805,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     try {
       // A save on its way lands first: the Send takes the draft the Inbox holds (none once deleted), and none lands after.
       await autosave.settle();
-      const draft = autosave.base() !== null ? { id: draftId.current } : null;
+      const draft = autosave.mayHold() ? { id: draftId.current } : null;
       // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
       const words = !box
         ? body
