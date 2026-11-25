@@ -11,6 +11,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { inboxPullIsOpen, type InboxPull, type InboxPullDiffAnswer, type InboxPullItem, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
+import type { InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import { get } from '../api';
 import { pullUrl } from './pullMachines';
 
@@ -86,6 +87,29 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
 export function forgeSaid(diff: Pick<InboxPullDiffAnswer, 'key' | 'state' | 'merged_at'> | null, key: string): Pick<InboxPull, 'state' | 'merged_at'> | null {
   if (!diff || diff.key !== key || !diff.state || inboxPullIsOpen({ state: diff.state })) return null;
   return { state: diff.state, merged_at: diff.merged_at ?? null };
+}
+
+/**
+ * What a merged ship says of its PR (Ship: the record its Reviews row's "Merged <time>" reads, kept 6 hours, the
+ * teammate's PR that left every list too): merged, at its time. Merged is final, so it is taken over any list's word.
+ */
+export function shipSaid(ship: Pick<InboxShipView, 'key' | 'state' | 'merged_at' | 'ended_at'> | null | undefined, key: string): Pick<InboxPull, 'state' | 'merged_at'> | null {
+  if (!ship || ship.key !== key || ship.state !== 'merged') return null;
+  return { state: 'merged', merged_at: ship.merged_at ?? ship.ended_at };
+}
+
+/**
+ * A held page's stack with each open layer whose ship merged marked merged: the launchpad reads no forge, and a
+ * teammate's PR held there would say open beside a row that says Merged. The same stack when no ship merged one.
+ */
+export function withShipState(stack: InboxPullStack, ships: ReadonlyMap<string, Pick<InboxShipView, 'key' | 'state' | 'merged_at' | 'ended_at'>> | null | undefined): InboxPullStack {
+  if (!ships || ships.size === 0) return stack;
+  let out = stack;
+  for (const layer of stack.layers) {
+    const said = inboxPullIsOpen(layer) ? shipSaid(ships.get(layer.key), layer.key) : null;
+    if (said) out = withForgeState(out, layer.key, true, said, null)!;
+  }
+  return out;
 }
 
 /**

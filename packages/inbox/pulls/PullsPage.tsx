@@ -34,7 +34,7 @@ import { closeLocal, openLocal } from './localNav';
 import { localOpenKey, type LocalOpen } from './localRoute';
 /** App's Reviews list reads PullsPage's address props through here (localRoute.ts). */
 export { pullsPageAddress } from './localRoute';
-import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { forwardRef, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { inboxPullIsOpen, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack, type InboxReviewRow } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
@@ -93,6 +93,7 @@ import type { ReactNode } from 'react';
 import type { InboxToastModel } from '../components/Toast';
 import { focusWhenGone, hiddenLabel, hideWithUndo, itemsBy, showRepoWithToast, showWithToast } from './hiddenPulls';
 import { useKeptStack } from './keptStack';
+import { withShipState } from './routePull';
 
 /** System in Reviews: present only while System shows (`systemShown`). */
 export interface PullsSystem {
@@ -494,7 +495,9 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
 
 function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPullsAnswer; judgments: RiskJudgments; riskFailed: RiskFailures; phone: boolean; onClose: () => void }) {
   const { item, model, phone, judgments, riskFailed } = props;
-  const stack = item.stack;
+  // A layer whose ship merged says merged here, as its Reviews row's "Merged <time>" does (the launchpad reads no forge).
+  const ships = useContext(ShipsContext)?.ships;
+  const stack = useMemo(() => withShipState(item.stack, ships), [item.stack, ships]);
   // The stack's one review thread: its lowest open linked layer's (`stackLink`), whoever else linked a layer above.
   const link = stackLink(stack, model.links);
   const agent = linkAgentName(link);

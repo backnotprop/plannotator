@@ -93,6 +93,7 @@ import { lookedBefore, markLooked, useLooked } from '../prs/looked';
 import { RailScopeRows } from './RailScopeRows';
 import { drawnStackWith, hiddenIn, useKeptStack } from './keptStack';
 import { forgeSaid, loneStack, unreadWords, useRoutePull, withForgeState } from './routePull';
+import { shutWord } from './stateWord';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The file rail's width: dragged and kept. */
@@ -908,9 +909,18 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     </Tip>
   );
   // The title opens the PR's details (the owner's "title only"; with `DETAILS_BUTTON`, the Details button beside it too).
+  // A PR that merged or closed while open here says so beside its mark, in its Reviews row's words, a phone's too.
+  const shut = shutWord(layer.state);
+  const shutMark = shut && (
+    <span className="ib-prr-num" data-pull-review-state={layer.state}>
+      {shut}
+      {/* No break before the dot: a phone's narrow title row never wraps it under the word. */}
+      <span aria-hidden="true">&nbsp;·</span>
+    </span>
+  );
   const title = (
     <DetailsTitle
-      name={scopeTitle ?? `${label} ${layer.title}`}
+      name={`${shut ? `${shut}, ` : ''}${scopeTitle ?? `${label} ${layer.title}`}`}
       tip={`${label} ${layer.title} · ${layer.author ?? 'A teammate'} wants to merge ${layer.head} into ${layer.base}`}
       open={detailsOpen}
       data={details.data}
@@ -919,6 +929,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
       data-pull-review-title=""
     >
       <RefMarkIcon kind="pr" state={layer.state} size={15} />
+      {shutMark}
       {scopeTitle ? (
         <bdi>{scopeTitle}</bdi>
       ) : (
@@ -1076,7 +1087,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
       <div className="ib-rsplit">
         {phone && (
           <div className="ib-prp-row2">
-            <button type="button" className={`ib-prp-this${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} aria-label={`${stack.layers.length > 1 ? `${stack.layers.findIndex((l) => l.key === layer.key) + 1} of ${stack.layers.length} ` : ''}${scopeTitle ?? layer.title}, opens details`} onClick={toggleDetails} data-pull-review-title="" data-pull-details-button="">
+            <button type="button" className={`ib-prp-this${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} aria-label={`${shut ? `${shut}, ` : ''}${stack.layers.length > 1 ? `${stack.layers.findIndex((l) => l.key === layer.key) + 1} of ${stack.layers.length} ` : ''}${scopeTitle ?? layer.title}, opens details`} onClick={toggleDetails} data-pull-review-title="" data-pull-details-button="">
+              {shut && <RefMarkIcon kind="pr" state={layer.state} size={15} />}
+              {shutMark}
               {stack.layers.length > 1 && <span className="ib-prp-of">{stack.layers.findIndex((l) => l.key === layer.key) + 1} of {stack.layers.length}</span>}
               <bdi className="ib-prp-title">{scopeTitle ?? layer.title}</bdi>
               <Icon name="chevD" size={13} />

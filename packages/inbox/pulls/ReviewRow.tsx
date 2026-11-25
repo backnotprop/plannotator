@@ -32,6 +32,7 @@ import { facesOnce } from './words';
 import { pullAvatarUrl } from './pullUrls';
 import { shipLook, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import { ShipMark, ShipWater, ShipWords } from './ShipRow';
+import { PULL_STATE_WORD } from './stateWord';
 
 /**
  * The PR author's profile picture (the person's own PRs too; a stack's bottom layer's author), read through the
@@ -167,7 +168,7 @@ function titleWhenCut(event: React.PointerEvent<HTMLElement>, title: string) {
   else shown.removeAttribute('title');
 }
 
-const STATE_WORD: Record<InboxPull['state'], string> = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' };
+const STATE_WORD = PULL_STATE_WORD;
 
 /** What a PR's mark says by its colour and shape, in words: "Open pull request", "Merged merge request". */
 function prStateWords(state: InboxPull['state'], platform: InboxPull['platform']): string {

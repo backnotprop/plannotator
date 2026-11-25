@@ -16,7 +16,11 @@
  *  - a PR merged or closed elsewhere (the forge says so at the diff's read, or the server's read) still marked open;
  *  - the forge not answering (offline, down) read as "gone": the page must stay as last read with one line saying so,
  *    and ask again when the window gets its focus back or the browser is back online;
- *  - a merged PR reloaded with only a kept draft comment turning read-only.
+ *  - a merged PR reloaded with only a kept draft comment turning read-only;
+ *  - a merged or closed PR's header showing only its small mark (none at all on a phone): it says "Merged" or
+ *    "Closed" beside it, its Reviews row's word;
+ *  - the launchpad held on a teammate's PR whose ship merged (it left every list) still saying open beside a Reviews
+ *    row that says Merged.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -24,6 +28,7 @@ import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullsAnswer, InboxPullStack } from '@plannotator/core/inbox-types';
+import type { InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import { pull } from './pullReviewFixtures';
 import { pullsStateOf } from './reviewsTestState';
 import type { PullsPageProps } from './PullsPage';
@@ -51,6 +56,7 @@ const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof impo
 const { StackPage } = (hasDom ? await import('../prs/StackPage') : {}) as typeof import('../prs/StackPage');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { forgetPullThreadStarts } = (hasDom ? await import('./threadStarts') : {}) as typeof import('./threadStarts');
+const { resetShipsForTests, shipEvents } = (hasDom ? await import('../data/ships') : {}) as typeof import('../data/ships');
 
 const SHA = 'a'.repeat(40);
 /** Someone else's PR the person was asked to review: once merged, no search of theirs lists it any more. */
@@ -78,19 +84,24 @@ let serverPull: Record<string, InboxPull> = {};
 /** The forge does not answer the server's read of one PR (`unreadable`); `pullReads`: how many times the page asked. */
 let forgeQuiet = false;
 let pullReads = 0;
+/** This Inbox's ships (`GET /api/inbox/ships`): what the Reviews row's "Merged <time>" reads. */
+let ships: InboxShipView[] = [];
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   window.localStorage.clear();
   forgetPullThreadStarts();
+  resetShipsForTests();
   forgeState = {};
   serverPull = {};
   forgeQuiet = false;
   pullReads = 0;
+  ships = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     if (init?.method === 'POST') return Response.json({ ok: true });
+    if (url.pathname.endsWith('/api/inbox/ships')) return Response.json({ serverSession: 's', ships, projects: {} });
     if (url.pathname.endsWith('/pulls/details')) return Response.json({ serverSession: 's', key: url.searchParams.get('key'), description: null, labels: [], reviewers: [], checks: [], comments: [] });
     if (url.pathname.endsWith('/pulls/diff')) {
       const key = url.searchParams.get('key')!;
@@ -384,4 +395,76 @@ test.skipIf(!hasDom)('a layer opened from a held stack’s page opens on that st
   for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
   expect(!!$('[data-stub-reader]')).toBe(true);
   expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
+});
+
+/** A phone's window for `run` (usePhone's media queries), the desktop's again after. */
+async function onPhone(run: () => Promise<void>) {
+  const saved = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('max-width: 767px') || query.includes('pointer: coarse'),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+  try {
+    await run();
+  } finally {
+    window.matchMedia = saved;
+  }
+}
+
+/** The header's state word and the mark beside it, as the person sees them (`where`: the desktop's title or a phone's). */
+const headerState = (where: string) => ({ word: $(`${where} [data-pull-review-state]`)?.textContent?.replace(/[\s·]+$/, '') ?? null, mark: $(`${where} .ib-refmark`)?.getAttribute('data-ref-state') ?? null });
+
+test.skipIf(!hasDom)('merged or closed: the header says so in words beside its mark, its Reviews row’s word, a phone’s header too; an open PR’s says nothing new', async () => {
+  const closed = (key: string): InboxPullsAnswer => ({ ...base, pulls: base.pulls.map((p) => (p.key === key ? { ...p, state: 'closed' } : p)) });
+  for (const [model, want] of [
+    [merged(mine.key), 'Merged'],
+    [closed(mine.key), 'Closed'],
+  ] as const) {
+    mount(<PullReview model={model} modelError={null} stackId={mine.key} layerKey={mine.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+    for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+    expect(headerState('[data-pull-review-title]')).toEqual({ word: want, mark: want.toLowerCase() });
+    // A screen reader hears it first, as the eye reads it.
+    expect($('[data-pull-review-title]')!.getAttribute('aria-label')!.startsWith(`${want}, `)).toBe(true);
+    act(() => root?.unmount());
+    host?.remove();
+  }
+  await onPhone(async () => {
+    mount(<PullReview model={merged(mine.key)} modelError={null} stackId={mine.key} layerKey={mine.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+    for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+    expect(headerState('[data-pull-details-button]')).toEqual({ word: 'Merged', mark: 'merged' });
+    act(() => root?.unmount());
+    host?.remove();
+    // Open on a phone: no mark and no word, as before.
+    mount(<PullReview model={base} modelError={null} stackId={mine.key} layerKey={mine.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+    for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+    expect(headerState('[data-pull-details-button]')).toEqual({ word: null, mark: null });
+  });
+  act(() => root?.unmount());
+  host?.remove();
+  mount(<PullReview model={base} modelError={null} stackId={mine.key} layerKey={mine.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+  for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+  expect(headerState('[data-pull-review-title]')).toEqual({ word: null, mark: 'open' });
+});
+
+test.skipIf(!hasDom)('a teammate’s PR whose ship merged, gone from every list: its held launchpad says Merged, as its Reviews row does', async () => {
+  mount(<Reviews stackId={theirs.key} />);
+  await settle();
+  expect($('[data-launchpad] .ib-lp-bar .ib-refmark')!.getAttribute('data-ref-state')).toBe('open');
+  expect(!!$('[data-launch-state]')).toBe(false);
+  // The agent shipping it merged it: the ship's record says merged (the row's "Merged <time>"), and no list names it.
+  const at = new Date(Date.now() - 120_000).toISOString();
+  ships = [{ id: 'shp_880', key: theirs.key, url: theirs.url, title: theirs.title, number: 880, repo: theirs.repo, host: 'github.com', thread_id: 'thr_880', project_id: 'prj_2', agent: { host: 'claude-code', session: 'ses_web', name: 'Claude Code' }, started_at: at, state: 'merged', reason: null, ended_at: at, merged_at: at } as InboxShipView];
+  await act(async () => read(without(theirs.key)));
+  // This Inbox says its ships changed (`event: ships`): the window reads them again.
+  await act(async () => shipEvents.emit());
+  await settle();
+  expect(!!$('[data-launchpad]')).toBe(true);
+  expect($('[data-launchpad] .ib-lp-bar .ib-refmark')!.getAttribute('data-ref-state')).toBe('merged');
+  expect($('[data-launch-state]')!.textContent).toBe('Merged');
 });

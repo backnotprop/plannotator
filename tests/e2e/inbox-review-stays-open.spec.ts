@@ -7,7 +7,8 @@
  * The person opens their own pull request's diff and starts a comment on a changed line. The fake forge merges the
  * PR (the person's searches now list it as merged, out of every open stack) and the window reads the list again:
  * the diff, the file rail and the half-written comment are all still there, and the header's state mark says merged
- * (the mark the PR gets everywhere in the Inbox). Before, the page turned into "This pull request is no longer in the
+ * (the mark the PR gets everywhere in the Inbox) with the word "Merged" beside it, its Reviews row's word, a phone's
+ * title row too. Before, the page turned into "This pull request is no longer in the
  * list." and the comment was gone. Then the person reloads: the page reopens on the merged PR (no stack holds it), its
  * diff and its kept comment there, the header still saying merged.
  *
@@ -19,7 +20,8 @@
  * the next focus asks again and the line goes.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/review-stays-open (CI keeps .local/proof/ as "inbox-window-proof-N"):
- * 1440 light and dark, a phone at 390, and the page after the reload, light and dark; then teammate-merged,
+ * before-merge and merged at 1440 light and dark, merged on a phone at 390, and the page after the reload, light and
+ * dark; then teammate-merged,
  * draft-only-reloaded, forge-unreachable and forge-unreachable-restarted, 1440 light.
  *
  * Build the binary first (see inbox.spec.ts), then
@@ -246,7 +248,11 @@ test('a merged PR’s diff stays open with the comment being written, and its he
   await expect(composer).toBeFocused();
   const words = 'Cap the tries at five, and say why in';
   await composer.fill(words);
+  await expect(review.locator('[data-pull-review-state]')).toHaveCount(0);
   await shot('before-merge', 1440, 900, 'light');
+  await shot('before-merge', 1440, 900, 'dark');
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  await expect(composer).toHaveValue(words);
 
   // The forge merges it; the window reads the list again (focus, past its 20 s).
   // The review page keeps the list's count only, so its focus read takes the server's cache: the server reads the
@@ -273,10 +279,18 @@ test('a merged PR’s diff stays open with the comment being written, and its he
   // The comment is added (kept with the review, not posted).
   await page.getByRole('button', { name: 'Add Comment' }).click();
   await expect(review.locator('.ib-vcomments')).toContainText('1');
+  // The header says it in words beside the mark, its Reviews row's word.
+  const word = review.locator('[data-pull-review-title] [data-pull-review-state]');
+  await expect(word).toHaveAttribute('data-pull-review-state', 'merged');
+  await expect(word).toContainText('Merged');
 
   await shot('merged', 1440, 900, 'light');
   await shot('merged', 1440, 900, 'dark');
   await shot('merged', 390, 844, 'light');
+  // A phone's header has no title bar: its title row says it, with the mark.
+  const phoneTitle = review.locator('[data-pull-details-button]');
+  await expect(phoneTitle.locator('[data-pull-review-state]')).toContainText('Merged');
+  await expect(phoneTitle.locator('.ib-refmark')).toHaveAttribute('data-ref-state', 'merged');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
 
@@ -285,6 +299,7 @@ test('a merged PR’s diff stays open with the comment being written, and its he
   await page.reload();
   await expect(review.locator(`[data-guide-file-shell="${FILE}"]`)).toBeVisible({ timeout: 30_000 });
   await expect(mark).toHaveAttribute('data-ref-state', 'merged');
+  await expect(word).toContainText('Merged');
   await expect(page.getByText('This pull request is no longer in the list.')).toHaveCount(0);
   await expect(review.locator('.ib-vcomments')).toContainText('1');
   await shot('reloaded', 1440, 900, 'light');
@@ -365,6 +380,7 @@ test('a teammate’s PR: merged as the diff reads it, then gone from every list,
   await expect(fileShell()).toBeVisible();
   expect(await review().locator('.ib-rrail').innerText()).toBe(rail);
   await expect(review().locator('.ib-vcomments')).toContainText('1');
+  await expect(review().locator('[data-pull-review-title] [data-pull-review-state]')).toContainText('Merged');
   await shot('teammate-merged', 1440, 900, 'light');
 
   // A reload: no list names it, and its only comment is the kept draft. The page reopens on it, merged, the draft
