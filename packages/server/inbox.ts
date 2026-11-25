@@ -47,7 +47,7 @@ import { codeReviewOfferAtStart, codeReviewOfferDue } from "./inbox-code-review-
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { type InboxSidebarLayout } from "@plannotator/core/inbox-sidebar";
 import { inboxSidebarOff, inboxSidebarState, saveInboxSidebar } from "./inbox-sidebar-save";
 import { createMcpHandler } from "@modelcontextprotocol/server";
@@ -1498,6 +1498,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
   // The projects' letter-mark pictures (inbox-project-pictures.ts; Settings → Rows, all off by default).
   const projectPictures = createProjectPictures({ ...options.projectPictures, dir: options.projectPictures?.dir ?? join(inboxDir(dataDir), "project-pictures") });
+  // A project's picture changed: the same `event: tags` as its tags, so windows and linked machines read the list again.
+  const projectPictureChanged = () => {
+    for (const listener of threadTagListeners) listener();
+  };
   /** Reviews posted to a forge while this Inbox runs (PR key, head, action, body): an identical one is refused. */
   const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
@@ -5813,6 +5817,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
     touch: () => void agentFacesFile.touch(),
     setIconKept: async (set, icon) => (builtInIconSets.ids.has(set) ? !!(await builtInIconSets.read(set, icon)) : !!iconSetFetcher.read(set, icon)),
+    projects: {
+      has: (projectId) => !!store.project(projectId),
+      uploadedAt: (projectId) => projectPictures.uploadedAt(projectId),
+      setUpload: (projectId, bytes) => projectPictures.setUpload(projectId, bytes),
+      changed: () => projectPictureChanged(),
+    },
+    // A request this Inbox does not keep: a linked machine's (its project's, or one its window made). The first that
+    // knows it answers; one that does not, or an older one without the route, is passed by.
+    far: async ({ request, picture }) => {
+      for (const peer of machines?.peerLinks() ?? []) {
+        if (peer.state !== "online") continue;
+        try {
+          const there = await peer.request("icon-animate", "", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request, picture, relayed: true, idempotency_key: randomUUID() }), timeoutMs: 30_000 });
+          const text = await there.text();
+          if (there.status === 404) continue;
+          return new Response(text, { status: there.status, headers: { "content-type": "application/json; charset=utf-8" } });
+        } catch {
+          // Not reached: the next machine.
+        }
+      }
+      return null;
+    },
   });
   const agentIcons = createInboxAgentIcons({
     icons: agentIconFiles,
@@ -8260,8 +8286,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Rows has them on, read from config.json `inboxRows`; the repo's logo also with `logo=1`, a local file, while
       // GitHub is never turned on by the request: `pictureSources`), or an empty 204 and the window draws the letters
       // (an <img> errors on it the same as on a 404, and the console stays clear; an older window draws its letters too). POST `{ picture: "data:image/…;base64,…" | null }`: Set picture…, or take it away; the same
-      // guards as every window write. Every window, and a linked
-      // machine's window through the door; never an agent's.
+      // guards as every window write. Every window, and a linked machine's window through the door (POST from a press
+      // in its window only: the forward sends it now or not at all); never an agent's.
       const projectPictureMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/picture$/.exec(path);
       if (projectPictureMatch) {
         const projectId = projectPictureMatch[1]!;
@@ -8293,7 +8319,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.picture === null) {
-          projectPictures.removeUpload(projectId);
+          if (projectPictures.removeUpload(projectId)) projectPictureChanged();
         } else {
           // Only the approved words reach the toast: too big (however long the data URL), or not one of the five.
           const given = typeof body.picture === "string" ? body.picture : "";
@@ -8304,6 +8330,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (saved.reason === "not_saved") throw new InboxError("config_not_saved", "The picture did not change.");
             throw new InboxError("validation_error", saved.reason === "too_big" ? "Picture: at most 512 KB." : "Picture: a PNG, JPEG, GIF, WebP or SVG image.", { field: "picture" });
           }
+          projectPictureChanged();
         }
         return json({ project: projectFolders().find((p) => p.id === projectId) ?? null });
       }

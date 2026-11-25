@@ -5,7 +5,8 @@
  * What this catches: the one door agents have to an icon opening wider than asked (a made-up request, another agent
  * showing the same picture, an agent the person moved on from since); a hand-back that skips the upload's checks (a
  * page dressed as an SVG, a file past the cap); the happy path not changing the icon every window reads, or losing the
- * way back to the original.
+ * way back to the original. Animating a project's picture: the animation not becoming the picture every window reads,
+ * or the agent told it changed an agent's icon.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -74,7 +75,7 @@ async function world() {
     return { code, out, err };
   };
   const pictures = () => readdirSync(join(dataDir, "inbox", "agent-icons")).filter((f) => !f.includes(".still."));
-  return { base, post, faceOf, icon, request, handBack, pictures };
+  return { base, post, faceOf, icon, request, handBack, pictures, server };
 }
 
 test("the hand-back replaces only the icon it was asked about, and the original stays one click away", async () => {
@@ -110,7 +111,7 @@ test("the door refuses a made-up request and anything the upload refuses, and ch
     expect(refused.code).not.toBe(0);
   }
   const unknown = await w.handBack("icon.svg", svg("#000"), "ia_000000000000000000000000");
-  expect([unknown.code, unknown.err]).toEqual([1, "no_request: No such request. Use the request id from the Inbox message that asked you to animate the icon.\n"]);
+  expect([unknown.code, unknown.err]).toEqual([1, "no_request: No such request. Use the request id from the Inbox message that asked you for the icon.\n"]);
   // A page dressed as an SVG, and a file past the cap: the upload's own words.
   const page = await w.handBack("icon.svg", '<!doctype html><html><script>fetch("/x")</script><svg></svg></html>');
   expect([page.code, page.err]).toEqual([1, "validation_error: Picture: a PNG, JPEG, GIF, WebP or SVG image.\n"]);
@@ -118,4 +119,14 @@ test("the door refuses a made-up request and anything the upload refuses, and ch
   expect([big.code, big.err]).toEqual([1, "validation_error: Picture: at most 512 KB.\n"]);
   expect(w.pictures()).toEqual(before);
   expect(await w.faceOf("agent-a")).toBe(`own:${w.icon}`);
+});
+
+test("an animation asked for a project becomes the picture every window reads", async () => {
+  const w = await world();
+  const project = w.server.store.ensureProject({ name: "billing", root: "/work/billing" });
+  const asked = (await w.post("icon-animate", { animate: { icon: "totman", project: project.id } })).request as string;
+  const animated = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0f766e"/><text x="32" y="44" font-size="34" text-anchor="middle" fill="#fff">B</text></svg>';
+  const done = await w.handBack("billing.svg", animated, asked);
+  expect(done).toEqual({ code: 0, out: "Done: the project now shows your picture, in every Inbox window.\n", err: "" });
+  expect(await (await fetch(`${w.base}/api/inbox/projects/${project.id}/picture`)).text()).toBe(animated);
 });
