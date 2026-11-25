@@ -8338,6 +8338,29 @@
               "type": "null"
             }
           ]
+        },
+        "viewed": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "viewed": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "path",
+                "viewed"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

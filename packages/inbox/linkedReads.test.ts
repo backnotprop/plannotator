@@ -11,7 +11,7 @@ import { guideReviewImages } from './reviewImages';
 import { searchPasses } from './search/searchMachines';
 import { searchTagIds } from './search/searchTags';
 import { tagsOnOwnRows } from './threadTags';
-import { machineServesReads, ownerSwitch, threadStepsRead } from './linkedReads';
+import { FAR_READS_AT_ONCE, farRead, machineServesReads, ownerSwitch, threadStepsRead } from './linkedReads';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 
 const SELF = `ibx_01K${'0'.repeat(22)}S`;
@@ -128,11 +128,13 @@ test("before a machine's list is read its marks are unknown: nothing new is aske
 test("another machine's steps line reads that thread's checklist again, as this Inbox's own does; its PR line still does not", () => {
   const records: unknown[] = [];
   const machines: unknown[] = [];
-  const handlers = { onRecord: (event: unknown) => void records.push(event), onStatus: () => {}, onMachine: (frame: unknown) => void machines.push(frame) };
-  const steps = { seq: 7, kind: 'steps', id: 'stp_1', thread_id: NEW_THREAD };
-  dispatchInboxFrame({ name: 'machine', id: null, data: JSON.stringify({ machine: NEW, seq: 7, live: true, record: steps }) }, handlers);
+  const steps: string[] = [];
+  const handlers = { onRecord: (event: unknown) => void records.push(event), onStatus: () => {}, onMachine: (frame: unknown) => void machines.push(frame), onSteps: (threadId: string) => void steps.push(threadId) };
+  dispatchInboxFrame({ name: 'machine', id: null, data: JSON.stringify({ machine: NEW, seq: 7, live: true, record: { seq: 7, kind: 'steps', id: 'stp_1', thread_id: NEW_THREAD } }) }, handlers);
   dispatchInboxFrame({ name: 'machine', id: null, data: JSON.stringify({ machine: NEW, seq: 8, live: true, record: { seq: 8, kind: 'thread_pull', thread_id: NEW_THREAD } }) }, handlers);
-  expect(records).toEqual([steps]);
+  expect(steps).toEqual([NEW_THREAD]);
+  // Never a record (a list or thread read) nor a machine line.
+  expect(records).toEqual([]);
   expect(machines).toEqual([]);
 });
 
@@ -158,4 +160,30 @@ test("the Tag chip offers a linked machine's tags once its search takes the filt
   const tagsOf = (row: Pick<InboxListRow, 'tags'>) => row.tags ?? [];
   expect(tagsOnOwnRows(tags, rows, SELF, tagsOf).map((tag) => tag.id)).toEqual(['ini_A']);
   expect(tagsOnOwnRows(tags, rows, SELF, tagsOf, (machine) => machine === NEW).map((tag) => tag.id)).toEqual(['ini_A', 'ini_B']);
+});
+
+test("reads of linked machines' threads are held to a few at once; this computer's own are never queued behind them", async () => {
+  linked();
+  const started: string[] = [];
+  const release: (() => void)[] = [];
+  const read = (name: string) => () =>
+    new Promise<string>((done) => {
+      started.push(name);
+      release.push(() => done(name));
+    });
+  const far = Array.from({ length: FAR_READS_AT_ONCE + 2 }, (_, i) => farRead(NEW_THREAD, read(`far-${i}`)));
+  const own = farRead(LOCAL_THREAD, read('own'));
+  await Promise.resolve();
+  expect(started).toEqual([...Array.from({ length: FAR_READS_AT_ONCE }, (_, i) => `far-${i}`), 'own']);
+  // One answers: the next one waiting starts.
+  release.shift()!();
+  await far[0];
+  await Promise.resolve();
+  expect(started).toContain(`far-${FAR_READS_AT_ONCE}`);
+  // Every read answers in turn, so none is left waiting.
+  for (let i = 0; i < 20 && release.length; i++) {
+    while (release.length) release.shift()!();
+    await new Promise((go) => setTimeout(go, 0));
+  }
+  expect(await Promise.all([...far, own])).toEqual([...Array.from({ length: FAR_READS_AT_ONCE + 2 }, (_, i) => `far-${i}`), 'own']);
 });

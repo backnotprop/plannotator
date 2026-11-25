@@ -70,11 +70,16 @@ let savedFetch: typeof fetch;
 /** The Code review switch each Inbox answers with the snapshot. */
 let switchThere = { far: false, here: false };
 let posts: string[] = [];
+let bodies: { path: string; viewed: boolean }[] = [];
+/** The review's machine is away: a Viewed write is held. */
+let away = false;
 
 beforeEach(() => {
   if (!hasDom) return;
   viewed = undefined;
   posts = [];
+  bodies = [];
+  away = false;
   window.localStorage.clear();
   setSelfMachine(SELF, [
     { id: SELF, self: true, name: 'Studio' },
@@ -86,7 +91,14 @@ beforeEach(() => {
     const path = String(input);
     if (init?.method === 'POST') {
       posts.push(path);
-      if (path.endsWith('/guide/viewed')) return Response.json({ message_id: FAR, viewed: (JSON.parse(String(init.body)) as { viewed: string[] }).viewed });
+      if (path.endsWith('/guide/viewed')) {
+        const sent = JSON.parse(String(init.body)) as { path: string; viewed: boolean };
+        const tick = { path: sent.path, viewed: sent.viewed };
+        bodies.push(tick);
+        // MacBook away: the tick is held in this computer's outbox.
+        if (away) return Response.json({ outbox: { key: `k${bodies.length}`, machine: OTHER, route: `messages/${FAR}/guide/viewed`, state: 'queued', queued_at: '2026-11-25T10:00:00.000Z', settled_at: null, status: null, answer: null, notice: null, dismissed: false, viewed: tick }, machine: null }, { status: 202 });
+        return Response.json({ message_id: FAR, viewed: tick.viewed ? [tick.path] : [] });
+      }
       return Response.json({});
     }
     if (path.endsWith('/guide')) {
@@ -118,7 +130,7 @@ async function settle() {
 }
 
 /** The review `id`, with this computer's Code review switch `codeReview`. */
-async function render(id: string, codeReview: boolean) {
+async function render(id: string, codeReview: boolean, outbox?: ReadonlyMap<string, import('@plannotator/core/inbox-wire-models').OutboxView>) {
   const message = messageOf(id);
   const thread: InboxThread = { thread_id: id, project: PROJECT, subject: 'Token refresh', thread_name: null, resolved_at: null, messages: [message] };
   act(() => root?.unmount());
@@ -129,7 +141,7 @@ async function render(id: string, codeReview: boolean) {
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={thread} message={message} codeReview={codeReview} onBack={() => {}} onClose={() => {}} onSent={() => {}} onWriteReply={() => {}} />
+        <ReviewPane thread={thread} message={message} codeReview={codeReview} outbox={outbox} onBack={() => {}} onClose={() => {}} onSent={() => {}} onWriteReply={() => {}} />
       </div>,
     );
   });
@@ -150,6 +162,45 @@ test.skipIf(!hasDom)("a linked machine's review: Code review on there offers Vie
   await act(async () => viewed!.onToggle('src/guard.ts'));
   await settle();
   expect(posts).toEqual([`/api/inbox/m/${OTHER}/messages/${FAR}/guide/viewed`]);
+});
+
+test.skipIf(!hasDom)("its machine away: a tick is held, not an error; reopened, it still shows, and the next tick sends that file alone", async () => {
+  switchThere = { far: true, here: true };
+  away = true;
+  await render(FAR, true);
+  await act(async () => viewed!.onToggle('src/guard.ts'));
+  await settle();
+  expect([...viewed!.files]).toEqual(['src/guard.ts']);
+  expect(host!.querySelector('[role="alert"]')).toBeNull();
+  // Reopened from what MacBook keeps (none yet), with the tick still in this computer's outbox.
+  const held = new Map([[`k1`, { key: 'k1', machine: OTHER, route: `messages/${FAR}/guide/viewed`, state: 'queued' as const, queued_at: '2026-11-25T10:00:00.000Z', settled_at: null, status: null, answer: null, notice: null, dismissed: false, viewed: bodies[0]! }]]);
+  await render(FAR, true, held);
+  expect([...viewed!.files]).toEqual(['src/guard.ts']);
+  // Unticked again: one file's change, never a list that would drop another tick on its way.
+  await act(async () => viewed!.onToggle('src/guard.ts'));
+  await settle();
+  expect(bodies).toEqual([
+    { path: 'src/guard.ts', viewed: true },
+    { path: 'src/guard.ts', viewed: false },
+  ]);
+});
+
+test.skipIf(!hasDom)("a linked machine's marks read after the review opened: its Viewed ticks show then, with no reopening", async () => {
+  switchThere = { far: true, here: true };
+  setSelfMachine(SELF, [
+    { id: SELF, self: true, name: 'Studio' },
+    { id: OTHER, name: 'MacBook', marks: [], list_cursor: null, state: 'connecting' },
+  ]);
+  await render(FAR, true);
+  expect(viewed).toBeUndefined();
+  await act(async () => {
+    setSelfMachine(SELF, [
+      { id: SELF, self: true, name: 'Studio' },
+      { id: OTHER, name: 'MacBook', marks: ['linked-reads'], list_cursor: 1, state: 'online' },
+    ]);
+  });
+  await settle();
+  expect(viewed).toBeDefined();
 });
 
 test.skipIf(!hasDom)("this computer's review follows this computer's switch", async () => {

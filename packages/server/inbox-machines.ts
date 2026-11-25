@@ -366,7 +366,13 @@ export interface OutboxView {
   thread: string | null;
   /** The machine's name once its link is gone (null while linked: the window knows it). */
   machine_name: string | null;
+  /** A held Viewed tick in a review there: its file and whether it is ticked (null for any other write). */
+  viewed: { path: string; viewed: boolean } | null;
 }
+
+const VIEWED_ROUTE = /^messages\/[^/]+\/guide\/viewed$/;
+const viewedOf = (entry: OutboxEntry): OutboxView["viewed"] =>
+  VIEWED_ROUTE.test(entry.route) && typeof entry.body.path === "string" && typeof entry.body.viewed === "boolean" ? { path: entry.body.path, viewed: entry.body.viewed } : null;
 
 /** At most this much of a held write's words rides its view. */
 const OUTBOX_WORDS_SHOWN = 2_000;
@@ -394,6 +400,7 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
   words: wordsOf(entry),
   thread: entry.thread ?? null,
   machine_name: entry.machine_name ?? null,
+  viewed: viewedOf(entry),
 });
 
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
@@ -405,9 +412,11 @@ const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-
 const FILE_READ_ROUTE = /^open-in\//;
 /**
  * The reads of a far file only this Inbox's window makes: a file a message names, a Markdown file's pictures, a
- * document next to a file, a guided review's pictures.
+ * document next to a file, a guided review's pictures, whole files and package changes.
  */
-const WINDOW_FILE_READ = /^(?:open-in\/|attachments\/[^/]+\/(?:markdown-image|linked-page)$|messages\/[^/]+\/guide\/review-(?:markdown-)?image$)/;
+const WINDOW_FILE_READS: readonly RegExp[] = [FILE_READ_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, MACHINE_LINKED_PAGE_ROUTE, MACHINE_GUIDE_IMAGE_ROUTE, MACHINE_GUIDE_JSON_ROUTE];
+/** The reads a linked machine's window makes of this mark (`linked-reads`): steps, a review's files, a hover, a file check. */
+const LINKED_READ_ROUTES: readonly RegExp[] = [/^threads\/[^/]+\/steps$/, MACHINE_GUIDE_IMAGE_ROUTE, MACHINE_GUIDE_JSON_ROUTE, /^open-in\/file(?:\/code)?$/];
 /** A forwarded file read that is not a press in this Inbox's window. */
 export const INBOX_MACHINE_FILE_WINDOW_ONLY_BODY = { error: "A file on another machine opens from the Inbox window only.", code: "window_only" } as const;
 
@@ -419,7 +428,7 @@ export const INBOX_MACHINE_FILE_WINDOW_ONLY_BODY = { error: "A file on another m
  * machine's files through this one (the remote launch rule; a tightening, not a secret).
  */
 export function forwardedFileReadRefusal(route: string, req: Request): { status: 403; body: Record<string, string> } | null {
-  if (!WINDOW_FILE_READ.test(route)) return null;
+  if (!WINDOW_FILE_READS.some((read) => read.test(route))) return null;
   const site = req.headers.get("sec-fetch-site")?.trim().toLowerCase();
   const origin = req.headers.get("origin");
   let originHost: string | null = null;
@@ -997,6 +1006,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       json({ error: `${links.get(machine)?.name ?? "That machine"} cannot be reached now.`, code: "machine_offline", machine: machinesView().find((m) => m.id === machine) }, 503);
     const fileRead = forwardedFileReadRefusal(route, req);
     if (fileRead) return json(fileRead.body, fileRead.status);
+    // A linked-reads read of a machine known to be away answers at once: never a wait to the request's limit.
+    if (req.method === "GET" && peer.state === "offline" && LINKED_READ_ROUTES.some((read) => read.test(route))) return offline();
     // HEAD as a local page and its folder answer it: the far GET's headers, no body.
     const head = req.method === "HEAD" && (MACHINE_PAGE_ROUTE.test(route) || MACHINE_ASSET_ROUTE.test(route) || MACHINE_MARKDOWN_IMAGE_ROUTE.test(route) || MACHINE_GUIDE_IMAGE_ROUTE.test(route));
     if (req.method === "GET" || head) {

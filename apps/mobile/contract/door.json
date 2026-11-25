@@ -1560,7 +1560,7 @@
       "kind": "read",
       "write": null,
       "key": null,
-      "answer": "json",
+      "answer": "bytes",
       "range": false,
       "relay": true
     },
@@ -1578,7 +1578,7 @@
       "kind": "read",
       "write": null,
       "key": null,
-      "answer": "json",
+      "answer": "bytes",
       "range": false,
       "relay": true
     },

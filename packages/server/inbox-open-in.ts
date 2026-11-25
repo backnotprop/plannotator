@@ -313,6 +313,17 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     });
   };
 
+  /**
+   * A read's scope from its query. A linked machine's window (through the door) asks about its thread only: that
+   * thread's folders and PRs, never every clone of a repository (`repo`) or a PR it names (`pull`), so its window
+   * cannot read the rest of this computer through a hover or a Copy path.
+   */
+  const scopeFor = (req: Request, params: URLSearchParams): { scope: FileScope; door: boolean } => {
+    const door = !!context.doorOf?.(req);
+    const own = { thread: params.get("thread"), message: params.get("message"), from: params.get("from") };
+    return { door, scope: door ? own : { ...own, repo: params.get("repo"), pull: params.get("pull") } };
+  };
+
   /** Open in for a file a reference names: its project-relative path, in a scope; never a root from the request. */
   const fileRoute = async (req: Request): Promise<Response> => {
     if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
@@ -320,11 +331,10 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
       const url = new URL(req.url);
       if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
       if (notFromWindow(req)) return json(INBOX_MACHINE_FILE_WINDOW_ONLY_BODY, 403);
-      const params = url.searchParams;
-      // A linked machine's window (its Copy path): the thread's own folders only, never every clone (`repo`), as the code route.
-      const door = !!context.doorOf?.(req);
-      const scope = { thread: params.get("thread"), message: params.get("message"), repo: door ? null : params.get("repo"), from: params.get("from") };
-      const file = await checkInboxProjectFile(placesOf(scope, params.get("path") ?? ""));
+      const { scope, door } = scopeFor(req, url.searchParams);
+      const file = await checkInboxProjectFile(placesOf(scope, url.searchParams.get("path") ?? ""));
+      // A linked machine's window is never told a secret is there, as its hover never shows one.
+      if (file.ok && door && (holdsCredentials(file.path) || isPlannotatorState(file.path, dataDirs))) return json({ found: false });
       return json(file.ok ? { found: true, path: file.path, kind: file.kind } : { found: false });
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
@@ -352,14 +362,8 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     const url = new URL(req.url);
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
     if (notFromWindow(req)) return json(INBOX_MACHINE_FILE_WINDOW_ONLY_BODY, 403);
-    const params = url.searchParams;
-    // A linked machine's window asks about its thread here: only that thread's folders and PRs, never every clone of a
-    // repository (`repo`) or a PR it names (`pull`), so its window cannot read the rest of this computer through a hover.
-    const door = !!context.doorOf?.(req);
-    const scope: FileScope = door
-      ? { thread: params.get("thread"), message: params.get("message"), from: params.get("from") }
-      : { thread: params.get("thread"), message: params.get("message"), repo: params.get("repo"), pull: params.get("pull"), from: params.get("from") };
-    const named = params.get("path") ?? "";
+    const { scope } = scopeFor(req, url.searchParams);
+    const named = url.searchParams.get("path") ?? "";
     const places = placesOf(scope, named);
     const pulls = typeof scope.pull === "string" ? [scope.pull] : typeof scope.thread === "string" ? threadPulls(scope.thread) : [];
     if (pulls.length > 0) {

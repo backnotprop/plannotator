@@ -1710,6 +1710,7 @@
       "OutboxView.state",
       "OutboxView.status",
       "OutboxView.thread",
+      "OutboxView.viewed",
       "OutboxView.words",
       "ProjectFolder.archived",
       "ProjectFolder.combined",

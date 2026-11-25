@@ -65,20 +65,34 @@ function streamed(size: number): ReadableStream<Uint8Array> {
   });
 }
 
+/** The far machine asleep: its stream ends and every request hangs, as a sleeping computer's do. */
+let farSleep: () => void = () => {};
+
 /** The far machine's door: what keeps it online, then what its window routes answer (some of them hostile). */
 function farDoor() {
+  let asleep = false;
+  const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     idleTimeout: 0,
     fetch(req) {
+      if (asleep) return new Promise<Response>(() => {});
       const url = new URL(req.url);
       const route = url.pathname.replace("/api/inbox/device/", "");
       if (req.headers.get("authorization") !== `Bearer ${TOKEN}`) return Response.json({ code: "device_token_invalid" }, { status: 401 });
       if (route === "health") return Response.json({ ok: true, inbox_id: FAR, machine_links: 1, version: "0.28.66" });
       if (route === "threads") return Response.json({ cursor: 0, sections: [], projects: [] });
       if (route === "events") {
-        return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start: (c) => {
+              streams.push(c);
+              c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`));
+            },
+          }),
+          { headers: { "Content-Type": "text/event-stream" } },
+        );
       }
       asked.push(`${route}${url.search}`);
       const path = url.searchParams.get("path");
@@ -135,6 +149,10 @@ function farDoor() {
     },
   });
   cleanups.push(() => server.stop(true));
+  farSleep = () => {
+    asleep = true;
+    for (const stream of streams) stream.close();
+  };
   return `http://127.0.0.1:${server.port}`;
 }
 
@@ -173,7 +191,8 @@ async function linkedInbox() {
     const url = new URL(`http://127.0.0.1:1${path}`);
     return (await machines.route(new Request(url, { method, headers: { Host: "127.0.0.1:1", ...headers } }), url, "local"))!;
   };
-  return { get };
+  const state = () => machines.machinesView().find((m) => m.id === FAR)?.state;
+  return { get, state };
 }
 
 /** The window's own read (an `<img>` or a fetch from the Inbox page). */
@@ -296,9 +315,24 @@ describe("a far guided review's pictures", () => {
     expect([refused.status, ((await refused.json()) as { code: string }).code]).toEqual([404, "guide_file_refused"]);
   });
 
+  test("with the far machine known to be away, each read answers that at once, never after the request's limit", async () => {
+    const { get, state } = await linkedInbox();
+    farSleep();
+    for (let i = 0; i < 300 && state() !== "offline"; i++) await Bun.sleep(20);
+    expect(state()).toBe("offline");
+    for (const path of [`/api/inbox/m/${FAR}/messages/${GUIDE}/guide/file?path=src/app.ts`, ...reads("shot.png"), `/api/inbox/m/${FAR}/threads/thr_x/steps`, `/api/inbox/m/${FAR}/open-in/file/code?thread=thr_x&path=a.ts`]) {
+      const started = Date.now();
+      const away = await get(path);
+      expect([path, away.status, ((await away.json()) as { code: string }).code]).toEqual([path, 503, "machine_offline"]);
+      // The request's own limit here is 2 s (`requestMs`): an answer at once, not after it.
+      expect(Date.now() - started).toBeLessThan(500);
+    }
+  });
+
   test("only this Inbox's window reads them: a bare call is refused, never asked of the far machine", async () => {
     const { get } = await linkedInbox();
-    for (const path of reads("shot.png")) {
+    const json =[`/api/inbox/m/${FAR}/messages/${GUIDE}/guide/file?path=src/app.ts`, `/api/inbox/m/${FAR}/messages/${GUIDE}/guide/package-changes?snapshot=${GUIDE}`];
+    for (const path of [...reads("shot.png"), ...json]) {
       for (const headers of [{}, { "Sec-Fetch-Site": "none" }, { "Sec-Fetch-Site": "same-origin", Origin: "http://evil.test" }] as Record<string, string>[]) {
         const refused = await get(path, headers);
         expect([path, headers, refused.status, ((await refused.json()) as { code: string }).code]).toEqual([path, headers, 403, "window_only"]);

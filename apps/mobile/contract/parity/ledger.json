@@ -23599,6 +23599,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-outboxview-viewed",
+      "title": "field:OutboxView.viewed",
+      "surface": [
+        "field:OutboxView.viewed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

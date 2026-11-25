@@ -553,7 +553,7 @@ export async function inboxGuideRoute(
       }
     }
     try {
-      return answer({ message_id: viewedMatch[1], viewed: store.saveGuideViewed(viewedMatch[1]!, body.viewed, files) });
+      return answer({ message_id: viewedMatch[1], viewed: store.saveGuideViewed(viewedMatch[1]!, body.viewed, files, body.path) });
     } catch (error) {
       if (!(error instanceof InboxError)) throw error;
       const status = error.code === "validation_error" ? 422 : 404;

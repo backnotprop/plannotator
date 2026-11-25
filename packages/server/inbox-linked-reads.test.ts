@@ -66,6 +66,7 @@ function world() {
   const home = join(root, "home");
   for (const dir of [join(project, "docs"), join(clone, "src"), home]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(project, "docs", "plan.md"), "# Plan\n");
+  writeFileSync(join(project, "docs", "deploy.pem"), "-----BEGIN PRIVATE KEY-----\n");
   writeFileSync(join(clone, "src", "secret-plan.ts"), "export const other = 1;\n");
   const store = InboxStore.open(join(root, "data"));
   const prj = store.ensureProject({ name: "project", root: project });
@@ -140,6 +141,13 @@ describe("the file check over the tailnet", () => {
     expect((await w.ask("/api/inbox/open-in/file", { repo: "github.com/o/r", path: "src/secret-plan.ts" })).body).toMatchObject({ found: true });
     // A bare call there (no window's mark) is refused, as the hover's text is.
     expect((await w.ask("/api/inbox/open-in/file", { thread: w.thread, path: "docs/plan.md" }, "machine-bare", "tailnet")).status).toBe(403);
+  });
+
+  test("a linked machine's window is never told a secret of its thread's folder is there", async () => {
+    const w = world();
+    expect((await w.ask("/api/inbox/open-in/file", { thread: w.thread, message: w.message, path: "docs/deploy.pem" }, "machine")).body).toEqual({ found: false });
+    // This computer's own window still opens it in an app, as before.
+    expect((await w.ask("/api/inbox/open-in/file", { thread: w.thread, message: w.message, path: "docs/deploy.pem" })).body).toMatchObject({ found: true });
   });
 });
 

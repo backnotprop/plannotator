@@ -11422,12 +11422,13 @@ public struct OutboxView: Codable, Hashable, Sendable {
   public var words: String?
   public var thread: String?
   public var machineName: String?
+  public var viewed: OutboxViewViewed?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["key", "machine", "route", "state", "queued_at", "settled_at", "status", "answer", "notice", "dismissed", "words", "thread", "machine_name"]
+  static let knownKeys: Set<String> = ["key", "machine", "route", "state", "queued_at", "settled_at", "status", "answer", "notice", "dismissed", "words", "thread", "machine_name", "viewed"]
 
-  public init(key: String, machine: String, route: String, state: OutboxViewState, queuedAt: String, settledAt: String? = nil, status: Double? = nil, answer: JSONValue, notice: OutboxViewNotice? = nil, dismissed: Bool, words: String? = nil, thread: String? = nil, machineName: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(key: String, machine: String, route: String, state: OutboxViewState, queuedAt: String, settledAt: String? = nil, status: Double? = nil, answer: JSONValue, notice: OutboxViewNotice? = nil, dismissed: Bool, words: String? = nil, thread: String? = nil, machineName: String? = nil, viewed: OutboxViewViewed? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.key = key
     self.machine = machine
     self.route = route
@@ -11441,6 +11442,7 @@ public struct OutboxView: Codable, Hashable, Sendable {
     self.words = words
     self.thread = thread
     self.machineName = machineName
+    self.viewed = viewed
     self.unknownFields = unknownFields
   }
 
@@ -11459,6 +11461,7 @@ public struct OutboxView: Codable, Hashable, Sendable {
     self.words = try c.decodeIfPresent(String.self, forKey: WireKey("words"))
     self.thread = try c.decodeIfPresent(String.self, forKey: WireKey("thread"))
     self.machineName = try c.decodeIfPresent(String.self, forKey: WireKey("machine_name"))
+    self.viewed = try c.decodeIfPresent(OutboxViewViewed.self, forKey: WireKey("viewed"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -11477,6 +11480,7 @@ public struct OutboxView: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.words, forKey: WireKey("words"))
     try c.encodeIfPresent(self.thread, forKey: WireKey("thread"))
     try c.encodeIfPresent(self.machineName, forKey: WireKey("machine_name"))
+    try c.encodeIfPresent(self.viewed, forKey: WireKey("viewed"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -11582,6 +11586,35 @@ public enum OutboxViewState: Codable, Hashable, Sendable, RawRepresentable {
 
   public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+public struct OutboxViewViewed: Codable, Hashable, Sendable {
+  public var path: String
+  public var viewed: Bool
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["path", "viewed"]
+
+  public init(path: String, viewed: Bool, unknownFields: [String: JSONValue] = [:]) {
+    self.path = path
+    self.viewed = viewed
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.path = try c.decode(String.self, forKey: WireKey("path"))
+    self.viewed = try c.decode(Bool.self, forKey: WireKey("viewed"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.path, forKey: WireKey("path"))
+    try c.encode(self.viewed, forKey: WireKey("viewed"))
+    try WireKey.write(unknownFields, to: &c)
+  }
 }
 
 /// From `packages/core/inbox-wire-models.ts`.
@@ -12785,9 +12818,9 @@ public enum DoorRoutes {
   /// `GET messages/:id/guide/file`: the window's `/api/inbox/messages/{message}/guide/file`.
   public static let getMessageGuideFile = DoorRoute(name: "GET messages/:id/guide/file", method: .get, path: "messages/{message}/guide/file", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET messages/:id/guide/review-image`: the window's `/api/inbox/messages/{message}/guide/review-image`.
-  public static let getMessageGuideReviewImage = DoorRoute(name: "GET messages/:id/guide/review-image", method: .get, path: "messages/{message}/guide/review-image", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getMessageGuideReviewImage = DoorRoute(name: "GET messages/:id/guide/review-image", method: .get, path: "messages/{message}/guide/review-image", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET messages/:id/guide/review-markdown-image`: the window's `/api/inbox/messages/{message}/guide/review-markdown-image`.
-  public static let getMessageGuideReviewMarkdownImage = DoorRoute(name: "GET messages/:id/guide/review-markdown-image", method: .get, path: "messages/{message}/guide/review-markdown-image", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getMessageGuideReviewMarkdownImage = DoorRoute(name: "GET messages/:id/guide/review-markdown-image", method: .get, path: "messages/{message}/guide/review-markdown-image", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET messages/:id/guide/package-changes`: the window's `/api/inbox/messages/{message}/guide/package-changes`.
   public static let getMessageGuidePackageChanges = DoorRoute(name: "GET messages/:id/guide/package-changes", method: .get, path: "messages/{message}/guide/package-changes", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST messages/:id/guide/viewed`: the window's `/api/inbox/messages/{message}/guide/viewed`.

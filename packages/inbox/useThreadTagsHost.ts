@@ -3,7 +3,7 @@ import { inboxNextTagColour, inboxTagLook, inboxTagLookColour, inboxTagShownHex,
 import { inboxApi } from './api';
 import type { MachinesModel } from './machines';
 import { machineOf } from './inboxUrl';
-import { machineServesReads } from './linkedReads';
+import { machineServesReads, useLinkedReadsRev } from './linkedReads';
 import { setSidebarSectionOpen } from './sidebarSections';
 import { canTagThread, rowTagsHere, tagById, tagsOnOwnRows, threadTagsHere, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, type ListTag, type ThreadTagsHost } from './threadTags';
 import { initiativeDeletedToast } from './board/model';
@@ -79,7 +79,10 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
   const shownTagId = filterTag?.id ?? routeTag;
   const tagCounts = useMemo(() => tagThreadCounts(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
   const tagWaiting = useMemo(() => tagWaitingCounts(latestSections, tagsOfRow), [latestSections, tagsOfRow]);
-  const tagsHere = useMemo(() => (listTags ? tagsOnOwnRows(listTags, windowRows, machines.self, tagsOfRow, machineServesReads) : []), [listTags, windowRows, machines.self, tagsOfRow]);
+  // `linkedRev`: a linked machine's marks, which say whether its search takes a Tag filter, may come after the rows.
+  const linkedRev = useLinkedReadsRev();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const tagsHere = useMemo(() => (listTags ? tagsOnOwnRows(listTags, windowRows, machines.self, tagsOfRow, machineServesReads) : []), [listTags, windowRows, machines.self, tagsOfRow, linkedRev]);
   const tagsShown = listTags !== null && tagsSectionShown(listTags, windowRows, tagsOfRow);
   const setThreadTag = async (threadId: string, tag: ListTag, on: boolean, undo = true) => {
     const before = tagPatches.get(threadId) ?? rowOf(threadId)?.tags ?? (openRow?.thread_id === threadId ? openRow.tags : undefined) ?? [];

@@ -68,8 +68,10 @@ import { useLineInView } from './reviewLineInView';
 import type { ReviewAt } from '../app/reviewAt';
 import type { GuideSelectionActions } from '../guide/types';
 import { reviewSourceLine } from '../guide/sourceLine';
-import { InboxApiError, inboxApi } from '../api';
-import { ownerSwitch, readsServedFor } from '../linkedReads';
+import { InboxApiError, InboxHeldError, inboxApi } from '../api';
+import type { OutboxView } from '@plannotator/core/inbox-wire-models';
+import { viewedWithHeld } from '../guide/heldViewed';
+import { ownerSwitch, readsServedFor, useLinkedReadsRev } from '../linkedReads';
 import { guideReviewImages } from '../reviewImages';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
@@ -137,6 +139,8 @@ export interface ReviewPaneProps {
    */
   at?: ReviewAt | null;
   onLanded?: () => void;
+  /** The window's outbox: a Viewed tick held for the review's machine (away) shows as ticked until it lands. */
+  outbox?: ReadonlyMap<string, OutboxView>;
 }
 
 /** Below this width the comments panel folds into the header's Comments button: the rail and the diff keep the room. */
@@ -154,8 +158,10 @@ function chapterOf(chapters: readonly { diffs: readonly { file: string }[] }[], 
   return at < 0 ? null : at;
 }
 
-export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted, onAsk, codeReview: codeReviewHere, chapterDiagrams = true, onWriteReply, at = null, onLanded }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted, onAsk, codeReview: codeReviewHere, chapterDiagrams = true, onWriteReply, at = null, onLanded, outbox }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
+  // Moves when a linked machine's marks arrive: a review opened before the merged list was read gets its reads then.
+  const linkedRev = useLinkedReadsRev();
   // The Inbox that holds the review decides: a linked machine's, as it answered with the snapshot (an older one says
   // nothing: this computer's, as before), so nothing shows that its Inbox would refuse.
   const codeReview = ownerSwitch(message.id, codeReviewHere, state.codeReviewThere ?? codeReviewHere);
@@ -241,7 +247,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   const phone = usePhone();
   // With Code review on, its diff headers offer Open in (the thread's project; nothing when the file is not there).
   // Code review's image previews on changed images, from the patch the agent sent (reviewImages.ts).
-  const images = useMemo(() => guideReviewImages(message.id), [message.id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `linkedRev`: the marks `guideReviewImages` reads.
+  const images = useMemo(() => guideReviewImages(message.id), [message.id, linkedRev]);
   const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
   const [mode, setMode] = useState<RailMode>('walkthrough');
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
@@ -506,17 +513,21 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
     [phone, files.length, walkthrough],
   );
 
-  const viewedSet = useMemo(() => new Set(viewed), [viewed]);
+  // What its Inbox keeps, with each tick still held for it (its machine away) laid over: as the person ticked them.
+  const shownViewed = useMemo(() => viewedWithHeld(viewed, outbox, message.id), [viewed, outbox, message.id]);
+  const viewedSet = useMemo(() => new Set(shownViewed), [shownViewed]);
   const toggleViewed = useCallback(
     (path: string) => {
-      const next = viewed.includes(path) ? viewed.filter((p) => p !== path) : [...viewed, path];
-      setViewed(next);
-      inboxApi.saveGuideViewed(message.id, next).then(
+      // One file's change, never the whole list: a tick that waits never undoes another made since.
+      const on = !shownViewed.includes(path);
+      setViewed((kept) => (on ? [...kept.filter((p) => p !== path), path] : kept.filter((p) => p !== path)));
+      inboxApi.saveGuideViewed(message.id, path, on).then(
         (saved) => setViewed(saved.viewed),
-        (cause: unknown) => setSaveError(cause instanceof Error ? cause.message : 'The Viewed tick was not saved.'),
+        // Held for a machine that is away: not a failure. The tick stays (the outbox's entry) and lands once it is back.
+        (cause: unknown) => (cause instanceof InboxHeldError ? undefined : setSaveError(cause instanceof Error ? cause.message : 'The Viewed tick was not saved.')),
       );
     },
-    [viewed, message.id, setSaveError],
+    [shownViewed, message.id, setSaveError],
   );
   // Viewed ticks are Code review's: the server takes them only on a review, and only while Code review is on.
   const viewedProp = useMemo(() => (readOnly || !viewedTicks ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, viewedTicks, viewedSet, toggleViewed]);

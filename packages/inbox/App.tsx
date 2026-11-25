@@ -1576,9 +1576,8 @@ function Inbox() {
             cardsTimer = setTimeout(() => void refreshCards(), 60);
             return;
           }
-          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a list or thread
-          // read: only the open thread's checklist reads them again. The checklist lives only in its thread (owner,
-          // 2026-11-09): no list row or Board card shows it.
+          // A thread's steps (approval "inbox-thread-steps"; a linked machine's come by `onSteps`): silent, only the open
+          // thread's checklist reads them again. It lives only in its thread (owner, 2026-11-09): no row or card shows it.
           if (event?.kind === 'steps') {
             stepsBus.emit(event.thread_id);
             return;
@@ -1647,6 +1646,7 @@ function Inbox() {
         },
         // A thread's tags changed (here, in another window): read the list's `tags` again (approval "inbox-thread-tags").
         onTags: () => listAfterEvents(60),
+        onSteps: (threadId) => stepsBus.emit(threadId),
         // A linked machine's cards changed (its Board was read again here): the merged Board is read, as for a card record.
         onCards: () => {
           if (cardsTimer) clearTimeout(cardsTimer);
@@ -6253,9 +6253,9 @@ function Inbox() {
         {said}
       </div>
       {guideMessage && thread && (
-        // Every guide or review an agent sends opens the full-window review (approval "inbox-one-review-screen");
-        // what Code review brings shows only while it is on.
+        // Every guide or review an agent sends opens the full-window review (approval "inbox-one-review-screen").
         <ReviewPane
+          outbox={outbox}
           key={guideMessage.id}
           thread={thread}
           message={guideMessage}

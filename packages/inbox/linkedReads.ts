@@ -4,8 +4,17 @@
  * Viewed ticks, a referenced file's hover text, and a search with a Tag filter. An older Inbox there does not say the
  * mark, so the window asks it nothing new and shows what it showed before (docs/agent-guides/inbox-machines.md).
  */
+import { useSyncExternalStore } from 'react';
 import { INBOX_LINKED_READS_MARK } from '@plannotator/core/inbox-types';
-import { linkedMachineFacts, machineOf, selfMachineId } from './inboxUrl';
+import { linkedMachineFacts, linkedMachinesRev, machineOf, onLinkedMachines, selfMachineId } from './inboxUrl';
+
+/**
+ * A count that moves when the linked machines' facts change, marks included: what asks `readsServedFor` while it
+ * draws takes it as a dependency, so a far thread opened before the merged list was read gets its reads once it is.
+ */
+export function useLinkedReadsRev(): number {
+  return useSyncExternalStore(onLinkedMachines, linkedMachinesRev, () => 0);
+}
 
 /**
  * Whether a machine serves these reads. This machine always, by its own routes: an id with no machine (`null`: this
@@ -21,6 +30,27 @@ export function machineServesReads(machine: string | null | undefined): boolean 
 /** Whether the machine that owns this id (a thread, a message) serves these reads. */
 export function readsServedFor(id: string | null | undefined): boolean {
   return machineServesReads(machineOf(id));
+}
+
+/**
+ * The most reads of linked machines' threads out at once. A browser keeps a few connections to this window's own
+ * origin; a sleeping machine's reads must never hold them all, so the list and this computer's threads stay quick.
+ */
+export const FAR_READS_AT_ONCE = 4;
+let farReading = 0;
+const farWaiting: (() => void)[] = [];
+
+/** `run` (a read of `id`'s machine), queued past `FAR_READS_AT_ONCE` when that machine is a linked one. */
+export async function farRead<T>(id: string | null | undefined, run: () => Promise<T>): Promise<T> {
+  if (!onLinkedMachine(id)) return run();
+  if (farReading >= FAR_READS_AT_ONCE) await new Promise<void>((go) => farWaiting.push(go));
+  farReading += 1;
+  try {
+    return await run();
+  } finally {
+    farReading -= 1;
+    farWaiting.shift()?.();
+  }
 }
 
 /** Whether this id (a thread, a message) is on a linked machine rather than this one. */

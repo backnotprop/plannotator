@@ -424,9 +424,14 @@ function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords, raised = f
   const touch = useTouchScreen();
   const [missing, setMissing] = useState(false);
   const [told, setTold] = useState(false);
+  // The read out now: a new rest, or the words gone, stops it (a sleeping machine's read never lingers).
+  const reading = useRef<AbortController | null>(null);
+  useEffect(() => () => reading.current?.abort(), []);
   const hover = useHoverPreview<Extract<OpenInFileCode, { found: true }>>(async () => {
+    reading.current?.abort();
+    const read = (reading.current = new AbortController());
     // Open's own answer comes with the code, so the window opens whole.
-    const [answer] = await Promise.all([inboxApi.openInFileCode(scope, path).catch(() => null), phone ? null : checkOpenInFile(scope, path)]);
+    const [answer] = await Promise.all([inboxApi.openInFileCode(scope, path, read.signal).catch(() => null), phone ? null : checkOpenInFile(scope, path)]);
     setMissing(!answer?.found);
     // Still resting on the words: they say so now, with no second rest.
     if (!answer?.found && (pointerIn.current || document.activeElement === hover.anchorRef.current)) setTold(true);
