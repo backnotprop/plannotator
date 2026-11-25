@@ -87,6 +87,7 @@ import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readCliHosts, ref
 import { cliAnsweredPlainly, createSignedKeep } from "./inbox-pull-signed-keep";
 import { createDepartedPulls } from "./inbox-pull-departed";
 import { type ForgePullRead, forgePullState, readForgePull } from "./inbox-pull-forge";
+import { createLastDiffs, lastDiffId, withNewerState } from "./inbox-pull-last-diff";
 import { join as joinPath } from "node:path";
 
 /** GitHub's PR as the diff read asks for it around the patch: its head, its description, and its state now. */
@@ -770,8 +771,13 @@ export interface InboxPulls {
   othersSettled(): Promise<void>;
   /** The profile pictures' URLs of the authors of the PRs the last list showed on this host, by login. */
   avatarUrls(host: string): Record<string, string>;
-  /** One layer's patch, or a compare up to that layer (`InboxPullDiffScope`; `from` for a range or a commit). Throws InboxPullsError. */
-  diff(key: string, scope: InboxPullDiffScope, from?: string, pinnedHead?: string): Promise<InboxPullDiffAnswer>;
+  /**
+   * One layer's patch, or a compare up to that layer (`InboxPullDiffScope`; `from` for a range or a commit). Throws
+   * InboxPullsError. A PR no list names whose forge read fails (offline, a 404, a rate limit) answers the last patch
+   * read of it, kept past a restart (inbox-pull-last-diff.ts): the page open on it shows its last read. `repos` (the
+   * projects' repositories): a restart that has not read the list yet reads it once first, as `pull` does.
+   */
+  diff(key: string, scope: InboxPullDiffScope, from?: string, pinnedHead?: string, repos?: InboxPullRepo[]): Promise<InboxPullDiffAnswer>;
   /** What the forge has beside the diff: reviewers, checks, labels, comments. Only for a PR the last list named. */
   details(key: string): Promise<InboxPullDetailsAnswer>;
   /** The PR's own text as the details read answered it, for the PR media route. Throws InboxPullsError. */
@@ -1195,6 +1201,18 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const departedWide = createDepartedPulls({ now, hidden: options.hidden, ...(options.dir ? { file: joinPath(options.dir, "pull-departed-wide.json") } : {}) });
   /** The forge's answer for one PR (`pull`), for a short while: a page and its reload ask once. */
   const forgeReads = new Map<string, { at: number; pull: Promise<ForgePullRead> }>();
+  /** Each PR's last patch, for a page open on one no list names whose forge read fails (inbox-pull-last-diff.ts). */
+  const lastDiffs = createLastDiffs({ now, ...(options.dir ? { file: joinPath(options.dir, "pull-last-diffs.json") } : {}) });
+  /**
+   * Each PR's state as last learned outside a list (a read of the PR itself, a diff's head read, an action here), and
+   * when: a patch read before it (the read cache, a kept last patch) says this state instead (`withNewerState`).
+   */
+  const statesSeen = new Map<string, { at: number; state: InboxPullState; merged_at: string | null }>();
+  const noteState = (key: string, state: InboxPullState, merged_at: string | null) => {
+    statesSeen.delete(key);
+    statesSeen.set(key, { at: now(), state, merged_at });
+    while (statesSeen.size > 200) statesSeen.delete(statesSeen.keys().next().value!);
+  };
   const findKnown = (key: string): InboxPull | undefined => known.get(key) ?? knownWide.get(key);
   /** The stack a listed PR is a layer of, from the list that names it (Reviews' first, as `findKnown`). */
   const stackOf = (pull: InboxPull) => {
@@ -1665,6 +1683,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         lastRepos = wanted;
         reposRead = true;
       }
+      // The last patch of each PR no list names now is kept past a restart (written only when that set changed).
+      lastDiffs.save((key) => !findKnown(key));
       // Only the people this list names (a PR's author, its reviewers, who approved it): the window may ask for their
       // pictures, no one else's.
       const nextAvatars = new Map<string, Record<string, string>>();
@@ -1743,6 +1763,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     markMerged(key) {
       const at = now();
       mergedHere.set(key, at);
+      noteState(key, "merged", new Date(at).toISOString());
       for (const map of [known, knownWide]) {
         const pull = map.get(key);
         if (pull) map.set(key, asMerged(pull, at));
@@ -1752,6 +1773,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const was = findKnown(key)?.state;
       if (was !== "open" && was !== "draft") return;
       closedHere.set(key, { at: now(), was });
+      noteState(key, "closed", null);
       for (const map of [known, knownWide]) {
         const pull = map.get(key);
         if (pull) map.set(key, { ...pull, state: "closed" });
@@ -1760,6 +1782,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     markReopened(key) {
       const closed = closedHere.get(key);
       closedHere.delete(key);
+      noteState(key, closed?.was === "draft" ? "draft" : "open", null);
       for (const map of [known, knownWide]) {
         const pull = map.get(key);
         if (pull && pull.state === "closed") map.set(key, { ...pull, state: closed?.was ?? "open" });
@@ -1860,16 +1883,21 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       // forge saying it has no such PR is told too (`missing`): the copy kept is then only a last read, never current.
       const answer = (read: ForgePullRead): ForgePullRead =>
         read.unreadable ? { pull: was, unreadable: true } : read.missing ? { pull: was, missing: true } : { pull: read.pull ?? was };
+      // Every answer is held for the same 20 s, one that did not answer too: during a rate limit each window's ask (each
+      // list read, each focus) would otherwise reach the forge again.
       const hit = forgeReads.get(key);
       if (hit && now() - hit.at < INBOX_PULLS_REFRESH_MS) return answer(await hit.pull);
+      // The host asked to slow down (a 429 to any read of it, this one's too): not asked again until its hold ends.
+      if (now() < (holdUntil.get(host) ?? 0)) return answer({ pull: null, unreadable: true });
       const platform = was?.platform ?? [...known.values(), ...knownWide.values()].find((p) => p.host === host)?.platform ?? (hosts.get(host)?.cli === "glab" ? "gitlab" : "github");
       const cli: RefCli = hosts.get(host)?.cli ?? (platform === "github" ? "gh" : "glab");
       const entry = { at: now(), pull: Promise.resolve<ForgePullRead>({ pull: null }) };
       entry.pull = readForgePull(run, cli, platform, host, repo, Number(number), was).then((read) => {
+        if (read.limited) holdUntil.set(host, now() + REF_RATE_LIMIT_MS);
         // Kept as one that left, so its diff, details and files read too (after a restart as well).
         if (read.pull && !options.hidden?.(key)) (lastRepos.has(repoKey) ? departed : departedWide).put(read.pull);
-        // A forge that did not answer is asked again at the page's next ask (a focus, back online), not held here.
-        if (read.unreadable && forgeReads.get(key) === entry) forgeReads.delete(key);
+        // Its state now, for a patch read before (a reopened PR's kept patch says open).
+        if (read.pull) noteState(key, read.pull.state, read.pull.merged_at);
         return read;
       });
       forgeReads.set(key, entry);
@@ -1976,7 +2004,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         readWorkingTree: readRepoWorkingTreeFile,
       });
     },
-    async diff(key, scope, from, pinnedHead) {
+    async diff(key, scope, from, pinnedHead, repos) {
+      // Restarted, and a page open on a PR no list names reads its diff before any list read: read the list once first.
+      if (repos && !reposRead) await this.list(repos, { refresh: false }).catch(() => {});
       const pull = readable(key);
       if (!pull) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       // Whole stack: from the branch the lowest open layer is based on (merged layers are not read again), and from
@@ -2002,9 +2032,10 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const cacheKey = `${key}\u0000${scope}\u0000${bases[0]}\u0000${pull.head_sha ?? pull.updated_at}`;
       const hit = diffs.get(cacheKey);
       // Only an answer naming the head last read here: a list gone back to an older head reads the forge, and so does a
-      // head the forge did not pin down.
-      if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS && readHeads.get(key) === hit.answer.head_sha) return hit.answer;
-      if (hit && pinnedHead && hit.answer.head_sha === pinnedHead) return hit.answer;
+      // head the forge did not pin down. Its state as last learned since (a PR reopened since its read says open).
+      if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS && readHeads.get(key) === hit.answer.head_sha) return withNewerState(hit.answer, hit.at, statesSeen.get(key));
+      if (hit && pinnedHead && hit.answer.head_sha === pinnedHead) return withNewerState(hit.answer, hit.at, statesSeen.get(key));
+      const lastId = lastDiffId(key, scope, bases[0]!);
       const flying = diffsInFlight.get(cacheKey);
       if (flying) return flying;
       const reading = (async (): Promise<InboxPullDiffAnswer> => {
@@ -2078,11 +2109,20 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         diffs.set(cacheKey, { at: now(), answer });
         // Bounded: only the last few diffs are kept.
         while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
+        if (before?.state) noteState(key, before.state, before.merged_at);
+        // Its last read, for when the forge no longer answers for it; on disk at once for a PR no list names.
+        lastDiffs.put(lastId, answer);
+        if (!findKnown(key)) lastDiffs.save((k) => !findKnown(k));
         return answer;
       })();
       diffsInFlight.set(cacheKey, reading);
       try {
         return await reading;
+      } catch (cause) {
+        // A PR no list names whose forge read failed (offline, a 404, a rate limit): its last read, as its page says.
+        const last = cause instanceof InboxPullsError && cause.code === "pull_diff_failed" && !findKnown(key) ? lastDiffs.get(lastId) : undefined;
+        if (last) return withNewerState(last.answer, last.at, statesSeen.get(key));
+        throw cause;
       } finally {
         diffsInFlight.delete(cacheKey);
       }

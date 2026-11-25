@@ -4,7 +4,7 @@
  * there. What is not read here (checks, reviews) is left unknown rather than shown from an old read.
  */
 import type { InboxPull, InboxPullPlatform, InboxPullState } from "@plannotator/core/inbox-types";
-import type { RefCli, RefRunner } from "./ref-cards";
+import { refErrorOf, type RefCli, type RefRunner } from "./ref-cards";
 
 type Json = Record<string, unknown>;
 const obj = (v: unknown): Json => (v && typeof v === "object" && !Array.isArray(v) ? (v as Json) : {});
@@ -74,12 +74,17 @@ export function forgePullOf(platform: InboxPullPlatform, host: string, repo: str
 /**
  * What a read of one PR found: the PR; `missing` (the forge answered that it has no such PR: deleted with its
  * repository, or no longer visible to this login); or `unreadable` (the forge did not answer: offline, signed out,
- * down, an answer that is not a PR), which says nothing of the PR.
+ * down, an answer that is not a PR), which says nothing of the PR. `limited`: the forge asked to slow down (its
+ * rate limit), so the host is held as the list's reads are; the route never sends it.
  */
-export type ForgePullRead = { pull: InboxPull | null; unreadable?: true; missing?: true };
+export type ForgePullRead = { pull: InboxPull | null; unreadable?: true; missing?: true; limited?: true };
 
-/** The forge said it has no such PR (gh's and glab's `HTTP 404` / `404 Not Found`). */
-const saysNotFound = (text: string): boolean => /\b404\b/.test(text);
+/**
+ * The forge said it has no such PR, in the CLI's own shape (gh's `gh: Not Found (HTTP 404)`, glab's `404 Not Found`
+ * or GitLab's `404 Project Not Found`), never a bare number: a PR numbered 404, or a repository called error-404-page
+ * in a network error's URL, is not a 404 (as `refErrorOf` reads a 429).
+ */
+export const saysNotFound = (text: string): boolean => /\bHTTP 404\b|\(404\)|\b404 (?:\w+ )?Not Found\b/i.test(text);
 
 /** Read one PR from the forge. */
 export async function readForgePull(run: RefRunner, cli: RefCli, platform: InboxPullPlatform, host: string, repo: string, number: number, was: InboxPull | null): Promise<ForgePullRead> {
@@ -88,7 +93,10 @@ export async function readForgePull(run: RefRunner, cli: RefCli, platform: Inbox
   const endpoint = platform === "github" ? `repos/${repo}/pulls/${number}` : `projects/${encodeURIComponent(repo)}/merge_requests/${number}`;
   const read = await run(cli, ["api", "--hostname", host, endpoint, ...(platform === "github" ? ["--jq", FORGE_PULL_JQ] : [])]).catch(() => null);
   if (!read) return { pull: null, unreadable: true };
-  if (read.exitCode !== 0) return saysNotFound(`${read.stderr}\n${read.stdout}`) ? { pull: null, missing: true } : { pull: null, unreadable: true };
+  if (read.exitCode !== 0) {
+    if (refErrorOf(cli, read) === "rate_limited") return { pull: null, unreadable: true, limited: true };
+    return saysNotFound(`${read.stderr}\n${read.stdout}`) ? { pull: null, missing: true } : { pull: null, unreadable: true };
+  }
   try {
     const pull = forgePullOf(platform, host, repo, number, obj(JSON.parse(read.stdout)), was);
     return pull ? { pull } : { pull: null, unreadable: true };

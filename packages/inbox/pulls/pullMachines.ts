@@ -72,6 +72,27 @@ export function learnPullMachines(answer: InboxPullsAnswer): InboxPullsAnswer {
   return answer;
 }
 
+/** A PR whose machine answered that it is not linked here any more: this machine reads it from now on. */
+export function forgetPullMachine(key: string): void {
+  byKey.delete(key);
+  const seen = leftMap();
+  if (seen.delete(key)) saveLeft(seen);
+}
+
+/**
+ * A machine the person unlinked here: the PRs remembered as its go back to this machine. One unlinked elsewhere (on
+ * it, or while this window was closed) is learned at its PR's next read, which answers `machine_not_linked`
+ * (routePull.ts `forgetPullMachine`).
+ */
+export function forgetPullMachines(machine: string): void {
+  for (const [key, id] of byKey) if (id === machine) byKey.delete(key);
+  for (const [author, id] of byAuthor) if (id === machine) byAuthor.delete(author);
+  const seen = leftMap();
+  let changed = false;
+  for (const [key, id] of [...seen]) if (id === machine) changed = seen.delete(key) || changed;
+  if (changed) saveLeft(seen);
+}
+
 /** The linked machine that lists this PR (or listed it last, before it left the board), or null for this machine's own. */
 export function pullMachine(key: string): string | null {
   return byKey.get(key) ?? leftMap().get(key) ?? null;

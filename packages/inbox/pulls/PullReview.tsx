@@ -315,7 +315,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   const lone = useMemo(() => (route.pull ? loneStack(route.pull) : null), [route.pull]);
   const [said, setSaid] = useState<ReturnType<typeof forgeSaid>>(null);
   const found = kept?.stack ?? drawnStackWith(stackId, layerKey, model) ?? (lone && model && !hiddenIn(lone, model) ? lone : null);
-  const stack = useMemo(() => withForgeState(found, layerKey, listed, said, route.pull), [found, layerKey, listed, said, route.pull]);
+  const stack = useMemo(() => withForgeState(found, layerKey, listed, said, route), [found, layerKey, listed, said, route.pull, route.fresh]); // eslint-disable-line react-hooks/exhaustive-deps
   const layer = stack?.layers.find((l) => l.key === layerKey) ?? null;
   // A range the list no longer holds as one (a layer merged or moved) shows the layer's own diff.
   const scope = stack ? liveView(stack, layerKey, asked) : asked;
@@ -882,7 +882,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
           </Tip>
         </div>
         <div className="ib-pr-empty" role={modelError || model ? 'alert' : undefined}>
-          {modelError ?? (model && !route.asking ? 'This pull request is no longer in the list.' : 'Reading your pull requests…')}
+          {modelError ?? (model && !route.asking ? (route.rest ?? 'This pull request is no longer in the list.') : 'Reading your pull requests…')}
         </div>
       </section>
     );
@@ -896,8 +896,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   const readOnlyParts: Words = layer.mine ? ['No review thread yet'] : layer.author ? ['by ', person(layer.author)] : ['by a deleted account'];
   const readOnlyWords = wordsText(readOnlyParts);
   // The forge not answering for a PR no list names, or saying it has no such PR now: the page stays as last read,
-  // with one line saying so.
-  const unreadNote = (route.unread || route.missing) && (
+  // with one line saying so, on its own line above the diff (its words whole, a phone's too). Only while a diff is on
+  // screen: one never read here (the diff's error shows instead) is no last read.
+  const unreadNote = (route.unread || route.missing) && !!diff && (
     <p className="ib-prr-note" {...(route.missing ? { 'data-pull-review-missing': '' } : { 'data-pull-review-unread': '' })}>
       {route.missing ? missingWords(forgeName(layer)) : unreadWords(forgeName(layer))}
     </p>
@@ -1014,7 +1015,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
           </button>
         )}
         {!judged && riskFailure && <RiskMark failed={riskFailure} />}
-        {unreadNote || (!phone && readOnlyNote)}
+        {!phone && readOnlyNote}
         {!phone && <DetailsButton open={detailsOpen} data={details.data} onToggle={toggleDetails} />}
         <span className="ib-sp" />
         {/* Every review header's diff controls (approval diff-controls-headers), in the bar as in a thread's review: one
@@ -1162,6 +1163,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
           />
         )}
         <div className="ib-gbody" data-repo-open={repoOpen && repoSha ? '' : undefined}>
+          {unreadNote}
           {repoOpen && repoSha && (
             <PanePart>
               <PullRepoFilePart.Part key={repoOpen} pullKey={layer.key} sha={repoSha} path={repoOpen} />

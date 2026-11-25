@@ -111,6 +111,24 @@ describe("a linked machine's reported branches", () => {
     }
   });
 
+  test("a machine unlinked while this Inbox was down leaves nothing behind: linked again later, its old rows never come back", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-machine-branches-"));
+    try {
+      const awake = peer(B, ["branches"], () => Response.json({ reports: [far] }), []);
+      const first = createMachineBranches({ peers: () => [awake], dir, linked: () => [B] });
+      first.start(() => null);
+      await first.settled();
+      expect(first.start(() => null)().rows).toHaveLength(1);
+      // B was unlinked while this Inbox was down: the restart reads the file with B no longer linked.
+      createMachineBranches({ peers: () => [], dir, linked: () => [] });
+      // B is linked again and sleeps (no list read from it yet): none of its rows from before the unlink.
+      const asleep = { ...peer(B, [], () => Response.json({}, { status: 502 }), []), state: "offline", list: null } as unknown as PeerLink;
+      expect(createMachineBranches({ peers: () => [asleep], dir, linked: () => [B] }).start(() => null)().rows).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("the file is written only when a read changes it, and a machine that stops taking branches leaves it", async () => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-machine-branches-"));
     try {

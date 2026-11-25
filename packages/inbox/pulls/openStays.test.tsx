@@ -57,6 +57,7 @@ const { StackPage } = (hasDom ? await import('../prs/StackPage') : {}) as typeof
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { forgetPullThreadStarts } = (hasDom ? await import('./threadStarts') : {}) as typeof import('./threadStarts');
 const { resetShipsForTests, shipEvents } = (hasDom ? await import('../data/ships') : {}) as typeof import('../data/ships');
+const { learnPullMachines, pullMachine, resetPullMachines } = (hasDom ? await import('./pullMachines') : {}) as typeof import('./pullMachines');
 
 const SHA = 'a'.repeat(40);
 /** Someone else's PR the person was asked to review: once merged, no search of theirs lists it any more. */
@@ -90,6 +91,8 @@ let forgeMissing = false;
 let diffDown = false;
 /** This Inbox's ships (`GET /api/inbox/ships`): what the Reviews row's "Merged <time>" reads. */
 let ships: InboxShipView[] = [];
+/** What this Inbox answers for a linked computer's read of one PR (asleep, too old, unlinked). */
+let farAnswer: { status: number; body: unknown } | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -104,7 +107,9 @@ beforeEach(() => {
   forgeMissing = false;
   diffDown = false;
   ships = [];
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  farAnswer = null;
+  resetPullMachines();
+  globalThis.fetch =(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     if (init?.method === 'POST') return Response.json({ ok: true });
     if (url.pathname.endsWith('/api/inbox/ships')) return Response.json({ serverSession: 's', ships, projects: {} });
@@ -115,6 +120,8 @@ beforeEach(() => {
       const patch = 'diff --git a/src/retry.ts b/src/retry.ts\n--- a/src/retry.ts\n+++ b/src/retry.ts\n@@ -12 +12 @@\n-a\n+b\n';
       return Response.json({ serverSession: 's', key, scope: 'layer', base: 'main', head: 'y', patch, head_sha: SHA, state: forgeState[key] ?? 'open', merged_at: null });
     }
+    // A linked computer's read of one PR, through this Inbox (`/api/inbox/m/<id>/pulls/pull`).
+    if (url.pathname.startsWith('/api/inbox/m/') && url.pathname.endsWith('/pulls/pull') && farAnswer) return Response.json(farAnswer.body, { status: farAnswer.status });
     if (url.pathname.endsWith('/pulls/pull')) {
       pullReads += 1;
       return Response.json({ serverSession: 's', pull: serverPull[url.searchParams.get('key')!] ?? null, ...(forgeQuiet ? { unreadable: true } : forgeMissing ? { missing: true } : {}) });
@@ -255,6 +262,9 @@ test.skipIf(!hasDom)('the forge not answering: the page stays as last read with 
   expect($('[data-stub-reader]') === before.reader && $<HTMLTextAreaElement>('[data-stub-comment]')!.value === 'Cap the backoff at').toBe(true);
   expect(document.querySelectorAll('[data-pull-review-unread]').length).toBe(1);
   expect($('[data-pull-review-unread]')!.textContent).toContain('GitHub');
+  // On its own line above the diff, never in the header bar (where a note is cut to fit).
+  expect(!!$('.ib-vhead [data-pull-review-unread]')).toBe(false);
+  expect(!!$('.ib-gbody > [data-pull-review-unread]')).toBe(true);
   const asked = pullReads;
   await fire('focus');
   expect(pullReads).toBe(asked + 1);
@@ -478,6 +488,83 @@ test.skipIf(!hasDom)('the forge saying it has no such PR any more: the page stay
   expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
   expect($('[data-pull-review-missing]')?.textContent).toContain('GitHub');
   expect(!!$('[data-pull-review-unread]')).toBe(false);
+});
+
+test.skipIf(!hasDom)('closed elsewhere, then reopened: Closed without Post, then open with Post back, though the diff read before still said closed', async () => {
+  // Closed on GitHub: no list names it; the page's read of it and its diff's read say closed (a reload: nothing held).
+  forgeState[theirs.key] = 'closed';
+  serverPull[theirs.key] = { ...theirs, state: 'closed', checks: null };
+  let model = without(theirs.key);
+  function Page() {
+    const [shown, setShown] = useState(model);
+    read = setShown;
+    return <PullReview model={shown} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />;
+  }
+  mount(<Page />);
+  for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+  await settle();
+  expect(refState()).toBe('closed');
+  expect(!!$('[data-review-posts]')).toBe(false);
+  // Reopened, still in no list (a teammate's no longer asked of the person): closed is not final, so the next list
+  // read asks again, and the forge's answer now (open) outranks the diff read's closed.
+  serverPull[theirs.key] = { ...theirs, checks: null };
+  model = { ...model };
+  await act(async () => read(model));
+  await settle(20);
+  expect(refState()).toBe('open');
+  expect(!!$('[data-review-posts]')).toBe(true);
+  // Closed again and back in the list, open (reopened once more): the list's word, whatever the diff read said.
+  serverPull[theirs.key] = { ...theirs, state: 'closed', checks: null };
+  await act(async () => read({ ...model }));
+  await settle(20);
+  expect(refState()).toBe('closed');
+  await act(async () => read(base));
+  await settle(20);
+  expect(refState()).toBe('open');
+  expect(!!$('[data-review-posts]')).toBe(true);
+});
+
+/** A teammate's PR no page here has drawn or read before (the pages' held stacks and read patches last the module). */
+const unseen = (n: number) => pull(n, { repo: 'northwind/web-app', mine: false, requested: true, author: 'tomas', head: `branch-${n}`, head_sha: SHA });
+
+test.skipIf(!hasDom)('the forge not answering and no patch of it ever read here: the diff’s own error, and no line claiming a last read', async () => {
+  const fresh = unseen(891);
+  forgeQuiet = true;
+  diffDown = true;
+  serverPull[fresh.key] = { ...fresh, state: 'merged', checks: null };
+  mount(<PullReview model={base} modelError={null} stackId={fresh.key} layerKey={fresh.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+  await settle(20);
+  expect(refState()).toBe('merged');
+  expect(!!$('[data-pull-diff-error]')).toBe(true);
+  expect(!!$('[data-pull-review-unread]')).toBe(false);
+});
+
+for (const [what, answer, want] of [
+  ['the linked computer that lists it is asleep', { status: 503, body: { error: 'Mac mini cannot be reached now.', code: 'machine_offline' } }, 'Mac mini cannot be reached now.'],
+  ['the linked computer runs an older Inbox without this read', { status: 404, body: { error: 'Not a door route.', code: 'not_found' } }, 'This pull request is no longer in the list.'],
+  ['the linked computer was unlinked since: this computer answers', { status: 404, body: { error: 'That machine is not linked.', code: 'machine_not_linked' } }, 'This pull request is no longer in the list.'],
+] as const) {
+  test.skipIf(!hasDom)(`no copy to show and ${what}: the page comes to rest with words, never reading for ever`, async () => {
+    const far = unseen(892);
+    // That computer's board named it once (this window remembers whose it is); none names it now.
+    learnPullMachines({ ...base, pulls: [{ ...far, machine: 'ibx_01JZ0000000000000000000000' }] });
+    farAnswer = answer;
+    mount(<PullReview model={base} modelError={null} stackId={far.key} layerKey={far.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+    await settle(20);
+    expect($('.ib-pr-empty')!.textContent).toBe(want);
+    if (answer.body.code === 'machine_not_linked') expect(pullMachine(far.key)).toBeNull();
+  });
+}
+
+test.skipIf(!hasDom)('no copy to show and the forge not answering: the list’s own line for it, asked again on focus', async () => {
+  const quiet = unseen(893);
+  forgeQuiet = true;
+  mount(<PullReview model={base} modelError={null} stackId={quiet.key} layerKey={quiet.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+  await settle(20);
+  expect($('.ib-pr-empty')!.textContent).toBe("GitHub didn't answer; its pull requests aren't shown.");
+  const asked = pullReads;
+  await fire('focus');
+  expect(pullReads).toBe(asked + 1);
 });
 
 /** A phone's window for `run` (usePhone's media queries), the desktop's again after. */

@@ -495,7 +495,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const peers = new Map<string, PeerLink>();
   const machinePulls = createMachinePulls({ peers: () => peers.values() });
   // Branch reviews: each linked machine's reported branches, read when Reviews is, kept past a restart (inbox-machine-branches.ts).
-  const machineBranches = createMachineBranches({ peers: () => peers.values(), dir: inboxDir(context.dataDir) });
+  const machineBranches = createMachineBranches({ peers: () => peers.values(), dir: inboxDir(context.dataDir), linked: () => links.list().map((link) => link.id) });
   // Ship: each linked machine's merged ships, read when Reviews is (inbox-machine-ships.ts).
   const machineShips = createMachineShips({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */

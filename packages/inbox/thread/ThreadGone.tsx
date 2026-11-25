@@ -5,7 +5,7 @@
  */
 export function ThreadGone() {
   return (
-    <div className="ib-pwait-line" role="status" data-thread-gone="" style={{ margin: '10px auto' }}>
+    <div className="ib-pwait-line my-2.5 mx-auto" role="status" data-thread-gone="">
       <span>This thread is not in the Inbox. It may have been deleted.</span>
     </div>
   );

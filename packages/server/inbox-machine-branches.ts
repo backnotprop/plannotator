@@ -66,7 +66,8 @@ export function farBranchRow(value: unknown): Omit<InboxBranchReportRow, "machin
 }
 
 /** The linked machines' reported branches, as last read. */
-export function createMachineBranches(options: { peers: () => Iterable<PeerLink>; now?: () => number; dir?: string }) {
+/** `linked`: the ids of the machines linked now (the links on disk), so a saved read of one unlinked since is dropped. */
+export function createMachineBranches(options: { peers: () => Iterable<PeerLink>; now?: () => number; dir?: string; linked?: () => Iterable<string> }) {
   const now = options.now ?? Date.now;
   const file = options.dir ? join(options.dir, MACHINE_BRANCHES_FILE) : null;
   const lists = new Map<string, Omit<InboxBranchReportRow, "machine">[]>();
@@ -81,6 +82,10 @@ export function createMachineBranches(options: { peers: () => Iterable<PeerLink>
       // None yet, or unreadable: the next reads bring them.
     }
   }
+  // A machine unlinked while this Inbox was down (`forget` never ran for it): its rows go, on disk too.
+  const linked = options.linked ? new Set(options.linked()) : null;
+  let unlinked = false;
+  for (const id of linked ? [...lists.keys()] : []) if (!linked!.has(id)) unlinked = lists.delete(id) || unlinked;
   /** What the file holds now: a read that changed nothing writes nothing. */
   let written = "";
   const save = () => {
@@ -98,6 +103,7 @@ export function createMachineBranches(options: { peers: () => Iterable<PeerLink>
       // A read-only folder: the rows stay in memory.
     }
   };
+  if (unlinked) save();
   const reading = new Map<string, { done: Promise<void>; abort: AbortController }>();
   const readAt = new Map<string, number>();
 

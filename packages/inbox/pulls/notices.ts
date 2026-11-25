@@ -36,6 +36,13 @@ function clisFor(host: string): Cli[] {
 }
 
 /**
+ * A host (or hosts, `many`) that didn't answer: its last read shown, or its pull requests not. The list's line, and a
+ * PR's page with nothing of it to show (routePull.ts).
+ */
+export const unansweredLine = (names: string, shown: boolean, many = false): string =>
+  `${names} didn't answer; ${shown ? `showing ${many ? 'their' : 'its'} last read.` : `${many ? 'their' : 'its'} pull requests aren't shown.`}`;
+
+/**
  * Why the list may be missing pull requests, one notice per cause: a host that didn't answer or asked to slow down
  * (its last read shown when there is one, else its PRs are not), a host whose searches found more than one read takes
  * ("Showing 100 of 133" when the searches were limited to the projects' repositories, else that not every one was
@@ -55,7 +62,7 @@ export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'u
       const many = hosts.length > 1;
       const head = error === 'unavailable' ? `${names} didn't answer` : `${names} asked to slow down`;
       const tail = shown ? `showing ${many ? 'their' : 'its'} last read.` : `${many ? 'their' : 'its'} pull requests aren't shown.`;
-      out.push({ key: `${error}:${shown}`, head, line: `${head}; ${tail}${error === 'rate_limited' && !shown ? ' Try again in a minute.' : ''}` });
+      out.push({ key: `${error}:${shown}`, head, line: error === 'unavailable' ? unansweredLine(names, shown, many) : `${head}; ${tail}${!shown ? ' Try again in a minute.' : ''}` });
     }
   }
   // Others (every open PR of the projects' repositories) is a read of its own: it failed while the person's own lists

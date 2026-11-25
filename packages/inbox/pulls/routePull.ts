@@ -12,8 +12,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { inboxPullIsOpen, type InboxPull, type InboxPullDiffAnswer, type InboxPullItem, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import type { InboxShipView } from '@plannotator/core/inbox-pull-handoff';
-import { get } from '../api';
-import { pullUrl } from './pullMachines';
+import { get, InboxApiError } from '../api';
+import { forgetPullMachine, pullMachine, pullUrl } from './pullMachines';
+import { hostName } from './labels';
+import { unansweredLine } from './notices';
+import { pageState } from './pageState';
 
 /**
  * The server's copy of one PR, listed or not (`pull` null: none it may read). `unreadable`: the forge did not answer
@@ -46,19 +49,40 @@ export function itemOf(stack: InboxPullStack, key: string): InboxPullItem {
  * "gone", and it is asked again when the window gets its focus back or the browser is back online. `missing` once the
  * forge says it has no such PR: the copy the page has stays too, as its last read, and the page says so.
  */
-export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'> | null, wanted: boolean): { pull: InboxPull | null; asking: boolean; unread: boolean; missing: boolean } {
-  const raw = useMemo(() => (wanted && model ? (model.pulls.find((p) => p.key === key) ?? null) : null), [wanted, model, key]);
+export interface RoutePull {
+  pull: InboxPull | null;
+  /** The read is out (or the Inbox could not be reached at all): the page says it is reading, not that the PR is gone. */
+  asking: boolean;
+  unread: boolean;
+  missing: boolean;
+  /** `pull` is the forge's answer now (or the list's own copy), not a copy kept from before. */
+  fresh: boolean;
   /**
-   * `read`: the forge answered; `missing`: it answered that it has no such PR; `unread`: it did not answer (the server
-   * said so); `failed`: the Inbox could not be reached.
+   * With no copy to show: what the page says instead of "no longer in the list", in words the Inbox already says for
+   * the same cause. The forge did not answer: the list's own line for a host that did not ("GitHub didn't answer; its
+   * pull requests aren't shown.", notices.ts); the linked computer that lists it could not be reached: that
+   * computer's own answer ("Mac mini cannot be reached now."). Null: "no longer in the list" is the truth.
    */
-  const [got, setGot] = useState<{ key: string; pull: InboxPull | null; as: 'read' | 'missing' | 'unread' | 'failed' } | null>(null);
+  rest: string | null;
+}
+
+/**
+ * `read`: the forge answered; `missing`: it answered that it has no such PR; `unread`: it did not answer (the server
+ * said so); `away`: the linked computer that lists it could not be reached (its words in `away`); `none`: no Inbox
+ * can answer for it (a linked computer too old for this read); `failed`: this Inbox could not be reached.
+ */
+type Got = { key: string; pull: InboxPull | null; as: 'read' | 'missing' | 'unread' | 'away' | 'none' | 'failed'; away?: string };
+
+export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'> | null, wanted: boolean): RoutePull {
+  const raw = useMemo(() => (wanted && model ? (model.pulls.find((p) => p.key === key) ?? null) : null), [wanted, model, key]);
+  const [got, setGot] = useState<Got | null>(null);
   const [retry, setRetry] = useState(0);
   // Asked each time the list stops naming it (or the page opens so), and again on each list read while the copy it
-  // has is open or none: the server's copy can be a list's older read (a list that never named it here, or the other
-  // list), and only a new ask learns that it merged. Merged or closed is final: no more asks then.
+  // has is not merged: the server's copy can be a list's older read (a list that never named it here, or the other
+  // list), and only a new ask learns that it merged, closed or reopened. Merged is final: no more asks then (a closed
+  // PR can be reopened).
   const ask = wanted && !!model;
-  const final = got?.key === key && got.as === 'read' && !!got.pull && !inboxPullIsOpen(got.pull);
+  const final = got?.key === key && got.as === 'read' && got.pull?.state === 'merged';
   const seen = useRef({ model, ask });
   useEffect(() => {
     const was = seen.current;
@@ -72,7 +96,7 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
     // A read that found nothing new keeps the copy this page has: an unanswered read never says "gone", nor does the
     // forge saying it has no such PR now (the page says that instead). Only "none" (the PR is not the person's to
     // read here any more: hidden, its project removed) takes it away.
-    const keep = (pull: InboxPull | null, as: 'missing' | 'unread' | 'failed') => setGot((was) => ({ key, pull: pull ?? (was?.key === key ? was.pull : null), as }));
+    const keep = (pull: InboxPull | null, as: Exclude<Got['as'], 'read'>, away?: string) => setGot((was) => ({ key, pull: pull ?? (was?.key === key ? was.pull : null), as, ...(away ? { away } : {}) }));
     readRoutePull(key, controller.signal)
       .then((answer) => {
         if (controller.signal.aborted) return;
@@ -80,14 +104,23 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
         else if (answer.missing) keep(answer.pull, 'missing');
         else setGot({ key, pull: answer.pull, as: 'read' });
       })
-      .catch(() => {
-        if (!controller.signal.aborted) keep(null, 'failed');
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        const code = cause instanceof InboxApiError ? cause.code : null;
+        // The computer it was learned from is not linked any more: this computer answers for it instead.
+        if (code === 'machine_not_linked' && pullMachine(key)) {
+          forgetPullMachine(key);
+          setRetry((n) => n + 1);
+        } else if (code === 'machine_offline' && cause instanceof Error) keep(null, 'away', cause.message);
+        // A linked computer whose Inbox has no such read (an older one), or a refusal: nothing can say more of it.
+        else if (cause instanceof InboxApiError && cause.status >= 400 && cause.status < 500) keep(null, 'none');
+        else keep(null, 'failed');
       });
     return () => controller.abort();
   }, [ask, key, retry]);
   const mine = ask && got?.key === key ? got : null;
   const unread = mine?.as === 'unread';
-  const unanswered = unread || mine?.as === 'failed';
+  const unanswered = unread || mine?.as === 'away' || mine?.as === 'failed';
   useEffect(() => {
     if (!unanswered) return;
     const askAgain = () => setRetry((n) => n + 1);
@@ -99,10 +132,20 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
     };
   }, [unanswered]);
   const fetched = got?.key === key ? got.pull : null;
-  // The forge's read is newer than the raw list's for a PR no stack holds (its state, its head). An unanswered read
-  // with no copy at all reads as still reading, never as gone.
-  const answered = got?.key === key && (got.as === 'read' || got.as === 'missing');
-  return { pull: wanted ? (fetched ?? raw) : null, asking: wanted && !!model && (got?.key !== key || (!answered && !fetched && !raw)), unread, missing: mine?.as === 'missing' };
+  const pull = wanted ? (fetched ?? raw) : null;
+  // The forge's read is newer than the raw list's for a PR no stack holds (its state, its head). Every answer comes
+  // to rest: only a read still out, or an Inbox that could not be reached, reads as still reading.
+  const settled = got?.key === key && got.as !== 'failed';
+  const host = /^([^/#]+)\//.exec(key)?.[1] ?? '';
+  const rest = !pull && mine ? (mine.as === 'unread' ? unansweredLine(hostName(host), false) : mine.as === 'away' ? (mine.away ?? null) : null) : null;
+  return {
+    pull,
+    asking: wanted && !!model && (got?.key !== key || (!settled && !fetched && !raw)),
+    unread,
+    missing: mine?.as === 'missing',
+    fresh: !!pull && (!fetched || mine?.as === 'read'),
+    rest,
+  };
 }
 
 /** What the forge said of this PR at the diff's read: only merged or closed. */
@@ -135,16 +178,16 @@ export function withShipState(stack: InboxPullStack, ships: ReadonlyMap<string, 
 }
 
 /**
- * The stack to draw: the layer's state as the forge last said it when that is merged or closed, and no checks for a
- * PR the list no longer names (`listed` false).
+ * The stack to draw: the layer's state as the page's one rule has it (pageState.ts: the list, the diff's read, the
+ * page's own read of the PR), and no checks for a PR the list no longer names (`listed` false).
  */
-export function withForgeState(stack: InboxPullStack | null, key: string, listed: boolean, said: Pick<InboxPull, 'state' | 'merged_at'> | null, read: InboxPull | null): InboxPullStack | null {
+export function withForgeState(stack: InboxPullStack | null, key: string, listed: boolean, said: Pick<InboxPull, 'state' | 'merged_at'> | null, read: Pick<RoutePull, 'pull' | 'fresh'> | null): InboxPullStack | null {
   if (!stack) return null;
-  const forge = said ?? (read && !inboxPullIsOpen(read) ? { state: read.state, merged_at: read.merged_at } : null);
   const at = stack.layers.findIndex((l) => l.key === key);
   if (at < 0) return stack;
   const layer = stack.layers[at]!;
-  const moved = forge && forge.state !== layer.state;
+  const forge = pageState({ layer, listed, said, read: read?.pull ? { pull: read.pull, fresh: read.fresh } : null });
+  const moved = forge.state !== layer.state;
   const stale = !listed && layer.checks !== null;
   if (!moved && !stale) return stack;
   const now: InboxPull = { ...layer, ...(moved ? { state: forge.state, merged_at: forge.merged_at ?? layer.merged_at } : {}), ...(stale ? { checks: null } : {}) };

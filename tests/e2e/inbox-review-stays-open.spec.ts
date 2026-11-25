@@ -17,15 +17,19 @@
  * (`GET /api/inbox/pulls/pull`, read from the forge by number) and says merged; a reload with only a kept draft
  * comment reopens it with the draft and the reader still taking comments. Then GitHub stops answering: a reload, and
  * a restart of the Inbox while still offline, reopen the page with one line saying GitHub didn't answer; back online,
- * the next focus asks again (the restarted Inbox reads its list first) and the line goes. GitHub then answers 404 for
- * it (repository deleted, access lost): a reload keeps the page as last read, with one line saying so. A PR on a linked
- * computer (its routes answered as that computer's Inbox would): merged there and gone from the board, its page stays,
- * asks that computer and says merged, also after a reload.
+ * the next focus asks again (the restarted Inbox reads its list first) and the line goes. The line is its own, above
+ * the diff, whole at 1440 and on a phone (in the header bar it was cut), and the diff stays as last read, after the
+ * restart too. GitHub then answers 404 for it (repository deleted, access lost), every read of it, its patch too: a
+ * reload keeps the page and its diff as last read, with one line saying so. A teammate's PR closed on GitHub says
+ * Closed with no Post, through a reload, and once reopened says open with Post back. A PR on a linked computer (its
+ * routes answered as that computer's Inbox would): merged there and gone from the board, its page stays, asks that
+ * computer and says merged, also after a reload.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/review-stays-open (CI keeps .local/proof/ as "inbox-window-proof-N"):
  * before-merge and merged at 1440 light and dark, merged on a phone at 390, and the page after the reload, light and
- * dark; then teammate-merged, draft-only-reloaded, forge-unreachable, forge-unreachable-restarted, forge-missing,
- * linked-merged and linked-reloaded, 1440 light, and linked-reloaded at 390.
+ * dark; then teammate-merged, draft-only-reloaded, forge-unreachable (1440 and 390), forge-unreachable-restarted,
+ * forge-missing (1440 and 390), reopen-closed, reopened, linked-merged and linked-reloaded, 1440 light, and
+ * linked-reloaded at 390.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-review-stays-open.spec.ts`.
@@ -59,6 +63,8 @@ const MINE: Who = { number: 412, title: 'Retry failed charges on a new schedule'
 const THEIRS: Who = { number: 880, title: 'Show invoice totals in the customer’s currency', author: 'tomas', head: 'tomas/invoice-currency' };
 /** Merged on the forge while GitHub's search still lists it open (the search lags a merge). */
 const LAGGING: Who = { number: 881, title: 'Round refunds to the cent', author: 'jun', head: 'jun/refund-rounding' };
+/** Closed on the forge, then reopened. */
+const REOPENED: Who = { number: 882, title: 'Send the dunning email in the customer’s language', author: 'ines', head: 'ines/dunning-locale' };
 const keyOf = (who: Who) => `github.com/${REPO}#${who.number}`;
 
 const pr = (state: 'OPEN' | 'MERGED', who: Who = MINE) => ({
@@ -97,7 +103,7 @@ function writeLists(): void {
  * One PR as the forge's REST API has it now: what a read of the PR itself takes (readForgePull's jq) and what the
  * diff's head read takes (its sha, body and state). The fake prints it whatever jq it is asked.
  */
-function forgeHas(who: Who, state: 'open' | 'merged'): void {
+function forgeHas(who: Who, state: 'open' | 'merged' | 'closed'): void {
   const at = new Date().toISOString();
   const rest = {
     sha: HEAD,
@@ -318,6 +324,15 @@ const fileShell = () => review().locator(`[data-guide-file-shell="${FILE}"]`);
 const gone = () => page.getByText('This pull request is no longer in the list.');
 const unread = () => review().locator('[data-pull-review-unread]');
 
+/** The page's one line reads whole: the sentence there, on screen, not cut (no ellipsis: nothing wider than its box). */
+async function expectWhole(line: ReturnType<typeof unread>, words: string): Promise<void> {
+  await expect(line).toBeVisible();
+  await expect(line).toHaveText(words);
+  const box = await line.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, inBar: !!el.closest('.ib-vhead') }));
+  expect(box.inBar).toBe(false);
+  expect(box.scroll).toBeLessThanOrEqual(box.client);
+}
+
 async function openPull(who: Who): Promise<void> {
   const key = encodeURIComponent(keyOf(who));
   await page.goto(`${url}#pulls&stack=${key}&layer=${key}&scope=layer`);
@@ -420,15 +435,23 @@ test('GitHub not answering: the page stays as last read with one line, through a
   await expect(gone()).toHaveCount(0);
   await expect(fileShell()).toBeVisible();
   await shot('forge-unreachable', 1440, 900, 'light');
+  // The line is its own, above the diff: the whole sentence reads, on a phone too (in the header bar it was cut).
+  await expectWhole(unread(), "GitHub didn't answer; showing its last read.");
+  await shot('forge-unreachable', 390, 844, 'light');
+  await expectWhole(unread(), "GitHub didn't answer; showing its last read.");
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   // The Inbox restarts while still offline (its first sign-in check fails, with no good one on record): the PRs it
-  // kept since they left the list are still there, so the page reopens on #880 with the same line.
+  // kept since they left the list are still there, so the page reopens on #880 with the same line, and its diff as
+  // last read here (kept on disk past the restart), not "could not read this diff".
   await stopScratchInbox(dataDir);
   url = startInbox();
   await openPull(THEIRS);
   await expect(review().locator('[data-pull-review-title]')).toBeVisible({ timeout: 30_000 });
   await expect(unread()).toHaveCount(1, { timeout: 30_000 });
   await expect(gone()).toHaveCount(0);
+  await expect(fileShell()).toBeVisible({ timeout: 30_000 });
+  await expect(review().locator('[data-pull-diff-error]')).toHaveCount(0);
   await shot('forge-unreachable-restarted', 1440, 900, 'light');
 
   // Back online: the next focus asks again (the restarted Inbox had read no list yet: it reads one first, so the PR it
@@ -452,7 +475,59 @@ test('GitHub no longer has the PR (its repository deleted, access lost): the pag
   await expect(unread()).toHaveCount(0);
   await expect(gone()).toHaveCount(0);
   await expect(markOf()).toHaveAttribute('data-ref-state', 'merged');
+  // Its diff as last read here, as the line says: GitHub's 404 for every read of it (its patch too) loses nothing.
+  await expect(fileShell()).toBeVisible({ timeout: 30_000 });
+  await expect(review().locator('[data-pull-diff-error]')).toHaveCount(0);
+  await expectWhole(missing, "GitHub can't find this pull request any more; showing its last read.");
   await shot('forge-missing', 1440, 900, 'light');
+  await shot('forge-missing', 390, 844, 'light');
+  await expectWhole(missing, "GitHub can't find this pull request any more; showing its last read.");
+  await page.setViewportSize({ width: 1440, height: 900 });
+});
+
+test('a PR closed on GitHub, then reopened: its page says Closed with no Post, then open with Post back, through a reload', async () => {
+  // A teammate's PR the person was asked to review, open: its page with Post.
+  requested = [LAGGING, REOPENED];
+  writeLists();
+  forgeHas(REOPENED, 'open');
+  await expect.poll(async () => (await serverLists()).get(keyOf(REOPENED)), { timeout: 60_000, intervals: [5_000] }).toBe('open');
+  await openPull(REOPENED);
+  await expect(fileShell()).toBeVisible({ timeout: 30_000 });
+  await expect(markOf()).toHaveAttribute('data-ref-state', 'open');
+  const post = review().locator('[data-review-posts]');
+  await expect(post).toHaveCount(1);
+
+  // Closed on GitHub: the search no longer lists it. The page stays, asks GitHub for it, and says Closed; Post goes.
+  requested = [LAGGING];
+  writeLists();
+  forgeHas(REOPENED, 'closed');
+  await page.waitForTimeout(FOCUS_READ_MS);
+  await expect.poll(async () => (await serverLists()).has(keyOf(REOPENED)), { timeout: 60_000, intervals: [5_000] }).toBe(false);
+  await focusUntil(() => markOf().getAttribute('data-ref-state'), 'closed');
+  await expect(review().locator('[data-pull-review-title] [data-pull-review-state]')).toContainText('Closed');
+  await expect(post).toHaveCount(0);
+  // A reload while closed: its diff read now says closed too (the server's read of it).
+  await page.reload();
+  await expect(fileShell()).toBeVisible({ timeout: 30_000 });
+  await expect(markOf()).toHaveAttribute('data-ref-state', 'closed');
+  await shot('reopen-closed', 1440, 900, 'light');
+
+  // Reopened: the search lists it again. Closed is not final: the page says open and Post is back, whatever the
+  // diff read before (still in the server's 5-minute cache) said.
+  requested = [LAGGING, REOPENED];
+  writeLists();
+  forgeHas(REOPENED, 'open');
+  await page.waitForTimeout(FOCUS_READ_MS);
+  await expect.poll(async () => (await serverLists()).get(keyOf(REOPENED)), { timeout: 60_000, intervals: [5_000] }).toBe('open');
+  await focusUntil(() => markOf().getAttribute('data-ref-state'), 'open');
+  await expect(review().locator('[data-pull-review-title] [data-pull-review-state]')).toHaveCount(0);
+  await expect(post).toHaveCount(1);
+  await shot('reopened', 1440, 900, 'light');
+  // And after a reload.
+  await page.reload();
+  await expect(fileShell()).toBeVisible({ timeout: 30_000 });
+  await expect(markOf()).toHaveAttribute('data-ref-state', 'open');
+  await expect(post).toHaveCount(1);
 });
 
 /** A linked computer ("Mac mini") whose gh lists a PR this one does not: the window reads it there, through `/api/inbox/m/<id>/`. */

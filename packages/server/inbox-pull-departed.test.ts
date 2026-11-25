@@ -22,9 +22,11 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInboxPulls, INBOX_PULLS_FRESH_MS, InboxPullsError } from "./inbox-pulls";
+import { createInboxPulls, INBOX_PULLS_FRESH_MS, INBOX_PULLS_REFRESH_MS, InboxPullsError } from "./inbox-pulls";
 import { INBOX_PULLS_DEPARTED_MAX, INBOX_PULLS_DEPARTED_MS } from "./inbox-pull-departed";
-import { pullMissingAnswer } from "./inbox-pull-missing";
+import { saysNotFound } from "./inbox-pull-forge";
+import { pullMissingAnswer, pullToAct } from "./inbox-pull-missing";
+import { REF_RATE_LIMIT_MS } from "./ref-cards";
 import { INBOX_PULLS_SIGNED_KEEP_MS } from "./inbox-pull-signed-keep";
 import type { RefRunner } from "./ref-cards";
 
@@ -73,6 +75,10 @@ function forge() {
     down: false,
     /** PRs the forge says it has no such of (`HTTP 404`). */
     missing: new Set<number>(),
+    /** PRs closed without a merge (a close can be undone: reopened). */
+    closed: new Set<number>(),
+    /** The forge asks to slow down (its rate limit): every API read is refused so. */
+    limited: false,
     calls: [] as string[][],
     run: (async (cli, args) => {
       f.calls.push([cli, ...args]);
@@ -81,8 +87,11 @@ function forge() {
         f.authChecks += 1;
         return f.down ? { stdout: "", stderr: "error connecting to api.github.com", exitCode: 1 } : f.auth;
       }
-      if (f.down) return { stdout: "", stderr: "error connecting to api.github.com\ncheck your internet connection", exitCode: 1 };
-      if (args.includes("--jq") && f.missing.has(Number(args[3]!.split("/").at(-1)))) return { stdout: "", stderr: "gh: Not Found (HTTP 404)", exitCode: 1 };
+      // A network error names the URL it was reading: a PR numbered 404 is in it.
+      if (f.down) return { stdout: "", stderr: `Get "https://api.github.com/${args[3] ?? ""}": dial tcp: lookup api.github.com: no such host\nerror connecting to api.github.com\ncheck your internet connection`, exitCode: 1 };
+      if (f.limited && args[0] === "api") return { stdout: JSON.stringify({ message: "API rate limit exceeded for user ID 1." }), stderr: "gh: API rate limit exceeded for user ID 1. (HTTP 403)", exitCode: 1 };
+      // Every read of a PR the forge has no such of: the read by number, the diff's head read and its patch.
+      if (args[0] === "api" && args[1] === "--hostname" && f.missing.has(Number(args[3]!.split("/").at(-1)))) return { stdout: JSON.stringify({ message: "Not Found" }), stderr: "gh: Not Found (HTTP 404)", exitCode: 1 };
       if (args.includes("graphql")) {
         if (args.some((a) => a.startsWith("query=query InboxPullsOthers"))) return { stdout: JSON.stringify({ data: { viewer: { login: "dana" }, others0: { issueCount: 0, nodes: [] } } }), stderr: "", exitCode: 0 };
         return { stdout: JSON.stringify({ data: { viewer: { login: "dana" }, requested: { nodes: f.listed.map(ghPull) }, authored: { nodes: [] }, merged: { nodes: [] } } }), stderr: "", exitCode: 0 };
@@ -92,7 +101,7 @@ function forge() {
         const sha = number.padStart(40, "a");
         // The PR as the forge has it now: one answer for the diff's head read and for a read of the PR itself.
         const merged = f.merged.has(Number(number));
-        const state = { state: merged ? "closed" : "open", merged, merged_at: merged ? "2026-11-03T12:00:00Z" : null, draft: false };
+        const state = { state: merged || f.closed.has(Number(number)) ? "closed" : "open", merged, merged_at: merged ? "2026-11-03T12:00:00Z" : null, draft: false };
         const whole = { number: Number(number), html_url: `https://github.com/${REPO}/pull/${number}`, title: `PR ${number}`, user: { login: "tomas" }, base: { ref: "main" }, head: { ref: `branch-${number}`, sha, repo: { full_name: REPO } }, additions: 1, deletions: 1, changed_files: 1, updated_at: "2026-11-03T12:00:00Z", requested_reviewers: [] };
         return { stdout: `${JSON.stringify({ sha, body: null, ...state, ...whole })}\n`, stderr: "", exitCode: 0 };
       }
@@ -278,9 +287,14 @@ test("pull() tells a forge that did not answer from a PR that is not yours or no
   const asked = f.calls.length;
   expect(await pulls.pull("github.com/elsewhere/other#5")).toEqual({ pull: null });
   expect(f.calls.length).toBe(asked);
-  // A failed read is not held: the next ask goes to the forge again, and reads it once it answers.
+  // A failed read is held as any answer is, for 20 s (each window's ask would reach the forge again); then the next
+  // ask goes to the forge again, and reads it once it answers.
   f.down = false;
   f.merged.add(777);
+  const quiet = f.calls.length;
+  expect(await pulls.pull(keyOf(777))).toEqual({ pull: null, unreadable: true });
+  expect(f.calls.length).toBe(quiet);
+  now += INBOX_PULLS_REFRESH_MS;
   expect(await pulls.pull(keyOf(777))).toMatchObject({ pull: { number: 777, state: "merged" } });
   expect((await pulls.pull(keyOf(777))).unreadable).toBeUndefined();
   // The forge answering that it has no such PR is not "unreadable": it is `missing`.
@@ -370,8 +384,9 @@ test("restarted, the page asks before any list read: the PR kept from before ans
     f.down = true;
     const offline = createInboxPulls({ run: f.run, now: () => now, dir });
     expect(await offline.pull(keyOf(880), repos)).toMatchObject({ pull: { number: 880, state: "merged" }, unreadable: true });
-    // Back online: the next ask reads it from the forge.
+    // Back online: the next ask past the 20 s hold of the last answer reads it from the forge.
     f.down = false;
+    now += INBOX_PULLS_REFRESH_MS;
     expect(await offline.pull(keyOf(880), repos)).toEqual({ pull: expect.objectContaining({ number: 880, state: "merged" }) });
     // Restarted online, asked first: the same.
     const online = createInboxPulls({ run: f.run, now: () => now, dir });
@@ -398,7 +413,48 @@ test("the forge saying it has no such PR any more: missing, with the copy kept a
   expect(f.calls.length).toBe(asked);
 });
 
-test("an action on a PR that left the list answers 409 pull_closed; one never listed, 404 pull_unknown", async () => {
+test("an action on a PR that left the list while still open acts on it; merged since, 409 pull_closed; never listed, 404 pull_unknown", async () => {
+  let now = 1_000_000;
+  const f = forge();
+  const pulls = createInboxPulls({ run: f.run, now: () => now });
+  await pulls.list(repos);
+  // A read comes back without #881, still open on the forge (a search blip): Post, Merge and Close still take it.
+  f.listed = [880];
+  now += INBOX_PULLS_FRESH_MS;
+  await pulls.list(repos, { refresh: true });
+  expect(pullToAct(pulls, keyOf(881))).toMatchObject({ number: 881, state: "open" });
+  // Its author merges it; the page's read of it says so: no longer open.
+  f.merged.add(881);
+  expect((await pulls.pull(keyOf(881), repos)).pull?.state).toBe("merged");
+  expect(pullToAct(pulls, keyOf(881))).toBeNull();
+  const [closed, closedStatus] = pullMissingAnswer(pulls, keyOf(881));
+  expect([closed.code, closedStatus]).toEqual(["pull_closed", 409]);
+  expect(pullToAct(pulls, keyOf(999))).toBeNull();
+  const [unknown, unknownStatus] = pullMissingAnswer(pulls, keyOf(999));
+  expect([unknown.code, unknownStatus]).toEqual(["pull_unknown", 404]);
+  // A listed PR is the list's.
+  expect(pullToAct(pulls, keyOf(880))).toMatchObject({ number: 880 });
+});
+
+test("a 404 is read in the CLI's own shape only: a PR numbered 404 or a repository named for one is not missing", async () => {
+  expect(saysNotFound("gh: Not Found (HTTP 404)")).toBe(true);
+  expect(saysNotFound("glab: 404 Not Found (HTTP 404)")).toBe(true);
+  expect(saysNotFound('{"message":"404 Project Not Found"}')).toBe(true);
+  expect(saysNotFound('Get "https://api.github.com/repos/northwind/error-404-page/pulls/404": dial tcp: lookup api.github.com: no such host')).toBe(false);
+  // PR #404, offline: the forge did not answer, never "can't find".
+  let now = 1_000_000;
+  const f = forge();
+  f.listed = [880, 404];
+  const pulls = createInboxPulls({ run: f.run, now: () => now });
+  await pulls.list(repos);
+  f.listed = [880];
+  now += INBOX_PULLS_FRESH_MS;
+  await pulls.list(repos, { refresh: true });
+  f.down = true;
+  expect(await pulls.pull(keyOf(404), repos)).toMatchObject({ pull: { number: 404 }, unreadable: true });
+});
+
+test("a rate limit holds the host: the page's next asks never reach the forge until the hold ends", async () => {
   let now = 1_000_000;
   const f = forge();
   const pulls = createInboxPulls({ run: f.run, now: () => now });
@@ -406,10 +462,74 @@ test("an action on a PR that left the list answers 409 pull_closed; one never li
   f.listed = [880];
   now += INBOX_PULLS_FRESH_MS;
   await pulls.list(repos, { refresh: true });
-  const [closed, closedStatus] = pullMissingAnswer(pulls, keyOf(881));
-  expect([closed.code, closedStatus]).toEqual(["pull_closed", 409]);
-  const [unknown, unknownStatus] = pullMissingAnswer(pulls, keyOf(999));
-  expect([unknown.code, unknownStatus]).toEqual(["pull_unknown", 404]);
+  f.limited = true;
+  expect(await pulls.pull(keyOf(881), repos)).toMatchObject({ pull: { number: 881 }, unreadable: true });
+  const asked = f.calls.length;
+  // Each focus and each list read of every window asks again: held 20 s as any answer, then by the host's hold.
+  for (const wait of [1_000, INBOX_PULLS_REFRESH_MS, REF_RATE_LIMIT_MS - INBOX_PULLS_REFRESH_MS - 2_000]) {
+    now += wait;
+    expect((await pulls.pull(keyOf(881), repos)).unreadable).toBe(true);
+  }
+  expect(f.calls.length).toBe(asked);
+  // The hold over, the forge answering again: read.
+  f.limited = false;
+  now += 2_000;
+  expect(await pulls.pull(keyOf(881), repos)).toEqual({ pull: expect.objectContaining({ number: 881, state: "open" }) });
+});
+
+test("a PR no list names keeps its last patch: the forge offline or answering 404, and after a restart, its page shows its last read", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-pull-departed-"));
+  try {
+    let now = 1_000_000;
+    const f = forge();
+    const first = createInboxPulls({ run: f.run, now: () => now, dir });
+    await first.list(repos);
+    expect(await diffOf(first, keyOf(881))).toBe("read");
+    const patch = (await first.diff(keyOf(881), "layer")).patch;
+    // A teammate merges it: no list names it any more.
+    f.listed = [880];
+    f.merged.add(881);
+    now += INBOX_PULLS_FRESH_MS;
+    await first.list(repos, { refresh: true });
+    // Past the read cache, the forge offline: the last patch, not "could not read".
+    now += 6 * 60_000;
+    f.down = true;
+    expect((await first.diff(keyOf(881), "layer")).patch).toBe(patch);
+    // The forge back, but it no longer has the PR (its repository deleted): still the last patch.
+    f.down = false;
+    f.missing.add(881);
+    expect((await first.diff(keyOf(881), "layer")).patch).toBe(patch);
+    // This Inbox restarts while the forge says 404; the page's diff read comes before any list read.
+    const again = createInboxPulls({ run: f.run, now: () => now, dir });
+    expect((await again.diff(keyOf(881), "layer", undefined, undefined, repos)).patch).toBe(patch);
+    // A PR the list still names is read as ever: a failed read says so, never an old patch as current.
+    f.down = true;
+    now += 6 * 60_000;
+    expect(await diffOf(again, keyOf(880))).not.toBe("read");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a PR closed when its patch was read and reopened since: the read cache says open, as the page's read of it does", async () => {
+  let now = 1_000_000;
+  const f = forge();
+  const pulls = createInboxPulls({ run: f.run, now: () => now });
+  await pulls.list(repos);
+  // Closed elsewhere: it leaves the list; its page reads it, closed.
+  f.closed.add(881);
+  f.listed = [880];
+  now += INBOX_PULLS_FRESH_MS;
+  await pulls.list(repos, { refresh: true });
+  expect((await pulls.diff(keyOf(881), "layer")).state).toBe("closed");
+  expect((await pulls.pull(keyOf(881), repos)).pull?.state).toBe("closed");
+  // Reopened: the page asks again (its next list read); the diff, still in the read cache, says open too.
+  f.closed.delete(881);
+  now += INBOX_PULLS_REFRESH_MS;
+  expect((await pulls.pull(keyOf(881), repos)).pull?.state).toBe("open");
+  const calls = f.calls.length;
+  expect((await pulls.diff(keyOf(881), "layer")).state).toBe("open");
+  expect(f.calls.length).toBe(calls);
 });
 
 test("a diff read says the PR's state as the forge has it now", async () => {

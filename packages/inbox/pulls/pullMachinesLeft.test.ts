@@ -6,7 +6,7 @@
  */
 import { afterEach, expect, test } from 'bun:test';
 import type { InboxPull, InboxPullsAnswer } from '@plannotator/core/inbox-types';
-import { learnPullMachines, pullMachine, pullUrl, resetPullMachines } from './pullMachines';
+import { forgetPullMachine, forgetPullMachines, learnPullMachines, pullMachine, pullUrl, resetPullMachines } from './pullMachines';
 
 const MACHINE = 'ibx_01JZ0000000000000000000000';
 const KEY = 'github.com/northwind/billing-svc#880';
@@ -27,4 +27,19 @@ test('a linked machine’s PR that left the board is still read on that machine;
   expect(pullMachine(KEY)).toBeNull();
   learnPullMachines(board([]));
   expect(pullMachine(KEY)).toBeNull();
+});
+
+test('a machine unlinked here, or one that answers it is not linked any more: its PRs are read on this machine again', () => {
+  const OTHER = 'github.com/northwind/billing-svc#881';
+  const SECOND = 'ibx_01JZ0000000000000000000001';
+  learnPullMachines(board([{ key: KEY, host: 'github.com', machine: MACHINE }, { key: OTHER, host: 'github.com', machine: SECOND }]));
+  learnPullMachines(board([]));
+  // The person unlinks it in Settings: every PR remembered as its goes; the other machine's stays.
+  forgetPullMachines(MACHINE);
+  expect(pullMachine(KEY)).toBeNull();
+  expect(pullUrl('/pulls/pull', KEY)).toBe(`/api/inbox/pulls/pull?key=${encodeURIComponent(KEY)}`);
+  expect(pullMachine(OTHER)).toBe(SECOND);
+  // Unlinked on the other computer: its read answered `machine_not_linked`, and that one PR goes.
+  forgetPullMachine(OTHER);
+  expect(pullMachine(OTHER)).toBeNull();
 });

@@ -359,7 +359,7 @@ import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, linkUnlistedPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
-import { pullMissingAnswer } from "./inbox-pull-missing";
+import { pullMissingAnswer, pullToAct } from "./inbox-pull-missing";
 import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
@@ -6755,7 +6755,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           try {
-            return json({ serverSession, ...(await pulls.diff(key, scoped.scope, scoped.from)) });
+            // A PR no list names (merged or closed elsewhere, a restart since): the projects' repositories, so a restart
+            // reads its list once first and the PR kept from before is still found (as `pull` does).
+            return json({ serverSession, ...(await pulls.diff(key, scoped.scope, scoped.from, undefined, pulls.find(key) ? undefined : (await pullProjects()).wanted)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_diff_fork" ? 409 : 502);
             throw cause;
@@ -7088,7 +7090,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         await findPulls(keys as string[], wanted);
         let theirs = true;
         for (const key of keys as string[]) {
-          const pull = pulls.find(key);
+          // A kept copy that is still open is acted on as the list's (inbox-pull-missing.ts).
+          const pull = pullToAct(pulls, key);
           if (pull && pull.mine) theirs = false;
           if (!pull) return json(...pullMissingAnswer(pulls, key));
           if (!(projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? []).includes(projectId)) {
@@ -7099,7 +7102,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Already given to a thread (another window's Start a thread, a hand-off): which, so that window opens it, not a second.
         // Its own thread as the list links it: a hand-off's, or a thread started from the PR's page and not tied yet.
         if (validateOnly) {
-          const links = linkInboxPulls((keys as string[]).map((key) => pulls.find(key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
+          const links = linkInboxPulls((keys as string[]).map((key) => pullToAct(pulls, key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
           return json({ serverSession, ok: true, owner: Object.values(links).find((link) => link.via === "owner")?.thread_id ?? null });
         }
         if (body.ask !== undefined && !isInboxPullAsk(body.ask)) throw new InboxError("validation_error", `ask: ${INBOX_PULL_ASKS.join(", ")}.`, { field: "ask" });
@@ -7133,8 +7136,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (fileLevelSent !== fileLevelComments.length || fileLevelSent > PULL_REVIEW_COMMENTS_MAX) throw new InboxError("validation_error", `fileLevelComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, body }.`, { field: "fileLevelComments" });
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
         // A PR a thread owns but no list has (reached by its link): its own read says what the list would. Any other stays unknown.
-        const unlisted = !pulls.find(key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
-        const pull = pulls.find(key) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
+        const unlisted = !pullToAct(pulls, key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
+        const pull = pullToAct(pulls, key) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
         if (!pull && unlisted) return json({ error: "Couldn't check that link. Try again.", code: "pull_unknown" }, 404);
         if (!pull) return json(...pullMissingAnswer(pulls, key));
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
@@ -7206,7 +7209,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.confirmed !== true) return json({ error: "Confirm the merge first.", code: "merge_unconfirmed" }, 409);
         // After a restart the list may not have been read yet: read it once, as the review route does.
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-        const pull = pulls.find(key);
+        const pull = pullToAct(pulls, key);
         if (!pull) return json(...pullMissingAnswer(pulls, key));
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         const result = await mergePull(options.refRunner ?? refCliRunner, pull, seen);
@@ -7245,7 +7248,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             return [{ error: `Only a pull request closed here in the last ${PULL_REOPEN_WINDOW_MS / 60_000} minutes can be reopened here.`, code: "reopen_not_closed_here" }, 409];
           }
           if (!reopen && !pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-          const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
+          const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pullToAct(pulls, key);
           if (!pull) return pullMissingAnswer(pulls, key);
           if (!reopen && !inboxPullIsOpen(pull)) return [{ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409];
           const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);

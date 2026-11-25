@@ -8,8 +8,10 @@
  * but the machine that closed; a forge write held for an asleep
  * machine; an asleep machine's rows dropped; a thread's PRs on the other machine not read or changed there; a review
  * thread's PRs (`pulls/owner`) kept anywhere but the thread's machine, or by a call without the window's mark; a look at
- * the other machine's PR ("Changed since you looked") not kept there or not read back; the board of an Inbox with no
- * machine linked changing at all.
+ * the other machine's PR ("Changed since you looked") not kept there or not read back; a page open on the other
+ * machine's PR after it left that board (merged there) not read from that machine's forge (`pulls/pull`), an asleep
+ * machine's PR answered as anything but `machine_offline`, or a phone reaching `pulls/pull` on the door; the board of
+ * an Inbox with no machine linked changing at all.
  *
  * Starts Inboxes: CI runs it.
  */
@@ -21,6 +23,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type { RefRunner } from "@plannotator/shared/ref-cards";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { INBOX_PULLS_REFRESH_MS } from "./inbox-pulls";
 import { waitFor } from "../../tests/helpers/inbox-world";
 
 type Json = Record<string, any>;
@@ -53,11 +56,14 @@ const node = (repo: string, number: number, author = "dana") => ({
 
 /**
  * A scripted gh: the person's own PRs (`authored`), each PR's state for the close route's read, and its writes kept.
- * `hang`: its list waits for it (a machine that is online but does not answer).
+ * `hang`: its list waits for it (a machine that is online but does not answer). `states`: set one "merged" for a PR
+ * merged on the forge by someone else (the list stops naming it; a read by number says so); `reads`: each PR read by
+ * number (`api … repos/o/r/pulls/N`), as `repo#N`.
  */
 function fakeGh(prs: [string, number][], hang?: Promise<void>) {
   const states = new Map(prs.map(([repo, n]) => [`${repo}#${n}`, "open"]));
   const writes: string[] = [];
+  const reads: string[] = [];
   const run: RefRunner = async (cli, args) => {
     if (cli !== "gh") return { stdout: "", stderr: "not found", exitCode: 127 };
     if (args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
@@ -91,13 +97,14 @@ function fakeGh(prs: [string, number][], hang?: Promise<void>) {
         states.set(key, to);
         return { stdout: "{}", stderr: "", exitCode: 0 };
       }
+      reads.push(key);
       const state = states.get(key) ?? "open";
       const head = { sha: n!.padStart(40, "a") };
       return { stdout: JSON.stringify({ state: state === "merged" ? "closed" : state, merged: state === "merged", merged_at: state === "merged" ? "2026-11-14T10:05:00Z" : null, draft: false, head, mergeable: true, mergeable_state: "clean" }), stderr: "", exitCode: 0 };
     }
     return { stdout: "", stderr: "HTTP 404", exitCode: 1 };
   };
-  return { run, writes };
+  return { run, writes, reads, states };
 }
 
 /** No real tailscale ever runs: the loopback transport is the test sandbox's, and serve holds nothing. */
@@ -119,7 +126,7 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
     dirs.push(dir);
     return dir;
   };
-  const start = (dataDir: string, run: RefRunner) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale, codeReview: true, refRunner: run, readProjectRepo: async () => null });
+  const start = (dataDir: string, run: RefRunner, phones = false) => startInboxServer({ dataDir, binaryPath: null, phones, tailscale, codeReview: true, refRunner: run, readProjectRepo: async () => null });
   const at = (port: number) => `http://127.0.0.1:${port}`;
   const board = async (port: number) => (await (await fetch(`${at(port)}/api/inbox/pulls?everywhere=1&machines=1`)).json()) as Json;
   const rows = async (port: number) => ((await board(port)).pulls as Json[]).map((p) => [p.key, p.machine ?? null, p.state]).sort((x, y) => String(x[0]).localeCompare(String(y[0])));
@@ -284,6 +291,126 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
       b.stop();
     }
   }, 150_000);
+
+  // One PR for a page open on it after it left its machine's board (`pulls/pull`, the door's machine-only read).
+  const BILL12 = "github.com/northwind/billing-svc#12";
+  const BILL21 = "github.com/northwind/billing-svc#21";
+  /** This Inbox's own Pull requests page (no linked machine's rows); `refresh`: the window's refresh. */
+  const own = async (port: number, refresh = false) => ((await (await fetch(`${at(port)}/api/inbox/pulls?everywhere=1${refresh ? "&refresh=1" : ""}`)).json()) as Json).pulls as Json[];
+  /** A window's read of `machine`'s PR, through its forward. */
+  const farPull = (port: number, machine: string, key: string) => fetch(`${at(port)}/api/inbox/m/${machine}/pulls/pull?key=${encodeURIComponent(key)}`);
+  const machineOn = async (port: number, id: string) => (((await (await fetch(`${at(port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === id);
+  /** A linked to B both ways, each online with mark `pulls` on the other. `tokenAtB`: A's machine token at B's door. */
+  const linkBoth = async (a: InboxServer, b: InboxServer, dataA: string) => {
+    const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+    const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+    expect(linked.status).toBe(201);
+    const linkOnA = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0];
+    const bId = linkOnA.id as string;
+    const aId = ((await (await fetch(`${at(a.port)}/api/inbox/threads?machines=1`)).json()) as Json).self as string;
+    const up = (view: Json | undefined) => view?.state === "online" && (view.marks as string[]).includes("pulls");
+    await waitFor("each online with `pulls` on the other", async () => up(await machineOn(a.port, bId)) && up(await machineOn(b.port, aId)), 30_000);
+    return { aId, bId, tokenAtB: linkOnA.token as string };
+  };
+
+  test("a PR merged on its own machine's forge after it left that board: the other's window reads it merged there, both ways; that machine asleep, 503 machine_offline", async () => {
+    const ghA = fakeGh([["northwind/billing-svc", 12]]);
+    const ghB = fakeGh([["northwind/billing-svc", 21]]);
+    const dataA = scratch("plannotator-pulls-pull-a-");
+    const dataB = scratch("plannotator-pulls-pull-b-");
+    const a = await start(dataA, ghA.run);
+    let b: InboxServer = await start(dataB, ghB.run);
+    let aUp = true;
+    try {
+      const { aId, bId } = await linkBoth(a, b, dataA);
+      // Each PR on its own machine's board, and on the other's as that machine's.
+      expect((await own(a.port)).map((p) => p.key)).toEqual([BILL12]);
+      expect((await own(b.port)).map((p) => p.key)).toEqual([BILL21]);
+      await waitFor("B's PR on A's board", async () => (await rows(a.port)).some((r) => r[0] === BILL21 && r[1] === bId), 20_000);
+      await waitFor("A's PR on B's board", async () => (await rows(b.port)).some((r) => r[0] === BILL12 && r[1] === aId), 20_000);
+
+      // While its machine lists it: that list's copy, open; no forge read by number on either machine.
+      const listed = await farPull(a.port, bId, BILL21);
+      expect(listed.status).toBe(200);
+      expect(((await listed.json()) as Json).pull).toMatchObject({ key: BILL21, state: "open" });
+      expect([ghA.reads, ghB.reads]).toEqual([[], []]);
+
+      // Someone merges both on the forge: the next read of each list (the window's refresh, once the last read is
+      // older than the refresh's floor) no longer names them.
+      ghA.states.set("northwind/billing-svc#12", "merged");
+      ghB.states.set("northwind/billing-svc#21", "merged");
+      await Bun.sleep(INBOX_PULLS_REFRESH_MS);
+      await waitFor("B's list stops naming its PR", async () => !(await own(b.port, true)).some((p) => p.key === BILL21), 30_000);
+      await waitFor("A's list stops naming its PR", async () => !(await own(a.port, true)).some((p) => p.key === BILL12), 30_000);
+
+      // A's window asks for B's PR: B reads its forge by number and answers it merged; A's gh never reads it.
+      const fromA = await farPull(a.port, bId, BILL21);
+      expect(fromA.status).toBe(200);
+      const answerA = (await fromA.json()) as Json;
+      expect(answerA.pull).toMatchObject({ key: BILL21, state: "merged" });
+      expect(answerA.unreadable).toBeUndefined();
+      expect(ghB.reads).toContain("northwind/billing-svc#21");
+      expect(ghA.reads).not.toContain("northwind/billing-svc#21");
+      // The mirror: B's window asks for A's PR; A's forge answers it.
+      const fromB = await farPull(b.port, aId, BILL12);
+      expect(fromB.status).toBe(200);
+      expect(((await fromB.json()) as Json).pull).toMatchObject({ key: BILL12, state: "merged" });
+      expect(ghA.reads).toContain("northwind/billing-svc#12");
+      expect(ghB.reads).not.toContain("northwind/billing-svc#12");
+
+      // B asleep: A's ask says so plainly, never an answer for the page to show.
+      b.stop();
+      await waitFor("B offline on A", async () => (await machineOn(a.port, bId))?.state === "offline", 30_000);
+      const asleepB = await farPull(a.port, bId, BILL21);
+      expect([asleepB.status, ((await asleepB.json()) as Json).code]).toEqual([503, "machine_offline"]);
+      // B back, then A asleep: B's ask for A's PR the same.
+      b = await start(dataB, ghB.run);
+      await waitFor("B back on A", async () => (await machineOn(a.port, bId))?.state === "online", 45_000);
+      await waitFor("A online on B", async () => (await machineOn(b.port, aId))?.state === "online", 45_000);
+      a.stop();
+      aUp = false;
+      await waitFor("A offline on B", async () => (await machineOn(b.port, aId))?.state === "offline", 30_000);
+      const asleepA = await farPull(b.port, aId, BILL12);
+      expect([asleepA.status, ((await asleepA.json()) as Json).code]).toEqual([503, "machine_offline"]);
+    } finally {
+      if (aUp) a.stop();
+      b.stop();
+    }
+  }, 180_000);
+
+  test("`pulls/pull` on the door is a linked machine's: A's machine token reads B's PR there, a phone paired with B is refused 404", async () => {
+    // Pairing also asks for a mailbox: never the real relay.
+    const relayWas = process.env.PLANNOTATOR_RELAY_URL;
+    process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
+    const ghA = fakeGh([["northwind/billing-svc", 12]]);
+    const ghB = fakeGh([["northwind/billing-svc", 21]]);
+    const dataA = scratch("plannotator-pulls-pull-phone-a-");
+    const a = await start(dataA, ghA.run);
+    const b = await start(scratch("plannotator-pulls-pull-phone-b-"), ghB.run, true);
+    try {
+      const { tokenAtB } = await linkBoth(a, b, dataA);
+      expect((await own(b.port)).map((p) => p.key)).toEqual([BILL21]);
+      const made = (await (await fetch(`${at(b.port)}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as Json;
+      const paired = await fetch(`${at(b.port)}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) });
+      expect(paired.status).toBe(201);
+      const phone = ((await paired.json()) as Json).token as string;
+      const atDoor = (token: string, route: string) => fetch(`${at(b.port)}/api/inbox/device/${route}`, { headers: { Authorization: `Bearer ${token}` } });
+      const route = `pulls/pull?key=${encodeURIComponent(BILL21)}`;
+      // The linked machine: B's answer.
+      const machine = await atDoor(tokenAtB, route);
+      expect(machine.status).toBe(200);
+      expect(((await machine.json()) as Json).pull).toMatchObject({ key: BILL21, state: "open" });
+      // The phone: its token is good on its own routes, and this one is not one of them.
+      expect((await atDoor(phone, "threads")).status).toBe(200);
+      const refused = await atDoor(phone, route);
+      expect([refused.status, ((await refused.json()) as Json).code]).toEqual([404, "device_route_not_found"]);
+    } finally {
+      a.stop();
+      b.stop();
+      if (relayWas === undefined) delete process.env.PLANNOTATOR_RELAY_URL;
+      else process.env.PLANNOTATOR_RELAY_URL = relayWas;
+    }
+  }, 60_000);
 
   test("a linked machine online but not answering: this machine's board answers at once, the other's pending, then joins", async () => {
     let answer = () => {};
