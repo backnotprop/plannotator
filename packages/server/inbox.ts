@@ -41,6 +41,7 @@
 
 import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
+import { inboxReviewAnalysisOf, parseInboxReviewAnalysisChange } from "./inbox-review-analysis";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { codeReviewOfferAtStart, codeReviewOfferDue } from "./inbox-code-review-offer";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -3217,6 +3218,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return diffOptionsState();
   };
 
+  /** Code review's "Semantic changes" switch (config.json `reviewAnalysis.semanticDiff`, inbox-review-analysis.ts). */
+  const reviewAnalysisState = () => inboxReviewAnalysisOf(loadConfig().reviewAnalysis);
+  const saveReviewAnalysis = (value: unknown, validateOnly = false) => {
+    const change = parseInboxReviewAnalysisChange(value);
+    if (!change.ok) throw new InboxError("validation_error", change.error, { field: change.field });
+    if (validateOnly) return reviewAnalysisState();
+    saveConfig({ reviewAnalysis: change.reviewAnalysis });
+    const saved = reviewAnalysisState();
+    if (saved.semantic_diff !== change.reviewAnalysis.semanticDiff) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    return saved;
+  };
+
   /**
    * The one-time sound dialog, claimed by the page that will show it: a
    * compare-and-set from `dialogDueFor` to `dialogShownFor`, so of several
@@ -4222,6 +4235,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     diff_style: diffStyleState(),
     /** How diffs are drawn (config.json `diffOptions`, inbox-diff-options.ts), shared with code review; each field null when never chosen. */
     diff_options: diffOptionsState(),
+    /** Code review's "Semantic changes" switch (config.json `reviewAnalysis.semanticDiff`): off, no semantic diff in the Inbox either; null when never chosen. */
+    review_analysis: reviewAnalysisState(),
     /** Experimental features, each off unless switched on (Settings → Capabilities → Experimental). */
     experimental: experimentalState(),
     /** The Board (config.json `inboxBoard`): off unless the person turned it on. */
@@ -7536,6 +7551,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.sidebar === undefined &&
           body.diff_style === undefined &&
           body.diff_options === undefined &&
+          body.review_analysis === undefined &&
           body.experimental === undefined &&
           body.tour === undefined &&
           body.prompts === undefined &&
@@ -7557,7 +7573,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, review_analysis, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
@@ -7597,6 +7613,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.sidebar !== undefined) saveSidebar(body.sidebar, true);
         const diffOptionsChange = body.diff_style !== undefined || body.diff_options !== undefined;
         if (diffOptionsChange) saveDiffOptions(body, true);
+        if (body.review_analysis !== undefined) saveReviewAnalysis(body.review_analysis, true);
         if (body.experimental !== undefined) saveExperimental(body.experimental, true);
         if (body.tour !== undefined) saveTour(body.tour, true);
         if (body.board !== undefined) saveBoard(body.board, true);
@@ -7632,6 +7649,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const rows = { ...rowsWire(rowsUndone ?? (body.rows === undefined ? rowsState() : saveRows(body.rows, false, rowsBy))), ...(body.rows_undo === true ? { rows_undone: rowsUndone !== null } : {}) };
         const sidebar = sidebarWire(body.sidebar === undefined ? sidebarState() : saveSidebar(body.sidebar));
         const diffOptions = diffOptionsChange ? saveDiffOptions(body) : diffOptionsState();
+        const reviewAnalysis = body.review_analysis === undefined ? reviewAnalysisState() : saveReviewAnalysis(body.review_analysis);
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
@@ -7653,7 +7671,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, decision_mode: decisionMode, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, review_analysis: reviewAnalysis, experimental, tour, board, decision_mode: decisionMode, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {
