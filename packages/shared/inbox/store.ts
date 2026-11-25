@@ -168,8 +168,7 @@ import {
   type InboxInlineImage,
   type InboxLiveSiteRef,
 } from "@plannotator/core/inbox-types";
-import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSave, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
-import { remapReplyMentions } from "@plannotator/core/inbox-thread-mention";
+import { checkReplyDraftConflict, projectReplyDraft, replyDraftFilesAfter, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
 import type { InboxReplyMention } from "@plannotator/core/inbox-types";
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
@@ -179,7 +178,7 @@ import { DECISION_LINES_FILE, decisionLinesOf, type DecisionDataInput } from "./
 import type { DecisionExportInput } from "./decision-export";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
-import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
+import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
 import { isInboxArtifactKey, readInboxArtifactPins, writeInboxArtifactPins } from "./artifact-pins";
 import { inboxThreadArtifactRefs, type InboxArtifactPin, type InboxArtifactRef } from "@plannotator/core/inbox-artifact-pins";
@@ -6873,55 +6872,23 @@ export class InboxStore {
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given, quote, mentions } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
-    if (ops) {
-      // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
-      // Only the words are compared: a file change elsewhere never refuses this save.
-      const ownWords = baseBody !== null && existing !== null && existing.body === baseBody;
-      if ((existing?.updated_at ?? null) !== base && !ownWords) {
-        throw new InboxError(
-          "draft_conflict",
-          existing ? "This reply changed in another window since you opened it." : "This reply's draft was discarded or sent in another window.",
-          { draft: existing },
-        );
-      }
-      // A save a step behind (its own words, `base_body`) adds no file the draft lost since the version it names:
-      // another window took it out after this page's earlier save of it landed (its answer lost), so the add is
-      // that save's, sent again, not a new one.
-      const removals = existing && existing.updated_at !== base ? this.replyDraftRemovals.get(threadId) : undefined;
-      const add = removals ? ops.add.filter((file) => !((removals.get(file.upload_id) ?? "") > (base ?? ""))) : ops.add;
-      // Words changed: another window's long paste this save does not place moves with them.
-      const after = applyReplyDraftFileOps(existing?.files ?? [], { ...ops, add }, existing ? { from: existing.body, to: body } : undefined);
-      if (body.trim() === "" && after.length === 0) {
-        this.deleteReplyDraft(threadId);
-        return null;
-      }
-      return this.writeReplyDraft(threadId, existing, body, after, given, quote, mentions);
-    }
-    // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
-    // is never dropped by it).
-    const files = replyDraftFilesAfterSave(existing?.files ?? [], incoming, allFiles);
-    // `base_body`: the words this window wrote last. A save sent as the page goes may carry a base read
-    // before that write's answer came back; the draft still holding those words is the window's own.
-    // With `base_files` (the files it wrote last), the draft must hold those too: the compare covers both.
-    // A file a Send carried since is no upload any more and left every draft (`dropSentUploadsFromReplyDrafts`):
-    // the window that still names it is not told apart by it.
-    const existingIds = replyDraftFileIdsSeenBy(existing?.files ?? [], allFiles);
-    const ownWords =
-      baseBody !== null &&
-      existing !== null &&
-      existing.body === baseBody &&
-      (baseFiles === null ||
-        sameInboxUploadIds(
-          existingIds,
-          baseFiles.filter((id) => existingIds.includes(id) || readInboxUpload(this.dir, id) !== null),
-        ));
-    if ((existing?.updated_at ?? null) !== base && !ownWords) {
-      throw new InboxError(
-        "draft_conflict",
-        existing ? "This reply changed in another window since you opened it." : "This reply's draft was discarded or sent in another window.",
-        { draft: existing },
-      );
-    }
+    // The compare-and-set (@plannotator/core/inbox-reply-draft, one set of rules with a linked machine's held draft).
+    // A page's file changes: only the words are compared, a file change elsewhere never refuses this save. A whole
+    // list (`base_files`): the draft must hold those files too; a file a Send carried since is no upload any more and
+    // left every draft (`dropSentUploadsFromReplyDrafts`), so the window that still names it is not told apart by it.
+    const conflict = checkReplyDraftConflict(existing, { base, baseBody, baseFiles, allFiles, ops: ops !== null }, (id) => readInboxUpload(this.dir, id) !== null);
+    if (conflict) throw new InboxError("draft_conflict", conflict, { draft: existing });
+    // A save a step behind (its own words, `base_body`) adds no file the draft lost since the version it names:
+    // another window took it out after this page's earlier save of it landed (its answer lost), so the add is
+    // that save's, sent again, not a new one. An older page (no `all_files`) names long pastes only: the draft's
+    // other files stay (a file it does not know is never dropped by it).
+    const removals = ops && existing && existing.updated_at !== base ? this.replyDraftRemovals.get(threadId) : undefined;
+    const files = replyDraftFilesAfter(
+      existing,
+      existing?.files ?? [],
+      body,
+      ops ? { ops: { ...ops, add: removals ? ops.add.filter((file) => !((removals.get(file.upload_id) ?? "") > (base ?? ""))) : ops.add } } : { files: incoming, allFiles },
+    );
     // Nothing left: no words and no file kept beside them.
     if (body.trim() === "" && files.length === 0) {
       this.deleteReplyDraft(threadId);
@@ -6945,25 +6912,9 @@ export class InboxStore {
     quote: InboxReplyQuote | null | undefined = undefined,
     mentions: readonly InboxReplyMention[] | undefined = undefined,
   ): InboxReplyDraft {
-    const at = this.stamp();
-    // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
-    const updatedAt = existing && at <= existing.updated_at ? new Date(Date.parse(existing.updated_at) + 1).toISOString() : at;
-    const draft: InboxReplyDraft = {
-      v: 1,
-      thread_id: threadId,
-      body,
-      created_at: existing?.created_at ?? at,
-      updated_at: updatedAt,
-      ...(files.length > 0 ? { files: [...files] } : {}),
-    };
-    const aimed = recipients ?? existing?.recipients ?? [];
-    if (aimed.length > 0) draft.recipients = [...aimed];
-    // The quote (approval "inbox-reply-quote"): a save that names one sets it, `null` takes it away, absent keeps it.
-    const quoted = quote === undefined ? (existing?.quote ?? null) : quote;
-    if (quoted) draft.quote = { ...quoted };
-    // The mentions (approval "inbox-drag-threads"): a save that names them sets them; absent, the draft's own move with its words.
-    const mentioned = mentions ?? remapReplyMentions(existing?.mentions ?? [], existing?.body ?? "", body);
-    if (mentioned.length > 0) draft.mentions = mentioned.map((m) => ({ ...m }));
+    // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart. The
+    // quote (approval "inbox-reply-quote") and the mentions (approval "inbox-drag-threads") as `projectReplyDraft` says.
+    const draft = projectReplyDraft(threadId, existing, { body, files, recipients, quote, mentions }, this.stamp());
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
     this.changes += 1;

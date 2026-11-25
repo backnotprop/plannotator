@@ -7,7 +7,7 @@
  * draft, it outlives leaving the thread and a new page, two computers typing at once show the conflict line and never
  * overwrite, a sleeping computer gets the words once when it wakes, and a Send clears it there for good.
  *
- * The thread pane over this Inbox's real forward for drafts (packages/server/inbox-machine-drafts.ts, with a real outbox
+ * The thread pane over this Inbox's real forward for drafts (packages/server/inbox-machine-drafts.ts, holding drafts
  * in a temp folder) and a stand-in for the other computer's door holding its drafts with the store's compare-and-set
  * (`base`, `base_body`). The other computer is online or asleep on cue. An older Plannotator there (no mark) keeps
  * today's behaviour: nothing is sent, the words are kept in this page and the leave guard asks; once it updates, those
@@ -25,7 +25,6 @@ import { applyReplyDraftFileOps } from '@plannotator/core/inbox-reply-draft';
 import type { InboxAuthor, InboxDraftFile, InboxMessageWire, InboxProject, InboxReplyDraft, InboxThread, InboxUpload } from '@plannotator/core/inbox-types';
 import type { MachineView } from './api';
 import type { Signal } from './signal';
-import { InboxOutbox, type OutboxEntry } from '../server/inbox-outbox';
 import { createMachineDrafts, type DraftPeer } from '../server/inbox-machine-drafts';
 
 const hasDom = typeof document !== 'undefined';
@@ -62,7 +61,6 @@ let replies: Record<string, unknown>[] = [];
 /** Draft requests that went to this computer's own draft routes (a far thread's never should). */
 let localDraftCalls: string[] = [];
 let here = '';
-let outbox: InboxOutbox;
 let peer: DraftPeer & { state: string; list: NonNullable<DraftPeer['list']> };
 let forward: ReturnType<typeof createMachineDrafts>;
 let root: Root | null = null;
@@ -161,7 +159,6 @@ beforeEach(() => {
   localDraftCalls = [];
   signal = createSignal();
   here = mkdtempSync(join(tmpdir(), 'plannotator-far-reply-drafts-'));
-  outbox = InboxOutbox.open(here);
   peer = {
     id: MINI,
     state: 'online',
@@ -170,18 +167,11 @@ beforeEach(() => {
       if (peer.state !== 'online') throw new Error('unreachable');
       return miniDoor(route, init.method, init.body ? (JSON.parse(init.body) as Record<string, unknown>) : {});
     },
-    flush() {
-      if (peer.state !== 'online') return;
-      void outbox.drain(MINI, async (entry: OutboxEntry) => {
-        const answer = miniDoor(entry.route, 'POST', entry.body);
-        return { status: answer.status, body: await answer.json() };
-      });
-    },
     poke() {},
     refreshList: async () => {},
   };
   // This Inbox tells its windows when a thread's draft changes as it shows it (`event: drafts`).
-  forward = createMachineDrafts({ outbox, peer: () => peer, onChange: () => signal.emit() });
+  forward = createMachineDrafts({ dataDir: here, peer: () => peer, onChange: () => signal.emit(), retryMs: 60_000 });
   rememberMachine([FAR], MINI);
   savedFetch = globalThis.fetch;
   savedXhr = globalThis.XMLHttpRequest;
@@ -326,7 +316,7 @@ test.skipIf(!hasDom)("typed in the Mini's thread: the draft is saved on the Mini
   typeOn(el, 'Words for the Mini thread.');
   await until(() => mini.drafts.get(FAR)?.body === 'Words for the Mini thread.', 'the draft on the Mini');
   expect(localDraftCalls.filter((call) => call.startsWith('POST'))).toEqual([]);
-  expect(outbox.list(MINI, 'pending').length).toBe(0);
+  expect(forward.heldCount(MINI)).toBe(0);
   act(() => draw(HERE));
   await settle();
   act(() => draw(FAR));
@@ -378,7 +368,7 @@ test.skipIf(!hasDom)('the Mini asleep: the words are held here and shown as save
   const el = await open();
   await reply(el);
   typeOn(el, 'Typed while the Mini sleeps.');
-  await until(() => outbox.list(MINI, 'pending').length === 1, 'the save held here');
+  await until(() => forward.heldCount(MINI) === 1, 'the save held here');
   act(() => draw(HERE));
   await settle();
   act(() => draw(FAR));
@@ -390,8 +380,8 @@ test.skipIf(!hasDom)('the Mini asleep: the words are held here and shown as save
   expect(mini.writes.length).toBe(0);
   // It wakes: what waits goes, once.
   peer.state = 'online';
-  peer.flush();
-  await until(() => outbox.list(MINI, 'pending').length === 0, 'the held save sent');
+  void forward.drain(MINI);
+  await until(() => forward.heldCount(MINI) === 0, 'the held save sent');
   await settle(10);
   expect(mini.drafts.get(FAR)?.body).toBe('Typed while the Mini sleeps. And more.');
   expect(farWrites().length).toBe(1);
@@ -473,9 +463,9 @@ test.skipIf(!hasDom)("a file attached in the Mini's thread goes to the Mini and 
   });
   await until(() => tiles(el).includes('later.csv:refused'), 'the file refused on its tile');
   typeOn(el, ' One more line.');
-  await until(() => outbox.list(MINI, 'pending').length === 1, 'the words held here');
+  await until(() => forward.heldCount(MINI) === 1, 'the words held here');
   peer.state = 'online';
-  peer.flush();
+  void forward.drain(MINI);
   await until(() => mini.drafts.get(FAR)?.body === 'The export, attached. One more line.', 'the words on the Mini once it wakes');
   expect((mini.drafts.get(FAR)?.files ?? []).map((file) => file.name)).toEqual(['ledger.csv']);
   // The refused tile is the person's to remove or try again; the draft goes.

@@ -23515,6 +23515,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-machineview-drafts-held",
+      "title": "field:MachineView.drafts_held",
+      "surface": [
+        "field:MachineView.drafts_held"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

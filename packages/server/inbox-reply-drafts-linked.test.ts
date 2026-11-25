@@ -153,24 +153,37 @@ describe("a reply draft on a linked machine's thread, two real Inboxes linked bo
     }
   }, 60_000);
 
-  test("that machine asleep: the save is held (nothing waiting, no notice), read back through a restart here, and lands when it is back", async () => {
-    const here = A;
-    const there = B;
-    await stopInbox(there.w);
-    await waitFor(`${here.name} sees ${there.name} away`, async () => ((await stateOf(here, there)) === "offline" ? true : null), 30_000);
-    const held = await saveHere(here, there, "Typed while the MacBook sleeps", null);
-    expect(held.status).toBe(200);
-    expect(((await held.json()) as Json).draft).toMatchObject({ body: "Typed while the MacBook sleeps" });
-    expect((await getJson(here, "/api/inbox/outbox")).waiting).toEqual([]);
-    expect((await getJson(here, "/api/inbox/outbox")).notices).toEqual([]);
-    expect((await draftHere(here, there))?.body).toBe("Typed while the MacBook sleeps");
-    // This Inbox restarts while that machine still sleeps: the words are still the draft here.
-    await stopInbox(here.w);
-    startInbox(here.w);
-    expect((await draftHere(here, there))?.body).toBe("Typed while the MacBook sleeps");
-    startInbox(there.w);
-    const landed = await waitFor("the held draft landed there", async () => ((await draftThere(there))?.body === "Typed while the MacBook sleeps" ? true : null), 60_000);
-    expect(landed).toBe(true);
-    expect((await getJson(here, "/api/inbox/outbox")).notices).toEqual([]);
-  }, 150_000);
+  test("that machine asleep: the saves are held (nothing waiting, no notice), read back through a restart here, and the newest lands when it is back, both ways", async () => {
+    const heldFor = async (m: Machine, other: Machine) => ((await getJson(m, "/api/inbox/machines")).machines as Json[]).find((x) => x.id === other.id)?.drafts_held;
+    for (const [here, there] of [
+      [A, B],
+      [B, A],
+    ] as const) {
+      await stopInbox(there.w);
+      await waitFor(`${here.name} sees ${there.name} away`, async () => ((await stateOf(here, there)) === "offline" ? true : null), 30_000);
+      // Autosaves while it sleeps: held here as one draft, never a write waiting in the outbox.
+      let seen: string | null = null;
+      let words = "";
+      for (const more of ["Typed", " while", ` the ${there.name}`, " sleeps"]) {
+        words += more;
+        const held = await saveHere(here, there, words, seen);
+        expect(held.status).toBe(200);
+        seen = (((await held.json()) as Json).draft as Json).updated_at as string;
+      }
+      expect((await getJson(here, "/api/inbox/outbox")).waiting).toEqual([]);
+      expect((await getJson(here, "/api/inbox/outbox")).notices).toEqual([]);
+      expect(await heldFor(here, there)).toBe(1);
+      expect((await draftHere(here, there))?.body).toBe(words);
+      // This Inbox restarts while that machine still sleeps: the words are still the draft here.
+      await stopInbox(here.w);
+      startInbox(here.w);
+      expect((await draftHere(here, there))?.body).toBe(words);
+      startInbox(there.w);
+      const landed = await waitFor(`the held draft landed on the ${there.name}`, async () => ((await draftThere(there))?.body === words ? true : null), 60_000);
+      expect(landed).toBe(true);
+      await waitFor("nothing held any more", async () => ((await heldFor(here, there)) === 0 ? true : null), 30_000);
+      expect((await getJson(here, "/api/inbox/outbox")).notices).toEqual([]);
+      await windowPost(here, `/api/inbox/m/${there.id}/threads/${there.message.thread}/draft/delete`, {}, there.message.thread);
+    }
+  }, 300_000);
 });

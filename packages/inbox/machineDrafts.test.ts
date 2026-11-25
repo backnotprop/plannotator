@@ -7,8 +7,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReplyDraftStore } from '@plannotator/core/inbox-reply-draft';
 import type { InboxReplyDraft } from '@plannotator/core/inbox-types';
-import { rememberMachine, resetMachineRoutes, setSelfMachine } from './inboxUrl';
-import { keepsReplyDraft } from './machineDrafts';
+import { hasMachineMark, rememberMachine, resetMachineRoutes, setSelfMachine } from './inboxUrl';
+import { keepsReplyDraft, replyDraftHost } from './machineDrafts';
 import { landWordsInReplyDraft, takeHeldVoiceWords } from './replyDraft';
 
 const SELF = 'ibx_01HAAAAAAAAAAAAAAAAAAAAAAA';
@@ -57,10 +57,16 @@ describe('where a reply draft is kept', () => {
     expect(keepsReplyDraft('msg_unlisted')).toBe(false);
   });
 
+  test('a mark is asked one way: this Inbox (no machine, or its own id) takes every mark; a linked one as its list says', () => {
+    machines();
+    expect([null, SELF, NEWER, OLDER, UNLISTED, 'ibx_01HZZZZZZZZZZZZZZZZZZZZZZZ'].map((id) => hasMachineMark(id, 'reply-drafts'))).toEqual([true, true, true, false, false, false]);
+    expect(hasMachineMark({ id: OLDER, marks: ['reply-drafts'] }, 'reply-drafts')).toBe(true);
+  });
+
   test("dictated words for a closed box land in the draft of a linked machine's thread that keeps drafts", async () => {
     machines();
     const { store, saved } = recording();
-    await landWordsInReplyDraft('msg_newer', 'and retry after the deploy', store);
+    await landWordsInReplyDraft('msg_newer', 'and retry after the deploy', store, replyDraftHost.canPersist);
     expect(saved).toEqual(['msg_newer: and retry after the deploy']);
     expect(takeHeldVoiceWords('msg_newer')).toEqual([]);
   });
@@ -68,7 +74,7 @@ describe('where a reply draft is kept', () => {
   test('on an older machine they wait in this page for the box, and nothing is written', async () => {
     machines();
     const { store, saved } = recording();
-    await landWordsInReplyDraft('msg_older', 'and retry after the deploy', store);
+    await landWordsInReplyDraft('msg_older', 'and retry after the deploy', store, replyDraftHost.canPersist);
     expect(saved).toEqual([]);
     expect(takeHeldVoiceWords('msg_older')).toEqual(['and retry after the deploy']);
   });

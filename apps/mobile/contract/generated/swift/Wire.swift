@@ -11284,6 +11284,7 @@ public struct MachineView: Codable, Hashable, Sendable {
   public var address: String?
   public var bothWays: Bool
   public var waiting: Double
+  public var draftsHeld: Double?
   public var listCursor: Int64?
   public var snoozes: Bool?
   public var launch: Bool?
@@ -11296,9 +11297,9 @@ public struct MachineView: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "name", "self", "state", "since", "reason", "version", "address", "both_ways", "waiting", "list_cursor", "snoozes", "launch", "message_deletions", "snooze_old", "marks", "update", "clock_ms", "link_through"]
+  static let knownKeys: Set<String> = ["id", "name", "self", "state", "since", "reason", "version", "address", "both_ways", "waiting", "drafts_held", "list_cursor", "snoozes", "launch", "message_deletions", "snooze_old", "marks", "update", "clock_ms", "link_through"]
 
-  public init(id: String, name: String, selfValue: Bool, state: MachineViewState, since: String, reason: String? = nil, version: String? = nil, address: String? = nil, bothWays: Bool, waiting: Double, listCursor: Int64? = nil, snoozes: Bool? = nil, launch: Bool? = nil, messageDeletions: Bool? = nil, snoozeOld: Bool? = nil, marks: [String]? = nil, update: MachineUpdateView? = nil, clockMs: Int64? = nil, linkThrough: LinkThroughView? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(id: String, name: String, selfValue: Bool, state: MachineViewState, since: String, reason: String? = nil, version: String? = nil, address: String? = nil, bothWays: Bool, waiting: Double, draftsHeld: Double? = nil, listCursor: Int64? = nil, snoozes: Bool? = nil, launch: Bool? = nil, messageDeletions: Bool? = nil, snoozeOld: Bool? = nil, marks: [String]? = nil, update: MachineUpdateView? = nil, clockMs: Int64? = nil, linkThrough: LinkThroughView? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.id = id
     self.name = name
     self.selfValue = selfValue
@@ -11309,6 +11310,7 @@ public struct MachineView: Codable, Hashable, Sendable {
     self.address = address
     self.bothWays = bothWays
     self.waiting = waiting
+    self.draftsHeld = draftsHeld
     self.listCursor = listCursor
     self.snoozes = snoozes
     self.launch = launch
@@ -11333,6 +11335,7 @@ public struct MachineView: Codable, Hashable, Sendable {
     self.address = try c.decodeIfPresent(String.self, forKey: WireKey("address"))
     self.bothWays = try c.decode(Bool.self, forKey: WireKey("both_ways"))
     self.waiting = try c.decode(Double.self, forKey: WireKey("waiting"))
+    self.draftsHeld = try c.decodeIfPresent(Double.self, forKey: WireKey("drafts_held"))
     self.listCursor = try c.decodeIfPresent(Int64.self, forKey: WireKey("list_cursor"))
     self.snoozes = try c.decodeIfPresent(Bool.self, forKey: WireKey("snoozes"))
     self.launch = try c.decodeIfPresent(Bool.self, forKey: WireKey("launch"))
@@ -11357,6 +11360,7 @@ public struct MachineView: Codable, Hashable, Sendable {
     try c.encode(self.address, forKey: WireKey("address"))
     try c.encode(self.bothWays, forKey: WireKey("both_ways"))
     try c.encode(self.waiting, forKey: WireKey("waiting"))
+    try c.encodeIfPresent(self.draftsHeld, forKey: WireKey("drafts_held"))
     try c.encodeIfPresent(self.listCursor, forKey: WireKey("list_cursor"))
     try c.encodeIfPresent(self.snoozes, forKey: WireKey("snoozes"))
     try c.encodeIfPresent(self.launch, forKey: WireKey("launch"))

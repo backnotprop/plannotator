@@ -72,6 +72,8 @@ export interface MachineView {
   both_ways: boolean;
   /** Writes held for it. */
   waiting: number;
+  /** Its threads' reply drafts held here, not landed there yet (never "waiting"). Absent from an older Inbox. */
+  drafts_held?: number;
   /** The cursor of its list this Inbox holds: it moves when its rows changed. Absent from an older Inbox. */
   list_cursor?: number | null;
   /** Its Inbox keeps snoozes (approval "inbox-snooze"). Absent from an older Inbox, and false for a linked one too old: nothing to snooze with on its rows (`snooze_old`). */

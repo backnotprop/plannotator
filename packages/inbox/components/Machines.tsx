@@ -110,7 +110,8 @@ export function MachinesSection({ machines, onChanged, onMachineUpdate }: Machin
               {onMachineUpdate && <MachineUpdateButton machine={machine} onPress={() => onMachineUpdate(machine.id)} />}
               <UnlinkLink
                 name={machine.name}
-                warning={machine.waiting > 0 ? `${waitingText(machine.waiting)} will be lost.` : undefined}
+                // A reply draft held for it (never "waiting" in its line) is lost with the link too.
+                warning={machine.waiting + (machine.drafts_held ?? 0) > 0 ? `${waitingText(machine.waiting + (machine.drafts_held ?? 0))} will be lost.` : undefined}
                 onRemove={async () => {
                   setError(null);
                   setUnlinkedNote(null);

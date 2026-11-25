@@ -5,13 +5,11 @@
  * (docs/agent-guides/inbox-machines.md, "Reply drafts"). An older Plannotator there keeps none: the words stay in the
  * box only, and dictated words for a closed box wait in this page, as before.
  */
-import { linkedMachineFacts, machineOf } from './inboxUrl';
-
-/** The mark a linked machine's list carries when it keeps reply drafts from here. */
-export const REPLY_DRAFTS_MARK = 'reply-drafts';
+import { hasMachineMark, machineOf, onLinkedMachines } from './inboxUrl';
 
 export function keepsReplyDraft(threadId: string | null | undefined): boolean {
-  const machine = machineOf(threadId);
-  if (!machine) return true;
-  return linkedMachineFacts(machine)?.marks.includes(REPLY_DRAFTS_MARK) === true;
+  return hasMachineMark(machineOf(threadId), 'reply-drafts');
 }
+
+/** What the Inbox hands the reply draft client (replyDraft.ts): which threads' drafts are kept, and when that may change. */
+export const replyDraftHost = { canPersist: keepsReplyDraft, onPersistenceChange: onLinkedMachines } as const;

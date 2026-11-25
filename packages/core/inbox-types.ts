@@ -3746,6 +3746,8 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  */
 export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through", "reply-drafts"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
+/** Whether a linked machine's list marks say it takes `mark` (none known: it does not). */
+export const inboxMarksHave = (marks: readonly string[] | null | undefined, mark: InboxLinkedMark): boolean => marks?.includes(mark) === true;
 
 /**
  * A thread pinned to the window's sidebar (approval "inbox-pinned-threads"):

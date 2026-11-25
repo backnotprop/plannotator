@@ -34,7 +34,7 @@
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_MESSAGE_COMMENT_QUOTE_MAX, isInboxId, isInboxRecipientSessionId, type InboxDraftFile, type InboxReplyDraft, type InboxReplyMention, type InboxReplyQuote } from "@plannotator/core/inbox-types";
-import { checkInboxDraftFiles, checkInboxDraftIds, checkInboxDraftPlaces, INBOX_DRAFT_BODY_MAX } from "./drafts";
+import { checkInboxDraftFiles, checkInboxDraftIds, checkInboxDraftPlaces, INBOX_DRAFT_BODY_MAX, type InboxUploadLookup } from "./drafts";
 import type { ReplyDraftFileOps } from "@plannotator/core/inbox-reply-draft";
 import { standingReplyMentions } from "@plannotator/core/inbox-thread-mention";
 import { InboxError } from "./schema";
@@ -137,7 +137,8 @@ export function sameInboxUploadIds(a: readonly string[], b: readonly string[]): 
  * match (absent: words only, as an older window sends).
  */
 export function checkInboxReplyDraftInput(
-  inboxDirPath: string,
+  /** This Inbox's folder, or (a linked machine's held draft) where its uploads are known: a whole list's unknown file is not shown. */
+  inboxDirPath: string | InboxUploadLookup,
   input: InboxReplyDraftInput,
 ): {
   body: string;
@@ -169,7 +170,7 @@ export function checkInboxReplyDraftInput(
   if (listedBase !== null && (!Array.isArray(listedBase) || listedBase.some((id) => typeof id !== "string"))) {
     throw new InboxError("validation_error", "base_files: the upload ids this window saved last, or null.", { field: "base_files" });
   }
-  const files = checkInboxDraftFiles(inboxDirPath, input.files, body.length);
+  const files = checkInboxDraftFiles(inboxDirPath, input.files, body.length, { skipGone: typeof inboxDirPath !== "string" });
   const opsGiven = input.files_add !== undefined || input.files_remove !== undefined || input.files_place !== undefined;
   const ops = opsGiven
     ? {

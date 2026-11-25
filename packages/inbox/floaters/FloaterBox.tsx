@@ -28,6 +28,7 @@ import { VoiceMicButton, VoiceStatusLine } from '../components/VoiceMic';
 import { Icon } from '../icons';
 import { linkedMachineFacts, machineOf } from '../inboxUrl';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
+import { replyDraftHost } from '../machineDrafts';
 import { tookOverReply, wordsMessage } from '../sendTargets';
 import { useFloatingReplyWords } from '../threadMentions';
 import { inboxThreadShortcuts } from '../shortcuts';
@@ -90,6 +91,7 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   const takeFiles = useRef<(threadId: string, draft: { files?: readonly InboxDraftFile[] }, wanted: readonly string[]) => void>(() => {});
   const takeWords = useRef<(threadId: string, draft: { body: string; files?: readonly InboxDraftFile[] }, was: string) => ReplyBoxTook>(() => 'hidden');
   const draft = useReplyDraft(threadId, {
+    ...replyDraftHost,
     onFiles: (id, saved, wanted) => takeFiles.current(id, saved, wanted),
     onWords: (id, saved, was) => takeWords.current(id, saved, was),
   });

@@ -8899,6 +8899,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     machines = createInboxMachines({
       dataDir,
       serverSession,
+      follows,
       computerName: devices.machineDoor.computerName,
       door: devices.machineDoor,
       readBody,

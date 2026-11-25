@@ -57,9 +57,7 @@ import {
 } from "@plannotator/shared/inbox/uploads";
 import type { InboxLaunch } from "./inbox-launch";
 import { replacesEndedAsker, takesOver, thereInThread, type createInboxLiveSessions } from "./inbox-sessions";
-
-/** How many characters of a reply draft the Drafts page shows. */
-const INBOX_REPLY_PREVIEW_MAX = 160;
+import { replyDraftPreview } from "@plannotator/core/inbox-reply-draft";
 /** The Drafts page's "Replies not sent": the most recently drafted first. */
 const newestDraftFirst = (a: InboxReplyDraftRow, b: InboxReplyDraftRow) => (b.unsent!.reply_at ?? b.last_at).localeCompare(a.unsent!.reply_at ?? a.last_at) || a.thread_id.localeCompare(b.thread_id);
 
@@ -432,13 +430,8 @@ export function createInboxCompose(options: {
     store
       .unsentRows()
       .filter((row) => inboxHasUnsent(row.unsent) && !inboxRowArchived(row))
-      .map((row) => {
-        const draft = store.replyDraft(row.thread_id);
-        // A draft holding only files reads as its first: a long paste's first words, another file's name.
-        const first = draft?.files?.[0];
-        const words = (draft?.body.trim() || first?.pasted?.preview || first?.name || "").replace(/\s+/g, " ").trim();
-        return { ...row, reply_preview: words ? words.slice(0, INBOX_REPLY_PREVIEW_MAX) : null };
-      })
+      // A draft holding only files reads as its first: a long paste's first words, another file's name.
+      .map((row) => ({ ...row, reply_preview: replyDraftPreview(store.replyDraft(row.thread_id)) }))
       .sort(newestDraftFirst);
 
   /** Forget uploads older than a day that no draft names, and the blobs only they held. */

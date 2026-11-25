@@ -6,7 +6,6 @@
  * client (replyDraft.ts `remoteToDraft`) saves them there as words not saved yet, or shows the conflict.
  */
 import { machineOf } from './inboxUrl';
-import { keepsReplyDraft } from './machineDrafts';
 
 export const remoteWords = new Map<string, string>();
 
@@ -19,10 +18,10 @@ export function keepRemoteWords(threadId: string, text: string): void {
   else remoteWords.delete(threadId);
 }
 
-/** That computer keeps drafts now: the thread's kept words leave here (undefined: none, or still not kept there). */
-export function remoteWordsToSave(threadId: string): string | undefined {
+/** That computer keeps drafts now (the host's `canPersist`): the thread's kept words leave here (undefined: none, or still not kept there). */
+export function remoteWordsToSave(threadId: string, canPersist: (threadId: string) => boolean): string | undefined {
   const words = remoteWords.get(threadId);
-  if (words === undefined || !keepsReplyDraft(threadId)) return undefined;
+  if (words === undefined || !canPersist(threadId)) return undefined;
   remoteWords.delete(threadId);
   return words;
 }

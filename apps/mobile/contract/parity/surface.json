@@ -1676,6 +1676,7 @@
       "MachineView.address",
       "MachineView.both_ways",
       "MachineView.clock_ms",
+      "MachineView.drafts_held",
       "MachineView.id",
       "MachineView.launch",
       "MachineView.link_through",

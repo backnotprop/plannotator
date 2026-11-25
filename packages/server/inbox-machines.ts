@@ -147,6 +147,8 @@ const safeDecode = (segment: string): string => {
 export interface InboxMachinesContext {
   dataDir: string;
   serverSession: string;
+  /** The earlier runs of this Inbox's data folder (the health's `follows`): a far reply draft save from a page one served is taken. */
+  follows?: readonly string[];
   computerName: () => string;
   door: InboxMachineDoor;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
@@ -303,6 +305,8 @@ export interface MachineView {
   both_ways: boolean;
   /** Writes held for it (rule 12: "Will send when … is back"). */
   waiting: number;
+  /** Its threads' reply drafts held here, not landed there yet (never "waiting"): Unlink says they would be lost too. */
+  drafts_held: number;
   /**
    * The cursor of its list this Inbox holds (null: none yet). It moves when
    * that list is read again, so the window's `machines` frame tells it to
@@ -497,7 +501,15 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const machinePulls = createMachinePulls({ peers: () => peers.values() });
   // A linked machine's thread's reply draft (mark `reply-drafts`): kept there, held here while it is away. Every window
   // hears a change as it hears this Inbox's own (`event: drafts`).
-  const drafts = createMachineDrafts({ outbox, peer: (id) => peers.get(id), onChange: (_machine, threadId) => emit({ event: "drafts", data: { thread_id: threadId } }) });
+  // The machines block says how many are held for each (`drafts_held`, for Unlink); it is sent only when that moved.
+  const drafts = createMachineDrafts({
+    dataDir: context.dataDir,
+    peer: (id) => peers.get(id),
+    onChange: (_machine, threadId) => {
+      emit({ event: "drafts", data: { thread_id: threadId } });
+      machinesChanged();
+    },
+  });
   // Branch reviews: each linked machine's reported branches, read when Reviews is (inbox-machine-branches.ts).
   const machineBranches = createMachineBranches({ peers: () => peers.values() });
   // Ship: each linked machine's merged ships, read when Reviews is (inbox-machine-ships.ts).
@@ -581,6 +593,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       address: context.door.tailnetAddress(),
       both_ways: true,
       waiting: 0,
+      drafts_held: 0,
       list_cursor: null,
       snoozes: true,
       marks: [...INBOX_LINKED_MARKS],
@@ -601,6 +614,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         address: openTransport(link.transport).describe(),
         both_ways: link.device_id !== null,
         waiting: outbox.list(link.id, "pending").filter((e) => !e.auto).length,
+        drafts_held: drafts.heldCount(link.id),
         list_cursor: peer?.list?.cursor ?? null,
         snoozes: peer?.list?.snoozes ?? false,
         snooze_old: peer?.list ? !peer.list.snoozes : false,
@@ -677,6 +691,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
         if (peer.list?.reactions) context.reactionsSaid?.(peer.list.reactions);
         // An older Plannotator there says no mark: its switches stay its own, and none of its are taken here.
         if (peer.list?.capability_set && peer.list.marks.includes(CAPABILITY_SET_MARK)) context.capabilitySetSaid?.(peer.list.capability_set);
+        // Back online: a reply draft held here for it lands (inbox-machine-drafts.ts).
+        if (peer.state === "online") void drafts.drain(link.id);
         machinesChanged();
       },
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
@@ -715,6 +731,16 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // What it introduced and is not complete yet goes with it: its open codes here, the devices they made, the introductions it sent.
     context.door.dropIntroductions(id);
     linkThrough.forgetBroker(id);
+    // A reply draft held for it is lost with the link, as a write waiting for it is: its words join the "Not sent"
+    // list (a write that was waiting, dropped below), never gone silently. Only here does a draft enter the outbox.
+    for (const lost of drafts.forget(id)) {
+      try {
+        // Well under the outbox's limit on a held body (the line shows the first OUTBOX_WORDS_SHOWN of them).
+        outbox.submit(id, `threads/${lost.thread}/draft`, { idempotency_key: crypto.randomUUID(), body: lost.words.slice(0, 100_000) }, lost.thread);
+      } catch {
+        // Not a machine id this outbox keeps: nothing more can be done for them.
+      }
+    }
     outbox.dropMachine(id, link?.name ?? null);
     // The last link gone: with Phones off the tailnet door has nothing left to serve (but a refusal owed).
     if (closeDoor === "after_answer") closeDoorAfterAnswer();
@@ -1080,7 +1106,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     // Every other write is a JSON body, whatever its Content-Type says, and goes through the outbox.
     const body = await context.readBody(req);
-    if (checkServerSession(body, context.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+    // A reply draft SAVE from a page an earlier run of this same Inbox served is taken, as this Inbox's own drafts take
+    // it (inbox-reply-drafts.ts `follows`): it is a compare-and-set, so it never writes over newer words.
+    const earlierRun = !!draftRoute && !draftRoute[2] && typeof body.serverSession === "string" && (context.follows ?? []).includes(body.serverSession);
+    if (!earlierRun && checkServerSession(body, context.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     // A press in this Inbox's window (its own Origin and this run's page session), said to the other machine with the
     // write: it answers a permission prompt, or starts, stops or trusts an agent there, only for one (remote launch).
     // An agent's or a script's bare call is still the owner's for every other write, as before.

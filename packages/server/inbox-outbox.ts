@@ -51,7 +51,7 @@ import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { JsonLines } from "@plannotator/shared/inbox/devices";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
-import type { InboxMessage, InboxReplyDraft } from "@plannotator/core/inbox-types";
+import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { inboxTidyWords, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
 import type { OutboxFile } from "./inbox-outbox-files";
 
@@ -132,11 +132,6 @@ export interface OutboxEntry {
    * is on its way right now). So nothing of it lands after its maker said it did not.
    */
   send_by?: string;
-  /**
-   * A reply draft write held for the thread's machine (inbox-machine-drafts.ts; always `auto`): `view`, the draft the
-   * window here shows while it waits (null: none, after a delete), never sent on. Settled, it is not kept past a start.
-   */
-  draft?: { view: InboxReplyDraft | null };
   /**
    * This Inbox's own write the person is told about when it does not land (an agent's answer in another computer's
    * thread, held while that computer was away; inbox-mcp-far-reply.ts): its refusal is a notice, as a window's write's.
@@ -316,8 +311,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST messages/:id/secret": "now",
   "POST threads/:id/delete": "set",
   // A reply draft of the machine's thread (mark `reply-drafts`): a compare-and-set on the words, so a second copy is
-  // the same draft (its own words, `base_body`) or refused; a delete twice deletes once. Held only while the machine
-  // cannot take it now (inbox-machine-drafts.ts), as this Inbox's own write: never "waiting", never a notice.
+  // the same draft (its own words, `base_body`) or refused; a delete twice deletes once. While the machine cannot take
+  // it now, it is held in a file of its own per thread (inbox-machine-drafts.ts), never in this outbox.
   "POST threads/:id/draft": "set",
   "POST threads/:id/draft/delete": "set",
   "POST annotations": "set",
@@ -570,13 +565,12 @@ export class InboxOutbox {
     window = false,
     sentFrom: InboxSentFromPlace | null = null,
     auto = false,
-    own: { follows?: string; send_by?: string; notify?: boolean; files?: readonly OutboxFile[]; draft?: { view: InboxReplyDraft | null } } = {},
+    own: { follows?: string; send_by?: string; notify?: boolean; files?: readonly OutboxFile[] } = {},
   ): { entry: OutboxEntry; fresh: boolean } {
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a write to another machine.", { field: "idempotency_key" });
-    // A reply draft is held whole, as that machine's store keeps it (its own limit on the words): never refused here.
-    if (!(auto && own.draft) && JSON.stringify(body).length > OUTBOX_MAX_BODY_BYTES) {
+    if (JSON.stringify(body).length > OUTBOX_MAX_BODY_BYTES) {
       throw new InboxError("validation_error", `body: at most ${OUTBOX_MAX_BODY_BYTES} bytes are held for another machine; send files while it is online.`, { field: "body" });
     }
     const existing = this.entries.get(key);
@@ -611,7 +605,6 @@ export class InboxOutbox {
       ...(auto && own.send_by ? { send_by: own.send_by } : {}),
       ...(auto && own.notify ? { notify: true as const } : {}),
       ...(auto && own.files && own.files.length > 0 ? { files: own.files.map((file) => ({ ...file })) } : {}),
-      ...(auto && own.draft ? { draft: own.draft } : {}),
     });
     return { entry, fresh: true };
   }
@@ -786,19 +779,8 @@ export class InboxOutbox {
    */
   compact(): void {
     const now = this.now().getTime();
-    // Each thread's newest reply draft write (inbox-machine-drafts.ts).
-    const newestDraft = new Map<string, OutboxEntry>();
-    for (const entry of this.entries.values()) {
-      if (!entry.draft || entry.state === "cancelled") continue;
-      const at = `${entry.machine} ${entry.thread}`;
-      const before = newestDraft.get(at);
-      if (!before || entry.n > before.n) newestDraft.set(at, entry);
-    }
     const keep = (entry: OutboxEntry) => {
       if (pending(entry)) return true;
-      // A reply draft's settled write: nobody asks for it by its key again (each save has its own). Kept only while its
-      // words are the draft shown here: the thread's newest, that machine did not take it, and no write carried it yet.
-      if (entry.draft) return newestDraft.get(`${entry.machine} ${entry.thread}`) === entry && entry.notice !== null && !entry.dismissed;
       const settled = entry.settled_at ? Date.parse(entry.settled_at) : now;
       // Not sent because the link went: its words are the only copy, so it stays until the person dismisses it.
       if (entry.state === "dropped" && !entry.dismissed) return true;

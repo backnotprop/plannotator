@@ -71,7 +71,8 @@ import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, useLateVoiceMiss } from '../lateVoice';
 import { replyBoxSetAside } from '../floaters/model';
-import { keepsReplyDraft, landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
+import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
+import { keepsReplyDraft, replyDraftHost } from '../machineDrafts';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
 import { conflictRevision, onPickConflict } from '../pickConflict';
 import { useReplyHasWords, useReplyTextStore } from '../replyText';
@@ -390,7 +391,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const takeTheirWords = useRef<(threadId: string, draft: InboxReplyDraft, was: string) => ReplyBoxTook>(() => 'differs');
   const ownedFor = useRef<string | null>(null);
   const ownedBox = useRef<(threadId: string) => { text: string; files: ReplyDraftFiles } | null>(() => null);
-  const replyDraft = useReplyDraft(thread.thread_id, {
+  const replyDraft = useReplyDraft(thread.thread_id, { ...replyDraftHost,
     onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted),
     onWords: (threadId, draft, was) => takeTheirWords.current(threadId, draft, was),
     ownedBox: (threadId) => ownedBox.current(threadId),
@@ -2286,8 +2287,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // A file the reply draft holds on the server is not lost by a restart. One still uploading, waiting for its save,
   // refused (its upload gone), or on a thread whose drafts are not kept (an older linked machine) would be: the guard asks.
   const heldFiles = new Set((replyDraft.draft?.files ?? []).map((file) => file.upload_id));
-  const unsentFiles =
-    box.open && replyFiles.files.some((file) => !(file.state === 'done' && file.upload && keepsReplyDraft(thread.thread_id) && heldFiles.has(file.upload.upload_id)));
+  const unsentFiles = box.open && replyFiles.files.some((file) => !(file.state === 'done' && file.upload && keepsReplyDraft(thread.thread_id) && heldFiles.has(file.upload.upload_id)));
 
   // Files dropped on the reply box attach there (a dashed "Drop to attach"; approval "inbox-reply-attach").
   const boxDrop = useFileDrop((list) => {
