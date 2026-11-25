@@ -9,25 +9,27 @@
  * `inboxAgentName` does, "An agent". An agent with a session but no known name or host is not a script and keeps
  * "An agent" here too.
  */
-import { inboxAgentName, inboxSessionlessSend, type InboxAuthor, type InboxListRow, type InboxRowDelivery } from '@plannotator/core/inbox-types';
+import { INBOX_SCRIPT_AUTHOR_NAME, inboxAgentName, inboxScriptAuthor, type InboxAuthor, type InboxListRow, type InboxRowDelivery } from '@plannotator/core/inbox-types';
 
 /** What the person sees for a script's post, in place of "An agent". */
-export const SCRIPT_AUTHOR_NAME = 'Script';
+export const SCRIPT_AUTHOR_NAME = INBOX_SCRIPT_AUTHOR_NAME;
 
 type Author = { kind: string; host?: string | null; session?: string | null; name?: string | null } | null | undefined;
 type AgentMessage = { author: Author; wakes?: boolean };
 
-/** A message from a script: the core's own rule (no session, host or name, and not sent through a waking connection). */
+/**
+ * A message from a script, by its author alone (`inboxScriptAuthor`: no session, host or name), as its mark and its
+ * row are: so the name and the terminal always agree, in the thread and on its row. Routing's own rule also reads
+ * `wakes` (`inboxSessionlessSend`); a waking connection always names its session and host, so they differ only for
+ * a record no connection writes, which is then named and drawn as a script everywhere the person looks.
+ */
 export function isScriptPost(message: AgentMessage | null | undefined): boolean {
-  return !!message?.author && inboxSessionlessSend({ author: message.author, wakes: message.wakes });
+  return isScriptAuthor(message?.author);
 }
 
-/**
- * By its author alone, where no message is at hand (a list row, a mark): the same rule without `wakes`. A waking
- * connection (the Claude Code mod, Pi, OpenCode 2) always names its session and host, so the two never differ.
- */
+/** By its author alone, where no message is at hand (a list row, a mark). */
 export function isScriptAuthor(author: Author): boolean {
-  return isScriptPost({ author });
+  return inboxScriptAuthor(author);
 }
 
 /** A message's author as the person sees it: "Script" for a script's post, else `inboxAgentName`. */

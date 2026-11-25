@@ -87,6 +87,18 @@ public enum ActionWords {
     return agent(InboxAuthor(kind: .agent, host: first.host, session: first.session, name: first.name))
   }
 
+  /// Whom the person's reply goes to on a row (packages/inbox/scriptAuthor.ts `rowRecipientName`): in a thread a
+  /// script started, the row's delivery names it ("Script" only where no session takes the reply, `script`); with no
+  /// delivery, the row's agent as its tiles name it (`rowAgent`). Every other row names its agent as before.
+  public static func rowRecipient(_ row: InboxListRow) -> String {
+    let author = row.author
+    let script = author.kind == .agent && (author.session ?? "").isEmpty && (author.host ?? "").isEmpty && (author.name ?? "").isEmpty
+    if script, let delivery = row.delivery {
+      return delivery.script == true ? "Script" : agent(InboxAuthor(kind: .agent, host: delivery.host, name: delivery.name))
+    }
+    return rowAgent(row)
+  }
+
   /// `shortAgentName`: whole up to 40 characters as a person counts them, else cut with "…", at the last space when
   /// one is near, with no bracket or dash left hanging.
   public static func shortName(_ name: String, max: Int = shortNameMax) -> String {

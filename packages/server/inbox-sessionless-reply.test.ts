@@ -26,6 +26,7 @@ import { rowAgentName, rowIsScript, rowRecipientName } from "../inbox/scriptAuth
 import { agentAuthor, windowedThread, windowedThreadText } from "./inbox-mcp-read";
 import { createInboxLiveSessions, INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { InboxOutbox } from "./inbox-outbox";
+import { inboxPushSummary } from "./inbox-relay-push";
 import { PeerLink } from "./inbox-peer-link";
 import { openTransport } from "./inbox-transport";
 
@@ -74,7 +75,7 @@ function world() {
     store.markAgentChecked(threadId, undefined, undefined, reader);
     store.settleReadPast(threadId, reader);
   };
-  return { store, live, poll, tool, script, reply, row, line, read, later: (ms: number) => void (offset += ms) };
+  return { store, projectId: project.id, live, poll, tool, script, reply, row, line, read, later: (ms: number) => void (offset += ms) };
 }
 
 describe("a script's post does not steal the thread", () => {
@@ -273,6 +274,26 @@ describe("a script's post reads \"Script\" in the window, and only there", () =>
     expect(rowIsScript(over, over.author)).toBe(false);
     expect(rowAgentName(over, over.author)).toBe("Claude Code");
     expect(rowRecipientName(over, over.author)).toBe("Claude Code");
+  });
+
+  test("the phone's push for a script's new thread names Script, as the window's notification does; an agent's names the agent", async () => {
+    const w = world();
+    const script = w.script("Spend check: $412 of $450 this month.");
+    expect(inboxPushSummary(w.store, script.id, () => w.store.listRows())?.agent).toBe("Script");
+    const own = w.tool("ses-ops", "The nightly sync is green.");
+    expect(inboxPushSummary(w.store, own.id, () => w.store.listRows())?.agent).toBe("Claude Code");
+    const shim = w.script("Which queue should I drain first?", undefined, "ses_shim1");
+    expect(inboxPushSummary(w.store, shim.id, () => w.store.listRows())?.agent).toBe("An agent");
+  });
+
+  test("an author that woke with no session, host or name is named as it is drawn: its row lists no session for it and a reply to it reads Script", async () => {
+    const w = world();
+    const woke = w.store.sendMessage({ project_id: w.projectId, author: { kind: "agent", host: null, session: null, name: null }, body: "Disk at 91%.", wakes: true }).message;
+    w.reply(woke.thread_id, "Thanks.");
+    const row = w.row(woke.thread_id);
+    expect(row.delivery?.script).toBe(true);
+    expect(rowAgentName(row, row.author)).toBe("Script");
+    expect(rowRecipientName(row, row.author)).toBe("Script");
   });
 
   test("read_thread's text, as an agent gets it, never says Script: a script's thread and one a session took over still name the script An agent", async () => {

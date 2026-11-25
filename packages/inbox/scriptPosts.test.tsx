@@ -17,7 +17,7 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxListRow, InboxListSection, InboxMessageWire, InboxProject, InboxReplyDraftRow, InboxRowDelivery, InboxThread } from '@plannotator/core/inbox-types';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
-import { authorName, messageAuthorName, rowIsScript, rowRecipientName, threadAskerName } from './scriptAuthor';
+import { authorName, isScriptAuthor, messageAuthorName, rowIsScript, rowRecipientName, threadAskerName } from './scriptAuthor';
 import { rowScriptOf, scriptTip } from './components/RowAgents';
 
 const hasDom = typeof document !== 'undefined';
@@ -28,12 +28,14 @@ const GEMINI: InboxAuthor = { kind: 'agent', host: null, session: null, name: 'G
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses-api', name: 'Claude Code' };
 
 describe('who is a script', () => {
-  test('only an agent with no session, host or name, not sent through a waking connection', () => {
+  test('only an agent with no session, host or name, by its author alone, as its mark is', () => {
     expect(messageAuthorName({ author: SCRIPT })).toBe('Script');
     expect(messageAuthorName({ author: SHIM })).toBe('An agent');
     expect(messageAuthorName({ author: GEMINI })).toBe('Gemini CLI');
     expect(messageAuthorName({ author: CLAUDE })).toBe('Claude Code');
-    expect(messageAuthorName({ author: SCRIPT, wakes: true })).toBe('An agent');
+    // One that woke with no session, host or name: the mark (by the author) draws the terminal, so the name agrees.
+    expect(messageAuthorName({ author: SCRIPT, wakes: true })).toBe('Script');
+    expect(isScriptAuthor(SCRIPT)).toBe(true);
     expect(messageAuthorName({ author: { kind: 'person' } as InboxAuthor })).toBe('An agent');
   });
 
@@ -248,6 +250,31 @@ describe('drawn', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(el.querySelector('textarea')!.getAttribute('aria-label')).toBe('Reply to Claude Code');
+  });
+
+  test.skipIf(!hasDom)("a thread only a script wrote in: the reply box's answer groups are Script's messages, never An agent's", async () => {
+    const { ThreadPane } = await import('./components/Thread');
+    const asked = (id: string, seq: number, prompt: string): InboxMessageWire => ({
+      ...message(id, SCRIPT, seq, prompt, id === 'msg_1' ? null : 'msg_1'),
+      questions: [
+        {
+          key: 'q-1', position: 0, kind: 'single', prompt, context: null, choices: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }], recommendation: null, suggested_text: null, stopped: null, holds_up: [],
+          asked_by_agent_id: null, orphaned: false, state: 'picked', revision: 1, sent_revision: 0, picked_by: null, picked_at: null, sent_reply_id: null, message_id: id, superseded_by: null,
+          answer: { v: 1, key: 'q-1', kind: 'single', prompt, selected: ['yes'] },
+        },
+      ],
+    }) as unknown as InboxMessageWire;
+    const el = await draw(<ThreadPane thread={thread([asked('msg_1', 1, 'Clear the snapshots?'), asked('msg_2', 2, 'Page Bob Tully?')])} {...threadProps} />);
+    // Picked answers wait in a draft: open it.
+    const edit = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Edit draft')!;
+    act(() => edit.click());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const labels = [...el.querySelectorAll('[aria-label]')].map((n) => n.getAttribute('aria-label')!).filter((l) => /'s message, /.test(l));
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels.every((l) => l.includes("Script's message, "))).toBe(true);
+    expect(el.textContent).not.toContain("An agent's message");
   });
 
   test.skipIf(!hasDom)("a reply's quote of a script's post names Script beside its terminal", async () => {
