@@ -9,7 +9,8 @@
  * the wrong computer; the other computer's list not hearing the change; a draw request about a linked machine's
  * project refused or kept here; a hand-back from the other computer's agent lost (`no_request`) or applied to the wrong
  * computer; an agent's or a script's bare call setting a linked machine's picture; either direction working without
- * the other.
+ * the other. A look picked in the mark's picker (a hue): not kept on the project's machine, not in the other
+ * computer's list, or taking the drawn picture's place nowhere; the picker's sources not readable through the door.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -115,6 +116,15 @@ describe("a project's picture across linked machines", () => {
       expect((await handBack(b.port, other.body.request, dataUrl(drawnOnB))).body).toMatchObject({ applied: true, target: "project" });
       expect(await pictureOf(a.port, onA.id)).toBe(drawnOnB);
       await waitFor("A's picture key on B", async () => typeof (await keyOn(b.port, onA.id)) === "number", 15_000);
+
+      // A hue from A's window on B's project: kept on B in place of the drawn picture, and in A's merged list.
+      expect((await press(a.port, `/api/inbox/m/${bId}/projects/${onB.id}/picture`, { look: "hue:6" })).status).toBe(200);
+      expect(await pictureOf(b.port, onB.id)).toBeNull();
+      const lookOn = async (port: number, project: string) => ((await get(port, "/api/inbox/threads?machines=1")).projects as Json[] | undefined)?.find((p) => p.id === project)?.look ?? null;
+      await waitFor("B's look on A", async () => (await lookOn(a.port, onB.id)) === "hue:6", 15_000);
+      expect(await lookOn(b.port, onB.id)).toBe("hue:6");
+      // The picker's sources, read through B's door.
+      expect(await get(a.port, `/api/inbox/m/${bId}/projects/${onB.id}/picture/sources`)).toEqual({ repo: false, github: false });
 
       // Remove picture from B's window on A's project: gone on A.
       expect((await press(b.port, `/api/inbox/m/${aId}/projects/${onA.id}/picture`, { picture: null })).status).toBe(200);

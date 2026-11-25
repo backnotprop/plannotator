@@ -233,6 +233,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^whats-new\/image$/, window: () => "/api/inbox/whats-new/image" },
   // A project's picture (a logo, read only): a linked machine's window shows that machine's project rows with it.
   { method: "GET", route: /^projects\/([^/]+)\/picture$/, window: (m) => `/api/inbox/projects/${m[1]}/picture` },
+  // Which picture sources a project has (its mark's picker): a linked machine's window offers them for this Inbox's projects.
+  { method: "GET", route: /^projects\/([^/]+)\/picture\/sources$/, window: (m) => `/api/inbox/projects/${m[1]}/picture/sources`, machineOnly: true },
   // The archived threads (Settings' Archived block), read only; before threads/:id, which would also match it.
   { method: "GET", route: /^threads\/archived$/, window: () => "/api/inbox/threads/archived" },
   { method: "GET", route: /^threads\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}` },

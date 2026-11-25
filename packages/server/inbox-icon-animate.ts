@@ -102,6 +102,8 @@ function readRequests(file: string): IconAnimateRequest[] {
 export interface IconAnimateProjects {
   has: (projectId: string) => boolean;
   uploadedAt: (projectId: string) => number | undefined;
+  /** The look picked for the project in its mark's picker (a hue or a picture source), when one is. */
+  lookOf?: (projectId: string) => string | undefined;
   setUpload: (projectId: string, bytes: Uint8Array) => { ok: true; at: number } | { ok: false; reason: "not_image" | "too_big" | "not_saved" };
   /** A project's picture changed: every window, and every linked machine, reads the projects again. */
   changed: () => void;
@@ -151,8 +153,11 @@ export function createInboxIconAnimate(options: {
     if (!isInboxAgentFaceId(given.agent)) throw new InboxError("validation_error", "agent: the agent's id.", { field: "agent" });
     return { agent: given.agent, sessions: cleanInboxFaceSessions(given.sessions, given.agent) };
   };
-  /** What a project showed when asked: its picture's time, or null with none set. */
-  const projectShown = (project: string) => options.projects?.uploadedAt(project) ?? null;
+  /** What a project showed when asked: its picture's time, else its picked look, or null with neither. */
+  const projectShown = (project: string): number | string | null => {
+    const look = options.projects?.lookOf?.(project);
+    return options.projects?.uploadedAt(project) ?? (look ? `look:${look}` : null);
+  };
 
   const keep = (request: Omit<IconAnimateRequest, "id" | "result" | "at">): Response => {
     const kept: IconAnimateRequest = { id: `ia_${randomBytes(12).toString("hex")}`, ...request, result: null, at: now() };
@@ -206,7 +211,7 @@ export function createInboxIconAnimate(options: {
 
     if (request.project !== undefined) {
       const projects = options.projects;
-      const showing = projects?.uploadedAt(request.project) ?? null;
+      const showing = projectShown(request.project);
       const applied = !!projects && projects.has(request.project) && (showing === request.shown || (request.result_at !== undefined && showing === request.result_at));
       const set = applied ? projects.setUpload(request.project, bytes!) : null;
       if (set && !set.ok) throw new InboxError(set.reason === "not_saved" ? "config_not_saved" : "validation_error", set.reason === "not_saved" ? "The picture did not change." : set.reason === "too_big" ? AGENT_ICON_TOO_BIG : AGENT_ICON_NOT_IMAGE, { field: "picture" });

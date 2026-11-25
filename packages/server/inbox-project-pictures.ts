@@ -2,7 +2,10 @@
  * A project's picture for its letter mark (approval "inbox-letter-marks", 2026-11-07; Settings → Rows, all off by
  * default). In order, the first one there:
  *
- * 1. A picture someone set (the project's ⋯ menu "Set picture…"), kept in the data dir per project.
+ * 0. A look someone picked for this project in its mark's picker, kept in `looks.json`: a hue (`hue:0` to `hue:7`, no
+ *    picture: the letters in that hue), the repo's logo (`repo`) or the GitHub owner's picture (`github`), whatever
+ *    the Rows switches say. Nothing else is read then; a picked source the project lacks shows its letters.
+ * 1. A picture someone set (the project's ⋯ menu "Set picture…", the icon dialog), kept in the data dir per project.
  * 2. "Logo from the repo" (a switch): a favicon or logo found inside the project's own folder. Read from disk only,
  *    never the network.
  * 3. "GitHub pictures" (a switch, off by default): the owner's picture, for a project whose `origin` is on
@@ -10,6 +13,8 @@
  *    `https://avatars.githubusercontent.com/<owner>?s=64`, once per owner, kept in the data dir and fetched again
  *    after a week (the kept one is served if that fails). A failed fetch is remembered for an hour.
  * 4. None: the window draws the letters.
+ *
+ * A look and a set picture rule each other out: setting one takes the other away, and Remove picture takes both.
  *
  * The window's CSP stays `img-src 'self' data: blob:`: every picture is served from the Inbox's own origin.
  *
@@ -24,6 +29,14 @@ import type { InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { readCapped } from "./inbox-card-favicons";
 
 export type ProjectPictureFrom = "upload" | "repo" | "github";
+/** A look picked for one project: a letter-mark hue, or one picture source. */
+export type ProjectLook = `hue:${number}` | "repo" | "github";
+export const PROJECT_HUES = 8;
+export function isProjectLook(value: unknown): value is ProjectLook {
+  if (value === "repo" || value === "github") return true;
+  const hue = typeof value === "string" ? /^hue:([0-7])$/.exec(value) : null;
+  return hue !== null;
+}
 export interface ProjectPicture {
   type: string;
   body: Uint8Array<ArrayBuffer>;
@@ -230,9 +243,17 @@ export function pictureSources(rows: readonly string[], params: URLSearchParams)
 export interface ProjectPictures {
   /** When the project's uploaded picture was set (ms), or undefined: the window's key for it. */
   uploadedAt(projectId: string): number | undefined;
+  /** The look picked for the project, or undefined. */
+  lookOf(projectId: string): ProjectLook | undefined;
+  /** Pick a look: the uploaded picture is taken away. False when it could not be kept. */
+  setLook(projectId: string, look: ProjectLook): boolean;
+  /** Which picture sources the project has (the repo's logo; the GitHub owner's picture, kept or allowed), never fetching. */
+  sources(project: { id: string; root: string }, use: { github: boolean; repo: () => InboxProjectRepo | null | Promise<InboxProjectRepo | null> }): Promise<{ repo: boolean; github: boolean }>;
+  /** One source's picture alone, for the picker's places: GitHub's is fetched only when `use.github` or the project's look is `github`. */
+  source(project: { id: string; root: string }, from: "repo" | "github", use: { github: boolean; repo: () => InboxProjectRepo | null | Promise<InboxProjectRepo | null> }): Promise<ProjectPicture | null>;
   /** Keep an uploaded picture (sniffed: PNG, JPEG, GIF, WebP, SVG, ICO, AVIF or BMP; at most 512 KB). */
   setUpload(projectId: string, bytes: Uint8Array): { ok: true; at: number } | { ok: false; reason: "not_image" | "too_big" | "not_saved" };
-  /** Drop the uploaded picture; true when there was one. */
+  /** Drop the uploaded picture and the look; true when there was either. */
   removeUpload(projectId: string): boolean;
   /** The project's picture in order (uploaded, the repo's logo when `logo`, the GitHub owner's when `github`), or null. */
   get(project: { id: string; root: string }, use: { logo: boolean; github: boolean; repo: () => InboxProjectRepo | null | Promise<InboxProjectRepo | null> }): Promise<ProjectPicture | null>;
@@ -254,6 +275,29 @@ export function createProjectPictures(options: ProjectPictureOptions): ProjectPi
   const repoLogos = new Map<string, { at: number; found: { type: string; body: Uint8Array<ArrayBuffer> } | null }>();
   /** Each uploaded picture's time, read from disk once. */
   let uploads: Map<string, number> | null = null;
+  const looksFile = join(options.dir, "looks.json");
+  /** Each project's picked look, read from disk once. */
+  let looks: Map<string, ProjectLook> | null = null;
+  const lookMap = (): Map<string, ProjectLook> => {
+    if (looks) return looks;
+    looks = new Map();
+    try {
+      const file = JSON.parse(readFileSync(looksFile, "utf8")) as { v?: unknown; looks?: Record<string, unknown> };
+      for (const [id, look] of Object.entries(file.v === 1 && file.looks && typeof file.looks === "object" ? file.looks : {})) if (PROJECT_ID.test(id) && isProjectLook(look)) looks.set(id, look);
+    } catch {
+      // No file yet: no looks.
+    }
+    return looks;
+  };
+  const saveLooks = (): boolean => {
+    try {
+      mkdirSync(options.dir, { recursive: true });
+      writeFileSync(looksFile, `${JSON.stringify({ v: 1, looks: Object.fromEntries(lookMap()) })}\n`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   const readMeta = (file: string): { type: string; at: number } | null => {
     try {
@@ -346,6 +390,12 @@ export function createProjectPictures(options: ProjectPictureOptions): ProjectPi
     }
   }
 
+  /** The owner's kept picture, however old, without asking GitHub. */
+  const keptGithub = (owner: string): ProjectPicture | null => {
+    const kept = readPicture(join(githubDir, owner.toLowerCase()), GITHUB_TYPES);
+    return kept ? { type: kept.type, body: kept.body, from: "github" } : null;
+  };
+
   function github(owner: string): Promise<ProjectPicture | null> {
     const key = owner.toLowerCase();
     const base = join(githubDir, key);
@@ -374,6 +424,16 @@ export function createProjectPictures(options: ProjectPictureOptions): ProjectPi
     return run;
   }
 
+  const sourceOf: ProjectPictures["source"] = async (project, from, use) => {
+    if (from === "repo") {
+      const logo = repoLogo(project.root);
+      return logo ? { ...logo, from: "repo" } : null;
+    }
+    const owner = githubOwner(await use.repo());
+    if (!owner) return null;
+    return use.github || lookMap().get(project.id) === "github" ? github(owner) : keptGithub(owner);
+  };
+
   return {
     uploadedAt: (projectId) => uploadTimes().get(projectId),
     setUpload(projectId, bytes) {
@@ -385,11 +445,31 @@ export function createProjectPictures(options: ProjectPictureOptions): ProjectPi
       const at = Math.max(now(), (uploadTimes().get(projectId) ?? 0) + 1);
       if (!writePicture(uploadDir, projectId, type, bytes, at)) return { ok: false, reason: "not_saved" };
       uploadTimes().set(projectId, at);
+      if (lookMap().delete(projectId)) saveLooks();
       return { ok: true, at };
     },
+    lookOf: (projectId) => lookMap().get(projectId),
+    setLook(projectId, look) {
+      if (!PROJECT_ID.test(projectId) || !isProjectLook(look)) return false;
+      lookMap().set(projectId, look);
+      if (!saveLooks()) return false;
+      if (uploadTimes().delete(projectId)) {
+        for (const ext of [".img", ".json"]) rmSync(join(uploadDir, `${projectId}${ext}`), { force: true });
+      }
+      return true;
+    },
+    async sources(project, use) {
+      const repo = !!repoLogo(project.root);
+      const owner = githubOwner(await use.repo());
+      const github = !!owner && (use.github || lookMap().get(project.id) === "github" || keptGithub(owner) !== null);
+      return { repo, github };
+    },
+    source: sourceOf,
     removeUpload(projectId) {
       if (!PROJECT_ID.test(projectId)) return false;
-      const had = uploadTimes().delete(projectId);
+      const hadLook = lookMap().delete(projectId);
+      if (hadLook) saveLooks();
+      const had = uploadTimes().delete(projectId) || hadLook;
       for (const ext of [".img", ".json"]) {
         try {
           rmSync(join(uploadDir, `${projectId}${ext}`), { force: true });
@@ -400,6 +480,10 @@ export function createProjectPictures(options: ProjectPictureOptions): ProjectPi
       return had;
     },
     async get(project, use) {
+      // A look picked for this project rules alone: its hue draws letters, a source draws that source or letters.
+      const look = PROJECT_ID.test(project.id) ? lookMap().get(project.id) : undefined;
+      if (look === "repo" || look === "github") return sourceOf(project, look, use);
+      if (look) return null;
       if (PROJECT_ID.test(project.id) && uploadTimes().has(project.id)) {
         const upload = readPicture(join(uploadDir, project.id), UPLOAD_TYPES);
         if (upload) return { type: upload.type, body: upload.body, from: "upload" };
