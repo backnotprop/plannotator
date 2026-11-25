@@ -1,12 +1,12 @@
 diff --git a/packages/diffs/package.json b/packages/diffs/package.json
-index be0fba76..c14ff6a8 100644
+index be0fba76..a4211d21 100644
 --- a/packages/diffs/package.json
 +++ b/packages/diffs/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "@pierre/diffs",
 -  "version": "1.7.0-beta.3",
-+  "version": "1.7.0-beta.3-sem.8",
++  "version": "1.7.0-beta.3-sem.9",
    "license": "apache-2.0",
    "files": [
      "dist",
@@ -249,6 +249,205 @@ index 0f1512fc..36ad8ffe 100644
      for (const child of content.children) {
        if (!(child instanceof HTMLElement)) continue;
        if (child.dataset.lineAnnotation !== FILE_ANNOTATION_DOM_KEY) {
+diff --git a/packages/diffs/src/dom/ColumnReconciler.ts b/packages/diffs/src/dom/ColumnReconciler.ts
+index 94fd6d5e..82c061ec 100644
+--- a/packages/diffs/src/dom/ColumnReconciler.ts
++++ b/packages/diffs/src/dom/ColumnReconciler.ts
+@@ -40,6 +40,9 @@ export interface ReconcileResult {
+  * memoization decides the cost. A change that moved no row skips the walk
+  * and patches the rows it touched by key.
+  *
++ * Only the rows it wrote are walked: a node the layout did not draw, in
++ * either column, is stepped over and left where it is.
++ *
+  * A focused element with a `data-focus-key` keeps focus across a write that
+  * replaces it: the element with the same key in the new rows takes focus.
+  */
+@@ -47,10 +50,10 @@ export class ColumnReconciler {
+   readonly #gutter: HTMLElement;
+   readonly #content: HTMLElement;
+   readonly #rows = new Map<RowKey, Row>();
++  // The key of every content cell this reconciler wrote or adopted. A child of
++  // the content column without one is a node the layout did not draw (one a
++  // browser extension put there, say): walks step over it and leave it be.
+   readonly #keys = new WeakMap<Element, RowKey>();
+-  // The specs the children were written from, until `#rows` is built from
+-  // them on the first incremental reconcile.
+-  #unindexed: { specs: readonly RowSpec[]; trusted: boolean } | undefined;
+   #hasRows = false;
+   // The `data-focus-key` of the element that had focus in this column when a
+   // write began, until the write ends.
+@@ -66,8 +69,7 @@ export class ColumnReconciler {
+     this.#rememberFocus();
+     this.#gutter.innerHTML = hastToHtml(specs.map((spec) => spec.gutter));
+     this.#content.innerHTML = hastToHtml(specs.map((spec) => spec.content));
+-    this.#rows.clear();
+-    this.#unindexed = { specs, trusted: true };
++    this.#index(specs, true);
+     this.#hasRows = true;
+     this.#restoreFocus();
+   }
+@@ -85,8 +87,7 @@ export class ColumnReconciler {
+     ) {
+       return false;
+     }
+-    this.#rows.clear();
+-    this.#unindexed = { specs, trusted: false };
++    this.#index(specs, false);
+     this.#hasRows = true;
+     return true;
+   }
+@@ -95,7 +96,6 @@ export class ColumnReconciler {
+   elementFor(
+     key: RowKey
+   ): { gutter: HTMLElement; content: HTMLElement } | undefined {
+-    this.#index();
+     return this.#rows.get(key);
+   }
+
+@@ -108,7 +108,6 @@ export class ColumnReconciler {
+   removeStale(specs: readonly RowSpec[]): void {
+     if (!this.#hasRows) return;
+     this.#rememberFocus();
+-    this.#index();
+     const keep = new Set<RowKey>();
+     for (const spec of specs) keep.add(spec.key);
+     for (const [key, row] of this.#rows) {
+@@ -139,7 +138,6 @@ export class ColumnReconciler {
+       };
+     }
+     this.#rememberFocus();
+-    this.#index();
+     const result = patched == null ? this.#walk(specs) : this.#patch(patched);
+     this.#restoreFocus();
+     return result;
+@@ -224,21 +222,35 @@ export class ColumnReconciler {
+       nextKeys.add(spec.key);
+     }
+
+-    let cursor = content.firstElementChild;
+-    let gutterCursor = gutter.firstElementChild;
++    // The walk goes over the content column's rows only, stepping over any
++    // node the layout did not draw. The gutter is not walked: the gutter cell
++    // to insert before is the one of the row at the content cursor, so a node
++    // among the gutter rows cannot put the two columns out of step.
++    const keys = this.#keys;
++    const rowAt = (element: Element | null): Element | null => {
++      while (element != null && !keys.has(element)) {
++        element = element.nextElementSibling;
++      }
++      return element;
++    };
++    const gutterAt = (row: Element | null): Element | null => {
++      if (row == null) return null;
++      const key = keys.get(row);
++      return (key == null ? undefined : rows.get(key)?.gutter) ?? null;
++    };
++    let cursor = rowAt(content.firstElementChild);
+     const advance = () => {
+-      cursor = cursor?.nextElementSibling ?? null;
+-      gutterCursor = gutterCursor?.nextElementSibling ?? null;
++      cursor = rowAt(cursor?.nextElementSibling ?? null);
+     };
+     const removeAtCursor = () => {
+-      const key = this.#keyOf(cursor);
+-      const next = cursor?.nextElementSibling ?? null;
+-      const nextGutter = gutterCursor?.nextElementSibling ?? null;
+-      cursor?.remove();
+-      gutterCursor?.remove();
+-      rows.delete(key);
+-      cursor = next;
+-      gutterCursor = nextGutter;
++      const current = cursor;
++      if (current == null) return;
++      const key = keys.get(current);
++      const row = key == null ? undefined : rows.get(key);
++      cursor = rowAt(current.nextElementSibling);
++      current.remove();
++      row?.gutter.remove();
++      if (key != null) rows.delete(key);
+     };
+
+     // Rows to insert before the cursor, written as one string per column.
+@@ -247,7 +259,7 @@ export class ColumnReconciler {
+       if (pending.length === 0) return;
+       const gutterCells = insertRun(
+         gutter,
+-        gutterCursor,
++        gutterAt(cursor),
+         pending.map((spec) => spec.gutter)
+       );
+       const contentCells = insertRun(
+@@ -271,7 +283,7 @@ export class ColumnReconciler {
+     };
+
+     for (const spec of specs) {
+-      while (cursor != null && !nextKeys.has(this.#keyOf(cursor))) {
++      while (cursor != null && !nextKeys.has(keys.get(cursor)!)) {
+         removeAtCursor();
+       }
+       const existing = rows.get(spec.key);
+@@ -283,7 +295,7 @@ export class ColumnReconciler {
+       if (existing.content === cursor) {
+         advance();
+       } else {
+-        gutter.insertBefore(existing.gutter, gutterCursor);
++        gutter.insertBefore(existing.gutter, gutterAt(cursor));
+         content.insertBefore(existing.content, cursor);
+       }
+       this.#patchRow(existing, spec, result);
+@@ -320,12 +332,14 @@ export class ColumnReconciler {
+     row.spec = spec;
+   }
+
+-  // Builds the key map from the specs the columns were last written from.
+-  #index(): void {
+-    const unindexed = this.#unindexed;
+-    if (unindexed == null) return;
+-    this.#unindexed = undefined;
+-    const { specs, trusted } = unindexed;
++  // Builds the key map from the specs the columns were just written from (or,
++  // when not `trusted`, the rows they hold stand in for), matched by
++  // position. It runs right after the write, while the columns hold only
++  // those rows: anything put among them later is not a row and is stepped
++  // over. Rows the columns lack are left out of the map, so the next
++  // reconcile inserts them.
++  #index(specs: readonly RowSpec[], trusted: boolean): void {
++    this.#rows.clear();
+     let gutterCell = this.#gutter.firstElementChild;
+     let contentCell = this.#content.firstElementChild;
+     for (const spec of specs) {
+@@ -333,9 +347,7 @@ export class ColumnReconciler {
+         !(gutterCell instanceof HTMLElement) ||
+         !(contentCell instanceof HTMLElement)
+       ) {
+-        throw new Error(
+-          'ColumnReconciler: the columns have fewer rows than their specs'
+-        );
++        return;
+       }
+       this.#rows.set(spec.key, {
+         gutter: gutterCell,
+@@ -346,19 +358,6 @@ export class ColumnReconciler {
+       gutterCell = gutterCell.nextElementSibling;
+       contentCell = contentCell.nextElementSibling;
+     }
+-    if (gutterCell != null || contentCell != null) {
+-      throw new Error(
+-        'ColumnReconciler: the columns have more rows than their specs'
+-      );
+-    }
+-  }
+-
+-  #keyOf(element: Element | null): RowKey {
+-    const key = element == null ? undefined : this.#keys.get(element);
+-    if (key == null) {
+-      throw new Error('ColumnReconciler: a row on screen has no key');
+-    }
+-    return key;
+   }
+ }
+
 diff --git a/packages/diffs/src/layout/DiffLayout.ts b/packages/diffs/src/layout/DiffLayout.ts
 index 79f7703b..10185460 100644
 --- a/packages/diffs/src/layout/DiffLayout.ts
@@ -564,6 +763,31 @@ index 2ed8c725..eff3d6e4 100644
              }
            }
          }
+diff --git a/packages/diffs/src/managers/ResizeManager.ts b/packages/diffs/src/managers/ResizeManager.ts
+index b87aecf8..e88612ec 100644
+--- a/packages/diffs/src/managers/ResizeManager.ts
++++ b/packages/diffs/src/managers/ResizeManager.ts
+@@ -1,4 +1,5 @@
+ import type { ObservedAnnotationNodes, ObservedGridNodes } from '../types';
++import { getCodeColumns } from '../utils/getCodeColumns';
+
+ interface CodeColumnUpdate {
+   codeInlineSize?: number;
+@@ -123,10 +124,10 @@ export class ResizeManager {
+         );
+       }
+
+-      let numberElement = codeElement.firstElementChild;
+-      if (!(numberElement instanceof HTMLElement)) {
+-        numberElement = null;
+-      }
++      // The line-number column, found by its attribute: a node the layout
++      // did not draw may sit first in the code element.
++      const numberElement: HTMLElement | null =
++        getCodeColumns(codeElement)?.gutter ?? null;
+       if (item != null) {
+         this.observedNodes.set(codeElement, item);
+         observedNodes.delete(codeElement);
 diff --git a/packages/diffs/src/renderers/DiffHunksRenderer.ts b/packages/diffs/src/renderers/DiffHunksRenderer.ts
 index f4dbfccf..0509c04b 100644
 --- a/packages/diffs/src/renderers/DiffHunksRenderer.ts
