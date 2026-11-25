@@ -306,8 +306,11 @@ async function walk(page: Page, run: Run, tag: 'desktop' | 'phone'): Promise<voi
   await expect(dialog).toBeHidden();
   await shot(page, tag, '06-file-open-dialog-in-its-pill');
 
-  // 07 · The file closed: the dialog is back on the same card.
-  await pane.getByRole('button', { name: /^Close / }).first().click();
+  // 07 · The file closed: the dialog is back on the same card. A phone shows the file full screen only: its way out is
+  // the bar's Back to the thread (the side-by-side header's × is not drawn there).
+  const closeFile = tag === 'phone' ? pane.getByRole('button', { name: 'Back to the thread', exact: true }) : pane.getByRole('button', { name: /^Close / }).first();
+  await expect(closeFile).toBeVisible();
+  await closeFile.click();
   await expect(dialog).toBeVisible();
   await expect(card(page)).toHaveAttribute('data-decision-card', cardId!);
   await expect(page.locator('[data-decision-pill]')).toHaveCount(0);
