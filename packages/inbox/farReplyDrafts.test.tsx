@@ -634,3 +634,46 @@ for (const choice of ['Keep mine', 'Discard mine'] as const) {
     await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
   });
 }
+
+test.skipIf(!hasDom)("a held conflict's words after another window saved on the Mini's draft: a new window offers them too, and Keep mine of words edited since settles them for good", async () => {
+  linked(['reply-drafts']);
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'Start.');
+  await until(() => mini.drafts.get(FAR)?.body === 'Start.', 'the first save on the Mini');
+  peer.state = 'offline';
+  linked(['reply-drafts']);
+  typeOn(el, ' Mine from the Studio.');
+  await until(() => forward.read(peer, FAR)?.draft?.body === 'Start. Mine from the Studio.', 'the save held here');
+  await typedOnTheMini(FAR, 'Start. Theirs from the Mini.');
+  peer.state = 'online';
+  linked(['reply-drafts']);
+  await act(async () => forward.drain(MINI));
+  // Another window here, which never showed the conflict, saves on the Mini's draft before it reads again.
+  const theirs = mini.drafts.get(FAR)!;
+  const other = await forward.write(peer, FAR, false, { body: `${theirs.body} A second window.`, base: theirs.updated_at, files_add: [], files_remove: [], files_place: [] });
+  expect('far' in other && other.far.status).toBe(200);
+  // A new window opening the thread offers the words too: the box holds them, the conflict line beside the Mini's.
+  const next = await newPage();
+  await settle(6);
+  if (!box(next)) await reply(next);
+  await until(() => conflictShown(next), 'the conflict line in a new window');
+  expect(box(next)!.value).toBe('Start. Mine from the Studio.');
+  // Edited (some words deleted), then Keep mine: those words are the draft, and nothing is offered again.
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(box(next)!, 'Start. Mine.');
+    box(next)!.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => next.querySelector<HTMLButtonElement>('[data-draft-keep-mine]')!.click());
+  await until(() => mini.drafts.get(FAR)?.body === 'Start. Mine.', 'Keep mine on the Mini');
+  await until(() => forward.notLanded(MINI, FAR) === null, 'the offered words settled');
+  const again = await newPage();
+  await settle(6);
+  if (!box(again)) await reply(again);
+  await until(() => box(again)?.value === 'Start. Mine.', 'the kept words in a new window');
+  await settle(10);
+  expect(conflictShown(again)).toBe(false);
+  await discardInBox(again);
+  await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
+});

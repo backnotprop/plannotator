@@ -313,6 +313,53 @@ describe("a linked machine's reply draft, from this Inbox", () => {
     expect(l.heldFiles()).toEqual([]);
   });
 
+  for (const choice of ["Keep mine", "Discard mine"] as const) {
+    test(`a held conflict's words stay offered while another window that never showed them saves and discards, online and away, through a restart; only ${choice} settles them`, async () => {
+      const l = linked();
+      l.peer.state = "online";
+      const start = await answerOf(await l.save({ body: "Shared start", base: null }));
+      l.peer.state = "offline";
+      const mine = await answerOf(await l.save({ body: "Shared start, typed on the Studio", base: start.body.draft.updated_at, base_body: "Shared start" }));
+      l.far.store.saveReplyDraft(l.far.thread, { body: "Shared start, typed on the MacBook", base: start.body.draft.updated_at });
+      await l.back();
+      const offered = { words: "Shared start, typed on the Studio", version: mine.body.draft.updated_at as string, conflict: true as const };
+      expect(l.drafts.notLanded(MACHINE, l.far.thread)).toEqual(offered);
+      // Another window here, which read the MacBook's draft before the conflict was offered, saves on it: it lands there.
+      let theirs = l.far.store.replyDraft(l.far.thread)!;
+      const other = await answerOf(await l.save({ body: `${theirs.body}, and a second window`, base: theirs.updated_at, base_body: theirs.body }));
+      expect(other.status).toBe(200);
+      expect(l.far.store.replyDraft(l.far.thread)?.body).toBe("Shared start, typed on the MacBook, and a second window");
+      expect(l.drafts.notLanded(MACHINE, l.far.thread)).toEqual(offered);
+      // Away, the same window saves again (held here) and Discards: the words are still offered, through a restart.
+      theirs = l.far.store.replyDraft(l.far.thread)!;
+      l.peer.state = "offline";
+      const held = await answerOf(await l.save({ body: `${theirs.body}, held`, base: theirs.updated_at, base_body: theirs.body }));
+      expect(held.status).toBe(200);
+      expect(l.drafts.read(l.peer, l.far.thread)?.not_landed).toEqual(offered);
+      l.restart();
+      expect(l.drafts.read(l.peer, l.far.thread)?.not_landed).toEqual(offered);
+      await l.back();
+      expect(l.far.store.replyDraft(l.far.thread)?.body).toBe("Shared start, typed on the MacBook, and a second window, held");
+      expect(l.drafts.notLanded(MACHINE, l.far.thread)).toEqual(offered);
+      theirs = l.far.store.replyDraft(l.far.thread)!;
+      expect(await answerOf(await l.drafts.write(l.peer, l.far.thread, true, { base: theirs.updated_at }))).toMatchObject({ status: 200 });
+      expect(l.far.store.replyDraft(l.far.thread)).toBeNull();
+      expect(l.drafts.notLanded(MACHINE, l.far.thread)).toEqual(offered);
+      expect(l.drafts.overlay([l.row()])[0]!.unsent?.reply_at).toBe(offered.version);
+      if (choice === "Keep mine") {
+        // A window that shows them saves them: they are the draft there, and nothing is offered any more.
+        const kept = await answerOf(await l.save({ body: offered.words, base: null }));
+        expect(kept.status).toBe(200);
+        expect(l.far.store.replyDraft(l.far.thread)?.body).toBe(offered.words);
+      } else {
+        expect(await answerOf(await l.drafts.write(l.peer, l.far.thread, true, { not_landed: offered.version }))).toEqual({ status: 200, body: { ok: true, deleted: false } });
+        expect(l.far.store.replyDraft(l.far.thread)).toBeNull();
+      }
+      expect(l.drafts.notLanded(MACHINE, l.far.thread)).toBeNull();
+      expect(l.heldFiles()).toEqual([]);
+    });
+  }
+
   test("a held save whose draft was discarded there meanwhile becomes the draft; the discarded words do not come back", async () => {
     const l = linked();
     l.peer.state = "online";

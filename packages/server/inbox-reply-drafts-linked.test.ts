@@ -5,11 +5,18 @@
  * window reads it, this list's row says Draft and the Drafts page lists it; a save there reads here; Discard deletes it
  * there; a Send that carries it clears it there; Take back puts the words back in the draft there and here; with that
  * machine asleep, the save is held (nothing "waiting", no notice), read back here through a restart of this Inbox, and
- * lands there when it is back. Starts Inboxes: CI only.
+ * lands there when it is back. The person's words and files are never lost, doubled, brought back or written over:
+ * the paste removed while away lands as left; a held Discard spares newer words typed there; a held save that meets
+ * newer words there is offered, never joined (and becomes the draft when the draft there was discarded); a file swept
+ * there is named; a reply held with the draft settles it only once delivered, and a refused one gives the words back;
+ * Unlink from the other computer hands every held word, file name and quote to "Not sent". "Meanwhile there" is made
+ * by stopping this Inbox while that machine's own window writes. Starts Inboxes: CI only.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxWorld, destroyInboxWorld, registry, removeStubbedHtml, startInbox, stopInbox, stubBuiltHtml, waitFor, worldEnv, type InboxWorld } from "../../tests/helpers/inbox-world";
 
 type Json = Record<string, any>;
@@ -57,6 +64,45 @@ const draftHere = async (here: Machine, there: Machine) => (await getJson(here, 
 const saveHere = (here: Machine, there: Machine, body: string, base: string | null, baseBody: string | null = null) =>
   windowPost(here, `/api/inbox/m/${there.id}/threads/${there.message.thread}/draft`, { body, base, base_body: baseBody, files_add: [], files_remove: [], files_place: [] }, there.message.thread);
 const stateOf = async (viewer: Machine, other: Machine) => ((await getJson(viewer, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === other.id)?.state;
+const heldFor = async (m: Machine, other: Machine) => ((await getJson(m, "/api/inbox/machines")).machines as Json[]).find((x) => x.id === other.id)?.drafts_held;
+
+const draftPath = (there: Machine) => `/api/inbox/m/${there.id}/threads/${there.message.thread}/draft`;
+/** The whole read here: the draft and any words of the person's it does not hold (`not_landed`). */
+const readHere = (here: Machine, there: Machine) => getJson(here, draftPath(there));
+const writeHere = (here: Machine, there: Machine, body: Json) => windowPost(here, draftPath(there), { files_add: [], files_remove: [], files_place: [], ...body }, there.message.thread);
+const draftOf = async (answer: Response): Promise<Json> => {
+  expect(answer.status).toBe(200);
+  return ((await answer.json()) as Json).draft as Json;
+};
+const discardHere = (here: Machine, there: Machine, body: Json = {}) => windowPost(here, `${draftPath(there)}/delete`, body, there.message.thread);
+/** That machine's own window writes its draft. */
+const typedThere = (there: Machine, body: string, base: string | null) => windowPost(there, `/api/inbox/threads/${there.message.thread}/draft`, { body, base, files_add: [], files_remove: [], files_place: [] });
+
+async function away(here: Machine, there: Machine) {
+  await stopInbox(there.w);
+  await waitFor(`${here.name} sees ${there.name} away`, async () => ((await stateOf(here, there)) === "offline" ? true : null), 30_000);
+}
+const seesOnline = (here: Machine, there: Machine) => waitFor(`${here.name} sees ${there.name} online`, async () => ((await stateOf(here, there)) === "online" ? true : null), 60_000);
+async function back(here: Machine, there: Machine) {
+  startInbox(there.w);
+  await seesOnline(here, there);
+}
+/** That machine wakes while this Inbox is down: its own window writes before this Inbox can land what it holds. */
+async function wakesWhileHereIsDown(here: Machine, there: Machine) {
+  await stopInbox(here.w);
+  startInbox(there.w);
+}
+/** A file the window here sends to that machine (a pasted text, a picture): it streams there, never held. */
+async function uploadHere(here: Machine, there: Machine, name: string, text: string): Promise<Json> {
+  const { serverSession } = await getJson(here, "/api/inbox/health");
+  const answer = await fetch(`${base(here)}/api/inbox/m/${there.id}/uploads?name=${encodeURIComponent(name)}&idempotency_key=up-${crypto.randomUUID()}&serverSession=${serverSession}`, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain", Origin: base(here) },
+    body: text,
+  });
+  expect(answer.status).toBe(200);
+  return ((await answer.json()) as Json).upload as Json;
+}
 
 describe("a reply draft on a linked machine's thread, two real Inboxes linked both ways", () => {
   let stubs: string[] = [];
@@ -154,7 +200,6 @@ describe("a reply draft on a linked machine's thread, two real Inboxes linked bo
   }, 60_000);
 
   test("that machine asleep: the saves are held (nothing waiting, no notice), read back through a restart here, and the newest lands when it is back, both ways", async () => {
-    const heldFor = async (m: Machine, other: Machine) => ((await getJson(m, "/api/inbox/machines")).machines as Json[]).find((x) => x.id === other.id)?.drafts_held;
     for (const [here, there] of [
       [A, B],
       [B, A],
@@ -185,5 +230,167 @@ describe("a reply draft on a linked machine's thread, two real Inboxes linked bo
       expect((await getJson(here, "/api/inbox/outbox")).notices).toEqual([]);
       await windowPost(here, `/api/inbox/m/${there.id}/threads/${there.message.thread}/draft/delete`, {}, there.message.thread);
     }
+  }, 300_000);
+
+  test("away, a long paste becomes a chip, autosaves, then the chip is removed and some words deleted: back, the draft lands as left and both sides agree, both ways", async () => {
+    for (const [here, there] of both()) {
+      await seesOnline(here, there);
+      // The paste's upload went there just before it slept (an upload is never held).
+      const paste = await uploadHere(here, there, "pasted-text.txt", "a long pasted line\n".repeat(300));
+      await away(here, there);
+      const typed = `Notes for the ${there.name}. `.repeat(20);
+      const chip = { upload_id: paste.upload_id, pasted: { at: typed.length, preview: "a long pasted line" } };
+      let draft = await draftOf(await writeHere(here, there, { body: typed, base: null, files_add: [chip], files_place: [chip] }));
+      expect(draft.files.map((f: Json) => f.upload_id)).toEqual([paste.upload_id]);
+      draft = await draftOf(await writeHere(here, there, { body: `${typed}And a last line.`, base: draft.updated_at, base_body: draft.body }));
+      const left = typed.slice(0, 120);
+      draft = await draftOf(await writeHere(here, there, { body: left, base: draft.updated_at, base_body: draft.body, files_remove: [paste.upload_id] }));
+      expect(draft.body).toBe(left);
+      expect(draft.files ?? []).toEqual([]);
+      expect((await readHere(here, there)).draft.body).toBe(left);
+      await back(here, there);
+      await waitFor(`the draft landed on the ${there.name}`, async () => ((await draftThere(there))?.body === left ? true : null), 60_000);
+      await waitFor("nothing held any more", async () => ((await heldFor(here, there)) === 0 ? true : null), 30_000);
+      const far = (await draftThere(there))!;
+      const seen = await readHere(here, there);
+      expect(far.files ?? []).toEqual([]);
+      expect(seen.draft).toMatchObject({ body: left, updated_at: far.updated_at });
+      expect(seen.draft.files ?? []).toEqual([]);
+      expect(seen.not_landed).toBeUndefined();
+      expect((await discardHere(here, there)).status).toBe(200);
+    }
+  }, 300_000);
+
+  test("a held Discard goes only for the draft thrown away: newer words typed there meanwhile stay, both ways", async () => {
+    for (const [here, there] of both()) {
+      await seesOnline(here, there);
+      const thrown = await draftOf(await writeHere(here, there, { body: `Thrown away on the ${here.name}`, base: null }));
+      await away(here, there);
+      expect((await discardHere(here, there, { base: thrown.updated_at })).status).toBe(200);
+      expect((await readHere(here, there)).draft).toBeNull();
+      await wakesWhileHereIsDown(here, there);
+      expect((await typedThere(there, `Newer words typed on the ${there.name}`, thrown.updated_at)).status).toBe(200);
+      startInbox(here.w);
+      await waitFor("the held Discard answered there", async () => ((await stateOf(here, there)) === "online" && (await heldFor(here, there)) === 0 ? true : null), 60_000);
+      expect((await draftThere(there))?.body).toBe(`Newer words typed on the ${there.name}`);
+      expect((await readHere(here, there)).draft?.body).toBe(`Newer words typed on the ${there.name}`);
+      expect((await discardHere(here, there)).status).toBe(200);
+    }
+  }, 300_000);
+
+  test("a held save that meets newer words there: the draft there stays and these words are offered, never joined (Discard mine lets them go); discarded there meanwhile, these words become the draft; both ways", async () => {
+    for (const [here, there] of both()) {
+      await seesOnline(here, there);
+      const start = await draftOf(await writeHere(here, there, { body: "Shared start", base: null }));
+      await away(here, there);
+      const mine = await draftOf(await writeHere(here, there, { body: `Shared start, typed on the ${here.name}`, base: start.updated_at, base_body: start.body }));
+      await wakesWhileHereIsDown(here, there);
+      expect((await typedThere(there, `Shared start, typed on the ${there.name}`, start.updated_at)).status).toBe(200);
+      startInbox(here.w);
+      const offered = await waitFor("the conflict offered here", async () => {
+        const read = await readHere(here, there);
+        return read.not_landed?.conflict ? read : null;
+      }, 60_000);
+      expect(offered.draft.body).toBe(`Shared start, typed on the ${there.name}`);
+      expect(offered.not_landed).toMatchObject({ words: mine.body, version: mine.updated_at, conflict: true });
+      expect((await draftThere(there))?.body).toBe(`Shared start, typed on the ${there.name}`);
+      // Discard mine: only these words go; the draft there stays.
+      expect((await discardHere(here, there, { not_landed: mine.updated_at })).status).toBe(200);
+      expect((await readHere(here, there)).not_landed).toBeUndefined();
+      expect((await draftThere(there))?.body).toBe(`Shared start, typed on the ${there.name}`);
+      expect(await heldFor(here, there)).toBe(0);
+
+      // Again, and this time the draft there is discarded meanwhile: these words are the draft.
+      const theirs = (await draftThere(there))!;
+      await away(here, there);
+      await draftOf(await writeHere(here, there, { body: `Only the ${here.name}'s words`, base: theirs.updated_at, base_body: theirs.body }));
+      await wakesWhileHereIsDown(here, there);
+      expect((await windowPost(there, `/api/inbox/threads/${there.message.thread}/draft/delete`, {})).status).toBe(200);
+      startInbox(here.w);
+      await waitFor(`the words landed on the ${there.name}`, async () => ((await draftThere(there))?.body === `Only the ${here.name}'s words` ? true : null), 60_000);
+      await waitFor("nothing held any more", async () => ((await heldFor(here, there)) === 0 ? true : null), 30_000);
+      expect((await readHere(here, there)).not_landed).toBeUndefined();
+      expect((await discardHere(here, there)).status).toBe(200);
+    }
+  }, 300_000);
+
+  test("a held save naming a file swept there before it landed: the words land and the read names the file as not attached, both ways", async () => {
+    for (const [here, there] of both()) {
+      await seesOnline(here, there);
+      const shot = await uploadHere(here, there, "screenshot.txt", "the pixels, as text");
+      await away(here, there);
+      const held = await draftOf(await writeHere(here, there, { body: "See the picture", base: null, files_add: [{ upload_id: shot.upload_id }] }));
+      expect(held.files.map((f: Json) => f.name)).toEqual(["screenshot.txt"]);
+      // While it sleeps that machine's day-old upload is swept.
+      removeInboxUploads(inboxDir(there.w.dataDir), [shot.upload_id]);
+      await back(here, there);
+      await waitFor(`the words landed on the ${there.name}`, async () => ((await draftThere(there))?.body === "See the picture" ? true : null), 60_000);
+      expect((await draftThere(there))?.files ?? []).toEqual([]);
+      const read = await waitFor("the swept file named here", async () => {
+        const seen = await readHere(here, there);
+        return seen.not_landed?.files?.length ? seen : null;
+      }, 30_000);
+      expect(read.not_landed.files.map((f: Json) => f.name)).toEqual(["screenshot.txt"]);
+      expect((await discardHere(here, there)).status).toBe(200);
+    }
+  }, 300_000);
+
+  test("a reply sent while the draft is held settles it only once delivered there; a refused reply gives its words back as the draft, both ways", async () => {
+    for (const [here, there] of both()) {
+      await seesOnline(here, there);
+      there.message = await agentAsks(there);
+      const seen = (await getJson(here, `/api/inbox/m/${there.id}/threads/${there.message.thread}`)).cursor as number;
+      const reply = (key: string, words: string, clear: string, seq: number) =>
+        windowPost(here, `/api/inbox/m/${there.id}/messages/${there.message.id}/reply`, { idempotency_key: key, words, questions: [], clear_draft: clear, seen_through_seq: seq }, there.message.thread);
+
+      await away(here, there);
+      const shipped = await draftOf(await writeHere(here, there, { body: `Ship it from the ${here.name}`, base: null }));
+      expect((await reply(`held-send-${here.name}`, shipped.body, shipped.updated_at, seen)).status).toBe(202);
+      // Waiting to be delivered: the sent words do not show as the draft, and they are still held, through a restart here.
+      expect((await readHere(here, there)).draft).toBeNull();
+      await stopInbox(here.w);
+      startInbox(here.w);
+      expect((await readHere(here, there)).draft).toBeNull();
+      expect(await heldFor(here, there)).toBe(1);
+      await back(here, there);
+      await waitFor("the reply delivered there", async () => ((await getJson(here, "/api/inbox/outbox")).waiting.length === 0 ? true : null), 60_000);
+      await waitFor("the held draft settled", async () => ((await heldFor(here, there)) === 0 ? true : null), 60_000);
+      expect(await draftThere(there)).toBeNull();
+      expect((await readHere(here, there)).draft).toBeNull();
+
+      // A reply that thread refuses (it moved on since the person read it): its words are the draft again, there too.
+      await away(here, there);
+      const late = await draftOf(await writeHere(here, there, { body: `Late words from the ${here.name}`, base: null }));
+      expect((await reply(`late-send-${here.name}`, late.body, late.updated_at, 0)).status).toBe(202);
+      expect((await readHere(here, there)).draft).toBeNull();
+      await back(here, there);
+      await waitFor("the refusal", async () => (((await getJson(here, "/api/inbox/outbox")).notices as Json[]).some((n) => n.key === `late-send-${here.name}` && n.notice?.kind === "refused") ? true : null), 60_000);
+      await waitFor(`the words back as the draft on the ${there.name}`, async () => ((await draftThere(there))?.body === late.body ? true : null), 60_000);
+      expect((await readHere(here, there)).draft?.body).toBe(late.body);
+      expect((await discardHere(here, there)).status).toBe(200);
+    }
+  }, 600_000);
+
+  // Last: it ends the link.
+  test("Unlink from the other computer while a long draft with a file and a quote is held here: every word, the file's name and the quote are in Not sent", async () => {
+    const [here, there] = [A, B];
+    await seesOnline(here, there);
+    const file = await uploadHere(here, there, "trace.txt", "the trace");
+    const start = await draftOf(await writeHere(here, there, { body: "Start", base: null, files_add: [{ upload_id: file.upload_id }], quote: { of: there.message.id, words: "the refund webhook" } }));
+    await away(here, there);
+    const long = `Words for the ${there.name} before it goes. ${"Every one of these words must be kept. ".repeat(80)}The end.`;
+    expect(long.length).toBeGreaterThan(2_000);
+    const held = await draftOf(await writeHere(here, there, { body: long, base: start.updated_at, base_body: start.body }));
+    expect(held).toMatchObject({ body: long, quote: { of: there.message.id, words: "the refund webhook" } });
+    expect(held.files.map((f: Json) => f.name)).toEqual(["trace.txt"]);
+    await wakesWhileHereIsDown(here, there);
+    const unlinked = cli(there, "unlink", here.id);
+    expect(unlinked.code).toBe(0);
+    startInbox(here.w);
+    await waitFor(`${here.name} forgot ${there.name}`, async () => (((await getJson(here, "/api/inbox/machines")).machines as Json[]).some((m) => m.id === there.id) ? null : true), 60_000);
+    const lost = ((await getJson(here, "/api/inbox/outbox")).notices as Json[]).filter((n) => n.route === `threads/${there.message.thread}/draft`);
+    expect(lost.length).toBeGreaterThan(0);
+    expect(lost.every((n) => n.notice?.kind === "not_delivered")).toBe(true);
+    expect(lost.map((n) => n.words).join("")).toBe(`${long}\n\nReplying to words in a message: “the refund webhook”\n\nAttached: trace.txt`);
   }, 300_000);
 });

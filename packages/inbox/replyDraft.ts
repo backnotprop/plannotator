@@ -1383,9 +1383,17 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       setConflict(target, null);
       setState((s) => ({ ...s, conflict: null }));
       write(target, text, take(target, files, text));
+      letOfferedGo(target, true);
     },
     [write],
   );
+
+  /** Words a conflict met there offered (kept for every window until chosen) go: Discard mine at once; Keep mine once its save is through. */
+  const letOfferedGo = (target: string, kept = false) => {
+    const lost = storeRef.current.notLanded?.(target);
+    const choose = () => (kept && (conflicts.current.has(target) || failedWords.has(target) || queuedOf(target).length > 0) ? undefined : storeRef.current.discard(target, { notLanded: lost!.version }).then(() => undefined, () => undefined));
+    if (lost?.conflict) chain.current = chain.current.then(choose);
+  };
 
   /**
    * After a conflict, Discard: this window's words and its file changes go (the server's draft stays); the box takes
@@ -1396,9 +1404,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     setConflict(target, null);
     takeCarried(target);
     setState((s) => ({ ...s, conflict: null }));
-    // Words a conflict met there offered (the store keeps them until the person chooses): they go now.
-    const lost = storeRef.current.notLanded?.(target);
-    if (lost?.conflict) chain.current = chain.current.then(() => storeRef.current.discard(target, { notLanded: lost.version }).then(() => undefined, () => undefined));
+    letOfferedGo(target);
     return stateRef.current.draft;
   }, []);
 

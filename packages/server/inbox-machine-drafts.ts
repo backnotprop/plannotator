@@ -132,6 +132,12 @@ const draftOf = (answer: unknown): InboxReplyDraft | null => {
 const keyOf = (body: Body) => (typeof body.idempotency_key === "string" && body.idempotency_key.trim() ? body.idempotency_key.trim() : crypto.randomUUID());
 /** A held write still to go there (as opposed to a record that only offers words that did not land). */
 const waits = (record: HeldDraft) => record.sent !== null || record.next !== null || !!record.stopped || !!record.sending;
+/**
+ * Words a conflict offers that stay offered beside `draft`: they go only by the person's choice in some window (Keep
+ * mine saves them, Discard mine names them), or once the draft holds them. Another window's write never settles them.
+ */
+const stillOffered = (record: HeldDraft | null | undefined, draft: InboxReplyDraft | null): { conflict?: InboxReplyDraft } =>
+  record?.conflict && !(draft?.body ?? "").includes(record.conflict.body) ? { conflict: record.conflict } : {};
 /** Any upload id is one, for checking a save's shape and places only (that machine knows which files it holds). */
 const anyUpload = (id: string): InboxUpload => ({ upload_id: id, name: id, size: 0, kind: "file", sha256: "", created_at: "" }) as InboxUpload;
 
@@ -357,8 +363,8 @@ export function createMachineDrafts(options: {
         return refusal(error);
       }
     }
-    // The person wrote again: words a conflict offered, a "Not saved", a Send's wait are settled by it.
-    put({ v: 1, machine, thread_id: threadId, view, sent: left ? write : (record?.sent ?? null), next, ...(record?.sending ? { sending: record.sending } : {}) });
+    // The person wrote again: a "Not saved", a Send's wait are settled by it. Words a conflict offers stay until chosen.
+    put({ v: 1, machine, thread_id: threadId, view, sent: left ? write : (record?.sent ?? null), next, ...(record?.sending ? { sending: record.sending } : {}), ...stillOffered(record, view) });
     changed(machine, threadId);
     if (peer.state === "online") void drain(machine);
     else peer.poke();
@@ -407,9 +413,13 @@ export function createMachineDrafts(options: {
           far = await send();
         }
         if (far.status < 500) {
-          // Landed: words a conflict offered here were the person's to settle, and they wrote again.
+          // Landed: what was held here is settled, but words a conflict offers stay until the person chooses (a window
+          // that never showed them saved).
           if (far.ok && record) {
-            drop(peer.id, threadId);
+            const landed = deleting ? null : draftOf(await far.clone().json().catch(() => null));
+            const offered = stillOffered(record, landed);
+            if (offered.conflict) put({ v: 1, machine: peer.id, thread_id: threadId, view: landed, sent: null, next: null, ...offered });
+            else drop(peer.id, threadId);
             changed(peer.id, threadId);
           }
           void noteAnswer(peer.id, threadId, deleting, far.clone());
