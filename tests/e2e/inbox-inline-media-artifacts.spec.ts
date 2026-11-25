@@ -185,7 +185,8 @@ test('a video played in a message is an artifact: the count, the grid, the viewe
     await expect(pane).toBeVisible();
     await expect(pane.locator('video')).toHaveCount(1);
     await shot(page, '03-video-open-desktop');
-    await pane.getByRole('button', { name: 'Close walkthrough.webm' }).click();
+    // A file from a message's text opens full screen (fileView.ts), whose × is named for where it goes.
+    await pane.getByRole('button', { name: 'Back to the thread', exact: true }).click();
     await expect(pane).toHaveCount(0);
 
     const filmCard = page.locator('[data-artifacts-view] li').filter({ has: page.locator('[data-artifact-tile]', { hasText: 'walkthrough.webm' }) });
@@ -269,7 +270,7 @@ test('a video played in a message is an artifact: the count, the grid, the viewe
     await phone.close();
 
     // Send: the agent reads both under the video's own heading, each at its moment.
-    await viewer.getByRole('button', { name: /^Close / }).click();
+    await viewer.getByRole('button', { name: 'Back to the thread', exact: true }).click();
     await expect(viewer).toHaveCount(0);
     await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
     await page.getByRole('textbox', { name: /^Reply to / }).fill('Two notes on the walkthrough.');
