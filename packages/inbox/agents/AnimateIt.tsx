@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { isInboxMarkFace } from '@plannotator/core/inbox-types';
-import { inboxApi } from '../api';
 import { openComposer } from '../compose/openComposer';
+import { iconAnimateResults } from '../data/iconApi';
 import { ANIMATE_THREAD_NAME, animatePrompt } from './animatePrompt';
 import type { FaceSources } from './FaceFan';
 import { useAgentFaceSources } from './faceArtLoad';
@@ -30,8 +30,7 @@ function useAnimatedOriginals(): ReadonlyMap<string, AgentFace> {
   const [originals, setOriginals] = useState<ReadonlyMap<string, AgentFace>>(new Map());
   useEffect(() => {
     let live = true;
-    inboxApi
-      .iconAnimateResults()
+    iconAnimateResults()
       .then((answer) => {
         const list = Array.isArray(answer.results) ? (answer.results as { icon?: unknown; result?: unknown }[]) : [];
         // `icon` is an uploaded picture's hash, or the face itself (a set's icon, one of ours).

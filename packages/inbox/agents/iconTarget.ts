@@ -8,6 +8,7 @@
  */
 import { InboxApiError } from '../apiError';
 import { inboxApi } from '../api';
+import { askIconAnimate } from '../data/iconApi';
 import { linkedMachineFacts, machineOf } from '../inboxUrl';
 import { learnProjects, pictureFromFile } from '../projectPictures';
 import { errorText } from '../toastError';
@@ -75,7 +76,7 @@ function agentOf(agent: AgentFaceRef): { agent: string; sessions: string[] } {
 
 /** Animate it: a request about `icon` for the target. Resolves to its id. */
 export async function askAnimate(target: IconTarget, icon: string): Promise<string> {
-  const answer = await inboxApi.askIconAnimate(target.kind === 'agent' ? { icon, ...agentOf(target.agent) } : { icon, project: target.project });
+  const answer = await askIconAnimate(target.kind === 'agent' ? { icon, ...agentOf(target.agent) } : { icon, project: target.project });
   if (typeof answer.request !== 'string') throw new Error('no request');
   return answer.request;
 }
