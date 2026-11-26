@@ -212,8 +212,9 @@ const shell = (on: Page, path: string) => on.locator(`[data-guide-file-shell="${
 const pane = (on: Page) => on.locator('[data-review-message]');
 
 /** Whole-window pictures, light and dark (the window follows the system's scheme). */
-async function shoot(on: Page, name: string, dark = true): Promise<void> {
-  await on.mouse.move(0, 0).catch(() => {});
+async function shoot(on: Page, name: string, dark = true, hovering = false): Promise<void> {
+  // Out of the way, but for a hover window's picture: moving off its words closes it.
+  if (!hovering) await on.mouse.move(0, 0).catch(() => {});
   await settled(on);
   await on.screenshot({ path: join(shots, `${name}-light.png`) });
   if (!dark) return;
@@ -424,7 +425,8 @@ test("4. A code span on Laptop's thread: Laptop's file and its path there, Copy 
   const copy = window.locator('[data-open-in-copy-path]');
   await expect(copy).toBeVisible();
   await expect(window.locator('[data-open-in-primary], [data-open-in-caret]')).toHaveCount(0);
-  await shoot(page, '05-hover-copy-path', false);
+  await shoot(page, '05-hover-copy-path', false, true);
+  await expect(copy).toBeVisible();
   await copy.click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(laptopPath);
   // Nothing ever asked to launch an app, here or there.
