@@ -179,7 +179,7 @@ import { DECISION_LINES_FILE, decisionLinesOf, type DecisionDataInput } from "./
 import type { DecisionExportInput } from "./decision-export";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
-import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, writeInboxReplyDraft } from "./reply-drafts";
+import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, inboxReplyDraftKey, readInboxReplyDrafts, removeInboxReplyDraft, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
 import { isInboxArtifactKey, readInboxArtifactPins, writeInboxArtifactPins } from "./artifact-pins";
 import { inboxThreadArtifactRefs, type InboxArtifactPin, type InboxArtifactRef } from "@plannotator/core/inbox-artifact-pins";
@@ -969,6 +969,12 @@ export class InboxStore {
    */
   private readonly replyDraftRemovals = new Map<string, Map<string, string>>();
   /**
+   * Per thread, the idempotency key of the save that made its reply draft (a linked machine's, through the door; the
+   * draft file's `last_key`). One key, written over by every save, gone with the draft: a replay of that save (its
+   * answer lost) is answered with the draft as it is, nothing written again (`saveReplyDraft`).
+   */
+  private readonly replyDraftKeys = new Map<string, string>();
+  /**
    * The threads pinned to the window's sidebar, in pin order (pins.ts,
    * approval "inbox-pinned-threads"): a file outside the event log, read at
    * load. Read by nothing that routes, lists or answers an agent.
@@ -1118,7 +1124,11 @@ export class InboxStore {
     this.seq = Math.max(this.seq, contents.seqFloor);
     this.replyDrafts.clear();
     this.replyDraftRemovals.clear();
-    for (const [threadId, draft] of readInboxReplyDrafts(this.dir)) this.replyDrafts.set(threadId, draft);
+    this.replyDraftKeys.clear();
+    for (const [threadId, { draft, lastKey }] of readInboxReplyDrafts(this.dir)) {
+      this.replyDrafts.set(threadId, draft);
+      if (lastKey) this.replyDraftKeys.set(threadId, lastKey);
+    }
     const lines = contents.lines;
     lines.sort((a, b) => a.seq - b.seq);
     for (const line of lines) this.apply(line);
@@ -6874,6 +6884,13 @@ export class InboxStore {
     return this.replyDrafts.get(threadId) ?? null;
   }
 
+  /** The draft the save under `input`'s key made, while it is still the draft (null: not that save's, or no key). */
+  replyDraftSavedBy(threadId: string, input: { idempotency_key?: unknown }): InboxReplyDraft | null {
+    const key = inboxReplyDraftKey(input);
+    const draft = this.replyDrafts.get(threadId);
+    return key !== null && draft && this.replyDraftKeys.get(threadId) === key ? draft : null;
+  }
+
   /**
    * Save the reply box's words for a thread (a compare-and-set on
    * `updated_at`: `base` is the `updated_at` the writer last read, null to
@@ -6887,6 +6904,9 @@ export class InboxStore {
   ): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    // The same save again (its answer was lost): the draft it made, as it is. Nothing is written, nothing is told.
+    const replayed = this.replyDraftSavedBy(threadId, input);
+    if (replayed) return replayed;
     const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given, quote, mentions } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
     // The compare-and-set (@plannotator/core/inbox-reply-draft, one set of rules with a linked machine's held draft).
@@ -6911,7 +6931,7 @@ export class InboxStore {
       this.deleteReplyDraft(threadId);
       return null;
     }
-    return this.writeReplyDraft(threadId, existing, body, files, given, quote, mentions);
+    return this.writeReplyDraft(threadId, existing, body, files, given, quote, mentions, inboxReplyDraftKey(input));
   }
 
   /**
@@ -6919,6 +6939,7 @@ export class InboxStore {
    * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own. `quote`: the
    * message the reply quotes; null takes it away, undefined keeps the draft's own. `mentions`: the threads mentioned
    * in the words; undefined keeps the draft's own that still stand once its words become these (remapped, never matched).
+   * `key`: the save's idempotency key, kept on the draft (`last_key`); null (a save with none, a Send's change) clears it.
    */
   private writeReplyDraft(
     threadId: string,
@@ -6928,12 +6949,15 @@ export class InboxStore {
     recipients: readonly string[] | null = null,
     quote: InboxReplyQuote | null | undefined = undefined,
     mentions: readonly InboxReplyMention[] | undefined = undefined,
+    key: string | null = null,
   ): InboxReplyDraft {
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart. The
     // quote (approval "inbox-reply-quote") and the mentions (approval "inbox-drag-threads") as `projectReplyDraft` says.
     const draft = projectReplyDraft(threadId, existing, { body, files, recipients, quote, mentions }, this.stamp());
-    writeInboxReplyDraft(this.dir, draft);
+    writeInboxReplyDraft(this.dir, draft, key);
     this.replyDrafts.set(threadId, draft);
+    if (key) this.replyDraftKeys.set(threadId, key);
+    else this.replyDraftKeys.delete(threadId);
     this.changes += 1;
     this.noteReplyDraftRemovals(threadId, existing, draft);
     this.replyDraftChanged(threadId);
@@ -7004,8 +7028,10 @@ export class InboxStore {
 
   /** Drop a thread's reply draft (Discard); true when there was one. */
   deleteReplyDraft(threadId: string): boolean {
-    // Gone whole: a draft made again later starts with no removals (a save against no draft adds every file it names).
+    // Gone whole: a draft made again later starts with no removals (a save against no draft adds every file it names),
+    // and with no key: a replay of a save before the Discard is the compare-and-set again.
     this.replyDraftRemovals.delete(threadId);
+    this.replyDraftKeys.delete(threadId);
     const had = this.replyDrafts.delete(threadId);
     this.changes += 1;
     const removed = removeInboxReplyDraft(this.dir, threadId) || had;
@@ -7239,6 +7265,7 @@ export class InboxStore {
       removeInboxReplyDraft(this.dir, threadId);
       this.replyDrafts.delete(threadId);
       this.replyDraftRemovals.delete(threadId);
+      this.replyDraftKeys.delete(threadId);
       this.changes += 1;
     }
     // So does its Ask AI conversation.

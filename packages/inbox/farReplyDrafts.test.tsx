@@ -55,7 +55,7 @@ const threadOf = (id: string, subject: string): InboxThread => ({
 });
 
 /** The Mini: its drafts, its uploads, and every draft write that reached its door. */
-let mini: { drafts: Map<string, InboxReplyDraft>; uploads: Map<string, InboxUpload>; writes: { route: string; body: string; status: number }[]; answered: Map<string, { status: number; text: string }>; clock: number };
+let mini: { drafts: Map<string, InboxReplyDraft>; uploads: Map<string, InboxUpload>; writes: { route: string; body: string; status: number }[]; lastKey: Map<string, string>; clock: number };
 /** Every reply the window sent to the Mini. */
 let replies: Record<string, unknown>[] = [];
 /** Draft requests that went to this computer's own draft routes (a far thread's never should). */
@@ -80,9 +80,10 @@ const stamp = () => new Date(Date.UTC(2026, 10, 2, 11, 0, (mini.clock += 1))).to
 
 /**
  * The Mini's door for a thread's draft, as its store answers (inbox-reply-drafts.ts): the compare-and-set on `base`, or
- * on the words (`base_body`); a Discard naming `base` only while the draft is still that version. As its door does
- * (inbox-devices.ts `DRAFT_SAVE_KEPT`), a Discard's plain answer under a key it saw is answered the same again; a save,
- * or a conflict, is never kept: it is the compare-and-set again.
+ * on the words (`base_body`); a Discard must name `base` (inbox-devices.ts `requires`) and takes the draft only while it
+ * is still that version. Its door keeps no answer of a draft write (`carries: "draft"`): a save sent again under the
+ * key of the save that made the draft is answered with that draft, nothing written again (the store's `last_key`);
+ * anything else is the compare-and-set again.
  */
 function miniDoor(route: string, method: string, body: Record<string, unknown> = {}): Response {
   const match = /^threads\/([^/]+)\/draft(\/delete)?$/.exec(route);
@@ -90,15 +91,16 @@ function miniDoor(route: string, method: string, body: Record<string, unknown> =
   const thread = match[1]!;
   const current = mini.drafts.get(thread) ?? null;
   if (method === 'GET') return Response.json({ draft: current });
-  const key = typeof body.idempotency_key === 'string' ? `${route} ${body.idempotency_key}` : null;
-  const replay = key ? mini.answered.get(key) : undefined;
-  if (replay) return new Response(replay.text, { status: replay.status, headers: { 'Content-Type': 'application/json' } });
+  if (match[2] && !('base' in body)) return Response.json({ error: 'base: required here.', code: 'validation_error', field: 'base' }, { status: 422 });
+  const key = typeof body.idempotency_key === 'string' ? body.idempotency_key : null;
+  if (!match[2] && key && current && mini.lastKey.get(thread) === key) return Response.json({ draft: current });
   const conflict = { status: 409, json: { error: 'This reply changed in another window since you opened it.', code: 'draft_conflict', draft: current } };
   let out: { status: number; json: unknown };
   if (match[2]) {
-    if ('base' in body && current && current.updated_at !== body.base) out = conflict;
+    if (current && current.updated_at !== body.base) out = conflict;
     else {
       mini.drafts.delete(thread);
+      mini.lastKey.delete(thread);
       out = { status: 200, json: { ok: true, deleted: current !== null } };
     }
   } else {
@@ -108,18 +110,20 @@ function miniDoor(route: string, method: string, body: Record<string, unknown> =
       const add = ((body.files_add as { upload_id: string }[] | undefined) ?? []).flatMap((ref) => (mini.uploads.has(ref.upload_id) ? [mini.uploads.get(ref.upload_id)!] : []));
       const files = applyReplyDraftFileOps<InboxDraftFile>(current?.files ?? [], { add, remove: (body.files_remove as string[] | undefined) ?? [], place: [] });
       const words = String(body.body ?? '');
-      if (words.trim() === '' && files.length === 0) mini.drafts.delete(thread);
-      else {
+      if (words.trim() === '' && files.length === 0) {
+        mini.drafts.delete(thread);
+        mini.lastKey.delete(thread);
+      } else {
         const at = stamp();
         mini.drafts.set(thread, { v: 1, thread_id: thread, body: words, created_at: current?.created_at ?? at, updated_at: at, ...(files.length > 0 ? { files } : {}) });
+        if (key) mini.lastKey.set(thread, key);
+        else mini.lastKey.delete(thread);
       }
       out = { status: 200, json: { draft: mini.drafts.get(thread) ?? null } };
     }
   }
   mini.writes.push({ route, body: String(body.body ?? ''), status: out.status });
-  const text = JSON.stringify(out.json);
-  if (key && match[2] && out.status === 200) mini.answered.set(key, { status: out.status, text });
-  return new Response(text, { status: out.status, headers: { 'Content-Type': 'application/json' } });
+  return Response.json(out.json, { status: out.status });
 }
 
 /** The Mini's own window saves the thread's draft (on the draft it holds), and its stream tells this Inbox. */
@@ -172,7 +176,7 @@ class FakeXhr {
 
 beforeEach(() => {
   if (!hasDom) return;
-  mini = { drafts: new Map(), uploads: new Map(), writes: [], answered: new Map(), clock: 0 };
+  mini = { drafts: new Map(), uploads: new Map(), writes: [], lastKey: new Map(), clock: 0 };
   draftPostsFail = false;
   draftPostsRefused = false;
   saveGate = null;
@@ -199,6 +203,8 @@ beforeEach(() => {
     },
     poke() {},
     refreshList: async () => {},
+    listAsked: 0,
+    listGen: 0,
   };
   // This Inbox tells its windows when a thread's draft changes as it shows it (`event: drafts`).
   forward = createMachineDrafts({ dataDir: here, peer: () => peer, onChange: () => signal.emit(), retryMs: 60_000 });
@@ -233,7 +239,10 @@ beforeEach(() => {
       // The Mini's clear (`clear_draft`): the draft it names by its `updated_at`, or ('') one holding exactly these words.
       const kept = mini.drafts.get(FAR);
       const clear = body.clear_draft;
-      if (kept && typeof clear === 'string' && (clear === kept.updated_at || (clear === '' && kept.body.trim() === String(body.words ?? '').trim()))) mini.drafts.delete(FAR);
+      if (kept && typeof clear === 'string' && (clear === kept.updated_at || (clear === '' && kept.body.trim() === String(body.words ?? '').trim()))) {
+        mini.drafts.delete(FAR);
+        mini.lastKey.delete(FAR);
+      }
       return Response.json({ reply: { id: 'msg_reply' }, questions: [], replayed: false });
     }
     if (/^\/api\/inbox\/threads\/[^/]+\/draft/.test(path)) {

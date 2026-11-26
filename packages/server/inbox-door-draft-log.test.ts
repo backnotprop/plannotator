@@ -1,11 +1,11 @@
 /**
- * The reply draft's save and Discard through the device door (inbox-devices.ts `claim`, `DRAFT_SAVE_KEPT`), in
+ * The reply draft's save and Discard through the device door (inbox-devices.ts `claim`, `carries: "draft"`), in
  * process: the window's handler is the real draft routes (inbox-reply-drafts.ts) on a real store in a temp folder.
- * What regresses: a linked machine's draft save (each pause in typing) or a Discard's conflict written to the door's
- * command log (inbox/device-commands.jsonl), which is appended to and never compacted, so the person's words stay there
- * after they Discard or Send; the log growing per save; a save under a key already seen answered from a record instead
- * of the compare-and-set (so no draft words are needed to replay it); other door routes no longer recorded and
- * replayed. No Inbox.
+ * What regresses: a linked machine's draft save (each pause in typing), a Discard or either's conflict written to the
+ * door's command log (inbox/device-commands.jsonl), which is appended to and never compacted, so the person's words
+ * stay there after they Discard or Send; a Discard taken without naming its version (`base`); a save under the key the
+ * draft was last saved with written again, or told to the windows again, instead of answered by the store
+ * (`last_key`); other door routes no longer recorded and replayed. No Inbox.
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -29,7 +29,8 @@ async function door() {
   const store = InboxStore.open(join(dataDir, "store"));
   const project = store.ensureProject({ name: "billing-svc", root: join(dataDir, "billing-svc") });
   const thread = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses_a", name: null }, body: "Retry the webhook?", thread: "refunds" }).message.thread_id;
-  const drafts = createInboxReplyDrafts({ store, serverSession: "0".repeat(32), readBody: async (req) => (await req.json()) as Record<string, unknown>, json: (body, status = 200) => Response.json(body, { status }), onChange: () => {} });
+  const told: string[] = [];
+  const drafts = createInboxReplyDrafts({ store, serverSession: "0".repeat(32), readBody: async (req) => (await req.json()) as Record<string, unknown>, json: (body, status = 200) => Response.json(body, { status }), onChange: (threadId) => told.push(threadId) });
   const handed: string[] = [];
   const devices = createInboxDevices({
     dataDir,
@@ -59,7 +60,7 @@ async function door() {
   const logFile = join(inboxDir(dataDir), INBOX_DEVICE_COMMANDS_FILE);
   const log = () => (existsSync(logFile) ? readFileSync(logFile, "utf8") : "");
   const lines = () => log().split("\n").filter(Boolean);
-  return { store, thread, handed, post, log, lines };
+  return { store, storeRoot: join(dataDir, "store"), thread, handed, told, post, log, lines };
 }
 
 const ops = { files_add: [], files_remove: [], files_place: [] };
@@ -85,26 +86,39 @@ describe("the reply draft through the door keeps no words in the command log", (
     const stale = await d.post(`threads/${d.thread}/draft/delete`, { idempotency_key: "discard-stale", base: "2000-01-01T00:00:00.000Z" });
     expect([stale.status, stale.body.draft.body]).toEqual([409, saved]);
     expect(d.lines()).toEqual([]);
-    // The Discard of the version shown: its plain answer is kept (no words), and a replay of it answers the same.
+    // A Discard that names no version is refused before it reaches the draft: a replay of it could delete words typed since.
+    const bare = await d.post(`threads/${d.thread}/draft/delete`, { idempotency_key: "discard-bare" });
+    expect([bare.status, bare.body.field]).toEqual([422, "base"]);
+    expect(d.store.replyDraft(d.thread)?.body).toBe(saved);
+    // The Discard of the version shown: nothing kept. Again under its key, it is the compare-and-set again: gone already.
     const discard = await d.post(`threads/${d.thread}/draft/delete`, { idempotency_key: "discard", base });
     expect([discard.status, discard.body]).toEqual([200, { ok: true, deleted: true }]);
-    expect(d.lines().length).toBe(1);
-    expect(d.log()).not.toContain(secret);
-    expect(d.log()).not.toContain("take ");
     const again = await d.post(`threads/${d.thread}/draft/delete`, { idempotency_key: "discard", base });
-    expect([again.status, again.body, again.replayed]).toEqual([200, { ok: true, deleted: true }, "true"]);
+    expect([again.status, again.body, again.replayed]).toEqual([200, { ok: true, deleted: false }, null]);
     expect(d.store.replyDraft(d.thread)).toBeNull();
+    expect(d.lines()).toEqual([]);
+    // A replay after newer words were typed there: refused, and they stay.
+    const newer = d.store.saveReplyDraft(d.thread, { body: "Typed there after the Discard", base: null })!;
+    const late = await d.post(`threads/${d.thread}/draft/delete`, { idempotency_key: "discard", base });
+    expect([late.status, late.body.draft?.body]).toEqual([409, newer.body]);
+    expect(d.store.replyDraft(d.thread)?.body).toBe(newer.body);
+    expect(d.log()).toBe("");
   });
 
-  test("a save under a key already seen is the compare-and-set again: its own words there answer as a conflict, never doubled", async () => {
+  test("a save under the key the draft was last saved with is answered with the draft by the store: nothing written again, no window told", async () => {
     const d = await door();
     const first = await d.post(`threads/${d.thread}/draft`, { idempotency_key: "save-once", body: "Ship it after the deploy", base: null, base_body: null, ...ops });
     expect(first.status).toBe(200);
+    expect(d.told).toEqual([d.thread]);
     const again = await d.post(`threads/${d.thread}/draft`, { idempotency_key: "save-once", body: "Ship it after the deploy", base: null, base_body: null, ...ops });
-    expect([again.status, again.body.code, again.body.draft.body, again.replayed]).toEqual([409, "draft_conflict", "Ship it after the deploy", null]);
+    expect([again.status, again.body.draft, again.replayed]).toEqual([200, first.body.draft, null]);
     expect(d.handed.filter((path) => path.endsWith("/draft")).length).toBe(2);
-    expect(d.store.replyDraft(d.thread)?.body).toBe("Ship it after the deploy");
-    expect(d.log()).not.toContain("Ship it");
+    expect(d.told).toEqual([d.thread]);
+    expect(d.store.replyDraft(d.thread)).toEqual(first.body.draft);
+    // Through a restart of that Inbox too: the key is on the draft's own file.
+    const reopened = InboxStore.open(d.storeRoot);
+    expect(reopened.saveReplyDraft(d.thread, { idempotency_key: "save-once", body: "Ship it after the deploy", base: null, ...ops })).toEqual(first.body.draft);
+    expect(d.lines()).toEqual([]);
   });
 
   test("another door route is still recorded and replayed: applied once", async () => {

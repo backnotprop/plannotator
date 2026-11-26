@@ -12856,9 +12856,9 @@ public enum DoorRoutes {
   /// `GET threads/:id/draft`: the window's `/api/inbox/threads/{thread}/draft`.
   public static let getThreadDraft = DoorRoute(name: "GET threads/:id/draft", method: .get, path: "threads/{thread}/draft", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST threads/:id/draft`: the window's `/api/inbox/threads/{thread}/draft`.
-  public static let postThreadDraft = DoorRoute(name: "POST threads/:id/draft", method: .post, path: "threads/{thread}/draft", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadDraft = DoorRoute(name: "POST threads/:id/draft", method: .post, path: "threads/{thread}/draft", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `POST threads/:id/draft/delete`: the window's `/api/inbox/threads/{thread}/draft/delete`.
-  public static let postThreadDraftDelete = DoorRoute(name: "POST threads/:id/draft/delete", method: .post, path: "threads/{thread}/draft/delete", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadDraftDelete = DoorRoute(name: "POST threads/:id/draft/delete", method: .post, path: "threads/{thread}/draft/delete", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `GET threads/:id/attachments`: the window's `/api/inbox/threads/{thread}/attachments`.
   public static let getThreadAttachments = DoorRoute(name: "GET threads/:id/attachments", method: .get, path: "threads/{thread}/attachments", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET threads/:id/decisions`: the window's `/api/inbox/threads/{thread}/decisions`.

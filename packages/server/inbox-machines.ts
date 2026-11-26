@@ -47,7 +47,7 @@ import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type Ou
 import type { OutboxFile } from "./inbox-outbox-files";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
-import { createMachineDrafts, heldReplyState, lostDraftParts, MACHINE_DRAFT_ROUTE } from "./inbox-machine-drafts";
+import { createMachineDrafts, heldReplyState, lostDraftParts, MACHINE_DRAFT_ROUTE, type LostDraft } from "./inbox-machine-drafts";
 import { createMachineShips } from "./inbox-machine-ships";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
@@ -516,9 +516,24 @@ export function createInboxMachines(context: InboxMachinesContext) {
   // A linked machine's thread's reply draft (mark `reply-drafts`): kept there, held here while it is away. Every window
   // hears a change as it hears this Inbox's own (`event: drafts`).
   // The machines block says how many are held for each (`drafts_held`, for Unlink); it is sent only when that moved.
+  /** A reply draft's words for a machine whose link went, put in "Not sent" in parts; false when a part could not be. */
+  const notSent = (machine: string, name: string | null, lost: LostDraft): boolean => {
+    let all = true;
+    for (const part of lostDraftParts(lost)) {
+      try {
+        outbox.recordLostDraft(machine, lost.thread, part, name);
+      } catch (error) {
+        all = false;
+        console.error(`Plannotator Inbox: a reply draft held for an unlinked computer could not be put in "Not sent" (${error instanceof Error ? error.message : String(error)}); it stays on disk.`);
+      }
+    }
+    return all;
+  };
   const drafts = createMachineDrafts({
     dataDir: context.dataDir,
     peer: (id) => peers.get(id),
+    // Words saved as that machine's link went (a save on its way as Unlink ran): to "Not sent", never held for it.
+    lost: (peer, lost) => void notSent(peer.id, peer.name ?? null, lost),
     // A reply that carried a held draft: the draft settles once it is delivered there; refused or cancelled, it comes back.
     replyState: (key) => heldReplyState(outbox.get(key)?.state),
     onChange: (_machine, threadId) => {
@@ -716,8 +731,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onReread: (event) => emit({ event, data: {} }),
       onCards: () => emit({ event: "cards", data: {} }),
       // A reply draft there changed (its window, a phone, a Send, this Inbox's own write): read again on the next read.
-      onDrafts: (threadId) => {
-        drafts.farChanged(link.id, threadId);
+      onDrafts: (threadId, refreshed) => {
+        drafts.farChanged(link.id, threadId, refreshed);
         emit({ event: "drafts", data: { thread_id: threadId } });
       },
       onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
@@ -749,20 +764,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
     context.door.dropIntroductions(id);
     linkThrough.forgetBroker(id);
     // A reply draft held for it is lost with the link, as a write waiting for it is: its words join the "Not sent"
-    // list (a write that was waiting, dropped below), never gone silently. Only here does a draft enter the outbox.
-    // Every word goes (its files and quote named after them): a draft longer than one held write fits is said in parts.
+    // list, never gone silently. Never queued or sent (`recordLostDraft` writes it already dropped).
+    // Every word goes (its files and quote named after them): a draft longer than one line fits is said in parts.
     // Written to "Not sent" first: the held files go only once every part is there.
     let handedOver = true;
-    for (const lost of drafts.forget(id, true)) {
-      for (const part of lostDraftParts(lost)) {
-        try {
-          outbox.submit(id, `threads/${lost.thread}/draft`, { idempotency_key: crypto.randomUUID(), body: part }, lost.thread);
-        } catch (error) {
-          handedOver = false;
-          console.error(`Plannotator Inbox: a reply draft held for an unlinked computer could not be put in "Not sent" (${error instanceof Error ? error.message : String(error)}); it stays on disk.`);
-        }
-      }
-    }
+    for (const lost of drafts.forget(id, true)) if (!notSent(id, link?.name ?? null, lost)) handedOver = false;
     if (handedOver) drafts.forget(id);
     outbox.dropMachine(id, link?.name ?? null);
     // The last link gone: with Phones off the tailnet door has nothing left to serve (but a refusal owed).
@@ -1135,11 +1141,13 @@ export function createInboxMachines(context: InboxMachinesContext) {
         return offline();
       }
     }
-    // Every other write is a JSON body, whatever its Content-Type says, and goes through the outbox.
+    // Every other write is a JSON body, whatever its Content-Type says, and goes through the outbox, but draft text.
     const body = await context.readBody(req);
+    // Draft text (rule 8's `draft`): the reply-draft module's, never the outbox's (`submit` refuses it).
+    const draftWrite = kind === "draft" ? MACHINE_DRAFT_ROUTE.exec(route) : null;
     // A reply draft SAVE from a page an earlier run of this same Inbox served is taken, as this Inbox's own drafts take
     // it (inbox-reply-drafts.ts `follows`): it is a compare-and-set, so it never writes over newer words.
-    const earlierRun = !!draftRoute && !draftRoute[2] && typeof body.serverSession === "string" && (context.follows ?? []).includes(body.serverSession);
+    const earlierRun = !!draftWrite && !draftWrite[2] && typeof body.serverSession === "string" && (context.follows ?? []).includes(body.serverSession);
     if (!earlierRun && checkServerSession(body, context.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     // A press in this Inbox's window (its own Origin and this run's page session), said to the other machine with the
     // write: it answers a permission prompt, or starts, stops or trusts an agent there, only for one (remote launch).
@@ -1147,9 +1155,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const window = isWindowRequest(req, body, context.serverSession);
     if (!window && startsAgentThere(route, body)) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
     // A reply draft's save or Discard: straight there while it can take it, else held here (inbox-machine-drafts.ts).
-    if (draftRoute) {
+    if (kind === "draft") {
+      if (!draftWrite) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
       delete body.serverSession;
-      const answer = await drafts.write(peer, draftRoute[1]!, !!draftRoute[2], body, req.signal);
+      const answer = await drafts.write(peer, draftWrite[1]!, !!draftWrite[2], body, req.signal);
       return "far" in answer ? passAnswer(answer.far) : json(answer.body, answer.status);
     }
     // Sent now or not at all, from a press in this window (rule 8, `now`): a file a message names, attached there as the

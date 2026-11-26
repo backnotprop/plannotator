@@ -149,6 +149,8 @@ test("Unlink with a draft held for that machine: it is counted for Unlink, and i
   const unlinked = await call(`/api/inbox/machines/${FAR}/unlink`, { serverSession: SESSION });
   expect(unlinked.status).toBe(200);
   const notices = (await call("/api/inbox/outbox")).body.notices as Record<string, unknown>[];
-  expect(notices).toEqual([expect.objectContaining({ machine: FAR, machine_name: "Mini", thread: THREAD, words: "Typed for the Mini while it was busy", notice: expect.objectContaining({ kind: "not_delivered" }) })]);
+  expect(notices).toEqual([expect.objectContaining({ machine: FAR, machine_name: "Mini", thread: THREAD, state: "dropped", words: "Typed for the Mini while it was busy", notice: expect.objectContaining({ kind: "not_delivered" }) })]);
+  // Never queued and never sent: no draft write reached that machine after it was held.
+  expect(door.seen.saves).toEqual([]);
   expect(existsSync(heldDir) ? readdirSync(heldDir) : []).toEqual([]);
 });

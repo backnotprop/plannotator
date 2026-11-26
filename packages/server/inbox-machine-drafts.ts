@@ -54,11 +54,16 @@ const RETRY_MAX_MS = 30_000;
 /** What this needs of a machine's line (`PeerLink`). */
 export interface DraftPeer {
   readonly id: string;
+  /** Its name as its link says it (for "Not sent"). */
+  readonly name?: string;
   state: string;
   list: { marks: readonly string[]; rows: readonly (InboxListRow & { machine: string })[] } | null;
+  /** Reads of its list started so far, and which of them made the list held now (inbox-peer-link.ts). */
+  listAsked: number;
+  listGen: number;
   request(route: string, search: string, init: { method: "GET" | "POST"; headers: Record<string, string>; body?: string; signal?: AbortSignal; timeoutMs?: number }): Promise<Response>;
   poke(): void;
-  refreshList(): Promise<void>;
+  refreshList(): Promise<unknown>;
 }
 
 /** The forward's answer: that machine's own (passed on as it came), or this Inbox's for a held write. */
@@ -101,6 +106,14 @@ export function lostDraftParts(lost: LostDraft, size = 40_000): string[] {
   }
   return parts;
 }
+
+/** A draft's words as "Not sent" keeps them: every word, its files' names, its quote (null: nothing to keep). */
+const lostOf = (thread: string, draft: Pick<InboxReplyDraft, "body" | "files" | "quote"> | null | undefined): LostDraft | null => {
+  if (!draft) return null;
+  const files = (draft.files ?? []).map((file) => file.name);
+  if (draft.body.trim() === "" && files.length === 0) return null;
+  return { thread, words: draft.body, files, quote: draft.quote ?? null };
+};
 
 type Body = Record<string, unknown>;
 const words = (body: Body) => (typeof body.body === "string" ? body.body : "");
@@ -190,6 +203,14 @@ const fold = (first: HeldDraftWrite | null, then: HeldDraftWrite): HeldDraftWrit
   return { ...first, save: carry(first.save, then.save) };
 };
 
+/** What was folded behind a write that landed, standing on the draft there (its time and words), as a window's next save would. */
+const standingOn = (behind: HeldDraftWrite | null, landed: InboxReplyDraft | null): HeldDraftWrite | null =>
+  behind?.save && !behind.discard
+    ? { ...behind, save: { ...behind.save, base: landed?.updated_at ?? null, base_body: landed?.body ?? null, base_files: null } }
+    : behind?.discard && behind.discard.base === undefined
+      ? { ...behind, discard: { ...behind.discard, base: landed?.updated_at ?? null } }
+      : behind;
+
 /** A held write without the files a delivered reply carried: they are its attachments there now, in no draft. */
 const withoutSentFiles = (write: HeldDraftWrite | null, sentIds: readonly string[]): HeldDraftWrite | null => {
   if (!write?.save || sentIds.length === 0) return write;
@@ -273,6 +294,11 @@ export function createMachineDrafts(options: {
   peer: (machine: string) => DraftPeer | undefined;
   /** How a reply held for that machine stands (its outbox key): a draft it carried settles once it is delivered. */
   replyState?: (key: string) => "pending" | "delivered" | "refused";
+  /**
+   * Words saved for a machine whose link went while the save was on its way (Unlink ran meanwhile): they go to "Not
+   * sent" here (inbox-machines.ts), as `forget` hands back what was held. Nothing is held for that machine any more.
+   */
+  lost?: (peer: DraftPeer, lost: LostDraft) => void;
   now?: () => Date;
   /** Tests: the first pause before a held draft that machine could not answer is tried again. */
   retryMs?: number;
@@ -285,8 +311,13 @@ export function createMachineDrafts(options: {
   /** The drafts held here, one per thread: the files on disk, read once at start. */
   const held = new Map<string, HeldDraft>();
   for (const record of readHeldDrafts(dataDir, log)) held.set(key(record.machine, record.thread_id), record);
-  /** Each far draft as this Inbox last heard it there (null: none). Absent: not heard since this Inbox started. */
-  const known = new Map<string, InboxReplyDraft | null>();
+  /**
+   * Each far draft as this Inbox last heard it there (null: none), with how many reads of that machine's list had
+   * started then (`asked`): a list read started later says what is there now. Absent: not heard since this Inbox started.
+   */
+  const known = new Map<string, { draft: InboxReplyDraft | null; asked: number }>();
+  const machineOf = (k: string) => k.slice(0, k.indexOf(" "));
+  const heard = (k: string) => known.get(k)?.draft;
   /**
    * Far drafts last heard that that machine has since said moved on (its stream said the draft changed, and its list,
    * read again for it, names another version or none): sent, discarded or written over there. While it is away, a
@@ -294,9 +325,13 @@ export function createMachineDrafts(options: {
    */
   const movedOn = new Set<string>();
   const hear = (k: string, draft: InboxReplyDraft | null) => {
-    known.set(k, draft);
+    known.set(k, { draft, asked: options.peer(machineOf(k))?.listAsked ?? 0 });
     movedOn.delete(k);
   };
+  /** The version of the far draft last heard (null: none, or none heard). */
+  const heardAt = (k: string) => heard(k)?.updated_at ?? null;
+  /** The thread's held record is what this Inbox shows for it: words to land, or offered words a person must settle. */
+  const shows = (record: HeldDraft | null | undefined): boolean => !!record && (waits(record) || !!record.conflict);
   const uploads = new Map<string, InboxUpload>();
   const draining = new Map<string, Promise<void>>();
   const again = new Set<string>();
@@ -308,8 +343,12 @@ export function createMachineDrafts(options: {
   const landedAs = new Map<string, { here: string; there: string }>();
   let failedOnce = false;
 
-  /** Written to disk first: memory follows only once the file holds it (a full disk leaves both as they were). */
+  /**
+   * Written to disk first: memory follows only once the file holds it (a full disk leaves both as they were). Never for
+   * a machine that is not linked (its link went while a write was on its way): nothing is held for it after `forget`.
+   */
   const put = (record: HeldDraft) => {
+    if (!options.peer(record.machine)) return;
     const next = Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as unknown as HeldDraft;
     writeHeldDraft(dataDir, next);
     held.set(key(record.machine, record.thread_id), next);
@@ -394,7 +433,7 @@ export function createMachineDrafts(options: {
       return was && body.base === was.here ? was.there : body.base;
     }
     if (record?.conflict) return record.view?.updated_at ?? null;
-    return known.has(k) ? (known.get(k)?.updated_at ?? null) : undefined;
+    return known.has(k) ? heardAt(k) : undefined;
   };
 
   /**
@@ -403,9 +442,22 @@ export function createMachineDrafts(options: {
    */
   const hold = (peer: DraftPeer, threadId: string, deleting: boolean, body: Body, left = false): DraftAnswer => {
     const machine = peer.id;
+    // Its link went while this write was on its way (Unlink ran meanwhile): nothing is held for it. A save's words go to
+    // "Not sent" (`lost`), as `forget` handed back the rest; a Discard has none to keep. A link replaced by a new one to
+    // the same machine (rule 19) is still linked: the write is held for it as ever.
+    if (!options.peer(machine)) {
+      if (!deleting) {
+        const made = project(threadId, null, body, false);
+        const gone = lostOf(threadId, "view" in made ? made.view : ({ body: words(body) } as InboxReplyDraft));
+        if (gone) options.lost?.(peer, gone);
+      }
+      return { status: 404, body: { error: "That machine is not linked.", code: "machine_not_linked" } };
+    }
     const k = key(machine, threadId);
     const record = held.get(k) ?? null;
-    const prior = record ? record.view : (known.get(k) ?? null);
+    // The draft it stands on: the one held here while it waits (or beside offered words), else the one last heard there
+    // (a record only naming files a landed save could not keep holds no draft of its own).
+    const prior = record && shows(record) ? record.view : (heard(k) ?? record?.view ?? null);
     const idempotency_key = keyOf(body);
     let view: InboxReplyDraft | null = null;
     let write: HeldDraftWrite;
@@ -415,7 +467,7 @@ export function createMachineDrafts(options: {
     } else {
       // A second window here a step behind the held draft is refused as that machine's store would refuse it. With
       // nothing held, that machine judges the save when it lands.
-      const made = project(threadId, prior, body, record !== null);
+      const made = project(threadId, prior, body, shows(record));
       if ("refused" in made) return made.refused;
       view = made.view;
       write = { save: { ...body, idempotency_key } };
@@ -471,7 +523,9 @@ export function createMachineDrafts(options: {
           return peer.request(`threads/${threadId}/draft${deleting ? "/delete" : ""}`, "", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(deleting ? { idempotency_key: sent.idempotency_key, ...(base !== undefined ? { base } : {}) } : sent),
+            // A Discard always names the version it throws away (that door requires it): null when none is known here,
+            // so it never deletes a draft this Inbox never showed.
+            body: JSON.stringify(deleting ? { idempotency_key: sent.idempotency_key, base: base ?? null } : sent),
             signal,
             timeoutMs: DRAFT_WAIT_MS,
           });
@@ -624,8 +678,9 @@ export function createMachineDrafts(options: {
       }
       const write = record.sent!;
       if (write.discard) {
-        const { base } = write.discard;
-        let answer = await post(peer, threadId, true, { idempotency_key: write.discard.idempotency_key, ...(base !== undefined ? { base } : {}) });
+        // Its version, else (none set as the write before it landed) the one last heard there, else none: always named.
+        const base = write.discard.base !== undefined ? write.discard.base : heardAt(k);
+        let answer = await post(peer, threadId, true, { idempotency_key: write.discard.idempotency_key, base });
         if (!answer) return false;
         // Refused, but the draft there is the words thrown away under a newer version (the save they came with landed
         // after, or an earlier run of this Inbox landed it): those go.
@@ -657,19 +712,16 @@ export function createMachineDrafts(options: {
       if (answer.status < 300) {
         const landed = draftOf(answer.body);
         hear(k, landed);
-        // What was folded behind it stands on the draft it left there (its time and words), as a window's next save would.
-        const behind = current.next;
-        const next = behind?.save && !behind.discard
-          ? { ...behind, save: { ...behind.save, base: landed?.updated_at ?? null, base_body: landed?.body ?? null, base_files: null } }
-          : behind?.discard && behind.discard.base === undefined
-            ? { ...behind, discard: { ...behind.discard, base: landed?.updated_at ?? null } }
-            : behind;
+        const next = standingOn(current.next, landed);
         // A file it added that machine swept since is not in the draft there: never dropped unsaid, its tile says so.
         const gone = goneAfter(save, landed, current);
         const { gone: _was, ...rest } = current;
         // The draft the windows were shown while it waited is this one there now: a Discard naming it goes for this.
         if (!next && current.view && landed) landedAs.set(k, { here: current.view.updated_at, there: landed.updated_at });
-        put({ ...rest, sent: null, next, ...(gone.length > 0 ? { gone, ...(next ? {} : { view: landed }) } : {}) });
+        // Nothing left to send but the files it could not add: the record keeps their names only, never the draft's words
+        // (that draft is there, read from there; held here it would outlive a Send or a Discard there). Beside offered
+        // words it is the draft they are offered against, as `met` leaves it.
+        put({ ...rest, sent: null, next, ...(gone.length > 0 ? { gone, ...(next ? {} : { view: rest.conflict ? landed : null }) } : {}) });
         if (gone.length > 0 && !next) {
           await peer.refreshList().catch(() => {});
           changed(peer.id, threadId);
@@ -680,12 +732,12 @@ export function createMachineDrafts(options: {
       if (codeOf(answer.body) === "draft_conflict") {
         const far = draftOf(answer.body);
         hear(k, far);
-        if (far && far.body === words(save) && far.updated_at !== save.base) {
-          // Its own words there: it landed on a try whose answer never came (that machine's door keeps no draft
-          // answer to replay, inbox-devices.ts `DRAFT_SAVE_KEPT`), or the same words were typed there. It goes again
-          // on that draft (its file changes applied twice are the same as once), so what was folded behind it still
-          // stands on it, never offered as a conflict with itself.
-          put({ ...current, sent: { save: { ...save, base: far.updated_at, base_body: far.body, base_files: null, idempotency_key: crypto.randomUUID() } } });
+        if (far && far.body === words(save)) {
+          // Its words are the draft there, under a newer version: it landed and that draft changed there since (a window
+          // there took a file out, changed the quote or the recipients: a replay under its key alone is answered by the
+          // store, `last_key`), or the same words were typed there. That draft is the newer one and stays as it is: this
+          // save is never sent again over it (nor offered as a conflict with itself). What was folded behind stands on it.
+          put({ ...current, sent: null, next: standingOn(current.next, far) });
           continue;
         }
         if (!current.view) {
@@ -784,16 +836,21 @@ export function createMachineDrafts(options: {
     read(peer: DraftPeer, threadId: string): { draft: InboxReplyDraft | null; not_landed?: DraftNotLanded } | null {
       const k = key(peer.id, threadId);
       const record = held.get(k);
-      // Away, and the draft last heard has moved on there: none is shown (it may be sent already), and a save typed
-      // now stands on none, as the window that reads this does. Words typed here and held stay as they are.
-      if (movedOn.has(k) && peer.state !== "online") hear(k, null);
-      const heard = known.get(k);
+      if (peer.state !== "online" && !(record && waits(record))) {
+        // Away, and the draft last heard has moved on there: none is shown (it may be sent already), and a save typed
+        // now stands on none, as the window that reads this does. Words typed here and held stay as they are. Moved on:
+        // its stream said so, or a list read started after it was heard (one at a reconnect, say) names another version.
+        const was = known.get(k);
+        const row = was && peer.listGen > was.asked ? peer.list?.rows.find((one) => one.thread_id === threadId) : undefined;
+        if (movedOn.has(k) || (was && peer.listGen > was.asked && (row?.unsent?.reply_at ?? null) !== (was.draft?.updated_at ?? null))) hear(k, null);
+      }
+      const last = heard(k);
       if (record && (waits(record) || peer.state !== "online")) {
         const offered = notLandedOf(record);
-        return { draft: waits(record) ? record.view : heard !== undefined ? heard : record.view, ...(offered ? { not_landed: offered } : {}) };
+        return { draft: waits(record) ? record.view : last !== undefined ? last : record.view, ...(offered ? { not_landed: offered } : {}) };
       }
       if (record) return null;
-      return peer.state !== "online" && heard !== undefined ? { draft: heard } : null;
+      return peer.state !== "online" && last !== undefined ? { draft: last } : null;
     },
     /** Words of the person's that the draft there does not hold, for a read that machine answered. */
     notLanded(machine: string, threadId: string): DraftNotLanded | null {
@@ -811,13 +868,20 @@ export function createMachineDrafts(options: {
      * again first: heard again on the next read. The last one heard stays meanwhile: a save held before that read
      * stands on it (its files, its quote), never on no draft; that machine judges it against its newer one as it lands.
      * Unless the list's row names that very version, it has moved on (`movedOn`): a read while that machine is away
-     * shows no draft.
+     * shows no draft. `refreshed` false: the list could not be read again, so it may have moved on: it has. A row that
+     * says no draft there (sent or discarded) also ends the names of files a landed save could not keep (`gone`).
      */
-    farChanged(machine: string, threadId: string): void {
+    farChanged(machine: string, threadId: string, refreshed = true): void {
       const k = key(machine, threadId);
+      const row = refreshed ? options.peer(machine)?.list?.rows.find((one) => one.thread_id === threadId) : undefined;
+      const record = held.get(k);
+      if (record?.gone && row && (row.unsent?.reply_at ?? null) === null) {
+        const { gone: _gone, ...rest } = record;
+        if (shows(rest)) put(rest);
+        else drop(machine, threadId);
+      }
       if (!known.has(k)) return;
-      const row = options.peer(machine)?.list?.rows.find((one) => one.thread_id === threadId);
-      if (!row || (row.unsent?.reply_at ?? null) !== (known.get(k)?.updated_at ?? null)) movedOn.add(k);
+      if (!row || (row.unsent?.reply_at ?? null) !== heardAt(k)) movedOn.add(k);
     },
     /** A file uploaded to that machine through the forward: a held draft shows its tile by it. */
     noteUpload(answer: Response): void {
@@ -841,7 +905,7 @@ export function createMachineDrafts(options: {
       const record = held.get(k) ?? null;
       // The draft shown here: the one held while it waits, else the one last heard there (a Send while that machine
       // sleeps, or before a window reads it again, must not bring the sent words back from it).
-      const view = record && waits(record) ? record.view : known.has(k) ? (known.get(k) ?? null) : (record?.view ?? null);
+      const view = record && waits(record) ? record.view : known.has(k) ? (heard(k) ?? null) : (record?.view ?? null);
       const uploadsSent = strings(body.uploads);
       const wordsSent = typeof body.words === "string" ? body.words : undefined;
       const sentAs = { clearDraft: body.clear_draft, words: wordsSent, uploads: uploadsSent };
@@ -873,13 +937,17 @@ export function createMachineDrafts(options: {
       }
       if (peer.state === "online") void drain(machine);
     },
-    /** That machine's rows, each with the Draft mark of a draft held here for it. */
+    /**
+     * That machine's rows, each with the Draft mark of a draft held here for it. A record that does not wait (offered
+     * words, files a landed save could not keep) draws no version of its own: the row's, else the offered words'.
+     */
     overlay<R extends InboxListRow & { machine: string }>(rows: readonly R[]): R[] {
       if (held.size === 0) return [...rows];
       return rows.map((row) => {
         const record = held.get(key(row.machine, row.thread_id));
         if (!record) return row;
-        const unsent = { ...(row.unsent ?? { reply_at: null, picks: 0, comments: 0 }), reply_at: record.view ? record.view.updated_at : (record.conflict?.updated_at ?? null) };
+        const reply_at = waits(record) ? (record.view?.updated_at ?? record.conflict?.updated_at ?? null) : (row.unsent?.reply_at ?? record.conflict?.updated_at ?? null);
+        const unsent = { ...(row.unsent ?? { reply_at: null, picks: 0, comments: 0 }), reply_at };
         return { ...row, unsent: inboxHasUnsent(unsent) ? unsent : null };
       });
     },
@@ -891,10 +959,10 @@ export function createMachineDrafts(options: {
         open.map(async (row) => {
           const peer = takers.get(row.machine)!;
           const record = held.get(key(peer.id, row.thread_id));
-          let draft: InboxReplyDraft | null | undefined = record ? (record.view ?? record.conflict ?? null) : undefined;
+          let draft: InboxReplyDraft | null | undefined = record && shows(record) ? (record.view ?? record.conflict ?? null) : undefined;
           if (draft === undefined) {
-            const heard = known.get(key(peer.id, row.thread_id));
-            if (heard !== undefined && (heard?.updated_at ?? null) === row.unsent!.reply_at) draft = heard;
+            const last = heard(key(peer.id, row.thread_id));
+            if (last !== undefined && (last?.updated_at ?? null) === row.unsent!.reply_at) draft = last;
           }
           if (draft === undefined && row.unsent!.reply_at !== null && peer.state === "online") {
             const answer = await peer.request(`threads/${row.thread_id}/draft`, "", { method: "GET", headers: {}, timeoutMs: PREVIEW_WAIT_MS }).catch(() => null);
@@ -921,11 +989,8 @@ export function createMachineDrafts(options: {
     forget(machine: string, keepHeld = false): LostDraft[] {
       const lost: LostDraft[] = [];
       const add = (thread: string, draft: InboxReplyDraft | null | undefined) => {
-        if (!draft) return;
-        const files = (draft.files ?? []).map((file) => file.name);
-        if (draft.body.trim() === "" && files.length === 0) return;
-        if (lost.some((one) => one.thread === thread && one.words === draft.body)) return;
-        lost.push({ thread, words: draft.body, files, quote: draft.quote ?? null });
+        const one = lostOf(thread, draft);
+        if (one && !lost.some((was) => was.thread === thread && was.words === one.words)) lost.push(one);
       };
       for (const record of [...held.values()]) {
         if (record.machine !== machine) continue;
