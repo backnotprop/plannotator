@@ -9,10 +9,12 @@
  * reader reads from `ReviewImagesContext`: no review-editor code here, so the pages that pass it load none until the
  * reader's own chunk does.
  *
- * A diff on another linked machine gets none (its door does not carry these routes): its images stay as before.
+ * A guided review on another linked machine reads them there (mark `linked-reads`); a pull request's diff on another
+ * machine gets none (its door does not carry these routes for PRs): its images stay as before.
  */
 import { createContext } from 'react';
 import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
+import { machineServesReads } from './linkedReads';
 import { pullMachine, pullUrl } from './pulls/pullMachines';
 import type { GuideReaderImages } from './guide/types';
 
@@ -56,12 +58,18 @@ export function pullReviewImages(key: string, scope: string, from: string | unde
   };
 }
 
-/** A guided review on a message: its patch as the agent sent it, which never changes, so the message is the snapshot. */
+/**
+ * A guided review on a message: its patch as the agent sent it, which never changes, so the message is the snapshot.
+ * Read on the message's own machine: a linked machine's door serves these once it says `linked-reads`; an older one
+ * gets no image previews, as before.
+ */
 export function guideReviewImages(messageId: string): GuideReaderImages | undefined {
-  if (!here(machineOf(messageId))) return undefined;
+  const machine = machineOf(messageId);
+  if (!machineServesReads(machine)) return undefined;
+  const on = here(machine) ? null : machine;
   return {
     snapshotId: `inbox:guide:${messageId}`,
-    fetchImpl: reviewFetch((read, query) => inboxUrl(`/messages/${encodeURIComponent(messageId)}/guide/${read}`, query.replace(/(^|&)snapshot=[^&]*/, `$1snapshot=${encodeURIComponent(messageId)}`))),
-    markdownImageUrl: markdownImageRoute((query) => inboxUrl(`/messages/${encodeURIComponent(messageId)}/guide/review-markdown-image`, query.replace(/(^|&)snapshot=[^&]*/, `$1snapshot=${encodeURIComponent(messageId)}`))),
+    fetchImpl: reviewFetch((read, query) => inboxUrl(`/messages/${encodeURIComponent(messageId)}/guide/${read}`, query.replace(/(^|&)snapshot=[^&]*/, `$1snapshot=${encodeURIComponent(messageId)}`), on)),
+    markdownImageUrl: markdownImageRoute((query) => inboxUrl(`/messages/${encodeURIComponent(messageId)}/guide/review-markdown-image`, query.replace(/(^|&)snapshot=[^&]*/, `$1snapshot=${encodeURIComponent(messageId)}`), on)),
   };
 }

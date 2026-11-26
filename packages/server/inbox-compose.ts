@@ -162,6 +162,7 @@ export function createInboxCompose(options: {
         last_thread: last ? { id: last.id, subject: last.subject, at: last.at } : null,
         ...(root !== group.project.root ? { root } : {}),
         ...(entry.label ? { label: entry.label } : {}),
+        ...(entry.runtime ? { runtime: entry.runtime } : {}),
         activity: Math.max(entry.startedAt, last ? Date.parse(last.at) : 0),
       });
     }

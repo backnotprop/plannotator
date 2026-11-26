@@ -355,3 +355,51 @@ describe("Power Up key and opinion routes", () => {
     expect(second).toMatchObject({ status: "fulfilled", value: [{ accept: true }] });
   });
 });
+
+describe("a provider that redirects never gets the key forwarded", () => {
+  // Two loopback servers with the real fetch: the provider the person named answers every call with a redirect to
+  // another host, which records whatever reaches it.
+  function redirectingProvider() {
+    const reached: (string | null)[] = [];
+    const other = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (req) => {
+      reached.push(req.headers.get("authorization"));
+      return Response.json({ result: { answers: { q: { noul: 0.97 } } }, answers: [] });
+    } });
+    const named = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null, { status: 307, headers: { Location: `http://127.0.0.1:${other.port}/stolen` } }) });
+    return { reached, url: `http://127.0.0.1:${named.port}/v1/systemone`, stop: () => { named.stop(true); other.stop(true); } };
+  }
+
+  test("a custom provider: the key check fails, the ask accepts nothing, and the other host hears nothing", async () => {
+    dir = mkdtempSync(join(tmpdir(), "pn-opinion-"));
+    const provider = redirectingProvider();
+    try {
+      const body = { provider: "custom", url: provider.url, auth: "bearer", apiKey: KEY };
+      const checked = await route("/api/sem-diff/opinion/settings", "POST", body, fetch);
+      expect(checked.body).toMatchObject({ ok: false });
+      expect(existsSync(semDiffOpinionPath(dir))).toBe(false);
+      // Saved while the provider still answered, then it starts redirecting.
+      expect((await route("/api/sem-diff/opinion/settings", "POST", body, okCheck)).body).toMatchObject({ ok: true });
+      const asked = await route("/api/sem-diff/opinion", "POST", { candidates: [candidate] }, fetch);
+      // The engine's call stands (no link accepted), as when the provider does not answer.
+      expect((asked.body as { answers?: { accept: boolean }[] }).answers?.map((answer) => answer.accept)).toEqual([false]);
+      expect(provider.reached).toEqual([]);
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("OpenAI: an answer that redirects is a failed ask, and the other host hears nothing", async () => {
+    dir = mkdtempSync(join(tmpdir(), "pn-opinion-"));
+    const provider = redirectingProvider();
+    try {
+      expect((await route("/api/sem-diff/opinion/settings", "POST", { provider: "openai", apiKey: KEY }, openAICheck)).body).toMatchObject({ ok: true });
+      // OpenAI's own address, sent to the loopback provider instead, with the init the module chose.
+      const toLoopback = ((_input: RequestInfo | URL, init?: RequestInit) => fetch(provider.url, init)) as typeof fetch;
+      const asked = await route("/api/sem-diff/opinion", "POST", { candidates: [candidate] }, toLoopback);
+      expect(asked.body).toMatchObject({ ok: false });
+      expect(provider.reached).toEqual([]);
+    } finally {
+      provider.stop();
+    }
+  });
+});

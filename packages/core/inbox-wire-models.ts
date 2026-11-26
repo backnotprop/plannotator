@@ -137,6 +137,8 @@ export interface OutboxView {
   thread?: string | null;
   /** The machine's name, kept once its link went (an Unlink here or on that machine). */
   machine_name?: string | null;
+  /** A held Viewed tick in a review there: its file and whether it is ticked. Absent from an older Inbox. */
+  viewed?: { path: string; viewed: boolean } | null;
 }
 
 /** Checking for updates has failed for hours with no success (packages/shared/update-check.ts releaseCheckFailing). */

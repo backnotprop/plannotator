@@ -5,6 +5,7 @@ export {
   getServerConfig,
   resolveAIEnabled,
   resolveAnnotateHistory,
+  resolveHtmlStartsInInteract,
   resolveClaudeSandbox,
   resolveCursorSandbox,
   resolveFeedbackHistory,

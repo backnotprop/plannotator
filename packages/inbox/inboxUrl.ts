@@ -114,6 +114,11 @@ export function hasMachineMark(machineOrId: string | { id: string; marks?: reado
   return inboxMarksHave(typeof machineOrId === 'string' ? linkedFacts.get(id)?.marks : machineOrId.marks, mark);
 }
 
+/** Every linked machine the merged list last named that can be read (not one too old to link, nor revoked), by id. */
+export function linkedMachineIds(): string[] {
+  return [...linkedFacts].filter(([, facts]) => facts.state !== 'needs_update' && facts.state !== 'revoked').map(([id]) => id).sort();
+}
+
 /** The linked machines the merged list last said take `mark`, by id (an older one, or one not listed yet, does not). */
 export function linkedMachinesWith(mark: string): string[] {
   return [...linkedFacts].filter(([, facts]) => facts.marks.includes(mark) && facts.state !== 'needs_update' && facts.state !== 'revoked').map(([id]) => id).sort();

@@ -16,8 +16,9 @@ import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
 import type { OpenInFileCode, OpenInFileScope } from '../openInWire';
 import { Icon } from '../icons';
-import { newTabUrl, onAnotherMachine, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
+import { newTabMenu, newTabUrl, onAnotherMachine, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
 import { readableVersion } from '../attachments';
+import { onLinkedMachine, readsServedFor, useLinkedReadsRev } from '../linkedReads';
 import { projectFileOfLink } from '../links';
 import { useInboxFileSource } from '../fileSource';
 import { usePhone, useTouchScreen } from '../phone';
@@ -82,19 +83,19 @@ function useOpenInActions(path: string | null, open: (id: string) => Promise<{ o
 }
 
 /**
- * Everything an attachment's control needs: the menu, and picking from it. `enabled: false` (off this computer): no
- * list is read, no menu. A file on another machine (`here: false`): no list is read either, and the menu is what
- * works from here (`openInMenu`).
+ * Everything an attachment's control needs: the menu, and picking from it. `enabled: false`: no list is read, no
+ * menu. A file on another machine, or a window over the tailnet (`tab`), is `here: false`: no list is read either, and
+ * the menu is what works with no app (`newTabMenu`: a new tab, Copy path).
  */
-function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent', enabled = true) {
-  const here = !onAnotherMachine(attachment);
+function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent', enabled = true, tab = false) {
+  const here = !tab && !onAnotherMachine(attachment);
   // A read that did not answer (a restarting Inbox) is asked again for the next file.
   const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, enabled && here, attachment.id);
   const [remembered, remember] = useRememberedOpenInApp();
   const menu: OpenInMenu | null = !enabled
     ? null
     : !here
-      ? openInMenu(attachment, [], 'linux', remembered, version)
+      ? newTabMenu(attachment, version)
       : answer?.available
         ? openInMenu(attachment, answer.apps, answer.platform ?? 'linux', remembered, version)
         : null;
@@ -163,8 +164,10 @@ function Status({ status }: { status: { text: string; error: boolean } | null })
 
 /**
  * The pane header's control. On this computer: the split button (or, while
- * the apps are unknown to this server, the new-tab icon). Over the tailnet
- * and on a phone: the new-tab icon for HTML and images, nothing otherwise.
+ * the apps are unknown to this server, the new-tab icon). Over the tailnet:
+ * what a file on another machine shows, a new tab for HTML and images and
+ * Copy path (no server call: the path is the record's). On a phone: the
+ * new-tab icon (its Copy path is in full screen's ⋯ and the tile's menu).
  */
 export function OpenInControl({
   attachment,
@@ -181,8 +184,8 @@ export function OpenInControl({
   /** A phone's 44 px icon. */
   big?: boolean;
 }) {
-  if (surface === 'tab') return <NewTabButton attachment={attachment} version={version} big={big} />;
-  return <OpenInSplit attachment={attachment} version={version} label={label} />;
+  if (surface === 'tab' && big) return <NewTabButton attachment={attachment} version={version} big={big} />;
+  return <OpenInSplit attachment={attachment} version={version} label={label} tab={surface === 'tab'} />;
 }
 
 function NewTabButton({ attachment, version, big }: { attachment: InboxAttachmentState; version: 'current' | 'sent'; big: boolean }) {
@@ -197,9 +200,9 @@ function NewTabButton({ attachment, version, big }: { attachment: InboxAttachmen
   );
 }
 
-function OpenInSplit({ attachment, version, label }: { attachment: InboxAttachmentState; version: 'current' | 'sent'; label: boolean }) {
-  const { here, answer, menu, busy, status, launch, copyPath } = useOpenIn(attachment, version);
-  // A file on another machine with nothing but Copy path: a plain button, not a one-item list.
+function OpenInSplit({ attachment, version, label, tab }: { attachment: InboxAttachmentState; version: 'current' | 'sent'; label: boolean; tab: boolean }) {
+  const { here, answer, menu, busy, status, launch, copyPath } = useOpenIn(attachment, version, true, tab);
+  // A file on another machine (or over the tailnet) with nothing but Copy path: a plain button, not a one-item list.
   if (!here && menu && menu.items.length === 0) return <CopyPathButton id={attachment.id} status={status} copyPath={copyPath} />;
   if (!here && menu) return <SplitButton id={attachment.id} kind={attachment.kind} missingWord="" menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} />;
   if (!answer) return null;
@@ -307,8 +310,9 @@ const knownFiles = new Map<string, { path: string; kind: string } | null>();
 
 /**
  * "Open in" for a file something references, by its project-relative path (a message's code spans, a review's
- * diff headers). The split button, without "Open". Nothing at all when the file is not on this computer, through the
- * tailnet (the apps route refuses it) or on a phone, as for an attachment there is no app to launch. `line` goes along
+ * diff headers). The split button, without "Open". Through the tailnet (the apps route refuses it), and for a file on
+ * the thread's linked machine (asked there, its path there), Copy path alone; nothing at all when the file is not on
+ * the thread's computer, or on a phone, as there is no app to launch. `line` goes along
  * when the app's launcher takes one. `label`: the word "Open" on the button (the code window's header). `note`: added to the button's hover words.
  */
 export function OpenInFile({ scope, path, line, label = false, onListOpenChange, note }: { scope: OpenInFileScope; path: string; line?: number; label?: boolean; onListOpenChange?: (open: boolean) => void; note?: string }) {
@@ -324,7 +328,9 @@ async function checkOpenInFile(scope: OpenInFileScope, path: string): Promise<{ 
   try {
     const found = await inboxApi.openInFileCheck(scope, path);
     const next = found.found && found.path && found.kind ? { path: found.path, kind: found.kind } : null;
-    knownFiles.set(key, next);
+    // Not asked there yet (that machine has not said it serves these reads): nothing known, so nothing kept.
+    if ('thread' in scope && !readsServedFor(scope.thread)) knownFiles.delete(key);
+    else knownFiles.set(key, next);
     return next;
   } catch {
     knownFiles.delete(key);
@@ -338,9 +344,15 @@ function OpenInFileSplit({ scope, path, line, label, onListOpenChange, note }: {
   const key = JSON.stringify([scope, path]);
   const [file, setFile] = useState(() => knownFiles.get(key) ?? null);
   const available = answer?.available === true;
+  // Asked once the app list answered either way: without apps (over the tailnet) a file that is here still has its path.
+  const answered = answer !== null;
+  // A linked machine's file is asked again when that machine's facts change: its marks came, or it is back online.
+  // This computer's own files are not asked again for another machine's comings and goings.
+  const linkedRev = useLinkedReadsRev();
+  const farRev = 'thread' in scope && onLinkedMachine(scope.thread) ? linkedRev : 0;
   useEffect(() => {
     setFile(knownFiles.get(key) ?? null);
-    if (!available) return;
+    if (!answered) return;
     let live = true;
     void checkOpenInFile(scope, path).then((next) => {
       if (live) setFile(next);
@@ -350,9 +362,12 @@ function OpenInFileSplit({ scope, path, line, label, onListOpenChange, note }: {
     };
     // `key` names the scope and the path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, available]);
+  }, [key, answered, farRev]);
   const { busy, status, launch, copyPath } = useOpenInActions(file?.path ?? null, (id) => inboxApi.openInFile(scope, path, id, line), remember);
-  if (!answer?.available || !file) return null;
+  if (!file) return null;
+  // No app to launch here (a window over the tailnet), or the file is on the thread's linked machine (its path there;
+  // an app here cannot open a file that is not on this disk): Copy path alone, as for an attachment there.
+  if (!available || ('thread' in scope && onLinkedMachine(scope.thread))) return <CopyPathButton id={path} status={status} copyPath={copyPath} />;
   const menu = openInMenuFor(file, answer.apps, answer.platform ?? 'linux', remembered, null, false);
   return <SplitButton id={path} kind={file.kind} missingWord="" menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} onOpenChange={onListOpenChange} note={note} />;
 }
@@ -415,9 +430,14 @@ function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords, raised = f
   const touch = useTouchScreen();
   const [missing, setMissing] = useState(false);
   const [told, setTold] = useState(false);
+  // The read out now: a new rest, or the words gone, stops it (a sleeping machine's read never lingers).
+  const reading = useRef<AbortController | null>(null);
+  useEffect(() => () => reading.current?.abort(), []);
   const hover = useHoverPreview<Extract<OpenInFileCode, { found: true }>>(async () => {
+    reading.current?.abort();
+    const read = (reading.current = new AbortController());
     // Open's own answer comes with the code, so the window opens whole.
-    const [answer] = await Promise.all([inboxApi.openInFileCode(scope, path).catch(() => null), phone ? null : checkOpenInFile(scope, path)]);
+    const [answer] = await Promise.all([inboxApi.openInFileCode(scope, path, read.signal).catch(() => null), phone ? null : checkOpenInFile(scope, path)]);
     setMissing(!answer?.found);
     // Still resting on the words: they say so now, with no second rest.
     if (!answer?.found && (pointerIn.current || document.activeElement === hover.anchorRef.current)) setTold(true);
@@ -810,7 +830,8 @@ export function TileMenu({
   const version = readableVersion(attachment);
   const source = useInboxFileSource();
   const apps = surface === 'apps';
-  const { menu, status, launch, copyPath, flash } = useOpenIn(attachment, version, apps);
+  // Over the tailnet or on a phone the tile's menu has a new tab and Copy path (no ⋯: the tile itself opens it).
+  const { menu, status, launch, copyPath, flash } = useOpenIn(attachment, version, apps || (surface === 'tab' && source.writes), surface === 'tab');
   const arm = useMessageArm();
   const [open, setOpen] = useState(false);
   // A source that writes nothing (the tour): no Download, as the viewer's.
@@ -920,8 +941,23 @@ interface FullScreenMoreProps {
  * Open in list is the header's; through the tailnet or on a phone, a new tab.
  */
 export function FullScreenMore(props: FullScreenMoreProps) {
-  return props.surface === 'apps' ? <FullScreenMoreApps {...props} /> : <FullScreenMoreMenu {...props} openIn={null} />;
+  if (props.surface === 'apps') return <FullScreenMoreApps {...props} />;
+  return props.surface === 'tab' ? <FullScreenMoreTab {...props} /> : <FullScreenMoreMenu {...props} openIn={null} />;
 }
+
+/** Through the tailnet or on a phone: the new tab, and Copy path (the record's path; no server call). */
+function FullScreenMoreTab(props: FullScreenMoreProps) {
+  const { status, copyPath } = useOpenInActions(props.attachment.path, NO_LAUNCH, NO_REMEMBER);
+  return (
+    <>
+      <FullScreenMoreMenu {...props} openIn={null} onCopyPath={() => void copyPath()} />
+      <Status status={status} />
+    </>
+  );
+}
+
+const NO_LAUNCH = async () => ({ ok: false });
+const NO_REMEMBER = () => {};
 
 function FullScreenMoreApps(props: FullScreenMoreProps) {
   const { menu, status, launch, copyPath } = useOpenIn(props.attachment, props.version);
@@ -943,14 +979,15 @@ function FullScreenMoreApps(props: FullScreenMoreProps) {
   );
 }
 
-function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNode }) {
+function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNode; onCopyPath?: () => void }) {
   const { attachment, version } = props;
   // A source that writes nothing (the tour): no Open in, no Download; the menu says so.
   const source = useInboxFileSource();
   const { writes } = source;
   // Through the tailnet or on a phone (or a server without the app list): a new tab, for HTML and images.
   const tab = writes && props.openIn === null && props.surface !== undefined ? newTabUrl(attachment, version) : null;
-  const named = [props.openIn || tab ? 'open in' : null, writes ? 'download' : null, props.versionAction ? 'versions' : null].filter(Boolean).join(', ') || 'not in the tour';
+  const copyPath = writes && props.openIn === null ? props.onCopyPath : undefined;
+  const named = [props.openIn || tab || copyPath ? 'open in' : null, writes ? 'download' : null, props.versionAction ? 'versions' : null].filter(Boolean).join(', ') || 'not in the tour';
   return (
     <DropdownMenu open={props.open} onOpenChange={props.onOpenChange}>
       <DropdownMenuTrigger
@@ -967,7 +1004,13 @@ function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNo
             <span className="flex-1">Open in new tab</span>
           </DropdownMenuItem>
         )}
-        {writes && (props.openIn || tab) && <DropdownMenuSeparator />}
+        {copyPath && (
+          <DropdownMenuItem className="text-xs" onClick={copyPath} data-open-in-item="copy-path">
+            <Icon name="copy" size={15} className="ib-appi ib-glyph" />
+            <span className="flex-1">Copy path</span>
+          </DropdownMenuItem>
+        )}
+        {writes && (props.openIn || tab || copyPath) && <DropdownMenuSeparator />}
         {writes ? (
           <DropdownMenuItem className="text-xs" render={<a href={source.downloadUrl(attachment, version)} download={attachment.name} />} data-attachment-download="">
             <Icon name="download" size={15} className="ib-appi ib-glyph" />

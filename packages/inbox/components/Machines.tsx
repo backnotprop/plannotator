@@ -8,6 +8,7 @@ import { CodeBox, CopyButton } from './ConnectPicker';
 import { UnlinkLink } from './Devices';
 import { LinkThroughRows } from './LinkThrough';
 import { errorText } from '../toastError';
+import { forgetPullMachines } from '../pulls/pullMachines';
 
 /**
  * What a refused link means, in the window's words. The server's messages
@@ -117,6 +118,8 @@ export function MachinesSection({ machines, onChanged, onMachineUpdate }: Machin
                   setUnlinkedNote(null);
                   try {
                     const answer = await inboxApi.unlinkMachine(machine.id);
+                    // Its PRs this window remembered (a page open on one, a reload) are read here from now on.
+                    forgetPullMachines(machine.id);
                     if (!answer.told) setUnlinkedNote(`Unlinked here. ${machine.name} could not be reached, so it drops the link the next time it is in touch. This computer stays reachable on your tailnet for it for up to 7 days, until it hears.`);
                   } catch (cause) {
                     setError(linkErrorText(cause));

@@ -124,7 +124,7 @@ import {
   type InboxQuestionState,
   type InboxRowDelivery,
 } from "@plannotator/core/inbox-types";
-import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads } from "@plannotator/core/inbox-types";
+import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads, inboxRuntimeNamed } from "@plannotator/core/inbox-types";
 import { inboxListSections, inboxRowDraftOnly, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
 import { sameInboxSend } from "./send-same";
@@ -2682,7 +2682,8 @@ export class InboxStore {
       // One session too when a script's post started the thread (`inboxScriptAuthor`; it has no session of its own):
       // the window draws that session, not the script, once it took the thread over (packages/inbox/scriptAuthor.ts).
       ...(participants.length > 1 || (participants.length === 1 && inboxScriptAuthor(root.author)) ? { participants } : {}),
-      ...(participants.length > 1 && lastAgent?.author.kind === "agent" ? { last_agent: { host: lastAgent.author.host, ...(lastAgent.author.name ? { name: lastAgent.author.name } : {}) } } : {}),
+      // With one agent too when its name is not its host's ("Oh My Pi" on a `pi` session): the held line names it so.
+      ...(lastAgent?.author.kind === "agent" && (participants.length > 1 || inboxRuntimeNamed(lastAgent.author.host, lastAgent.author.name)) ? { last_agent: { host: lastAgent.author.host, ...(lastAgent.author.name ? { name: lastAgent.author.name } : {}) } } : {}),
       // What the Stopped / Holds up badge holds (approval "inbox-row-badges"): the window's hover card.
       ...(waits.length > 0 ? { waits } : {}),
     };
@@ -6034,20 +6035,31 @@ export class InboxStore {
 
   /**
    * The files the person ticked Viewed in a review (code review in the Inbox):
-   * each a file of the review's patch, once, in the order given. No write
-   * when nothing changed. Only on a message whose guide is a review.
+   * each a file of the review's patch, once. Either one file's tick (`path`
+   * and `viewed` true or false), laid over what is kept, so a tick held for a
+   * while never undoes another one made since; or the whole list (`viewed`, a
+   * list, in its order; an older window's). No write when nothing changed.
+   * Only on a message whose guide is a review.
    */
-  saveGuideViewed(messageId: string, viewed: unknown, files: readonly string[]): string[] {
+  saveGuideViewed(messageId: string, viewed: unknown, files: readonly string[], path?: unknown): string[] {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     if (!message.guide?.review) throw new InboxError("guide_not_found", "This message carries no review.");
-    if (!Array.isArray(viewed) || viewed.some((value) => typeof value !== "string")) {
-      throw new InboxError("validation_error", "viewed: a list of the review's file paths.", { field: "viewed" });
-    }
     const known = new Set(files);
-    const unknown = (viewed as string[]).find((path) => !known.has(path));
-    if (unknown !== undefined) throw new InboxError("validation_error", `viewed: ${JSON.stringify(unknown)} is not a file of this review.`, { field: "viewed" });
-    const next = [...new Set(viewed as string[])];
+    let next: string[];
+    if (path !== undefined) {
+      if (typeof path !== "string" || !known.has(path)) throw new InboxError("validation_error", `path: ${JSON.stringify(path)} is not a file of this review.`, { field: "path" });
+      if (typeof viewed !== "boolean") throw new InboxError("validation_error", "viewed: true or false for that file.", { field: "viewed" });
+      const kept = (message.guide_viewed ?? []).filter((one) => one !== path);
+      next = viewed ? [...kept, path] : kept;
+    } else {
+      if (!Array.isArray(viewed) || viewed.some((value) => typeof value !== "string")) {
+        throw new InboxError("validation_error", "viewed: a list of the review's file paths.", { field: "viewed" });
+      }
+      const unknown = (viewed as string[]).find((one) => !known.has(one));
+      if (unknown !== undefined) throw new InboxError("validation_error", `viewed: ${JSON.stringify(unknown)} is not a file of this review.`, { field: "viewed" });
+      next = [...new Set(viewed as string[])];
+    }
     if (JSON.stringify(next) !== JSON.stringify(message.guide_viewed ?? [])) {
       const at = this.stamp();
       this.appendMessage({ ...message, guide_viewed: next }, at);

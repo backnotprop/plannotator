@@ -876,7 +876,7 @@ function NameField({ container, index, fresh, anchor, phone, onClose, onReact }:
           >
             {r && (
               <>
-                <SkillNameInput inputRef={nameRef} data="name-field" value={text} onChange={setText} onEnter={() => index !== null && !namesNoSkill(index, text) && close('enter')} own={r.skill} label={`Name for ${r.emoji}, optional, or / for a skill. Enter to keep it`} />
+                <SkillNameInput inputRef={nameRef} roomOf={anchor} data="name-field" value={text} onChange={setText} onEnter={() => index !== null && !namesNoSkill(index, text) && close('enter')} own={r.skill} label={`Name for ${r.emoji}, optional, or / for a skill. Enter to keep it`} />
                 <TrayRow
                   highlight={null}
                   fresh={fresh}
@@ -958,7 +958,7 @@ function SavedEditor({
             {r && index !== null && (
               <>
                 <div className="ib-react-form">
-                  <SkillNameInput inputRef={nameRef} data="edit-name" value={text} onChange={setText} onEnter={() => done(true)} own={r.skill} label={`Name for ${r.emoji}, or / for a skill`} />
+                  <SkillNameInput inputRef={nameRef} roomOf={anchor} data="edit-name" value={text} onChange={setText} onEnter={() => done(true)} own={r.skill} label={`Name for ${r.emoji}, or / for a skill`} />
                   <div className="ib-react-acts">
                     <button
                       type="button"

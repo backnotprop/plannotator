@@ -7,7 +7,7 @@
  *   with no tags, none on a tag's own list), several tags widening, combined with the other groups, the badge counting;
  * - Search: tags are never results (the owner: "It can be a filter but nothing more"): with tags the results for
  *   `#rel` and `rel` are what they are without; the Tag chip after From offers the tags this Inbox's threads carry (not
- *   one only a linked machine holds), picks several (one id each, sent as `tag`), reads "Tagged Release or Windows",
+ *   one only an older linked machine holds), picks several (each machine's id of each, sent as `tag`), reads "Tagged Release or Windows",
  *   narrows with the other chips, and is absent with no tags;
  * - the Board-off preview of a sent `#name`: its threads (the one it sits in left out), "Show threads" to its list,
  *   a first tap previews and a second goes, a tag only a linked machine holds previews too.
@@ -416,7 +416,7 @@ test.skipIf(!hasDom)('search: tags are never results: `#rel` and `rel` draw the 
   expect(drawn['true:#rel']).toHaveLength(2);
 });
 
-test.skipIf(!hasDom)('search: the Tag chip after From offers this Inbox\'s tags, picks several (the menu stays open), sends one id each, narrows with the other chips; none with no tags', async () => {
+test.skipIf(!hasDom)('search: the Tag chip after From offers this Inbox\'s tags, picks several (the menu stays open), sends each machine\'s id of each, narrows with the other chips; none with no tags', async () => {
   palette(hostOf(ROWS, [RELEASE, WINDOWS, DOCS], []));
   await typeIn('notes');
   expect(chips()).toEqual(['type', 'project', 'status', 'from', 'tag']);
@@ -429,15 +429,15 @@ test.skipIf(!hasDom)('search: the Tag chip after From offers this Inbox\'s tags,
     ['Release', 'menuitemcheckbox', 'false'],
     ['Windows', 'menuitemcheckbox', 'false'],
   ]);
-  // "Docs move" is only on the Mac mini's threads, which search does not read: it is not offered (it could only find nothing).
+  // "Docs move" is only on the Mac mini's threads, and this mini's search does not say it takes the filter: not offered.
   await click(menu().querySelectorAll('.ib-sp-mi')[1]!);
   await settle();
   expect(menu()).not.toBeNull();
-  // Release is held here and on the Mac mini: this Inbox's id goes, once.
-  expect(lastAsked().getAll('tag')).toEqual(['ini_release']);
+  // Release is held here and on the Mac mini: each machine's id goes, once, so each filters by its own.
+  expect(lastAsked().getAll('tag')).toEqual(['ini_release', 'ini_mini_release']);
   await click(menu().querySelectorAll('.ib-sp-mi')[2]!);
   await settle();
-  expect(lastAsked().getAll('tag')).toEqual(['ini_release', 'ini_windows']);
+  expect(lastAsked().getAll('tag')).toEqual(['ini_release', 'ini_mini_release', 'ini_windows']);
   expect(chip().textContent).toBe('Tagged Release or Windows');
   expect(menu().querySelectorAll('[aria-checked="true"]')).toHaveLength(2);
   // Unticking takes it out.

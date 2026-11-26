@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { inboxApi, type ListModel, type ThreadModel } from '../api';
+import { InboxApiError, inboxApi, type ListModel, type ThreadModel } from '../api';
 import { inboxUrl, machineOf } from '../inboxUrl';
 import { createInboxQueryClient } from './client';
 import { inboxKeys } from './keys';
@@ -39,6 +39,8 @@ async function readHeld(client: QueryClient): Promise<HeldProbeRead> {
       if (!held) continue;
       const fresh = await inboxApi.thread(threadId).catch((cause: unknown) => {
         if (machineOf(threadId)) return null;
+        // Deleted elsewhere while on screen: the window keeps it by design (paneReads.ts), so it has nothing to match.
+        if (cause instanceof InboxApiError && cause.status === 404 && cause.code === 'thread_not_found') return null;
         throw cause;
       });
       if (!fresh) continue;

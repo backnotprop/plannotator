@@ -73,6 +73,7 @@ import {
   type SessionChip,
 } from './model';
 import { newUuid } from '../uuid';
+import { useOtherFieldVoice } from '../components/FieldVoice';
 
 /** The answer lands as a stamp before the card leaves (brief §7). */
 const STAMP_MS = 350;
@@ -521,12 +522,16 @@ export function DecisionMode(props: DecisionModeProps) {
   const sendableKeys = groupKeys(queue).filter((key) => freshPicks(queue, key, carried.get(key)).length > 0);
   const answeredCount = sendableKeys.reduce((n, key) => n + freshPicks(queue, key, carried.get(key)).length, 0);
   const sendingAny = inFlightKeys.size > 0;
+  /** An Other answer being dictated: Send waits for its words. */
+  const otherVoice = useOtherFieldVoice();
   /**
    * Send these groups. Every answer on the cards is saved first (the thread's rounds, pickQueue.ts `forSend`): one that
    * cannot be saved sends nothing and says so, never a reply without an answer the person can see. Closed or tucked
    * away meanwhile, a failure is told by the window's toast.
    */
   const sendGroups = async (keys: readonly string[]) => {
+    // An Other answer still being dictated: every way to send (Send, a strip's Try again) waits for its words.
+    if (otherVoice.busyNow()) return;
     setError(null);
     const told = savesToldAway.current;
     const release = await saves.forSend();
@@ -871,7 +876,7 @@ export function DecisionMode(props: DecisionModeProps) {
           <div className="ib-dm-deck" data-reduced={reduced ? '' : undefined}>
             {/* The next card peeks behind this one: an edge, nothing to read. */}
             {peekDecision && <div className="ib-dm-peek" aria-hidden="true" data-decision-peek="" />}
-            <DecisionCard
+            {otherVoice.wrap(<DecisionCard
               key={current.id}
               decision={current}
               body={isActionDecision(current) ? null : cardBody(current)}
@@ -909,7 +914,7 @@ export function DecisionMode(props: DecisionModeProps) {
                 flushTyped();
                 setProto({ messageId: current.message.id, key });
               }}
-            />
+            />)}
           </div>
         ) : (
           <div className="ib-dm-loading">Reading what waits on you…</div>
@@ -941,7 +946,7 @@ export function DecisionMode(props: DecisionModeProps) {
           type="button"
           className="ib-btn ib-pri ib-dm-send"
           data-decision-send=""
-          disabled={answeredCount === 0 || sendingAny}
+          disabled={answeredCount === 0 || sendingAny || otherVoice.busy}
           aria-label={answeredCount === 0 ? 'Send: nothing answered yet' : `Send ${answeredCount === 1 ? '1 answer' : `${formatCount(answeredCount)} answers`}`}
           onClick={() => void sendAnswered()}
         >

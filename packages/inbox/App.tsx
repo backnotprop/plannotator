@@ -238,7 +238,7 @@ import { type SheetLayout } from './prs/tableModel';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
 import { reviewsOnYou } from './pulls/reviewsModel';
-import { appReviewView } from './app/reviewView';
+import { useAppReviewView } from './app/reviewView';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { BroIntro } from './components/BroIntro';
@@ -1576,9 +1576,8 @@ function Inbox() {
             cardsTimer = setTimeout(() => void refreshCards(), 60);
             return;
           }
-          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a list or thread
-          // read: only the open thread's checklist reads them again. The checklist lives only in its thread (owner,
-          // 2026-11-09): no list row or Board card shows it.
+          // A thread's steps (approval "inbox-thread-steps"; a linked machine's come by `onSteps`): silent, only the open
+          // thread's checklist reads them again. It lives only in its thread (owner, 2026-11-09): no row or card shows it.
           if (event?.kind === 'steps') {
             stepsBus.emit(event.thread_id);
             return;
@@ -1647,6 +1646,7 @@ function Inbox() {
         },
         // A thread's tags changed (here, in another window): read the list's `tags` again (approval "inbox-thread-tags").
         onTags: () => listAfterEvents(60),
+        onSteps: (threadId) => stepsBus.emit(threadId),
         // A linked machine's cards changed (its Board was read again here): the merged Board is read, as for a card record.
         onCards: () => {
           if (cardsTimer) clearTimeout(cardsTimer);
@@ -2820,12 +2820,10 @@ function Inbox() {
 
   /**
    * Mark unread (the owner's ask, 2026-10-31; markRead.ts `canMarkUnread`):
-   * the thread's latest agent message is new again, so its row is New and
-   * bold, as if the person had not opened it. Nothing is sent to the agent,
-   * and a Mark read stands, so Move back still reopens what it closed. From
-   * the open thread the thread closes, as a mail app's Mark unread does: left
-   * open, its next look would read it again, and the list shows the row back
-   * in New. Undo is a look capped at the message Mark unread took back, so it
+   * the latest agent message is new again: the row is bold in New (or, with questions waiting, in their group, its
+   * questions as they were), as if never opened. Nothing is sent to the agent, and a Mark read stands, so Move back
+   * still reopens what it closed. From the open thread the thread closes, as a mail app's Mark unread does: left
+   * open, its next look would read it again, and the list shows the row where it now goes. Undo is a look capped at the message Mark unread took back, so it
    * puts back exactly what was there and leaves anything that arrived since
    * new. When the server wrote nothing (a stale row: the thread was new
    * already, an agent having written there behind "N new") the row on screen
@@ -2872,14 +2870,14 @@ function Inbox() {
       return;
     }
     await afterWrite([threadId]);
-    // The open thread closes and the list settles with its row in New; any other row is bold where it is (R7).
+    // The open thread closes and the list settles with its row in New (or its questions' group); any other is bold where it is (R7).
     const wasOpen = routeRef.current.thread === threadId;
     if (wasOpen) {
       if (fromCard) backToCard();
       else close({ ...routeRef.current, thread: null, file: null });
     }
     showToast({
-      ...markUnreadToast(before ?? { subject: null }, wasOpen),
+      ...markUnreadToast(before ?? { subject: null }, wasOpen && written.thread.section === 'new'),
       icon: 'unread',
       onUndo: () => {
         dismissToast();
@@ -4945,7 +4943,7 @@ function Inbox() {
     />
   );
 
-  const reviewView = appReviewView({ route, pulls, pullsShown, thread, projectNames, go });
+  const reviewView = useAppReviewView({ route, pulls, pullsShown, thread, projectNames, go });
   // The Reviews list: on its own page, or beside a thread opened from it (the thread pane is the Inbox's own).
   const reviewsList = (project: string | null, view: PullFilter, threadId: string | null) => {
     // A PR opened from a project's drawing closes back to it (its own page only).
@@ -5283,7 +5281,7 @@ function Inbox() {
     const stack = stacks.find((s) => s.id === route.stack || s.layers.some((l) => l.key === route.stack)) ?? null;
     main = (
       <StackPage
-        stack={stack && stack.layers.some(inboxPullIsOpen) ? stack : null}
+        stack={stack && stack.layers.some(inboxPullIsOpen) ? stack : null} id={route.stack}
         loading={!sheetPulls.model} board={sheetPulls.model}
         repoLabel={stack ? (repoLabels(stacks).get(`${stack.host}/${stack.repo}`.toLowerCase()) ?? stack.repo) : null}
         phone={phone}
@@ -6241,9 +6239,9 @@ function Inbox() {
         {said}
       </div>
       {guideMessage && thread && (
-        // Every guide or review an agent sends opens the full-window review (approval "inbox-one-review-screen");
-        // what Code review brings shows only while it is on.
+        // Every guide or review an agent sends opens the full-window review (approval "inbox-one-review-screen").
         <ReviewPane
+          outbox={outbox}
           key={guideMessage.id}
           thread={thread}
           message={guideMessage}

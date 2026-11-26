@@ -121,6 +121,8 @@ packages/inbox/decisionModeSettings.test.tsx
 packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
 packages/inbox/components/stalePageNotice.test.tsx
+packages/inbox/components/FieldVoice.test.tsx
+packages/inbox/components/FieldVoiceShows.test.tsx
 packages/inbox/threadHeader.test.tsx
 packages/inbox/snoozeBackLine.test.tsx
 packages/inbox/launchMenuTailnet.test.tsx
@@ -242,6 +244,7 @@ packages/inbox/ack.test.tsx
 packages/inbox/reactionLanding.test.ts
 packages/inbox/reactionTray.test.tsx
 packages/inbox/reactionSkillEnter.test.tsx
+packages/inbox/reactionSkillList.test.tsx
 packages/inbox/replyHoldTray.test.tsx
 packages/inbox/reactEveryMessage.test.tsx
 packages/inbox/reactFaceSelect.test.tsx
@@ -321,12 +324,15 @@ packages/inbox/sidebarUpdateDot.test.tsx
 packages/inbox/sidebarSections.test.tsx
 packages/inbox/sidebarCustomize.test.tsx
 packages/inbox/listGroups.test.tsx
+packages/inbox/listLocalUnchanged.test.tsx
+packages/inbox/listTaggedSection.test.tsx
 packages/inbox/showOpensGroups.test.tsx
 packages/inbox/listNewPill.test.tsx
 packages/inbox/showLight.test.tsx
 packages/inbox/holdView.test.tsx
 packages/inbox/holdViewRowBoxes.test.tsx
 packages/inbox/projectSort.test.tsx
+packages/inbox/tagSort.test.tsx
 packages/inbox/updateStuck.test.tsx
 packages/inbox/palettePicker.test.tsx
 packages/inbox/textSize.test.tsx
@@ -721,6 +727,7 @@ packages/inbox/reviewPane.test.tsx
 packages/inbox/reviewPaneGuide.test.tsx
 packages/inbox/reviewJump.test.tsx
 packages/inbox/reviewAllFilesTree.test.tsx
+packages/inbox/reviewLinkedSwitch.test.tsx
 packages/inbox/guide/reviewKeys.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/pulls/pullLaunchpad.test.tsx
@@ -760,6 +767,8 @@ packages/inbox/guide/pullChangesTreeRisk.test.tsx
 packages/review-editor/components/hostLineMarks.test.ts
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
+packages/inbox/pulls/openStays.test.tsx
+packages/inbox/app/reviewViewKept.test.tsx
 packages/inbox/pulls/pullReviewCommentsToggle.test.tsx
 packages/review-editor/components/SelectionChooser.test.tsx
 packages/inbox/lazyChunkFailure.test.tsx
@@ -946,4 +955,9 @@ packages/inbox/commentRowFiles.test.tsx
 packages/inbox/sidebarStickyHeadings.test.tsx
 packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx
+packages/inbox/skillFileOpen.dom.test.tsx
 packages/inbox/reviewAnalysis.test.tsx
+packages/inbox/reviewSettings/reviewsSettings.test.tsx
+packages/inbox/guide/usePowerUp.test.tsx
+packages/inbox/guide/useViewedTicks.test.tsx
+packages/inbox/components/reply/replyBoxParity.test.tsx

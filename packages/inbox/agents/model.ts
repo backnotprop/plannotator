@@ -3,7 +3,7 @@
  * Pure: what each machine's group holds, each agent's name, the thread its row opens and the facts its hover card
  * says, from data the window already has (the list's `agents`, its rows and the linked machines). No read of its own.
  */
-import { INBOX_HOST_NAMES, type InboxAgent, type InboxAgentsGroup, type InboxListRow, type InboxListSection, type InboxParticipant } from '@plannotator/core/inbox-types';
+import { inboxHostName, type InboxAgent, type InboxAgentsGroup, type InboxListRow, type InboxListSection, type InboxParticipant } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
 import type { MachineView } from '../api';
 import { awayLine, isAway, type MachinesModel } from '../machines';
@@ -24,8 +24,22 @@ export interface AgentsGroup {
   agents: AgentEntry[];
 }
 
+/** The status order used by the Agents sidebar when "Show agent status" is on. */
+export function sortAgentEntries(entries: readonly AgentEntry[], statusOn: boolean): AgentEntry[] {
+  if (!statusOn) return [...entries];
+  const rank = (entry: AgentEntry): number => {
+    if (entry.agent.status_mark?.state === 'blocked') return 0;
+    if (entry.agent.status_mark?.state === 'working') return 1;
+    return 2;
+  };
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => rank(a.entry) - rank(b.entry) || a.index - b.index)
+    .map(({ entry }) => entry);
+}
+
 /** An agent's host in words ("Claude Code"); "An agent" when nothing said. */
-export const agentHostName = (host: string | null): string => (host ? (INBOX_HOST_NAMES[host] ?? host) : 'An agent');
+export const agentHostName = (host: string | null, runtime?: unknown): string => (host ? inboxHostName(host, runtime) : 'An agent');
 
 const rowName = (row: InboxListRow) => (row.thread_name ?? row.subject ?? '').trim();
 
@@ -86,7 +100,7 @@ export type AgentNameContext = 'list' | 'thread';
  */
 export function agentRowName(agent: InboxAgent, context: AgentNameContext = 'list'): string {
   const fallback = context === 'list' ? agent.first_thread?.name.trim() || agent.project?.name : null;
-  return agentOwnName(agent) || fallback || agentHostName(agent.host);
+  return agentOwnName(agent) || fallback || agentHostName(agent.host, agent.runtime);
 }
 
 /**
@@ -100,8 +114,11 @@ export function agentRowName(agent: InboxAgent, context: AgentNameContext = 'lis
  * the person, so only the continuing one is drawn. Two agents that share a thread and do not continue one another
  * stay two rows.
  */
-export function agentsGroups(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel, rows: readonly InboxListRow[]): AgentsGroup[] {
-  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({ machine: view, agents: groupEntries(group, machine, machines.self, rows).shown }));
+export function agentsGroups(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel, rows: readonly InboxListRow[], statusOn = false): AgentsGroup[] {
+  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({
+    machine: view,
+    agents: sortAgentEntries(groupEntries(group, machine, machines.self, rows).shown, statusOn),
+  }));
 }
 
 /** Each group the section draws: one flat group of this Inbox's agents with no machine linked, else one per machine. */
@@ -227,7 +244,7 @@ export function modelName(id: string): string {
 
 export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: Date = new Date()): AgentFacts {
   const { agent } = entry;
-  const sub = [agentHostName(agent.host), agent.project?.name, machine?.name].filter(Boolean).join(' · ');
+  const sub = [agentHostName(agent.host, agent.runtime), agent.project?.name, machine?.name].filter(Boolean).join(' · ');
   const away = machine && isAway(machine) ? awayLine(machine, now) : null;
   const state =
     away ??
@@ -312,7 +329,7 @@ export function threadSessions(
     // Only a name the session has itself (`agentOwnName`, else the labels' same ladder), else its agent. Never the
     // sidebar's fallbacks (a thread's name, a project), which inside a thread read as the thread's own title.
     const own = Object.hasOwn(labels, p.session) ? labels[p.session]?.trim() : '';
-    const name = (agent && agentOwnName(agent)) || own || p.name || agentHostName(p.host);
+    const name = (agent && agentOwnName(agent)) || own || p.name || agentHostName(p.host, agent?.runtime);
     const same = agent ? out.find((s) => s.agentId === agent!.id) : undefined;
     if (same) {
       if (!same.sessions.includes(p.session)) same.sessions.push(p.session);

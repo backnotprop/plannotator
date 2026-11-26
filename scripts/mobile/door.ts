@@ -52,6 +52,7 @@ const BYTES = new Set([
   'GET whats-new/image', 'GET projects/:id/picture', 'GET threads/:id/decisions', 'GET attachments/:id/image', 'GET attachments/:id/video',
   'GET attachments/:id/audio', 'GET attachments/:id/download', 'GET attachments/:id/markdown-image', 'GET attachments/:id/linked-page',
   'GET markups/:id', 'GET messages/:id/image', 'GET html-assets/:id/:path', 'GET uploads/:id/image', 'GET open-in/file/raw',
+  'GET messages/:id/guide/review-image', 'GET messages/:id/guide/review-markdown-image',
 ]);
 const RANGE = new Set(['GET attachments/:id/video', 'GET attachments/:id/audio', 'GET attachments/:id/download', 'GET messages/:id/image', 'GET open-in/file/raw']);
 const STREAM = new Set(['GET events']);
