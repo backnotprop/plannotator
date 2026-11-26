@@ -115,6 +115,20 @@ export function GrokBotIcon({ className }: { className?: string }) {
   );
 }
 
+// Mistral Vibe: Mistral's pixel M, traced cell for cell from Vibe's 64 px icon (an 8 px grid). Its own five colours
+// in every theme; the viewBox crops the icon's padding.
+export function VibeIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="4 4 56 56" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false" shapeRendering="crispEdges" data-mark="mistral-vibe">
+      <path fill="#FFAF00" d="M12 12H20V20H12ZM44 12H52V20H44Z" />
+      <path fill="#FF8205" d="M12 20H28V28H12ZM36 20H52V28H36Z" />
+      <path fill="#FA500F" d="M12 28H52V36H12Z" />
+      <path fill="#E10500" d="M12 36H20V44H12ZM28 36H36V44H28ZM44 36H52V44H44Z" />
+      <path fill="#C4001D" d="M4 44H28V52H4ZM36 44H60V52H36Z" />
+    </svg>
+  );
+}
+
 export function MuseIcon({ className }: { className?: string }) {
   const id = `muse-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   return (
