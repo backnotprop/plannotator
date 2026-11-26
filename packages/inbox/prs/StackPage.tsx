@@ -9,7 +9,7 @@
  *
  * Left for later (not in this first version): the docked inspector and the merged fold.
  */
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { inboxPullIsOpen, inboxPullLabel, inboxPullLandsNext, type InboxPull, type InboxPullStack, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { SidebarTrigger } from '../shell/sidebar';
@@ -21,13 +21,16 @@ import type { PullViewScope } from '../pulls/viewScope';
 import { changedSince, useLooked } from './looked';
 import { pickNext, rangeOf, rangeOpens } from './stackRange';
 import { StackRangeBar } from './StackRangeBar';
+import { useKeptStack } from '../pulls/keptStack';
 
 export interface StackPageProps {
   stack: InboxPullStack | null;
+  /** The stack the address names: the page holds the last one it drew under it while the list stops naming it (keptStack.ts). */
+  id?: string | null;
   /** The list is still being read: nothing to say yet. */
   loading: boolean;
   /** The board the stack is read from: where each layer's look is kept. */
-  board?: Pick<InboxPullsAnswer, 'pulls' | 'machines'> | null;
+  board?: Pick<InboxPullsAnswer, 'pulls' | 'machines' | 'hidden' | 'hidden_repos'> | null;
   repoLabel: string | null;
   phone: boolean;
   onBack: () => void;
@@ -37,7 +40,13 @@ export interface StackPageProps {
 }
 
 export function StackPage(props: StackPageProps) {
-  const { stack, phone } = props;
+  const { phone } = props;
+  // What is open stays open: its layers merged or closed, or a read without them, the page stays as it was drawn.
+  const held = useKeptStack(props.stack, props.id ?? null, props.board);
+  const stack = props.id === undefined ? props.stack : held;
+  const label = useRef<string | null>(null);
+  if (props.repoLabel) label.current = props.repoLabel;
+  const repoLabel = props.repoLabel ?? (stack ? label.current : null);
   const now = props.now ?? Date.now();
   const titleId = useId();
   const looked = useLooked(props.board ?? null);
@@ -50,7 +59,7 @@ export function StackPage(props: StackPageProps) {
         <Icon name="chevL" size={15} />
         Pull requests
       </button>
-      {props.repoLabel && <span className="ib-prst-repo">/ {props.repoLabel}</span>}
+      {repoLabel && <span className="ib-prst-repo">/ {repoLabel}</span>}
     </nav>
   );
   if (!stack) {

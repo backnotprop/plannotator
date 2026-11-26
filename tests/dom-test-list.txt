@@ -760,6 +760,8 @@ packages/inbox/guide/pullChangesTreeRisk.test.tsx
 packages/review-editor/components/hostLineMarks.test.ts
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
+packages/inbox/pulls/openStays.test.tsx
+packages/inbox/app/reviewViewKept.test.tsx
 packages/inbox/pulls/pullReviewCommentsToggle.test.tsx
 packages/review-editor/components/SelectionChooser.test.tsx
 packages/inbox/lazyChunkFailure.test.tsx
