@@ -220,7 +220,27 @@ interface DoorRoute {
   only?: readonly string[];
   /** A field the door takes besides `only` and never hands to the window route: the caller's note, told after it applies. */
   note?: string;
+  /**
+   * Which of its answers the command log keeps for a replay (default: every one under 500): the reply draft's routes
+   * (`DRAFT_SAVE_KEPT`).
+   */
+  kept?: (status: number) => boolean;
 }
+
+/**
+ * The reply draft's save and Discard keep no answer holding the draft's words in the command log, which is appended
+ * to and never compacted: a far window saves at every pause in typing, and the words would stay there after a Discard
+ * or a Send. The log is what makes a write under a key already seen answer as it did without applying again (a lost
+ * answer, a second path); a reply or a new thread sent twice would be two. These two need it less: a save names the
+ * version it stands on (`base`, `base_body`), so a save that already landed meets its own words there as a conflict
+ * (inbox-machine-drafts.ts `land` goes on on that draft), and its file changes applied twice are the same as once; a
+ * Discard naming a version (`base`) deletes only that one. What is lost: a save's replay answers its conflict, not its
+ * first answer. A Discard's plain answer (`{ ok, deleted }`, no words) is still kept: one from an older page names no
+ * version, and only the record keeps its replay from deleting words typed there after it. Its conflict (the draft
+ * there, words and all) is not kept: a replay asks again, a compare-and-set.
+ */
+const DRAFT_SAVE_KEPT = () => false;
+const DRAFT_DISCARD_KEPT = (status: number) => status === 200;
 
 const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^health$/, window: () => "/api/inbox/health" },
@@ -318,8 +338,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^threads\/([^/]+)\/draft$/, window: (m) => `/api/inbox/threads/${m[1]}/draft` },
   // A linked machine's window saves and discards the reply draft of this Inbox's thread here (mark `reply-drafts`), so
   // the draft is one on every window of both machines. A phone writes none (7.62): the unknown-route 404, as before.
-  { method: "POST", route: /^threads\/([^/]+)\/draft$/, window: (m) => `/api/inbox/threads/${m[1]}/draft`, machineOnly: true },
-  { method: "POST", route: /^threads\/([^/]+)\/draft\/delete$/, window: (m) => `/api/inbox/threads/${m[1]}/draft/delete`, machineOnly: true },
+  // Neither keeps the draft's words in the command log (`DRAFT_SAVE_KEPT`).
+  { method: "POST", route: /^threads\/([^/]+)\/draft$/, window: (m) => `/api/inbox/threads/${m[1]}/draft`, machineOnly: true, kept: DRAFT_SAVE_KEPT },
+  { method: "POST", route: /^threads\/([^/]+)\/draft\/delete$/, window: (m) => `/api/inbox/threads/${m[1]}/draft/delete`, machineOnly: true, kept: DRAFT_DISCARD_KEPT },
   { method: "GET", route: /^threads\/([^/]+)\/attachments$/, window: (m) => `/api/inbox/threads/${m[1]}/attachments` },
   // Export decisions: the thread's decisions as a download (`?format=md|html|json&tz=`), read only, from what the thread read serves.
   { method: "GET", route: /^threads\/([^/]+)\/decisions$/, window: (m) => `/api/inbox/threads/${m[1]}/decisions` },
@@ -1248,7 +1269,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const answer = entry.only && response.ok ? JSON.stringify(onlyFields(await response.json().catch(() => ({})), entry.only)) : await response.text();
       const headers = new Headers(response.headers);
       headers.delete("content-length");
-      return { response: new Response(answer, { status: response.status, headers }), answer, status: response.status, record: true };
+      return { response: new Response(answer, { status: response.status, headers }), answer, status: response.status, record: entry.kept?.(response.status) ?? true };
     });
   };
 

@@ -37,6 +37,7 @@ import { inboxHasUnsent, inboxMarksHave, inboxRowArchived, type InboxDraftFile, 
 import { checkInboxReplyDraftInput } from "@plannotator/shared/inbox/reply-drafts";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { readHeldDrafts, removeHeldDraft, writeHeldDraft, type HeldDraft, type HeldDraftWrite } from "./inbox-machine-drafts-held";
+import type { OutboxState } from "./inbox-outbox";
 
 /** A forwarded route of a thread's reply draft: its read and save (`draft`), or Discard (`draft/delete`). */
 export const MACHINE_DRAFT_ROUTE = /^threads\/([A-Za-z0-9_]+)\/draft(\/delete)?$/;
@@ -189,6 +190,16 @@ const fold = (first: HeldDraftWrite | null, then: HeldDraftWrite): HeldDraftWrit
   return { ...first, save: carry(first.save, then.save) };
 };
 
+/** A held write without the files a delivered reply carried: they are its attachments there now, in no draft. */
+const withoutSentFiles = (write: HeldDraftWrite | null, sentIds: readonly string[]): HeldDraftWrite | null => {
+  if (!write?.save || sentIds.length === 0) return write;
+  const sent = new Set(sentIds);
+  const keep = (value: unknown) => refs(value).filter((ref) => !sent.has(ref.upload_id));
+  const save: Body = { ...write.save };
+  for (const field of ["files_add", "files_place", "files"] as const) if (Array.isArray(save[field])) save[field] = keep(save[field]);
+  return { ...write, save };
+};
+
 /**
  * A folded save as it goes there: each long paste at its place in the draft shown here (`view`, made save by save by
  * that machine's rules), one this Inbox does not hold kept within the words, then checked as that machine checks a
@@ -244,6 +255,16 @@ const withoutMissing = (body: Body, answer: unknown): Body | null => {
   return { ...body, idempotency_key, files: body.files.filter((_, i) => i !== index) };
 };
 
+/**
+ * How a reply held for that machine stands, from its outbox entry's state (`replyState`). No entry: it settled long
+ * ago and was dropped past its keep (inbox-outbox.ts `OUTBOX_KEEP_SETTLED_MS`): delivered, or refused and its line
+ * dismissed. Never read as refused: words already sent there must not come back as the draft.
+ */
+export function heldReplyState(state: OutboxState | undefined): "pending" | "delivered" | "refused" {
+  if (state === undefined || state === "delivered") return "delivered";
+  return state === "refused" || state === "dropped" || state === "cancelled" ? "refused" : "pending";
+}
+
 export function createMachineDrafts(options: {
   dataDir: string;
   /** A thread's draft changed as this Inbox shows it: every window's stream says `event: drafts`. */
@@ -266,6 +287,16 @@ export function createMachineDrafts(options: {
   for (const record of readHeldDrafts(dataDir, log)) held.set(key(record.machine, record.thread_id), record);
   /** Each far draft as this Inbox last heard it there (null: none). Absent: not heard since this Inbox started. */
   const known = new Map<string, InboxReplyDraft | null>();
+  /**
+   * Far drafts last heard that that machine has since said moved on (its stream said the draft changed, and its list,
+   * read again for it, names another version or none): sent, discarded or written over there. While it is away, a
+   * read here shows no draft rather than words that may be sent already (`read`).
+   */
+  const movedOn = new Set<string>();
+  const hear = (k: string, draft: InboxReplyDraft | null) => {
+    known.set(k, draft);
+    movedOn.delete(k);
+  };
   const uploads = new Map<string, InboxUpload>();
   const draining = new Map<string, Promise<void>>();
   const again = new Set<string>();
@@ -493,8 +524,8 @@ export function createMachineDrafts(options: {
 
   const noteAnswer = async (machine: string, threadId: string, deleting: boolean, answer: Response) => {
     const body = await answer.json().catch(() => null);
-    if (answer.ok) known.set(key(machine, threadId), deleting ? null : draftOf(body));
-    else if (codeOf(body) === "draft_conflict") known.set(key(machine, threadId), draftOf(body));
+    if (answer.ok) hear(key(machine, threadId), deleting ? null : draftOf(body));
+    else if (codeOf(body) === "draft_conflict") hear(key(machine, threadId), draftOf(body));
   };
 
   /** One try of a write there: its answer, or null when that machine did not give one (or gave a 5xx). */
@@ -544,7 +575,9 @@ export function createMachineDrafts(options: {
       put(untouched ? { ...back, view: sending.before } : back);
       return changed(peer.id, record.thread_id);
     }
-    put(rest);
+    // Delivered: a save still held from before the Send (words typed after it fold onto it) no longer adds the files
+    // the reply carried, so the next draft never names them as files that could not be added.
+    put({ ...rest, sent: withoutSentFiles(rest.sent, sending.uploads), next: withoutSentFiles(rest.next, sending.uploads) });
     if (!untouched || !sending.before) return;
     const after = settleReplyDraftAfterSend(sending.before, { clearDraft: sending.clear_draft, words: sending.words, uploads: sending.uploads });
     // Only the version it carried goes (newer words typed there since stay).
@@ -604,13 +637,13 @@ export function createMachineDrafts(options: {
         if (codeOf(answer.body) === "draft_conflict") {
           // Changed there since the person threw it away (newer words typed there): it stays, and every window shows it.
           // A save behind the Discard stands on no draft, so it meets that one as a conflict (or lands beside it).
-          known.set(k, draftOf(answer.body));
+          hear(k, draftOf(answer.body));
           put({ ...latest, sent: write.save ? { save: write.save } : null });
           changed(peer.id, threadId);
           continue;
         }
         // Gone there (or nothing to go): the save behind it, if any, stands on no draft; a Discard behind, on none.
-        known.set(k, null);
+        hear(k, null);
         const next = latest.next?.discard && latest.next.discard.base === undefined ? { ...latest.next, discard: { ...latest.next.discard, base: null } } : latest.next;
         put({ ...latest, sent: write.save ? { save: write.save } : null, next });
         continue;
@@ -623,7 +656,7 @@ export function createMachineDrafts(options: {
       if (!current) return true;
       if (answer.status < 300) {
         const landed = draftOf(answer.body);
-        known.set(k, landed);
+        hear(k, landed);
         // What was folded behind it stands on the draft it left there (its time and words), as a window's next save would.
         const behind = current.next;
         const next = behind?.save && !behind.discard
@@ -646,7 +679,15 @@ export function createMachineDrafts(options: {
       }
       if (codeOf(answer.body) === "draft_conflict") {
         const far = draftOf(answer.body);
-        known.set(k, far);
+        hear(k, far);
+        if (far && far.body === words(save) && far.updated_at !== save.base) {
+          // Its own words there: it landed on a try whose answer never came (that machine's door keeps no draft
+          // answer to replay, inbox-devices.ts `DRAFT_SAVE_KEPT`), or the same words were typed there. It goes again
+          // on that draft (its file changes applied twice are the same as once), so what was folded behind it still
+          // stands on it, never offered as a conflict with itself.
+          put({ ...current, sent: { save: { ...save, base: far.updated_at, base_body: far.body, base_files: null, idempotency_key: crypto.randomUUID() } } });
+          continue;
+        }
         if (!current.view) {
           // A Discard waits behind it: the person threw these words away. It goes only for the draft they saw, so the
           // newer one there stays.
@@ -743,6 +784,9 @@ export function createMachineDrafts(options: {
     read(peer: DraftPeer, threadId: string): { draft: InboxReplyDraft | null; not_landed?: DraftNotLanded } | null {
       const k = key(peer.id, threadId);
       const record = held.get(k);
+      // Away, and the draft last heard has moved on there: none is shown (it may be sent already), and a save typed
+      // now stands on none, as the window that reads this does. Words typed here and held stay as they are.
+      if (movedOn.has(k) && peer.state !== "online") hear(k, null);
       const heard = known.get(k);
       if (record && (waits(record) || peer.state !== "online")) {
         const offered = notLandedOf(record);
@@ -763,11 +807,18 @@ export function createMachineDrafts(options: {
     /** That machine is online (its line changed): what is held for it lands. */
     drain,
     /**
-     * That machine said its draft changed (another window there, a phone, a Send, this Inbox's own write): heard again
-     * on the next read. The last one heard stays meanwhile: a save held before that read stands on it (its files, its
-     * quote), never on no draft; that machine judges it against its newer one as it lands.
+     * That machine said its draft changed (another window there, a phone, a Send, this Inbox's own write), its list read
+     * again first: heard again on the next read. The last one heard stays meanwhile: a save held before that read
+     * stands on it (its files, its quote), never on no draft; that machine judges it against its newer one as it lands.
+     * Unless the list's row names that very version, it has moved on (`movedOn`): a read while that machine is away
+     * shows no draft.
      */
-    farChanged(_machine: string, _threadId: string): void {},
+    farChanged(machine: string, threadId: string): void {
+      const k = key(machine, threadId);
+      if (!known.has(k)) return;
+      const row = options.peer(machine)?.list?.rows.find((one) => one.thread_id === threadId);
+      if (!row || (row.unsent?.reply_at ?? null) !== (known.get(k)?.updated_at ?? null)) movedOn.add(k);
+    },
     /** A file uploaded to that machine through the forward: a held draft shows its tile by it. */
     noteUpload(answer: Response): void {
       void answer.json().then(
@@ -850,7 +901,7 @@ export function createMachineDrafts(options: {
             const body = answer?.ok ? await answer.json().catch(() => null) : null;
             if (body) {
               draft = draftOf(body);
-              known.set(key(peer.id, row.thread_id), draft);
+              hear(key(peer.id, row.thread_id), draft);
             }
           }
           return { ...row, reply_preview: replyDraftPreview(draft) };
@@ -887,6 +938,7 @@ export function createMachineDrafts(options: {
       if (retry?.timer) clearTimeout(retry.timer);
       retries.delete(machine);
       for (const k of [...known.keys()]) if (k.startsWith(`${machine} `)) known.delete(k);
+      for (const k of [...movedOn]) if (k.startsWith(`${machine} `)) movedOn.delete(k);
       for (const k of [...landedAs.keys()]) if (k.startsWith(`${machine} `)) landedAs.delete(k);
       return lost;
     },

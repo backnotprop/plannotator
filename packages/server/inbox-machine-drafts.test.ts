@@ -24,7 +24,8 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxListRow, InboxReplyDraft } from "@plannotator/core/inbox-types";
 import { receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
-import { createMachineDrafts, lostDraftParts, MORE_OFFERED_MAX, type DraftAnswer, type DraftPeer } from "./inbox-machine-drafts";
+import { createMachineDrafts, heldReplyState, lostDraftParts, MORE_OFFERED_MAX, type DraftAnswer, type DraftPeer } from "./inbox-machine-drafts";
+import type { OutboxState } from "./inbox-outbox";
 import { INBOX_MACHINE_DRAFTS_DIR } from "./inbox-machine-drafts-held";
 
 const MACHINE = "ibx_01HZZZZZZZZZZZZZZZZZZZZZZZ";
@@ -51,7 +52,10 @@ function farMachine() {
     json: (body, status = 200) => Response.json(body, { status }),
     onChange: () => {},
   });
-  /** As that machine's door (inbox-devices.ts `claim`): a key it answered once is answered the same again, never applied twice. */
+  /**
+   * As that machine's door (inbox-devices.ts `claim`, `DRAFT_SAVE_KEPT`): a save is never replayed from a record (it is
+   * applied again, a compare-and-set); a Discard's plain answer is answered the same again, never applied twice.
+   */
   const seen = new Map<string, { status: number; text: string }>();
   const door = async (route: string, init: { method: string; body?: string }) => {
     const key = init.method === "POST" ? (JSON.parse(init.body ?? "{}") as { idempotency_key?: string }).idempotency_key : undefined;
@@ -65,13 +69,14 @@ function farMachine() {
       if (!(error instanceof InboxError)) throw error;
       answer = Response.json({ error: error.message, code: error.code, ...error.details }, { status: error.code === "draft_conflict" ? 409 : error.code.endsWith("_not_found") ? 404 : 422 });
     }
-    if (key && answer.status < 500) seen.set(`${route} ${key}`, { status: answer.status, text: await answer.clone().text() });
+    if (key && route.endsWith("/delete") && answer.status === 200) seen.set(`${route} ${key}`, { status: answer.status, text: await answer.clone().text() });
     return answer;
   };
   return { store, thread, door };
 }
 
-function linked(options: { marks?: string[] } = {}) {
+/** `outbox`: each held reply's entry state as the outbox holds it (no entry: gone), read as inbox-machines.ts reads it. */
+function linked(options: { marks?: string[]; outbox?: Map<string, OutboxState> } = {}) {
   const far = farMachine();
   const here = tempDir("here");
   const changes: string[] = [];
@@ -117,7 +122,7 @@ function linked(options: { marks?: string[] } = {}) {
     refreshList: async () => {},
   };
   const make = () =>
-    createMachineDrafts({ dataDir: here, peer: () => peer, onChange: (_m, threadId) => changes.push(threadId), retryMs: 60_000, replyState: (k) => replies.get(k) ?? "pending", log: (line) => logged.push(line) });
+    createMachineDrafts({ dataDir: here, peer: () => peer, onChange: (_m, threadId) => changes.push(threadId), retryMs: 60_000, replyState: (k) => (options.outbox ? heldReplyState(options.outbox.get(k)) : (replies.get(k) ?? "pending")), log: (line) => logged.push(line) });
   let drafts = make();
   const save = (body: Record<string, unknown>) => drafts.write(peer, far.thread, false, { files_add: [], files_remove: [], files_place: [], ...body });
   const heldDir = join(inboxDir(here), INBOX_MACHINE_DRAFTS_DIR, MACHINE);
@@ -653,6 +658,21 @@ describe("a linked machine's reply draft, from this Inbox", () => {
     expect(l.heldFiles()).toEqual([]);
   });
 
+  test("a held reply whose outbox entry is gone (settled long ago, its settle missed here): the words it carried never come back", async () => {
+    const outbox = new Map<string, OutboxState>([["reply-1", "sending"]]);
+    const l = linked({ outbox });
+    const held = await answerOf(await l.save({ body: "Ship it", base: null }));
+    l.drafts.afterReply(l.peer, l.far.thread, { words: "Ship it", clear_draft: held.body.draft.updated_at }, "reply-1");
+    // Delivered, its settle never heard here (a restart in between), then dropped from the outbox past its keep.
+    outbox.delete("reply-1");
+    l.restart();
+    expect(l.drafts.read(l.peer, l.far.thread)).toEqual({ draft: null });
+    await l.back();
+    expect(l.far.store.replyDraft(l.far.thread)).toBeNull();
+    expect(l.drafts.read(l.peer, l.far.thread)).toBeNull();
+    expect(l.heldFiles()).toEqual([]);
+  });
+
   test("a held reply refused there: the words it carried are the draft again", async () => {
     const l = linked();
     const held = await answerOf(await l.save({ body: "Ship it", base: null }));
@@ -683,6 +703,27 @@ describe("a linked machine's reply draft, from this Inbox", () => {
     const there = l.far.store.replyDraft(l.far.thread);
     expect(there?.body).toBe("");
     expect(there?.files?.map((f) => f.upload_id)).toEqual([left.upload_id]);
+  });
+
+  test("a held reply that sent the draft's file, then new words typed while it waits: they land, and the sent file is never said to be not added", async () => {
+    const l = linked();
+    const file = await receiveInboxUpload(l.far.store.dir, "invoice.pdf", new Response("bytes").body, { at: new Date().toISOString() });
+    l.drafts.noteUpload(Response.json({ upload: file }));
+    await Bun.sleep(5);
+    const held = await answerOf(await l.save({ body: "Here is the invoice", base: null, files_add: [{ upload_id: file.upload_id }] }));
+    l.drafts.afterReply(l.peer, l.far.thread, { words: "Here is the invoice", clear_draft: held.body.draft.updated_at, uploads: [file.upload_id] }, "reply-1");
+    expect(l.drafts.read(l.peer, l.far.thread)).toEqual({ draft: null });
+    // The next reply, typed while the first waits.
+    const typed = await answerOf(await l.save({ body: "And the receipt follows", base: null }));
+    expect(typed.body.draft.files ?? []).toEqual([]);
+    // Delivered there: the file is the reply's attachment now, no longer an upload.
+    removeInboxUploads(l.far.store.dir, [file.upload_id]);
+    l.replies.set("reply-1", "delivered");
+    await l.back();
+    expect(l.far.store.replyDraft(l.far.thread)?.body).toBe("And the receipt follows");
+    expect(l.far.store.replyDraft(l.far.thread)?.files ?? []).toEqual([]);
+    expect(l.drafts.notLanded(MACHINE, l.far.thread)).toBeNull();
+    expect(l.drafts.read(l.peer, l.far.thread)).toBeNull();
   });
 
   /** A held save meets newer words there: `words` are offered as a conflict. */
@@ -818,6 +859,43 @@ describe("a linked machine's reply draft, from this Inbox", () => {
     expect(held.body.draft).toMatchObject({ body: "Longer words typed while it sleeps", quote: { of: l.far.thread, words: "the webhook" } });
     expect(held.body.draft.files.map((f: { name: string }) => f.name)).toEqual(["trace.txt"]);
     expect(l.drafts.forget(MACHINE)).toEqual([{ thread: l.far.thread, words: "Longer words typed while it sleeps", files: ["trace.txt"], quote: { of: l.far.thread, words: "the webhook" } }]);
+  });
+
+  for (const how of ["Send", "Discard"] as const) {
+    test(`words ${how === "Send" ? "sent" : "discarded"} there after this Inbox last heard them never come back here while that machine sleeps: no draft shows, and words typed then land as typed`, async () => {
+      const l = linked();
+      l.peer.state = "online";
+      const file = await receiveInboxUpload(l.far.store.dir, "trace.txt", new Response("bytes").body, { at: new Date().toISOString() });
+      l.drafts.noteUpload(Response.json({ upload: file }));
+      const kept = await answerOf(await l.save({ body: "Refund Ada Novak in full", base: null, files_add: [{ upload_id: file.upload_id }] }));
+      await Bun.sleep(5);
+      // There, on that machine: the draft is sent (or discarded); its stream says so, its list read again first.
+      if (how === "Send") expect(l.far.store.clearSentReplyDraft(l.far.thread, kept.body.draft.updated_at, "Refund Ada Novak in full", [file.upload_id])).toBe(true);
+      else expect(l.far.store.deleteReplyDraft(l.far.thread)).toBe(true);
+      l.peer.list = { marks: ["reply-drafts"], rows: [l.row()] };
+      l.drafts.farChanged(MACHINE, l.far.thread);
+      l.peer.state = "offline";
+      // Never the words already sent or thrown away, so no Send of them again and no typing over them.
+      expect(l.drafts.read(l.peer, l.far.thread)).toEqual({ draft: null });
+      const typed = await answerOf(await l.save({ body: "Something new", base: null }));
+      expect(typed.body.draft.body).toBe("Something new");
+      expect(typed.body.draft.files ?? []).toEqual([]);
+      await l.back();
+      expect(l.far.store.replyDraft(l.far.thread)?.body).toBe("Something new");
+      expect(l.far.store.replyDraft(l.far.thread)?.files ?? []).toEqual([]);
+      expect(l.drafts.notLanded(MACHINE, l.far.thread)).toBeNull();
+    });
+  }
+
+  test("that machine says its draft changed and its list names the version last heard (this Inbox's own write): while it sleeps, that draft still shows", async () => {
+    const l = linked();
+    l.peer.state = "online";
+    await answerOf(await l.save({ body: "Words saved there", base: null }));
+    await Bun.sleep(5);
+    l.peer.list = { marks: ["reply-drafts"], rows: [l.row()] };
+    l.drafts.farChanged(MACHINE, l.far.thread);
+    l.peer.state = "offline";
+    expect(l.drafts.read(l.peer, l.far.thread)?.draft?.body).toBe("Words saved there");
   });
 
   test("Unlink: a held draft is counted, and every word of it handed back to keep, its file and quote named; nothing of it stays held", async () => {

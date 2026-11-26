@@ -47,7 +47,7 @@ import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type Ou
 import type { OutboxFile } from "./inbox-outbox-files";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
-import { createMachineDrafts, lostDraftParts, MACHINE_DRAFT_ROUTE } from "./inbox-machine-drafts";
+import { createMachineDrafts, heldReplyState, lostDraftParts, MACHINE_DRAFT_ROUTE } from "./inbox-machine-drafts";
 import { createMachineShips } from "./inbox-machine-ships";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
@@ -508,10 +508,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     dataDir: context.dataDir,
     peer: (id) => peers.get(id),
     // A reply that carried a held draft: the draft settles once it is delivered there; refused or cancelled, it comes back.
-    replyState: (key) => {
-      const state = outbox.get(key)?.state;
-      return state === "delivered" ? "delivered" : state === undefined || state === "refused" || state === "dropped" || state === "cancelled" ? "refused" : "pending";
-    },
+    replyState: (key) => heldReplyState(outbox.get(key)?.state),
     onChange: (_machine, threadId) => {
       emit({ event: "drafts", data: { thread_id: threadId } });
       machinesChanged();
