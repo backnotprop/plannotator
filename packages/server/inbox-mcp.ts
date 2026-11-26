@@ -34,6 +34,7 @@ import { inboxMessageImageRefsInOrder, inboxMessageRemoteImageRefsInOrder } from
 import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
 import { MEDIA_NOT_SHOWN_MAX, mediaNotShown, mediaNotShownText, type MediaNotShown } from "./inbox-media-not-shown";
 import { LINKS_NOT_FOUND_MAX, linksNotFound, linksNotFoundText, type LinkNotFound } from "./inbox-links-not-found";
+import type { InboxLinkPulls } from "./inbox-open-in";
 import { SEND_WARNINGS_MAX, pagesNotShown, pagesNotShownText, questionMediaNotShown, questionMediaNotShownText, type PageNotShown, type QuestionMediaNotShown } from "./inbox-send-warnings";
 import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
@@ -297,6 +298,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * attachments are refused.
    */
   recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
+  /** A thread's PRs and a file's text at one, as the referenced-file view reads them (`links_not_found` asks them too). Absent: no PR is asked. */
+  linkPulls?: InboxLinkPulls;
   /**
    * A question's running-app prototypes (`Prototype: http://localhost:…`): checked and probed before anything is
    * written (inbox-live.ts `checkPrototypeApps`); a refusal names the question and the option. Absent: a body that
@@ -1009,7 +1012,7 @@ export async function sendAgentMessage(
   const notPlayed = await mediaNotShown(input.body, { root: project.root, base: basePath });
   // Links to a file that opens nothing in the window (a session on another computer names its own disk: not checked).
   // The message is already stored: a check that fails is left out, never an error for a sent message.
-  const notFound = farAuthor ? [] : await linksNotFound(store, message).catch(() => []);
+  const notFound = farAuthor ? [] : await linksNotFound(store, message, undefined, context.linkPulls).catch(() => []);
   const questionMedia = questionMediaNotShown(input.body);
   const bigPages = pagesNotShown(message.attachments);
   // Pictures sent only as attachments (tiles at the bottom, away from the words about them):
@@ -1106,7 +1109,7 @@ export async function sendAgentMessage(
       /** Sounds and videos written inside a question (`question`: its key): the card shows them as text. */
       ...(questionMedia.length > 0 ? { question_media_not_shown: questionMedia.slice(0, SEND_WARNINGS_MAX) } : {}),
       ...(questionMedia.length > SEND_WARNINGS_MAX ? { question_media_not_shown_more: questionMedia.length - SEND_WARNINGS_MAX } : {}),
-      /** Attached HTML pages past what the window frames (`limit`, bytes): the person gets a download card. */
+      /** Attached HTML pages whose own bytes are past what the page route keeps (`limit`; inbox-send-warnings.ts: a lower bound). */
       ...(bigPages.length > 0 ? { pages_not_shown: bigPages.slice(0, SEND_WARNINGS_MAX) } : {}),
       ...(bigPages.length > SEND_WARNINGS_MAX ? { pages_not_shown_more: bigPages.length - SEND_WARNINGS_MAX } : {}),
       /** Attached pictures the body does not show with `![alt](path)`, as written (a nudge; the message was sent). */

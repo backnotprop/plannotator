@@ -22,10 +22,11 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-async function open(path: string, answer: Record<string, unknown>, onAttached: (id: string) => void = () => {}) {
+async function open(path: string, answer: Record<string, unknown> | (() => Promise<Response>), onAttached: (id: string) => void = () => {}) {
   const asked: string[] = [];
   globalThis.fetch = ((input: RequestInfo | URL) => {
     asked.push(String(input));
+    if (typeof answer === 'function') return answer();
     return Promise.resolve(new Response(JSON.stringify(answer), { headers: { 'Content-Type': 'application/json' } }));
   }) as typeof fetch;
   host = document.createElement('div');
@@ -34,7 +35,7 @@ async function open(path: string, answer: Record<string, unknown>, onAttached: (
     root = createRoot(host!);
     root.render(<ReferencedFilePane threadId="msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ" fileRef={{ path, messageId: 'msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ' }} phone={false} full={false} onOpen={() => {}} onClose={() => {}} onAttached={(id) => onAttached(id)} />);
   });
-  for (let i = 0; i < 50 && !host.querySelector('[data-code-view], .ib-docscroll, [data-ref-missing]'); i++) await act(async () => new Promise((r) => setTimeout(r, 10)));
+  for (let i = 0; i < 50 && !host.querySelector('[data-code-view], .ib-docscroll, [data-ref-missing], [data-ref-failed]'); i++) await act(async () => new Promise((r) => setTimeout(r, 10)));
   return asked;
 }
 
@@ -86,6 +87,38 @@ test.skipIf(!hasDom)('a file found nowhere names where it was looked for, never 
   await open('.env', { found: false, name: '.env', path: '.env', reason: 'refused' });
   expect(host!.querySelector('[data-ref-missing="refused"]')).not.toBeNull();
   expect(host!.textContent).not.toContain("isn't at");
+});
+
+test.skipIf(!hasDom)("a file at the project's top, or one with no path safe to name, is the short form: never \"plan.md isn't at plan.md\"", async () => {
+  for (const answer of [
+    { found: false, name: 'plan.md', path: 'plan.md', reason: 'missing', looked_in: 'plan.md' },
+    { found: false, name: 'todo.md', path: '~/todo.md', reason: 'missing' },
+  ]) {
+    await open(answer.path, answer);
+    const note = host!.querySelector('[data-ref-missing="missing"]')!;
+    expect(note.textContent).toBe(`Couldn't find ${answer.name}.`);
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+  }
+});
+
+test.skipIf(!hasDom)('a view that could not be read (a network or server error) says so, never where the file is', async () => {
+  await open('docs/plan.md', () => Promise.reject(new TypeError('Failed to fetch')));
+  expect(host!.querySelector('[data-ref-missing]')).toBeNull();
+  const failed = host!.querySelector('[data-ref-failed]')!;
+  expect(failed.getAttribute('role')).toBe('alert');
+  // The attachment pane's own words for a file it could not load.
+  expect(failed.textContent).toBe('The file could not be opened.');
+  expect(failed.textContent).not.toContain("isn't at");
+  expect(failed.textContent).not.toContain('not on this computer');
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  await open('docs/plan.md', () => Promise.resolve(new Response(JSON.stringify({ error: 'The Inbox is busy.', code: 'internal_error' }), { status: 500, headers: { 'Content-Type': 'application/json' } })));
+  expect(host!.querySelector('[data-ref-missing]')).toBeNull();
+  // A server's refusal says what the server said.
+  expect(host!.querySelector('[data-ref-failed]')!.textContent).toBe('The Inbox is busy.');
 });
 
 test.skipIf(!hasDom)('a link the thread holds as an attachment (the view answers its id) opens that attachment', async () => {

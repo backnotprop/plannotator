@@ -1,21 +1,30 @@
 /**
  * The file a relative link in an agent's message means when it is not where the message's own folder says
  * (`base_path` follows the agent's shell, so the same link text in two messages of one thread may start in two
- * folders). The referenced-file view (inbox-open-in.ts) asks these after the message's own places miss, and the send
- * asks them before it warns (`links_not_found`):
+ * folders). Every route that opens a link asks this after the message's own places miss (inbox-open-in.ts: the pane's
+ * view, its raw bytes, the attach, the hover and Open in), and the send asks it before it warns (`links_not_found`):
  *
  *   1. a file the message itself attached under that name (or ending in that relative path);
- *   2. the newest such file attached by an earlier message of the same thread;
+ *   2. such a file an earlier message of the same sender in this thread attached, newest first;
  *   3. the link from the folder each earlier message of the same sender was sent from, newest first.
  *
+ * The same sender is the same agent session on the same computer: never another agent's file, nor the person's
+ * upload, nor a session's on another computer. An agent in a linked worktree never falls back to another checkout's
+ * folder (the rule of `inboxMessagePlaces`: the main checkout's copy is not the agent's file).
+ *
  * The thread's project folder is already one of the message's own places. Nothing here widens what is read: an
- * attachment is the thread's own kept copy, and a folder of step 3 is a candidate path that goes through the same
- * readable-file checks and reach as any other.
+ * attachment is the thread's own kept copy, and a path of step 3 (or an attachment's own path, for Open in) is a
+ * candidate that goes through the same readable-file checks and reach as any other.
  */
 import { join, posix } from "node:path";
+import { isLinkedWorktree } from "@plannotator/shared/linked-worktree";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { checkoutOf } from "./inbox-open-in";
 
 type ThreadMessage = NonNullable<ReturnType<InboxStore["thread"]>>["messages"][number];
+
+/** One place to try, in order: an attachment (its id, and the path it was attached from) or a path on this computer. */
+export type LinkFallback = { attachment: string; path: string } | { attachment?: undefined; path: string };
 
 /** A link as written, cleaned to a relative path with forward slashes; null for an absolute or `~` path. */
 export function relativeLinkPath(named: string): string | null {
@@ -44,32 +53,51 @@ function upTo(store: InboxStore, threadId: unknown, messageId: unknown): ThreadM
   return at < 0 ? [] : messages.slice(0, at + 1).reverse();
 }
 
-/** The attachment a relative link means when it is not on disk where the message says: its own first, then the newest earlier one. */
-export function sameNamedAttachment(store: InboxStore, scope: { thread?: unknown; message?: unknown }, named: string): string | null {
-  const clean = relativeLinkPath(named);
-  if (!clean) return null;
-  const tail = tailOf(clean);
-  for (const message of upTo(store, scope.thread, scope.message)) {
-    const hit = (message.attachments ?? []).find((attachment) => attachmentMeans(attachment, tail));
-    if (hit) return hit.id;
-  }
-  return null;
-}
+type AgentFields = { session?: string | null; host?: string | null; name?: string | null; machine?: string | null };
 
+/** The same agent: on the same computer (`machine`, absent for this one's), then by session, else by host and name. */
 function sameSender(a: ThreadMessage["author"], b: ThreadMessage["author"]): boolean {
   if (a.kind !== "agent" || b.kind !== "agent") return false;
-  const first = a as { session?: string | null; host?: string | null; name?: string | null };
-  const second = b as { session?: string | null; host?: string | null; name?: string | null };
+  const first = a as AgentFields;
+  const second = b as AgentFields;
+  if ((first.machine ?? null) !== (second.machine ?? null)) return false;
   if (first.session && second.session) return first.session === second.session;
   return (first.host ?? null) === (second.host ?? null) && (first.name ?? null) === (second.name ?? null);
 }
 
-/** The link from the folders earlier messages of the same sender in the thread were sent from, newest first (never the message's own). */
-export function earlierSenderPlaces(store: InboxStore, scope: { thread?: unknown; message?: unknown }, named: string): string[] {
+/**
+ * Where a relative link may be when the message's own places miss, in the order above. `home` is the home folder's
+ * realpath (a checkout at home is no checkout). [] for an absolute or `~` link, a message out of that thread, or one
+ * that is not an agent's.
+ */
+export function linkFallbacks(store: InboxStore, home: string, scope: { thread?: unknown; message?: unknown }, named: string): LinkFallback[] {
   const clean = relativeLinkPath(named);
   if (!clean) return [];
   const [own, ...earlier] = upTo(store, scope.thread, scope.message);
-  if (!own) return [];
-  const bases = earlier.filter((message) => sameSender(message.author, own.author)).map((message) => message.base_path ?? null);
-  return [...new Set(bases.filter((base): base is string => typeof base === "string" && base !== "" && base !== own.base_path).map((base) => join(base, clean)))];
+  if (!own || own.author.kind !== "agent") return [];
+  const tail = tailOf(clean);
+  const mine = earlier.filter((message) => sameSender(message.author, own.author));
+  const out: LinkFallback[] = [];
+  for (const message of [own, ...mine]) {
+    const hit = (message.attachments ?? []).find((attachment) => attachmentMeans(attachment, tail));
+    if (hit) out.push({ attachment: hit.id, path: hit.path });
+  }
+  const checkout = own.base_path ? checkoutOf(own.base_path, home) : null;
+  const worktree = checkout && isLinkedWorktree(checkout) ? checkout : null;
+  const bases = mine
+    .map((message) => message.base_path ?? null)
+    .filter((base): base is string => typeof base === "string" && base !== "" && base !== own.base_path)
+    .filter((base) => !worktree || checkoutOf(base, home) === worktree);
+  for (const base of new Set(bases)) out.push({ path: join(base, clean) });
+  return out;
+}
+
+/** The attachment a link means when it is not on disk where the message says (steps 1 and 2), or null. */
+export function sameNamedAttachment(fallbacks: readonly LinkFallback[]): string | null {
+  return fallbacks.find((step) => step.attachment)?.attachment ?? null;
+}
+
+/** The paths of step 3 alone: the same sender's earlier folders. */
+export function earlierFolderPaths(fallbacks: readonly LinkFallback[]): string[] {
+  return fallbacks.filter((step) => !step.attachment).map((step) => step.path);
 }

@@ -3,8 +3,12 @@
  *
  * - `question_media_not_shown`: a sound or video written inside a question (a picture choice, `Shows:`, `Before:` /
  *   `After:`). The question card draws pictures only, so it shows as text there; the body plays it.
- * - `pages_not_shown`: an attached HTML page past what the window frames (`INBOX_PAGE_MAX_BYTES`): the person gets
- *   the file's download card instead of the page.
+ * - `pages_not_shown`: an attached HTML page whose own bytes are already past what the page route keeps
+ *   (`INBOX_PAGE_MAX_BYTES`): the person gets the file's "too large" card instead of the page. The route measures the
+ *   document the window frames, which the window builds from the page (its asset links rewritten, its bridge and
+ *   theme added): never smaller than the page, and not known here. So this names only a page that can never show,
+ *   and says nothing of one just under the limit whose framed document still goes over: a lower bound, never a
+ *   false warning.
  */
 import { formatBytes } from "@plannotator/core/inbox-format";
 import { inboxQuestionMedia } from "@plannotator/core/inbox-questions";

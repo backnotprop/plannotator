@@ -1,16 +1,17 @@
 /**
  * send_message's `links_not_found`: links in the body (`[text](path)`, outside code) to a file that opens nothing in
  * the window, because there is no file where the window looks for it. Where it looks is the referenced-file view's
- * own order (inbox-open-in.ts `inboxMessageCandidates`, then inbox-link-fallback.ts: a file of that name the thread
- * was handed, the same sender's earlier folders). A warning in the result, never a refusal: the message is sent.
+ * own order (inbox-open-in.ts `inboxPullVersion` in a thread that owns a PR, `inboxMessageCandidates`, then
+ * inbox-link-fallback.ts: a file of that name the same sender attached in the thread, its earlier folders). A warning
+ * in the result, never a refusal: the message is sent.
  */
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { checkInboxReadableFile } from "@plannotator/shared/inbox/attachments";
 import { blankCode } from "@plannotator/shared/inbox/message-images";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxMessageCandidates } from "./inbox-open-in";
-import { earlierSenderPlaces, sameNamedAttachment } from "./inbox-link-fallback";
+import { inboxMessageCandidates, inboxPullVersion, type InboxLinkPulls } from "./inbox-open-in";
+import { earlierFolderPaths, linkFallbacks, sameNamedAttachment } from "./inbox-link-fallback";
 
 /** The most links the warning names (the structured list and the text alike); the rest are counted. */
 export const LINKS_NOT_FOUND_MAX = 10;
@@ -54,17 +55,24 @@ export function bodyFileLinks(body: string): { ref: string; path: string }[] {
   return [...out].map(([path, ref]) => ({ ref, path }));
 }
 
-/** The body's links of a sent message that open nothing: no file where the window would look, nor one of that name the thread was handed. */
-export async function linksNotFound(store: InboxStore, message: { id: string; thread_id: string; body: string }, home = homedir()): Promise<LinkNotFound[]> {
+/**
+ * The body's links of a sent message that open nothing: no file where the window would look, nor one of that name the
+ * thread was handed, nor the thread's PR's version (`pulls`: the view opens that first, inbox-open-in.ts
+ * `inboxPullVersion`). Absent `pulls`: no PR is asked.
+ */
+export async function linksNotFound(store: InboxStore, message: { id: string; thread_id: string; body: string }, home = homedir(), pulls?: InboxLinkPulls): Promise<LinkNotFound[]> {
   const scope = { thread: message.thread_id, message: message.id };
   const out: LinkNotFound[] = [];
   for (const { ref, path } of bodyFileLinks(message.body).slice(0, LINKS_CHECKED_MAX)) {
     const places = inboxMessageCandidates(store, home, home, scope, path);
-    if (places.length === 0 || sameNamedAttachment(store, scope, path)) continue;
-    const all = [...new Set([...places, ...earlierSenderPlaces(store, scope, path)])];
+    if (places.length === 0) continue;
+    const fallbacks = linkFallbacks(store, home, scope, path);
+    if (sameNamedAttachment(fallbacks)) continue;
+    const all = [...new Set([...places, ...earlierFolderPaths(fallbacks)])];
     const file = await checkInboxReadableFile(all, () => false);
     // Something is there (a file, or one the window refuses to show and says so): not this warning's.
     if (file.ok || file.code === "refused" || all.some((place) => existsSync(place))) continue;
+    if (pulls && (await inboxPullVersion(store, home, pulls, scope, path))) continue;
     out.push({ ref, path: places[0]! });
   }
   return out;
