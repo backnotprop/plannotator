@@ -282,6 +282,7 @@
   "inbox-update-notice.spec.ts": 60,
   "inbox-updates.spec.ts": 10,
   "inbox-video.spec.ts": 18,
+  "inbox-view-skill.spec.ts": 20,
   "inbox-voice.spec.ts": 452,
   "inbox-whats-new-behind.spec.ts": 2,
   "inbox-whats-new-tailnet.spec.ts": 2,

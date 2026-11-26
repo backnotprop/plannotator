@@ -945,6 +945,7 @@ packages/inbox/commentRowFiles.test.tsx
 packages/inbox/sidebarStickyHeadings.test.tsx
 packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx
+packages/inbox/skillFileOpen.dom.test.tsx
 packages/inbox/reviewAnalysis.test.tsx
 packages/ui/components/LaunchDialog.test.tsx
 packages/ui/components/LaunchAnnouncement.test.tsx

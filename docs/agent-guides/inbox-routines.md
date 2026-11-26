@@ -38,6 +38,8 @@ The only limit is the 15-minute rule: a schedule whose runs come closer than 15 
 
 ### Agents
 
+Codex routines accept a `plannotator-inbox` MCP registration in the start folder's `.codex/config.toml` when Codex's global config marks that project trusted. An explicitly disabled registration does not count. The global registration remains available for routines in any folder.
+
 The `routine` tool (also `plannotator_inbox` action `routine`; the shim fills it like `card`): `op` create, list, get, update, on, off, run, delete. Paired cloud agents (the agent door) get it as a local agent does (the owner, 2026-11-21: "Allow fully, same as a local agent."), with the same rules, the same `/create-routine` grant in their own thread and the same change lines; with Routines off it is no action for them either. A create with no folder runs in the project `project` or `project_path` names, else in a new scratch folder (their own place is no folder to run in); `folder.path` names a folder on the person's computer, under the same rules (never home, `/` or a hidden folder); a routine's `attachments` are paths on the person's computer, as for a local agent. `plannotator routine` with `PLANNOTATOR_PAIRING` goes through the pairing. Through the relay, `list` and `get` are reads and every other op a write (`isInboxAgentWrite`).
 
 | Surface | Form |
