@@ -140,13 +140,13 @@ export function createInboxVibeWake(options: {
     if ("uncertain" in result) {
       retryAt.delete(key);
       uncertain.add(key);
-      log(`the Mistral Vibe launch may have delivered ${item.id} to ${session} (${result.uncertain}); it is not sent again: the agent sees it when it reads the thread.`);
+      log(`the Vibe launch may have delivered ${item.id} to ${session} (${result.uncertain}); it is not sent again: the agent sees it when it reads the thread.`);
       return false;
     }
     dropClaim(id, session);
     const wait = Math.min((retry?.wait ?? RETRY_FIRST_MS / 2) * 2, RETRY_MAX_MS);
     retryAt.set(key, { at: now() + wait, wait });
-    log(`the Mistral Vibe launch could not deliver ${item.id} to ${session}: ${result.failed}. Trying again later.`);
+    log(`the Vibe launch could not deliver ${item.id} to ${session}: ${result.failed}. Trying again later.`);
     return false;
   };
 
@@ -209,7 +209,7 @@ export function createInboxVibeWake(options: {
           await sweepOnce();
         } while (again && !stopped);
       } catch (error) {
-        log(`the Mistral Vibe wake failed a sweep: ${error instanceof Error ? error.message : String(error)}`);
+        log(`the Vibe wake failed a sweep: ${error instanceof Error ? error.message : String(error)}`);
       } finally {
         sweeping = null;
       }

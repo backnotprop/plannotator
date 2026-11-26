@@ -1,5 +1,5 @@
 /**
- * Mistral Vibe as a `LaunchHost` (inbox-launch-host.ts): "New Mistral Vibe session" in compose's To.
+ * Mistral Vibe as a `LaunchHost` (inbox-launch-host.ts): "New Vibe session" in compose's To.
  *
  * Codex's pattern (inbox-launch-codex.ts): the Inbox owns the process. One `vibe-acp` per launched session, in its
  * folder, speaking the Agent Client Protocol (JSON-RPC 2.0, one message per line) over stdio. It runs with the
@@ -40,9 +40,9 @@ import { launchTurnErrorNote, writeLaunchNote, type LaunchAvailability, type Lau
 import { createVibePermissions, VIBE_PERMISSION_REQUEST, type VibeToolCall } from "./inbox-launch-vibe-permission";
 
 /** The run line's cause when Vibe has no API key for its provider (`session/new` answers -32000). */
-export const VIBE_SIGNED_OUT = "Mistral Vibe isn't signed in. Run vibe --setup in Terminal, then try again.";
+export const VIBE_SIGNED_OUT = "Vibe isn't signed in. Run vibe --setup in Terminal, then try again.";
 /** The run line's cause when another Vibe holds the session (Vibe's one-process-per-session lock). */
-export const VIBE_HELD_ELSEWHERE = "This Mistral Vibe session is open in another Vibe. Quit it there, then try again.";
+export const VIBE_HELD_ELSEWHERE = "This Vibe session is open in another Vibe. Quit it there, then try again.";
 /** The stopped line's words (`stoppedNote`) when this Inbox never ran the session's process (it was restarted). */
 export const VIBE_STOPPED_NOTE = "The Inbox restarted, which ended it. Your reply continues it.";
 
@@ -68,7 +68,7 @@ const INITIALIZE = { protocolVersion: 1, clientCapabilities: { fs: { readTextFil
 
 // ── Pure helpers (unit-tested) ──
 
-/** A cause as the line shows it after "Mistral Vibe didn't start.": one line, ending in a period. */
+/** A cause as the line shows it after "Vibe didn't start.": one line, ending in a period. */
 export function vibeCause(text: string): string {
   const line = text.replace(/\s+/g, " ").trim();
   return !line ? "" : /[.!?]$/.test(line) ? line : `${line}.`;
@@ -254,11 +254,11 @@ export function createVibeLaunchHost(ctx: LaunchHostContext, options: { readyMs?
   /** A request; `ms` null waits as long as it takes (a turn). */
   const request = (p: VibeProcess, method: string, params: Rpc, ms: number | null = requestMs): Promise<Rpc> =>
     new Promise((resolveRpc, rejectRpc) => {
-      if (p.exited) return rejectRpc(new RpcError("Mistral Vibe is not running"));
+      if (p.exited) return rejectRpc(new RpcError("Vibe is not running"));
       const id = `inbox-${++rpcIds}`;
       const timer = ms === null ? null : setTimeout(() => {
         p.waiters.delete(id);
-        rejectRpc(new RpcError(`Mistral Vibe did not answer ${method} within ${Math.round(ms / 1000)} s`, null, true));
+        rejectRpc(new RpcError(`Vibe did not answer ${method} within ${Math.round(ms / 1000)} s`, null, true));
       }, ms);
       const clear = () => {
         if (timer) clearTimeout(timer);
@@ -276,7 +276,7 @@ export function createVibeLaunchHost(ctx: LaunchHostContext, options: { readyMs?
       if (!write(p, { id, method, params })) {
         clear();
         p.waiters.delete(id);
-        rejectRpc(new RpcError("Mistral Vibe is not running"));
+        rejectRpc(new RpcError("Vibe is not running"));
       }
     });
 
@@ -343,7 +343,7 @@ export function createVibeLaunchHost(ctx: LaunchHostContext, options: { readyMs?
         if (p.exited) return;
         const text = error instanceof Error ? error.message : String(error);
         if (existsSync(ctx.launchDir(p.launchId))) ctx.startLog(p.launchId, `vibe-acp ${p.ref}: the turn ended with an error: ${text.slice(0, 2000)}`);
-        ctx.log(`Inbox launch ${p.launchId}: a Mistral Vibe turn ended with an error: ${text.slice(0, 200)}`);
+        ctx.log(`Inbox launch ${p.launchId}: a Vibe turn ended with an error: ${text.slice(0, 200)}`);
         note(p, vibeTurnErrorNote(text), `vibe-error-${p.launchId}-${turnKey}`, true);
       })
       .finally(() => {
@@ -372,7 +372,7 @@ export function createVibeLaunchHost(ctx: LaunchHostContext, options: { readyMs?
       const waiter = p.waiters.get(String(message.id));
       if (!waiter) return;
       p.waiters.delete(String(message.id));
-      if (message.error) waiter.reject(new RpcError(String(message.error?.message ?? "Mistral Vibe refused it"), typeof message.error?.code === "number" ? message.error.code : null));
+      if (message.error) waiter.reject(new RpcError(String(message.error?.message ?? "Vibe refused it"), typeof message.error?.code === "number" ? message.error.code : null));
       else waiter.resolve((message.result ?? {}) as Rpc);
       return;
     }
@@ -423,7 +423,7 @@ export function createVibeLaunchHost(ctx: LaunchHostContext, options: { readyMs?
       p.turn = null;
       p.ready = false;
       releaseWaiting(p);
-      for (const waiter of p.waiters.values()) waiter.reject(new RpcError("Mistral Vibe is not running"));
+      for (const waiter of p.waiters.values()) waiter.reject(new RpcError("Vibe is not running"));
       p.waiters.clear();
       permissions?.processEnded(p);
       if (existsSync(ctx.launchDir(launch.id))) {
@@ -489,7 +489,7 @@ export function createVibeLaunchHost(ctx: LaunchHostContext, options: { readyMs?
         id = ref;
       } else {
         const made = await request(p, "session/new", { cwd: launch.folder, mcpServers: mcpServers(session) }, readyMs);
-        if (typeof made.sessionId !== "string" || !made.sessionId) return await fail("Mistral Vibe answered session/new without a session");
+        if (typeof made.sessionId !== "string" || !made.sessionId) return await fail("Vibe answered session/new without a session");
         id = made.sessionId;
         p.ref = id;
         procs.set(id, p);
@@ -560,7 +560,7 @@ export function createVibeLaunchHost(ctx: LaunchHostContext, options: { readyMs?
       const path = e.which("vibe-acp");
       if (!path) return { ok: false, missing: true, reason: "vibe-acp is not on the Inbox's PATH", code: "missing" };
       const version = parseVibeVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
-      if (!version || !versionAtLeast(version, INBOX_VIBE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Mistral Vibe ${version ?? "?"} is older than ${INBOX_VIBE_LAUNCH_MIN_VERSION}`, code: "too_old" };
+      if (!version || !versionAtLeast(version, INBOX_VIBE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Vibe ${version ?? "?"} is older than ${INBOX_VIBE_LAUNCH_MIN_VERSION}`, code: "too_old" };
       choiceKey = `${path}@${version}`;
       return { ok: true, version };
     },
@@ -638,7 +638,7 @@ export function createVibeLaunchHost(ctx: LaunchHostContext, options: { readyMs?
       const under = spawning.get(ref);
       if (under) await under.done;
       const p = running(ref);
-      if (!p?.ready) return { failed: "Mistral Vibe is not running" };
+      if (!p?.ready) return { failed: "Vibe is not running" };
       return (await nextTurn(p, text, signal)) ? "delivered" : "hold";
     },
 
@@ -656,9 +656,9 @@ export function createVibeLaunchHost(ctx: LaunchHostContext, options: { readyMs?
       return { exitCode: code ?? 1, text: code === null ? "did not end; killed" : `ended ${code}` };
     },
     /** Vibe keeps its sessions (its own history and `vibe --resume`): nothing to remove. */
-    remove: async (): Promise<LaunchHostResult> => ({ exitCode: 0, text: "Mistral Vibe keeps its own sessions" }),
+    remove: async (): Promise<LaunchHostResult> => ({ exitCode: 0, text: "Vibe keeps its own sessions" }),
     /** Vibe keeps its sessions by id, not by folder: nothing of a scratch folder's to purge. */
-    purge: async (): Promise<LaunchHostResult & { skipped?: string }> => ({ exitCode: 0, text: "", skipped: "Mistral Vibe keeps its sessions by id, not by folder" }),
+    purge: async (): Promise<LaunchHostResult & { skipped?: string }> => ({ exitCode: 0, text: "", skipped: "Vibe keeps its sessions by id, not by folder" }),
 
     /** Only while no `vibe-acp` of this Inbox holds the session (one Vibe opens it at a time). */
     attach(launch: InboxLaunchRecord): string | null {
@@ -701,12 +701,12 @@ export function createVibeLaunchHost(ctx: LaunchHostContext, options: { readyMs?
       return permissions;
     },
 
-    /** The words after "Mistral Vibe stopped." when the person did not press Stop: why this session is not running. */
+    /** The words after "Vibe stopped." when the person did not press Stop: why this session is not running. */
     stoppedNote(launch: InboxLaunchRecord): string | null {
       const ref = launch.session_ref;
       if (!ref) return null;
       const p = procs.get(ref);
-      if (p?.exited && p.ending === null) return `Mistral Vibe ended on its own (exit ${p.exitCode ?? "unknown"}). Your reply continues it.`;
+      if (p?.exited && p.ending === null) return `Vibe ended on its own (exit ${p.exitCode ?? "unknown"}). Your reply continues it.`;
       if (p?.exited && p.ending === "handoff") return "It was opened in Terminal. Your reply continues it here once Vibe there has quit.";
       return VIBE_STOPPED_NOTE;
     },

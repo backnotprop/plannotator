@@ -38,8 +38,8 @@ afterEach(async () => {
 const agents = stubbedAgentClis();
 
 describe("a launched Mistral Vibe session's shim", () => {
-  test("PLANNOTATOR_VIBE_SESSION names the session as Mistral Vibe", () => {
-    expect(inboxHostSessionFromEnv({ PLANNOTATOR_VIBE_SESSION: VIBE_SESSION })).toEqual({ host: "mistral-vibe", session: VIBE_SESSION, name: "Mistral Vibe" });
+  test("PLANNOTATOR_VIBE_SESSION names the session as Vibe", () => {
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_VIBE_SESSION: VIBE_SESSION })).toEqual({ host: "mistral-vibe", session: VIBE_SESSION, name: "Vibe" });
   });
   test("a malformed value names nothing", () => {
     for (const bad of ["", "--yolo", "a b", "x".repeat(200)]) expect(inboxHostSessionFromEnv({ PLANNOTATOR_VIBE_SESSION: bad })).toBeNull();
@@ -50,7 +50,7 @@ describe("a launched Mistral Vibe session's shim", () => {
 });
 
 describe("a launched Mistral Vibe session over plannotator inbox mcp", () => {
-  test("its messages are filed under that session, as Mistral Vibe", async () => {
+  test("its messages are filed under that session, as Vibe", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-vibe-shim-")));
     roots.push(root);
     const dataDir = join(root, "data");
@@ -76,6 +76,6 @@ describe("a launched Mistral Vibe session over plannotator inbox mcp", () => {
     const result = await client.callTool({ name: "send_message", arguments: { body: "Done with the readme.", idempotency_key: "vibe-1" } });
     const sent = result.structuredContent as { thread_id: string };
     const { thread } = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${sent.thread_id}`)).json()) as { thread: InboxThread };
-    expect(thread.messages[0]!.author).toMatchObject({ kind: "agent", host: "mistral-vibe", session: VIBE_SESSION, name: "Mistral Vibe" });
+    expect(thread.messages[0]!.author).toMatchObject({ kind: "agent", host: "mistral-vibe", session: VIBE_SESSION, name: "Vibe" });
   }, 90_000);
 });

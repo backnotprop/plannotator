@@ -113,17 +113,17 @@ function setup(options: { state?: FakeVibeLaunchState; withVibe?: boolean } = {}
 }
 
 describe("Mistral Vibe through the launch engine, against the fake vibe-acp", () => {
-  test("To offers Mistral Vibe only once a new enough vibe-acp is there", async () => {
+  test("To offers Vibe only once a new enough vibe-acp is there", async () => {
     const ready = setup();
     expect((await ready.launch.composeBlock())!.agents.map((a) => a.agent)).toContain("mistral-vibe");
 
     const missing = setup({ withVibe: false });
     const block = (await missing.launch.composeBlock())!;
     expect(block.agents.map((a) => a.agent)).not.toContain("mistral-vibe");
-    expect(block.not_ready).toContainEqual({ agent: "mistral-vibe", name: "Mistral Vibe", code: "missing" });
+    expect(block.not_ready).toContainEqual({ agent: "mistral-vibe", name: "Vibe", code: "missing" });
 
     const old = setup({ state: { version: "vibe-acp 3.0.0" } });
-    expect((await old.launch.composeBlock())!.not_ready).toContainEqual({ agent: "mistral-vibe", name: "Mistral Vibe", code: "too_old" });
+    expect((await old.launch.composeBlock())!.not_ready).toContainEqual({ agent: "mistral-vibe", name: "Vibe", code: "too_old" });
   });
 
   test("Send starts vibe-acp in the folder with the person's env, makes a session with the Inbox MCP server named for it, and the root is its first turn", async () => {
@@ -227,10 +227,10 @@ describe("Mistral Vibe through the launch engine, against the fake vibe-acp", ()
       t.store
         .threadMessageIds(root.id)
         .map((id) => t.store.message(id)!)
-        .find((m) => m.author.kind === "agent" && m.body.startsWith("Mistral Vibe's turn ended with an error:")),
+        .find((m) => m.author.kind === "agent" && m.body.startsWith("Vibe's turn ended with an error:")),
     );
-    expect(note.body).toBe("Mistral Vibe's turn ended with an error: Rate limit exceeded for mistral-medium-latest.");
-    expect(note.author).toMatchObject({ host: "mistral-vibe", name: "Mistral Vibe" });
+    expect(note.body).toBe("Vibe's turn ended with an error: Rate limit exceeded for mistral-medium-latest.");
+    expect(note.author).toMatchObject({ host: "mistral-vibe", name: "Vibe" });
     expect(note.turn_error).toBe(true);
   });
 
@@ -243,7 +243,7 @@ describe("Mistral Vibe through the launch engine, against the fake vibe-acp", ()
       return id ? { id, q: t.store.questionsOf(id)[0]! } : null;
     });
     // The card's action labels, pinned on purpose: they name what Vibe is asked to allow.
-    expect(question.q.prompt).toBe("Mistral Vibe wants to run a command");
+    expect(question.q.prompt).toBe("Vibe wants to run a command");
     expect(question.q.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `touch` for this session", "Deny"]);
     expect(t.store.message(question.id)!.body).toContain("touch approved.txt");
     const picked = { v: 1 as const, key: question.q.key, kind: "single" as const, prompt: question.q.prompt, selected: [INBOX_PERMISSION_ALLOW_ONCE] };

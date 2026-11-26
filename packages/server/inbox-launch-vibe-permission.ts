@@ -33,7 +33,7 @@ import { createLaunchQuestions, openPermissionQuestions } from "./inbox-launch-p
 export const VIBE_PERMISSION_REQUEST = "session/request_permission";
 
 /** The thread note for a request the card cannot show, declined at once. */
-export const VIBE_DECLINED_NOTE = "Mistral Vibe asked for an approval the Inbox can't show yet; declined.";
+export const VIBE_DECLINED_NOTE = "Vibe asked for an approval the Inbox can't show yet; declined.";
 
 /** Vibe's terms for every card: Allow once, the session choice and Deny; no mode switch, no Terminal. */
 export const VIBE_PERMISSION_TERMS: InboxPermissionOptions = { modes: false, full: false, fullPermissions: false, allowHere: true, terminal: false, note: null, handoff: null };
@@ -171,7 +171,7 @@ export function createVibePermissions(
       const decline = () => options.respond(target, id, vibeDecision("deny", offered));
       if (!root || !event) {
         decline();
-        log(`Inbox launch: a Mistral Vibe approval the card cannot show; declined`);
+        log(`Inbox launch: a Vibe approval the card cannot show; declined`);
         if (root) writeLaunchNote(options, root, { author: { host: INBOX_VIBE_HOST, session: root.launch!.session ?? target.ref, name: INBOX_VIBE_NAME }, body: VIBE_DECLINED_NOTE, key: `vibe-declined-${key}` }, log);
         return;
       }
@@ -205,7 +205,7 @@ export function createVibePermissions(
           continue;
         }
         if (!options.respond(p.target, p.rpcId, vibeDecision(done.choice, p.options))) continue;
-        log(`Inbox launch: Mistral Vibe approval answered ${done.choice}`);
+        log(`Inbox launch: Vibe approval answered ${done.choice}`);
         if (done.choice === "deny" && done.reason) options.followUp(p.target, `The person denied that in the Inbox: ${done.reason}`);
         options.onChange();
       }

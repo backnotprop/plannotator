@@ -473,7 +473,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   antigravity: "Antigravity",
   cline: "Cline",
   muse: "Muse Code",
-  "mistral-vibe": "Mistral Vibe",
+  "mistral-vibe": "Vibe",
   openclaw: "OpenClaw",
   hermes: "Hermes Agent",
   orca: "Orca",

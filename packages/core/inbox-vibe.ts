@@ -6,7 +6,7 @@ import { inboxLaunchTokenOk, type InboxLaunchChoices } from "./inbox-launch-choi
 
 export const INBOX_VIBE_HOST = "mistral-vibe";
 
-export const INBOX_VIBE_NAME = "Mistral Vibe";
+export const INBOX_VIBE_NAME = "Vibe";
 
 /**
  * Set only in the env of the Inbox MCP server a launched Vibe session runs: the session the shim's calls belong to.
