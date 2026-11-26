@@ -10,7 +10,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-plan-header.spec.ts`.
  * PNGs land in .local/proof/plan-header/: phone-<light|dark>, phone-scrolled-<scheme>, phone-menu-<scheme>,
  * phone-<390|375|320>-light, phone-long-name-light, desktop-<scheme>, desktop-menu-<scheme>, desktop-copied-light,
- * desktop-scrolled-light, desktop-narrow-light, desktop-narrow-contents-light, desktop-panel-p2-<scheme> (the panel with no
+ * desktop-scrolled-light, desktop-narrow-light, desktop-clock-tip-<scheme>, desktop-versions-<scheme>, desktop-panel-p2-<scheme> (the panel with no
  * head, Pages first, the back arrow first in the top bar).
  */
 
@@ -108,7 +108,9 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       const planPage = page.locator(`[data-plan-page="${plan.id}"]`);
       const kicker = page.locator('.ib-docscroll > [data-plan-kicker]');
       await expect(kicker.locator('[data-plan-approval="approved"]')).toHaveText('Approved by you, with notes');
-      await expect(kicker.locator('[data-reading-versions]')).toHaveText('v1');
+      // No version text (approval A2): the history clock at the line's end carries the version in its name.
+      await expect(kicker.locator('[data-reading-versions]')).toHaveAccessibleName('Versions · v1, newest');
+      expect(await kicker.innerText()).not.toContain('v1');
       // At rest: the project in the bar, the plan's name once (the document's own title), no file-name row.
       await expect(planPage).toHaveAttribute('data-plan-header', 'project');
       await expect(page.locator('[data-plan-bartitle-rest]')).toHaveText('trailhead-api');
@@ -217,6 +219,19 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       await expect(reading.locator('[data-plan-approval="approved"]')).toHaveText('Approved by you, with notes');
       await expect(reading.locator('[data-plan-edit]')).toBeVisible();
       await expect(page.locator('.ib-vhead')).toHaveCount(0);
+      // The bar (approval A2): the approval's words and three marks, no version text; Versions closed until the clock.
+      expect((await reading.innerText()).trim()).toBe('Approved by you, with notes');
+      await expect(page.locator('[data-versions-panel]')).toHaveCount(0);
+      const clock = reading.locator('[data-reading-versions]');
+      await clock.hover();
+      await expect(page.getByRole('tooltip').or(page.locator('[data-pn-tooltip]')).first()).toHaveText('Versions · v1, newest');
+      await page.screenshot({ path: join(proofDir, `desktop-clock-tip-${scheme}.png`) });
+      await clock.click();
+      await expect(page.locator('[data-versions-panel]')).toBeVisible();
+      await expect(clock).toHaveAttribute('aria-pressed', 'true');
+      await page.screenshot({ path: join(proofDir, `desktop-versions-${scheme}.png`) });
+      await clock.click();
+      await expect(page.locator('[data-versions-panel]')).toHaveCount(0);
       await expect(page.locator('[data-plan-dock] [data-plan-global]')).toBeVisible();
       await blur(page);
       await page.screenshot({ path: join(proofDir, `desktop-${scheme}.png`) });
@@ -260,8 +275,9 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
     }
   }
 
-  // A narrow computer window (no room for the Contents rail beside the document): Contents is still one press away
-  // (its own button over the document), and the Send line stays beside Send.
+  // A narrow computer window: the Send line stays (words above the controls where the bar is short), and Contents
+  // is still on screen. At 820 px the document keeps 480 px and more, so the Contents rail shows beside it (on main
+  // as here); the pane's own Contents button, for a card too narrow for the rail, is guarded by planHeader.test.tsx.
   {
     const context = await browser.newContext({ viewport: { width: 820, height: 900 }, colorScheme: 'light' });
     try {
@@ -277,14 +293,9 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       // The controls stay one row (the line is words above them where the bar is narrow).
       const controlTops = await page.locator('[data-plan-dock]').evaluate((dock) => [...dock.querySelectorAll('.ib-toolstrip button, [data-plan-global], [data-annotations-sheet], [data-plan-send-button]')].map((el) => Math.round(el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2)));
       expect(Math.max(...controlTops) - Math.min(...controlTops)).toBeLessThanOrEqual(2);
-      const contents = page.locator('[data-plan-annotate] [data-contents-open]');
-      await expect(contents).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('.pn-contents-rail').first()).toBeVisible({ timeout: 10_000 });
       await blur(page);
       await page.screenshot({ path: join(proofDir, 'desktop-narrow-light.png') });
-      await contents.click();
-      await expect(page.locator('[data-contents="sheet"]')).toBeVisible();
-      await page.waitForTimeout(300);
-      await page.screenshot({ path: join(proofDir, 'desktop-narrow-contents-light.png') });
       expect(errors).toEqual([]);
     } finally {
       await context.close();

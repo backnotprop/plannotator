@@ -72,7 +72,7 @@ test('Edit, then Done: a new newest version of the person’s words, the agent n
     await reading.locator('[data-plan-edit-done]').click();
 
     await expect(page.locator('[data-plan-banner="saved"] p')).toHaveText('Saved as v2. No agent is running in ledger, so the agent was not told.');
-    await expect(reading.locator('[data-reading-versions]')).toContainText('v2 · newest');
+    await expect(reading.locator('[data-reading-versions]')).toHaveAccessibleName('Versions · v2, newest');
     await expect(page.locator('[data-plan-document]')).toContainText('Refill every second.');
     await expect(reading.locator('[data-plan-approval="moved"]')).toHaveText('Your approval moved to v2.');
     for (const scheme of ['light', 'dark'] as const) {
