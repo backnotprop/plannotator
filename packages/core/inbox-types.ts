@@ -506,12 +506,12 @@ export function inboxHostName(host: string, runtime?: unknown): string {
   return INBOX_HOST_NAMES[id] ?? host;
 }
 
-/** The name an agent's own connection gave (`agent_name`) when the app it runs in has a name of its own: Oh My Pi's "Pi" becomes "Oh My Pi". */
 /** An agent's own name that its host alone would not give ("Oh My Pi" on a `pi` session): the window shows that name. */
 export function inboxRuntimeNamed(host: string | null | undefined, name: string | null | undefined): boolean {
   return host === "pi" && name === INBOX_HOST_NAMES[INBOX_OH_MY_PI_RUNTIME];
 }
 
+/** The name an agent's own connection gave (`agent_name`) when the app it runs in has a name of its own: Oh My Pi's "Pi" becomes "Oh My Pi". */
 export function inboxRuntimeAgentName(host: unknown, name: unknown, runtime: InboxAgentRuntime | undefined): string | null {
   return runtime && host === "pi" && (name === undefined || name === null || name === INBOX_HOST_NAMES.pi) ? INBOX_HOST_NAMES[runtime]! : null;
 }
