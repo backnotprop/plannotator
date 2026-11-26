@@ -951,3 +951,4 @@ packages/ui/components/LaunchDialog.test.tsx
 packages/ui/components/LaunchAnnouncement.test.tsx
 packages/ui/components/GlowStars.test.tsx
 packages/inbox/launchDialog.test.tsx
+packages/inbox/guide/usePowerUp.test.tsx

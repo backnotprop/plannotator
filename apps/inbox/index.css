@@ -11,6 +11,8 @@
 /* The guided review: the guide chain and the read-only diff renderer it draws with (packages/inbox/guide). */
 @source "../../packages/guide-viewer/**/*.tsx";
 @source "../../packages/review-editor/components/**/*.tsx";
+/* Power Up's status mark in a review's bar (packages/review-editor/semDiff/PowerUpStatusSlot.tsx). */
+@source "../../packages/review-editor/semDiff/**/*.tsx";
 /* System: the project setup dialog (packages/inbox/system). */
 @source "../../packages/inbox/system/**/*.tsx";
 /* Floating reply drafts (packages/inbox/floaters/). */

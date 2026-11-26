@@ -29,6 +29,8 @@ export interface InboxDiffOptions {
   tab_size: number | null;
   semantic: boolean | null;
   expand_unchanged: boolean | null;
+  /** Power Up (config.json `diffOptions.powerUp`, on unless set): off, the Inbox never asks a provider either. */
+  power_up: boolean | null;
 }
 
 type WireKey = keyof InboxDiffOptions;
@@ -55,6 +57,7 @@ export const INBOX_DIFF_OPTION_FIELDS: Record<WireKey, Field> = {
   tab_size: { config: "tabSize", read: (value) => (Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 8 ? value : undefined), rule: "a whole number from 1 to 8" },
   semantic: { config: "semantic", read: bool, rule: "true or false" },
   expand_unchanged: { config: "expandUnchanged", read: bool, rule: "true or false" },
+  power_up: { config: "powerUp", read: bool, rule: "true or false" },
 };
 
 const WIRE_KEYS = Object.keys(INBOX_DIFF_OPTION_FIELDS) as WireKey[];

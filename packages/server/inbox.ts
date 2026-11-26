@@ -282,6 +282,7 @@ import {
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxLiveReview } from "./inbox-live-review";
+import { powerUpRoute } from "./inbox-power-up";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxRex, type InboxRex, type InboxRexReach, type InboxRexStatus } from "./inbox-rex";
@@ -6484,6 +6485,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path.startsWith("/api/ai/")) {
         const answer = await ask.aiRoute(req, path, via);
         if (answer) return answer;
+      }
+      // Power Up's second opinion and its key (inbox-power-up.ts): code review's own paths, so the page's worker and the
+      // shared settings need no fork. This computer's key, in the data dir code review reads; never a door's.
+      if (path === "/api/sem-diff/opinion" || path === "/api/sem-diff/opinion/settings") {
+        return await powerUpRoute(req, path, { dataDir, serverSession, fromDoor: fromDeviceDoor.has(req), fromCloudflare: fromCfDoor.has(req) });
       }
       if (path === CF_ACCESS_ROUTE || path.startsWith(`${CF_ACCESS_ROUTE}/`)) {
         if (fromCfDoor.has(req)) return json({ error: "Cloudflare settings change only on this computer or over your tailnet.", code: "local_only" }, 403);

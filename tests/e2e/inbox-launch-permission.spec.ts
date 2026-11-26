@@ -13,7 +13,7 @@
  *  1. Allow once: the card in the launch thread (the action, the command, its
  *     purpose and folder, Allow once / Allow `bun run` for this session / Deny),
  *     its header the run line, the foot "1 permission waiting", the row in
- *     Stopped on you; the hook prints allow with updatedInput and nothing more;
+ *     Stopped on you; the hook prints a bare allow (no updatedInput);
  *     the agent goes on; the answer never reaches the session's own poll;
  *     the record states the click ("You chose Allow once"); at rest (no
  *     line) the ⋯ menu still has Copy attach command.
@@ -371,7 +371,7 @@ test('allow once: the question in the launch thread, the waiting line and the fo
   const [result] = await waitFor('the prompt decided', () => (fake.permissions().length > 0 ? fake.permissions() : null));
   expect(result!.outcome).toBe('ran');
   expect(result!.exitCode).toBe(0);
-  expect(result!.output).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', updatedInput: BUILD.tool_input } } });
+  expect(result!.output).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
   // The agent goes on and answers; the line goes once it rests.
   await expect(p.locator('article.ib-message[data-author="agent"]').last()).toContainText('[Bash ran]', { timeout: 30_000 });
   await expect(p.locator('[data-run]')).toHaveCount(0, { timeout: 30_000 });
@@ -406,7 +406,6 @@ test('allow for this session: allow with the update for this session (never the 
   expect(result.outcome).toBe('ran');
   expect(result.output?.hookSpecificOutput?.decision).toEqual({
     behavior: 'allow',
-    updatedInput: BUILD.tool_input,
     updatedPermissions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'bun run:*' }], behavior: 'allow', destination: 'session' }],
   });
 });
@@ -637,7 +636,6 @@ test('the approved card: Write by Allow once (Enter), Bash by its session rule, 
   await answer(page, { choice: 'session' });
   expect(await decision(0)).toEqual({
     behavior: 'allow',
-    updatedInput: BUILD.tool_input,
     updatedPermissions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'bun run:*' }], behavior: 'allow', destination: 'session' }],
   });
   await expect(record(page, 'session')).toContainText('You chose Allow bun run for this session');
@@ -656,7 +654,7 @@ test('the approved card: Write by Allow once (Enter), Bash by its session rule, 
   await shot(page, 'dark', { scheme: 'dark' });
   await armed(page);
   await page.keyboard.press('Enter');
-  expect(await decision(1)).toEqual({ behavior: 'allow', updatedInput: write.tool_input });
+  expect(await decision(1)).toEqual({ behavior: 'allow' });
   await expect(record(page, 'once')).toContainText('You chose Allow once');
   await expect(record(page, 'once')).toContainText('packages/inbox/search/fuzzy.ts');
 
@@ -694,7 +692,6 @@ test('the approved card: Write by Allow once (Enter), Bash by its session rule, 
   await answer(page, { choice: 'Auto mode' });
   expect(await decision(3)).toEqual({
     behavior: 'allow',
-    updatedInput: edit.tool_input,
     updatedPermissions: [{ type: 'setMode', mode: 'auto', destination: 'session' }],
   });
   // What was asked of Claude Code, never that it switched (an account without Auto mode ignores it).
@@ -819,7 +816,6 @@ test('Full permissions, with the person\'s bypass consent: the launch record dec
   const first = await waitFor('the prompt decided', () => fake.permissions()[before]);
   expect(first.output?.hookSpecificOutput?.decision).toEqual({
     behavior: 'allow',
-    updatedInput: BUILD.tool_input,
     updatedPermissions: [{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }],
   });
   // The session took the switch (bypass was allowed at its start). The record states the person's answer.
