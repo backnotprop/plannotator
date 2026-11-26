@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxAgentConnection } from "./generated/inbox/agent-link.ts";
-import { piHandoffLine, readPiSessionHeader, registerPiInbox } from "./inbox.ts";
+import { ompContinuesLine, piHandoffLine, readPiSessionHeader, registerPiInbox } from "./inbox.ts";
 
 const cleanup: (() => void)[] = [];
 afterEach(() => {
@@ -115,19 +115,49 @@ describe("piHandoffLine", () => {
 	});
 });
 
-/** A stand-in for Pi's ExtensionAPI: one interactive session whose file the test names. */
-function fakePi() {
+describe("ompContinuesLine (Oh My Pi's headers name the earlier session by id)", () => {
+	const ids = { a: "0190a000-0000-7000-8000-00000000000a", b: "0190a000-0000-7000-8000-00000000000b", c: "0190a000-0000-7000-8000-00000000000c" };
+	const named = (dir: string, id: string, header: Record<string, unknown>) => sessionFile(dir, `2026-11-25T00-00-00-000Z_${id}.jsonl`, { type: "session", id, ...header });
+
+	test("a copy after a copy: continuationOf, then parentSession, each found by its id beside the file, nearest first", () => {
+		const dir = tempDir("plannotator-omp-sessions-");
+		named(dir, ids.a, {});
+		named(dir, ids.b, { continuationOf: ids.a, parentSession: ids.a });
+		const c = named(dir, ids.c, { parentSession: ids.b });
+		expect(ompContinuesLine({ parentSession: ids.b }, c, ids.c)).toEqual([ids.b, ids.a]);
+		// Pi's reading of the same header finds nothing: it opens parentSession as a file.
+		expect(piHandoffLine(c, ids.c)).toEqual([]);
+	});
+
+	test("an earlier file that is gone still names its id; a loop, no header, or a path that is not a file stop the line", () => {
+		const dir = tempDir("plannotator-omp-sessions-");
+		const b = named(dir, ids.b, { continuationOf: ids.a });
+		expect(ompContinuesLine({ continuationOf: ids.a }, b, ids.b)).toEqual([ids.a]);
+		expect(ompContinuesLine({ continuationOf: ids.b }, b, ids.b)).toEqual([]);
+		expect(ompContinuesLine(null, b, ids.b)).toEqual([]);
+		expect(ompContinuesLine({ parentSession: join(dir, "gone.jsonl") }, b, ids.b)).toEqual([]);
+		// A branch's parentSession is a file path, as Pi's.
+		const a = named(dir, ids.a, {});
+		expect(ompContinuesLine({ parentSession: a }, join(dir, "new.jsonl"), ids.c)).toEqual([ids.a]);
+	});
+});
+
+/** A stand-in for Pi's ExtensionAPI (or Oh My Pi's, `omp`): one interactive session whose file the test names. */
+function fakePi(omp = false) {
 	const handlers = new Map<string, ((event: unknown, ctx?: unknown) => unknown)[]>();
 	let sessionId = "";
 	let sessionFilePath: string | undefined;
 	let parentSession: string | undefined;
+	let header: Record<string, unknown> | undefined;
+	let entries: unknown[] = [];
 	const ctx = {
 		hasUI: true,
 		cwd: "/tmp",
 		sessionManager: {
 			getSessionId: () => sessionId,
 			getSessionFile: () => sessionFilePath,
-			getHeader: () => parentSession ? { parentSession } : undefined,
+			getHeader: () => header ?? (parentSession ? { parentSession } : undefined),
+			getEntries: () => entries,
 			getSessionName: () => "test",
 			getBranch: () => [],
 		},
@@ -142,12 +172,19 @@ function fakePi() {
 			sendUserMessage: () => {},
 			getActiveTools: () => [],
 			setActiveTools: () => {},
+			// What tells Oh My Pi's ExtensionAPI from Pi's (pi-host.ts detectPiHost).
+			...(omp ? { arktype: () => {}, pi: {} } : {}),
 		},
-		start(id: string, file?: string, parent?: string) {
+		start(id: string, file?: string, parent?: string, full?: Record<string, unknown>) {
 			sessionId = id;
 			sessionFilePath = file;
 			parentSession = parent;
+			header = full;
 			for (const handler of handlers.get("session_start") ?? []) handler({}, ctx);
+		},
+		/** The entries the next session holds (Oh My Pi's `getEntries`). */
+		entries(next: unknown[]) {
+			entries = next;
 		},
 		shutdown() {
 			for (const handler of handlers.get("session_shutdown") ?? []) handler({}, ctx);
@@ -181,12 +218,12 @@ function fakeConnection(dataDir: string, polls: Poll[]) {
 }
 
 describe("the poll's continues", () => {
-	function world() {
+	function world(omp = false) {
 		const sessions = tempDir("plannotator-pi-sessions-");
 		const dataDir = tempDir("plannotator-pi-data-");
 		mkdirSync(join(dataDir, "inbox"), { recursive: true });
 		const polls: Poll[] = [];
-		const pi = fakePi();
+		const pi = fakePi(omp);
 		registerPiInbox(pi.pi as never, fakeConnection(dataDir, polls), { isAskActive: () => false, reminder: null });
 		cleanup.push(() => pi.shutdown());
 		return { sessions, polls, pi };
@@ -223,6 +260,44 @@ describe("the poll's continues", () => {
 		expect(polls.find((poll) => poll.session === "new")?.body.continues).toEqual(["parent", "grandparent"]);
 		await Bun.sleep(1500);
 		expect(polls.slice(handedOff).every((poll) => poll.session === "new")).toBe(true);
+	});
+
+	test("Oh My Pi resumed a newer copy of a conversation: its poll names the old id, so the replies waiting for it come here", async () => {
+		const { sessions, polls, pi } = world(true);
+		const old = "0190a000-0000-7000-8000-00000000000a";
+		const now = "0190a000-0000-7000-8000-00000000000b";
+		sessionFile(sessions, `2026-11-25T00-00-00-000Z_${old}.jsonl`, { type: "session", id: old });
+		const header = { type: "session", id: now, parentSession: old, continuationOf: old };
+		pi.start(now, sessionFile(sessions, `2026-11-25T00-00-01-000Z_${now}.jsonl`, header), undefined, header);
+		await waitFor("the session's poll", () => polls.some((poll) => poll.session === now));
+		expect(polls.find((poll) => poll.session === now)?.body.continues).toEqual([old]);
+	});
+
+	test("Oh My Pi the Inbox started for a new session, opened by Auto Resume on an earlier one: no poll as that one; the new session polls", async () => {
+		const before = process.env.PLANNOTATOR_INBOX_NEW_SESSION;
+		process.env.PLANNOTATOR_INBOX_NEW_SESSION = "1";
+		cleanup.push(() => {
+			if (before === undefined) delete process.env.PLANNOTATOR_INBOX_NEW_SESSION;
+			else process.env.PLANNOTATOR_INBOX_NEW_SESSION = before;
+		});
+		const { polls, pi } = world(true);
+		// Read once and not passed on to what the session runs.
+		expect(process.env.PLANNOTATOR_INBOX_NEW_SESSION).toBeUndefined();
+		pi.entries([{ type: "model_change" }, { type: "message", message: { role: "user" } }]);
+		pi.start("earlier");
+		await Bun.sleep(800);
+		expect(polls.some((poll) => poll.session === "earlier")).toBe(false);
+		// The Inbox's `new_session`: Oh My Pi switches to a new one.
+		pi.entries([{ type: "model_change" }]);
+		pi.start("fresh");
+		await waitFor("the new session's poll", () => polls.some((poll) => poll.session === "fresh"));
+	});
+
+	test("without the Inbox's marker, a session with turns polls at once (a resume, or Oh My Pi started by hand)", async () => {
+		const { polls, pi } = world(true);
+		pi.entries([{ type: "message", message: { role: "user" } }]);
+		pi.start("resumed");
+		await waitFor("the session's poll", () => polls.some((poll) => poll.session === "resumed"));
 	});
 
 	test("a session that was not handed off sends no continues", async () => {

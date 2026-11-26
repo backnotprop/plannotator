@@ -96,7 +96,12 @@ const NOTE_TITLE_MAX = 80;
  */
 const SETTLE_MS = 1_500;
 
-const DIALOGS = new Set(["select", "confirm", "input", "editor"]);
+/**
+ * The dialogs answered Cancel: Pi's four, and Oh My Pi's `form` (one whole HTML form, sent with no opt-in: its `ask`
+ * tool always asks this way in RPC mode, rpc-mode.ts requestRpcFormDialog) and `ask` (only once a client sent
+ * `set_ask_dialog`, which the Inbox never does). Either untouched would leave the session waiting with no word.
+ */
+const DIALOGS = new Set(["select", "confirm", "input", "editor", "form", "ask"]);
 
 /**
  * What tells Pi from an agent built on it that loads the same extension (Oh My Pi, inbox-launch-omp.ts): one
@@ -709,6 +714,9 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
    */
   const spawnPi = async (launch: InboxLaunchRecord, session: string | null, name: string, login: Readonly<LaunchEnv>, cancelled: () => boolean): Promise<SpawnResult> => {
     const env = piSpawnEnv(login.PATH ? login : (await ctx.environment()).env as LaunchEnv, dataDirArg());
+    // A new session of an agent that picks its own id: should Auto Resume open an earlier one, the extension polls
+    // nothing as that one before the `new_session` below (apps/pi-extension/inbox.ts `reopened`).
+    if (session === null) env.PLANNOTATOR_INBOX_NEW_SESSION = "1";
     const path = createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env }).which(BIN) ?? (await ctx.environment()).which(BIN);
     if (!path) return { ok: false, cancelled: false, missing: true, text: `${BIN} is not on the login PATH.`, output: `${BIN} not found` };
     // The last moment a Stop, Delete or Open in Terminal can keep the process from being made at all.
@@ -787,7 +795,8 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       // (a session that moved away): another id. Taken for this thread only when its header leads back to ours.
       const record = readRecord(launch.id);
       const dirs = [...new Set([got.file ? dirname(got.file) : null, record ? dirname(record.file) : null].filter((dir): dir is string => !!dir))];
-      if (flavor.ids === "agent" && got.file && piSessionContinues(got.file, got.id, session, dirs)) {
+      // Never an id another thread here has (or another process of the Inbox's runs): that is that thread's conversation.
+      if (flavor.ids === "agent" && got.file && !knownIds(p).has(got.id.toLowerCase()) && piSessionContinues(got.file, got.id, session, dirs)) {
         ctx.startLog(launch.id, `${BIN} ${argv.slice(1).join(" ")}: session ${session} continues as ${got.id} (${got.file})`);
       } else {
         got = null;
@@ -1248,6 +1257,8 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       // An agent that continues a session only from its file, which it never wrote: a reply has nothing to continue.
       if (flavor.ids === "agent") {
         const record = readRecord(launch.id);
+        // `--resume` once answered with a session that is not this one: a reply is refused with these words, so the line says them.
+        if (record?.stray) return STRAY(NAME);
         if (record && !record.written && !existsSync(record.file)) return piUnsavedNote(NAME);
       }
       if (handedBack.has(session)) return PI_HANDED_BACK_NOTE;

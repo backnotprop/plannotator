@@ -4,7 +4,9 @@
  * "Oh My Pi" as its own row beside "Pi" once `omp` and Plannotator's extension in its plugin record are there, and not
  * before; a Send starts `omp --mode rpc` in the project's folder and addresses the thread to the session id Oh My Pi
  * picked, as host `pi` (its extension polls the Inbox as Pi does), which takes the root; Pi's own row still starts Pi.
- * A reply that Oh My Pi resumes under a newer copy's id moves the thread to that id, and that session takes the reply.
+ * A reply that Oh My Pi resumes under a newer copy's id moves the thread to that id, and that session takes the reply;
+ * later replies to a message from before the move reach it too (its poll's `continues`). With Auto Resume on, a new
+ * start never takes a reply waiting for the session it reopened, nor cancels a turn of it.
  * A small bridge stands in for the Inbox's: no Inbox is started.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -157,4 +159,81 @@ describe("Oh My Pi through the launch engine, against the fake omp", () => {
     after.sweep(true);
     expect(t.fake.starts()).toHaveLength(2);
   }, 30_000);
+
+  /**
+   * A thread whose Oh My Pi answered under its first id (X, `answer`: written as its `send_message` writes it), then,
+   * after an Inbox restart, resumed as a newer copy (Y) on a reply that Y took.
+   */
+  async function movedThread() {
+    const t = setup();
+    const target = t.launch.target({ launch: { agent: "oh-my-pi", project_id: t.project.id } })!;
+    const prepared = await t.launch.prepare(target, { name: "Tidy the readme", body: "Tidy the readme.", resolveProject: async () => t.project });
+    const root = t.store.startPersonThread({ project_id: t.project.id, body: "Tidy the readme.", to: prepared.to, idempotency_key: "send-1", thread_name: "Tidy the readme", launch: prepared.launch }).message;
+    t.launch.begin(root);
+    const session = await until("the session", () => t.store.message(root.id)!.launch!.session_ref);
+    await until("the session saved", () => t.fake.sessionFiles().some((file) => file.endsWith(`_${session}.jsonl`) && readFileSync(file, "utf8").split("\n").filter(Boolean).length >= 3));
+    const answer = t.store.sendMessage({ project_id: t.project.id, author: { kind: "agent", host: "pi", session, name: "Oh My Pi" }, body: "Tidied. Shall I fix the links too?", reply_to: root.id, idempotency_key: "answer-1" }).message;
+    await t.launch.stop();
+    await until("the first omp ended", () => !t.fake.alive(t.fake.starts()[0]!.pid));
+    const after = t.makeLaunch();
+    t.clock.ahead = 120_000;
+    await after.runOf(root.id);
+    t.fake.configure({ resumeAs: "continuation" });
+    const { reply } = t.store.sendReply(answer.id, { words: "Yes, please.", idempotency_key: "reply-1" });
+    await until("a second start", () => (after.sweep(true), t.fake.starts()[1]));
+    const moved = await until("the thread moved", () => {
+      const ref = t.store.message(root.id)!.launch!.session_ref;
+      return ref !== session ? ref : null;
+    });
+    await until("the first reply delivered", () => t.store.message(reply.id)!.delivery);
+    return { ...t, root, session, moved, answer, after };
+  }
+
+  test("after the move, a reply to an older message (written under the first id) reaches the new session", async () => {
+    const t = await movedThread();
+    // The new session answers under its own id; the person then replies to the older answer, which names the first id.
+    t.store.sendMessage({ project_id: t.project.id, author: { kind: "agent", host: "pi", session: t.moved, name: "Oh My Pi" }, body: "Links fixed.", reply_to: t.root.id, idempotency_key: "answer-2" });
+    const { reply } = t.store.sendReply(t.answer.id, { words: "And the badges, as you said.", idempotency_key: "reply-2" });
+    await until("that reply taken by the new session", () => t.fake.delivered().includes(reply.id), 8_000);
+    await until("its delivery recorded", () => t.store.message(reply.id)!.delivery);
+    t.after.sweep(true);
+    expect(t.fake.starts()).toHaveLength(2);
+  }, 40_000);
+
+  test("after the move, the person's next reply, before the new session wrote anything, reaches it", async () => {
+    const t = await movedThread();
+    // The latest agent message is still the first id's.
+    const { reply } = t.store.sendReply(t.answer.id, { words: "One more: the changelog.", idempotency_key: "reply-2" });
+    await until("that reply taken by the new session", () => t.fake.delivered().includes(reply.id), 8_000);
+    t.after.sweep(true);
+    expect(t.fake.starts()).toHaveLength(2);
+  }, 40_000);
+
+  test("Auto Resume on, and a reply waits for the session it reopens: the new start never takes that reply, nor cancels a turn of it", async () => {
+    const t = setup();
+    // An earlier thread in the folder: answered (so its file has turns), then the Inbox stops, and a reply waits for it.
+    const target = t.launch.target({ launch: { agent: "oh-my-pi", project_id: t.project.id } })!;
+    const first = await t.launch.prepare(target, { name: "Tidy the readme", body: "Tidy the readme.", resolveProject: async () => t.project });
+    const root = t.store.startPersonThread({ project_id: t.project.id, body: "Tidy the readme.", to: first.to, idempotency_key: "send-1", thread_name: "Tidy the readme", launch: first.launch }).message;
+    t.launch.begin(root);
+    const earlier = await until("the session", () => t.store.message(root.id)!.launch!.session_ref);
+    await until("the session saved", () => t.fake.sessionFiles().some((file) => file.endsWith(`_${earlier}.jsonl`) && readFileSync(file, "utf8").split("\n").filter(Boolean).length >= 3));
+    const answer = t.store.sendMessage({ project_id: t.project.id, author: { kind: "agent", host: "pi", session: earlier, name: "Oh My Pi" }, body: "Tidied.", reply_to: root.id, idempotency_key: "answer-1" }).message;
+    await t.launch.stop();
+    await until("the first omp ended", () => !t.fake.alive(t.fake.starts()[0]!.pid));
+    const { reply } = t.store.sendReply(answer.id, { words: "Thanks, now the links.", idempotency_key: "reply-1" });
+    // Auto Resume on, and Oh My Pi's other extensions slow to start: get_state waits while the extension is up.
+    t.fake.configure({ autoResume: true, startMs: 1_500 });
+    const after = t.makeLaunch();
+    const second = await after.prepare(after.target({ launch: { agent: "oh-my-pi", project_id: t.project.id } })!, { name: "Write the changelog", body: "Write the changelog.", resolveProject: async () => t.project });
+    const root2 = t.store.startPersonThread({ project_id: t.project.id, body: "Write the changelog.", to: second.to, idempotency_key: "send-2", thread_name: "Write the changelog", launch: second.launch }).message;
+    after.begin(root2);
+    const fresh = await until("the new session", () => t.store.message(root2.id)!.launch!.session_ref, 15_000);
+    expect(fresh).not.toBe(earlier);
+    await until("the new thread's root delivered", () => t.fake.delivered().includes(root2.id), 8_000);
+    // The reply for the reopened session was never handed to this process, so no turn of it was cut off.
+    expect(t.fake.delivered()).not.toContain(reply.id);
+    expect(t.fake.cancelled()).toEqual([]);
+    expect(t.store.message(reply.id)!.delivery).toBeUndefined();
+  }, 40_000);
 });

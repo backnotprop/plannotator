@@ -41,7 +41,7 @@ export interface FakePiConfig {
   /** The RPC process answers its first `get_state` this much later (ms): a Pi slow to come up. */
   readyDelayMs?: number;
   /** Each turn first asks this extension dialog over RPC, and waits for the answer (10 s at most). */
-  dialog?: { method?: "select" | "confirm" | "input" | "editor"; title: string; options?: string[] } | null;
+  dialog?: { method?: "select" | "confirm" | "input" | "editor" | "form"; title: string; options?: string[]; html?: string } | null;
   /** Ask `dialog` once as the session starts, before any turn (an extension's session_start). */
   dialogOnStart?: boolean;
   /** How long a turn works before it answers (ms, default 600). */
@@ -64,8 +64,12 @@ export interface FakePiConfig {
   newSessionCancelled?: boolean;
   /** Oh My Pi only: `--resume <id>` answers as another copy of the conversation (a new id), or one of no lineage. */
   resumeAs?: "continuation" | "fork" | "stranger" | null;
+  /** With `resumeAs`: the id that copy gets (else a new one). */
+  resumeId?: string | null;
   /** `get_state` reports this as the session id instead of its own. */
   stateId?: string | null;
+  /** Oh My Pi only: its other extensions' `session_start` take this long (ms); every RPC frame but a dialog's answer waits. */
+  startMs?: number;
 }
 
 export interface FakePiCall {
@@ -92,6 +96,8 @@ export interface FakePi {
   delivered(): string[];
   dialogs(): { sessionId: string; title: string; response: { cancelled?: boolean; value?: string; confirmed?: boolean } | null }[];
   exits(): { sessionId: string; pid: number; why: string; aborted?: boolean; terminal?: boolean; at: number }[];
+  /** Oh My Pi only: the commands whose turn `new_session` cancelled (delivered, never answered). */
+  cancelled(): { id: string; sessionId: string; at: number }[];
   osascript(): string[][];
   /** Every session file of Pi's agent dir in the test HOME. */
   sessionFiles(): string[];
@@ -190,6 +196,7 @@ export function installFakePi(input: { bin: string; state: string; home: string;
     delivered: () => (existsSync(join(state, "delivered.log")) ? readFileSync(join(state, "delivered.log"), "utf8").split("\n").filter(Boolean) : []),
     dialogs: () => lines("dialogs.jsonl"),
     exits: () => lines("exits.jsonl"),
+    cancelled: () => lines("cancelled.jsonl"),
     osascript() {
       const file = join(state, "osascript.log");
       if (!existsSync(file)) return [];

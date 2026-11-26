@@ -213,6 +213,28 @@ describe("Oh My Pi's own session ids, against the fake omp", () => {
     expect(fake.starts()).toHaveLength(2);
   }, 15_000);
 
+  test("after a resume answered as another session, the stopped line says so, here and after an Inbox restart: never that a reply continues it", async () => {
+    const { fake, host, saved, restarted } = setup({ noConnect: true, turnOnStart: true, turnError: "401 expired" });
+    const { launch } = await saved();
+    fake.configure({ resumeAs: "stranger" });
+    const words = "Oh My Pi opened another session in place of this one, so it can't continue it here. Start a new Oh My Pi session.";
+    expect((await host.resume(launch)).failure?.text).toBe(words);
+    await until("that omp ended", () => fake.starts().every((call) => !fake.alive(call.pid)));
+    expect(host.stoppedNote(launch)).toBe(words);
+    expect(restarted().stoppedNote(launch)).toBe(words);
+  }, 15_000);
+
+  test("a resume that answers as the session another thread here has: refused, and that thread keeps its running session", async () => {
+    const { fake, host, saved, started } = setup({ noConnect: true, turnOnStart: true, turnError: "401 expired" });
+    const first = await saved();
+    const other = await started();
+    fake.configure({ resumeAs: "continuation", resumeId: other.session });
+    const resumed = await host.resume(first.launch);
+    expect(resumed.failure?.text).toBe("Oh My Pi opened another session in place of this one, so it can't continue it here. Start a new Oh My Pi session.");
+    expect(resumed.session).toBeUndefined();
+    expect((await host.sessions())(other.session)).toMatchObject({ state: "running" });
+  }, 15_000);
+
   test("an id that is not a session id is never taken", async () => {
     const { fake, host, started } = setup({ noConnect: true, stateId: "../../etc --resume x" });
     await expect(started()).rejects.toThrow("It answered something else.");
@@ -321,6 +343,17 @@ describe("Oh My Pi's launch host, against the fake omp", () => {
     const note = await until("the note in the thread", () => agentNotes(root)[0]);
     expect(note.author).toMatchObject({ kind: "agent", host: "pi", session, name: "Oh My Pi" });
     expect(note.body).toBe("Oh My Pi asked something the Inbox can't show yet (“Allow bash: rm -rf build?”); answered Cancel.");
+  });
+
+  test("Oh My Pi's form (how its ask tool asks in RPC mode) is answered Cancel as well, and the thread says so: the session never waits on it", async () => {
+    const { fake, started, agentNotes } = setup({ noConnect: true, turnOnStart: true, dialog: { method: "form", title: "Which branch should I use?" } });
+    const { root, session } = await started();
+    const asked = await until("the form answered", () => fake.dialogs()[0], 5_000);
+    expect(asked.response).toMatchObject({ cancelled: true });
+    const note = await until("the note in the thread", () => agentNotes(root)[0]);
+    expect(note.author).toMatchObject({ kind: "agent", host: "pi", session, name: "Oh My Pi" });
+    // A form has no title: the note without one.
+    expect(note.body).toBe("Oh My Pi asked something the Inbox can't show yet; answered Cancel.");
   });
 
   test("the stopped line after an Inbox restart", () => {

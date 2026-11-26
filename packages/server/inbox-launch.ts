@@ -1209,6 +1209,12 @@ ${result.text}`);
   const moveLaunch = (root: InboxMessage, from: string | null, to: string) => {
     const now = store.message(root.id);
     if (!from || !now?.launch || !now.to || now.launch.deleted_at || now.launch.session_ref !== from) return;
+    // Never onto a session another thread has: two threads would then share one conversation.
+    const taken = roots().find((other) => other.id !== root.id && [other.to?.session, other.launch?.session, other.launch?.session_ref].includes(to));
+    if (taken) {
+      log(`Inbox launch ${root.launch!.id}: not moved to ${to}, which thread ${taken.thread_id} already has`);
+      return;
+    }
     const waiting = personPending(now.to.session).filter((m) => m.thread_id === root.thread_id && m.id !== root.id);
     const at = { host: now.to.host, session: to };
     store.settleLaunch(root.id, { to: at, session_ref: to });

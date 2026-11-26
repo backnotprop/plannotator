@@ -42,6 +42,12 @@
  * extension refused it). Config `resumeAs`: `--resume <id>` answers as another copy of that conversation, a new id
  * whose header points back (`continuation`: `continuationOf` and `parentSession`; `fork`: `parentSession`), or as
  * `stranger`, a new id that points back to nothing. rpc.jsonl lists each `new_session`.
+ * As Oh My Pi's RPC mode, every frame but a dialog's answer is held until the `session_start` handlers are done (a
+ * start dialog answered, the extension's poll under way, config `startMs`); `new_session` cancels a turn under way
+ * (cancelled.jsonl: delivered, never answered); Auto Resume never picks a session with no turn, nor one another live
+ * process writes (`<state>/leases/`). Its extension sends `continues` (the ids its header leads back to) and, started
+ * with `PLANNOTATOR_INBOX_NEW_SESSION`, polls nothing as a session Auto Resume opened until `new_session`, as
+ * Plannotator's Pi extension does on Oh My Pi. A `form` dialog (its `ask` tool) carries HTML, no title.
  *
  * State in $FAKE_PI_STATE: config.json (read on each use), calls.jsonl (argv,
  * cwd, env names, the data dir and Inbox-tool values it got), pids.log,
@@ -141,15 +147,36 @@ if (OMP && !sessionFile && flag("--resume")) {
 /** Oh My Pi writes a new session's file only from its first answer on: the lines wait until then. */
 let unwritten = null;
 const idOfFile = (name) => /_([0-9a-f-]{36})\.jsonl$/i.exec(name)?.[1];
+/** Each session's lease (`<state>/leases/<id>`: the pid writing it), as Oh My Pi's session storage claims a file it writes. */
+const leases = path.join(STATE, "leases");
+const lease = () => {
+  try {
+    fs.mkdirSync(leases, { recursive: true });
+    fs.writeFileSync(path.join(leases, sessionId), String(process.pid));
+  } catch {}
+};
+const heldElsewhere = (id) => {
+  try {
+    const pid = Number(fs.readFileSync(path.join(leases, id), "utf8"));
+    if (!pid || pid === process.pid) return false;
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+/** The newest session in this folder with a turn in it (session-listing.ts findMostRecentNonEmptySession: an empty one is never picked). */
 const newestHere = () =>
   fs
     .readdirSync(sessionDir)
-    .filter((name) => name.endsWith(".jsonl") && idOfFile(name))
+    .filter((name) => name.endsWith(".jsonl") && idOfFile(name) && fs.readFileSync(path.join(sessionDir, name), "utf8").split("\n").filter(Boolean).length > 1)
     .sort()
     .at(-1);
-if (OMP && !terminal && !flag("--resume") && config().autoResume && newestHere()) {
-  // Auto Resume on (main.ts createSessionManager: `continueRecent`): the newest session in this folder, not a new one.
-  sessionFile = newestHere();
+// Auto Resume on (main.ts createSessionManager: `continueRecent`): the newest session in this folder, not a new one;
+// a new one after all when another live process writes that one (session-storage.ts isSessionOwnedElsewhere).
+const recent = OMP && !terminal && !flag("--resume") && config().autoResume ? newestHere() : undefined;
+if (recent && !heldElsewhere(idOfFile(recent))) {
+  sessionFile = recent;
   sessionId = idOfFile(sessionFile);
 }
 if (sessionFile) sessionFile = path.resolve(sessionDir, sessionFile);
@@ -160,7 +187,7 @@ if (OMP && !terminal && sessionFile && flag("--resume") && config().resumeAs) {
   const kind = config().resumeAs;
   const [head, ...rest] = fs.readFileSync(sessionFile, "utf8").split("\n").filter(Boolean);
   const previous = JSON.parse(head);
-  const next = crypto.randomUUID();
+  const next = config().resumeId || crypto.randomUUID();
   const header = { ...previous, id: next, timestamp: new Date().toISOString(), ...(kind === "stranger" ? {} : { parentSession: previous.id }), ...(kind === "continuation" ? { continuationOf: previous.id } : {}) };
   if (kind === "stranger") delete header.parentSession;
   const to = path.join(path.dirname(sessionFile), `${new Date().toISOString().replace(/[:.]/g, "-")}_${next}.jsonl`);
@@ -190,6 +217,7 @@ const writeLine = (entry, answer = false) => {
   fs.appendFileSync(sessionFile, line);
 };
 let sessionName = flag("--name");
+if (OMP && !terminal) lease();
 
 // ── The extension: the session claim (packages/shared/inbox/pi-session-claim.ts) ──
 // The default data dir only inside a scratch HOME: never the account's real ~/.plannotator.
@@ -250,6 +278,14 @@ if (terminal) {
   // Up until the person quits, connected or not (the Inbox tool off: no bridge poll keeps it running).
   setInterval(() => {}, 1 << 30);
 } else process.stdin.setEncoding("utf8");
+/**
+ * Oh My Pi reads stdin from its start but holds every frame except a dialog's answer until its extensions'
+ * `session_start` handlers are done (rpc-mode.ts `heldFrames`): a start dialog answered, Plannotator's extension's
+ * bridge poll under way, and config `startMs` for other extensions' handlers. `get_state` waits with the rest.
+ */
+let held = OMP && !terminal ? [] : null;
+/** Bumped by `new_session`: a turn under way when it changes is cancelled (agent-session.ts newSession aborts the run). */
+let turnGeneration = 0;
 if (!terminal) process.stdin.on("data", (chunk) => {
   input += chunk;
   for (let at = input.indexOf("\n"); at >= 0; at = input.indexOf("\n")) {
@@ -267,46 +303,53 @@ if (!terminal) process.stdin.on("data", (chunk) => {
       if (waiter) waiter(command);
       continue;
     }
-    if (command.type === "prompt") {
-      // A prompt over RPC: a turn of its own here (its dialog, if configured), with no Inbox answer.
-      out({ id: command.id, type: "response", command: "prompt", success: true });
-      void localTurn();
-      continue;
-    }
-    if (command.type === "get_state") {
-      // Config `stateId`: the id it reports instead of its own (an answer that is not a session id).
-      const answer = () => out({ id: command.id, type: "response", command: "get_state", success: true, data: { sessionId: config().stateId ?? sessionId, sessionFile, messageCount: messageCount(), isStreaming: busy, sessionName } });
-      // A Pi slow to come up (config `readyDelayMs`): its first answer waits.
-      const delay = config().readyDelayMs ?? 0;
-      if (delay > 0) setTimeout(answer, delay);
-      else answer();
-      continue;
-    }
-    if (command.type === "abort") aborted = true;
-    if (OMP && command.type === "new_session") {
-      append("rpc.jsonl", { type: "new_session", from: sessionId });
-      // An extension's `session_before_switch` may cancel it (agent-session.ts newSession): the session stays.
-      if (config().newSessionCancelled) {
-        out({ id: command.id, type: "response", command: "new_session", success: true, data: { cancelled: true } });
-        continue;
-      }
-      // A new id, its file on disk at once with its header alone (session-manager.ts newSession: ensureOnDisk).
-      sessionId = crypto.randomUUID();
-      sessionFile = path.join(sessionDir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
-      unwritten = null;
-      fs.writeFileSync(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd })}\n`);
-      sessionName = undefined;
-      claim();
-      out({ id: command.id, type: "response", command: "new_session", success: true, data: { cancelled: false } });
-      continue;
-    }
-    if (OMP && command.type === "set_session_name") {
-      sessionName = command.name;
-      append("names.jsonl", { sessionId, name: command.name });
-    }
-    out({ id: command.id, type: "response", command: command.type, success: true });
+    if (held) held.push(command);
+    else handle(command);
   }
 });
+function handle(command) {
+  if (command.type === "prompt") {
+    // A prompt over RPC: a turn of its own here (its dialog, if configured), with no Inbox answer.
+    out({ id: command.id, type: "response", command: "prompt", success: true });
+    void localTurn();
+    return;
+  }
+  if (command.type === "get_state") {
+    // Config `stateId`: the id it reports instead of its own (an answer that is not a session id).
+    const answer = () => out({ id: command.id, type: "response", command: "get_state", success: true, data: { sessionId: config().stateId ?? sessionId, sessionFile, messageCount: messageCount(), isStreaming: busy, sessionName } });
+    // A Pi slow to come up (config `readyDelayMs`): its first answer waits.
+    const delay = config().readyDelayMs ?? 0;
+    if (delay > 0) setTimeout(answer, delay);
+    else answer();
+    return;
+  }
+  if (command.type === "abort") aborted = true;
+  if (OMP && command.type === "new_session") {
+    append("rpc.jsonl", { type: "new_session", from: sessionId });
+    // An extension's `session_before_switch` may cancel it (agent-session.ts newSession): the session stays.
+    if (config().newSessionCancelled) {
+      out({ id: command.id, type: "response", command: "new_session", success: true, data: { cancelled: true } });
+      return;
+    }
+    // The run under way ends unanswered (agent-session.ts newSession aborts it first).
+    turnGeneration += 1;
+    // A new id, its file on disk at once with its header alone (session-manager.ts newSession: ensureOnDisk).
+    sessionId = crypto.randomUUID();
+    sessionFile = path.join(sessionDir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
+    unwritten = null;
+    fs.writeFileSync(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd })}\n`);
+    sessionName = undefined;
+    claim();
+    lease();
+    out({ id: command.id, type: "response", command: "new_session", success: true, data: { cancelled: false } });
+    return;
+  }
+  if (OMP && command.type === "set_session_name") {
+    sessionName = command.name;
+    append("names.jsonl", { sessionId, name: command.name });
+  }
+  out({ id: command.id, type: "response", command: command.type, success: true });
+}
 if (!terminal) {
   process.stdin.on("end", () => {
     stopped = true;
@@ -326,7 +369,9 @@ async function askDialog() {
   if (!spec) return null;
   const id = crypto.randomUUID();
   const got = new Promise((resolve) => dialogs.set(id, resolve));
-  out({ type: "extension_ui_request", id, method: spec.method || "select", title: spec.title, ...(spec.options ? { options: spec.options } : {}) });
+  // Oh My Pi's `form` (its `ask` tool in RPC mode) has no title: the whole form as HTML.
+  const method = spec.method || "select";
+  out({ type: "extension_ui_request", id, method, ...(method === "form" ? { html: spec.html ?? `<form><h1>${spec.title}</h1></form>` } : { title: spec.title }), ...(spec.options ? { options: spec.options } : {}) });
   const answered = await Promise.race([got, sleep(10_000).then(() => null)]);
   append("dialogs.jsonl", { sessionId, title: spec.title, response: answered });
   return { answered };
@@ -367,12 +412,54 @@ async function errorEnd() {
 
 // ── The extension: the bridge poll ──
 const on = (value) => ["1", "true", "on"].includes(String(value || "").toLowerCase());
+/** The extension's `session_start` is done (its bridge poll under way, or it does not connect). */
+let extensionStarted;
+const extensionStart = new Promise((resolve) => (extensionStarted = resolve));
+/**
+ * As Plannotator's Pi extension does on Oh My Pi (ompContinuesLine): the ids the session's header leads back to,
+ * `continuationOf` else `parentSession`, each earlier header found by its id beside the file. The poll's `continues`.
+ */
+const continuesLine = () => {
+  if (!OMP) return [];
+  const headerOf = (text) => {
+    try {
+      return JSON.parse(text.split("\n", 1)[0]);
+    } catch {
+      return null;
+    }
+  };
+  const readHeader = (file) => {
+    try {
+      return headerOf(fs.readFileSync(file, "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const dir = path.dirname(sessionFile);
+  let at = unwritten ? headerOf(unwritten[0]) : readHeader(sessionFile);
+  const line = [];
+  const seen = new Set([sessionId]);
+  while (at && line.length < 8) {
+    const back = at.continuationOf || at.parentSession;
+    if (typeof back !== "string" || seen.has(back)) break;
+    seen.add(back);
+    line.push(back);
+    const name = fs.readdirSync(dir).find((entry) => entry.endsWith(`_${back}.jsonl`));
+    at = name ? readHeader(path.join(dir, name)) : null;
+  }
+  return line;
+};
+/**
+ * As the extension does on Oh My Pi: started by the Inbox for a new session (`PLANNOTATOR_INBOX_NEW_SESSION`), a session
+ * Auto Resume opened instead (one with turns) is polled for nothing until the session changes (`new_session`).
+ */
+const reopened = OMP && process.env.PLANNOTATOR_INBOX_NEW_SESSION === "1" && messageCount() > 0 ? sessionId : null;
 async function extension() {
   // `noConnect` is the RPC process's; a terminal's Pi connects whenever the Inbox tool is on.
-  if (!on(process.env.PLANNOTATOR_INBOX_TOOL) || (!terminal && config().noConnect)) return;
+  if (!on(process.env.PLANNOTATOR_INBOX_TOOL) || (!terminal && config().noConnect)) return extensionStarted();
   if (!process.env.PLANNOTATOR_DATA_DIR && !scratchHome) {
     process.stderr.write(`fake pi: no PLANNOTATOR_DATA_DIR and HOME (${home || "unset"}) is not a scratch folder; not connecting\n`);
-    return;
+    return extensionStarted();
   }
   const dataDir = process.env.PLANNOTATOR_DATA_DIR || path.join(home, ".plannotator");
   const registryFile = path.join(dataDir, "inbox", "inbox.json");
@@ -384,6 +471,8 @@ async function extension() {
     }
   };
   let registry = read();
+  // Its `session_start` never waits for an Inbox to come up.
+  if (!registry) extensionStarted();
   while (!registry && !stopped) {
     await sleep(300);
     registry = read();
@@ -405,10 +494,19 @@ async function extension() {
     out({ type: "agent_start" });
     await post("/api/inbox/bridge/event", { type: "state", busy: true }).catch(() => {});
     writeLine({ type: "message", role: "user", text: command.body.split("\n")[0] });
+    const generation = turnGeneration;
     const asked = terminal ? null : await askDialog();
     const until = Date.now() + (config().workMs ?? 600);
-    while (!stopped && (Date.now() < until || config().hold)) await sleep(100);
+    while (!stopped && generation === turnGeneration && (Date.now() < until || config().hold)) await sleep(100);
     if (stopped) return;
+    if (generation !== turnGeneration) {
+      // `new_session` cancelled the run: delivered, never answered.
+      append("cancelled.jsonl", { id: command.id, sessionId, at: Date.now() });
+      busy = false;
+      out({ type: "agent_end", willRetry: false });
+      out({ type: "agent_settled" });
+      return;
+    }
     if (!terminal && config().turnError) {
       // The provider refused the turn: no answer through the Inbox, only the run's end on RPC.
       idleSince = new Date().toISOString();
@@ -433,7 +531,16 @@ async function extension() {
   };
   let queue = Promise.resolve();
   while (!stopped) {
-    const response = await post("/api/inbox/bridge/poll", { waitMs: 1000, project_path: cwd, started_at: startedAt, busy, idle_since: busy ? null : idleSince }).catch(() => null);
+    if (reopened !== null && sessionId === reopened) {
+      extensionStarted();
+      await sleep(100);
+      continue;
+    }
+    const continues = continuesLine();
+    const polling = post("/api/inbox/bridge/poll", { waitMs: 1000, project_path: cwd, started_at: startedAt, busy, idle_since: busy ? null : idleSince, ...(continues.length > 0 ? { continues } : {}) }).catch(() => null);
+    // The extension's `session_start` returns once its poll is under way.
+    extensionStarted();
+    const response = await polling;
     if (!response) {
       registry = read() || registry;
       await sleep(300);
@@ -453,6 +560,15 @@ async function extension() {
 }
 void extension();
 // An extension that asks as the session starts (config `dialogOnStart`), before any turn.
-if (!terminal && config().dialogOnStart) void askDialog();
+const startDialog = !terminal && config().dialogOnStart ? askDialog() : Promise.resolve();
+// Every `session_start` handler done (the dialog answered, the extension's poll under way, config `startMs` for other
+// extensions'): the frames held meanwhile are handled, in the order they came.
+if (held) {
+  void Promise.all([startDialog, extensionStart, sleep(config().startMs ?? 0)]).then(() => {
+    const frames = held;
+    held = null;
+    for (const command of frames) handle(command);
+  });
+}
 // A turn as the session starts (config `turnOnStart`), as an extension's own prompt would run one.
 if (!terminal && config().turnOnStart) setTimeout(() => void localTurn(), 200);
