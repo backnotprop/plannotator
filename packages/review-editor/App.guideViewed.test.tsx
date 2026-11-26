@@ -81,7 +81,7 @@ const PR_METADATA = {
   url: "https://github.com/acme/parser/pull/7",
 };
 
-function diffPayload(pr: boolean) {
+function diffPayload(pr: boolean, githubViewed: string[]) {
   return {
     rawPatch: PATCH,
     gitRef: "HEAD",
@@ -90,7 +90,7 @@ function diffPayload(pr: boolean) {
     diffType: "uncommitted",
     hideWhitespace: false,
     ...(pr
-      ? { prMetadata: PR_METADATA }
+      ? { prMetadata: PR_METADATA, viewedFiles: githubViewed }
       : {
           gitContext: {
             vcsType: "git",
@@ -143,7 +143,7 @@ interface Calls {
 let calls: Calls = { progress: [], prViewed: [], reviewedPuts: [] };
 let guidesWhere: string | undefined;
 
-function makeFetch(pr: boolean): typeof fetch {
+function makeFetch(pr: boolean, githubViewed: string[], progressViewed?: Promise<string[]>): typeof fetch {
   // SAFETY: the app only ever calls fetch(input, init).
   const impl = async (input: RequestInfo | URL, init?: RequestInit) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
@@ -151,18 +151,19 @@ function makeFetch(pr: boolean): typeof fetch {
     const url = new URL(rawUrl, "http://localhost");
     const method = init?.method ?? "GET";
     const body = () => JSON.parse(String(init?.body));
-    if (url.pathname === "/api/diff") return Response.json(diffPayload(pr));
+    if (url.pathname === "/api/diff") return Response.json(diffPayload(pr, githubViewed));
     if (url.pathname === "/api/diff/fresh") return Response.json({ fresh: true });
     if (url.pathname === "/api/review-progress") {
       if (method === "POST") {
         calls.progress.push(body());
         return Response.json({ ok: true });
       }
+      if (githubViewed.length > 0 && !progressViewed) return new Response(null, { status: 404 });
       return Response.json({
         available: true,
         key: "scope-1",
         fingerprints: { "src/a.ts": "fa", "src/b.ts": "fb", "src/c.ts": "fc" },
-        viewedFiles: [],
+        viewedFiles: progressViewed ? await progressViewed : [],
         suppressedFiles: [],
       });
     }
@@ -223,11 +224,11 @@ function seedAnnouncementsSeen(): void {
   memory.set("plannotator-review-dest-spotlight-seen", "1");
 }
 
-async function mount(pr: boolean): Promise<void> {
+async function mount(pr: boolean, githubViewed: string[] = [], progressViewed?: Promise<string[]>): Promise<void> {
   seedAnnouncementsSeen();
   setStorageBackend(memoryBackend);
   configStore.loadFromBackend();
-  globalThis.fetch = makeFetch(pr);
+  globalThis.fetch = makeFetch(pr, githubViewed, progressViewed);
   // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
@@ -286,6 +287,18 @@ async function tick(index: number): Promise<void> {
   const button = tickButtons()[index];
   if (!button) throw new Error(`section ${index} has no Reviewed control`);
   await act(async () => button.click());
+  await settle(5);
+}
+
+function sectionTicks(): boolean[] {
+  return tickButtons().map((button) => (button.title || button.getAttribute("aria-label")) === "Un-mark as reviewed");
+}
+
+async function toggleFileViewed(path: string, section?: number): Promise<void> {
+  const scope = section === undefined ? "" : `[data-guide-section="${section}"] `;
+  const selector = `${scope}[data-file-header-path="${path}"] button[title^="Mark as "][title*="viewed"]`;
+  await waitFor(() => !!document.querySelector(selector), `the Viewed control for ${path}`);
+  await act(async () => document.querySelector<HTMLButtonElement>(selector)!.click());
   await settle(5);
 }
 
@@ -360,6 +373,56 @@ describe.if(hasDom)("Guided Review: ticking a section marks its files viewed", (
       { filePaths: ["src/c.ts"], viewed: true },
       { filePaths: ["src/a.ts", "src/b.ts"], viewed: true },
     ]);
+  });
+});
+
+describe.if(hasDom)("Guided Review: viewed files mark their sections reviewed", () => {
+  test("file marks from the workspace and guide complete both sections with a shared file", async () => {
+    await mount(false);
+    await toggleFileViewed("src/a.ts");
+    await openLiveGuide();
+    await toggleFileViewed("src/c.ts", 1);
+    expect(sectionTicks()).toEqual([false, false]);
+
+    await toggleFileViewed("src/b.ts", 0);
+    expect(sectionTicks()).toEqual([true, true]);
+
+    await tick(0);
+    expect(sectionTicks()).toEqual([false, true]);
+
+    const expand = document.querySelector<HTMLButtonElement>('[data-guide-section="1"] button[title="Expand"]');
+    if (expand) await act(async () => expand.click());
+    await toggleFileViewed("src/c.ts", 1);
+    expect(sectionTicks()).toEqual([false, true]);
+    expect(viewedWrites()).toEqual([
+      { path: "src/a.ts", viewed: true },
+      { path: "src/c.ts", viewed: true },
+      { path: "src/b.ts", viewed: true },
+      { path: "src/c.ts", viewed: false },
+    ]);
+  });
+
+  test("a saved PR guide persists restored GitHub marks without writing them back to GitHub", async () => {
+    await mount(true, ["src/b.ts", "src/c.ts"]);
+    await openSavedGuide();
+    expect(sectionTicks()).toEqual([false, true]);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    expect(calls.reviewedPuts).toEqual([{ url: "/api/guide/saved:g1/reviewed", reviewed: [false, true] }]);
+    expect(viewedWrites()).toEqual([]);
+    expect(calls.prViewed).toEqual([]);
+  });
+
+  test("waits for restored progress before ticking from GitHub's initial marks", async () => {
+    const progress = Promise.withResolvers<string[]>();
+    await mount(true, ["src/a.ts", "src/b.ts", "src/c.ts"], progress.promise);
+    await openSavedGuide();
+    expect(sectionTicks()).toEqual([false, false]);
+
+    await act(async () => progress.resolve(["src/b.ts", "src/c.ts"]));
+    expect(sectionTicks()).toEqual([false, true]);
   });
 });
 

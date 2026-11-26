@@ -734,6 +734,13 @@ auto-mark setting (it is an explicit gesture). Auto-mark on scroll still does
 not run inside the guide. The guide chain and the guides.show viewer are
 unchanged: the host wraps `onToggleReviewed` in `GuideScreen`.
 
+**Viewed files also mark guide sections reviewed (#2244).** Opening a guide
+checks the current Viewed state, including restored GitHub marks. A section is
+marked when all its files in the current diff are viewed. Shared files count
+in every section that references them; prose and stale-only sections stay
+manual. Un-viewing a file never clears a tick, and while the guide is open a
+manual un-tick stays off until that section's files become fully viewed again.
+
 ### GitButler review invariants
 
 GitButler is a distinct VCS provider, ordered after JJ and before Git in both Bun and Pi. It is selected only while symbolic `HEAD` is `refs/heads/gitbutler/workspace` (or legacy `gitbutler/integration`) and the repository has GitButler's local target-ref configuration; a leftover database or an ordinary branch with the reserved name is not detection. An active workspace requires `but >= 0.21.0` on `PATH`, and a missing/incompatible CLI is an explicit error rather than a fallback to ordinary Git staging against the synthetic workspace commit. `--gitbutler` forces this provider; `--git` remains the escape hatch.
