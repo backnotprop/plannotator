@@ -66,6 +66,8 @@ export function drawMessageBody(d: MessageBodyData) {
         repo={d.repo}
         onOpenAttachment={(attachment, start) => acts.current.openFromMessage(attachment, null, start ? () => acts.current.setPageStart({ id: attachment.id, start }) : undefined)}
         onOpenFileRef={d.fileRefs ? (ref) => acts.current.openFileRef(id, ref) : undefined}
+        // A skill the person's message used: read where it was typed when the message says, else here, else on a linked computer.
+        onOpenSkill={isAgent ? undefined : (name) => acts.current.openFileRef(id, { path: name, skill: true })}
         onOpenInlineImage={(image) => acts.current.openFromMessage(image)}
         onOpenOptionSet={(key, image, choice) => acts.current.openOptionSet(id, key, image, choice)}
         onTryPrototype={isAgent ? (key) => acts.current.tryPrototype(id, key) : undefined}
