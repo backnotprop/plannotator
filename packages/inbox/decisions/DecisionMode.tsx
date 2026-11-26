@@ -530,6 +530,8 @@ export function DecisionMode(props: DecisionModeProps) {
    * away meanwhile, a failure is told by the window's toast.
    */
   const sendGroups = async (keys: readonly string[]) => {
+    // An Other answer still being dictated: every way to send (Send, a strip's Try again) waits for its words.
+    if (otherVoice.busyNow()) return;
     setError(null);
     const told = savesToldAway.current;
     const release = await saves.forSend();
@@ -553,7 +555,7 @@ export function DecisionMode(props: DecisionModeProps) {
     } else if (failed > 0) setError(`${failed === 1 ? 'A reply was' : `${formatCount(failed)} replies were`} not sent. Your answers wait as drafts in the thread.`);
   };
   /** The Send button: what is answered goes, one reply per agent; what is not stays open. */
-  const sendAnswered = () => (otherVoice.busyNow() ? undefined : sendGroups(sendableKeys));
+  const sendAnswered = () => sendGroups(sendableKeys);
 
   // ── After a Send: is the agent working on it? (its connection, every 3 s while open) ──
   useEffect(() => {

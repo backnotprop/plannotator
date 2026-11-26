@@ -775,7 +775,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const otherWidthRef = useRef(-1);
   const fitOther = () => {
     const field = otherRef.current;
-    setOtherGlyphTop(field ? fitOtherField(field) : null);
+    const grown = field ? fitOtherField(field) : null;
+    // With host tools, a line can come under the field (the mic's status): the mark stays beside its first line, where
+    // one line centres it, rather than centring on the taller box.
+    setOtherGlyphTop(grown ?? (field && OtherTools && field.offsetHeight > 15 ? (field.offsetHeight - 15) / 2 : null));
     otherWidthRef.current = field ? field.clientWidth : -1;
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1226,6 +1229,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 </span>
                 {/* One line tall, as the one-line field it replaced; it grows with its lines (wrapped or typed:
                     Enter makes a new line, as in the note) up to a cap, then scrolls. A read-only card shows it whole. */}
+                {/* The host's tools (the Inbox's mic) draw inside this box: over the field's right edge, and below it. */}
+                <div className="relative flex min-w-0 flex-1 flex-col">
                 <textarea
                   ref={otherRef}
                   rows={1}
@@ -1243,11 +1248,12 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
                   data-question-other=""
                   className={cx(
-                    'annotation-exclude min-w-0 flex-1 resize-none overflow-hidden break-words border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring',
+                    'annotation-exclude w-full min-w-0 resize-none overflow-hidden break-words border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring',
                     !readOnly && 'max-h-48',
                   )}
                 />
                 {OtherTools && !readOnly && <OtherTools key={`${question.key}:${otherRevision}`} textareaRef={otherRef} />}
+                </div>
               </div>
             )}
           </div>

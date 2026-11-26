@@ -302,6 +302,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             />
           )}
 
+          {/* The host's tools (the Inbox's mic) draw inside this box: over the field's right edge, and below it. */}
+          <div className="relative">
           <textarea
             ref={commentRef}
             data-pn-mobile-editable="true"
@@ -333,6 +335,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               }
             }}
           />
+          {FeedbackTools && <FeedbackTools key={voiceTarget} textareaRef={commentRef} onBusyChange={setVoiceBusy} />}
+          </div>
           <MentionAutocompleteMenu id={mentionListbox} menu={mention.menu} onSelect={mention.select} />
 
           {/* Optional suggested code section */}
@@ -414,15 +418,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             )}
 
             {/* Add Comment button — right side */}
-            {FeedbackTools && (
-              <span className="ml-auto">
-                <FeedbackTools key={voiceTarget} textareaRef={commentRef} onBusyChange={setVoiceBusy} />
-              </span>
-            )}
             <button
               onClick={submitWithTags}
               disabled={voiceBusy || (!commentText.trim() && !suggestedCode.trim())}
-              className={`review-toolbar-btn primary disabled:opacity-50 disabled:cursor-not-allowed ${FeedbackTools ? '' : 'ml-auto'}`}
+              className="review-toolbar-btn primary disabled:opacity-50 disabled:cursor-not-allowed ml-auto"
             >
               {isEditing ? 'Update' : 'Add Comment'}
             </button>

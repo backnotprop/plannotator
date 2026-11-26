@@ -131,6 +131,8 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
           </div>
 
           <div className="px-4 py-3 min-h-0 flex-1 flex">
+            {/* The host's tools (the Inbox's mic) draw inside this box: over the field's right edge, and below it. */}
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             <textarea
               data-pn-mobile-editable="true"
               ref={textareaRef}
@@ -147,6 +149,8 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
               placeholder="Leave feedback..."
               className="w-full h-full min-h-0 max-h-full bg-muted text-sm leading-relaxed placeholder:text-muted-foreground resize-y focus:outline-none rounded-lg border-0 px-3 py-2"
             />
+            {FeedbackTools && <FeedbackTools key={voiceTarget} textareaRef={textareaRef} onBusyChange={setVoiceBusy} />}
+            </div>
           </div>
 
           <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-border/50">
@@ -183,7 +187,6 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
                   Collapse
                 </button>
               )}
-              {FeedbackTools && <FeedbackTools key={voiceTarget} textareaRef={textareaRef} onBusyChange={setVoiceBusy} />}
               <button
                 type="button"
                 onClick={onSubmit}

@@ -20,6 +20,9 @@ async function machine(name: string) {
   return { cli, url, agent, project_path: scratchProject(root, 'rollout') };
 }
 
+/** A field's mic: drawn in the field's own box, right after it, only while it is wanted. */
+const micOf = (field: Locator) => field.locator('xpath=..').locator('[data-field-voice-mic] [data-voice-mic]');
+
 // A synthetic MediaStream, never a real microphone. Only the speech service is stubbed;
 // question picks, guide annotations, machine forwarding and Send use the real packed app.
 async function fakeSpeech(page: Page) {
@@ -42,9 +45,12 @@ async function fakeSpeech(page: Page) {
     settled = gate.then(() => r.fulfill({ json: { text: 'the support team' } })).catch(() => {});
     arrived(); await settled;
   });
-  async function take(mic: Locator) {
-    // Space activates the existing keyboard path; a second Space stops the take.
-    await mic.focus(); await mic.press('Space');
+  async function take(field: Locator) {
+    // The mic shows once the field has focus, and Tab reaches it right after the field. Space activates the existing
+    // keyboard path; a second Space stops the take.
+    await field.focus();
+    const mic = micOf(field);
+    await field.press('Tab'); await expect(mic).toBeFocused(); await mic.press('Space');
     await expect(mic).toHaveAttribute('data-state', 'live');
     await expect(page.locator('.ib-field-voice .ib-vbars > [data-v]').first()).toBeVisible();
     const request = new Promise<void>(resolve => { arrived = resolve; });
@@ -69,7 +75,7 @@ for (const phone of [false, true]) {
       const speech = await fakeSpeech(page);
       await page.goto(`${viewer.url}#thread=${thread_id}`);
       const other = page.locator('[data-question-other]');
-      const mics = page.locator('[data-field-voice] [data-voice-mic]');
+      const mics = page.locator('[data-field-voice-mic] [data-voice-mic]');
       const selected = page.getByText('Volunteers', { exact: true }).first();
       await expect(other).toHaveCount(2);
       // Use the same real settings door as the window; the field must remain editable without a mic.
@@ -79,24 +85,45 @@ for (const phone of [false, true]) {
         expect((await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: url.origin }, body: JSON.stringify({ serverSession, voice }) })).ok).toBe(true);
         await page.reload(); await expect(other).toHaveCount(2);
       };
-      await configure({ on: false }); await expect(mics).toHaveCount(0); await expect(other.first()).toBeEditable();
-      await configure({ on: true, phones_only: true }); await expect(mics).toHaveCount(phone ? 2 : 0);
+      await configure({ on: false }); await other.first().focus(); await expect(mics).toHaveCount(0); await expect(other.first()).toBeEditable();
+      await configure({ on: true, phones_only: true }); await other.first().focus(); await expect(mics).toHaveCount(phone ? 1 : 0);
       await page.route('**/voice/status*', r => r.fulfill({ json: { state: 'missing', plan: null } }));
-      await configure({ on: true, phones_only: false }); await expect(mics.first()).toHaveAttribute('aria-disabled', 'true');
+      await configure({ on: true, phones_only: false }); await other.first().focus(); await expect(mics.first()).toHaveAttribute('aria-disabled', 'true');
       await page.unroute('**/voice/status*');
       await page.route('**/voice/status*', r => r.fulfill({ json: { state: 'ready', plan: 'plus' } }));
-      await page.reload(); await expect(mics.first()).not.toHaveAttribute('aria-disabled', 'true');
-      await speech.take(mics.first()); await selected.click(); await speech.finish();
+      await page.reload(); await expect(other).toHaveCount(2);
+      // At rest no field has a mic. In a field, its own mic shows inside the field's box, and the field neither grows
+      // nor moves; a press keeps the field's focus (a phone's keyboard stays up); with focus gone and nothing running,
+      // the mic goes.
+      await expect(mics).toHaveCount(0);
+      const first = other.first();
+      const before = await first.boundingBox();
+      await first.focus();
+      await expect(mics).toHaveCount(1);
+      const mic = micOf(first);
+      await expect(mic).not.toHaveAttribute('aria-disabled', 'true');
+      const box = (await first.boundingBox())!, at = (await mic.boundingBox())!;
+      expect({ width: box.width, height: box.height }).toEqual({ width: before!.width, height: before!.height });
+      expect(at.x).toBeGreaterThanOrEqual(box.x); expect(at.x + at.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+      expect(at.y + at.height / 2).toBeGreaterThan(box.y); expect(at.y + at.height / 2).toBeLessThan(box.y + box.height);
+      await (phone ? mic.tap() : mic.click());
+      await expect(mic).toHaveAttribute('data-state', 'live');
+      await expect(first).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(mic).toHaveAttribute('data-state', 'idle');
+      await first.evaluate((e: HTMLTextAreaElement) => e.blur());
+      await expect(mics).toHaveCount(0);
+      await speech.take(first); await selected.click(); await speech.finish();
       await expect(other.first()).toHaveValue('');
       // Changing the selection by typing in Other is not abandoning the field.
-      await speech.take(mics.first());
+      await speech.take(other.first());
       await other.first().fill('Ask'); await speech.finish();
       await expect(other.first()).toHaveValue('Ask the support team');
       await selected.click();
       const field = other.nth(1);
       await page.getByText('Email', { exact: true }).first().click();
       await field.fill('Ask later'); await field.evaluate((e: HTMLTextAreaElement) => e.setSelectionRange(4, 9));
-      await speech.take(mics.nth(1));
+      await speech.take(field);
       const send = page.locator('.ib-pfoot button.ib-pri:visible').last();
       await expect(send).toBeDisabled();
       await field.press('Control+Enter');
@@ -122,7 +149,7 @@ for (const phone of [false, true]) {
       await own.fill('Ask');
       const decisionSend = page.locator('[data-decision-mode] [data-decision-send]');
       await expect(decisionSend).toBeEnabled();
-      await speech.take(card.locator('[data-voice-mic]'));
+      await speech.take(own);
       await expect(decisionSend).toBeDisabled(); await speech.finish();
       await expect(own).toHaveValue('Ask the support team');
       await expect(decisionSend).toBeEnabled();
@@ -148,7 +175,7 @@ for (const phone of [false, true]) {
       }
       await feedback.fill('Ask');
       const add = page.getByRole('button', { name: 'Add Comment', exact: true });
-      await speech.take(mics.last()); await expect(add).toBeDisabled(); await speech.finish();
+      await speech.take(feedback); await expect(add).toBeDisabled(); await speech.finish();
       await expect(feedback).toHaveValue('Ask the support team');
       await page.screenshot({ path: join(shots, `${phone ? 'phone' : 'desktop'}-guide.png`) });
       await add.click();

@@ -9414,8 +9414,15 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-cp-foot:has(.ib-vline) > :is(.ib-sp, .ib-cp-status, .ib-cp-del) { display: none; }
 /* Full screen's card has one short row: the status takes it from the chips until the words land. */
 .ib-fcomp-foot:has(.ib-vline) > .ib-fcomp-chips { display: none; }
-/* Field tools also live in the review toolbar's portal, outside .pn-inbox. */
-.ib-field-voice { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
+/* A field's mic (FieldVoice.tsx): inside the field at its right edge, in room the field keeps for it at rest too, so
+   the words never run under it and nothing moves when it comes. Also in the review toolbar's portal, outside .pn-inbox. */
+textarea[data-field-voice-room] { padding-inline-end: 34px; }
+.ib-field-mic { position: absolute; top: 0; inset-inline-end: 3px; z-index: 1; display: flex; align-items: center; animation: ib-field-mic-in 100ms ease-out; }
+@keyframes ib-field-mic-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ib-field-mic { animation: none; } }
+/* Below the field: the take's status and its notes, only while there is one. */
+.ib-field-vfoot { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 4px; }
+.ib-field-vfoot:empty { display: none; }
 .ib-field-voice .ib-vhint { display: none; }
 .ib-field-voice .ib-vline { gap: 4px; }
 .ib-field-voice .ib-vbars { max-width: 28px; }
@@ -9459,6 +9466,8 @@ mark.ib-vmark.ib-vfade { background: transparent; }
   :is(.pn-inbox, .pn-cbox, .ib-field-voice) .ib-vmic { width: 36px; height: 36px; border-radius: 8px; }
   :is(.pn-inbox, .pn-cbox, .ib-field-voice) .ib-vmic::after { content: ''; position: absolute; inset: -4px; }
   :is(.pn-inbox, .pn-cbox, .ib-field-voice) .ib-dtlink { padding: 8px 2px; }
+  textarea[data-field-voice-room] { padding-inline-end: 40px; }
+  .ib-field-mic { inset-inline-end: 2px; }
   /* A phone's row holds the status or the chips, not both: they step aside until the words land. Nothing wraps, so the button stays under the finger. */
   /* Each child before the voice foot (the row's last but compose's Send), as a `:has()` of its own: no `:has(…) > :not(…)`, see .ib-pfoot's route form. */
   .ib-rfoot > :not(.ib-dtfoot, .ib-rclip):has(~ :where(.ib-dtfoot) .ib-vline), .ib-cp-foot > :not(.ib-dtfoot, .ib-cp-clip, [data-compose-send]):has(~ :where(.ib-dtfoot) .ib-vline) { display: none; }
