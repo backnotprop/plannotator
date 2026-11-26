@@ -17972,11 +17972,13 @@
       "id": "window-only-sem-diff",
       "title": "Window endpoints under sem-diff with no door route",
       "surface": [
-        "window:/api/inbox/sem-diff"
+        "window:/api/inbox/sem-diff",
+        "window:/api/sem-diff/opinion",
+        "window:/api/sem-diff/opinion/settings"
       ],
       "flows": [],
       "mobile": "later",
-      "why": "L-nodoor: the phone reaches these only once a door route is added for them (sem-diff).",
+      "why": "L-nodoor: the phone reaches these only once a door route is added for them (sem-diff; Power Up's ask and its key settings answer the window only, from this computer's key).",
       "reason": "L-nodoor",
       "source": "seed: no SCOPE row names it",
       "ios": {
@@ -23527,6 +23529,20 @@
       "mobile": "undecided",
       "why": "",
       "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-settings-reviews",
+      "title": "settings:reviews",
+      "surface": [
+        "settings:reviews"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }

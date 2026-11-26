@@ -24,6 +24,20 @@ export interface AgentsGroup {
   agents: AgentEntry[];
 }
 
+/** The status order used by the Agents sidebar when "Show agent status" is on. */
+export function sortAgentEntries(entries: readonly AgentEntry[], statusOn: boolean): AgentEntry[] {
+  if (!statusOn) return [...entries];
+  const rank = (entry: AgentEntry): number => {
+    if (entry.agent.status_mark?.state === 'blocked') return 0;
+    if (entry.agent.status_mark?.state === 'working') return 1;
+    return 2;
+  };
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => rank(a.entry) - rank(b.entry) || a.index - b.index)
+    .map(({ entry }) => entry);
+}
+
 /** An agent's host in words ("Claude Code"); "An agent" when nothing said. */
 export const agentHostName = (host: string | null, runtime?: unknown): string => (host ? inboxHostName(host, runtime) : 'An agent');
 
@@ -100,8 +114,11 @@ export function agentRowName(agent: InboxAgent, context: AgentNameContext = 'lis
  * the person, so only the continuing one is drawn. Two agents that share a thread and do not continue one another
  * stay two rows.
  */
-export function agentsGroups(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel, rows: readonly InboxListRow[]): AgentsGroup[] {
-  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({ machine: view, agents: groupEntries(group, machine, machines.self, rows).shown }));
+export function agentsGroups(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel, rows: readonly InboxListRow[], statusOn = false): AgentsGroup[] {
+  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({
+    machine: view,
+    agents: sortAgentEntries(groupEntries(group, machine, machines.self, rows).shown, statusOn),
+  }));
 }
 
 /** Each group the section draws: one flat group of this Inbox's agents with no machine linked, else one per machine. */

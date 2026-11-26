@@ -799,8 +799,7 @@ const App: React.FC = () => {
   // captures clicks for pinpoint annotation; disarmed (Interact) = clicks are
   // fully native while committed markers stay visible/clickable and text
   // drag-selection commenting stays live. Session-only, never persisted.
-  // BOTH surface kinds start armed; Esc (or the header pen) drops to
-  // Interact.
+  // Annotate sessions apply their startup preference when /api/plan loads.
   const [htmlAnnotateArmed, setHtmlAnnotateArmed] = useState(true);
   const handleHtmlAnnotateToggle = useCallback(() => setHtmlAnnotateArmed((v) => !v), []);
   const handleHtmlToolsToggle = useCallback(() => setHtmlToolsHidden((v) => !v), []);
@@ -4075,8 +4074,6 @@ const App: React.FC = () => {
           // proxy origin. No rawHtml, no version fields, no sharing.
           setRenderAs('html');
           setMarkdown('');
-          // Live sessions open ARMED like every HTML surface (htmlAnnotateArmed
-          // defaults true): pinpoint is the default, Esc drops to Interact.
           setLiveApp({
             appUrl: data.appUrl,
             origin: new URL(data.appUrl).origin,
@@ -4129,15 +4126,14 @@ const App: React.FC = () => {
         setApprovalNotesSupported(data.approvalNotesSupported === true);
         if (data.mode === 'annotate' || data.mode === 'annotate-last' || folderLike || data.mode === 'annotate-app') {
           setAnnotateMode(true);
+          setAnnotateSource(data.mode === 'annotate-last' ? 'message' : folderLike ? 'folder' : 'file');
+          setHtmlAnnotateArmed(configStore.get('htmlAnnotateOnStartup'));
           setConfiguredAnnotateView(parseAnnotateOpenView(data.serverConfig?.annotateView));
           setGate(data.gate ?? false);
           setClientLease(data.clientLease ?? null);
         }
         if (folderLike) {
           sidebar.open('files');
-        }
-        if (data.mode === 'annotate' || data.mode === 'annotate-last' || folderLike || data.mode === 'annotate-app') {
-          setAnnotateSource(data.mode === 'annotate-last' ? 'message' : folderLike ? 'folder' : 'file');
         }
         if (data.mode === 'annotate-last' && data.recentMessages && data.recentMessages.length > 0) {
           messageStateCacheRef.current = new Map();
@@ -7095,9 +7091,8 @@ const App: React.FC = () => {
           : []),
         // HTML/live surfaces on the compact touch shell: the desktop pen and
         // eye toggles are header-only and hidden here, and Mod+Shift+A is
-        // keyboard-only, so without these menu actions a touch user has NO
-        // way to disarm annotate mode (every tap annotates, the page beneath
-        // is unreachable) or to bring hidden tools back.
+        // keyboard-only. These menu actions let touch users switch modes
+        // and bring hidden tools back.
         ...(isHtmlSurface && !documentReadOnly
           ? [{
               id: 'annotate' as const,
