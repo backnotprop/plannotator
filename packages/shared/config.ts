@@ -1713,6 +1713,20 @@ function writeConfigFile(configPath: string, contents: string): void {
  * (or read the value back).
  */
 export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
+  return saveConfigLocked(partial) === "saved";
+}
+
+/**
+ * saveConfig as a compare-and-set: `decide` runs inside the lock, with the config as both files hold it now, and
+ * returns what to save, or null to save nothing (`declined`). The check and its write are one critical section, so two
+ * processes sharing the data dir cannot both pass the check (the launch switch's one-time stamp). `failed`: decided,
+ * but the save did not land.
+ */
+export function saveConfigIf(decide: (current: PlannotatorConfig) => Partial<PlannotatorConfig> | null): "saved" | "declined" | "failed" {
+  return saveConfigLocked(decide);
+}
+
+function saveConfigLocked(input: Partial<PlannotatorConfig> | ((current: PlannotatorConfig) => Partial<PlannotatorConfig> | null)): "saved" | "declined" | "failed" {
   let lockPath: string | null = null;
   let locked = false;
   let saved = false;
@@ -1733,10 +1747,17 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
         `[plannotator] Warning: not saving config.json because ${read.reason}; `
         + `the settings in it are kept. Fix or remove ${getConfigPath()} to save settings again.\n`,
       );
-      return false;
+      return "failed";
     }
     const current = read.config;
     configSaveMergeWindowHook?.();
+    const stateRead = readState();
+    let partial: Partial<PlannotatorConfig>;
+    if (typeof input === "function") {
+      const decided = input(withMachineState(current as Record<string, unknown>, stateRead.state));
+      if (decided === null) return "declined";
+      partial = decided;
+    } else partial = input;
     // The nested settings merge key by key (one experimental switch saved keeps the others), but a
     // hand-edited config.json may hold anything there. A key the write does not name is kept verbatim,
     // whatever it holds; one it names merges only when both sides are plain objects, else the write's
@@ -1761,7 +1782,6 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
     for (const key of ["experimental", "diffOptions", "displayOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch", "inboxCapabilityFlips"] as const) nested(key);
     // Machine state named by the save goes to state.json only (MACHINE_STATE_KEYS): config.json's copy, if any, is
     // kept as it is, for other machines and older versions that read it.
-    const stateRead = readState();
     const state = { ...stateRead.state };
     let stateNamed = false;
     for (const key of MACHINE_STATE_KEYS) {
@@ -1795,7 +1815,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
   } finally {
     if (locked && lockPath) releaseConfigLock(lockPath);
   }
-  return saved;
+  return saved ? "saved" : "failed";
 }
 
 /**

@@ -3,6 +3,10 @@
  * reads it with packages/shared/launch-switch.ts's strict parser, and anything that parser refuses is off. What
  * regresses: a flip that a typo turns into a silent off (or a file the apps cannot read at all) reaching the site.
  * The site lane runs this file on a push that changes only public/launch.json.
+ *
+ * Flipping it on: merge the "on" file at least 3 hours before its startsAt. An app whose last check said off asks
+ * again only after 3 hours (launch-switch.ts `launchRefreshMs`), and the dialog becomes due at startsAt from the copy
+ * each app kept, with no request. Launch-day checklist: "The launch switch" in docs/agent-guides/guides-and-shared-ui.md.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';

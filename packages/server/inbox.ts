@@ -1403,7 +1403,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The sidebar's Update button (packages/server/inbox-updates.ts): the release
   // check, the binary on disk, Update now, Remind me tomorrow.
   // The launch switch (packages/shared/launch-switch.ts): its reader runs in the background from the start, at most
-  // every 15 minutes; the window's claim answers from the kept copy only.
+  // every 3 hours while no launch is on (launchRefreshMs); the window's claim answers from the kept copy only.
   const launchSwitch = createLaunchSwitch({ dataDir: () => dataDir, endpoint: () => launchSwitchEndpointNow(), shown: configLaunchShownStore });
   launchSwitch.start();
   let lastDailyPingCheck = 0;

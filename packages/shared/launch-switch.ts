@@ -27,17 +27,22 @@
  * Those gates also close the claim: switched off means no dialog either.
  *
  * The request, from the local server only (never a page): GET, no query, no cookies, `user-agent: plannotator`, 3 s for
- * the whole answer, 4 KB cap, redirects refused. At start, then at most every 15 minutes across every process sharing
- * the data folder (`checkedAt` in the kept file), in the background: nothing waits on it and it fails silently. A
- * 200 replaces the kept copy with what it parsed to (an invalid answer keeps an off); a failure keeps the last copy.
+ * the whole answer, 4 KB cap, redirects refused. At start when due, in the background: nothing waits on it and it
+ * fails silently. How often, across every process sharing the data folder (`checkedAt` in the kept file;
+ * `launchRefreshMs`): every 3 hours while the kept answer is off or absent (or its launch ended), hourly while it is on
+ * with startsAt still ahead, every 15 minutes while the launch is on. The dialog becomes due at startsAt from the kept
+ * copy, with no request, so the "on" file must be live on the site at least 3 hours before startsAt. A 200 replaces
+ * the kept copy with what it parsed to (an invalid answer keeps an off); a failure keeps the last copy. Every timer is
+ * unref'd: none keeps a process alive.
  *
  * Kept: `<data dir>/launch-switch.json` `{ checkedAt, doc }` (0600, written whole). The claim reads only this.
  * Shown once per computer, on whichever surface comes first: `launch[campaign]` in the machine state
- * (`{ shownAt, answer?: "opened" | "dismissed", answeredAt? }`), written through saveConfig.
+ * (`{ shownAt, answer?: "opened" | "dismissed", answeredAt? }`), stamped by a compare-and-set inside saveConfig's lock
+ * (saveConfigIf), so two surfaces stamping at once cannot both win: the first stamp stays, the other gets no.
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, parseTelemetryEnvOff, resolveUpdateCheck, saveConfig, type PlannotatorConfig } from "./config";
+import { loadConfig, parseTelemetryEnvOff, resolveUpdateCheck, saveConfig, saveConfigIf, type PlannotatorConfig } from "./config";
 import { isMarkedReleaseBuild } from "./daily-ping";
 import { getPlannotatorDataDir } from "./data-dir";
 
@@ -45,7 +50,14 @@ export const LAUNCH_SWITCH_URL = "https://plannotator.ai/launch.json";
 export const LAUNCH_SWITCH_FILE = "launch-switch.json";
 export const LAUNCH_SWITCH_MAX_BYTES = 4 * 1024;
 export const LAUNCH_SWITCH_TIMEOUT_MS = 3_000;
+/** While the launch is on (inside its dates): how often to ask, so switching it off reaches every app soon. */
 export const LAUNCH_SWITCH_REFRESH_MS = 15 * 60 * 1000;
+/** While a kept "on" waits for its startsAt. */
+export const LAUNCH_SWITCH_AHEAD_REFRESH_MS = 60 * 60 * 1000;
+/** While the kept answer is off or absent, or its launch has ended. */
+export const LAUNCH_SWITCH_OFF_REFRESH_MS = 3 * 60 * 60 * 1000;
+/** The reader's timer never wakes sooner than this. */
+const LAUNCH_SWITCH_MIN_WAKE_MS = 60 * 1000;
 export const LAUNCH_SWITCH_MAX_SPAN_MS = 14 * 24 * 60 * 60 * 1000;
 
 export type LaunchDoc =
@@ -179,6 +191,15 @@ export function launchActive(doc: LaunchDoc | null | undefined, now: number): do
   return start !== null && end !== null && now >= start && now < end;
 }
 
+/** How long a check stays fresh, from what is kept now (the header's cadence). */
+export function launchRefreshMs(doc: LaunchDoc | null | undefined, now: number): number {
+  if (!doc || doc.on !== true) return LAUNCH_SWITCH_OFF_REFRESH_MS;
+  const start = launchInstant(doc.startsAt);
+  const end = launchInstant(doc.endsAt);
+  if (start === null || end === null || now >= end) return LAUNCH_SWITCH_OFF_REFRESH_MS;
+  return now < start ? LAUNCH_SWITCH_AHEAD_REFRESH_MS : LAUNCH_SWITCH_REFRESH_MS;
+}
+
 // ── Who asks ──
 
 let releaseOverride: boolean | null = null;
@@ -260,6 +281,7 @@ export async function fetchLaunchDoc(fetcher: typeof fetch, url: string, timeout
       controller.abort();
       fail(new Error("timed out"));
     }, timeoutMs);
+    (timer as { unref?: () => void }).unref?.();
   });
   late.catch(() => {});
   try {
@@ -311,6 +333,11 @@ export interface LaunchShownStore {
   read(campaign: string): LaunchShownRecord | undefined;
   /** Write the record; true when it reached the file. */
   write(campaign: string, record: LaunchShownRecord): boolean;
+  /**
+   * The one-time stamp: check that no surface showed it and write `record`, as one step (no other writer between).
+   * `taken`: shown or answered already (the first stamp stays). `failed`: open, but the stamp did not reach the file.
+   */
+  stamp(campaign: string, record: LaunchShownRecord): "stamped" | "taken" | "failed";
 }
 
 /** `launch[campaign]` as the machine state holds it, keeping only the fields written here. */
@@ -339,6 +366,20 @@ export const configLaunchShownStore: LaunchShownStore = {
     const back = configLaunchShownStore.read(campaign);
     return back?.shownAt === record.shownAt && back?.answer === record.answer;
   },
+  stamp(campaign, record) {
+    const saved = saveConfigIf((current) => {
+      const before = readLaunchShown(current, campaign);
+      if (before?.shownAt || before?.answer) return null;
+      const all = current.launch;
+      const others = all && typeof all === "object" && !Array.isArray(all) ? all : {};
+      return { launch: { ...others, [campaign]: record } };
+    });
+    if (saved === "declined") return "taken";
+    // The lock can be unavailable (saveConfig then writes unlocked): the stamp read back says who won.
+    const back = configLaunchShownStore.read(campaign);
+    if (saved === "saved" && back?.shownAt === record.shownAt) return "stamped";
+    return back?.shownAt || back?.answer ? "taken" : "failed";
+  },
 };
 
 // ── The service ──
@@ -350,18 +391,22 @@ export interface LaunchSwitchDeps {
   shown: LaunchShownStore;
   fetch?: typeof fetch;
   now?: () => number;
+  /** Tests: one freshness for every state (default `launchRefreshMs`). */
   refreshMs?: number;
   timeoutMs?: number;
 }
 
 export interface LaunchSwitchService {
-  /** Ask the site now unless it was asked within refreshMs (any process) or an ask is running. Never throws. */
+  /** Ask the site now unless the kept check is still fresh (any process; `launchRefreshMs`) or an ask is running. Never throws. */
   refresh(): Promise<"asked" | "fresh" | "off" | "busy">;
-  /** At a server's start: one refresh in the background, then one every refreshMs (an unref'd timer). Once a process. */
+  /** At a server's start: one refresh in the background, then one each time the kept check goes stale (unref'd timers). Once a process. */
   start(): void;
   /** May a surface show the dialog: the kept copy only (and a background refresh when due). */
   claim(): LaunchClaim;
-  /** The surface draws it now: a compare-and-set stamping `launch[campaign].shownAt`. */
+  /**
+   * The surface drew it: a compare-and-set stamping `launch[campaign].shownAt`. `{ show: false }` when another surface
+   * stamped it first (that one keeps it). A stamp that cannot be written counts as shown for this process.
+   */
   shown(campaign?: string): { show: boolean };
   /** How it ended: the link opened, or closed. Once. */
   answer(answer: LaunchAnswer, campaign?: string): { ok: boolean };
@@ -369,10 +414,12 @@ export interface LaunchSwitchService {
 
 export function createLaunchSwitch(deps: LaunchSwitchDeps): LaunchSwitchService {
   const now = () => (deps.now ? deps.now() : Date.now());
-  const refreshMs = deps.refreshMs ?? LAUNCH_SWITCH_REFRESH_MS;
+  const freshFor = (doc: LaunchDoc | null, at: number) => deps.refreshMs ?? launchRefreshMs(doc, at);
   let running: Promise<"asked" | "fresh" | "off" | "busy"> | null = null;
   let started = false;
   const no: LaunchClaim = { show: false };
+  // Campaigns this process showed but could not stamp (a read-only data folder): shown, for this process.
+  const shownHere = new Set<string>();
 
   const current = (): Extract<LaunchDoc, { on: true }> | null => {
     if (!deps.endpoint()) return null;
@@ -380,8 +427,20 @@ export function createLaunchSwitch(deps: LaunchSwitchDeps): LaunchSwitchService 
     return launchActive(doc, now()) ? doc : null;
   };
   const open = (campaign: string) => {
+    if (shownHere.has(campaign)) return false;
     const record = deps.shown.read(campaign);
     return !record?.shownAt && !record?.answer;
+  };
+  /** When the kept check goes stale (or the kept launch starts or ends), from now. */
+  const nextWakeMs = (): number => {
+    const { checkedAt, doc } = readLaunchKept(deps.dataDir());
+    const at = now();
+    const last = checkedAt ? launchInstant(checkedAt) : null;
+    let wake = last === null || last > at ? 0 : last + freshFor(doc, at) - at;
+    for (const edge of doc?.on === true ? [launchInstant(doc.startsAt), launchInstant(doc.endsAt)] : []) {
+      if (edge !== null && edge > at) wake = Math.min(wake, edge - at);
+    }
+    return Math.max(LAUNCH_SWITCH_MIN_WAKE_MS, wake);
   };
 
   const service: LaunchSwitchService = {
@@ -395,7 +454,7 @@ export function createLaunchSwitch(deps: LaunchSwitchDeps): LaunchSwitchService 
           const kept = readLaunchKept(dataDir);
           const last = kept.checkedAt ? launchInstant(kept.checkedAt) : null;
           const at = now();
-          if (last !== null && at - last < refreshMs && last <= at) return "fresh" as const;
+          if (last !== null && at - last < freshFor(kept.doc, at) && last <= at) return "fresh" as const;
           // Stamped before the request: other processes sharing the data folder wait their turn.
           writeLaunchKept(dataDir, { checkedAt: new Date(at).toISOString(), doc: kept.doc });
           const got = await fetchLaunchDoc(deps.fetch ?? fetch, endpoint, deps.timeoutMs ?? LAUNCH_SWITCH_TIMEOUT_MS);
@@ -413,11 +472,24 @@ export function createLaunchSwitch(deps: LaunchSwitchDeps): LaunchSwitchService 
     start() {
       if (started) return;
       started = true;
-      const kick = () => void service.refresh().catch(() => {});
-      const first = setTimeout(kick, 0);
-      (first as { unref?: () => void }).unref?.();
-      const every = setInterval(kick, refreshMs);
-      (every as { unref?: () => void }).unref?.();
+      const wake = (ms: number) => {
+        const timer = setTimeout(() => {
+          void service
+            .refresh()
+            .catch(() => undefined)
+            .then(() => {
+              let next = LAUNCH_SWITCH_OFF_REFRESH_MS;
+              try {
+                next = nextWakeMs();
+              } catch {
+                // An unreadable data folder: look again in 3 hours.
+              }
+              wake(next);
+            });
+        }, ms);
+        (timer as { unref?: () => void }).unref?.();
+      };
+      wake(0);
     },
 
     claim() {
@@ -436,11 +508,11 @@ export function createLaunchSwitch(deps: LaunchSwitchDeps): LaunchSwitchService 
       try {
         const doc = current();
         if (!doc || (campaign !== undefined && campaign !== doc.campaign) || !open(doc.campaign)) return { show: false };
-        const record: LaunchShownRecord = { shownAt: new Date(now()).toISOString() };
-        // Not written (a read-only data dir): showing it anyway would show it on every load.
-        if (!deps.shown.write(doc.campaign, record)) return { show: false };
-        // Two processes stamping at once: only the one whose stamp is read back shows it.
-        return { show: deps.shown.read(doc.campaign)?.shownAt === record.shownAt };
+        const stamped = deps.shown.stamp(doc.campaign, { shownAt: new Date(now()).toISOString() });
+        // Not written (a read-only data folder): it is on screen, so it counts as shown here, and this process
+        // neither claims it again nor holds anything for it.
+        if (stamped === "failed") shownHere.add(doc.campaign);
+        return { show: stamped !== "taken" };
       } catch {
         return { show: false };
       }
