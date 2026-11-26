@@ -463,8 +463,17 @@ test('on, an opened row stays put through its look and the read after it; a thre
   expect(world.errors).toEqual([]);
 });
 
-test('Escape, one layer at a time: the open thread closes first, the view stays; the next Escape leaves it: the Smart groups back, no badge', async () => {
+test('Escape, one layer at a time: search closed first leaves no hold; the open thread closes first, the view stays; the next Escape leaves it: the Smart groups back, no badge', async () => {
   const { page, threads } = world;
+  // Search once and close it: App keeps its <dialog> (and the results' listbox) mounted, closed. Its Escape is its own,
+  // and once closed it never takes the view's.
+  await expect(recentBar(page)).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(page.locator('dialog[data-search-palette][open]')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('dialog[data-search-palette][open]')).toHaveCount(0);
+  await expect(page.locator('dialog[data-search-palette]')).toHaveCount(1);
+  await expect(recentBar(page)).toBeVisible();
   await rowButton(page, threads.bob).click();
   await expect(page.locator('section.ib-pane [aria-label="Close the thread"]')).toBeVisible();
   // Focus where the app leaves it: no blur before either Escape.

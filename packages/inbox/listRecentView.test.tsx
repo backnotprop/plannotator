@@ -428,4 +428,33 @@ describe.skipIf(!hasDom)("Escape: the window's ladder, one layer at a time", () 
     await escape(harbor);
     expect(bar()).toBeNull();
   });
+
+  test('only a layer that shows keeps Escape: search\'s <dialog> kept mounted closed (with its listbox), a menu hidden by its style, a floating reply window with focus outside it never do', async () => {
+    draw();
+    await turnOn();
+    // Search after its first ⌘K: App keeps the palette mounted, and closing it only closes the <dialog>.
+    const palette = document.createElement('dialog');
+    palette.setAttribute('role', 'dialog');
+    const results = document.createElement('div');
+    results.setAttribute('role', 'listbox');
+    palette.append(results);
+    document.body.append(palette);
+    const harbor = $('.ib-lbody [data-thread-id="t-harbor"]')!;
+    harbor.focus();
+    // Open, it keeps its Escape.
+    palette.setAttribute('open', '');
+    await escape(harbor);
+    expect(bar()).not.toBeNull();
+    palette.removeAttribute('open');
+    // A menu drawn but hidden by its style, and a floating reply window (non-modal, long-lived) the focus is not in.
+    const menuHidden = document.createElement('div');
+    menuHidden.setAttribute('role', 'menu');
+    menuHidden.style.display = 'none';
+    const floater = document.createElement('aside');
+    floater.setAttribute('data-chat-window', '');
+    floater.setAttribute('data-popover-layer', '');
+    document.body.append(menuHidden, floater);
+    await escape(harbor);
+    expect(bar() === null).toBe(true);
+  });
 });

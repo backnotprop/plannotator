@@ -199,18 +199,36 @@ export function listPlaceOf(route: Route): string | null {
   return route.page === 'inbox' && !route.reviews && !route.card ? [route.project, route.machine, route.agent, route.tag].join('\n') : null;
 }
 
-/** A layer open anywhere on the page (a dialog, a menu, a listbox, a popover, the Customize sidebar panel): its Escape. */
-const OPEN_LAYERS = 'dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-popover-layer], [data-sidebar-customizer]';
+/** A layer anywhere on the page (a dialog, a menu, a listbox, the Customize sidebar panel): its Escape, while it shows. */
+const LAYERS = 'dialog, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-sidebar-customizer]';
+/**
+ * Never a layer by being on the page: a message body's raw HTML; anything hidden or inert; a floating reply or Ask AI
+ * window, long-lived and not modal (its Escape is its own only with focus in it: `inOverlay`).
+ */
+const NOT_LAYERS = `${STRANGERS_MARKUP}, [hidden], [inert], [data-chat-window]:not([aria-modal="true"])`;
 
 /**
- * Something else may own this Escape: a field, a layer open anywhere (some listen on the window after App, so they
- * never get to mark the key used first), or a popup open from where focus is (a tooltip). A message body's raw HTML is
- * no layer.
+ * The layer shows: not in a closed <dialog> (search's palette and Decision mode stay mounted closed), not display:none
+ * on it or above it (a layer hidden by its class). Read from the tree and styles, not layout boxes, so it holds alike
+ * in a test's DOM.
+ */
+function layerShows(layer: Element): boolean {
+  if (layer.closest(NOT_LAYERS)) return false;
+  for (let el: Element | null = layer; el; el = el.parentElement) {
+    if (el.tagName === 'DIALOG' && !el.hasAttribute('open')) return false;
+    if (getComputedStyle(el).display === 'none') return false;
+  }
+  return getComputedStyle(layer).visibility !== 'hidden';
+}
+
+/**
+ * Something else may own this Escape: a field, a layer showing anywhere (some listen on the window after App, so they
+ * never get to mark the key used first), or a popup open from where focus is (a tooltip).
  */
 function escapeOwnedElsewhere(from: Element | null): boolean {
   if (modalOpen()) return true;
   if (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[aria-expanded="true"], [data-popup-open]'))) return true;
-  return [...document.querySelectorAll(OPEN_LAYERS)].some((layer) => !layer.closest(`${STRANGERS_MARKUP}, [hidden], [inert]`));
+  return [...document.querySelectorAll(LAYERS)].some(layerShows);
 }
 
 /**
