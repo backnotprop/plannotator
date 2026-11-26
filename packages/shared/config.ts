@@ -1082,6 +1082,11 @@ export function parseDisplayOptionsConfig(value: unknown): DisplayOptions | unde
   return result as DisplayOptions;
 }
 
+/** Whether HTML pages and live apps start in Interact ("Start in Annotate mode" turned off). */
+export function resolveHtmlStartsInInteract(config: PlannotatorConfig): boolean {
+  return parseDisplayOptionsConfig(config.displayOptions)?.htmlAnnotateOnStartup === false;
+}
+
 /** PLANNOTATOR_PACKAGE_LOOKUP: `0` / `false` / `off` / `disabled` is a hard off; anything else decides nothing. */
 export function parsePackageLookupEnv(env: NodeJS.ProcessEnv = process.env): false | undefined {
   const v = env.PLANNOTATOR_PACKAGE_LOOKUP?.trim().toLowerCase();

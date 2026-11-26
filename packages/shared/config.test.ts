@@ -45,6 +45,7 @@ import {
   isValidUrlHost,
   parseReviewAnalysisConfig,
   parseDisplayOptionsConfig,
+  resolveHtmlStartsInInteract,
   loadConfig,
   saveConfig,
   getServerConfig,
@@ -227,6 +228,15 @@ describe("parseDisplayOptionsConfig", () => {
 
   test("refuses anything that is not a plain object", () => {
     for (const bad of [null, [], "wide", 17, true]) expect(parseDisplayOptionsConfig(bad)).toBeUndefined();
+  });
+});
+
+describe("resolveHtmlStartsInInteract (the live bridge's start mode)", () => {
+  test("only an explicit off starts pages in Interact; unset or unreadable stays armed", () => {
+    expect(resolveHtmlStartsInInteract({ displayOptions: { htmlAnnotateOnStartup: false } })).toBe(true);
+    expect(resolveHtmlStartsInInteract({ displayOptions: { htmlAnnotateOnStartup: true } })).toBe(false);
+    expect(resolveHtmlStartsInInteract({})).toBe(false);
+    expect(resolveHtmlStartsInInteract({ displayOptions: { htmlAnnotateOnStartup: "false" } } as unknown as PlannotatorConfig)).toBe(false);
   });
 });
 

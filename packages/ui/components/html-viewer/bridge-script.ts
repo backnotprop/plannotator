@@ -642,9 +642,18 @@ ${SANDBOX_SHIM_SCRIPT}
   // navigation reach the page untouched. Text drag-selection commenting stays
   // LIVE in both modes (a real drag opens the comment toolbar even in
   // Interact), committed overlay artifacts stay visible in both modes, and
-  // marker buttons keep their own clicks. Stay passive until the parent
-  // sends its current mode, including after iframe navigation.
-  var annotateModeActive = false;
+  // marker buttons keep their own clicks. The page STARTS in the mode its
+  // host passed in with the bridge (live: the config prelude's startInteract;
+  // srcdoc: data-plannotator-start on this script's tag), so it is already
+  // armed, or already passive, before the parent's first set-annotate-mode.
+  // Armed unless told otherwise, on every load and navigation.
+  var startInteract = false;
+  if (LIVE) {
+    startInteract = LIVE.startInteract === true;
+  } else {
+    try { startInteract = !!document.currentScript && document.currentScript.getAttribute('data-plannotator-start') === 'interact'; } catch (ex) {}
+  }
+  var annotateModeActive = !startInteract;
   // A native host decides link navigations itself (HtmlViewer hostNavigates).
   var hostNavigates = false;
   // Forms and in-page links work as in a tab (the host's opt-in, \`pageNavigation\`).
@@ -6602,9 +6611,8 @@ ${SANDBOX_SHIM_SCRIPT}
       resizeObserver.observe(document.documentElement);
     }
     watchPageMutations();
-    // The bridge starts passive (Interact) until the parent's first
-    // set-annotate-mode, which follows this ready message: the startup choice
-    // (Settings → Display) is the parent's.
+    // Show the start mode's cursor affordance now (live sessions default to
+    // pinpoint) instead of waiting for the parent's first round trip.
     updatePinpointCursor();
     var readyMsg = { type: PREFIX + 'ready', protocolVersion: ${BRIDGE_PROTOCOL_VERSION} };
     if (LIVE) readyMsg.pageUrl = currentPageUrl();
