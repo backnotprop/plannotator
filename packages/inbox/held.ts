@@ -515,11 +515,12 @@ export function putReadRowBack(shown: readonly InboxListSection[], before: reado
  * reads as looked at until the server has taken the look and the list has
  * been read again (App.tsx `looking`), which then gives the server's row. Its
  * news is seen (`unseen` 0), so the row is no longer bold (shared/inbox/list.ts
- * `inboxRowUnread`), in the group it is drawn in. A row in New for that news
- * alone offers Mark unread at once, on its hover action and the header's
- * button (markRead.ts `canMarkUnread`). A row in Stopped, Holding up work or
- * Waiting on you keeps Mark read (its questions still wait). Only picks not
- * sent ("Answered, not sent") keep a row bold: it waits on the person's Send.
+ * `inboxRowUnread`), in the group it is drawn in, and it offers Mark unread at
+ * once, on its hover action, the header's ⋯ and a phone's swipe (markRead.ts
+ * `canMarkUnread`): a row in Stopped, Holding up work or Waiting on you too
+ * (the owner, 2026-11-25), whose Mark read stays in the row menu, the ⋯ and
+ * on `E` while its questions wait. Only picks not sent ("Answered, not sent")
+ * keep a row in New bold: it waits on the person's Send, and keeps Mark read.
  */
 export function lookedRow(row: InboxListRow): InboxListRow {
   if (row.unseen === 0) return row;

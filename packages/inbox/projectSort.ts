@@ -28,10 +28,10 @@ const SORTS: Readonly<Record<ProjectSort, { icon: IconName; now: string; next: C
 };
 const PRESS: Readonly<Record<ChosenProjectSort, string>> = { name: 'Sort A to Z', recent: 'Sort by most recent' };
 
-/** The toggle: its icon (the order on screen), its name and tooltip (that order, then what a press does), the next order and what a press says. */
-export function projectSortControl(sort: ProjectSort): { icon: IconName; label: string; next: ChosenProjectSort; said: string } {
+/** The toggle: its icon (the order on screen), its name and tooltip (that order, then what a press does), the next order and what a press says. Tags (tagSort.ts) use the same toggle. */
+export function projectSortControl(sort: ProjectSort, section = 'Projects'): { icon: IconName; label: string; next: ChosenProjectSort; said: string } {
   const { icon, now, next } = SORTS[sort];
-  return { icon, label: `${now}. ${PRESS[next]}`, next, said: `Projects: ${SORTS[next].now}.` };
+  return { icon, label: `${now}. ${PRESS[next]}`, next, said: `${section}: ${SORTS[next].now}.` };
 }
 
 /** The cookie's value as an order; anything else is today's. */

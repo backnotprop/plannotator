@@ -8,8 +8,11 @@
  * A right-click (or a finger held on it, `useContextMenuTrigger`'s `longPress`) opens Show threads, Rename (the row turns
  * into a field: Enter saves, Escape or leaving the field cancels) and Delete tag (no question: the toast has Undo).
  * Closed, the section keeps only the tag the list shows.
+ *
+ * The heading's sort toggle orders the tags as Projects' does (tagSort.ts): today's order (oldest first) until the
+ * first press, then A to Z or most recent.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxInitiative } from '@plannotator/core/inbox-types';
@@ -22,6 +25,8 @@ import { MenuCheckbox } from './Tidy';
 import { focusAfterSwap } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { tintAttrs } from '../tagColours';
 import type { TagColourControls } from '../useThreadTagsHost';
+import { setTagSort, sortTags, tagSortControl, useTagSort } from '../tagSort';
+import { SectionSortToggle } from './SectionSortToggle';
 
 export interface TagsSectionProps {
   /** The live tags, oldest first. */
@@ -47,10 +52,18 @@ export interface TagsSectionProps {
   onDelete: (tag: InboxInitiative) => void;
   /** Tag colours (tagColours.ts): each tag's row wears its colour, the key to the list's; null from an older Inbox. */
   colours?: TagColourControls | null;
+  /** Each tag's latest activity (`tagActivity`): what "most recent" sorts the tags by. */
+  activity?: ReadonlyMap<string, string>;
+  /** Says a new order to a screen reader. */
+  announce?: (text: string) => void;
 }
 
 export function TagsSection(props: TagsSectionProps) {
-  const { tags, closed } = props;
+  const { closed } = props;
+  const sort = useTagSort();
+  const activity = sort === 'recent' ? props.activity : undefined;
+  const tags = useMemo(() => sortTags(props.tags, sort, activity), [props.tags, sort, activity]);
+  const sortControl = tagSortControl(sort);
   const body = useRef<HTMLDivElement>(null);
   const head = useRef<HTMLDivElement>(null);
   const [portal, setPortal] = useState<HTMLElement | null>(null);
@@ -106,6 +119,9 @@ export function TagsSection(props: TagsSectionProps) {
     <div className="ib-tagsec" data-tags-section="" data-closed={closed ? '' : undefined}>
       <div ref={head} className="ib-secrow" data-tags-head="">
         {props.header}
+        {!closed && tags.length > 1 && (
+          <SectionSortToggle control={sortControl} onPress={() => setTagSort(sortControl.next)} announce={props.announce} className="ib-tags-sort" data={{ 'data-tags-sort': sort }} />
+        )}
         <Tip content="New tag">
           <button type="button" className="ib-proj-sort ib-tags-add" aria-label="New tag" data-tags-add="" onClick={startCreate}>
             <Icon name="plus" />
@@ -113,7 +129,7 @@ export function TagsSection(props: TagsSectionProps) {
         </Tip>
       </div>
       <ContextMenu.Root {...menu.root}>
-        <ContextMenu.Trigger ref={body} className="ib-tags" id={props.bodyId} role="group" aria-labelledby={props.labelId} data-closed={closed ? '' : undefined} {...menu.trigger}>
+        <ContextMenu.Trigger ref={body} className="ib-tags" id={props.bodyId} role="group" aria-labelledby={props.labelId} data-closed={closed ? '' : undefined} data-recent={sort === 'recent' ? '' : undefined} {...menu.trigger}>
           {creating && (
             <TagNameField
               name=""
