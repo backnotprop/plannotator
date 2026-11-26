@@ -13,12 +13,13 @@ import type { MarkdownFileView } from '../utils/markdownPreview';
 
 const LABEL: Record<MarkdownFileView, string> = { source: 'Source', changes: 'Changes', read: 'Read' };
 
-function describe(view: MarkdownFileView, status: MarkdownViewMenuProps['status']): string {
+function describe(view: MarkdownFileView, status: MarkdownViewMenuProps['status'], selectToComment: boolean): string {
   if (view === 'source') return 'The line diff · comment on lines';
-  if (view === 'changes') return 'Rendered, changes marked · select to comment';
-  if (status === 'deleted') return 'The deleted version, rendered · select to comment';
-  if (status === 'added') return 'The new file, rendered · select to comment';
-  return 'The new version, rendered · select to comment';
+  const tail = selectToComment ? ' · select to comment' : '';
+  if (view === 'changes') return `Rendered, changes marked${tail}`;
+  if (status === 'deleted') return `The deleted version, rendered${tail}`;
+  if (status === 'added') return `The new file, rendered${tail}`;
+  return `The new version, rendered${tail}`;
 }
 
 function ViewIcon({ view, className }: { view: MarkdownFileView; className: string }) {
@@ -45,6 +46,11 @@ export interface MarkdownViewMenuProps {
   touch?: boolean;
   /** Set while the view cannot change (the file holds the edit session): the button is disabled and says why. */
   disabledReason?: string | null;
+  /**
+   * A host where selecting rendered text does not comment and P is not bound (the Plannotator Inbox): the menu,
+   * its tooltip and footer leave out "select to comment" and the P key. Absent: code review's words.
+   */
+  withoutCommentAndKeyHints?: boolean;
 }
 
 export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
@@ -56,15 +62,17 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
   iconOnly = false,
   touch = false,
   disabledReason = null,
+  withoutCommentAndKeyHints = false,
 }) => {
   const [open, setOpen] = useState(false);
   const rendered = view !== 'source';
   const name = filePath.slice(filePath.lastIndexOf('/') + 1);
+  const hints = !withoutCommentAndKeyHints;
   const title = disabledReason
     ? disabledReason
     : rendered
-    ? `Showing ${LABEL[view]}. Select text to comment. P: next view`
-    : 'Show this Markdown file as Source, Changes or Read. P: next view';
+    ? `Showing ${LABEL[view]}.${hints ? ' Select text to comment. P: next view' : ''}`
+    : `Show this Markdown file as Source, Changes or Read.${hints ? ' P: next view' : ''}`;
 
   const trigger = touch ? (
     // Drawn 36 px; the ::after box makes the hit area 44 px (4 px past each
@@ -152,7 +160,7 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
                   <span className="min-w-0 flex-1">
                     <span className={`block font-medium text-foreground ${touch ? 'text-base' : 'text-xs'}`}>{LABEL[option]}</span>
                     <span className={`mt-0.5 block text-muted-foreground ${touch ? 'text-sm' : 'text-xs leading-snug'}`}>
-                      {describe(option, status)}
+                      {describe(option, status, hints)}
                     </span>
                   </span>
                   <Menu.RadioItemIndicator className="flex-none self-center text-primary">
@@ -165,8 +173,12 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
             </Menu.RadioGroup>
             {!touch && (
               <div aria-hidden="true" className="mt-1 border-t border-border/60 px-2.5 pb-1 pt-2 text-xs text-muted-foreground">
-                <kbd className="mr-1 rounded border border-border bg-muted px-1 font-mono text-xs text-foreground">P</kbd>
-                next view · files you have not set follow your choice
+                {hints ? (
+                  <>
+                    <kbd className="mr-1 rounded border border-border bg-muted px-1 font-mono text-xs text-foreground">P</kbd>
+                    next view · files you have not set follow your choice
+                  </>
+                ) : 'Files you have not set follow your choice'}
               </div>
             )}
           </Menu.Popup>

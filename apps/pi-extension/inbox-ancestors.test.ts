@@ -120,12 +120,14 @@ function fakePi() {
 	const handlers = new Map<string, ((event: unknown, ctx?: unknown) => unknown)[]>();
 	let sessionId = "";
 	let sessionFilePath: string | undefined;
+	let parentSession: string | undefined;
 	const ctx = {
 		hasUI: true,
 		cwd: "/tmp",
 		sessionManager: {
 			getSessionId: () => sessionId,
 			getSessionFile: () => sessionFilePath,
+			getHeader: () => parentSession ? { parentSession } : undefined,
 			getSessionName: () => "test",
 			getBranch: () => [],
 		},
@@ -141,9 +143,10 @@ function fakePi() {
 			getActiveTools: () => [],
 			setActiveTools: () => {},
 		},
-		start(id: string, file?: string) {
+		start(id: string, file?: string, parent?: string) {
 			sessionId = id;
 			sessionFilePath = file;
+			parentSession = parent;
 			for (const handler of handlers.get("session_start") ?? []) handler({}, ctx);
 		},
 		shutdown() {
@@ -188,6 +191,23 @@ describe("the poll's continues", () => {
 		cleanup.push(() => pi.shutdown());
 		return { sessions, polls, pi };
 	}
+
+	test("a new session reports its in-memory parent before its file exists", async () => {
+		const { sessions, polls, pi } = world();
+		const grandparent = sessionFile(sessions, "grand.jsonl", { id: "grandparent" });
+		const parent = sessionFile(sessions, "parent.jsonl", { id: "parent", parentSession: grandparent });
+		pi.start("new", join(sessions, "not-written.jsonl"), parent);
+		await waitFor("the session's poll", () => polls.some((poll) => poll.session === "new"));
+		expect(polls.find((poll) => poll.session === "new")?.body.continues).toEqual(["parent", "grandparent"]);
+	});
+
+	test("an in-memory parent that points back to the current session is not reported", async () => {
+		const { sessions, polls, pi } = world();
+		const parent = sessionFile(sessions, "parent.jsonl", { id: "new" });
+		pi.start("new", join(sessions, "not-written.jsonl"), parent);
+		await waitFor("the session's poll", () => polls.some((poll) => poll.session === "new"));
+		expect("continues" in polls[0]!.body).toBe(false);
+	});
 
 	test("a handed-off session's poll names the sessions it continues, and nothing polls as the old one", async () => {
 		const { sessions, polls, pi } = world();

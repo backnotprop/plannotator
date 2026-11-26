@@ -200,12 +200,12 @@ test.skipIf(!hasDom)('adjacent `:::action` blocks are one card; blocks separated
   expect(text).not.toContain('Run: ');
 });
 
-test.skipIf(!hasDom)('refs in a task stay plain text in its toggle (a button); its why links them into the thread repo', () => {
+test.skipIf(!hasDom)('refs in a task stay plain text on its toggle line; its why links them into the thread repo', () => {
   const action = record(0, { prompt: 'Merge acme/web#12 and #3, not `acme/web#13`', context: 'Then team/app#4 can ship.' });
   const el = mount(<ActionChecklist actions={[action]} agent="Claude Code" refRepo={{ display: 'group/web', host: 'gitlab.example.com' }} onMark={async () => true} />);
-  const toggle = el.querySelector('[data-action-toggle]')!;
-  expect(toggle.querySelector('a')).toBeNull();
-  expect(toggle.textContent).toContain('Merge acme/web#12 and #3, not acme/web#13');
+  const line = el.querySelector('[data-action-line]')!;
+  expect(line.querySelector('a')).toBeNull();
+  expect(line.querySelector('[data-action-task]')!.textContent).toContain('Merge acme/web#12 and #3, not acme/web#13');
   const why = el.querySelector('[data-action-why]')!;
   expect([...why.querySelectorAll('a[href]')].map((a) => a.getAttribute('href'))).toContain('https://gitlab.example.com/team/app/-/issues/4');
   // The task's text holds no link even where refs would link (a renderer given a repo).

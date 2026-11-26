@@ -34,6 +34,7 @@ const mods = (hasDom
       ...(await import('@base-ui/react/menu')),
       ...(await import('../components/Thread')),
       ...(await import('../app/route')),
+      ...(await import('../replyDraft')),
     }
   : {}) as typeof import('./useReplyFloaters') &
   typeof import('./model') &
@@ -43,7 +44,8 @@ const mods = (hasDom
   typeof import('../data/threadMentionRefs') &
   typeof import('@base-ui/react/menu') &
   typeof import('../components/Thread') &
-  typeof import('../app/route');
+  typeof import('../app/route') &
+  typeof import('../replyDraft');
 
 const PROJECT = { id: 'prj_1', name: 'billing' };
 const T0 = '2026-11-07T10:00:00.000Z';
@@ -166,13 +168,18 @@ beforeEach(() => {
   root = createRoot(host);
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
   root = null;
   host = null;
+  // The box's last save (sent as it unmounts) is answered by this test's fetch: one failing on the real fetch would
+  // be kept for the thread and show in the next test's box.
+  for (let i = 0; i < 100 && mods.replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const left = mods.replyDraftUnsaved();
   globalThis.fetch = savedFetch;
+  if (left) throw new Error('the test left a reply draft save on its way, or words not saved');
 });
 
 async function wait(ms: number) {
@@ -431,6 +438,43 @@ test("a draft's window rests clear of the minimized chat's circle, and above it 
   await act(async () => root!.render(<Harness start={null} rows={[row('thr_a')]} ask={{ ...plain, threadId: 'thr_x', hasChat: true, circle: true }} />));
   await until(() => windowAt('thr_a').bottom === '52px', 'the window lifted');
   expect(windowAt('thr_a').right).toBe('16px');
+});
+
+test("in a thread with no reply foot on screen (its Artifacts view), the pile rests straight above the minimized chat's circle; back at the foot, beside it", async () => {
+  if (!hasDom) return;
+  // The open thread in its Artifacts view: its foot is hidden.
+  const pane = document.createElement('section');
+  pane.className = 'ib-pane';
+  const foot = document.createElement('div');
+  foot.className = 'ib-pfoot';
+  foot.hidden = true;
+  pane.appendChild(foot);
+  document.body.appendChild(pane);
+  try {
+    fake.drafts.set('thr_a', draft('thr_a', 'Key the retry on invoice_id alone'));
+    mods.floatThread('thr_a', Date.now() - 10_000);
+    const pile = () => document.querySelector<HTMLElement>('[data-rf-corner]');
+    // No circle (no chat on this thread): the plain corner, 16 px in.
+    await act(async () => root!.render(<Harness start="thr_x" rows={[row('thr_a')]} ask={fakeAsk({ threadId: 'thr_x' })} />));
+    await until(() => pile() !== null, 'the pile');
+    expect(pile()!.getAttribute('data-rf-spot')).toBe('corner');
+    expect({ right: pile()!.style.right, bottom: pile()!.style.bottom }).toEqual({ right: '16px', bottom: '16px' });
+    // The thread's chat minimized, its circle drawn: the pile stays, lifted clear of the circle's 44 px box (as a draft's
+    // window is), its right edge the circle's own (5 px in), so its middle is 8 px off the circle's (centred, it would
+    // run past the window's edge); before, 16 px in, it sat 19 px off.
+    const circle = fakeAsk({ threadId: 'thr_x', hasChat: true, minimized: true, circle: true });
+    await act(async () => root!.render(<Harness start="thr_x" rows={[row('thr_a')]} ask={circle} />));
+    await until(() => pile()?.style.bottom === '52px', 'the pile above the circle');
+    expect(pile()!.style.right).toBe('5px');
+    // The reply foot back on screen (the thread view): level with Send again, nothing lifted.
+    foot.hidden = false;
+    window.dispatchEvent(new Event('resize'));
+    await until(() => pile()?.getAttribute('data-rf-spot') === 'foot', 'the pile at the foot');
+    expect(pile()!.style.bottom).not.toBe('52px');
+    expect(pile()!.style.right).not.toBe('5px');
+  } finally {
+    pane.remove();
+  }
 });
 
 test('Discard while a file still uploads: the upload stops and no draft comes back', async () => {

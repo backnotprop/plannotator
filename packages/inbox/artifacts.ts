@@ -11,21 +11,25 @@
  *
  * What counts: every attachment of every kind (documents, code, diagrams,
  * images, video, PDFs and other downloads), the images a message's text shows
- * (`inline_images`, captured as files), one guided review per message that
- * carries one, and the files the person pasted into a reply or a new message
- * (attachments of their own messages). Not: drawings made while commenting,
- * remote images, the message text.
+ * (`inline_images`, captured as files), the live html blocks of an agent's
+ * text (```html fences; not files: core inbox-html-blocks.ts), one guided
+ * review per message that carries one, and the files the person pasted into a
+ * reply or a new message (attachments of their own messages). Not: drawings
+ * made while commenting, remote images, the message text.
  *
- * The one seam between the two counts: a guided review opens its own reader,
- * never the file viewer, so the viewer does not step through it. The grid's
- * count is the peek's plus the thread's guided reviews ("2 of 10" in the
- * viewer, "11 artifacts" in the grid when one message carries a guide).
+ * The one seam between the two counts: a guided review opens its own reader
+ * and an html block its own page (htmlArtifactOpen.ts), never the file viewer,
+ * so the viewer does not step through them. The grid's count is the peek's
+ * plus the thread's guided reviews and html blocks ("2 of 10" in the viewer,
+ * "11 artifacts" in the grid when one message carries a guide).
  *
  * Pure: no DOM, no fetch.
  */
 
 import type { InboxAttachmentState, InboxGuideRef, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { isInboxAnnotatableKind } from '@plannotator/core/inbox-types';
+import { inboxHtmlBlocksOf } from '@plannotator/core/inbox-artifact-pins';
+import { inboxHtmlArtifactKey } from '@plannotator/core/inbox-html-blocks';
 import { agentName, whenTime } from './format';
 
 /** Who sent the message an artifact came in, and when, in the window's words. */
@@ -63,11 +67,32 @@ export interface GuideArtifact extends ArtifactOrigin {
   guide: InboxGuideRef;
 }
 
-export type Artifact = FileArtifact | GuideArtifact;
+/**
+ * A live html block of an agent's text (```html, core inbox-html-blocks.ts): not a file. It opens its own page, big,
+ * with the block's own tools (htmlArtifactOpen.ts); the viewer never steps through it.
+ */
+export interface HtmlArtifact extends ArtifactOrigin {
+  type: 'html';
+  /** `html:<message id>:<hash>`. */
+  key: string;
+  /** The page's first heading, else null (the tile says "HTML block"). */
+  title: string | null;
+  /** The source's size in bytes. */
+  size: number;
+  /** The block's source, when the thread's messages are at hand (the grid); null on the Wall. */
+  source: string | null;
+}
 
-/** The key a tile and a list use: the file's id, or `guide:<message id>`. */
+export type Artifact = FileArtifact | GuideArtifact | HtmlArtifact;
+
+/** The key a tile and a list use: the file's id, `guide:<message id>`, or an html block's `html:<message id>:<hash>`. */
 export function artifactKey(artifact: Artifact): string {
-  return artifact.type === 'file' ? artifact.attachment.id : `guide:${artifact.messageId}`;
+  return artifact.type === 'file' ? artifact.attachment.id : artifact.type === 'html' ? artifact.key : `guide:${artifact.messageId}`;
+}
+
+/** What a tile names an html block: its first heading, else "HTML block". */
+export function htmlArtifactName(artifact: Pick<HtmlArtifact, 'title'>): string {
+  return artifact.title ?? 'HTML block';
 }
 
 /** Who sent a message and when, as a tile says it (also the Artifacts wall's, from its rows). */
@@ -96,8 +121,9 @@ function originNow(message: Pick<InboxMessageWire, 'id' | 'author' | 'created_at
 
 /**
  * Every artifact of the thread in reading order: message by message, the
- * images its text shows in text order, then its attached files in the order
- * of its tiles, then its guided review. An image both shown in the text and
+ * images its text shows in text order, then the live html blocks of an agent's
+ * text, then its attached files in the order of its tiles, then its guided
+ * review. An image both shown in the text and
  * attached to the same message (the same file on disk) is one artifact, the
  * one in the text, carrying the attached record's id in `alsoIds`. A file
  * whose message is not in the thread (it should not happen) goes last, so the
@@ -118,6 +144,14 @@ export function threadArtifacts(
       placed.add(image.id);
       files.push({ type: 'file', ...origin(), attachment: image, inline: true, alsoIds: [] });
     }
+    // The live html blocks of an agent's text, after its pictures (the store's order: core inboxThreadArtifactRefs).
+    const pages: HtmlArtifact[] = [];
+    for (const block of inboxHtmlBlocksOf(message)) {
+      const key = inboxHtmlArtifactKey(message.id, block.hash);
+      if (placed.has(key)) continue;
+      placed.add(key);
+      pages.push({ type: 'html', ...origin(), key, title: block.title, size: block.size, source: block.content });
+    }
     for (const attachment of attachments) {
       if (attachment.message_id !== message.id || placed.has(attachment.id)) continue;
       placed.add(attachment.id);
@@ -129,7 +163,7 @@ export function threadArtifacts(
       }
       files.push({ type: 'file', ...origin(), attachment, inline: false, alsoIds: [] });
     }
-    out.push(...files);
+    out.push(...files.filter((f) => f.inline), ...pages, ...files.filter((f) => !f.inline));
     if (message.guide) out.push({ type: 'guide', ...origin(), guide: message.guide });
   }
   for (const [list, inline] of [

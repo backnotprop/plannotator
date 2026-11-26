@@ -310,9 +310,9 @@ test('a face by every name: the popover pictures the author and who it waits on;
 
   act(() => root?.unmount());
   host?.remove();
-  drawReviews();
+  drawReviews({ stackId: `github.com/${REPO}#2` });
   await settle();
-  // #2 asks for the person's review: tomas is pictured at the row's left, so his name in the words has no second face.
+  // #2, open, asks for the person's review: tomas is pictured at its second line's start, so his name in the words has no second face.
   const row = $(`[data-pulls-row="github.com/${REPO}#2"]`)!;
   expect(row.querySelector('.ib-lead [data-pulls-author="tomas"]')).not.toBeNull();
   const words = row.querySelector<HTMLElement>('[data-reviews-status]')!;

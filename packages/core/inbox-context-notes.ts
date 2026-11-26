@@ -10,8 +10,7 @@
  * - risk ranking: the places a high-risk judgment names (`InboxPullRiskPlace`);
  * - the review's thread agent: a `:::note path#L…` block in a message it
  *   sends (`inboxNoteBlocks`).
- * The window also shows a Show me board's parts that point at code. This file
- * holds the `:::note` parse; the guide author's notes and their checks live
+ * This file holds the `:::note` parse; the guide author's notes and their checks live
  * in `guide-notes.ts` (re-exported here).
  */
 
@@ -32,7 +31,7 @@ export interface InboxNoteBlock {
   to: number;
 }
 
-/** A `:::note` opening line: the anchor is Show me's `data-code` (`path#L42`, `path#L42-L48`), ` old` after it for removed lines. */
+/** A `:::note` opening line: the anchor is a code place (`path#L42`, `path#L42-L48`), ` old` after it for removed lines. */
 const NOTE_OPEN = /^:::note[ \t]+(\S.*?)[ \t]*$/;
 
 /** Reads a `:::note` anchor: `src/a.ts#L42-L48 old`. Null when it is none. */

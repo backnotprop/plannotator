@@ -576,7 +576,7 @@ function guideFeedbackIntro(title: string, comments: readonly CodeAnnotation[]):
  * two pictures never share one heading.
  */
 export function exportFileLabel(
-  attachment: Pick<InboxAttachmentState, 'path' | 'name' | 'ref' | 'sent_at'> & { message_id?: string },
+  attachment: Pick<InboxAttachmentState, 'path' | 'name' | 'ref' | 'sent_at'> & { message_id?: string; kind?: InboxAttachmentState['kind'] },
   projectRoot: string,
   others: readonly Pick<InboxAttachmentState, 'ref' | 'sent_at' | 'message_id'>[] = [],
   /** The image is in the person's own message: "(image in my … message)", never "your". */
@@ -585,22 +585,30 @@ export function exportFileLabel(
   const label = attachmentLabel(attachment, projectRoot);
   if (attachment.ref === undefined) return label;
   const whose = mine ? 'my' : 'your';
+  // A sound or video the text plays: "(video in your … message)", "(sound in …)"; a picture keeps "image".
+  const noun = inlineNoun(attachment.kind);
   const minute = whenTime(attachment.sent_at);
   const sameRef = others.filter((o) => o.ref === attachment.ref && o.message_id !== attachment.message_id && whenTime(o.sent_at) === minute);
-  if (sameRef.length === 0) return `${label} (image in ${whose} ${minute ? `${minute} ` : ''}message)`;
+  if (sameRef.length === 0) return `${label} (${noun} in ${whose} ${minute ? `${minute} ` : ''}message)`;
   const secondsOf = (iso: string) => {
     const date = new Date(iso);
     return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
   };
   const second = secondsOf(attachment.sent_at);
   const tied = sameRef.filter((o) => secondsOf(o.sent_at) === second);
-  if (tied.length === 0) return `${label} (image in ${whose} ${second} message)`;
+  if (tied.length === 0) return `${label} (${noun} in ${whose} ${second} message)`;
   const order = [...tied, { sent_at: attachment.sent_at, message_id: attachment.message_id ?? '' }]
     .map((o) => `${o.sent_at}\0${o.message_id ?? ''}`)
     .filter((key, index, all) => all.indexOf(key) === index)
     .sort();
   const place = order.indexOf(`${attachment.sent_at}\0${attachment.message_id ?? ''}`) + 1;
-  return `${label} (image in ${whose} ${second} message ${place})`;
+  return `${label} (${noun} in ${whose} ${second} message ${place})`;
+}
+
+/** What a file a message's text shows is called in the export: a picture "image", a film "video", a recording "sound". */
+function inlineNoun(kind: InboxAttachmentState['kind'] | undefined): 'image' | 'video' | 'sound' {
+  const read = kind === undefined ? 'image' : readInboxAttachmentKind(kind);
+  return read === 'video' ? 'video' : read === 'audio' ? 'sound' : 'image';
 }
 
 /** A comment on the text of an agent's message (approval "inbox-message-comments"), or false for any other annotation. */
@@ -879,6 +887,19 @@ export const ATTACHMENT_AND_IMAGE_FEEDBACK_HEADING = {
 };
 
 /**
+ * The heading's intro for the files a message's text shows, by what they are: pictures only keep
+ * ATTACHMENT_AND_IMAGE_FEEDBACK_HEADING as it was; with a video or a sound, only the kinds there are ("the images and
+ * videos your messages showed", "the videos and sounds your messages showed or played").
+ */
+function inlineFeedbackHeading(nouns: ReadonlySet<'image' | 'video' | 'sound'>): typeof ATTACHMENT_AND_IMAGE_FEEDBACK_HEADING {
+  if (!nouns.has('video') && !nouns.has('sound')) return ATTACHMENT_AND_IMAGE_FEEDBACK_HEADING;
+  const names = (['image', 'video', 'sound'] as const).filter((noun) => nouns.has(noun)).map((noun) => `${noun}s`);
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+  const verb = nouns.has('image') || nouns.has('video') ? (nouns.has('sound') ? 'showed or played' : 'showed') : 'played';
+  return { title: ATTACHMENT_FEEDBACK_HEADING.title, intro: `The following feedback is on the files you attached and the ${list} your messages ${verb}, one section per file and version.` };
+}
+
+/**
  * The feedback text a Send carries after the picks: the comments on the text
  * of agents' messages (`messageFeedback`), then Plannotator's export of the
  * files' annotations (the same entry renderer `exportAnnotations` uses), one
@@ -910,7 +931,7 @@ export function attachmentFeedback(
 ): string {
   if (records.length === 0) return '';
   const messages = messageFeedback(records, whenTime, { personMessageIds: options.personMessageIds, bodies: options.messageBodies });
-  let inlineImages = false;
+  const inlineNouns = new Set<'image' | 'video' | 'sound'>();
   const groups = new Map<string, { annotations: Annotation[]; markdown?: string; blocks: Block[]; video?: { durationMs?: number } }>();
   for (const record of records) {
     // Comments on a guided review's diff go in their own section, after the files'; a message's text has its own, before them.
@@ -927,7 +948,7 @@ export function attachmentFeedback(
       group.annotations.push(withPictureFiles(annotation as Annotation));
       continue;
     }
-    if (attachment.ref !== undefined) inlineImages = true;
+    if (attachment.ref !== undefined) inlineNouns.add(inlineNoun(attachment.kind));
     const mine = attachment.ref !== undefined && options.personMessageIds?.has(attachment.message_id) === true;
     const sentLabel = attachment.captured === 'on_open' ? SENT_VERSION_SUFFIX.firstSaw : mine ? SENT_VERSION_SUFFIX.mine : SENT_VERSION_SUFFIX.yours;
     const fileLabel = `${exportFileLabel(attachment, projectRoot, attachments, mine)}${sent ? sentLabel : ''}`;
@@ -977,6 +998,6 @@ export function attachmentFeedback(
     }
   }
   const entries = new Map([...groups].map(([label, group]) => [label, { annotations: group.annotations, globalAttachments: [], blocks: group.blocks }]));
-  const files = records.some(isFileComment) ? exportLinkedDocAnnotations(entries, inlineImages ? ATTACHMENT_AND_IMAGE_FEEDBACK_HEADING : ATTACHMENT_FEEDBACK_HEADING).trim() : '';
+  const files = records.some(isFileComment) ? exportLinkedDocAnnotations(entries, inlineNouns.size > 0 ? inlineFeedbackHeading(inlineNouns) : ATTACHMENT_FEEDBACK_HEADING).trim() : '';
   return [messages, files, liveSiteFeedback(records, options.prototypeNames), guideFeedback(records)].filter(Boolean).join('\n\n');
 }

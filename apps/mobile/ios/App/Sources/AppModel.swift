@@ -286,6 +286,13 @@ struct LaunchOptions {
           }
         case "sent":
           await session.send(thread: StandInData.retry, words: "Go ahead, and tell me when the first 10% looks healthy.")
+        case "readretry":
+          // The retry thread read once, so the phone has its copy when the computer goes away.
+          await session.open(StandInData.retry)
+        case "reacted":
+          // The docs thread's message marked with 🎉 from 👍's tray.
+          await session.open(StandInData.docs)
+          if let message = session.thread(StandInData.docs)?.thread.messages.last { _ = await session.react(StandInData.docs, message: message.id, on: true, reaction: DoorAckBodyReaction(emoji: "🎉")) }
         case "heldsend":
           await session.send(thread: StandInData.retry, words: "Go ahead when it is back.")
         case "away":
@@ -328,6 +335,37 @@ struct LaunchOptions {
         case "online":
           await door.setOffline(false)
           await session.refresh()
+        case "writing":
+          // A reply being written: words, a quote of the thread's first message, a picture on the computer and a file
+          // the Inbox refused.
+          await session.open(StandInData.retry)
+          if let first = session.thread(StandInData.retry)?.thread.messages.first { session.setQuote(StandInData.retry, DraftQuote(of: first.id)) }
+          session.keepDraft(StandInData.retry, words: "Hold the rollout until the error dashboards are green for an hour.")
+          await session.attach(StandInMedia.flameGraph(), name: "error-dashboard.png", type: "image/png", to: .thread(StandInData.retry))
+          await door.refuseUploads("upload_refused")
+          await session.attach(Data("TOKEN=example".utf8), name: ".env", type: "text/plain", to: .thread(StandInData.retry))
+          await door.refuseUploads(nil)
+        case "retryfile":
+          // A file the computer could not receive just now, in the reply: its tile offers Try again.
+          await session.open(StandInData.retry)
+          await door.refuseUploads("upload_refused", words: "The file could not be received; try again.", field: "body")
+          await session.attach(StandInMedia.flameGraph(), name: "rollout-notes.png", type: "image/png", to: .thread(StandInData.retry))
+          await door.refuseUploads(nil)
+        case "compose":
+          // New message to the first live session, with words and a picture.
+          await session.readSessions()
+          if let group = session.sessions.projects.first, let live = group.sessions.first {
+            session.changeCompose {
+              $0.to = ComposeTo(live, in: group)
+              $0.words = "Add a retry budget to the export job, and tell me what it costs at peak."
+            }
+          }
+          await session.attach(StandInMedia.flameGraph(), name: "export-p99.png", type: "image/png", to: .compose)
+        case "noagents":
+          await door.setLiveSessions([])
+        case "relayfiles":
+          // The phone reaches the computer through the relay only: files wait for its network.
+          await door.setOptions { $0.refusesMarkups = WireErrorCode.relayUploadUnavailable.rawValue }
         case "replaced":
           // The agent replaces the question the phone's held pick and Send answer.
           if let (asked, question) = retry() {

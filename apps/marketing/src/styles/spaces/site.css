@@ -28,6 +28,9 @@ html:root.pn-os-linux body {
 html:not(.transitions-ready) body .shf-face {
   transition-duration: 240ms, 240ms !important;
 }
+html:not(.transitions-ready) body .fan-pen {
+  transition-duration: 240ms !important;
+}
 html:not(.transitions-ready) body .proof {
   transition-duration: 0.5s !important;
 }
@@ -41,4 +44,10 @@ html:not(.transitions-ready) body .pf-foot,
 html:not(.transitions-ready) body .pf-note,
 html:not(.transitions-ready) body .pf-item {
   transition-duration: 0.4s !important;
+}
+html:not(.transitions-ready) body .lk-p[data-state="closed"] {
+  transition-duration: 110ms, 110ms, 0s !important;
+}
+html:not(.transitions-ready) body .lk-p[data-state="open"] {
+  transition-duration: 150ms, 200ms, 0s !important;
 }

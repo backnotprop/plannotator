@@ -22,6 +22,7 @@
 import { basename } from "node:path";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { FAR_WOKEN_HOSTS } from "./inbox-far-host-wakes";
 import { syncSection } from "./inbox-perf";
 import type { createInboxLiveSessions } from "./inbox-sessions";
 
@@ -53,6 +54,18 @@ export interface InboxTaggableSession {
   owner: boolean;
   /** It wrote in this thread. */
   wrote_thread: boolean;
+  /** Its connection takes Send now (a reply into the running turn): in a far computer's list (`taggable-agents`) only. */
+  send_now?: boolean;
+  /** A session on another linked computer (inbox-far-tags.ts): that computer's Inbox id and its name here. */
+  machine?: string;
+  machine_name?: string;
+}
+
+/** The far part of the route (inbox-far-tags.ts): each linked computer's agents this Inbox can wake there. */
+export interface InboxTaggableFar {
+  rows: (threadId: string, owner: string | null, writers: ReadonlySet<string>) => Promise<InboxTaggableSession[]>;
+  /** This computer, named as its linked computers name it; null while nothing is linked. */
+  self: () => { id: string; name: string } | null;
 }
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -62,12 +75,15 @@ export function createInboxTagsRoute(options: {
   serverSession: string;
   live: ReturnType<typeof createInboxLiveSessions>;
   json: (body: unknown, status?: number) => Response;
+  far?: InboxTaggableFar;
+  /** A session with no poll this Inbox wakes itself, so a linked computer's tag reaches it. Default: Codex, Qwen, T3, Antigravity. */
+  wokenHere?: (session: string, host: string) => boolean;
 }) {
   const { store, live, json } = options;
 
   /** The thread's owner now: the session it was last handed to, else its latest agent writer, else the session a thread the person started is addressed to. */
   // A hand-off (approval "inbox-tag-handoff") makes its new owner the owner, whoever writes after it.
-  const ownerOf = (threadId: string): { host: string | null; session: string } | null => (store.thread(threadId) ? store.threadOwner(threadId) : null);
+  const ownerOf = (threadId: string): { host: string | null; session: string } | null => (store.thread(threadId) ? store.threadOwner(threadId, (session) => live.askerLive(session)) : null);
 
   const taggable = (threadId: string, withLabels = false): { owner: { host: string | null; session: string } | null; sessions: InboxTaggableSession[] } => {
     const thread = store.thread(threadId);
@@ -134,13 +150,55 @@ export function createInboxTagsRoute(options: {
     return { owner, sessions: [...liveRows.map(({ rank: _rank, activity: _activity, ...row }) => row), ...mcpRows] };
   };
 
-  /** The route; null when the path is not it. */
-  const route = (req: Request, path: string): Response | null => {
+  /**
+   * This Inbox's own sessions a linked computer may tag in one of its threads (`GET taggable-agents` on the door,
+   * inbox-far-tags.ts): the live ones whose connection polls here, and the ones this Inbox wakes itself (Codex, Qwen,
+   * T3, Antigravity, a cloud agent with a wake: their wakes send a far wake as a local tag, inbox-far-host-wakes.ts),
+   * so each gets that computer's wake.
+   */
+  const wokenHere = options.wokenHere ?? ((_session: string, host: string) => FAR_WOKEN_HOSTS.has(host));
+  const liveHere = (): InboxTaggableSession[] =>
+    live
+      .allLive()
+      .filter((entry) => entry.polls || wokenHere(entry.session, entry.host))
+      .map((entry) => {
+        const known = entry.root !== null ? store.projectByRoot(entry.root) : null;
+        const project = entry.root !== null ? { id: null, name: known?.name ?? (basename(entry.root) || entry.root), root: null } : null;
+        return {
+          session: entry.session,
+          host: entry.host,
+          kind: "live" as const,
+          name: null,
+          ...(entry.label ? { label: entry.label } : {}),
+          project,
+          started_at: iso(entry.startedAt),
+          last_at: iso(entry.lastSeen),
+          busy: entry.busy,
+          idle_since: entry.idleSince === null ? null : iso(entry.idleSince),
+          taggable: entry.tags,
+          ...(entry.sendNow ? { send_now: true } : {}),
+          owner: false,
+          wrote_thread: false,
+        };
+      })
+      .sort((a, b) => b.started_at.localeCompare(a.started_at) || a.session.localeCompare(b.session));
+
+  /** The route; null when the path is not it. With linked computers, their agents follow this Inbox's own. */
+  const route = (req: Request, path: string): Response | Promise<Response> | null => {
     const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/taggable$/.exec(path);
     if (!match) return null;
     if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-    return json({ serverSession: options.serverSession, ...syncSection("taggable", () => taggable(match[1]!, true)) });
+    const here = syncSection("taggable", () => taggable(match[1]!, true));
+    const far = options.far;
+    const self = far?.self() ?? null;
+    if (!far || !self) return json({ serverSession: options.serverSession, ...here });
+    const writers = new Set(store.thread(match[1]!)?.messages.flatMap((m) => (m.author.kind === "agent" && m.author.session ? [m.author.session] : [])) ?? []);
+    return far.rows(match[1]!, here.owner?.session ?? null, writers).then((rows) => {
+      const mine = new Set(here.sessions.map((s) => s.session));
+      const farRows = rows.filter((row) => !mine.has(row.session));
+      return json({ serverSession: options.serverSession, ...here, sessions: [...here.sessions, ...farRows], ...(farRows.length > 0 ? { machine: self } : {}) });
+    });
   };
 
-  return { route, taggable, ownerOf };
+  return { route, taggable, ownerOf, liveHere };
 }

@@ -2,6 +2,10 @@ import { ROW_ICONS } from './treeRows';
 
 const TREE_ROW_HEIGHT = 28;
 const TOUCH_ROW_HEIGHT = 44;
+/** The risk bars before a file's icon: their width, the gap to the icon, the room added at the root (see below). */
+const LEAD_WIDTH = 10;
+const LEAD_GAP = 5;
+const LEAD_ROOM = 8;
 
 const unsafeCSS = `
   [data-item-git-status="modified"], [data-item-git-status="renamed"], [data-item-git-status="untracked"] {
@@ -57,6 +61,24 @@ const unsafeCSS = `
     & > [data-item-section="git"] {
       visibility: hidden;
     }
+  }
+  /* The risk bars (treeRows RISK_BARS_PARTS, 10px wide): the lane after the icon takes no room (its width and the gap
+     before it cancel out), and the mark is drawn over the indent ${LEAD_GAP}px left of the icon, so a marked row lines
+     up with the rest. A file at the tree's root has only the row's padding there: with one marked (\`data-lead-room\`),
+     every row starts ${LEAD_ROOM}px further in, so the mark stays inside its row and all rows still line up. */
+  [data-item-section="lead"]:has(> [data-item-part-id="risk"]) {
+    width: 0;
+    margin-inline-start: calc(-1 * var(--trees-item-row-gap));
+    overflow: visible;
+  }
+  [data-item-part-id="risk"] {
+    display: grid;
+    place-items: center;
+    transform: translateX(calc(-1 * (var(--trees-icon-width) + ${LEAD_WIDTH + LEAD_GAP}px)));
+    cursor: inherit;
+  }
+  :host([data-lead-room]) [data-type="item"] {
+    padding-inline-start: calc(var(--trees-item-padding-x) + ${LEAD_ROOM}px);
   }
   [data-item-muted="true"] > :is([data-item-section="content"], [data-item-section="icon"], [data-item-section="trail"], [data-item-section="git"]) {
     opacity: 0.5;

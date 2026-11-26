@@ -934,3 +934,65 @@ describe("a walkthrough", () => {
     expect(guideOf(w, sent.message_id).walkthrough).toBeUndefined();
   });
 });
+
+describe("On this computer's routes (inbox-local-work.ts)", () => {
+  const sameOrigin = { "Sec-Fetch-Site": "same-origin" };
+  test("the window's own reads: a program without the window's mark or another site is refused, Code review off too", async () => {
+    const w = await world();
+    await w.call("send_message", { body: "Working on retries." });
+    writeFileSync(join(w.project, "retry.ts"), "export const retries = 3;\n");
+    // An agent's program on this computer: no Origin, no Sec-Fetch-Site.
+    for (const path of ["/api/inbox/reviews/local", "/api/inbox/reviews/local/diff?project=x", "/api/inbox/reviews/local/refs", "/api/inbox/reviews/local/diff?folder=%2F"]) {
+      const res = await fetch(`${w.base}${path}`);
+      expect([res.status, ((await res.json()) as { code: string }).code]).toEqual([403, "window_only"]);
+      const cross = await fetch(`${w.base}${path}`, { headers: { Origin: "https://example.com", "Sec-Fetch-Site": "cross-site" } });
+      expect(cross.status).toBe(403);
+    }
+    const off = await fetch(`${w.base}/api/inbox/reviews/local`, { headers: sameOrigin });
+    expect([off.status, ((await off.json()) as { code: string }).code]).toEqual([409, "code_review_off"]);
+  });
+
+  test("the window reads the project folder's uncommitted changes, and their diff; a bad branch name is refused", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    await w.call("send_message", { body: "Working on retries." });
+    writeFileSync(join(w.project, "retry.ts"), "export const retries = 3;\n");
+    const projects = (await (await fetch(`${w.base}/api/inbox/projects`)).json()) as { projects: { id: string; root: string }[] };
+    const id = projects.projects.find((p) => p.root === w.project)!.id;
+    const list = await fetch(`${w.base}/api/inbox/reviews/local`, { headers: sameOrigin });
+    expect(list.status).toBe(200);
+    const answer = (await list.json()) as { items: { project_id: string; kind: string }[]; unread: number };
+    expect(answer.items).toEqual([expect.objectContaining({ project_id: id, kind: "uncommitted" })]);
+    const diff = await fetch(`${w.base}/api/inbox/reviews/local/diff?project=${id}`, { headers: sameOrigin });
+    expect(diff.status).toBe(200);
+    expect(((await diff.json()) as { patch: string }).patch).toContain("+export const retries = 3;");
+    const bad = await fetch(`${w.base}/api/inbox/reviews/local/diff?project=${id}&branch=${encodeURIComponent("--output=/tmp/x")}`, { headers: sameOrigin });
+    expect(bad.status).toBe(400);
+  });
+
+  test("the +: the projects and a project's branches; `folder=` only for a folder git lists or the folder opener accepts", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    await w.call("send_message", { body: "Working on retries." });
+    const projects = (await (await fetch(`${w.base}/api/inbox/projects`)).json()) as { projects: { id: string; root: string }[] };
+    const id = projects.projects.find((p) => p.root === w.project)!.id;
+    const step = (await (await fetch(`${w.base}/api/inbox/reviews/local/refs`, { headers: sameOrigin })).json()) as { projects: { project_id: string }[] };
+    expect(step.projects.map((p) => p.project_id)).toContain(id);
+    const refs = await fetch(`${w.base}/api/inbox/reviews/local/refs?project=${id}`, { headers: sameOrigin });
+    expect(refs.status).toBe(200);
+    expect((await refs.json()) as object).toMatchObject({ project_id: id, folders: [] });
+    // Option-looking, `..` or bare values: refused before any git; a folder that is neither a listed worktree nor one
+    // the folder opener accepts (the disk's root, the project's parent): no diff.
+    for (const folder of ["--output=/tmp/x", `${w.project}/../x`, "x"]) {
+      const res = await fetch(`${w.base}/api/inbox/reviews/local/diff?project=${id}&folder=${encodeURIComponent(folder)}`, { headers: sameOrigin });
+      expect([folder, res.status]).toEqual([folder, 400]);
+    }
+    for (const folder of ["/", join(w.project, "..")]) {
+      const res = await fetch(`${w.base}/api/inbox/reviews/local/diff?project=${id}&folder=${encodeURIComponent(folder)}`, { headers: sameOrigin });
+      expect([folder, res.status]).toEqual([folder, 404]);
+    }
+    // A kept key that names nothing here is no row.
+    const kept = (await (await fetch(`${w.base}/api/inbox/reviews/local?keep=${encodeURIComponent(`${id}:no/such-branch`)}`, { headers: sameOrigin })).json()) as { kept: unknown[] };
+    expect(kept.kept).toEqual([]);
+  });
+});

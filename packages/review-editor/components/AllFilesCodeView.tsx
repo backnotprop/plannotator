@@ -4,6 +4,7 @@ import { COMPACT_FILE_HEADER_HEIGHT, COMPACT_HUNK_SEPARATOR_HEIGHT, FILE_HEADER_
 import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
+import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
 import { revealFirstChange } from '../utils/revealFirstChange';
 import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch, hydratePartialDiff, processFile } from '@pierre/diffs';
 import type {
@@ -25,6 +26,7 @@ import type {
   ConventionalDecoration,
   ConventionalLabel,
   DiffAnnotationMetadata,
+  ImageAttachment,
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
@@ -99,6 +101,7 @@ import {
   type HostFileNote,
   type HostLineNote,
 } from './hostLineNotes';
+import { dropHostLineMarks, HOST_LINE_MARKS_CSS, keepHostLineMarks, NO_HOST_LINE_MARKS, type HostLineMark, type OnHostLineMark } from './hostLineMarks';
 import { applyFileLanguageFixes } from '../utils/highlightLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
@@ -230,6 +233,11 @@ export interface AllFilesCodeViewProps {
   /** What the host draws itself about a whole file (hostLineNotes.ts): in the file's header, under its path, above its
    *  first lines and the person's own file comments; read-only, never annotations. Absent: none, as before. */
   hostFileNotes?: readonly HostFileNote[];
+  /** The host's marks at the right edge of lines (hostLineMarks.ts): a button at each marked line's end, never over
+   *  code. Only a view of one file draws them. Absent: none, as before. */
+  hostLineMarks?: readonly HostLineMark[];
+  /** Hears the marks: hover, keyboard focus, a press (hostLineMarks.ts). */
+  onHostLineMark?: OnHostLineMark;
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   lineTarget?: AllFilesLineTarget | null;
@@ -327,7 +335,8 @@ export interface AllFilesCodeViewProps {
   onExplainAnnotation?: (id: string) => void;
   agentFindingSources?: ReadonlySet<string>;
   // Header actions (P3). Mirror AllFilesDiffView's header surface.
-  onAddFileCommentForFile?: (filePath: string, text: string) => void;
+  /** A file's comment box: its words and what was attached (pictures, files). */
+  onAddFileCommentForFile?: (filePath: string, text: string, images?: ImageAttachment[]) => void;
   viewedFiles?: Set<string>;
   onToggleViewed?: (filePath: string) => void;
   /** Chrome preference (#1277): false hides the header Viewed buttons; the `v`
@@ -506,7 +515,7 @@ export interface AllFilesCodeViewProps {
   askOnly?: boolean;
   /**
    * A host's choices for selected lines before the comment box (the Inbox's
-   * code review: Comment · Ask · Show me). Absent: a selection opens the
+   * code review: Comment · Ask). Absent: a selection opens the
    * comment box at once, as always.
    */
   selectionActions?: DiffSelectionActions;
@@ -886,7 +895,19 @@ function stickyHeaderHeight(node: HTMLElement | undefined): number {
   return node?.shadowRoot?.querySelector('[data-diffs-header]')?.getBoundingClientRect().height || FILE_HEADER_HEIGHT;
 }
 
-export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
+/**
+ * The diff in its own boundary: a draw that throws (a "+" on a line, the comment box under it) says so in the diff's
+ * place, and the page around it stays (ui's RegionBoundary). The selection a "+" sets is the host's, above the
+ * boundary: Try again clears it first, or the diff would draw it again and fail again. The words typed in the comment
+ * box are not in it (the toolbar's draft store keeps them by file and lines), so they are there when the box opens again.
+ */
+export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = (props) => (
+  <RegionBoundary name="Diff" onRetry={() => props.onLineSelection(null)}>
+    <AllFilesCodeViewBody {...props} />
+  </RegionBoundary>
+);
+
+const AllFilesCodeViewBody: React.FC<AllFilesCodeViewProps> = ({
   files,
   diffStyle,
   diffOverflow,
@@ -901,6 +922,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   annotations,
   hostLineNotes = NO_HOST_LINE_NOTES,
   hostFileNotes = NO_HOST_FILE_NOTES,
+  hostLineMarks = NO_HOST_LINE_MARKS,
+  onHostLineMark,
   selectedAnnotationId,
   scrollTargetAnnotation,
   lineTarget,
@@ -2429,11 +2452,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const powerUp = powerUpRef.current;
     if (!client || !texts || !powerUp?.active) return;
     const { file, oldText, newText, generation, signal } = texts;
-    const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+    const stale = () => signal.aborted || fileSetKeyRef.current !== generation || powerUpRef.current !== powerUp;
     const hadLinks = (powerUpFilesRef.current.get(itemId)?.links.length ?? 0) > 0;
     powerUpFilesRef.current.set(itemId, { state: 'asking', links: [] });
     reportPowerUp();
-    void client.diff(file.path, oldText, newText, signal, { rejected: powerUp.rejected }).then((result) => {
+    void client.diff(file.path, oldText, newText, signal, powerUp).then((result) => {
       if (stale()) return;
       const report = result?.secondOpinion;
       if (!result || !report) {
@@ -2494,20 +2517,38 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     restartPowerUpStream();
   }, [powerUpStream]);
   const powerUpRetry = powerUp?.retry ?? 0;
+  const settingsRevision = powerUp?.settingsRevision ?? 0;
+  const previousSettingsRevision = useRef(settingsRevision);
   useEffect(() => {
-    if (!powerUpActive) {
+    const providerChanged = previousSettingsRevision.current !== settingsRevision;
+    previousSettingsRevision.current = settingsRevision;
+    if (!powerUpActive || providerChanged) {
       const client = semClientRef.current;
+      const config = powerUpRef.current;
+      const restoring = new Set<string>();
       for (const [itemId, entry] of powerUpFilesRef.current) {
         const texts = semTextsRef.current.get(itemId);
         if (entry.links.length === 0 || !client || !texts) continue;
+        restoring.add(itemId);
         const { file, oldText, newText, generation, signal } = texts;
-        const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+        const stale = () => signal.aborted || fileSetKeyRef.current !== generation || powerUpRef.current !== config;
+        if (powerUpActive) {
+          showSemantic(itemId, false);
+          semDiffsRef.current.delete(itemId);
+          semStateRef.current.delete(itemId);
+          refreshItem(itemId);
+        }
         void client.diff(file.path, oldText, newText, signal).then((result) => {
-          if (result && !stale()) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {}, true, undefined, true);
+          if (stale()) return;
+          if (result) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {}, true, undefined, true);
+          if (powerUpActive) runPowerUp(itemId);
         });
       }
       powerUpFilesRef.current = new Map();
       reportPowerUp();
+      if (powerUpActive) {
+        for (const itemId of semTextsRef.current.keys()) if (!restoring.has(itemId)) runPowerUp(itemId);
+      }
       return;
     }
     for (const [itemId, entry] of powerUpFilesRef.current) {
@@ -2515,7 +2556,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
     for (const itemId of semTextsRef.current.keys()) if (!powerUpFilesRef.current.has(itemId)) runPowerUp(itemId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rejectedKey, powerUpActive, powerUpRetry]);
+  }, [rejectedKey, powerUpActive, powerUpRetry, settingsRevision]);
 
   const prefetchWholeFile = useCallback((itemId: string) => {
     const hostRead = fetchFileContentRef.current;
@@ -2763,6 +2804,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     for (const itemId of itemNodeRef.current.keys()) if (!semDiffsRef.current.has(itemId)) prefetchWholeFile(itemId);
   }, [semanticEnabled, prefetchWholeFile]);
 
+  // The host's line marks (hostLineMarks.ts): this view's file's, kept on its lines each time the file draws, and
+  // again on every drawn file when they change.
+  const onlyPath = files.length === 1 ? files[0]!.path : null;
+  const lineMarks = useMemo(() => (onlyPath ? hostLineMarks.filter((mark) => mark.filePath === onlyPath) : NO_HOST_LINE_MARKS), [hostLineMarks, onlyPath]);
+  const lineMarksRef = useRef(lineMarks);
+  lineMarksRef.current = lineMarks;
+  const onHostLineMarkRef = useRef(onHostLineMark);
+  onHostLineMarkRef.current = onHostLineMark;
+  useEffect(() => {
+    for (const node of itemNodeRef.current.values()) if (node.shadowRoot) keepHostLineMarks(node.shadowRoot, lineMarks, onHostLineMarkRef.current);
+  }, [lineMarks, onHostLineMark]);
+
   const handlePostRender = useStableCallback(
     (
       node: HTMLElement,
@@ -2774,6 +2827,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (!hasFirstCodePainted()) requestAnimationFrame(() => setTimeout(markFirstCodePainted, 0));
       if (phase === 'unmount') {
         clearItemSearchHighlights(node);
+        if (node.shadowRoot) dropHostLineMarks(node.shadowRoot);
         nodeToItemIdRef.current.delete(node);
         if (itemNodeRef.current.get(context.id) === node) itemNodeRef.current.delete(context.id);
         return;
@@ -2795,6 +2849,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (heldSelectionIdRef.current === context.id && context.fileDiff.isPartial !== true) setWholeAfterHold((n) => n + 1);
       if (flushesFiles) syncTrailingRow(node, context);
       if (powerUpStreamRef.current) keepPowerUpInStep(node);
+      if (node.shadowRoot) keepHostLineMarks(node.shadowRoot, lineMarksRef.current, onHostLineMarkRef.current);
       prefetchWholeFile(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
@@ -3061,6 +3116,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
               'F', a.id, a.text ?? '', a.source ?? '', a.author ?? '',
               a.reviewProfileLabel ?? '', a.conventionalLabel ?? '',
               (a.decorations ?? []).join(','), a.createdAt ?? 0, a.reasoning ?? '',
+              (a.images ?? []).map((image) => image.path),
             ])
           : JSON.stringify([
               a.id, a.lineEnd, a.side, a.type,
@@ -4204,6 +4260,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             data-pn-touch-target-icon={compactTouchLayout || undefined}
             className="flex items-center justify-center w-6 h-6 rounded hover:bg-foreground/10 transition-colors flex-shrink-0"
             title={collapsed ? 'Expand diff' : 'Collapse diff'}
+            data-file-collapse-toggle={collapsed ? 'collapsed' : 'expanded'}
           >
             <svg
               className={`w-3 h-3 transition-transform ${collapsed ? '' : 'rotate-90'}`}
@@ -4361,10 +4418,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const getMinimapViewer = useCallback(() => viewerRef.current?.getInstance(), []);
   const getMinimapScroller = useCallback(() => scrollRef.current, []);
 
+  // The host's line marks: buttons inside each file's shadow root, so only a view of one file can say which file's lines.
+  const lineMarksCss = lineMarks.length > 0 ? HOST_LINE_MARKS_CSS : '';
+
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
-      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}`,
+      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}${lineMarksCss}`,
       ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
       diffStyle,
       overflow: diffOverflow,
@@ -4439,6 +4499,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       pierreTheme.syntaxTheme,
       powerUpActive,
       powerUpMotion,
+      lineMarksCss,
       diffStyle,
       diffOverflow,
       diffIndicators,
@@ -4606,8 +4667,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           contextText={fileCommentAnchor.filePath.split('/').pop() || fileCommentAnchor.filePath}
           isGlobal={false}
           draftKey={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${fileCommentAnchor.filePath}`}
-          onSubmit={(text) => {
-            onAddFileCommentForFile(fileCommentAnchor.filePath, text);
+          onSubmit={(text, images) => {
+            onAddFileCommentForFile(fileCommentAnchor.filePath, text, images);
             setFileCommentAnchor(null);
           }}
           onClose={() => setFileCommentAnchor(null)}
