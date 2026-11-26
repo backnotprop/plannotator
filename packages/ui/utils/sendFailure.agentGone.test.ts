@@ -3,22 +3,18 @@
  *
  * What regresses if this fails: the page shows a gone agent's refusal as a
  * generic server error, offers a Retry that can never reach anyone, or, after
- * the server quit because its agent left, blames an unreachable Plannotator
+ * the review ended because its agent left, blames an unreachable Plannotator
  * instead of saying the agent is gone.
  */
 import { describe, expect, test } from 'bun:test';
-// The servers' codes, from the module both servers use. @plannotator/ui ships
-// to outside consumers and cannot depend on the private shared package, so it
-// keeps its own copies; this pins them to the servers'.
+// The codes both review servers answer with (packages/shared/review-agent-gone.ts
+// re-exports them from packages/core/review-agent-gone-words.ts).
 import {
   AGENT_AWAY_CODE as SERVER_AGENT_AWAY_CODE,
   AGENT_GONE_CODE as SERVER_AGENT_GONE_CODE,
   NO_SESSION_CODE as SERVER_NO_SESSION_CODE,
 } from '../../shared/review-agent-gone';
 import {
-  AGENT_AWAY_CODE,
-  AGENT_GONE_CODE,
-  NO_SESSION_CODE,
   assertSendOk,
   canRetrySend,
   DecisionSendError,
@@ -62,17 +58,15 @@ describe('agent gone', () => {
     expect(describeSendFailure(failure!)).not.toContain('gone');
   });
 
-  test("the page's codes are the servers' codes", () => {
-    expect([AGENT_GONE_CODE, AGENT_AWAY_CODE, NO_SESSION_CODE]).toEqual([SERVER_AGENT_GONE_CODE, SERVER_AGENT_AWAY_CODE, SERVER_NO_SESSION_CODE]);
-  });
-
   test('any other 410 stays a plain rejection', async () => {
     expect(await failureFor(Response.json({ error: 'x' }, { status: 410 }))).toEqual({ kind: 'rejected', status: 410 });
   });
 
-  test('a send after the page heard the agent is gone reads as agent-gone, whatever it ran into', () => {
+  test('a send after the page heard the agent is gone: an unreachable server reads as agent-gone, any other answer as itself', () => {
     const unreachable = new DecisionSendError({ kind: 'unreachable' });
     expect(sendFailureOf(sendErrorAfterAgentGone(unreachable, true))).toEqual({ kind: 'agent-gone' });
     expect(sendErrorAfterAgentGone(unreachable, false)).toBe(unreachable);
+    const decided = new DecisionSendError({ kind: 'decided' });
+    expect(sendErrorAfterAgentGone(decided, true)).toBe(decided);
   });
 });

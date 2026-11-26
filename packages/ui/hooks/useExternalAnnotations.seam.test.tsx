@@ -172,11 +172,13 @@ describe('session-closed event', () => {
       clear: async () => {},
     });
     const closed: Array<{ unsent: number; by: string | undefined }> = [];
+    const agentGone: boolean[] = [];
     const resultRef: { current: HookResult | null } = { current: null };
     function ClosingHarness() {
       resultRef.current = useExternalAnnotations<TestAnnotation>({
         enabled: true,
         onSessionClosed: (event) => closed.push({ unsent: event.unsentAnnotations, by: event.by }),
+        onAgentGone: (gone) => agentGone.push(gone),
       });
       return null;
     }
@@ -192,15 +194,16 @@ describe('session-closed event', () => {
       emit?.({ type: 'session-closed', by: 'agent', unsentAnnotations: 4 });
       // Plan mode / the agent session ended (Pi's plan review): not an agent close.
       emit?.({ type: 'session-closed', by: 'session', unsentAnnotations: 1 });
-      // A local code review whose agent is gone: the page keeps itself and says so.
-      emit?.({ type: 'session-closed', by: 'gone', unsentAnnotations: 2 });
       // An unknown closer reads as the agent, as before the field had variants.
       emit?.({ type: 'session-closed', by: 'later-kind', unsentAnnotations: 0 });
+      // A code review's agent left, then came back: neither closes the review.
+      emit?.({ type: 'agent-gone', gone: true });
+      emit?.({ type: 'agent-gone', gone: false });
     });
+    expect(agentGone).toEqual([true, false]);
     expect(closed).toEqual([
       { unsent: 4, by: 'agent' },
       { unsent: 1, by: 'session' },
-      { unsent: 2, by: 'gone' },
       { unsent: 0, by: 'agent' },
     ]);
     expect(resultRef.current?.externalAnnotations.map((a) => a.id)).toEqual(['x']);

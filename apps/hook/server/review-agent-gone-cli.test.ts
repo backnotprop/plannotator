@@ -8,8 +8,10 @@
  * What regresses if this fails:
  * - a backgrounded review whose agent still reads it is ended under the
  *   agent (reparenting taken for "gone");
- * - the local review keeps its server forever after its reader quit (the
- *   pile of leftover programs), or deletes the reviewer's comments as it ends;
+ * - the local review ends while its tab is still open (a reload finds
+ *   nothing), the tab is never told nobody can take a Send, or the review
+ *   keeps its server forever after its reader quit and its tab was closed
+ *   (the pile of leftover programs), or deletes the reviewer's comments as it ends;
  * - opening the same review again no longer brings the comments back;
  * - Send to the gone agent answers ok (the silent loss), or Send to a live
  *   agent stops deleting the draft;
@@ -189,17 +191,52 @@ describe("a local review started in the background", () => {
   }, 40_000);
 });
 
+/** A tab's event stream on the review: the `agent-gone` events it hears, in order. */
+async function tabStream(base: string) {
+  const controller = new AbortController();
+  const response = await fetch(`${base}/api/external-annotations/stream`, { signal: controller.signal });
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  const heard: boolean[] = [];
+  let buffer = "";
+  void (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          if (!chunk.startsWith("data: ")) continue;
+          const event = JSON.parse(chunk.slice(6)) as { type?: string; gone?: boolean };
+          if (event.type === "agent-gone") heard.push(event.gone === true);
+        }
+      }
+    } catch {
+      // Closed.
+    }
+  })();
+  return {
+    heard,
+    close: () => controller.abort(),
+  };
+}
+
 describe("a local review whose agent quit", () => {
-  test("refuses Send, ends by itself keeping the draft, and the comments come back when the same review is opened again", async () => {
+  test("stays open for its tab, which hears it and keeps its draft (a reload too); Send is refused; once the tab is closed it ends, and the comments come back when the same review is opened again", async () => {
     const { root, dataDir } = workspace();
     const firstReady = join(root, "ready-1");
     const secondReady = join(root, "ready-2");
     let run: Awaited<ReturnType<typeof backgrounded>> | undefined;
     let reopened: ReturnType<typeof Bun.spawn> | undefined;
+    let tab: Awaited<ReturnType<typeof tabStream>> | undefined;
     try {
-      run = await backgrounded(root, cliEnv(root, dataDir, firstReady), ["--patch-file", "change.patch"]);
+      // The grace with no tab open, shortened for this run (sandbox only).
+      run = await backgrounded(root, cliEnv(root, dataDir, firstReady, { PLANNOTATOR_TEST_SANDBOX: "1", PLANNOTATOR_TEST_REVIEW_NO_TAB_MS: "3000" }), ["--patch-file", "change.patch"]);
       const base = await baseOf(firstReady);
       expect((await saveDraft(base)).status).toBe(200);
+      tab = await tabStream(base);
 
       // The agent quits: nobody reads the review's stdout any more.
       kill(run.reader.pid);
@@ -210,9 +247,25 @@ describe("a local review whose agent quit", () => {
       expect(refused.status).toBe(410);
       expect(await refused.json()).toMatchObject({ code: "agent_gone" });
 
-      // The program quits by itself at its next look.
+      // The tab hears it at the next look, and the review stays open for it.
+      const firstTab = tab;
+      await waitFor(() => firstTab.heard.includes(true), PARENT_CHECK_MS + 8_000, "the tab to hear the agent is gone");
+      await Bun.sleep(5_000);
+      expect(alive(run.cliPid)).toBe(true);
+
+      // A reload: the new tab hears it at once, and the draft is all there.
+      firstTab.close();
+      tab = await tabStream(base);
+      const reloaded = tab;
+      await waitFor(() => reloaded.heard.includes(true), 3_000, "the reloaded tab to hear the agent is gone");
+      const kept = await (await fetch(`${base}/api/draft`)).json();
+      expect(kept.codeAnnotations[0].text).toBe("Why 2?");
+      expect(alive(run.cliPid)).toBe(true);
+
+      // The tab is closed: the program quits by itself once the grace passed.
+      reloaded.close();
       const reviewPid = run.cliPid;
-      await waitFor(() => !alive(reviewPid), PARENT_CHECK_MS + 8_000, "the review to exit");
+      await waitFor(() => !alive(reviewPid), PARENT_CHECK_MS * 2 + 8_000, "the review to exit");
 
       // Opened again (by an agent that is here): the comments are offered back.
       reopened = Bun.spawn([process.execPath, "run", entry, "review", "--patch-file", "change.patch"], {
@@ -233,12 +286,13 @@ describe("a local review whose agent quit", () => {
       expect(await reopened.exited).toBe(0);
       expect(await new Response(reopened.stdout).text()).toContain("Why 2?");
     } finally {
+      tab?.close();
       kill(run?.cliPid);
       kill(run?.reader.pid);
       kill(run?.watchdogPid);
       kill(reopened?.pid);
     }
-  }, 50_000);
+  }, 80_000);
 });
 
 describe("a PR review whose agent quit", () => {
@@ -256,6 +310,8 @@ describe("a PR review whose agent quit", () => {
       run = await backgrounded(
         root,
         cliEnv(root, dataDir, readyFile, {
+          PLANNOTATOR_TEST_SANDBOX: "1",
+          PLANNOTATOR_TEST_REVIEW_NO_TAB_MS: "1000",
           PLANNOTATOR_BITBUCKET_API_URL: fake.apiUrl,
           PLANNOTATOR_BITBUCKET_EMAIL: EMAIL,
           PLANNOTATOR_BITBUCKET_TOKEN: TOKEN,
@@ -266,9 +322,13 @@ describe("a PR review whose agent quit", () => {
 
       kill(run.reader.pid);
       await run.reader.exited;
-      // Longer than a local review takes to end.
+      // No tab has it open, for longer than a local review waits before it ends.
       await Bun.sleep(PARENT_CHECK_MS + 5_000);
       expect(alive(run.cliPid)).toBe(true);
+      // A tab opened now hears that nobody can take a Send.
+      const tab = await tabStream(base);
+      await waitFor(() => tab.heard.includes(true), 3_000, "the tab to hear the agent is gone");
+      tab.close();
       expect((await fetch(`${base}/api/diff`)).status).toBe(200);
 
       const posted = await fetch(`${base}/api/pr-action`, {

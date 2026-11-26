@@ -5,9 +5,12 @@
  * Each watch answers two questions:
  * - `presence()`, asked on every Send: can the decision be received right
  *   now? Evaluated live, never latched where the agent can come back.
- * - `ended()`, asked by the 10 s timer: is the agent surely gone, so a local
- *   review may end? Once true it stays true. Any doubt answers false: ending
- *   a review under a live agent is the outcome that must never happen.
+ * - `ended()`, asked by the 10 s timer: is the agent surely gone, so the
+ *   page is told and, once no tab has it open, a local review may end? Any
+ *   doubt answers false: ending a review under a live agent is the outcome
+ *   that must never happen. The stdout reader's answer stays true once true
+ *   (a pipe nobody reads cannot be read again); a mod launch's follows its
+ *   lease, so a resume brings the agent back.
  *
  * The CLI can watch two kinds of reader:
  * - The process reading its stdout (an agent's shell command, the OpenCode
@@ -34,6 +37,7 @@ import { readFileSync, writeSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { AgentPresence } from "@plannotator/shared/review-agent-gone";
+import { AGENT_GONE_CLI_LINE } from "@plannotator/core/review-agent-gone-words";
 import { takeHostResultPath } from "./host-result";
 import { PARENT_CHECK_MS, stdoutIsPipe, watchesParent } from "./orphan-plan-review";
 
@@ -60,14 +64,11 @@ export const SLEEP_GAP_MS = 3 * PARENT_CHECK_MS;
 export const PROBE_EVERY_MS = PARENT_CHECK_MS;
 export const PROBE_MAX_GAP_MS = 60_000;
 
-/** How long the open tab gets to hear that the review ended (and save its last edits) before the server stops. */
-export const AGENT_GONE_ANNOUNCE_MS = 1_000;
-
 export interface AgentWatch {
   readonly kind: "parent" | "mod";
   /** For Send: can a decision be received now. */
   presence(): AgentPresence;
-  /** For ending a local review: the agent is surely gone. Latched. */
+  /** For the page and for ending a local review: the agent is surely gone (see the top of this file). */
   ended(): boolean;
 }
 
@@ -165,7 +166,6 @@ export function modLeaseAgentWatch(options: {
   let lastLookAt: number | null = null;
   let lastStamp: number | null = null;
   let renewedAt = options.now();
-  let ended = false;
   const gone = (): boolean => {
     const t = options.now();
     // Asleep since the last look: the mod could not renew either.
@@ -187,10 +187,8 @@ export function modLeaseAgentWatch(options: {
   return {
     kind: "mod",
     presence: () => (gone() ? "gone" : "here"),
-    ended: () => {
-      if (!ended) ended = gone();
-      return ended;
-    },
+    // Not latched: a resume takes the lease again, and the agent is back.
+    ended: gone,
   };
 }
 
@@ -261,37 +259,72 @@ export function cliReviewAgentWatch(): AgentWatch | null {
 }
 
 /**
- * Ends a local code review once its agent is surely gone: tells the open tab,
- * gives it a moment, stops the server and exits with `AGENT_GONE_EXIT_CODE`.
- * No decision, no archive, no result record: the draft stays. Looks every
- * `PARENT_CHECK_MS`; the timer is unref'd. Never ends a review that was
- * decided: `announceAgentGone` answers false then, and the returned stop
- * (called as soon as a decision is taken) cancels a pending end too.
+ * How long a local review whose agent is gone waits with no tab open (no
+ * event stream: the page was closed, not reloaded) before it ends. Counted in
+ * looks of this process, not by the clock, so a machine that slept with the
+ * tab open does not end it on waking before the tab reconnects.
+ */
+export const AGENT_GONE_NO_TAB_MS = 2 * 60_000;
+
+/**
+ * The grace a spec may set on the CLI, heard only in the test sandbox
+ * (`PLANNOTATOR_TEST_SANDBOX`): `PLANNOTATOR_TEST_REVIEW_NO_TAB_MS`.
+ */
+export function noTabMsFromEnv(env: Record<string, string | undefined>): number | undefined {
+  if (!env.PLANNOTATOR_TEST_SANDBOX) return undefined;
+  const value = Number(env.PLANNOTATOR_TEST_REVIEW_NO_TAB_MS);
+  return env.PLANNOTATOR_TEST_REVIEW_NO_TAB_MS && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * Watches a local code review's agent. While the agent is gone the review
+ * stays open for every tab that has it (the page says nobody can receive a
+ * decision, keeps every comment and keeps saving its draft, and Send is
+ * refused), and says it to tabs opened later too. When the agent comes back
+ * (a mod launch whose lease is taken again), the page is told that too. Once
+ * the agent is gone and no tab has had the review open for
+ * `AGENT_GONE_NO_TAB_MS`, the review ends: the server stops and the process
+ * exits with `AGENT_GONE_EXIT_CODE`. No decision, no archive, no result
+ * record: the draft stays for the next review of the same changes. Looks every
+ * `PARENT_CHECK_MS`; the timer is unref'd. Never touches a review that was
+ * decided (`setAgentGone` answers false then), and the returned stop (called
+ * as soon as a decision is taken) ends the watch.
  */
 export function endReviewWhenAgentGone(
   watch: AgentWatch,
-  server: { announceAgentGone(): boolean; stop(): void },
-  options: { everyMs?: number; exit?: (code: number) => void } = {},
+  server: { setAgentGone(gone: boolean): boolean; openTabs(): number; stop(): void },
+  options: { everyMs?: number; noTabMs?: number; exit?: (code: number) => void } = {},
 ): () => void {
   const exit = options.exit ?? ((code: number) => process.exit(code));
+  const everyMs = options.everyMs ?? PARENT_CHECK_MS;
+  const noTabLooks = Math.max(1, Math.ceil((options.noTabMs ?? AGENT_GONE_NO_TAB_MS) / everyMs));
   let stopped = false;
-  let ending: ReturnType<typeof setTimeout> | null = null;
-  const timer = setInterval(() => {
-    if (stopped || ending || !watch.ended()) return;
-    clearInterval(timer);
-    if (!server.announceAgentGone()) return;
-    console.error("Plannotator: the agent that asked for this review is gone, so the review ends. Its draft is kept.");
-    ending = setTimeout(() => {
-      if (stopped) return;
-      server.stop();
-      exit(AGENT_GONE_EXIT_CODE);
-    }, AGENT_GONE_ANNOUNCE_MS);
-  }, options.everyMs ?? PARENT_CHECK_MS);
-  timer.unref?.();
-  return () => {
+  let announced = false;
+  let looksWithNoTab = 0;
+  const stop = () => {
     stopped = true;
     clearInterval(timer);
-    if (ending) clearTimeout(ending);
   };
+  const timer = setInterval(() => {
+    if (stopped) return;
+    const gone = watch.ended();
+    if (gone !== announced) {
+      if (!server.setAgentGone(gone)) return stop();
+      announced = gone;
+    }
+    if (!gone || server.openTabs() > 0) {
+      looksWithNoTab = 0;
+      return;
+    }
+    looksWithNoTab += 1;
+    if (looksWithNoTab < noTabLooks) return;
+    // Decided meanwhile: leave it to deliver that decision.
+    if (!server.setAgentGone(true)) return stop();
+    stop();
+    console.error(AGENT_GONE_CLI_LINE);
+    server.stop();
+    exit(AGENT_GONE_EXIT_CODE);
+  }, everyMs);
+  timer.unref?.();
+  return stop;
 }
-

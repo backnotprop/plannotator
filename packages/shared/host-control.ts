@@ -159,14 +159,12 @@ export function handleHostControlRequest(request: HostControlRequest, route: Hos
 
 /**
  * The external-annotation SSE event that tells open tabs the review was
- * closed: by the agent (`POST /api/host/close`, the `plannotator` tool),
- * `"session"`, because plan mode or the agent session itself ended, or
- * `"gone"`, because a local code review's agent is gone and its server is
- * quitting (packages/shared/review-agent-gone.ts).
+ * closed: by the agent (`POST /api/host/close`, the `plannotator` tool) or,
+ * `"session"`, because plan mode or the agent session itself ended.
  */
 export interface HostSessionClosedEvent {
 	type: "session-closed";
-	by: "agent" | "session" | "gone";
+	by: "agent" | "session";
 	unsentAnnotations: number;
 }
 

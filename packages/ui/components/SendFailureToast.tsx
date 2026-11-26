@@ -54,7 +54,7 @@ export function dismissSendFailureToast(): void {
  * from the theme, since the Toasters run sonner's light theme and its
  * secondary fill disappears on a dark card.
  */
-function CopyFeedbackButton({ getText }: { getText: () => string | undefined }) {
+export function CopyFeedbackButton({ getText }: { getText: () => string | undefined }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   return (
     <button

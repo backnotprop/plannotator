@@ -2,7 +2,8 @@
  * Whether a local code review's agent is gone (review-agent-watch.ts).
  *
  * What regresses if this fails: a review whose agent quit keeps its server
- * forever (the pile of leftover programs), or a review whose agent is still
+ * forever after its page was closed (the pile of leftover programs), or ends
+ * while its page is still open (a reload finds nothing), or a review whose agent is still
  * there (a backgrounded launch still read, a live Claude Code session whose
  * timer stalled, a quick `claude --continue`, a laptop that slept) is ended
  * under the person, or Send says "gone" to a session that came back.
@@ -260,15 +261,16 @@ describe("a Claude Code mod launch's lease", () => {
     expect(run.pass(60 * 60_000)).toBe(false);
   });
 
-  // H3: Send asks live. A session that came back is "here" for Send even after a look said "gone".
-  test("Send's answer is never latched; only the end decision is", () => {
+  // H3: Send asks live. A session that came back is "here" for Send, and for the page, even after a look said "gone".
+  test("never latched: a resume after the agent counted as gone brings it back, for Send and for the page", () => {
     const run = leaseRun();
     run.set({ owner: null, at: 0, touchedAt: 0, pid: 777 });
     run.hostQuits();
-    run.pass(MOD_AGENT_GONE_AFTER_MS + 10_000);
+    expect(run.pass(MOD_AGENT_GONE_AFTER_MS + 10_000)).toBe(true);
     expect(run.watch.presence()).toBe("gone");
     run.renew("mod-b", 888);
     expect(run.watch.presence()).toBe("here");
+    expect(run.watch.ended()).toBe(false);
   });
 
   test("the lease's pid is read only when it is a real pid", () => {
@@ -317,28 +319,50 @@ describe("a Claude Code mod launch's lease", () => {
   });
 });
 
-describe("ending the review", () => {
+describe("a local review whose agent is gone", () => {
   function watchOf(ended: () => boolean): AgentWatch {
     return { kind: "parent", presence: () => (ended() ? "gone" : "here"), ended };
   }
-
-  test("once gone: tells the tab, then stops the server and exits with the agent-gone code; never while here", async () => {
-    let gone = false;
+  function serverStub(options: { tabs?: () => number; decided?: () => boolean } = {}) {
     const events: string[] = [];
+    return {
+      events,
+      server: {
+        setAgentGone: (gone: boolean) => {
+          if (options.decided?.()) return false;
+          if (events.at(-1) !== `gone:${gone}`) events.push(`gone:${gone}`);
+          return true;
+        },
+        openTabs: options.tabs ?? (() => 0),
+        stop: () => events.push("stop"),
+      },
+    };
+  }
+
+  test("stays open while a tab has it, telling the page; ends only once no tab has had it for the grace, with the agent-gone code", async () => {
+    let gone = false;
+    let tabs = 1;
     const exits: number[] = [];
-    const stop = endReviewWhenAgentGone(
-      watchOf(() => gone),
-      { announceAgentGone: () => (events.push("announce"), true), stop: () => events.push("stop") },
-      { everyMs: 5, exit: (code) => exits.push(code) },
-    );
+    const { events, server } = serverStub({ tabs: () => tabs });
+    const stop = endReviewWhenAgentGone(watchOf(() => gone), server, { everyMs: 5, noTabMs: 50, exit: (code) => exits.push(code) });
     try {
       await Bun.sleep(40);
       expect(events).toEqual([]);
       gone = true;
-      await Bun.sleep(40);
-      expect(events).toEqual(["announce"]);
-      await Bun.sleep(1_100);
-      expect(events).toEqual(["announce", "stop"]);
+      await Bun.sleep(200);
+      // The tab is told, and the review stays for it however long it is open.
+      expect(events).toEqual(["gone:true"]);
+      expect(exits).toEqual([]);
+      // A reload: the tab is away for a moment, then back. Still open.
+      tabs = 0;
+      await Bun.sleep(15);
+      tabs = 1;
+      await Bun.sleep(100);
+      expect(exits).toEqual([]);
+      // The tab closed for good.
+      tabs = 0;
+      await Bun.sleep(200);
+      expect(events).toEqual(["gone:true", "stop"]);
       expect(exits).toEqual([AGENT_GONE_EXIT_CODE]);
       expect(AGENT_GONE_EXIT_CODE).not.toBe(0);
     } finally {
@@ -346,34 +370,44 @@ describe("ending the review", () => {
     }
   });
 
-  // M1: a decision taken during the second the tab is told must still be delivered.
-  test("a decision taken while the end is pending: the end is cancelled, the process lives to deliver it", async () => {
-    const events: string[] = [];
+  test("the agent back: the page is told, and the review never ends", async () => {
+    let gone = true;
     const exits: number[] = [];
-    const stop = endReviewWhenAgentGone(
-      watchOf(() => true),
-      { announceAgentGone: () => (events.push("announce"), true), stop: () => events.push("stop") },
-      { everyMs: 5, exit: (code) => exits.push(code) },
-    );
+    const { events, server } = serverStub({ tabs: () => 1 });
+    const stop = endReviewWhenAgentGone(watchOf(() => gone), server, { everyMs: 5, noTabMs: 20, exit: (code) => exits.push(code) });
+    try {
+      await Bun.sleep(40);
+      gone = false;
+      await Bun.sleep(40);
+      expect(events).toEqual(["gone:true", "gone:false"]);
+      expect(exits).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
+  // M1: a decision taken meanwhile must still be delivered.
+  test("a decision taken while no tab is open: the watch stops, the process lives to deliver it", async () => {
+    const exits: number[] = [];
+    let decided = false;
+    const { events, server } = serverStub({ decided: () => decided });
+    const stop = endReviewWhenAgentGone(watchOf(() => true), server, { everyMs: 5, noTabMs: 200, exit: (code) => exits.push(code) });
     await Bun.sleep(40);
-    expect(events).toEqual(["announce"]);
+    expect(events).toEqual(["gone:true"]);
     // index.ts: waitForDecision resolved.
+    decided = true;
     stop();
-    await Bun.sleep(1_100);
-    expect(events).toEqual(["announce"]);
+    await Bun.sleep(300);
+    expect(events).toEqual(["gone:true"]);
     expect(exits).toEqual([]);
   });
 
   test("a review already decided when the look finds it gone: never ended", async () => {
-    const events: string[] = [];
     const exits: number[] = [];
-    const stop = endReviewWhenAgentGone(
-      watchOf(() => true),
-      { announceAgentGone: () => false, stop: () => events.push("stop") },
-      { everyMs: 5, exit: (code) => exits.push(code) },
-    );
+    const { events, server } = serverStub({ decided: () => true });
+    const stop = endReviewWhenAgentGone(watchOf(() => true), server, { everyMs: 5, noTabMs: 10, exit: (code) => exits.push(code) });
     try {
-      await Bun.sleep(1_100);
+      await Bun.sleep(200);
       expect(events).toEqual([]);
       expect(exits).toEqual([]);
     } finally {

@@ -23,10 +23,16 @@
  * The page reads the codes in packages/ui/utils/sendFailure.ts.
  */
 
-export const AGENT_GONE_CODE = "agent_gone";
-export const AGENT_AWAY_CODE = "agent_away";
-export const NO_SESSION_CODE = "no_session";
+import {
+	AGENT_AWAY_CODE,
+	AGENT_AWAY_REFUSAL_ERROR,
+	AGENT_GONE_CODE,
+	AGENT_GONE_REFUSAL_ERROR,
+	NO_SESSION_CODE,
+	NO_SESSION_REFUSAL_ERROR,
+} from "@plannotator/core/review-agent-gone-words";
 
+export { AGENT_AWAY_CODE, AGENT_GONE_CODE, NO_SESSION_CODE };
 
 export type AgentPresence = "here" | "gone" | "away" | "no-session";
 
@@ -38,15 +44,15 @@ export interface AgentRefusal {
 const REFUSALS: Record<Exclude<AgentPresence, "here">, AgentRefusal> = {
 	gone: {
 		status: 410,
-		body: { error: "The agent that asked for this review is gone. Nothing was sent; your comments are kept.", code: AGENT_GONE_CODE },
+		body: { error: AGENT_GONE_REFUSAL_ERROR, code: AGENT_GONE_CODE },
 	},
 	away: {
 		status: 409,
-		body: { error: "No agent session can receive this right now. Nothing was sent; your comments are kept.", code: AGENT_AWAY_CODE },
+		body: { error: AGENT_AWAY_REFUSAL_ERROR, code: AGENT_AWAY_CODE },
 	},
 	"no-session": {
 		status: 410,
-		body: { error: "This review has no agent session to send to. Nothing was sent; your comments are kept.", code: NO_SESSION_CODE },
+		body: { error: NO_SESSION_REFUSAL_ERROR, code: NO_SESSION_CODE },
 	},
 };
 

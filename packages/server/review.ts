@@ -409,12 +409,15 @@ export interface ReviewServerResult {
   /** Host-only status and close, called in-process by a host that runs this server itself. */
   hostControl: HostControl;
   /**
-   * The agent that asked for this review is gone and the host is about to
-   * stop the server: tell the open tabs (`session-closed`, `by: "gone"`).
-   * Settles nothing: the draft stays for the next review of the same changes.
-   * False when the review was decided already: the host must then not end it.
+   * Whether the agent that asked for this review is gone: tells the open
+   * tabs, and every tab opened later, `agent-gone` (the page says nobody can
+   * receive a decision, and keeps every comment). Settles nothing: the server
+   * stays up and the draft keeps saving. False when the review was decided
+   * already: the host must then leave it to deliver that decision.
    */
-  announceAgentGone: () => boolean;
+  setAgentGone: (gone: boolean) => boolean;
+  /** How many tabs have the review open now (their event stream). */
+  openTabs: () => number;
 }
 
 // --- Server Implementation ---
@@ -4658,10 +4661,11 @@ export async function startReviewServer(
     waitForDecision: () => decisionPromise,
     stop,
     hostControl,
-    announceAgentGone: () => {
+    setAgentGone: (gone) => {
       if (reviewDecided) return false;
-      externalAnnotations.broadcast(hostSessionClosedEvent(unsentReviewComments(), "gone"));
+      externalAnnotations.setAgentGone(gone);
       return true;
     },
+    openTabs: () => externalAnnotations.openStreams(),
   };
 }

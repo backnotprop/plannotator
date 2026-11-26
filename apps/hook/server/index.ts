@@ -159,7 +159,7 @@ import {
 import { readHostMessages, takeHostMessagesPath } from "./host-messages";
 import { exitOnPortInUse } from "./port-in-use";
 import { exitWhenParentGone } from "./orphan-plan-review";
-import { cliReviewAgentWatch, endReviewWhenAgentGone } from "./review-agent-watch";
+import { cliReviewAgentWatch, endReviewWhenAgentGone, noTabMsFromEnv } from "./review-agent-watch";
 import { parseModPlanInput, readModPlanRevision, writeModPlanRevisionAck } from "./claude-mod-plan";
 import { INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
 import { isInboxSessionId } from "@plannotator/core/inbox-types";
@@ -1854,9 +1854,12 @@ if (args[0] === "sessions") {
     ...(reviewTarget ? { target: reviewTarget } : {}),
   });
 
-  // A local review ends once its agent is gone, keeping its draft. A PR
-  // review stays: it can still post to GitHub/GitLab with no agent.
-  const stopAgentWatch = agentWatch && !isPRMode ? endReviewWhenAgentGone(agentWatch, server) : () => {};
+  // Once its agent is gone the page says so and keeps every comment; a local
+  // review ends when no tab has had it open for a while, keeping its draft.
+  // A PR review never ends that way: it can still post to GitHub/GitLab.
+  const stopAgentWatch = agentWatch
+    ? endReviewWhenAgentGone(agentWatch, server, { noTabMs: isPRMode ? Infinity : noTabMsFromEnv(process.env) })
+    : () => {};
 
   // Wait for user feedback
   const result = await server.waitForDecision();
@@ -2932,7 +2935,9 @@ if (args[0] === "sessions") {
     ...(reviewTarget ? { target: reviewTarget } : {}),
   });
 
-  const stopAgentWatch = agentWatch && !isPRMode ? endReviewWhenAgentGone(agentWatch, server) : () => {};
+  const stopAgentWatch = agentWatch
+    ? endReviewWhenAgentGone(agentWatch, server, { noTabMs: isPRMode ? Infinity : noTabMsFromEnv(process.env) })
+    : () => {};
 
   const result = await server.waitForDecision();
   stopAgentWatch();

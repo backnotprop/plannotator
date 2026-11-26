@@ -26,11 +26,14 @@ they open the first numbered changelist with files in the provider's list.
 A local code review's server used to stay until its tab closed or the machine
 restarted, even after the agent that asked for it quit, and Send then
 "succeeded": the draft was deleted and the feedback archived with nobody to
-receive it. Now the review's program quits once its agent is surely gone, the
-comments stay in the draft and come back when a review of the same changes is
-opened again, and Send never reports success when nobody can receive it.
-Ending a review under a live agent is the one outcome that must never happen,
-so every doubt keeps the review.
+receive it. Now Send never reports success when nobody can receive it, the
+page says so as soon as it knows and keeps every comment on screen and in its
+draft, and the review's program quits only once its agent is surely gone AND
+no tab has had it open for 2 minutes; the comments come back when a review of
+the same changes is opened again. Ending a review under a live agent, or under
+an open tab, is the outcome that must never happen, so every doubt keeps the
+review. Every word a person reads here is in
+`packages/core/review-agent-gone-words.ts` (the owner approves them).
 
 - **Send never pretends (both runtimes).** `startReviewServer` takes
   `agentPresence?: () => "here" | "gone" | "away" | "no-session"` (Bun
@@ -43,8 +46,9 @@ so every doubt keeps the review.
   path's status post (`platform: true`) is never refused: the review went to
   GitHub, GitLab, Bitbucket or Forgejo. Without the probe nothing changes.
 - **How each launch path knows (`apps/hook/server/review-agent-watch.ts`).**
-  Each watch has `presence()` (Send, asked live, never latched while the agent
-  can come back) and `ended()` (the 10 s timer; latched).
+  Each watch has `presence()` (Send, asked live) and `ended()` (the 10 s
+  timer). Neither is latched for a mod launch, whose agent comes back with a
+  resume; the stdout reader's EPIPE is final.
   - A host result file under `claude-code-mod/`: the mod's lease
     (`watcher.json` beside it, `{ owner, at, touchedAt, pid }`). Gone only when
     its stamp has not changed for 2 minutes of the CLI's own clock (no clock is
@@ -77,65 +81,67 @@ so every doubt keeps the review.
     terminal; a parent that was already pid 1 at start; a mod lease with no
     pid (Git Bash on Windows; an older mod; a `host-pid` run that failed or
     disagreed, which the instance does not ask again).
-  - **How long ending takes:** the parent watch looks every 10 s and its probe
-    backs off to 60 s, so a review ends up to about 70 s after its reader
-    went; a mod review ends 2 minutes after the lease stopped moving, at the
+  - **How long it takes to know:** the parent watch looks every 10 s and its
+    probe backs off to 60 s, so the page hears it up to about 70 s after its
+    reader went; a mod review 2 minutes after the lease stopped moving, at the
     next 10 s look once its Claude Code process is gone. Send probes at once
     in both cases, so it never pretends during that time.
-- **The end (Bun CLI, local reviews only).** Once `ended()`, the CLI
-  broadcasts `session-closed` with `by: "gone"`, waits 1 s, stops and exits 3
-  (not 0: a mod launch that exits 0 with no record is read as an old CLI's
-  printed decision). A decision taken first always wins: the watch is stopped
-  as soon as `waitForDecision` resolves, and `announceAgentGone` answers false
-  (no end) once the review was decided.
+- **While the agent is gone (Bun CLI, `endReviewWhenAgentGone`).** Once
+  `ended()`, the CLI calls the server's `setAgentGone(true)`: every open
+  event stream gets `{ type: "agent-gone", gone: true }`, and so does every
+  stream opened later, right after its snapshot (a reload, a tab opened from
+  the URL). The server stays up: the draft keeps saving and a reload shows
+  every comment. When the agent comes back (a mod launch's lease taken again
+  by a resumed session), `setAgentGone(false)` sends `gone: false` and Send
+  goes through again.
+- **The end.** Once the agent is gone and no tab has held the event stream
+  (`openTabs()`, the external-annotations subscribers) for
+  `AGENT_GONE_NO_TAB_MS` (2 minutes, counted in looks so a machine that slept
+  does not end it before its tab reconnects; a spec in the test sandbox sets
+  `PLANNOTATOR_TEST_REVIEW_NO_TAB_MS`), the CLI prints its one stderr line,
+  stops the server and exits 3 (not 0: a mod launch that exits 0 with no
+  record is read as an old CLI's printed decision). A decision taken first
+  always wins: the watch is stopped as soon as `waitForDecision` resolves, and
+  `setAgentGone` answers false (no end) once the review was decided.
 - **PR reviews stay.** A review of a PR/MR URL (`isPRMode`, from the URL
-  argument) has no end timer, since it can still post to the platform; Send to
-  the agent is still refused while the agent is gone.
+  argument) is never ended, since it can still post to the platform; its page
+  still hears `agent-gone`, and Send to the agent is still refused.
 - **Pi and OpenCode's own server** run inside the agent's process and die with
   it. Pi: "here" while the opening session's context is alive or Pi has a
   current session (feedback goes to that session), else "away" (between two
   sessions). OpenCode's in-process review: "no-session" when the command had
   no session to prompt into, else no probe.
-- **The page** (`packages/review-editor/components/ReviewEnded.tsx`). On
-  `by: "gone"` the review editor, at once:
-  1. adds text typed into a comment box but not added yet as a general
-     comment: every text box the person typed in that still holds text
-     (`useTypedTextBoxes`; a box that held text from the start, such as a
-     settings field, is never taken), except the AI question boxes, marked
-     `data-not-a-comment`. The comment loses where it was anchored, not its
-     words;
-  2. saves the draft (twice, so an edit made during the first save is saved
-     too);
-  3. shows its own ended screen (`ReviewEndedScreen`, styled as the done
-     screen but never closing the tab, with no countdown and no "return to
-     the agent"): "Review Ended", "The agent that asked for this review is
-     gone, so nothing could be sent." plus, with comments, " Your comments are
-     saved as a draft: open a review of the same changes to get them back.",
-     with kept unfinished text "Text you typed but had not added is kept too,
-     as a general comment.", and Copy feedback (with comments; the same text
-     Send would have sent, kept text included). The screen covers the page,
-     so nothing can be typed into a review that can no longer save it.
-
-  The server stops a second after it announced the end, so a save that
-  takes longer is lost (a slow disk, a throttled background tab); Copy
-  feedback still holds every comment. The draft comes back only for a review
-  of the same changes (the same draft key: a different diff type or patch
-  opens another draft). A send refused before the end shows the send-failure
-  toast (`packages/ui/utils/sendFailure.ts`): agent-gone and no-session have
-  no Retry; away keeps it.
+- **The page** (`packages/review-editor/components/AgentGoneNotice.tsx`). On
+  `agent-gone` with `gone: true` the review editor changes nothing on the page
+  (no cover, no done screen, nothing closes the tab) and shows a notice at the
+  bottom, the send-failure toast's place: `AGENT_GONE_REASON` with Copy feedback
+  (what Send would send, read when clicked). It stays until dismissed, the
+  agent is back (`gone: false`), or a Send is refused as agent-gone, whose
+  toast ("Feedback not sent" / "Approval not sent", the same reason, Copy
+  feedback, no Retry) then says it. A Send that finds the server stopped
+  after the page heard the agent is gone also reads as agent-gone
+  (`sendErrorAfterAgentGone`). A send refused before the page heard it shows
+  the same toast (`packages/ui/utils/sendFailure.ts`): agent-gone and
+  no-session have no Retry; away keeps it. The draft comes back in a new
+  review only for the same changes (the same draft key: a different diff type
+  or patch opens another draft).
 - Tests: `apps/hook/server/review-agent-watch.test.ts` (each watch: a
   backgrounded reader kept, EPIPE ends; the lease with a live or dead pid, a
-  foreign clock, a sleep, Send not latched; the mod's real lease and pid; the
-  end sequence and a decision cancelling it),
+  foreign clock, a sleep, a resume bringing the agent back; the mod's real
+  lease and pid; staying open while a tab has it, through a reload, ending
+  once none has, the agent back, a decision stopping it),
   `apps/hook/server/review-agent-gone-cli.test.ts` (the real process tree: a
   backgrounded review still read lives past a look and delivers; its reader
-  killed, Send is refused, the review exits keeping the draft, the reopened
-  review restores it and a live Send settles it; a Bitbucket PR review stays
-  and posts; the probe on a real pipe writes no byte on macOS),
+  killed, Send is refused, the tab hears it and the review stays for it and
+  for a reload, then exits once the tab is closed keeping the draft, the
+  reopened review restores it and a live Send settles it; a Bitbucket PR
+  review stays, its tab hears it, and it posts; the probe on a real pipe
+  writes no byte on macOS),
   `apps/hook/hooks/mod/review-agent-gone.test.ts` (the mod's side,
-  see `claude-code-mod.md`), `packages/server/review-agent-gone.test.ts` and its
+  see `claude-code-mod.md`), `packages/server/review-agent-gone.test.ts` (Send
+  refused keeping the draft; open and later tabs hear gone and back) and its
   Pi mirror, `packages/ui/utils/sendFailure.agentGone.test.ts`,
-  `ReviewEnded.dom.test.tsx`, `App.agentGone.test.tsx`.
+  `AgentGoneNotice.dom.test.tsx`, `App.agentGone.test.tsx`.
 
 ### Color-free VCS output (#1661)
 

@@ -437,7 +437,8 @@ write names the Claude Code process (`pid`, asked once per instance through
 the `host-pid` script, `$PPID` / the PowerShell parent; recorded only when two
 runs agree and it is over 1; Git Bash records none), and a code review whose
 lease stamp has not moved for 2 minutes of the CLI's own clock while that pid
-no longer runs ends by itself, keeping its draft and writing no result (exit 3:
+no longer runs tells its page that nobody can take a Send, and once no tab has
+had it open for 2 more minutes ends by itself, keeping its draft and writing no result (exit 3:
 the mod then logs "The review of <subject> ended while no Claude Code session
 was open for it. Your comments are saved as a draft; open a review of the same
 changes to get them back." when the session is resumed). An idle or compacting

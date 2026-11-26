@@ -1,15 +1,13 @@
 /**
- * Code review's page when the server says its agent is gone (DOM_TESTS=1):
- * `session-closed` with `by: "gone"` on the external-annotations stream
- * (packages/server/review.ts `announceAgentGone`).
+ * Code review's page when its agent is gone (DOM_TESTS=1): `agent-gone` on
+ * the external-annotations stream (packages/server/review.ts `setAgentGone`),
+ * and `/api/feedback` refused with `410 agent_gone`
+ * (packages/shared/review-agent-gone.ts).
  *
- * Regressions guarded: the page staying editable after its server quit (a
- * keystroke typed there is lost); text typed into a comment box but not added
- * yet lost (missing from the saved draft and from Copy feedback); the screen
- * closing the tab by itself (auto-close at 0 s took Copy feedback with it) or
- * telling the person to return to the agent that is gone; the ended screen
- * worded as the agent's own close; a review with no comments claiming some
- * were saved.
+ * Regressions guarded: the page covering or closing itself when it hears the
+ * agent is gone (the comments leave the screen); the page not saying so until
+ * a Send fails; the notice staying after the agent is back; a refused Send
+ * shown as sent, dropping the comment, or leaving it out of the draft.
  */
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import React, { act } from "react";
@@ -20,7 +18,7 @@ import {
   type StorageBackend,
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
-import { REVIEW_ENDED_KEPT_UNFINISHED_TEXT, REVIEW_ENDED_TITLE, reviewEndedSubtitle } from "./components/ReviewEnded";
+import { AGENT_GONE_REASON } from "@plannotator/core/review-agent-gone-words";
 import { describeSendFailure } from "@plannotator/ui/utils/sendFailure";
 
 // Vite-only virtual module (`?worker&inline`): stubbed like App.panelView.test.tsx.
@@ -206,67 +204,90 @@ afterAll(() => {
   resetStorageBackend();
 });
 
+// Sonner keeps earlier toasts in its module store: find these by their words.
+const liveToasts = () =>
+  Array.from(document.querySelectorAll<HTMLElement>("[data-sonner-toast]"))
+    .filter((el) => el.getAttribute("data-removed") !== "true");
+const goneNotice = () => liveToasts().find((el) => el.querySelector("[data-title]")?.textContent === AGENT_GONE_REASON);
+const failureToast = () => liveToasts().find((el) => el.querySelector("[data-title]")?.textContent?.endsWith(" not sent"));
+const primaryButton = () => document.querySelector<HTMLButtonElement>("[data-decision-primary]");
+
+async function addGeneralComment(text: string): Promise<void> {
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>("button[data-review-panel-toggle]")!.click();
+  });
+  await settle();
+  await act(async () => document.querySelector<HTMLButtonElement>("[data-add-general-comment]")!.click());
+  await settle();
+  const input = document.querySelector<HTMLTextAreaElement>("[data-review-general-composer] [data-decision-note-input]")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, text);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => document.querySelector<HTMLButtonElement>("[data-general-comment-add]")!.click());
+  await settle();
+}
+
+async function waitFor(check: () => boolean, attempts = 60): Promise<void> {
+  for (let attempt = 0; attempt < attempts && !check(); attempt += 1) {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  }
+}
+
 describe.if(hasDom)("a code review whose agent is gone", () => {
-  test("the page is covered by the ended screen, which never closes the tab or sends the person back to the agent", async () => {
+  test("the page says so at once and stays as it is: the comment on screen, in the draft, and in Copy feedback; no ended or sent screen", async () => {
     seedEarlierChainSeen();
-    // Auto-close at 0 s: the done screen would close the tab at once.
+    // Auto-close at 0 s: a done screen would close the tab at once.
     memory.set("plannotator-auto-close", "0");
     let closes = 0;
     window.close = () => { closes += 1; };
-    await mount("claude-code", undefined);
-    expect(document.querySelector("[data-review-ended]")).toBeNull();
-    expect(streams.length).toBeGreaterThan(0);
-
-    await closeStream({ type: "session-closed", by: "gone", unsentAnnotations: 0 });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 3_200)); });
-
-    const screen = document.querySelector<HTMLElement>("[data-review-ended]");
-    expect(screen?.textContent).toContain(REVIEW_ENDED_TITLE);
-    expect(screen?.textContent).toContain(reviewEndedSubtitle(0));
-    expect(document.querySelector("[data-completion-state]")).toBeNull();
-    expect(closes).toBe(0);
-    expect(document.body.textContent).not.toContain("return to");
-    expect(document.body.textContent).not.toContain("Auto-close");
-    // No comments: nothing to copy, no claim that a draft holds some.
-    expect(screen?.querySelector("[data-review-ended-copy]")).toBeNull();
-    expect(screen?.textContent).not.toContain("saved as a draft");
-    expect(draftPosts).toEqual([]);
-  }, 15_000);
-
-  // Any comment box left open with text in it (here a stand-in text box the
-  // person typed in): its words go into the draft and into Copy feedback.
-  test("text typed but not added yet is kept: saved in the draft as a general comment and in Copy feedback", async () => {
-    seedEarlierChainSeen();
     const written: string[] = [];
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: async (text: string) => { written.push(text); } },
     });
     await mount("claude-code", undefined);
-    const box = document.createElement("textarea");
-    document.body.appendChild(box);
-    box.value = "Half-typed: why is b 2?";
-    await act(async () => { box.dispatchEvent(new Event("input", { bubbles: true })); });
-    // An AI question box is not a comment.
-    const ask = document.createElement("textarea");
-    ask.setAttribute("data-not-a-comment", "");
-    document.body.appendChild(ask);
-    ask.value = "What does parse do?";
-    await act(async () => { ask.dispatchEvent(new Event("input", { bubbles: true })); });
+    await addGeneralComment("Split this into two PRs.");
+    expect(streams.length).toBeGreaterThan(0);
+    expect(goneNotice()).toBeUndefined();
 
-    await closeStream({ type: "session-closed", by: "gone", unsentAnnotations: 0 });
-    for (let attempt = 0; attempt < 20 && !document.querySelector("[data-review-ended]"); attempt += 1) await settle();
+    await closeStream({ type: "agent-gone", gone: true });
+    await waitFor(() => !!goneNotice());
 
-    expect(draftPosts.some((body) => body.includes("Half-typed: why is b 2?"))).toBe(true);
-    expect(draftPosts.some((body) => body.includes("What does parse do?"))).toBe(false);
-    const screen = document.querySelector<HTMLElement>("[data-review-ended]");
-    expect(screen?.textContent).toContain(reviewEndedSubtitle(1));
-    expect(screen?.textContent).toContain(REVIEW_ENDED_KEPT_UNFINISHED_TEXT);
-    const copy = screen!.querySelector<HTMLButtonElement>("[data-review-ended-copy]")!;
+    expect(goneNotice()).toBeDefined();
+    expect(document.querySelector("[data-completion-state]")).toBeNull();
+    expect(closes).toBe(0);
+    // The comment is still on the page and still the reviewer's to send.
+    expect(document.body.textContent).toContain("Split this into two PRs.");
+    expect(primaryButton()!.textContent).toContain("Send Feedback");
+    // The draft keeps saving it, so a reload brings it back.
+    await waitFor(() => draftPosts.some((body) => body.includes("Split this into two PRs.")));
+    expect(draftPosts.some((body) => body.includes("Split this into two PRs."))).toBe(true);
+    const copy = goneNotice()!.querySelector<HTMLButtonElement>("[data-send-failure-copy]")!;
     await act(async () => { copy.click(); await Promise.resolve(); });
-    expect(written.join("\n")).toContain("Half-typed: why is b 2?");
+    await waitFor(() => written.length > 0);
+    expect(written.join("\n")).toContain("Split this into two PRs.");
     delete (navigator as { clipboard?: unknown }).clipboard;
-  });
+  }, 20_000);
+
+  test("the agent back: the notice goes, and Send reaches it", async () => {
+    seedEarlierChainSeen();
+    await mount("claude-code", undefined);
+    await addGeneralComment("Split this into two PRs.");
+    await closeStream({ type: "agent-gone", gone: true });
+    await waitFor(() => !!goneNotice());
+    expect(goneNotice()).toBeDefined();
+
+    await closeStream({ type: "agent-gone", gone: false });
+    await waitFor(() => !goneNotice());
+    expect(goneNotice()).toBeUndefined();
+
+    feedbackAnswer = "ok";
+    await act(async () => primaryButton()!.click());
+    await waitFor(() => !!document.querySelector("[data-completion-state]"));
+    expect(feedbackPosts).toHaveLength(1);
+    expect(document.querySelector("[data-completion-state]")).not.toBeNull();
+  }, 20_000);
 
   test("the agent's own close keeps its own screen", async () => {
     seedEarlierChainSeen();
@@ -274,38 +295,18 @@ describe.if(hasDom)("a code review whose agent is gone", () => {
     await closeStream({ type: "session-closed", by: "agent", unsentAnnotations: 0 });
     const screen = document.querySelector<HTMLElement>("[data-completion-state]");
     expect(screen).not.toBeNull();
-    expect(document.querySelector("[data-review-ended]")).toBeNull();
-    expect(screen?.textContent).not.toContain(REVIEW_ENDED_TITLE);
+    expect(goneNotice()).toBeUndefined();
   });
 });
 
 /**
- * Send while the agent is gone, before any end was announced: the server
- * refuses it (`410 agent_gone`). Regression guarded: the page showing its sent
+ * Send while the agent is gone, before the page heard it: the server refuses
+ * it (`410 agent_gone`). Regression guarded: the page showing its sent
  * screen, or dropping the reviewer's comment, for a Send nobody received.
  */
 describe.if(hasDom)("Send to an agent that is gone", () => {
-  // Sonner keeps earlier toasts in its module store: find this one by title.
-  const failureToast = () =>
-    Array.from(document.querySelectorAll<HTMLElement>("[data-sonner-toast]"))
-      .filter((el) => el.getAttribute("data-removed") !== "true")
-      .find((el) => el.querySelector("[data-title]")?.textContent?.endsWith(" not sent"));
-  const primaryButton = () => document.querySelector<HTMLButtonElement>("[data-decision-primary]");
-
   async function addGeneralCommentAndSend(text: string): Promise<void> {
-    await act(async () => {
-      document.querySelector<HTMLButtonElement>("button[data-review-panel-toggle]")!.click();
-    });
-    await settle();
-    await act(async () => document.querySelector<HTMLButtonElement>("[data-add-general-comment]")!.click());
-    await settle();
-    const input = document.querySelector<HTMLTextAreaElement>("[data-review-general-composer] [data-decision-note-input]")!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, text);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => document.querySelector<HTMLButtonElement>("[data-general-comment-add]")!.click());
-    await settle();
+    await addGeneralComment(text);
     expect(primaryButton()!.textContent).toContain("Send Feedback");
     await act(async () => primaryButton()!.click());
     for (let attempt = 0; attempt < 10; attempt += 1) await settle();
@@ -328,6 +329,9 @@ describe.if(hasDom)("Send to an agent that is gone", () => {
     // The comment is still the reviewer's: still on the page, still sendable.
     expect(document.body.textContent).toContain("Split this into two PRs.");
     expect(primaryButton()!.textContent).toContain("Send Feedback");
+    // And still in the draft, so a reload brings it back.
+    await waitFor(() => draftPosts.some((body) => body.includes("Split this into two PRs.")));
+    expect(draftPosts.some((body) => body.includes("Split this into two PRs."))).toBe(true);
   });
 
   test("a live agent still gets it: the sent screen, as before", async () => {

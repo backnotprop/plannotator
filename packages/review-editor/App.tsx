@@ -60,8 +60,8 @@ import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/u
 import { adoptServerSession, currentServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
 import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
 import { assertSendOk, sendErrorAfterAgentGone, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
-import { ReviewEndedScreen, useAgentGoneEnding, useTypedTextBoxes } from './components/ReviewEnded';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
+import { dismissAgentGoneNotice, noteSendFailureForAgentGone, showAgentGoneNotice } from './components/AgentGoneNotice';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
@@ -784,33 +784,19 @@ const ReviewApp: React.FC = () => {
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | 'exited' | false>(false);
   // A decided review has nothing left to retry: take any send failure down.
   useEffect(() => {
-    if (submitted) dismissSendFailureToast();
+    if (!submitted) return;
+    dismissSendFailureToast();
+    dismissAgentGoneNotice();
   }, [submitted]);
   // The agent that opened this review closed it (POST /api/host/close); the
   // reviewer's unsent comments stay in the draft for a reopen.
   const [agentClosed, setAgentClosed] = useState<{ unsentAnnotations: number } | null>(null);
-  // The agent that asked for this local review is gone and its server is
-  // quitting (`session-closed`, by "gone"): the page keeps text not added
-  // yet as general comments, saves its draft, then shows the ended screen
-  // with Copy feedback (ReviewEnded.tsx). A send meanwhile says the agent is gone.
-  // Set once the draft hook exists; saves the last edits before the server stops.
-  const flushDraftOnGoneRef = useRef<() => Promise<void>>(async () => {});
-  // Set once handleAddGeneralComment exists.
-  const addGeneralCommentOnGoneRef = useRef<(text: string) => boolean>(() => false);
-  // How many comments the draft holds (set every render, below).
-  const draftCommentCountRef = useRef(0);
-  const typedTextBoxes = useTypedTextBoxes();
-  const agentGoneEnding = useAgentGoneEnding({
-    unfinishedTexts: typedTextBoxes,
-    keepUnfinished: (texts) => texts.filter((text) => addGeneralCommentOnGoneRef.current(text)).length,
-    flushDraft: () => flushDraftOnGoneRef.current(),
-    savedComments: () => draftCommentCountRef.current,
-  });
-  const agentGoneRef = agentGoneEnding.gone;
-  const reviewEnded = agentGoneEnding.ended;
-  useEffect(() => {
-    if (reviewEnded) setSubmitted((current) => current || 'exited');
-  }, [reviewEnded]);
+  // The agent that asked for this local review is gone (`agent-gone`,
+  // packages/shared/review-agent-gone.ts): the review stays as it is, every
+  // comment on screen and in its draft, and a notice says nobody can receive
+  // a decision, with Copy feedback. The server refuses Send meanwhile; a send
+  // that fails while it holds says the agent is gone, whatever it ran into.
+  const agentGoneRef = useRef(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   // A committed review-level note waiting for its one-render deferred submit
   // (the payload builders close over `allAnnotations`, so the send has to wait
@@ -1150,12 +1136,13 @@ const ReviewApp: React.FC = () => {
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({
     enabled: !!origin,
     onSessionClosed: (event) => {
-      if (event.by === 'gone') {
-        void agentGoneEnding.onGone();
-        return;
-      }
       setAgentClosed(event);
       setSubmitted((current) => current || 'exited');
+    },
+    onAgentGone: (gone) => {
+      agentGoneRef.current = gone;
+      if (gone) showAgentGoneNotice({ copyText: () => retryDecisionRef.current.feedbackMarkdown });
+      else dismissAgentGoneNotice();
     },
   });
   const agentJobs = useAgentJobs({ enabled: !!origin && aiUIEnabled });
@@ -1474,9 +1461,6 @@ const ReviewApp: React.FC = () => {
     // true -> false flip would flash the draft banner for a viewed-only draft.
     persistViewedFiles: !!snapshotId && (reviewProgressStatus === 'unsupported' || reviewProgressStatus === 'error'),
   });
-  flushDraftOnGoneRef.current = flushDraftBeforeSwitch;
-  // What the draft saves (packages/ui/hooks/useCodeAnnotationDraft.ts): code, description and PR comment annotations.
-  draftCommentCountRef.current = allAnnotations.length + descriptionAnnotations.length + commentAnnotations.length;
 
   // In-place PR / scope switch onto a target holding an unsent draft (#1590):
   // its new items are merged straight into the session (no blocking banner),
@@ -4989,9 +4973,11 @@ const ReviewApp: React.FC = () => {
     } catch (err) {
       console.error('Failed to send feedback:', err);
       setIsSendingFeedback(false);
+      const sendError = sendErrorAfterAgentGone(err, agentGoneRef.current);
+      noteSendFailureForAgentGone(sendError);
       showSendFailureToast({
         what: 'feedback',
-        error: sendErrorAfterAgentGone(err, agentGoneRef.current),
+        error: sendError,
         onRetry: () => { void retryDecisionRef.current.sendFeedback(); },
         // What the Copy feedback button copies, read when clicked: what
         // Retry would send now.
@@ -5056,9 +5042,11 @@ const ReviewApp: React.FC = () => {
     } catch (err) {
       console.error('Failed to approve:', err);
       setIsApproving(false);
+      const sendError = sendErrorAfterAgentGone(err, agentGoneRef.current);
+      noteSendFailureForAgentGone(sendError);
       showSendFailureToast({
         what: 'approval',
-        error: sendErrorAfterAgentGone(err, agentGoneRef.current),
+        error: sendError,
         onRetry: () => { void retryDecisionRef.current.approve(options); },
         // The approval's text as Retry would send it now; a bare approval
         // has none to copy.
@@ -5164,8 +5152,6 @@ const ReviewApp: React.FC = () => {
     addCodeAnnotationsWithHistory([note]);
     return true;
   }, [identity, addCodeAnnotationsWithHistory, busyWithDecision, submitted, localDraftTarget]);
-
-  addGeneralCommentOnGoneRef.current = handleAddGeneralComment;
 
   // A global comment chosen in the guide's list: the sidebar's Annotations tab
   // shows it selected (its edit and delete live there).
@@ -6807,10 +6793,8 @@ const ReviewApp: React.FC = () => {
         />
 
         {/* Completion overlay - shown after approve/feedback/exit */}
-        {/* The review ended because its agent is gone: its own screen, which never closes the tab. */}
-        {reviewEnded && <ReviewEndedScreen ending={reviewEnded} copyText={() => feedbackMarkdown} />}
         <CompletionOverlay
-          submitted={reviewEnded ? null : submitted}
+          submitted={submitted}
           title={
             submitted === 'approved' ? 'Changes Approved'
             : submitted === 'exited' && agentClosed ? AGENT_CLOSED_TITLE

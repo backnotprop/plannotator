@@ -5,8 +5,8 @@
  * What regresses if this fails: Send to an agent that is gone answers ok,
  * deletes the reviewer's draft and archives feedback nobody receives (the
  * silent loss); or Send to a live agent stops deleting the draft; or a PR
- * review's post to the platform is refused for want of an agent; or the open
- * tab never hears that the review ended.
+ * review's post to the platform is refused for want of an agent; or a tab,
+ * open or opened later, never hears that the agent is gone or back.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -49,6 +49,38 @@ const saveDraft = (url: string) =>
   fetch(`${url}/api/draft`, { method: "POST", headers: json, body: JSON.stringify({ annotations: [], codeAnnotations: DRAFT_COMMENTS, globalAttachments: [] }) });
 const send = (url: string, body: Record<string, unknown> = { approved: false, feedback: "Fix a.ts", annotations: [{ id: "c1" }] }) =>
   fetch(`${url}/api/feedback`, { method: "POST", headers: json, body: JSON.stringify(body) });
+
+/** The review's event stream as a tab holds it: each `data:` event in order. */
+async function openStream(url: string) {
+  const controller = new AbortController();
+  const response = await fetch(`${url}/api/external-annotations/stream`, { signal: controller.signal });
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  const queued: Array<Record<string, unknown>> = [];
+  let buffer = "";
+  return {
+    async next(match: (event: Record<string, unknown>) => boolean): Promise<Record<string, unknown> | null> {
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        const index = queued.findIndex(match);
+        if (index >= 0) return queued.splice(0, index + 1).pop()!;
+        const { value, done } = await reader.read();
+        if (done) return null;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          if (chunk.startsWith("data: ")) queued.push(JSON.parse(chunk.slice(6)) as Record<string, unknown>);
+        }
+      }
+      return null;
+    },
+    async close() {
+      await reader.cancel().catch(() => undefined);
+      controller.abort();
+    },
+  };
+}
 
 describe("Send when the agent is gone (Bun)", () => {
   test("is refused with agent_gone; the draft stays, nothing is archived, nothing is decided", async () => {
@@ -95,37 +127,29 @@ describe("Send when the agent is gone (Bun)", () => {
     }
   });
 
-  test("the open tab hears that the review ended because its agent is gone, with its unsent count", async () => {
+  test("every open tab hears the agent is gone, a tab opened later (a reload) hears it too, and both hear it is back; the draft stays", async () => {
     const server = await startReviewServer({ rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML, agentPresence: () => "gone" });
-    const response = await fetch(`${server.url}/api/external-annotations/stream`);
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
+    const first = await openStream(server.url);
+    let later: Awaited<ReturnType<typeof openStream>> | null = null;
     try {
       await saveDraft(server.url);
-      let buffer = "";
-      let announced = false;
-      const deadline = Date.now() + 3000;
-      let found: Record<string, unknown> | null = null;
-      while (!found && Date.now() < deadline) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        for (const chunk of buffer.split("\n\n").slice(0, -1)) {
-          if (!chunk.startsWith("data: ")) continue;
-          const event = JSON.parse(chunk.slice(6)) as Record<string, unknown>;
-          if (event.type === "session-closed") found = event;
-        }
-        buffer = buffer.slice(buffer.lastIndexOf("\n\n") + 2);
-        if (!announced) {
-          announced = true;
-          server.announceAgentGone();
-        }
-      }
-      expect(found).toEqual({ type: "session-closed", by: "gone", unsentAnnotations: DRAFT_COMMENTS.length });
-      // Announcing settles nothing: the draft is still there for a reopen.
+      await first.next((event) => event.type === "snapshot");
+      expect(server.openTabs()).toBe(1);
+      expect(server.setAgentGone(true)).toBe(true);
+      expect(await first.next((event) => event.type === "agent-gone")).toEqual({ type: "agent-gone", gone: true });
+
+      later = await openStream(server.url);
+      expect(await later.next((event) => event.type === "agent-gone")).toEqual({ type: "agent-gone", gone: true });
+      expect(server.openTabs()).toBe(2);
+
+      server.setAgentGone(false);
+      expect(await first.next((event) => event.type === "agent-gone")).toEqual({ type: "agent-gone", gone: false });
+      expect(await later.next((event) => event.type === "agent-gone")).toEqual({ type: "agent-gone", gone: false });
+      // Saying it settles nothing: the draft is still there.
       expect((await (await fetch(`${server.url}/api/draft`)).json()).codeAnnotations).toEqual(DRAFT_COMMENTS);
     } finally {
-      await reader.cancel().catch(() => undefined);
+      await first.close();
+      await later?.close();
       server.stop();
     }
   });
@@ -157,12 +181,12 @@ describe("Send when the agent is gone (Bun)", () => {
   });
 
   // M1: the CLI must not end a review that was decided.
-  test("announcing after a decision does nothing and says so", async () => {
+  test("saying the agent is gone after a decision does nothing and says so", async () => {
     const server = await startReviewServer({ rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML, agentPresence: () => "here" });
     try {
-      expect(server.announceAgentGone()).toBe(true);
+      expect(server.setAgentGone(false)).toBe(true);
       expect((await send(server.url)).status).toBe(200);
-      expect(server.announceAgentGone()).toBe(false);
+      expect(server.setAgentGone(true)).toBe(false);
     } finally {
       server.stop();
     }

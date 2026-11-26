@@ -35,6 +35,7 @@
     "./embed-insert": "./embed-insert.ts",
     "./html-embed": "./html-embed.ts",
     "./external-annotation": "./external-annotation.ts",
+    "./review-agent-gone-words": "./review-agent-gone-words.ts",
     "./extract-code-paths": "./extract-code-paths.ts",
     "./favicon": "./favicon.ts",
     "./theme-file": "./theme-file.ts",
