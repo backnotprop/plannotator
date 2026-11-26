@@ -6,6 +6,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { ForgeRef, ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import type { InboxPull, InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { parseForgeRefUrl } from '@plannotator/core/forge-ref-card';
+import { forgeRefLinks, matchCrossRepoRef } from '@plannotator/core/forge-refs';
 import { OPEN_IN_REVIEWS, refCardReviewsAction, reviewsStackOf } from './refCardReviews';
 
 function listed(key: string, number: number, fields: Partial<InboxPull> = {}): InboxPull {
@@ -81,5 +83,18 @@ describe('Open in Reviews on a ref card', () => {
     expect(action(gh(12), issueAnswer)).toBeNull();
     model = null;
     expect(action(gh(12), undefined)).toBeNull();
+  });
+
+  test("a GitLab project's !45 and group/sub/project!45, written in a message, open their merge request in Reviews", () => {
+    const listedHere = (key: string, number: number, repo: string) => listed(key, number, { host: 'gitlab.harbor.dev', repo });
+    const model: Pick<InboxPullsAnswer, 'pulls'> = {
+      pulls: [listedHere('gitlab.harbor.dev/harbor-group/harbor#45:pull', 45, 'harbor-group/harbor'), listedHere('gitlab.harbor.dev/harbor-group/infra/fern-api#6:pull', 6, 'harbor-group/infra/fern-api')],
+    };
+    const project = { display: 'harbor-group/harbor', host: 'gitlab.harbor.dev' };
+    const bare = forgeRefLinks(project)!.mergeRequest!(45);
+    const cross = matchCrossRepoRef('harbor-group/infra/fern-api!6', '', project)!.href!;
+    for (const href of [bare, cross]) expect(reviewsStackOf(model, parseForgeRefUrl(href)!)).not.toBeNull();
+    // The project's issue #45 is another item: no Reviews link.
+    expect(reviewsStackOf(model, parseForgeRefUrl(forgeRefLinks(project)!.issue(45))!)).toBeNull();
   });
 });

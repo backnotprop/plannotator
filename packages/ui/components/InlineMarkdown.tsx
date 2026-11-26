@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useSyncExternalStore } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
-import { findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
+import { BARE_MR_REF, findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
 import { useHoverPreview } from "../hooks/useHoverPreview";
 import { matchInlineHtml } from '../utils/inlineHtmlTags';
@@ -1228,6 +1228,21 @@ export const InlineMarkdown: React.FC<{
         previousChar = match[0][match[0].length - 1];
         continue;
       }
+    }
+
+    // GitLab merge request: !123, on a GitLab project only, with `#123`'s boundary.
+    // An image's `![` was read above; GitHub's `!123` stays plain text.
+    const mergeRequest = !linkLabel && refLinks?.mergeRequest && !/\w/.test(previousChar) ? remaining.match(BARE_MR_REF) : null;
+    if (mergeRequest) {
+      const href = refLinks!.mergeRequest!(mergeRequest[1]);
+      parts.push(
+        <a key={key++} href={href} target="_blank" rel="noopener noreferrer" {...proseRefLinkProps(href)} className="text-primary font-medium hover:underline">
+          {mergeRequest[0]}
+        </a>,
+      );
+      remaining = remaining.slice(mergeRequest[0].length);
+      previousChar = mergeRequest[0][mergeRequest[0].length - 1];
+      continue;
     }
 
     // @mention — only at word boundary. GitHub-style handle pattern.

@@ -107,3 +107,45 @@ test.skipIf(!hasDom)('the list finds exactly the web links the message draws', a
   expect(drawn.length).toBeGreaterThan(20);
   expect(web(linksOfBody(BODY, repo).map((l) => l.href))).toEqual(drawn);
 });
+
+const GITLAB_BODY = [
+  'Merged !123, harbor-group/harbor!45 and harbor-group/infra/fern-api!6 (!12). Issue #7, other/lib#3, also !13.',
+  '',
+  'Not: `!9`, wow!123abc, x!14, !important, \\!16, https://gitlab.harbor.dev/a/b!17 and [label !22](https://example.com/x).',
+  '',
+  '| !30 | harbor-group/harbor!31 |',
+  '|---|---|',
+  '| a | b |',
+].join('\n');
+
+test.skipIf(!hasDom)("in a GitLab project, the list finds exactly the merge request links the message draws", async () => {
+  const gitlab = { display: 'harbor-group/harbor', host: 'gitlab.harbor.dev' };
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  await act(async () => {
+    root.render(
+      <Viewer
+        blocks={parseMarkdownToBlocks(GITLAB_BODY, { frontmatter: false })}
+        markdown={GITLAB_BODY}
+        annotations={[]}
+        onAddAnnotation={noop}
+        onSelectAnnotation={noop}
+        selectedAnnotationId={null}
+        allowImages={false}
+        mode="selection"
+        taterMode={false}
+        maxWidth={null}
+        stickyActions={false}
+        disableCodePathValidation
+        refRepo={gitlab}
+        readOnly
+      />,
+    );
+  });
+  const drawn = web([...host.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')!));
+  await act(async () => root.unmount());
+  host.remove();
+  expect(drawn.filter((h) => h.includes('/-/merge_requests/')).length).toBe(7);
+  expect(web(linksOfBody(GITLAB_BODY, gitlab).map((l) => l.href))).toEqual(drawn);
+});
