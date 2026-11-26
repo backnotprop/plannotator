@@ -406,6 +406,8 @@ const SIDE_CHROME = 16;
 const MIN_LIST_ROOM = 56;
 /** The list's own padding above and below its rows (SkillReferenceMenu's `p-1.5`). */
 const LIST_PADDING = 12;
+/** A list widened past its field (`minWidth`) keeps this far from the visible area's sides (the menu's own 8 px). */
+const WIDE_LIST_MARGIN = 8;
 
 interface MenuFrame {
   box: AnchorBox;
@@ -448,8 +450,11 @@ const sameFrame = (a: MenuFrame, b: MenuFrame) =>
  * on a phone) would otherwise leave it floating, and pressable, over that.
  * Focus moves, the shell's own changes and the end of a transition re-check.
  * `onShown` tells the field, which then leaves the list's keys alone.
+ *
+ * Also a one-line field's list (`textarea` an input: a saved emoji's name field in the reaction tray, SkillNameInput),
+ * with `minWidth` so its rows read as the reply box's do beside a narrow field.
  */
-function FloatingSkillMenu({
+export function FloatingSkillMenu({
   textarea,
   wrap,
   host,
@@ -458,8 +463,9 @@ function FloatingSkillMenu({
   children,
   kind = 'skill',
   left,
+  minWidth,
 }: {
-  textarea: HTMLTextAreaElement;
+  textarea: HTMLTextAreaElement | HTMLInputElement;
   wrap: HTMLElement;
   host: HTMLElement;
   caret: CaretMenuOptions | null;
@@ -467,6 +473,8 @@ function FloatingSkillMenu({
   kind?: 'skill' | 'hashtag';
   /** The list's left edge inside the anchor, from the anchor's box in viewport x (the `#` list: under the `#`). */
   left?: (box: { left: number; width: number }) => number;
+  /** The list is at least this wide (px), from the left edge of the box it hangs off, kept inside what is visible. */
+  minWidth?: number;
   onShown: (shown: boolean) => void;
   children: (boundary: () => VerticalBox | null, maxListHeight: number | undefined) => React.ReactNode;
 }) {
@@ -488,8 +496,8 @@ function FloatingSkillMenu({
     const phone = isPhone();
     const atCaret = (): AnchorBox => {
       const field = textarea.getBoundingClientRect();
-      // Not laid out (a test DOM): the field's top edge, so the menu still renders.
-      const line = caretLineRect(textarea) ?? { top: field.top, bottom: field.top };
+      // Not laid out (a test DOM): the field's top edge, so the menu still renders. A one-line input is its own line.
+      const line = (textarea instanceof HTMLTextAreaElement ? caretLineRect(textarea) : { top: field.top, bottom: field.bottom }) ?? { top: field.top, bottom: field.top };
       return caretAnchor(line, visibleBox(textarea, host), { left: field.left, width: field.width });
     };
     let anchor = own ? atCaret() : fieldAnchor(wrap, host, phone ? PHONE_FIELD_GAP_EXTRA : FIELD_GAP_EXTRA, phone ? 1 : 0);
@@ -528,6 +536,13 @@ function FloatingSkillMenu({
       const c = card.getBoundingClientRect();
       if (c.width > anchor.width) anchor = { ...anchor, left: c.left, width: c.width };
     }
+    if (minWidth && anchor.width < minWidth) {
+      const view = textarea.ownerDocument.defaultView ?? window;
+      const seenWidth = view.visualViewport?.width || view.innerWidth;
+      const width = Math.max(anchor.width, Math.min(minWidth, seenWidth - 2 * WIDE_LIST_MARGIN));
+      const leftEdge = Math.max(WIDE_LIST_MARGIN, Math.min(anchor.left, seenWidth - WIDE_LIST_MARGIN - width));
+      anchor = { ...anchor, left: leftEdge, width };
+    }
     // In the host's coordinates: an absolute box is placed against its padding box.
     const h = host.getBoundingClientRect();
     const box: AnchorBox = {
@@ -542,7 +557,7 @@ function FloatingSkillMenu({
     const shown = fieldInSight(textarea, textarea.closest('.ib-pfoot, dialog') ?? wrap, host, anchorRef.current);
     const next: MenuFrame = { box, room: r, cap, least, shown };
     setFrame((prev) => (prev && sameFrame(prev, next) ? prev : next));
-  }, [host, textarea, wrap, room]);
+  }, [host, textarea, wrap, room, minWidth]);
 
   // Every commit: the caret moved or the text changed (the equality guard above converges).
   useLayoutEffect(() => {

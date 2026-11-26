@@ -181,6 +181,7 @@
   "inbox-q-open-items.spec.ts": 127,
   "inbox-question-before-after.spec.ts": 8,
   "inbox-question-scenarios.spec.ts": 12,
+  "inbox-reaction-tray-skills.spec.ts": 20,
   "inbox-reask.spec.ts": 99,
   "inbox-recent-activity-filter.spec.ts": 10,
   "inbox-ref-cards.spec.ts": 18,
