@@ -1,11 +1,13 @@
 /**
  * Branch reviews in the window. What regresses:
- *  - anything of it drawn while Branch reviews is off (a row mark, the safety net);
+ *  - anything of it drawn while Branch reviews is off (a row mark);
  *  - a reported branch's row not saying where the branch is (this computer, another, a cloud agent's), or showing a risk
  *    mark with no judgment;
- *  - the safety net read before the person opens it, or its "Start a review" starting anything by itself;
  *  - the thread's "Ask for a guided review" going anywhere but a reply in the same thread, or offered for code that
  *    can't be opened;
+ *  - the ask sent twice: a double click, the button back once the ask is the thread's last message, or offered again
+ *    when the thread opens again after it was asked;
+ *  - a retry after a send that failed on the way back going out as a second request (a new idempotency key);
  *  - a cloud agent's remote drawn as a link, or with anything but its host and repository;
  *  - Rank offered for a branch that can't be ranked, or going anywhere but the rank route with its thread.
  *
@@ -24,6 +26,7 @@ const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof impo
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { ReviewViewNote } = (hasDom ? await import('./ReviewViewNote') : {}) as typeof import('./ReviewViewNote');
 const { branchNoteOf } = (hasDom ? await import('./branchReviews') : {}) as typeof import('./branchReviews');
+const { reviewViewOf } = (hasDom ? await import('./reviewsModel') : {}) as typeof import('./reviewsModel');
 
 const LIST = { fetched_at: '2026-11-16T10:00:00.000Z', hosts: [{ cli: 'gh', host: 'github.com', login: 'dana' }], pulls: [], links: {}, projects: {}, cards: {} } as unknown as InboxPullsAnswer;
 const RISK: InboxPullRiskAnswer = { rules: 'Anything in billing.', provider: 'pi-sdk', model: null, agents: [{ id: 'pi-sdk', label: 'Pi' }], pending: 0, last_failure: null, failed: {}, judgments: {} };
@@ -71,11 +74,12 @@ const fetches = (routes: Record<string, unknown>) => {
   restores.push(() => made.mockRestore());
   return seen;
 };
-const page = (answer: InboxReviewsAnswer, onReviewBranch?: (branch: { name: string; projectId: string }) => void) => (
+const page = (answer: InboxReviewsAnswer, threadId?: string) => (
   <SidebarProvider>
     <PullsPage
       state={{ model: LIST, reviews: answer, error: null, loading: false, refresh: () => {}, reload: () => {}, reloadRows: () => {} }}
       stackId={null}
+      threadId={threadId}
       project="prj_billing"
       projects={[{ id: 'prj_billing', name: 'billing', root: '/tmp/billing' } as never]}
       projectNames={new Map([['prj_billing', 'billing']])}
@@ -87,18 +91,16 @@ const page = (answer: InboxReviewsAnswer, onReviewBranch?: (branch: { name: stri
       onOpenThread={() => {}}
       onNew={() => {}}
       onNewReview={() => {}}
-      onReviewBranch={onReviewBranch ? (branch) => onReviewBranch(branch) : undefined}
     />
   </SidebarProvider>
 );
 const rowLine = (thread: string | null) => document.querySelector(`[data-reviews-row="${thread}"] .ib-pr-l3`)?.textContent ?? null;
 
-test.skipIf(!hasDom)('off: no branch rows from the server, and no safety net', async () => {
+test.skipIf(!hasDom)('off: no branch rows from the server, and no branch read', async () => {
   const restore = spyOn(inboxApi, 'pullRisk').mockImplementation(async () => RISK);
   restores.push(() => restore.mockRestore());
   const seen = fetches({});
-  await mount(page({ fetched_at: null, hosts: [], rows: [], projects: {} }, () => {}));
-  expect(document.querySelector('[data-reviews-unreported]')).toBeNull();
+  await mount(page({ fetched_at: null, hosts: [], rows: [], projects: {} }));
   expect(seen.some((url) => url.includes('/reviews/branches'))).toBe(false);
 });
 
@@ -106,34 +108,21 @@ test.skipIf(!hasDom)('on: each reported branch says where it is and waits on the
   const restore = spyOn(inboxApi, 'pullRisk').mockImplementation(async () => RISK);
   restores.push(() => restore.mockRestore());
   fetches({});
-  await mount(page({ fetched_at: null, hosts: [], rows: ROWS, projects: {}, branch_reviews: true }));
-  expect(rowLine(ROWS[0]!.thread_id)).toBe('retry-jitter · Ready for review');
-  expect(rowLine(ROWS[1]!.thread_id)).toBe('cache-keys from a cloud agent · Ready for review');
-  expect(rowLine(ROWS[2]!.thread_id)).toBe('web-fonts on Mac mini · Ready for review');
+  const answer: InboxReviewsAnswer = { fetched_at: null, hosts: [], rows: ROWS, projects: {}, branch_reviews: true };
+  await mount(page(answer));
+  // Closed, a row is one line: what the second line says is not drawn.
+  expect(ROWS.map((row) => rowLine(row.thread_id))).toEqual([null, null, null]);
+  // Open, its second line says where the branch is, its project and why it waits.
+  const opened = async (row: (typeof ROWS)[number]) => {
+    await act(async () => root!.render(page(answer, row.thread_id!)));
+    await settle();
+    return rowLine(row.thread_id);
+  };
+  expect(await opened(ROWS[0]!)).toBe('retry-jitter · billing · Ready for review');
+  expect(await opened(ROWS[1]!)).toBe('cache-keys from a cloud agent · billing · Ready for review');
+  expect(await opened(ROWS[2]!)).toBe('web-fonts on Mac mini · billing · Ready for review');
   expect(document.querySelector(`[data-reviews-row="${ROWS[0]!.thread_id}"] [data-pull-risk]`)).toBeNull();
   expect(document.querySelector(`[data-reviews-row="${ROWS[1]!.thread_id}"] [data-pull-risk]`)?.getAttribute('data-pull-risk')).toBe('high');
-  // No onReviewBranch: no safety net.
-  expect(document.querySelector('[data-reviews-unreported]')).toBeNull();
-});
-
-test.skipIf(!hasDom)('the safety net is read only when opened, and Start a review only opens New review with the branch', async () => {
-  const restore = spyOn(inboxApi, 'pullRisk').mockImplementation(async () => RISK);
-  restores.push(() => restore.mockRestore());
-  const seen = fetches({ '/reviews/branches/unreported': { project_id: 'prj_billing', git: true, branches: [{ project_id: 'prj_billing', branch: 'old-idea', base: 'main', ahead: 3, last_commit_at: '2026-11-15T10:00:00.000Z', worktree: null }] } });
-  const asked: { name: string; projectId: string }[] = [];
-  await mount(page({ fetched_at: null, hosts: [], rows: ROWS, projects: {}, branch_reviews: true }, (branch) => asked.push(branch)));
-  expect(document.querySelector('[data-reviews-unreported="prj_billing"]')).not.toBeNull();
-  expect(seen.some((url) => url.includes('/reviews/branches/unreported'))).toBe(false);
-  await act(async () => document.querySelector<HTMLButtonElement>('[data-reviews-unreported-toggle]')!.click());
-  await settle();
-  expect(seen.filter((url) => url.includes('/reviews/branches/unreported?project=prj_billing'))).toHaveLength(1);
-  const row = document.querySelector('[data-reviews-unreported-branch="old-idea"]');
-  expect(row?.textContent).toContain('3 commits not on main');
-  const before = seen.length;
-  await act(async () => row!.querySelector<HTMLButtonElement>('[data-reviews-unreported-start]')!.click());
-  expect(asked).toEqual([{ name: 'old-idea', projectId: 'prj_billing' }]);
-  // Nothing was sent or started: the click opened New review, no request went out.
-  expect(seen.length).toBe(before);
 });
 
 const view = (branch: ReviewView['branch']): ReviewView => ({ context: 'billing · Local branch: retry-jitter, against main', kind: 'local', title: null, name: null, firstReviewId: null, latestReviewId: null, curating: null, asked: null, fromThread: null, onWholeThread: () => {}, onOpenPull: null, pullUrl: null, branch });
@@ -165,6 +154,73 @@ test.skipIf(!hasDom)("the thread's ask is a reply in the same thread, and is not
   expect(document.querySelector('[data-review-branch] a')).toBeNull();
   expect(document.querySelector('[data-review-branch-ask]')).toBeNull();
   expect(document.querySelector('[data-review-branch-rank]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('the ask is sent once: a double click sends one reply, and it stays asked as the thread grows and when it opens again', async () => {
+  fetches({});
+  const replies: string[] = [];
+  let release = () => {};
+  const restore = spyOn(inboxApi, 'reply').mockImplementation((async (id: string) => {
+    replies.push(id);
+    await new Promise<void>((resolve) => (release = resolve));
+    return { reply: null, questions: [], replayed: false };
+  }) as never);
+  restores.push(() => restore.mockRestore());
+  const note = { report: report(), reach: null, canAsk: true, canRank: false, projectName: 'billing', replyTo: 'msg_01JD0000000000000000000009' };
+  await mount(<ReviewViewNote view={view(note)} />);
+  const button = document.querySelector<HTMLButtonElement>('[data-review-branch-ask]')!;
+  await act(async () => {
+    button.click();
+    button.click();
+  });
+  await settle();
+  expect(button.disabled).toBe(true);
+  expect(button.textContent).toBe('Asking…');
+  await act(async () => release());
+  await settle();
+  expect(replies).toEqual(['msg_01JD0000000000000000000009']);
+  expect(document.querySelector('[data-review-branch-ask]')).toBeNull();
+  // The ask is the thread's last message now, so the message a reply would go to moves on: still asked.
+  await act(async () => root!.render(<ReviewViewNote view={view({ ...note, replyTo: 'msg_01JD000000000000000000000A' })} />));
+  expect(document.querySelector('[data-review-branch-ask]')).toBeNull();
+  expect(document.querySelector('[data-review-branch-asked]')).not.toBeNull();
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+
+  // Opened again: the thread holds the person's ask since the report, so it is not offered again.
+  const row = inboxFarBranchReviewRow(report());
+  const at = (minutes: number) => new Date(Date.parse(report().at) + minutes * 60_000).toISOString();
+  const agentReport = { id: 'msg_01JD0000000000000000000001', author: { kind: 'agent' }, body: 'Ready for review.', created_at: report().at };
+  const ask = { id: 'msg_01JD000000000000000000000A', author: { kind: 'person' }, body: 'Please send me a guided review of the whole branch in billing (retry-jitter, against main), using /review-curate.\n\nIf I ask for changes, make them and send me the updated review in this thread.', created_at: at(1) };
+  const options = { projectName: 'billing', onWholeThread: () => {}, onOpenStack: () => {} };
+  const opened = reviewViewOf(row, { messages: [agentReport, ask], subject: null }, options);
+  expect(opened.branch?.asked).toBe(true);
+  await mount(<ReviewViewNote view={opened} />);
+  expect(document.querySelector('[data-review-branch-ask]')).toBeNull();
+  expect(document.querySelector('[data-review-branch-asked]')).not.toBeNull();
+  // Another word from the person, or an ask before a newer report (a new head), leaves it to ask.
+  expect(reviewViewOf(row, { messages: [agentReport, { ...ask, body: 'Thanks.' }], subject: null }, options).branch?.asked).toBe(false);
+  expect(reviewViewOf(row, { messages: [{ ...ask, created_at: at(-1) }, agentReport], subject: null }, options).branch?.asked).toBe(false);
+});
+
+test.skipIf(!hasDom)('a retry after a failed send of the ask uses the same idempotency key, so the Inbox takes it as one request', async () => {
+  fetches({});
+  const keys: string[] = [];
+  const restore = spyOn(inboxApi, 'reply').mockImplementation((async (_id: string, input: { idempotency_key: string }) => {
+    keys.push(input.idempotency_key);
+    if (keys.length === 1) throw new Error('The connection dropped.');
+    return { reply: null, questions: [], replayed: true };
+  }) as never);
+  restores.push(() => restore.mockRestore());
+  await mount(<ReviewViewNote view={view({ report: report(), reach: null, canAsk: true, canRank: false, projectName: 'billing', replyTo: 'msg_01JD0000000000000000000009' })} />);
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-review-branch-ask]')!.click());
+  await settle();
+  expect(document.querySelector('[data-review-branch-error]')?.textContent).toBe('The connection dropped.');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-review-branch-ask]')!.click());
+  await settle();
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).toBe(keys[0]!);
+  expect(document.querySelector('[data-review-branch-asked]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('Rank is offered only for a branch that can be ranked, and asks the rank route for its thread', async () => {

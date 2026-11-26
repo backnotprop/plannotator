@@ -101,6 +101,7 @@ import { loadConfig, resolveInboxLaunch, saveConfig } from "@plannotator/shared/
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxSectionWhileRoutineRuns } from "@plannotator/shared/inbox/list";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
@@ -108,7 +109,7 @@ import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { pathFoldersOf } from "./env-path";
-import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchStartFailure, LaunchTrustOffer } from "./inbox-launch-host";
+import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchStartFailure, LaunchTrustOffer, LaunchTurnError } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { samePlace } from "./agent-files";
@@ -209,11 +210,28 @@ interface Memo {
   turnError?: { key: string; at: number } | null;
   turnErrorNoted?: string | null;
   turnErrorTried?: string | null;
+  /**
+   * The last read of the host's turn error while the session was idle: what it found, when, the idle spell it was
+   * read in (`spell`) and how long until the next read in that spell (`wait`, TURN_ERROR_READ_MS doubling to
+   * TURN_ERROR_READ_MAX_MS). Cleared while the session is busy or away.
+   */
+  turnErrorRead?: { found: LaunchTurnError | null; at: number; spell: string; wait: number } | null;
   /** Clone from a git URL: the reply that started the clone again last (once per reply, as a respawn). */
   cloneFor?: string | null;
   /** When the running clone began: its percent shows only after a few seconds (E2). */
   cloneStartedAt?: number;
 }
+
+/**
+ * An idle launched session's turn error (`LaunchHost.turnError`, Claude Code's transcript, a few file calls in the
+ * person's folder and Claude's) is read on the sweep that sees something happen (a turn ended, the session took an
+ * item, a line in its thread: `readTurnError`), then again after 1 s, 2 s, 4 s, 8 s and every 10 s while nothing
+ * more happens. A turn the Inbox saw end is read at once, and one too short to be said busy (an error that returns
+ * at once) by the next second, as before; only a turn nothing in the Inbox started or saw (the agent going on by
+ * itself, too briefly to be said busy) waits up to 10 s. Before, every second, for every idle launch (#2788).
+ */
+const TURN_ERROR_READ_MS = 1_000;
+const TURN_ERROR_READ_MAX_MS = 10_000;
 
 /** The clone percent shows once a clone has run this long (E2: a big repo, not every clone). */
 const CLONE_PCT_AFTER_MS = 3_000;
@@ -647,6 +665,37 @@ export function createInboxLaunch(options: {
   /** The reply's restart was refused because the agent does not trust the folder. */
   const respawnUntrustedOf = (memo: Memo): boolean => memo.respawn?.untrusted === true && respawnFailedOf(memo) !== null;
 
+  type Pending = (session: string) => InboxMessage[];
+  const pendingEach: Pending = (session) => store.pendingReplies(session, { tags: true });
+  const pendingOnePass = (): Pending => {
+    let found: { sessions: Set<string>; bySession: Map<string, InboxMessage[]> } | null = null;
+    return (session) => {
+      if (!found) {
+        const sessions = new Set(roots().flatMap((root) => (root.to ? [root.to.session] : [])));
+        found = { sessions, bySession: store.pendingRepliesFor(sessions, { tags: true }) };
+      }
+      return found.sessions.has(session) ? (found.bySession.get(session) ?? []) : pendingEach(session);
+    };
+  };
+  let pass: Pending | null = null;
+  const pendingOf: Pending = (session) => (pass ?? pendingEach)(session);
+  const inOnePass = <T>(read: () => T, pending: Pending = pendingOnePass()): T => {
+    if (pass) return read();
+    pass = pending;
+    try {
+      return read();
+    } finally {
+      pass = null;
+    }
+  };
+
+  /**
+   * What waits for `session` from the person, oldest first: never the note that its questions moved (resolve_message's
+   * `moved_to`), nor Ship's stop or closed line (`ship_note` `stop`). Those go to a session that comes on its own; they
+   * never start or respawn one. Ship's watch notes do: the agent's job is not done until the PR is merged.
+   */
+  const personPending = (session: string): InboxMessage[] => pendingOf(session).filter((m) => !m.moved_note && m.ship_note?.kind !== "stop");
+
   /**
    * A turn waits for the session: the root or a reply is not taken yet, or it
    * was taken since the latest start but the session has neither polled busy
@@ -654,9 +703,10 @@ export function createInboxLaunch(options: {
    */
   const turnWaitingOf = (root: InboxMessage, memo: Memo): boolean => {
     if (!root.delivery) return true;
-    if (root.to && store.pendingReplies(root.to.session, { tags: true }).length > 0) return true;
+    if (root.to && personPending(root.to.session).length > 0) return true;
     if (memo.busySeen) return false;
-    const lastId = store.threadMessageIds(root.thread_id).at(-1);
+    // The note that the session's questions moved is not the person's: the latest is the message before it.
+    const lastId = [...store.threadMessageIds(root.thread_id)].reverse().find((id) => !store.message(id)?.moved_note && store.message(id)?.ship_note?.kind !== "stop");
     const last = lastId ? store.message(lastId) : null;
     // The person's latest, unless it went to another session (re-addressed), or is a routine's skip line or a run that didn't start.
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session) && !(last.scheduled_run && !last.to);
@@ -768,6 +818,25 @@ export function createInboxLaunch(options: {
   };
 
   /**
+   * The host's turn error for an idle session: read again only when something happened (`spell`) or its wait passed
+   * (TURN_ERROR_READ_MS); otherwise the last read stands, with no file call. Something happened: a turn ended (a new
+   * idle spell), the session took an item as a turn (`taken`: a reply, a tag, Send now, a routine's message, even a
+   * turn too short to be said busy), a line in the launch's thread (a reply, its delivery, Try again, the agent's
+   * answer), or the session came back (the read is dropped while it is busy or away).
+   */
+  const readTurnError = (host: LaunchHost, root: InboxMessage, session: string, live: LaunchLive, memo: Memo): LaunchTurnError | null => {
+    const launch = root.launch!;
+    const spell = `${session}:${live.busy}:${live.idleSince ?? ""}:${live.taken ?? 0}:${store.threadVersion(root.thread_id)}`;
+    const last = memo.turnErrorRead;
+    const at = now();
+    // A clock set back reads at once.
+    if (last && last.spell === spell && at >= last.at && at - last.at < last.wait) return last.found;
+    const found = host.turnError!(launch, session);
+    memo.turnErrorRead = { found, at, spell, wait: last && last.spell === spell ? Math.min(last.wait * 2, TURN_ERROR_READ_MAX_MS) : TURN_ERROR_READ_MS };
+    return found;
+  };
+
+  /**
    * A launched session whose host writes its failed turns down (Claude Code): once it is idle, the error its last turn
    * ended in becomes one note in the thread, from the session, in the words Codex's and Pi's failed turns use, and the
    * run line's "couldn't answer" with Try again. A turn that runs, or a last turn that ended well, clears the line;
@@ -782,7 +851,8 @@ export function createInboxLaunch(options: {
     const live = liveOf(host, root, memo);
     const was = memo.turnError ?? null;
     // Not connected (stopped, or not yet back): the stopped line says what it is. A turn runs: its end decides.
-    let found = !live || live.busy === true ? null : host.turnError(launch, session);
+    let found = !live || live.busy === true ? null : readTurnError(host, root, session, live, memo);
+    if (!live || live.busy === true) memo.turnErrorRead = null;
     if (found && found.key === memo.turnErrorTried) found = null;
     memo.turnError = found ? { key: found.key, at: found.at } : null;
     if (found && memo.turnErrorNoted !== found.key) {
@@ -808,7 +878,9 @@ export function createInboxLaunch(options: {
     // The switch off governs new starts only: an agent already started keeps its line, its questions and its respawn.
     const all = roots().filter((root) => !root.launch!.deleted_at && hostOf(root.launch!));
     if (all.length === 0) return;
-    for (const root of all) maybeRespawn(root);
+    inOnePass(() => {
+      for (const root of all) maybeRespawn(root);
+    });
     for (const root of all) watchTurnError(root);
     for (const host of hostList) stateOf(host).permissions.sweep();
     if (!watched) return;
@@ -1290,8 +1362,7 @@ ${result.text}`);
       // A reply the person wrote after the clone ended: never the thread's own first message (it waits for the agent
       // too), nor one the clone already had (E7: Cancel stays cancelled, a failure stays failed, a restart included).
       const ended = launch.clone.ended_at ?? null;
-      const newest = store
-        .pendingReplies(root.to.session, { tags: true })
+      const newest = personPending(root.to.session)
         .filter((reply) => reply.id !== root.id && ended !== null && reply.created_at > ended)
         .at(-1);
       if (newest && memo.cloneFor !== newest.id) {
@@ -1323,7 +1394,7 @@ ${result.text}`);
     };
     const live = liveOf(host, root, memo);
     // The person's reply starts it again: from this computer or over the tailnet.
-    const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
+    const newest = personPending(root.to.session).at(-1);
     const early = now() - memo.startedAt < INBOX_RUN_START_GRACE_MS;
     if (live || (early && !memo.paneClosed)) {
       // In Rex, its own pane closed (by the person, or Rex's API): the program went with it, while its last polls
@@ -1402,6 +1473,9 @@ ${result.text}`);
         : runLine?.state === "failed" || runLine?.state === "missing"
           ? { ...pending, state: "undelivered" as const, reason: "undelivered" as const, send_now: false }
           : row.delivery;
+    // A routine's run going (its newest divider's own launch): New at least until it ends (list.ts), and the window
+    // brings the row in at once (`scheduled_running`). Counts and `unread` stay the rules' own.
+    if (root.scheduled_run && word) return { ...row, run: word, delivery, section: inboxSectionWhileRoutineRuns(row), scheduled_running: true };
     return { ...row, run: word, delivery };
   };
 
@@ -1433,7 +1507,7 @@ ${result.text}`);
     if (inRex && !pane) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_NO_TAB);
     const memo = memoOf(launch);
     // What waits now was written before the Stop: it stays for the person's next reply.
-    memo.heldReply = root.to ? (store.pendingReplies(root.to.session, { tags: true }).at(-1)?.id ?? null) : null;
+    memo.heldReply = root.to ? (personPending(root.to.session).at(-1)?.id ?? null) : null;
     stopping.add(launch.id);
     let result: LaunchHostResult;
     try {
@@ -1904,17 +1978,20 @@ ${result.text}`);
    */
   const sendAgain = (root: InboxMessage, memo: Memo): void => {
     const session = inboxLaunchedSession(root)!;
-    if (store.pendingReplies(session, { tags: true }).length === 0) {
+    if (personPending(session).length === 0) {
       const last = store
         .threadMessageIds(root.thread_id)
         .map((id) => store.message(id))
-        .filter((m): m is InboxMessage => !!m && m.author.kind === "person" && m.delivery?.session === session)
+        // The person's own words: never the note that the session's questions moved.
+        .filter((m): m is InboxMessage => !!m && m.author.kind === "person" && !m.moved_note && !m.ship_note && m.delivery?.session === session)
         .at(-1);
       if (!last) throw new InboxError("validation_error", "That launch did not fail.");
       store.sendAgain(last.id, session);
     }
     memo.turnErrorTried = memo.turnError?.key ?? null;
     memo.turnError = null;
+    // The message goes in again: its turn's end is read from the next sweep on, as at any turn's start.
+    memo.turnErrorRead = null;
     // "Starting <agent> again…" until its turn begins.
     memo.busySeen = false;
     memo.startedAt = now();
@@ -1976,6 +2053,20 @@ ${result.text}`);
     },
     /** The last login shell's PATH folders (empty until it was read, and on Windows): the installer's extra PATH on Update now. */
     loginPath: (): string[] => [...loginPath],
+    /** The home folder the folder opener reads `~/…` from. */
+    home: options.homeDir,
+    /**
+     * A folder picked in the folder opener outside compose (Reviews' "On this computer" +, "Another folder…"): its real
+     * path when the opener offers to start in it, by the opener's own rules (`resolveHomeFolder`, read off the process
+     * outside home); null while launch is off, or for a folder it refuses, can't open, isn't there or never starts in.
+     */
+    async pickedFolder(typed: string): Promise<string | null> {
+      if (!enabled()) return null;
+      const read = await resolveFolderAnywhere(typed);
+      if (!read.ok || !read.value.ok) return null;
+      const folder = read.value;
+      return folder.exists && folder.start && folder.real ? folder.real : null;
+    },
     route,
     sweep,
     stop: () => {
@@ -2336,7 +2427,7 @@ ${result.text}`);
         scratch: { root },
         clone: { into: defaultCloneInto() },
         ...(notReady.length > 0 ? { not_ready: notReady } : {}),
-        drives: mounted.map((d) => ({ path: d.path, name: d.name, ...(d.network ? { network: true as const } : {}) })),
+        drives: mounted.map((d) => ({ path: d.path, name: d.name, ...(d.network ? { network: true as const } : {}), ...(d.shortcut === false ? { shortcut: false as const } : {}) })),
         ...(options.platform === "darwin" ? { finder: true as const } : {}),
       };
     },
@@ -2458,7 +2549,12 @@ ${result.text}`);
     rowDecorator(): <T extends InboxListRow>(row: T) => T {
       // One pass over the launches per list read, not one per row.
       const latest = new Map(roots().map((m) => [m.thread_id, m]));
-      return (row) => decorate(row, latest.get(row.thread_id) ?? null);
+      const pending = pendingOnePass();
+      return (row) => inOnePass(() => decorate(row, latest.get(row.thread_id) ?? null), pending);
+    },
+
+    onePass<T>(read: () => T): T {
+      return inOnePass(read);
     },
 
     /**
@@ -2509,12 +2605,14 @@ ${result.text}`);
      * no host here (a downgrade) is left out, as it has no line.
      */
     agents(): { launch_id: string; session: string; thread_id: string; host: string; project_id: string; started_at: string; started: boolean; run: InboxRun["state"] | null; scratch: string | null; scheduled: boolean; rex: boolean }[] {
-      return roots().flatMap((root) => {
-        const launch = root.launch!;
-        const session = inboxLaunchedSession(root);
-        if (launch.deleted_at || !session || !hostOf(launch)) return [];
-        return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run, rex: inboxLaunchRexUnstoppable(launch) }];
-      });
+      return inOnePass(() =>
+        roots().flatMap((root) => {
+          const launch = root.launch!;
+          const session = inboxLaunchedSession(root);
+          if (launch.deleted_at || !session || !hostOf(launch)) return [];
+          return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run, rex: inboxLaunchRexUnstoppable(launch) }];
+        }),
+      );
     },
 
     /** "Start new agents in" is Rex: every agent of this computer's in a Rex pane gets its place line, marks and Show. */
@@ -2577,12 +2675,14 @@ ${result.text}`);
 
     /** Changes when any launched thread's line would: part of the windows' delivery signature. */
     signature(): string {
-      return roots()
-        .map((root) => {
-          const line = runOfRoot(root);
-          return `${root.launch!.id}:${line ? `${line.state}${line.again ? "+" : ""}${line.since ?? ""}` : "-"}`;
-        })
-        .join(",");
+      return inOnePass(() =>
+        roots()
+          .map((root) => {
+            const line = runOfRoot(root);
+            return `${root.launch!.id}:${line ? `${line.state}${line.again ? "+" : ""}${line.since ?? ""}` : "-"}`;
+          })
+          .join(","),
+      );
     },
   };
 }

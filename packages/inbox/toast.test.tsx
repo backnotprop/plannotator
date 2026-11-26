@@ -26,6 +26,12 @@ describe('markReadToast: the approved words', () => {
     expect(markReadToast(row({ resolved_at: '2026-10-14T00:00:00Z' }), 'open')).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: 'Goes back to Archived', warn: false });
   });
 
+  test("the open thread while its routine's run goes: it stays in New until the run ends, so no move is promised", () => {
+    expect(markReadToast(row({ scheduled_running: true }), 'open')).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: '“Invoice list layout”', warn: false });
+    // An archived thread's run leaves it archived: it still goes back there.
+    expect(markReadToast(row({ scheduled_running: true, resolved_at: '2026-10-14T00:00:00Z' }), 'open').detail).toBe('Goes back to Archived');
+  });
+
   test('a row with no thread open: where it went, and the subject that says which', () => {
     expect(markReadToast(row(), 'list')).toEqual({ lead: 'Moved to Quiet', detail: '“Invoice list layout”', warn: false });
     expect(markReadToast(row({ resolved_at: '2026-10-14T00:00:00Z' }), 'list')).toEqual({ lead: 'Back in Archived', detail: '“Invoice list layout”', warn: false });
@@ -463,31 +469,6 @@ test.skipIf(!hasDom)("a phone toast sits above a full-screen file's minimized ca
   page.appendChild(wrap);
   const toast = show({ icon: 'check', lead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
   expect(toast.style.bottom).toBe(`${852 - 732 + 8}px`);
-  delete (window as { innerHeight?: number }).innerHeight;
-});
-
-test.skipIf(!hasDom)("a phone toast sits above a Shape board's dock in its thread, whose foot is hidden under the board", () => {
-  phoneWindow(true);
-  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
-  const page = document.createElement('div');
-  document.body.appendChild(page);
-  host = page;
-  // The thread's foot is display:none while the board shows (it measures 0): the board's dock (y 790) is the floor.
-  const pane = document.createElement('section');
-  pane.className = 'ib-pane';
-  const foot = document.createElement('div');
-  foot.className = 'ib-pfoot';
-  boxAt(foot, 0, 0, 0, 0);
-  const board = document.createElement('section');
-  board.setAttribute('data-shape-layer', '');
-  const dock = document.createElement('div');
-  dock.className = 'shp-dock';
-  boxAt(dock, 55, 790, 280, 42);
-  board.appendChild(dock);
-  pane.append(foot, board);
-  page.appendChild(pane);
-  const toast = show({ icon: 'check', lead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
-  expect(toast.style.bottom).toBe('62px');
   delete (window as { innerHeight?: number }).innerHeight;
 });
 

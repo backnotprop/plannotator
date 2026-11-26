@@ -599,7 +599,7 @@ test.skipIf(!hasDom)('a partial post keeps the dialog open on what did not go, w
 });
 
 
-test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's own origin; the agent is on the third line", async () => {
+test.skipIf(!hasDom)("the open row's second line leads with the author's picture, from the Inbox's own origin, then the agent", async () => {
   // The person's own stack (as "mara-lee", a login no other test drew), its review thread with Claude; a teammate's PR whose account is gone.
   const gone = pull(990, { repo: 'northwind/web-app', mine: false, requested: true, author: null, head: 'gone', updated_at: '2026-11-03T11:00:00.000Z' });
   const own = model.pulls.map((p) => (stack.some((l) => l.key === p.key) ? { ...p, author: 'mara-lee' } : p));
@@ -632,18 +632,15 @@ test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's 
   // The agent: its mark on the third line, named for a reader, and what it is doing.
   const agent = stackRow.querySelector('.ib-pv [data-pulls-row-agent]')!;
   expect(agent.getAttribute('data-pulls-row-agent')).toBe('claude-code');
-  expect(agent.getAttribute('aria-label')).toBe('Claude Code');
+  expect(agent.querySelector('.ib-sr')!.textContent).toBe('Claude Code, ');
   expect(stackRow.querySelector('[data-reviews-status]')!.textContent).toBe('Curating…');
   expect(agent.querySelector('svg, img')).not.toBeNull();
   // The picture failed: the initials stay, no broken image.
   expect(av.querySelector('img')).toBeNull();
   expect(av.getAttribute('data-pulls-avatar')).toBe('none');
   expect(av.textContent).toBe('ML');
-  // A deleted account: a grey person, never an empty box, and no picture asked for.
-  const ghost = row(gone.key).querySelector('[data-pulls-ghost]')!;
-  expect(ghost.getAttribute('aria-label')).toBe('A deleted account');
-  expect(ghost.querySelector('svg')).not.toBeNull();
-  expect(ghost.querySelector('img')).toBeNull();
+  // Only the open row has the second line: the other rows are one line, no picture (a deleted account's: reviewsCompact.test.tsx).
+  expect(row(gone.key).querySelector('[data-reviews-line2], [data-pulls-author], [data-pulls-ghost]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('a stack page has one "Open the diff"; the whole stack is the review\'s own switch', async () => {
@@ -820,7 +817,7 @@ function Page({
   );
 }
 
-test.skipIf(!hasDom)('the list: On you, then the folded group; a stack is one row with its chain', async () => {
+test.skipIf(!hasDom)('the list: On you, then the folded group; a stack is one row whose count unfolds its layers', async () => {
   const opened: string[] = [];
   mount(
     <SidebarProvider>
@@ -853,7 +850,7 @@ test.skipIf(!hasDom)('the list: On you, then the folded group; a stack is one ro
   await settle();
   expect(new Set(rows().map((r) => r.getAttribute('data-pulls-move')))).toEqual(new Set(['on_you', 'not_reviewed']));
   const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
-  expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
+  expect(el(`[data-reviews-stack-toggle="${stackRow.getAttribute('data-reviews-row')}"]`).textContent).toBe('3');
   await act(async () => stackRow.click());
   expect(opened).toEqual([STACK_ID]);
 });

@@ -9,6 +9,9 @@
  *   POST /api/inbox/artifact-pins   `{ thread_id, key, pinned: boolean }`: pin or unpin one artifact; `{ pins }`
  *   GET  /api/inbox/artifacts       the Wall: every thread's artifacts, newest first, paged, with filters
  *
+ * `?machines=1` on either GET: across linked machines too (inbox-artifacts-merged.ts). A linked machine's window
+ * pins this Inbox's artifacts through its door (`POST artifact-pins`) and reads its Wall (`GET artifacts`).
+ *
  * Not the sidebar's thread pins (inbox-pins.ts): another file, other routes.
  * A change tells every window (`event: artifact-pins` on the window's stream).
  * Agents, the MCP, search and the phone's door never see artifact pins.
@@ -30,6 +33,7 @@ import { displayInboxSubject, inboxRowArchived, type InboxListRow, type InboxMes
 import { inboxAttachmentState } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { artifactPinsWire, farWallSearch, mergeArtifactPins, mergeWall, readWallCursor, type FarWall } from "./inbox-artifacts-merged";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 
 export const INBOX_ARTIFACT_PINS_PATH = "/api/inbox/artifact-pins";
@@ -74,7 +78,7 @@ export function inboxWallEntries(store: InboxStore, includeArchived: boolean): W
     const archived = inboxRowArchived(row);
     if (archived && !includeArchived) continue;
     for (const ref of store.threadArtifactRefs(threadId)) {
-      const type = inboxArtifactTypeOf(ref.attachment ? ref.attachment.kind : "guide");
+      const type = inboxArtifactTypeOf(ref.attachment ? ref.attachment.kind : ref.html ? "html" : "guide");
       out.push({ entry: { ref, row, type, archived, pinnedAt: pinned.get(ref.key) ?? null }, at: ref.message.created_at, order: order++ });
     }
   }
@@ -131,9 +135,31 @@ async function wallRow({ ref, row, type, archived, pinnedAt }: WallEntry): Promi
     attachment: ref.attachment ? await inboxAttachmentState(ref.attachment, ref.message.id, { hash: "small" }) : null,
     inline: ref.inline,
     guide: ref.guide,
+    // An html block: its heading and size only (the tile is a quiet card; the block opens in its thread).
+    ...(ref.html ? { html: { title: ref.html.title, size: ref.html.size } } : {}),
     archived,
     pinned_at: pinnedAt,
   };
+}
+
+/** What the merged reads (`?machines=1`) need of the linked machines (inbox-machines.ts; inbox-artifacts-merged.ts). */
+export interface ArtifactPinMachines {
+  /** Each linked machine's pins as its list last said, from a machine that takes the mark. */
+  pinLists: () => { machine: string; pins: readonly InboxArtifactPin[] }[];
+  /** Each linked machine's Wall page that takes the mark, asked with its own search. */
+  walls: (searchOf: (machine: string) => string) => Promise<FarWall[]>;
+}
+
+/** The Wall across linked machines: this Inbox's page from its own offset, and each machine's from its own. */
+async function mergedArtifactsPage(store: InboxStore, url: URL, machines: ArtifactPinMachines): Promise<InboxArtifactsPage> {
+  const cursor = readWallCursor(url.searchParams.get("cursor"));
+  if (!cursor) throw new InboxError("validation_error", "cursor: the next_cursor of the page before.", { field: "cursor" });
+  const limit = whole(url, "limit", 1, INBOX_ARTIFACTS_PAGE_MAX) ?? INBOX_ARTIFACTS_PAGE;
+  const ownUrl = new URL(url);
+  ownUrl.searchParams.set("cursor", String(cursor.own));
+  const own = await inboxArtifactsPage(store, ownUrl);
+  const far = await machines.walls((machine) => farWallSearch(url, cursor.far.get(machine) ?? 0, limit));
+  return mergeWall(own, far, cursor, limit, (threadId) => store.message(threadId) !== null);
 }
 
 export function createInboxArtifactPins(options: {
@@ -141,19 +167,22 @@ export function createInboxArtifactPins(options: {
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
+  machines?: ArtifactPinMachines;
 }) {
-  const { store, serverSession, json } = options;
-  const wire = (pins: readonly InboxArtifactPin[]) => pins.map((pin) => ({ key: pin.key, thread_id: pin.thread_id, pinned_at: pin.pinned_at }));
+  const { store, serverSession, json, machines } = options;
+  const wire = artifactPinsWire;
+  const merged = (url: URL) => machines !== undefined && url.searchParams.get("machines") === "1";
 
   const route = async (req: Request, url: URL): Promise<Response | null> => {
     if (url.pathname === INBOX_ARTIFACTS_PATH) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
-      return json({ serverSession, ...(await inboxArtifactsPage(store, url)) });
+      return json({ serverSession, ...(merged(url) ? await mergedArtifactsPage(store, url, machines!) : await inboxArtifactsPage(store, url)) });
     }
     if (url.pathname !== INBOX_ARTIFACT_PINS_PATH) return null;
     if (req.method === "GET") {
       if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
+      if (merged(url)) return json({ pins: mergeArtifactPins(store.artifactPins(), machines!.pinLists(), (threadId) => store.message(threadId) !== null) });
       return json({ pins: wire(store.artifactPins()) });
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);

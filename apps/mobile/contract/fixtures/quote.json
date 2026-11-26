@@ -1,0 +1,124 @@
+{
+  "about": "Invented quotes for the quote suite. scripts/mobile/vectors-quote.ts writes each lead with the Inbox's own inboxReplyQuoteLead, puts it in front of each of the person's words (and after each of the store's first lines), and takes it away again with withoutInboxReplyQuoteLead; each thread's shape says who wrote each message, and the suite says where ↩ quotes the whole message (arrowQuotesWhole). scripts/mobile/vectors.ts writes vectors/quote.json. Each arrow thread (a and b two agent sessions, p the person) says, with the window's own arrowReply, what ↩ on each message does to the reply box with and without words selected and a quote already there; each excerpt is a message's body quoted whole (inboxReplyQuoteExcerpt).",
+  "leads": [
+    {
+      "whose": {
+        "kind": "yours"
+      },
+      "id": "msg_01J9QUOTEAAAAAAAAAAAAAAAAA",
+      "time": "10:04 AM",
+      "text": "Here is how the three fit together. Accounts hold your sign-in and the billing tables follow.",
+      "selected": false
+    },
+    {
+      "whose": {
+        "kind": "mine"
+      },
+      "id": "msg_01J9QUOTEBBBBBBBBBBBBBBBBB",
+      "time": "Nov 9, 2025, 11:58 PM",
+      "text": "Cap the wait at a minute.",
+      "selected": false
+    },
+    {
+      "whose": {
+        "kind": "theirs",
+        "name": "Codex"
+      },
+      "id": "msg_01J9QUOTECCCCCCCCCCCCCCCCC",
+      "time": "Yesterday",
+      "text": "first line\n\nsecond line after a blank",
+      "selected": true
+    },
+    {
+      "whose": {
+        "kind": "yours"
+      },
+      "id": "msg_01J9QUOTEDDDDDDDDDDDDDDDDD",
+      "text": "",
+      "selected": false
+    },
+    {
+      "whose": {
+        "kind": "theirs",
+        "name": "Ada Novak's agent"
+      },
+      "id": "msg_01J9QUOTEEEEEEEEEEEEEEEEEE",
+      "time": "9:15 AM",
+      "text": "> already a quote\nand **bold** words",
+      "selected": true
+    }
+  ],
+  "words": [
+    "Hold the rollout until the error dashboards are green for an hour.",
+    "Two lines.\nThe second one.",
+    ""
+  ],
+  "firsts": [
+    "Answered 1 question.",
+    "Skipped 2 questions.",
+    "Did 1 action item."
+  ],
+  "plain": [
+    "Replying to you now: the cap is a minute.",
+    "Replying to your message from 10:04 AM:\n> no id, so not the store's lead",
+    "Cap the wait at a minute, and add some jitter.",
+    "Answered 1 question.\n\nNo lead after the first line."
+  ],
+  "threads": [
+    "a",
+    "ap",
+    "apa",
+    "aap",
+    "papa",
+    "aaa",
+    "pp",
+    "apppa"
+  ],
+  "arrows": [
+    "ab",
+    "abp",
+    "aba",
+    "apb",
+    "bpap",
+    "ap",
+    "pa"
+  ],
+  "excerpts": [
+    {
+      "kind": "agent",
+      "body": "Here is how the three fit together. Accounts hold your sign-in and the billing tables follow."
+    },
+    {
+      "kind": "agent",
+      "body": "## The plan\n\n- **First**, move the `export` job to the queue.\n- Then [watch the dashboards](https://example.com/dash) for an hour.\n\n```ts\nconst cap = 60;\n```\n\nThat is all."
+    },
+    {
+      "kind": "agent",
+      "body": "Short."
+    },
+    {
+      "kind": "agent",
+      "body": "```\nonly code here\n```"
+    },
+    {
+      "kind": "agent",
+      "body": "| a | b |\n|---|---|\n| 1 | 2 |\n\n> A quoted line and then words that run on past the cut so the excerpt has to stop near a word boundary well before it reaches the end of this rather long sentence, which keeps going with more words about the export job, the billing tables, the sign-in flow and the dashboards that must stay green for an hour before anyone rolls the change out to everyone else on the team."
+    },
+    {
+      "kind": "person",
+      "body": "Answered 1 question.\n\nCap the wait at a minute.\n\n## Answers to your questions\n\n1. Which cap? A minute."
+    },
+    {
+      "kind": "person",
+      "body": "Replying to your message from 10:04 AM (msg_01J9QUOTEAAAAAAAAAAAAAAAAA):\n> Here is how\n\nHold the rollout."
+    },
+    {
+      "kind": "agent",
+      "body": "Line one\nline two\n\n\nline   three"
+    },
+    {
+      "kind": "agent",
+      "body": "1. Step one\n2. Step two\n- [ ] a task\n- [x] done task"
+    }
+  ]
+}

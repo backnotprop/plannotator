@@ -16,6 +16,9 @@ const SHORTHAND = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d{1,9})$/;
  * none: `owner/repo#123` (GitHub), or a GitHub, GitHub Enterprise, GitLab or
  * Bitbucket Cloud PR URL (`parsePRUrl`, the review's own parser). A URL is
  * kept as its canonical form, without a trailing `/files` or a query.
+ * A Forgejo / Gitea PR URL is none here: the Board has no Forgejo source yet,
+ * so it stays a plain web link to its own address, as before Forgejo reviews
+ * existed. Read as a PR, it was given GitHub's `/pull/N` link or GitHub's source.
  */
 export function parseInboxCardPr(value: unknown): InboxCardPr | null {
   if (typeof value !== "string") return null;
@@ -27,7 +30,7 @@ export function parseInboxCardPr(value: unknown): InboxCardPr | null {
     return { ref: `${owner}/${repo}#${Number(number)}`, url: `https://github.com/${owner}/${repo}/pull/${Number(number)}` };
   }
   const pr = parsePRUrl(text);
-  if (!pr) return null;
+  if (!pr || pr.platform === "forgejo") return null;
   if (pr.platform === "gitlab") return { ref: `${pr.projectPath}!${pr.iid}`, url: `https://${pr.host}/${pr.projectPath}/-/merge_requests/${pr.iid}` };
   if (pr.platform === "bitbucket") return { ref: `${pr.workspace}/${pr.repo}#${pr.number}`, url: `https://bitbucket.org/${pr.workspace}/${pr.repo}/pull-requests/${pr.number}` };
   const ref = pr.host === "github.com" ? `${pr.owner}/${pr.repo}#${pr.number}` : `${pr.host}/${pr.owner}/${pr.repo}#${pr.number}`;

@@ -335,6 +335,12 @@ export const INBOX_PULLS_SEARCH_MAX = 50;
 /** Merged PRs are asked back this many days (to put a stack's merged layers under it). */
 export const INBOX_PULLS_MERGED_DAYS = 14;
 
+/**
+ * A reopen (the board's Close, then Undo) is taken only for a PR this Inbox closed this recently. The server refuses
+ * one past it; the board's Undo line goes when it ends.
+ */
+export const INBOX_PULL_REOPEN_WINDOW_MS = 5 * 60_000;
+
 /** `#412` on GitHub, `!61` on GitLab. */
 export function inboxPullLabel(pull: Pick<InboxPull, "platform" | "number">): string {
   return `${pull.platform === "gitlab" ? "!" : "#"}${pull.number}`;

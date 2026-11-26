@@ -5,8 +5,10 @@
  * reduced to what the window draws and in what order (ids become stable
  * labels, `took_ms` is dropped).
  *
- * `author.host` (additive, approval "inbox-search-contrast") is left out, so
- * the recording made from main before it existed still compares. Re-record
+ * `author.host` (additive, approval "inbox-search-contrast") and each row's
+ * `score` (additive: linked machines' rows merge by it) are left out, so the
+ * recording made from main before they existed still compares; the order
+ * they give is what the recording checks. Re-record
  * only on purpose, when a change is meant to move results, from the commit
  * whose answers are the reference:
  *
@@ -130,7 +132,7 @@ export async function searchParityAnswers(): Promise<Record<string, unknown>> {
     const projectNames = new Map([api, web, exp, studio, pn].map((p) => [p.id, p.name]));
     const label = (id: string) => labels.get(id) ?? projectNames.get(id) ?? `?${id.slice(0, 4)}`;
     const row = (r: InboxSearchRow) => {
-      const { id, project, at, ...rest } = r as InboxSearchRow & { thread_id?: string; message_id?: string; author?: { host?: unknown } };
+      const { id, project, at, score: _score, ...rest } = r as InboxSearchRow & { thread_id?: string; message_id?: string; author?: { host?: unknown } };
       const out: Record<string, unknown> = { ...rest, id: label(id), project: project.name, at };
       if ("thread_id" in rest && rest.thread_id) out.thread_id = label(rest.thread_id);
       if ("message_id" in rest && rest.message_id) out.message_id = label(rest.message_id);

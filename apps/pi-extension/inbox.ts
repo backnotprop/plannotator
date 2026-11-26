@@ -39,7 +39,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync } from "node:fs";
 import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxTool } from "./generated/config.ts";
 import { getPlannotatorDataDir } from "./generated/data-dir.ts";
 import {
@@ -290,7 +290,87 @@ export function exportPiSessionProject(env: Record<string, string | undefined>, 
 	}
 }
 
-function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: string | null }): void {
+/** How far a handoff line is followed back: as many as the poll's `continues` takes (INBOX_CONTINUES_MAX). */
+const PI_HANDOFF_LINE_MAX = 8;
+/** A session header longer than this is not read (Pi's header is a few hundred bytes). */
+const PI_SESSION_HEADER_MAX_BYTES = 64 * 1024;
+
+/**
+ * The header (line 1) of a Pi session's .jsonl, or null when it cannot be read. Only the first line is read:
+ * the rest of a session file can be many megabytes. Exported for the tests.
+ */
+export function readPiSessionHeader(file: string): { id?: unknown; parentSession?: unknown } | null {
+	let fd: number | null = null;
+	try {
+		fd = openSync(file, "r");
+		const chunk = Buffer.alloc(4096);
+		const parts: Buffer[] = [];
+		let size = 0;
+		for (;;) {
+			const read = readSync(fd, chunk, 0, chunk.length, null);
+			if (read <= 0) break;
+			const end = chunk.subarray(0, read).indexOf(0x0a);
+			parts.push(Buffer.from(chunk.subarray(0, end >= 0 ? end : read)));
+			size += end >= 0 ? end : read;
+			if (end >= 0) break;
+			if (size > PI_SESSION_HEADER_MAX_BYTES) return null;
+		}
+		const first = Buffer.concat(parts).toString("utf8").trim();
+		if (!first) return null;
+		const value: unknown = JSON.parse(first);
+		return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as { id?: unknown; parentSession?: unknown }) : null;
+	} catch {
+		return null;
+	} finally {
+		if (fd !== null) {
+			try {
+				closeSync(fd);
+			} catch {}
+		}
+	}
+}
+
+/**
+ * The sessions a handed-off Pi session continues, nearest first (#3539): Pi's handoff starts the new
+ * session with `parentSession: <old session file>` in its header, and that file's header has the old id
+ * (and its own `parentSession` when the line goes further back). Sent as the poll's `continues`, so the
+ * Inbox hands this session what waits for an old id while that id does not poll; an old session that is
+ * running again keeps its own (packages/server/inbox-continuations.ts). Stops at an unreadable file, a
+ * header without an id, a session already seen, or PI_HANDOFF_LINE_MAX. Exported for the tests.
+ */
+export function piHandoffLine(sessionFile: string | null | undefined, currentSessionId: string): string[] {
+	const parent = sessionFile ? readPiSessionHeader(sessionFile)?.parentSession : undefined;
+	return piHandoffFromParent(parent, currentSessionId);
+}
+
+function piHandoffFromParent(parentSession: unknown, currentSessionId: string): string[] {
+	const line: string[] = [];
+	const seen = new Set<string>([currentSessionId]);
+	let parent = parentSession;
+	while (typeof parent === "string" && parent && line.length < PI_HANDOFF_LINE_MAX) {
+		const header = readPiSessionHeader(parent);
+		const id = header?.id;
+		if (typeof id !== "string" || !id || seen.has(id)) break;
+		seen.add(id);
+		line.push(id);
+		parent = header?.parentSession;
+	}
+	return line;
+}
+
+/** The handoff line of the session `ctx` runs; none when Pi cannot say its file (an in-memory session). */
+function piHandoffLineOf(ctx: ExtensionContext, sessionId: string): string[] {
+	try {
+		const parent = ctx.sessionManager.getHeader?.()?.parentSession;
+		if (typeof parent === "string" && parent) return piHandoffFromParent(parent, sessionId);
+		return piHandoffLine(ctx.sessionManager.getSessionFile(), sessionId);
+	} catch {
+		return [];
+	}
+}
+
+/** Exported for the tests. */
+export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: string | null }): void {
 	const spec = inboxAgentTool(connection.tools);
 	const ohMyPi = detectPiHost(pi) === "oh-my-pi";
 	if (!spec) return;
@@ -312,6 +392,8 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 
 	let ctx: ExtensionContext | null = null;
 	let wake: InboxWake | null = null;
+	/** The sessions this one continues (piHandoffLine), read as the session starts: the poll's `continues`. */
+	let continues: string[] = [];
 	/** The on-disk version the session was last told about (#2085's message, once per version). */
 	let notifiedOnDisk: string | null = null;
 	let activationSettled = false;
@@ -408,6 +490,8 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 			}
 			return { version, on_disk: onDisk, host: ohMyPi ? ("oh-my-pi" as const) : ("pi" as const) };
 		},
+		// A handed-off session (#3539): the sessions it continues, so their replies come here while they are gone.
+		continues: () => continues,
 		// The session's working folder, so the Inbox lists it under its project from its first poll.
 		projectPath: () => {
 			const current = ctx;
@@ -455,6 +539,7 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 			prompts.clear();
 			endWaiting(new Error("the session changed"));
 		}
+		continues = startCtx.hasUI ? piHandoffLineOf(startCtx, sessionId) : [];
 		if (!wake && startCtx.hasUI) {
 			wake = new InboxWake(connection, sessionId, target);
 			wake.start();

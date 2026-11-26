@@ -2,7 +2,7 @@
  * Settings → Experimental (the owner, 2026-10-27: "its own page on settings"):
  * the experimental settings sit in their own tab, the LAST one, never inside
  * another tab. Code review's "Edit Code to Suggest" lives there and still
- * toggles and persists under the same cookie; the Editor tab no longer holds
+ * toggles and persists under the same cookie; the Reviews tab does not hold
  * it; plan review and annotate (which never showed it) get no Experimental tab.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -83,9 +83,9 @@ describe.if(hasDom)('Settings → Experimental', () => {
     expect(configStore.get('editSuggestions')).toBe(false);
   });
 
-  test('the Editor tab no longer holds it', async () => {
+  test('the Reviews tab (which took over Editor) does not hold it', async () => {
     await mountSettings('review');
-    await openTab('Editor');
+    await openTab('Reviews');
     expect(document.body.textContent).toContain('Hover cards');
     expect(editSwitch()).toBeNull();
     expect(document.querySelector('[data-settings-experimental]')).toBeNull();

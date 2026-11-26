@@ -17,6 +17,7 @@
 import { type InboxTidyCombine, isInboxId } from "@plannotator/core/inbox-types";
 import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag, INBOX_PROJECTS_USAGE } from "./cli";
+import { localRouteFetch, type InboxRouteFetch } from "./inbox-route-fetch";
 import { writeWholeToStdout } from "./write-whole-stdout";
 
 /** One request never waits longer: a wedged Inbox must not hang the agent. */
@@ -81,6 +82,8 @@ export interface ProjectsCommandDeps {
   /** Tests: how long one request, and a list's wait for the repositories, may take. */
   timeoutMs?: number;
   tidyWaitMs?: number;
+  /** A paired cloud agent's way to the person's Inbox (inbox-call-command.ts `inboxPairedRouteFetch`), in place of this computer's. */
+  fetchRoute?: InboxRouteFetch;
 }
 
 const threadCount = (count: number) => `${count} ${count === 1 ? "thread" : "threads"}`;
@@ -130,16 +133,20 @@ export async function runInboxProjectsCommand(argv: readonly string[], deps: Pro
     err(`${code}: ${message}\n`);
     return 1;
   };
-  let entry: InboxRegistryEntry;
-  try {
-    entry = await deps.ensureRunning();
-  } catch (error) {
-    err(`${inboxEnsureFailedWords(error)}\n`);
-    return 1;
+  let route: InboxRouteFetch;
+  if (deps.fetchRoute) route = deps.fetchRoute;
+  else {
+    let entry: InboxRegistryEntry;
+    try {
+      entry = await deps.ensureRunning();
+    } catch (error) {
+      err(`${inboxEnsureFailedWords(error)}\n`);
+      return 1;
+    }
+    route = localRouteFetch(entry.port, deps.timeoutMs ?? REQUEST_TIMEOUT_MS);
   }
   const request = async (path: string, post?: Record<string, unknown>): Promise<Answer> => {
-    const signal = AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS);
-    const response = await fetch(`http://127.0.0.1:${entry.port}${path}`, post ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(post), signal } : { signal });
+    const response = await route(path, post ? { method: "POST", body: JSON.stringify(post) } : undefined);
     const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
     return { status: response.status, body };
   };

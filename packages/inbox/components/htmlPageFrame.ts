@@ -31,19 +31,19 @@ export function usePageStart(given: PageStart | null | undefined, attachmentId: 
 }
 
 /**
- * Full screen floats its tools over the file. The one in the bottom right corner (the gathered tools' corner
- * control; on a phone the toolbar, there in both states, so a pinch's tuck never resizes the page) would sit on an
- * HTML page's own controls there (a prototype's "1 2 3 4"). The page stops above it: `--ib-pageclear` is the room
- * it takes at the view's foot, measured from the control's layout box (not its box on screen, which flies).
- * `corner`: which control is in that corner now, or null for none.
+ * Full screen on a phone: its toolbar sits in the bottom right corner in both states (so a pinch's tuck never
+ * resizes the page), over an HTML page's own controls there (a prototype's "1 2 3 4"). The page stops above it:
+ * `--ib-pageclear` is the room it takes at the view's foot, measured from the bar's layout box. A desktop gives
+ * none: its page runs to the window's foot and the gathered tools' 32 px corner control floats over it, as the
+ * toolbar does at the top (a band the width of the window under the page read as broken).
  */
-export function usePageClear(sectionRef: RefObject<HTMLElement | null>, on: boolean, corner: 'bar' | 'handle' | null) {
+export function usePageClear(sectionRef: RefObject<HTMLElement | null>, on: boolean) {
   useLayoutEffect(() => {
     const section = sectionRef.current;
     if (!on || !section) return;
     const place = () => {
       const dock = section.querySelector<HTMLElement>('[data-full-view-dock]');
-      const control = dock && corner ? dock.querySelector<HTMLElement>(corner === 'bar' ? '[data-full-view-bar]' : '[data-full-view-handle]') : null;
+      const control = dock?.querySelector<HTMLElement>('[data-full-view-bar]') ?? null;
       const clear = dock && control ? Math.max(0, Math.ceil(dock.clientHeight - control.offsetTop) + 8) : 0;
       section.style.setProperty('--ib-pageclear', `${clear}px`);
     };
@@ -54,7 +54,7 @@ export function usePageClear(sectionRef: RefObject<HTMLElement | null>, on: bool
       observer?.disconnect();
       section.style.removeProperty('--ib-pageclear');
     };
-  }, [sectionRef, on, corner]);
+  }, [sectionRef, on]);
 }
 
 /** A page an attached HTML page links to, shown read-only over it: its path in the page's folder and the fragment its link named. */

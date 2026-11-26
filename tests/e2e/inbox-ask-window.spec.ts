@@ -14,7 +14,9 @@
  * stands on a phone, where Enter is a new line and nothing is sent, and Reply
  * in the thread leaves the reply in sight; a minimized chat is the circle in
  * the window's corner (the owner, 2026-11-20): its 44 px target opens it again
- * and never takes a click meant for Send or the bin beside it.
+ * and never takes a click meant for Send or the bin beside it; with floating
+ * drafts on, a thread's Artifacts view shows the circle and the drafts' pile
+ * just above it, spread inside the window at 1440 and 1024 px.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-ask-window.spec.ts`.
@@ -26,7 +28,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { writeInboxAsk, type InboxAskConversation } from '../../packages/shared/inbox/ask';
+import { readInboxAsk, writeInboxAsk, type InboxAskConversation } from '../../packages/shared/inbox/ask';
 import { scratchProject } from '../../scripts/inbox-sim';
 import { startScriptedAskAgent, type ScriptedAskAgent } from '../helpers/inbox-ask-agent';
 import { aiSession, postAsk, readAsk, runQuery, type AskAnswer } from '../helpers/inbox-ask-window';
@@ -450,6 +452,102 @@ test('minimized, a chat is a circle in the window corner: a 44 px target that op
   await expect.poll(async () => ((await (await fetch(new URL(`/api/inbox/threads/${corner}`, url))).json()) as { thread: { messages: unknown[] } }).thread.messages.length).toBe(2);
   await expect(circle).toBeVisible();
   await shot(page, '7-corner-circle-light', 'light');
+
+  // A right-click on the circle: its menu, one item, and no chat; Close takes the circle and the cut away, the chat stays.
+  await circle.click({ button: 'right' });
+  const circleMenu = page.locator('[data-side-circle-menu]');
+  await expect(circleMenu).toBeVisible();
+  await expect(circleMenu.getByRole('menuitem')).toHaveText(['Close']);
+  await expect(frame()).toHaveCount(0);
+  await circleMenu.getByRole('menuitem', { name: 'Close' }).click();
+  await expect(circle).toHaveCount(0);
+  await expect(page.locator('section.ib-pane[data-side-scoop]')).toHaveCount(0);
+  expect(readInboxAsk(join(world.dataDir, 'inbox'), corner)?.turns.length).toBe(1);
+});
+
+test("with Float reply drafts on, a thread's Artifacts view shows both: the circle in the corner and the drafts' pile just above it, spread inside the window", async () => {
+  const { page, url } = world;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const floats = (on: boolean) =>
+    page.evaluate(async (value) => (await fetch('/api/inbox/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ float_drafts: { on: value } }) })).ok, on);
+  const withChat = await world.send(world.projects.relay, 'ses-pile', 'claude-code', 'Claude Code', 'Queue drain order', 'The queue drains in order.');
+  writeInboxAsk(join(world.dataDir, 'inbox'), savedChat(withChat, 'ses-pile', 'claude-code', 3, 'Is the order kept on retry?', 'Yes, a retry goes to the back.', true));
+  const drafted = [
+    await world.send(world.projects.web, 'ses-banner', 'pi', 'Pi', 'Banner copy', 'Should the banner say "Saved" or "Done"?'),
+    await world.send(world.projects.billing, 'ses-ledger', 'codex', 'Codex', 'Ledger export', 'CSV or JSON for the export?'),
+  ];
+  expect(await floats(true)).toBe(true);
+  try {
+    await page.goto(`${url}#thread=${drafted[0]}`);
+    await page.reload();
+    // Two drafts typed and left: they float.
+    for (const [i, id] of drafted.entries()) {
+      await page.goto(`${url}#thread=${id}`);
+      await page.locator('section.ib-pane .ib-pfoot button', { hasText: 'Reply' }).click();
+      const words = i === 0 ? 'Say "Saved", it names what happened.' : 'CSV first, JSON when someone asks.';
+      await page.locator('section.ib-pane textarea').fill(words);
+      await expect.poll(async () => ((await (await fetch(new URL(`/api/inbox/threads/${id}/draft`, url))).json()) as { draft: { body: string } | null }).draft?.body ?? '').toBe(words);
+    }
+    // The thread with a minimized chat, in its Artifacts view: no reply foot, so the pile rests in the window's corner.
+    await page.goto(`${url}#thread=${withChat}&artifacts`);
+    await expect(page.locator('section.ib-pane > .ib-pfoot')).toBeHidden();
+    const circle = page.locator('[data-side-chat-corner]');
+    const pile = page.locator('[data-rf-corner][data-rf-spot="corner"]');
+    await expect(pile).toBeVisible();
+    await expect(page.locator('[data-rf-corner] [data-rf-card]')).toHaveCount(2);
+    // Both show: the circle and its cut as everywhere else, the pile straight above the circle, its right edge the circle's.
+    await expect(circle).toBeVisible();
+    expect(await circle.boundingBox()).toEqual({ x: 1396, y: 856, width: 44, height: 44 });
+    await expect(page.locator('section.ib-pane[data-side-scoop]')).toHaveCount(1);
+    const dot = (await circle.locator('.ib-sc-dot').boundingBox())!;
+    await expect.poll(async () => (await pile.boundingBox())!.y).toBe(900 - 52 - 44);
+    const rest = (await pile.boundingBox())!;
+    expect(rest.x + rest.width).toBeCloseTo(dot.x + dot.width, 0);
+    expect(Math.abs(rest.x + rest.width / 2 - (dot.x + dot.width / 2))).toBeLessThanOrEqual(8);
+    expect(rest.y + rest.height).toBeLessThanOrEqual(856);
+    // Each takes its own clicks: the circle's centre is the circle's, the pile's the pile's.
+    expect(await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-side-chat-corner]') !== null, [dot.x + dot.width / 2, dot.y + dot.height / 2])).toBe(true);
+    expect(await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-rf-corner]') !== null, [rest.x + rest.width / 2, rest.y + rest.height / 2])).toBe(true);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.mouse.move(700, 300);
+    await shot(page, '8-pile-above-circle-light', 'light');
+    await shot(page, '8-pile-above-circle-dark', 'dark');
+
+    // Spread (hover), at 1440 and at 1024: every row inside the window and clear of the circle's 44 px box.
+    for (const width of [1440, 1024]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect.poll(async () => (await circle.boundingBox())?.x).toBe(width - 44);
+      await expect.poll(async () => { const b = (await pile.boundingBox())!; return b.x + b.width; }).toBe(width - 5);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await pile.hover();
+      await expect(pile).toHaveAttribute('data-spread', '');
+      const cards = page.locator('[data-rf-corner] [data-rf-card]');
+      await expect.poll(async () => (await cards.first().boundingBox())?.width).toBe(288);
+      await page.waitForTimeout(300);
+      for (const b of await cards.evaluateAll((all) => all.map((el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; }))) {
+        expect(b.left).toBeGreaterThanOrEqual(0);
+        expect(b.right).toBeLessThanOrEqual(width);
+        expect(b.top).toBeGreaterThanOrEqual(0);
+        expect(b.bottom).toBeLessThanOrEqual(856);
+      }
+      await expect(circle).toBeVisible();
+      await shot(page, `8-pile-spread-${width}-light`, 'light');
+      await shot(page, `8-pile-spread-${width}-dark`, 'dark');
+      await page.mouse.move(300, 300);
+      await expect(pile).not.toHaveAttribute('data-spread', '');
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // Back to the thread: the pile is level with Send again, beside the circle, as before.
+    await page.goto(`${url}#thread=${withChat}`);
+    await expect(page.locator('[data-rf-corner][data-rf-spot="foot"]')).toBeVisible();
+    await expect(circle).toBeVisible();
+  } finally {
+    expect(await floats(false)).toBe(true);
+  }
+  await page.reload();
+  await expect(page.locator('section.ib-pane .ib-phead')).toBeVisible();
+  await expect(page.locator('[data-rf-corner]')).toHaveCount(0);
 });
 
 test('no page error, and the agent got the surface from the thread', async () => {

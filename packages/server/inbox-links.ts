@@ -149,10 +149,11 @@ export interface InboxLinkOffer {
   code: string | null;
 }
 
-export function buildLinkOffer(offer: { id: string; name: string; tailnet: string | null; secret: string; code: string }): string {
+export function buildLinkOffer(offer: { id: string; name: string; tailnet: string | null; secret: string; code: string | null }): string {
   const params = [`v=1`, `id=${offer.id}`, `name=${encodeURIComponent(offer.name)}`];
   if (offer.tailnet) params.push(`tailnet=${encodeURIComponent(offer.tailnet)}`);
-  params.push(`secret=${offer.secret}`, `code=${offer.code}`);
+  // An introduction's code has no six digits (its secret only).
+  params.push(`secret=${offer.secret}`, ...(offer.code ? [`code=${offer.code}`] : []));
   return `plannotator://link?${params.join("&")}`;
 }
 

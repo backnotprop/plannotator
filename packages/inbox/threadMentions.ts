@@ -18,11 +18,11 @@
  * (`useMentionBoxOpener`) and takes it as its field mounts.
  */
 import { useEffect, useRef } from 'react';
-import { inboxThreadMentionWords, remapReplyMentions, standingReplyMentions } from '@plannotator/core/inbox-thread-mention';
+import { inboxThreadMentionWords, remapReplyMentions, standingReplyMentions, type InboxThreadMentionReach } from '@plannotator/core/inbox-thread-mention';
 import type { InboxReplyDraft, InboxReplyMention } from '@plannotator/core/inbox-types';
 import { readRoute } from './app/route';
 import { writeRoute } from './app/writeRoute';
-import { machineOf, selfMachineId } from './inboxUrl';
+import { linkedMachineFacts, machineOf, selfMachineId, selfMachineName } from './inboxUrl';
 
 /** A thread as a mention names it: its id, title, project, whether it is archived, and the machine whose Inbox holds it. */
 export interface MentionRef {
@@ -188,6 +188,7 @@ export function addReplyMentions(threadId: string, text: string, added: readonly
 
 /** The reply was sent or discarded: its mentions go with its words (the draft's, as the Inbox answers next, stay apart). */
 export function clearReplyMentions(threadId: string, opts: { draft?: boolean } = {}): void {
+  forgetReplyThread(threadId);
   undoable.delete(threadId);
   const had = boxes.delete(threadId);
   const hadDraft = opts.draft ? drafts.delete(threadId) : false;
@@ -197,6 +198,7 @@ export function clearReplyMentions(threadId: string, opts: { draft?: boolean } =
 /** For a test: forget every reply's mentions and the last reply. */
 export function resetReplyMentionsForTests(): void {
   boxes.clear();
+  writing.clear();
   undoable.clear();
   drafts.clear();
   lastReply = undefined;
@@ -213,16 +215,40 @@ export function replyReaderMachine(threadId: string): string | null {
   return machineOf(threadId) ?? selfMachineId();
 }
 
-/** Whether the agent the reply to `threadId` goes to can open the mentioned thread (its Inbox holds it). */
+/**
+ * Whether the agent the reply to `threadId` goes to can read the mentioned thread: its own Inbox holds it, or reads it
+ * from a linked machine (mark `agent-read`). That is this window's machine and one it links to, in either direction:
+ * the reader's Inbox must take the mark and, when the thread is here, hold a link back to this one (`both_ways`). A
+ * linked machine too old for it must update first: the thread's machine when the thread is there, the reader's own
+ * when the thread is here, each named. A linked machine whose list is not read yet (asleep since a restart here) is not
+ * called old: its marks are not known, so the agent is told to read it, and the read says if it cannot be reached. A
+ * third machine, or one not heard of yet: false.
+ */
+export function mentionReach(threadId: string, mention: { machine?: string | null }): InboxThreadMentionReach {
+  const self = selfMachineId();
+  const at = mention.machine ?? self;
+  const reader = replyReaderMachine(threadId);
+  if (at === reader) return true;
+  if (at !== self && reader !== self) return false;
+  const far = at === self ? reader : at;
+  const facts = far ? linkedMachineFacts(far) : null;
+  if (!facts || (at === self && !facts.both_ways)) return false;
+  if (facts.marks.includes('agent-read')) return true;
+  if (facts.state !== 'needs_update' && !facts.listed) return true;
+  const here = selfMachineName() ?? 'this machine';
+  return at === self ? { update: 'reader', thread: here, reader: facts.name } : { update: 'thread', thread: facts.name, reader: here };
+}
+
+/** Whether the agent the reply to `threadId` goes to can open the mentioned thread (`mentionReach`). */
 export function mentionReadable(threadId: string, mention: { machine?: string | null }): boolean {
-  return (mention.machine ?? selfMachineId()) === replyReaderMachine(threadId);
+  return mentionReach(threadId, mention) === true;
 }
 
 /** The words the agent reads for this reply: each mention standing in them in its place, then the list (core). */
 export function replyWordsWithMentions(threadId: string, words: string): string {
   const mentions = mentionsFor(threadId, words);
   if (mentions.length === 0) return words;
-  return inboxThreadMentionWords(words, mentions, (m) => mentionReadable(threadId, m));
+  return inboxThreadMentionWords(words, mentions, (m) => mentionReach(threadId, m));
 }
 
 /** A drop never splits a word: an offset inside one moves to its end. */
@@ -310,9 +336,13 @@ export function requestMention(threadId: string, refs: readonly MentionRef[]): v
 
 /**
  * The thread pane's half: a mention asked for while its box is closed opens the box (`open`, the pane's own opener),
- * unless a Send is on its way (the box takes no words then; it opens once the Send ends).
+ * unless the pane is `busy`: a Send is on its way (the box takes no words then), or the thread's draft is not read yet
+ * (its words would be offered apart from the mention). It opens once that ends, unless the draft's words opened the
+ * box meanwhile (the mention then joins them at their end). `words`: the reply holds
+ * words not sent yet (the open box's, or with the box closed its draft's), which the row menu's item waits for.
  */
-export function useMentionBoxOpener(threadId: string, boxOpen: boolean, busy: boolean, open: () => void): void {
+export function useMentionBoxOpener(threadId: string, boxOpen: boolean, busy: boolean, open: () => void, words = false): void {
+  useReplyWords(threadId, 'pane', words);
   const openRef = useRef(open);
   openRef.current = open;
   const state = useRef({ boxOpen, busy });
@@ -328,11 +358,35 @@ export function useMentionBoxOpener(threadId: string, boxOpen: boolean, busy: bo
     };
   }, [threadId]);
   useEffect(() => {
-    if (!busy && !boxOpen && waiting.has(threadId)) openRef.current();
+    if (busy || boxOpen || !waiting.has(threadId)) return;
+    // After the pane's own effects of this turn have drawn (the draft just read may open the box with its words).
+    const later = setTimeout(() => {
+      if (!state.current.boxOpen && !state.current.busy && waiting.has(threadId)) openRef.current();
+    }, 0);
+    return () => clearTimeout(later);
   }, [busy, boxOpen, threadId]);
 }
 
 // ── Which reply a menu's Mention in reply goes to ──────────────────────────────────────────────────────────────────
+// The item shows only while a reply with words not sent yet is in play (the owner, 2026-11-22: "only with unsent words
+// in a reply box"): an empty box, or a reply already sent, offers nothing.
+
+/** The replies holding words not sent yet, as their pane or floating draft's window reports them while mounted. */
+const writing = new Map<object, { thread: string; where: 'pane' | 'window' }>();
+
+function useReplyWords(threadId: string, where: 'pane' | 'window', words: boolean): void {
+  useEffect(() => {
+    if (!words) return;
+    const mark = {};
+    writing.set(mark, { thread: threadId, where });
+    return () => void writing.delete(mark);
+  }, [threadId, where, words]);
+}
+
+/** A floating draft's window: whether its words (not sent yet) are there, for the row menu's item. */
+export function useFloatingReplyWords(threadId: string, words: boolean): void {
+  useReplyWords(threadId, 'window', words);
+}
 
 const LAST_KEY = 'plannotator-inbox-last-reply';
 let lastReply: string | null | undefined;
@@ -345,7 +399,7 @@ function storage(): Storage | null {
   }
 }
 
-/** The reply the person last wrote in (the menu names it, and it is the reply when no thread is open). */
+/** The reply the person is writing in (a phone's Mention in reply goes to it while its words are not sent). */
 export function noteReplyThread(threadId: string): void {
   if (lastReply === threadId) return;
   lastReply = threadId;
@@ -353,6 +407,17 @@ export function noteReplyThread(threadId: string): void {
     storage()?.setItem(LAST_KEY, threadId);
   } catch {
     // Refused: kept for this page only.
+  }
+}
+
+/** That reply was sent, discarded or emptied: it is no longer the one being written. */
+export function forgetReplyThread(threadId: string): void {
+  if (lastReplyThread() !== threadId) return;
+  lastReply = null;
+  try {
+    storage()?.removeItem(LAST_KEY);
+  } catch {
+    // Refused: forgotten for this page only.
   }
 }
 
@@ -368,16 +433,23 @@ function lastReplyThread(): string | null {
 }
 
 /**
- * The reply a Mention in reply goes to: the thread open beside the list (a computer), else the reply the person last
- * wrote in (a phone, or no thread open). `open`: whether that reply is the thread open now (the menu names it when not).
- * Null: none, and the item is not offered.
+ * The reply a Mention in reply goes to, only while it holds words not sent yet. A computer: the thread open beside the
+ * list, else an open floating draft's window. A phone (no thread beside the list): the reply the person was writing in.
+ * `draftWords`: whether a thread's saved draft holds words (null: not known now); a remembered reply whose draft is
+ * known to hold none is forgotten (a reply sent elsewhere, or a value an older version left). `open`: whether that
+ * reply is the thread open now (the menu names it when not). Null: none, and the item is not offered.
  */
-export function mentionTarget(phone: boolean): { thread: string; open: boolean } | null {
-  const route = readRoute();
-  const open = !phone && (route.page === 'inbox' || route.page === 'reviews') ? (route.thread ?? null) : null;
-  if (open) return { thread: open, open: true };
+export function mentionTarget(phone: boolean, draftWords: (threadId: string) => boolean | null): { thread: string; open: boolean } | null {
+  const held = [...writing.values()];
   const last = lastReplyThread();
-  return last ? { thread: last, open: false } : null;
+  const lastWords = last === null ? false : held.some((reply) => reply.thread === last) || draftWords(last);
+  if (last !== null && lastWords === false) forgetReplyThread(last);
+  if (phone) return last !== null && lastWords ? { thread: last, open: false } : null;
+  const route = readRoute();
+  const open = route.page === 'inbox' || route.page === 'reviews' ? (route.thread ?? null) : null;
+  if (open && held.some((reply) => reply.where === 'pane' && reply.thread === open)) return { thread: open, open: true };
+  const floating = held.find((reply) => reply.where === 'window');
+  return floating ? { thread: floating.thread, open: false } : null;
 }
 
 /**

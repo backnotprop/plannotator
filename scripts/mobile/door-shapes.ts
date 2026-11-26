@@ -9,9 +9,9 @@
  * Types only: nothing imports this file at run time.
  */
 import type { InboxDevicePublic } from '../../packages/shared/inbox/devices';
-import type { InboxAttachmentState } from '../../packages/core/inbox-attachments';
+import type { InboxAnnotationRecord, InboxAttachmentState } from '../../packages/core/inbox-attachments';
 import type { InboxRowSnooze } from '../../packages/core/inbox-snooze';
-import type { InboxListRow, InboxMessageWire, InboxQuestion, InboxRecordKind, InboxReplyDraft } from '../../packages/core/inbox-types';
+import type { InboxComposeProject, InboxDraft, InboxListRow, InboxMessageWire, InboxQuestion, InboxRecordKind, InboxReplyDraft, InboxUpload } from '../../packages/core/inbox-types';
 import type { QuestionAnswer } from '../../packages/core/question-block';
 import type { inboxPickBody } from '../../packages/core/inbox-answers';
 
@@ -204,4 +204,121 @@ export interface DoorThreadAttachmentsAnswer {
   serverSession: string;
   attachments: InboxAttachmentState[];
   inline_images?: InboxAttachmentState[];
+  /** The person's comments that wait for a Send (on files, on messages' words, on guided reviews). */
+  annotations?: InboxAnnotationRecord[];
+}
+
+/** `POST annotations` (packages/server/inbox-attachments.ts): a comment on a file's version, new or edited (the same annotation id). */
+export interface DoorAnnotationBody {
+  idempotency_key: string;
+  attachment_id: string;
+  /** `current`, or the sent version's sha256. */
+  version: string;
+  /** Plannotator's annotation, as the viewer made it. */
+  annotation: Record<string, unknown>;
+}
+
+/** `POST annotations` answers. */
+export interface DoorAnnotationAnswer {
+  annotation: InboxAnnotationRecord;
+}
+
+/** `POST annotations/:id/remove`. */
+export interface DoorAnnotationRemoveBody {
+  idempotency_key: string;
+}
+
+/** `POST markups` answers (packages/shared/inbox/markups.ts): where the drawing is kept, and the name a comment shows it by. */
+export interface DoorMarkupAnswer {
+  path: string;
+  name: string;
+  url?: string;
+}
+
+/** `GET sessions` (packages/server/inbox-compose.ts): every live agent session, grouped by project, for New message's To. */
+export interface DoorSessionsAnswer {
+  serverSession: string;
+  /** This Inbox's stable id (linked machines). */
+  machine?: string;
+  projects: InboxComposeProject[];
+}
+
+/** `POST messages` (packages/server/inbox-compose.ts `startThread`): a new thread to one live session. */
+export interface DoorComposeBody {
+  idempotency_key: string;
+  /** A live session (`409 session_not_live` otherwise, nothing written). */
+  to: { host?: string; session: string };
+  /** The words; may be empty when `uploads` holds a file. */
+  body: string;
+  /** `upl_` ids from `POST uploads`. */
+  uploads?: string[];
+}
+
+/** `POST messages` answers: the new thread and its first message. */
+export interface DoorComposeAnswer {
+  thread_id: string;
+  message: InboxMessageWire;
+  /** The project it was written in. A Send the Inbox replays from its own store (the key known, not the door's
+   * record of it) answers without it. */
+  project?: { id: string; name: string; root: string };
+  replayed: boolean;
+}
+
+/** `GET threads/:id/taggable` (packages/server/inbox-tags.ts `InboxTaggableSession`, a server type the schema does
+ * not read): who the person can tag with `@` in this thread's reply box. */
+export interface DoorTaggableSession {
+  session: string;
+  host: string | null;
+  /** `live`: its connection polls (woken); `mcp`: it reads the Inbox only (not woken). */
+  kind: 'live' | 'mcp';
+  /** The name an MCP agent gave itself; null otherwise. */
+  name: string | null;
+  /** A live session's own title, when it has one. */
+  label?: string;
+  project: { id: string | null; name: string; root: string | null } | null;
+  started_at: string | null;
+  last_at: string;
+  busy: boolean | null;
+  idle_since: string | null;
+  /** False: a live session on an older Plannotator (update it to tag it). */
+  taggable: boolean;
+  /** The session the reply goes to anyway. */
+  owner: boolean;
+  /** It wrote in this thread. */
+  wrote_thread: boolean;
+}
+
+/** `GET threads/:id/taggable` answers. */
+export interface DoorTaggableAnswer {
+  serverSession: string;
+  owner: { host: string | null; session: string } | null;
+  sessions: DoorTaggableSession[];
+}
+
+/** `POST messages/:id/ack` (packages/server/inbox.ts, the 👍 Looks good route): `ack: false` takes it back; `reaction`
+ * is the tray's emoji (null: 👍 Looks good again; absent: the ack's emoji as it is). */
+export interface DoorAckBody {
+  idempotency_key: string;
+  ack?: boolean;
+  reaction?: { emoji: string; label?: string } | null;
+}
+
+/** `POST messages/:id/ack` answers (`InboxStore.ackMessage`): the message with its ack, and its thread's row. */
+export interface DoorAckAnswer {
+  message: InboxMessageWire;
+  thread: InboxListRow;
+}
+
+/** `POST messages/:id/take-back` answers (packages/server/inbox-take-back.ts): the message, and the draft its words went
+ * back to on the computer: the thread's reply draft, or, for a thread's lone first message, a New message draft. Both
+ * null when it was taken back already. */
+export interface DoorTakeBackAnswer {
+  message: InboxMessageWire;
+  draft: InboxReplyDraft | null;
+  compose: InboxDraft | null;
+}
+
+/** `POST uploads?name=&idempotency_key=` (the file's own bytes) answers the pending upload a Send names. */
+export interface DoorUploadAnswer {
+  upload: InboxUpload;
 }

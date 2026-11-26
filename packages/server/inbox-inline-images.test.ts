@@ -262,6 +262,8 @@ test("images with no record are captured on a later read, in the background: wri
 
   writeFileSync(join(project, "design", "late.png"), png(4, 4, 40));
   await read(late.thread_id);
+  // The window draws it from the message route once it is there: that ends any wait the first read's miss began.
+  expect((await get(server, `/api/inbox/messages/${late.message_id}/image?path=${encodeURIComponent("design/late.png")}`)).status).toBe(200);
   await server.imageCapture.idle();
   expect((await read(late.thread_id)).messages[0].inline_images.map((i: any) => [i.ref, i.captured])).toEqual([["design/late.png", "on_open"]]);
   await server.imageCapture.idle();

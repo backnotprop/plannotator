@@ -583,10 +583,11 @@ test('the guided review\'s bar holds one Split / Unified button and the Diff dis
   expect((await world.context.cookies()).find((c) => c.name === 'plannotator-diff-style')?.value).toBe('unified');
   await shot('4.4-guide-diff-layout-unified');
 
-  // The gear: code review's popover without the two rows that need the repository; Wrap reaches config.json.
+  // The gear: code review's popover with its Whole file (the diffs obey it), without Hide whitespace (it needs the
+  // repository); Wrap reaches config.json.
   await controls.getByRole('button', { name: 'Diff display options' }).click();
   const popup = page.locator('[data-diff-display-popup]');
-  await expect(popup.getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Show moved & renamed code']);
+  await expect(popup.getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Whole file', 'Show moved & renamed code']);
   await popup.getByRole('switch', { name: 'Wrap long lines' }).click();
   await expect.poll(() => optionsOnDisk().overflow).toBe('wrap');
   await shot('4.4-guide-diff-display-popover');
@@ -606,11 +607,12 @@ test('the guided review\'s bar holds one Split / Unified button and the Diff dis
   expect(model.annotations.map((r) => [r.path, r.guide.side, r.guide.line_start, r.guide.line_end])).toEqual([['src/auth.ts', 'new', 3, 3]]);
   await shot('4.4-guide-diff-layout-unified-comment');
 
-  // Back to Split, then a phone: no controls, every diff in one column, the saved layout left as it is.
+  // Back to Split, then a phone: the gear alone, every diff in one column, the saved layout left as it is.
   await toggle.click();
   await expect.poll(styleOnDisk).toBe('split');
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(viewer.locator('[data-diff-controls]')).toHaveCount(0);
+  await expect(viewer.locator('[data-diff-layout-toggle]')).toHaveCount(0);
+  await expect(viewer.locator('[data-diff-controls] button')).toHaveCount(1);
   await expect(viewer.locator('[data-guide-section-tab]')).toHaveCount(0);
   await expect.poll(layouts).toEqual(['single', 'single']);
   await page.waitForTimeout(500);

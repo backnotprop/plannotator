@@ -86,6 +86,8 @@ enum PhoneWords {
   // MARK: A thread (FLOWS 4, mock 4)
   /// packages/core/inbox-types.ts:490 `inboxAgentName`'s fallback.
   static let anAgent = "An agent"
+  /// packages/inbox/scriptAuthor.ts `SCRIPT_AUTHOR_NAME`: a script's post (no session, host or name).
+  static let script = "Script"
   /// The window's own word for the person in a row's preview (packages/core/inbox-row-preview.ts:61, "You: …").
   static let you = "You"
   /// Brief S1: a block this slice does not draw yet.
@@ -123,12 +125,14 @@ enum PhoneWords {
   /// Why a Send was not taken (packages/inbox/sendFailure.ts): a short plain refusal of the Inbox is the line as it
   /// is, because it says what to do; anything else is the window's own line. Two cases have their own words: an
   /// answer another device changed (the Inbox's line for it names a key and a revision), and a session that ended.
-  static func notice(_ notice: InboxSession.Notice, computer: String, agent: String? = nil) -> String {
+  /// `newMessage`: the Send was a new message (New message), not a reply: the words say message.
+  static func notice(_ notice: InboxSession.Notice, computer: String, agent: String? = nil, newMessage: Bool = false) -> String {
+    let notSent = newMessage ? messageNotSent : replyNotSent
     switch notice {
     case .refused(_, "question_revision_conflict"): return answerChanged
-    case .refused(_, "session_not_live"): return sessionEnded(agent)
-    case .refused(let words, _): return SendFailure.plain(words) ?? replyNotSent
-    case .unreadable: return replyNotSent
+    case .refused(_, "session_not_live"): return newMessage ? messageSessionEnded(agent) : sessionEnded(agent)
+    case .refused(let words, _): return SendFailure.plain(words) ?? notSent
+    case .unreadable: return notSent
     case .notOffered: return "Plannotator on \(computer) cannot do this yet."
     case .appNeedsUpdate: return updatePhone
     case .gaveWay: return answerChanged
@@ -138,6 +142,10 @@ enum PhoneWords {
   static let replyNotSent = "The reply was not sent."
   /// `raceWhat` (packages/inbox/components/ReplyRoute.tsx:387).
   static func sessionEnded(_ agent: String?) -> String { "That \(agent.map { "\($0) " } ?? "")session ended before your reply went. Nothing was sent." }
+  /// A new message not taken (the window's New message, packages/inbox/components/ComposeDialog.tsx).
+  static let messageNotSent = "The message was not sent. Send again to retry."
+  /// A new message whose agent session ended before it went.
+  static func messageSessionEnded(_ agent: String?) -> String { "That \(agent.map { "\($0) " } ?? "")session ended before your message went. Nothing was sent." }
   /// A Send that named an answer another device changed after this phone read it.
   static let answerChanged = "An answer changed on another device. Check it, then send again."
   /// Why a pick did not go, on its card (packages/inbox/components/Thread.tsx:2499, :2505, :2516).
@@ -388,6 +396,54 @@ enum PhoneWords {
   static let done = "Done"
   static let selected = "Selected"
 
+  // MARK: Comments on files (FLOWS 7; every one is the window's own word)
+  /// packages/inbox/components/ImageAttachmentView.tsx, HtmlPageComment.tsx: the button that keeps a comment.
+  static let comment = "Comment"
+  /// packages/inbox/components/AttachmentPane.tsx:264, the field over a selection or a line.
+  static let commentOnThis = "Comment on this…"
+  /// packages/inbox/components/ImageAttachmentView.tsx:370.
+  static let commentOnImage = "Comment on this image…"
+  /// The same field once something is drawn on the picture.
+  static let whatShouldChange = "What should change?"
+  /// packages/inbox/components/HtmlPageComment.tsx:384.
+  static let commentOnPage = "Comment on this page…"
+  /// packages/inbox/components/ImageAttachmentView.tsx:393.
+  static let markUp = "Mark up"
+  /// apps/mobile/contract/flows/07-attachment.md: the page's two modes ("Comment" and "Use the page").
+  static let useThePage = "Use the page"
+  /// packages/inbox/components/AnnotationsChip.tsx: "Edit the comment", "No comments", and Remove.
+  static let editComment = "Edit the comment"
+  static let remove = "Remove"
+  static let noComments = "No comments"
+  /// packages/inbox/components/Thread.tsx: a comment the computer would not keep.
+  static let commentNotSaved = "The comment was not saved."
+  /// The editor's line for a change to a comment that already went in a Send (the owner's words, 2026-11-21; the
+  /// window has no such race: its comments go with the Send pressed there).
+  static let commentAlreadySent = "Not saved. This comment was already sent."
+  /// packages/inbox/components/AnnotationsChip.tsx: a comment whose place in the file is lost (it goes with its quote).
+  static let unanchored = "Unanchored"
+  /// A comment whose drawing can reach the computer only on its own network (the relay carries no drawing). The
+  /// owner's words; the window runs on the computer and has no such state.
+  static let needsNetwork = "Needs your computer's network"
+  /// The thread's line for the comments sent while their drawing could not go: each goes by itself once it can.
+  static func commentsNeedNetwork(_ n: Int) -> String { "\(CountWords.comments(n)) \(n == 1 ? "needs" : "need") your computer's network" }
+  /// packages/ui/components/Viewer.tsx: a comment on the whole document.
+  static let globalComment = "Global comment"
+  /// packages/inbox/components/Markup.tsx `markupToast`: a drawing added to the reply.
+  static let markupAdded = "Markup added to your reply"
+  static let addedToReply = "Added to your reply"
+  static let markupAddedSpoken = "Markup added to your reply."
+  /// packages/inbox/components/AttachmentPane.tsx, the panel's foot: what rides the next Send, comments for
+  /// annotations.
+  static func commentsRide(_ n: Int, agent: String, elsewhere: Int) -> String {
+    let lead = "\(CountWords.comments(n)) \(n == 1 ? "rides" : "ride") your next Send to \(agent)."
+    return elsewhere > 0 ? "\(lead) \(elsewhere) \(elsewhere == 1 ? "is" : "are") on other files." : lead
+  }
+
+  /// VoiceOver's state for a task box in a document (it cannot be ticked here).
+  static let taskTicked = "Checked"
+  static let taskOpen = "Not checked"
+
   // MARK: Files (FLOWS 7; the window's file viewer)
   /// apps/mobile/contract/flows/07-attachment.md: "File 2 of 4".
   static func filePlace(_ at: Int, of count: Int) -> String { "File \(at) of \(count)" }
@@ -413,4 +469,74 @@ enum PhoneWords {
   static func fileNotShown(_ name: String) -> String { "\(name) does not show here." }
   /// An alert in a document, by its kind (`> [!NOTE]`).
   static func alert(_ kind: String) -> String { kind.prefix(1).uppercased() + kind.dropFirst() }
+}
+
+// MARK: Writing: New message, attached files, the quote (all the window's own words, as cited)
+extension PhoneWords {
+  /// packages/inbox/components/InboxList.tsx:1108, the list's button.
+  static let newMessage = "New message"
+  /// packages/inbox/compose/ComposeDialog.tsx:1218.
+  static let toLabel = "To"
+  /// ComposeDialog.tsx:1265, the To button before an agent is chosen, and while the sessions are read.
+  static let chooseAnAgent = "Choose an agent"
+  static let lookingForAgents = "Looking for live agents…"
+  /// ComposeDialog.tsx:9, what Send says with no agent chosen.
+  static let chooseAgentToSend = "Choose an agent to send it."
+  /// packages/inbox/board/NewCardDialog.tsx:257.
+  static let noAgentRunning = "No agent is running"
+  /// ComposeDialog.tsx:1453, the field's placeholder.
+  static let composeHint = "Write an idea or a request. It starts a new thread."
+  /// ComposeDialog.tsx:788 and Thread.tsx:3014.
+  static let waitForFiles = "Wait for the files to finish uploading."
+  /// packages/inbox/compose/ComposeFiles.tsx:703, the paperclip.
+  static let attachFiles = "Attach files"
+  /// The system's own names for the three sources.
+  static let photoLibrary = "Photo Library"
+  static let takePhoto = "Take Photo"
+  static let chooseFiles = "Choose Files"
+  /// ComposeFiles.tsx:820 (the phone has no percentage to give) and :909.
+  static let uploading = "Uploading…"
+  static func removeFile(_ name: String) -> String { "Remove \(name)" }
+  /// The reply box's bin (packages/inbox, the reply foot's "Discard").
+  static let discard = "Discard"
+  /// packages/inbox/App.tsx:2329-2334, the toast after a new message is sent.
+  static func sentTo(_ agent: String) -> String { "Sent to \(agent)" }
+  static func inProject(_ project: String) -> String { "in \(project)" }
+  static func sentToSpeech(_ agent: String, _ project: String) -> String { "Sent to \(agent) in \(project). It takes it as its next turn." }
+  /// packages/inbox/replyQuote.ts REPLY_QUOTE_WORDS.
+  static let removeQuote = "Remove quote"
+  /// Said when × takes the quote away (REPLY_QUOTE_WORDS.removed).
+  static let quoteRemoved = "Quote removed."
+  /// The sent reply's quote line: a touch goes to the quoted message (the window's REPLY_QUOTE_WORDS.goTo).
+  static let goToMessage = "Go to the message"
+  static func replyingTo(_ who: String, time: String, words: Bool) -> String {
+    "Replying to \(words ? "words in " : "")\(who == you ? "your message" : "\(who)'s message")\(time.isEmpty ? "" : " from \(time)")"
+  }
+
+  // MARK: Writing, part 2: @ tags, 👍 Looks good, Take back (the window's own words)
+
+  /// packages/inbox/components/TagPicker.tsx:149, the list's name.
+  static let tagAnAgent = "Tag an agent"
+  /// packages/inbox/components/ComposerField.tsx:210, a bare `@` with nobody to offer.
+  static let noAgentToTag = "No agent to tag: none is live, and none reads the Inbox yet."
+  /// TagPicker.tsx:187-189, the row badges.
+  static let ownsThisThread = "Owns this thread"
+  static let notWoken = "Not woken"
+  static let tagUpdate = "Update"
+  /// ComposerField.tsx onPickBlocked: a session on an older Plannotator is not tagged.
+  static func tagBlocked(_ label: String) -> String { "\(label): \(TagRules.updateWords)." }
+  /// packages/inbox/parts/MessageHead.tsx:94, after "to <owner>".
+  static func toTagged(_ to: String?, _ names: String) -> String { "\(to.map { "to \($0) · " } ?? "")tagged \(names)" }
+  /// packages/inbox/components/ReactionTray.tsx:128, :198-199 and :104, the tray's cells and its trigger.
+  static let thumbsLooksGood = "👍 Looks good"
+  static let anyEmoji = "Any emoji"
+  static let anyEmojiSpeech = "React with any emoji, once"
+  static func moreReactions(_ agent: String) -> String { "More reactions for \(agent)'s message" }
+  /// ReactionTray.tsx:455-457, the button's tooltip, said as its hint.
+  static func looksGoodHint(_ agent: String) -> String { "Sends \(agent) 👍 Looks good. Moves to Quiet until it writes again. Hold for more reactions." }
+  static func takeBackReaction(_ current: InboxReaction?) -> String {
+    "Take back \(current.map { ($0.label ?? "").isEmpty ? "your \($0.emoji)" : $0.label ?? "" } ?? Reactions.looksGood)"
+  }
+  /// packages/inbox/components/Undelivered.tsx:112, Take back's tooltip, said as its hint.
+  static let takeBackHint = "Take it out of the queue and back into your reply box. Nothing goes out until you send it again."
 }
