@@ -8,7 +8,7 @@
  * another server, the settings read.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { POWER_UP_CHANGED_EVENT, type PowerUpProvider } from '@plannotator/ui/components/settings/SemanticDiffsTab';
+import { POWER_UP_CHANGED_EVENT, type PowerUpProvider } from '@plannotator/ui/components/settings/PowerUpSettings';
 import type { SemDiffClient } from './semDiffClient';
 import type { PowerUpConfig } from './powerUp';
 

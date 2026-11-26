@@ -10,6 +10,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { configStore } from '@plannotator/ui/config';
+import { POWER_UP_CHANGED_EVENT } from '@plannotator/ui/components/settings/PowerUpSettings';
 import type { SemDiffClient } from '@plannotator/review-editor/semDiff/semDiffClient';
 import { resetInboxDiffOptionsForTests } from '../diffOptions';
 import { resetReviewAnalysisForTests, waitForReviewAnalysis } from '../reviewAnalysis';
@@ -163,6 +164,20 @@ test.skipIf(!hasDom)('a phone: the face alone in the bar; its press opens one ca
   expect(node.querySelector('[data-power-up-card]')).not.toBeNull();
   await act(async () => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
   expect(node.querySelector('[data-power-up-card]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a key saved on Settings › Reviews (its Power Up section) powers up an open reader without a reload', async () => {
+  configStore.seed('diffSemantic', true);
+  configStore.seed('diffPowerUp', true);
+  keySet(false);
+  const { seen } = await reader();
+  expect(seen.at(-1)!.powerUp).toBeNull();
+  const reads = keySet(true);
+  // What the Reviews page's Power Up form sends once a key is saved (PowerUpSettings.tsx `changed`).
+  await act(async () => window.dispatchEvent(new Event(POWER_UP_CHANGED_EVENT)));
+  await settle();
+  expect(reads).toEqual(['/api/sem-diff/opinion/settings']);
+  expect(seen.at(-1)!.powerUp?.active).toBe(true);
 });
 
 // Last: config.json's value, once adopted, stays this page's (the store's server value).

@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useConfigValue } from '@plannotator/ui/config';
-import type { PowerUpProvider } from '@plannotator/ui/components/settings/SemanticDiffsTab';
+import type { PowerUpProvider } from '@plannotator/ui/components/settings/PowerUpSettings';
 import type { SemDiffClient } from '@plannotator/review-editor/semDiff/semDiffClient';
 import { readPowerUpRejected, type PowerUpConfig, type PowerUpStatus } from '@plannotator/review-editor/semDiff/powerUp';
 import { usePowerUpConfig } from '@plannotator/review-editor/semDiff/usePowerUpConfig';

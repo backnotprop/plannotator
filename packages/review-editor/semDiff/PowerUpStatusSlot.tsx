@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PowerUpGuy } from '@plannotator/ui/components/agentFace/PowerUpGuy';
-import { POWER_UP_PROVIDER_NAMES } from '@plannotator/ui/components/settings/SemanticDiffsTab';
+import { POWER_UP_PROVIDER_NAMES } from '@plannotator/ui/components/settings/PowerUpSettings';
 import type { PowerUpConfig, PowerUpStatus } from './powerUp';
 
 type SlotState = 'unavailable' | 'asking' | 'powered' | 'nothing';
