@@ -49,7 +49,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, PanePart, PullChangesTreePart, ReaderPart, ReviewKeysHere } from '../lazyParts';
-import { LineFeedbackToolsProvider } from '@plannotator/review-editor/components/LineFeedbackTools';
 import { FieldVoice } from './FieldVoice';
 import { CommentPictures } from '../commentPictures';
 import { inboxPullIsOpen, inboxPullUrlOfKey, type InboxMessageWire, type InboxPull, type InboxThread } from '@plannotator/core/inbox-types';
@@ -961,8 +960,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
               <ReviewKeysHere diff={snapshot.review.rawPatch} viewed={!!viewedProp} />
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview}>
               <ContextNotesProvider api={noteRows.api}>
-              <LineFeedbackToolsProvider value={message.guide && !isReview ? FieldVoice : null}>
               <GuideReader
+                lineFeedbackTools={message.guide && !isReview ? FieldVoice : null}
                 snapshot={readerSnapshot!}
                 reviewed={reviewed}
                 onReviewedChange={changeReviewed}
@@ -983,7 +982,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
                 {...(collapseAll ? { collapseAll } : {})}
                 {...(noteRows.anchors.length > 0 ? { contextNotes: noteRows.anchors, renderContextNote: noteRows.renderContextNote } : {})}
               />
-              </LineFeedbackToolsProvider>
               </ContextNotesProvider>
               </OpenInCodeSpans>
             </ReaderPart>
