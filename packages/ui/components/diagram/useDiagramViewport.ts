@@ -51,6 +51,8 @@ function clampScale(scale: number): number {
 export function useDiagramViewport(
   hostRef: RefObject<HTMLElement | null>,
   content: ContentSize | null,
+  /** The largest scale Fit may choose (zoom keeps the full range). Default: no limit below `ZOOM_MAX`. */
+  fitMaxScale: number = ZOOM_MAX,
 ): {
   readonly viewport: Viewport;
   readonly fit: () => void;
@@ -62,6 +64,8 @@ export function useDiagramViewport(
   const [viewport, setViewport] = useState<Viewport>(IDENTITY);
   const contentRef = useRef(content);
   contentRef.current = content;
+  const fitMaxRef = useRef(fitMaxScale);
+  fitMaxRef.current = fitMaxScale;
   // Whether the person zoomed or panned since the last fit. While true, a
   // new render (the draft preview) or a host resize (the Source pane
   // opening, the window) keeps their view; a fit (the key, the control, a
@@ -83,7 +87,7 @@ export function useDiagramViewport(
     }
     const availableWidth = Math.max(1, rect.width - FIT_PADDING_PX * 2);
     const availableHeight = Math.max(1, rect.height - FIT_PADDING_PX * 2);
-    const scale = clampScale(Math.min(availableWidth / size.width, availableHeight / size.height));
+    const scale = clampScale(Math.min(fitMaxRef.current, availableWidth / size.width, availableHeight / size.height));
     adjustedRef.current = false;
     setViewport({
       x: (rect.width - size.width * scale) / 2,
@@ -105,7 +109,7 @@ export function useDiagramViewport(
     });
     observer.observe(host);
     return () => observer.disconnect();
-  }, [fit, hostRef, content]);
+  }, [fit, hostRef, content, fitMaxScale]);
 
   const zoomBy = useCallback(
     (factor: number, clientX?: number, clientY?: number) => {

@@ -13,7 +13,7 @@ import { DiagramPending, DiagramInlineSource } from './diagram/DiagramPending';
 import { DiagramViewer, type DiagramAskAI } from './diagram/DiagramViewer';
 import type { CommentAskAIHandler } from './CommentPopover';
 import { diagramAskAIContext } from '../utils/diagramAskAI';
-import { svgContentSize } from './diagram/svgContentSize';
+import { inlineFitMaxScale, svgContentSize } from './diagram/svgContentSize';
 import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramComments';
 import type { DiagramRenderState } from './diagram/useDiagramRender';
 import type { DiagramReopenRequest } from './diagram/reopen';
@@ -60,8 +60,9 @@ const MAX_HEIGHT_PX = 36 * 16;
 
 function inlineHeight(state: DiagramRenderState | null): string {
   const size = state?.svgNode ? svgContentSize(state.svgNode) : null;
-  if (size === null) return 'min(65vh, 24rem)';
-  const px = Math.round(size.height * (NOMINAL_WIDTH_PX / size.width)) + 48;
+  if (size === null || !state?.svgNode) return 'min(65vh, 24rem)';
+  // At the scale Fit will use, so a diagram held at its own size is not centred in a box sized for a blown-up one.
+  const px = Math.round(size.height * Math.min(inlineFitMaxScale(state.svgNode), NOMINAL_WIDTH_PX / size.width)) + 48;
   return `min(65vh, ${Math.min(MAX_HEIGHT_PX, Math.max(MIN_HEIGHT_PX, px))}px)`;
 }
 
@@ -473,6 +474,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               // diagram; Ctrl/Cmd+wheel and a pinch zoom it. The popout
               // (below) zooms on a plain wheel.
               wheelZoom="modifier"
+              fitAtMostNaturalSize
               onAskAI={handleAskAI}
               onResolutionChange={setResolution}
               onRenderState={setRenderState}

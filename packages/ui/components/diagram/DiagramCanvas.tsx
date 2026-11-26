@@ -124,6 +124,7 @@ export function DiagramCanvas({
   autoFocus,
   className,
   wheelZoom = 'always',
+  fitMaxScale,
 }: {
   /** The last good render's sanitized svg root, or null before the first. */
   svgNode: SVGSVGElement | null;
@@ -154,11 +155,13 @@ export function DiagramCanvas({
   /** Default `always` (today's canvas). An inline diagram in a document
    * passes `modifier` so the reader's wheel scrolls the page past it. */
   wheelZoom?: DiagramWheelZoom;
+  /** The largest scale Fit may choose (`useDiagramViewport`). Default: the zoom range's top. */
+  fitMaxScale?: number;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [content, setContent] = useState<ContentSize | null>(null);
-  const { viewport, fit, zoomBy, toggleZoom, panBy, panIntoView } = useDiagramViewport(hostRef, content);
+  const { viewport, fit, zoomBy, toggleZoom, panBy, panIntoView } = useDiagramViewport(hostRef, content, fitMaxScale);
 
   // Mount the sanitized node once per render and size the wrapper to the
   // diagram's own box so the transform scales real pixels.
