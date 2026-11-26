@@ -2053,8 +2053,10 @@ export function inboxGroupWaitsOnPerson(id: string | null | undefined): boolean 
   return section ? inboxSectionWaitsOnPerson(section.id) : false;
 }
 
-/** How far back the list's "Recent activity" view reaches (`acted_at`), in hours, and how long acted.json keeps a time. */
+/** How far back the list's "Recent activity" view reaches (`acted_at`), in hours. */
 export const INBOX_RECENT_ACTIVITY_HOURS = 3;
+/** How long acted.json keeps a time: longer than the view shows, so the view's reach can change without losing the record. */
+export const INBOX_ACTED_KEPT_DAYS = 30;
 
 /**
  * One row of the list: a thread (owner ruling 2026-10-07, "a row is a
