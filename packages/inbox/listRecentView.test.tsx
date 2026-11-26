@@ -10,7 +10,9 @@
  * list for another place in the sidebar (or found on again on coming back); Done or Escape not leaving it, Escape
  * leaving it while a thread is still open (the thread closes first), or from a field or a key something else used;
  * a real filter that stops applying, or loses its own badge, under the view; the view's empty words missing, or shown
- * where the filter's own picks left nothing ("No threads match" says that); nothing said to a screen reader.
+ * where the filter's own picks left nothing ("No threads match" says that); nothing said to a screen reader; a row
+ * whose act ages past the 3 hours while the list holds leaving under the pointer at the next redraw (a list read),
+ * instead of at the next whole sort.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No server: nothing is fetched.
  */
@@ -67,11 +69,11 @@ function row(id: string, project: string, section: string, opts: { acted?: numbe
 const project = (name: string) => ({ id: `prj_${name}`, name, key: name, root: `/code/${name}`, created_at: NOW.toISOString(), threads: 2, unread: 0, listed: 2, archived: 0 }) as ProjectFolder;
 const PROJECTS = [project('harbor'), project('ledger'), project('fern-api')];
 
-/** Charlie Dunn's reply (ledger) an hour ago, the harbor retry three hours ago, fern-api's never, quill's 40 days ago. */
+/** Charlie Dunn's reply (ledger) an hour ago, the harbor retry two hours ago, fern-api's never, an older ledger one yesterday. */
 const ACTED = {
   sections: [
-    { id: 'waiting', label: 'Waiting on you', threads: [row('t-fern', 'fern-api', 'waiting', { unread: true }), row('t-harbor', 'harbor', 'waiting', { acted: 3, unread: true })] },
-    { id: 'quiet', label: 'Quiet', threads: [row('t-ledger', 'ledger', 'quiet', { acted: 1 }), row('t-old', 'ledger', 'quiet', { acted: 24 * 40 })] },
+    { id: 'waiting', label: 'Waiting on you', threads: [row('t-fern', 'fern-api', 'waiting', { unread: true }), row('t-harbor', 'harbor', 'waiting', { acted: 2, unread: true })] },
+    { id: 'quiet', label: 'Quiet', threads: [row('t-ledger', 'ledger', 'quiet', { acted: 1 }), row('t-old', 'ledger', 'quiet', { acted: 24 })] },
   ] as InboxListSection[],
   snoozed: [row('t-snoozed', 'harbor', 'quiet', { snoozed: true })],
   projects: PROJECTS,
@@ -87,6 +89,8 @@ const stored = new Map<string, string>();
 let root: ReturnType<typeof createRoot> | null = null;
 let host: HTMLElement | null = null;
 let latest: ListModel = ACTED;
+/** App's whole sorts: a new epoch is one (Show, a thread closing, a refresh). */
+let sortEpoch = 1;
 
 beforeEach(() => {
   setSystemTime(NOW);
@@ -98,6 +102,7 @@ beforeEach(() => {
   resetActedHereForTests();
   resetRecentActsForTests();
   latest = ACTED;
+  sortEpoch = 1;
 });
 
 afterEach(() => {
@@ -134,7 +139,7 @@ function Harness({ route }: { route: Route }) {
     hideAway: false,
     openedHere: { current: new Set() },
     heldOpen: () => null,
-    listSort: { epoch: 1, keep: null },
+    listSort: { epoch: sortEpoch, keep: null },
     heldRead: new Set(),
     tags: { listTags: [], across: null, rowOf: () => undefined, showError: () => {}, showToast: () => {}, dismissToast: () => {}, refreshList: async () => {}, openTag: () => {}, tagGone: () => {} },
   });
@@ -326,7 +331,7 @@ describe.skipIf(!hasDom)('Recent activity is a view, not a filter', () => {
     latest = UNTOUCHED;
     draw();
     await turnOn();
-    expect($('[data-recent-view-empty]')?.textContent).toBe('Nothing you acted in during the last month.');
+    expect($('[data-recent-view-empty]')?.textContent).toBe('Nothing you acted in during the last 3 hours.');
     expect($('[data-list-filter-empty]')).toBeNull();
     expect(bar()).not.toBeNull();
     // A Pull request pick no thread has: the filter's own picks left nothing.
@@ -337,6 +342,23 @@ describe.skipIf(!hasDom)('Recent activity is a view, not a filter', () => {
     draw();
     expect($('[data-list-filter-empty]')).not.toBeNull();
     expect($('[data-recent-view-empty]')).toBeNull();
+  });
+
+  test('a row acted in 2 h 59 min ago stays as its act ages past the 3 hours while the list holds; the next whole sort lets it go', async () => {
+    const edge = { ...ACTED, sections: [{ id: 'waiting', label: 'Waiting on you', threads: [row('t-ledger', 'ledger', 'waiting', { acted: 1 }), row('t-harbor', 'harbor', 'waiting', { acted: 3 - 1 / 60 })] }] } as unknown as ListModel;
+    latest = edge;
+    draw();
+    await turnOn();
+    expect(rowIds()).toEqual(['t-ledger', 't-harbor']);
+    // Two minutes on, a list read (an agent's message elsewhere) redraws the list with no whole sort: harbor stays.
+    setSystemTime(new Date(NOW.getTime() + 2 * 60_000));
+    latest = { ...edge, sections: edge.sections.map((s) => ({ ...s, threads: [...s.threads] })) } as ListModel;
+    draw();
+    expect(rowIds()).toEqual(['t-ledger', 't-harbor']);
+    // The next whole sort reads the clock again: harbor's act is past the 3 hours now.
+    sortEpoch = 2;
+    draw();
+    expect(rowIds()).toEqual(['t-ledger']);
   });
 });
 

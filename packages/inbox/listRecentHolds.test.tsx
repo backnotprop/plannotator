@@ -97,7 +97,7 @@ function sections(rows: InboxListRow[]): InboxListSection[] {
 function Shown({ listed, sort, open, on = true, covered = false, phone = false }: { listed: InboxListSection[]; sort: ListSort; open: string | null; on?: boolean; covered?: boolean; phone?: boolean }) {
   const recent = useRecentActivity(on, sort, open, () => covered);
   const kept = filterListSections(listed, NO_LIST_FILTER, Date.now());
-  const drawn = recent.held ? recentViewSections(listed, kept, recent.held, Date.now()) : kept;
+  const drawn = recent.held ? recentViewSections(listed, kept, recent.held, recent.at) : kept;
   return (
     <SidebarProvider>
       <InboxList

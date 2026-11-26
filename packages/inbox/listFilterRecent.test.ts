@@ -2,7 +2,8 @@
  * "Recent activity" (approval "inbox-recent-activity-filter"; listFilterRecent.ts, the view in listRecentView.ts, the
  * window's notes in recentActs.ts): which rows it keeps, their order, how it holds and how it goes.
  *
- * What this catches: a row kept with no act of the person's, or past the 30 days, or one dropped inside them; rows not
+ * What this catches: a row kept with no act of the person's, or past the 3 hours, or one dropped inside them (an act
+ * this window saw included); rows not
  * newest first by the act across the groups (or by `last_at` instead), a snoozed row drawn among them; a row that moves
  * under the person before the list settles, or one that stays put after it does; the List view still sorting by
  * `last_at` with the view on, or keeping its order once it is off; a thread that comes into the filter while the list holds drawn at once (pushing the rows down
@@ -15,7 +16,7 @@ import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
 import { resetStorageBackend } from '@plannotator/ui/utils/storage';
 import { NO_LIST_FILTER, filterListSections, resetListFilterForTests } from './listFilter';
 import { recentViewSections } from './listRecentView';
-import { RECENT_ACTIVITY_DAYS, actedPlaces, heldRecentRows, noteActedHere, resetActedHereForTests, rowActedAt, rowRecentlyActed } from './listFilterRecent';
+import { actedPlaces, heldRecentRows, noteActedHere, resetActedHereForTests, rowActedAt, rowRecentlyActed } from './listFilterRecent';
 import { flatRows } from './listView';
 import { gestured, mediaPlayed, personOpened, resetRecentActsForTests, routeChanged } from './recentActs';
 
@@ -46,12 +47,23 @@ afterEach(() => {
 const viewed = (sections: InboxListSection[], kept = sections) => recentViewSections(sections, kept, (listed, k, now) => heldRecentRows(listed, k, actedPlaces(null, null).key, now), NOW);
 
 describe('which rows Recent activity keeps', () => {
-  test('only a thread the person acted in within the last 30 days, in every group, the groups kept', () => {
+  test('only a thread the person acted in within the last 3 hours, in every group, the groups kept', () => {
+    const minute = 1 / 60;
     const sections = [
-      section('waiting', [row('charlie', { acted: ago(2) }), row('ada'), row('bob', { acted: ago(24 * (RECENT_ACTIVITY_DAYS + 1)) })]),
-      section('quiet', [row('dunn', { acted: ago(24 * (RECENT_ACTIVITY_DAYS - 1)) })]),
+      // Just inside (2 h 59 min), just outside (3 h 1 min), never, yesterday.
+      section('waiting', [row('charlie', { acted: ago(3 - minute) }), row('ada'), row('bob', { acted: ago(3 + minute) })]),
+      section('quiet', [row('dunn', { acted: ago(1) }), row('tully', { acted: ago(24) })]),
     ];
     expect(ids(viewed(sections))).toEqual(['waiting:charlie', 'quiet:dunn']);
+    // On the line itself it still counts.
+    expect(rowRecentlyActed(row('edge', { acted: ago(3) }), NOW)).toBe(true);
+  });
+
+  test('an act this window saw (noteActedHere) brings a row in whose last read act is past the 3 hours; one past them does not', () => {
+    const sections = [section('waiting', [row('harbor', { acted: ago(5) }), row('ledger', { acted: ago(5) })])];
+    noteActedHere('harbor', ago(0.25));
+    noteActedHere('ledger', ago(3 + 1 / 60));
+    expect(ids(viewed(sections))).toEqual(['waiting:harbor']);
   });
 
   test("within the filter's real picks; the Snoozed band keeps the filter's rows, so its count is never the view's", () => {
