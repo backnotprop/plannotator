@@ -124,3 +124,6 @@
 @media (prefers-reduced-motion: reduce) { .ib-plan-bartitle > *, .ib-plan-bartitle[data-settled] > * { transition: none; transform: none !important; } }
 /* A phone's one bar is as slim as the Inbox list's own phone header (`.ib-lhead`, 52 px): its 44 px targets fit it. */
 .ib-plan-page[data-phone] nav[data-page-header] { min-height: 0; height: 52px; padding-top: 1px; padding-bottom: 0; flex-wrap: nowrap; }
+/* The frame's empty actions group takes a row's full basis on a phone (meant for wrapping): with one row it would
+   squeeze the bar, so it is not drawn while it holds nothing. */
+.ib-plan-page[data-phone] nav[data-page-header] > [data-document-actions]:empty { display: none; }
