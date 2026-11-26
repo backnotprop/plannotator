@@ -71,6 +71,7 @@ packages/ui/utils/pele-render.test.ts
 packages/ui/utils/pele-hostile.test.ts
 packages/ui/utils/diagramAnchorPele.test.ts
 packages/ui/utils/peleRowSpaces.test.ts
+packages/ui/utils/peleSankeyHeader.test.ts
 packages/ui/components/DiagramBlock.copySource.test.tsx
 packages/ui/components/Viewer.askAISelectionLine.test.tsx
 packages/ui/components/Viewer.codeDocumentRepeatedLine.test.tsx
