@@ -51,8 +51,8 @@ export type ExternalAnnotationEvent<T = unknown> =
   /**
    * Not an annotation change: whether the agent that asked for this code
    * review is gone, so nothing can receive its decision
-   * (packages/shared/review-agent-gone.ts). Sent when it changes, and to every
-   * stream that opens while it holds. The review stays open: the tab keeps
+   * (packages/shared/review-agent-gone.ts). Sent when it changes, and, once a
+   * host has set it, to every stream that opens. The review stays open: the tab keeps
    * every comment and its draft, and says so.
    */
   | { type: "agent-gone"; gone: boolean };

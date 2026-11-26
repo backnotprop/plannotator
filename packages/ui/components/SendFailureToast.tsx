@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { copyTextToClipboard } from '../utils/clipboard';
-import { canRetrySend, describeSendFailure, sendFailureOf } from '../utils/sendFailure';
+import { canRetrySend, describeSendFailure, sendFailureOf, type SendFailure } from '../utils/sendFailure';
 
 /**
  * The one message a review page shows when a decision did not reach the
@@ -24,8 +24,9 @@ import { canRetrySend, describeSendFailure, sendFailureOf } from '../utils/sendF
  * connection fails in milliseconds) would be marked deleted as it appears.
  */
 let failures = 0;
-/** The failure toast on screen, if any. */
+/** The failure toast on screen, if any, and why it failed. */
 let currentId: string | null = null;
+let currentKind: SendFailure['kind'] | null = null;
 /** Decision sends in flight on this page. */
 let inFlight = 0;
 
@@ -40,11 +41,16 @@ export function sendSettled(): void {
   inFlight = Math.max(0, inFlight - 1);
 }
 
-/** The failure no longer applies (a send started, or the review was decided). */
-export function dismissSendFailureToast(): void {
-  if (currentId === null) return;
+/**
+ * The failure no longer applies (a send started, or the review was decided).
+ * With `kind`, only a failure of that kind (the code review page: the agent
+ * is back, so an agent-gone failure no longer says what Send would do).
+ */
+export function dismissSendFailureToast(kind?: SendFailure['kind']): void {
+  if (currentId === null || (kind !== undefined && currentKind !== kind)) return;
   toast.dismiss(currentId);
   currentId = null;
+  currentKind = null;
 }
 
 /**
@@ -96,8 +102,11 @@ export function showSendFailureToast(options: {
   dismissSendFailureToast(); // replaced, never stacked
   const id = `plannotator-send-failure-${++failures}`;
   currentId = id;
+  currentKind = failure.kind;
   const forget = () => {
-    if (currentId === id) currentId = null;
+    if (currentId !== id) return;
+    currentId = null;
+    currentKind = null;
   };
   toast.error(what === 'approval' ? 'Approval not sent' : 'Feedback not sent', {
     id,

@@ -145,11 +145,32 @@ describe("Send when the agent is gone (Bun)", () => {
       server.setAgentGone(false);
       expect(await first.next((event) => event.type === "agent-gone")).toEqual({ type: "agent-gone", gone: false });
       expect(await later.next((event) => event.type === "agent-gone")).toEqual({ type: "agent-gone", gone: false });
+      // A tab that reconnects after missing it (asleep, offline) hears it is back.
+      const reconnected = await openStream(server.url);
+      try {
+        expect(await reconnected.next((event) => event.type === "agent-gone")).toEqual({ type: "agent-gone", gone: false });
+      } finally {
+        await reconnected.close();
+      }
       // Saying it settles nothing: the draft is still there.
       expect((await (await fetch(`${server.url}/api/draft`)).json()).codeAnnotations).toEqual(DRAFT_COMMENTS);
     } finally {
       await first.close();
       await later?.close();
+      server.stop();
+    }
+  });
+
+  test("a review whose agent was never said to be gone tells a new tab nothing about it", async () => {
+    const server = await startReviewServer({ rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML });
+    const tab = await openStream(server.url);
+    try {
+      await tab.next((event) => event.type === "snapshot");
+      server.setAgentGone(true);
+      // The first agent-gone this tab hears is the change, not a "here" on connect.
+      expect(await tab.next((event) => event.type === "agent-gone")).toEqual({ type: "agent-gone", gone: true });
+    } finally {
+      await tab.close();
       server.stop();
     }
   });

@@ -54,8 +54,13 @@ review. Every word a person reads here is in
     its stamp has not changed for 2 minutes of the CLI's own clock (no clock is
     compared across processes; a gap over 30 s between looks, a sleep, starts
     the count again) AND the Claude Code pid the lease names no longer runs.
-    No lease file, or no pid in it (an older mod; Git Bash, where `$PPID` is
-    not a Windows pid), is never gone.
+    Send (`presence()`) does not wait for those 2 minutes: it answers "gone"
+    as soon as that pid no longer runs and nobody holds the lease (`owner`
+    null, released at session end; or its stamp unchanged for 20 s of the
+    CLI's clock, `MOD_LEASE_STALE_MS`, the mod's own `LEASE_STALE_MS`). A
+    fresh lease or a running pid is "here", and a resume that takes the lease
+    again is "here" at the next Send. No lease file, or no pid in it (an older
+    mod; Git Bash, where `$PPID` is not a Windows pid), is never gone.
   - Else, stdout on a pipe with a real parent (an agent's shell, the OpenCode
     CLI bridge): a changed parent (reparented; on Windows, a parent pid that
     no longer exists) is only a suspicion, since `plannotator review &`, nohup,
@@ -84,8 +89,13 @@ review. Every word a person reads here is in
   - **How long it takes to know:** the parent watch looks every 10 s and its
     probe backs off to 60 s, so the page hears it up to about 70 s after its
     reader went; a mod review 2 minutes after the lease stopped moving, at the
-    next 10 s look once its Claude Code process is gone. Send probes at once
-    in both cases, so it never pretends during that time.
+    next 10 s look once its Claude Code process is gone. Send asks at once:
+    the parent watch probes stdout on every Send while its parent looks
+    changed (skipping the back-off), and a mod launch refuses as
+    soon as its Claude Code process is gone and the lease is released or 20 s
+    stale. The one window left: a Claude Code process that crashed without
+    releasing the lease can still take a Send in the first 20 s; it is
+    delivered if that session is resumed.
 - **While the agent is gone (Bun CLI, `endReviewWhenAgentGone`).** Once
   `ended()`, the CLI calls the server's `setAgentGone(true)`: every open
   event stream gets `{ type: "agent-gone", gone: true }`, and so does every

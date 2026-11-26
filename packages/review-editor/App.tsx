@@ -1140,9 +1140,16 @@ const ReviewApp: React.FC = () => {
       setSubmitted((current) => current || 'exited');
     },
     onAgentGone: (gone) => {
+      const wasGone = agentGoneRef.current;
       agentGoneRef.current = gone;
-      if (gone) showAgentGoneNotice({ copyText: () => retryDecisionRef.current.feedbackMarkdown });
-      else dismissAgentGoneNotice();
+      // Heard again on a reconnect: a notice the person closed stays closed.
+      if (gone) {
+        if (!wasGone) showAgentGoneNotice({ copyText: () => retryDecisionRef.current.feedbackMarkdown });
+        return;
+      }
+      dismissAgentGoneNotice();
+      // Back: a refused Send's "not sent" no longer says what Send would do.
+      if (wasGone) dismissSendFailureToast('agent-gone');
     },
   });
   const agentJobs = useAgentJobs({ enabled: !!origin && aiUIEnabled });

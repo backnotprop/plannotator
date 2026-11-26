@@ -12,6 +12,7 @@
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { toast } from "sonner";
 import {
   resetStorageBackend,
   setStorageBackend,
@@ -19,6 +20,8 @@ import {
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
 import { AGENT_GONE_REASON } from "@plannotator/shared/review-agent-gone-words";
+import { dismissSendFailureToast } from "@plannotator/ui/components/SendFailureToast";
+import { dismissAgentGoneNotice } from "./components/AgentGoneNotice";
 
 // Vite-only virtual module (`?worker&inline`): stubbed like App.panelView.test.tsx.
 mock.module("./workerPool", () => ({
@@ -186,6 +189,12 @@ async function closeStream(event: Record<string, unknown>): Promise<void> {
 }
 
 afterEach(async () => {
+  // A toast closed by its own button stays in sonner's store, and the next
+  // test's Toaster would show it again: dismiss them all, and forget the
+  // notice and the failure the modules hold.
+  dismissAgentGoneNotice();
+  dismissSendFailureToast();
+  toast.dismiss();
   await unmount();
   globalThis.fetch = originalFetch;
   globalThis.EventSource = originalEventSource;
@@ -204,6 +213,7 @@ afterAll(() => {
 });
 
 // Sonner keeps earlier toasts in its module store: find these by their words.
+// Asserted as booleans: Bun's toBeUndefined() passes on a happy-dom element.
 const liveToasts = () =>
   Array.from(document.querySelectorAll<HTMLElement>("[data-sonner-toast]"))
     .filter((el) => el.getAttribute("data-removed") !== "true");
@@ -248,12 +258,12 @@ describe.if(hasDom)("a code review whose agent is gone", () => {
     await mount("claude-code", undefined);
     await addGeneralComment("Split this into two PRs.");
     expect(streams.length).toBeGreaterThan(0);
-    expect(goneNotice()).toBeUndefined();
+    expect(!!goneNotice()).toBe(false);
 
     await closeStream({ type: "agent-gone", gone: true });
     await waitFor(() => !!goneNotice());
 
-    expect(goneNotice()).toBeDefined();
+    expect(!!goneNotice()).toBe(true);
     expect(document.querySelector("[data-completion-state]")).toBeNull();
     expect(closes).toBe(0);
     // The comment is still on the page and still the reviewer's to send.
@@ -275,11 +285,11 @@ describe.if(hasDom)("a code review whose agent is gone", () => {
     await addGeneralComment("Split this into two PRs.");
     await closeStream({ type: "agent-gone", gone: true });
     await waitFor(() => !!goneNotice());
-    expect(goneNotice()).toBeDefined();
+    expect(!!goneNotice()).toBe(true);
 
     await closeStream({ type: "agent-gone", gone: false });
     await waitFor(() => !goneNotice());
-    expect(goneNotice()).toBeUndefined();
+    expect(!!goneNotice()).toBe(false);
 
     feedbackAnswer = "ok";
     await act(async () => primaryButton()!.click());
@@ -288,13 +298,58 @@ describe.if(hasDom)("a code review whose agent is gone", () => {
     expect(document.querySelector("[data-completion-state]")).not.toBeNull();
   }, 20_000);
 
+  // A stale "not sent" (no Retry) would tell the person Send cannot work while it now does.
+  test("the agent back after a refused Send: the not-sent toast goes too, and Send reaches it", async () => {
+    seedEarlierChainSeen();
+    await mount("claude-code", undefined);
+    await addGeneralComment("Split this into two PRs.");
+    await closeStream({ type: "agent-gone", gone: true });
+    await waitFor(() => !!goneNotice());
+    feedbackAnswer = "gone";
+    await act(async () => primaryButton()!.click());
+    await waitFor(() => !!failureToast());
+    expect(failureToast()!.textContent).toContain(AGENT_GONE_REASON);
+
+    await closeStream({ type: "agent-gone", gone: false });
+    await waitFor(() => !failureToast() && !goneNotice());
+    expect(!!failureToast()).toBe(false);
+    expect(!!goneNotice()).toBe(false);
+
+    feedbackAnswer = "ok";
+    await act(async () => primaryButton()!.click());
+    await waitFor(() => !!document.querySelector("[data-completion-state]"));
+    expect(feedbackPosts).toHaveLength(2);
+    expect(document.querySelector("[data-completion-state]")).not.toBeNull();
+  }, 20_000);
+
+  // packages/server/external-annotations.ts tells every stream that opens where things stand.
+  test("a reconnect that hears gone again keeps a closed notice closed; a new time gone shows it again", async () => {
+    seedEarlierChainSeen();
+    await mount("claude-code", undefined);
+    await closeStream({ type: "agent-gone", gone: true });
+    await waitFor(() => !!goneNotice());
+    await act(async () => goneNotice()!.querySelector<HTMLButtonElement>("[data-close-button]")!.click());
+    await waitFor(() => !goneNotice());
+    expect(!!goneNotice()).toBe(false);
+
+    await closeStream({ type: "agent-gone", gone: true });
+    for (let attempt = 0; attempt < 10; attempt += 1) await settle();
+    expect(!!goneNotice()).toBe(false);
+
+    await closeStream({ type: "agent-gone", gone: false });
+    await closeStream({ type: "agent-gone", gone: true });
+    await waitFor(() => !!goneNotice());
+    expect(!!goneNotice()).toBe(true);
+    await closeStream({ type: "agent-gone", gone: false });
+  }, 20_000);
+
   test("the agent's own close keeps its own screen", async () => {
     seedEarlierChainSeen();
     await mount("claude-code", undefined);
     await closeStream({ type: "session-closed", by: "agent", unsentAnnotations: 0 });
     const screen = document.querySelector<HTMLElement>("[data-completion-state]");
     expect(screen).not.toBeNull();
-    expect(goneNotice()).toBeUndefined();
+    expect(!!goneNotice()).toBe(false);
   });
 });
 
@@ -342,6 +397,6 @@ describe.if(hasDom)("Send to an agent that is gone", () => {
 
     expect(feedbackPosts).toHaveLength(1);
     expect(document.querySelector("[data-completion-state]")).not.toBeNull();
-    expect(failureToast()).toBeUndefined();
+    expect(!!failureToast()).toBe(false);
   });
 });

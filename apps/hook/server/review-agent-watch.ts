@@ -24,11 +24,13 @@
  * - A Claude Code mod launch (a host result file under `claude-code-mod/`).
  *   Its lease (`watcher.json` beside the result file) is renewed every 5 s by
  *   the Claude Code process watching the launch, which records its pid there
- *   (apps/hook/hooks/mod/controller.ts, `leaseText`). Gone when the lease's
+ *   (apps/hook/hooks/mod/controller.ts, `leaseText`). Ended when the lease's
  *   stamp has not changed for `MOD_AGENT_GONE_AFTER_MS` of THIS process's own
  *   awake time (no clock is compared across processes) AND the pid it names
- *   no longer runs. A lease without a pid (an older mod, Git Bash on Windows)
- *   is never judged gone.
+ *   no longer runs. Send asks less: gone once the pid no longer runs and
+ *   nobody holds the lease (released, or not renewed for `MOD_LEASE_STALE_MS`),
+ *   so a quit session's review never says "sent". A lease without a pid (an
+ *   older mod, Git Bash on Windows) is never judged gone.
  *
  * Anything else (a terminal, a file, another host's result file, a launch with
  * no lease file yet) has no watch, and the review runs exactly as before.
@@ -56,6 +58,13 @@ export const AGENT_GONE_EXIT_CODE = 3;
  * self-heal look, and a quick `claude --continue` takes it again at once.
  */
 export const MOD_AGENT_GONE_AFTER_MS = 2 * 60_000;
+
+/**
+ * A held lease whose stamp has not moved for this long (this process's clock)
+ * has no holder: the mod's own `LEASE_STALE_MS` (apps/hook/hooks/mod/controller.ts,
+ * a separate bundle; review-agent-gone.test.ts keeps the two equal).
+ */
+export const MOD_LEASE_STALE_MS = 20_000;
 
 /** A gap this long between two looks means the machine slept or the process was stopped: start counting again. */
 export const SLEEP_GAP_MS = 3 * PARENT_CHECK_MS;
@@ -166,7 +175,8 @@ export function modLeaseAgentWatch(options: {
   let lastLookAt: number | null = null;
   let lastStamp: number | null = null;
   let renewedAt = options.now();
-  const gone = (): boolean => {
+  /** The lease and how long (this process's clock) its stamp has not moved, or null with no lease. */
+  const look = (): { lease: WatcherLease; stillFor: number } | null => {
     const t = options.now();
     // Asleep since the last look: the mod could not renew either.
     if (lastLookAt !== null && t - lastLookAt > SLEEP_GAP_MS) renewedAt = t;
@@ -175,20 +185,31 @@ export function modLeaseAgentWatch(options: {
     // No lease (not written yet, unreadable): nothing to judge by.
     if (!lease) {
       renewedAt = t;
-      return false;
+      return null;
     }
     // Renewed: the stamp moved under a holder (whatever clock wrote it).
     if (lease.owner && lease.at !== lastStamp) renewedAt = t;
     lastStamp = lease.at;
-    if (t - renewedAt < MOD_AGENT_GONE_AFTER_MS) return false;
-    // Not renewed for long: gone only if the process that held it is gone too.
-    return lease.pid !== null && !options.pidAlive(lease.pid);
+    return { lease, stillFor: t - renewedAt };
   };
+  // The process that held it is gone (a lease without a pid is never judged).
+  const holderGone = (lease: WatcherLease) => lease.pid !== null && !options.pidAlive(lease.pid);
   return {
     kind: "mod",
-    presence: () => (gone() ? "gone" : "here"),
-    // Not latched: a resume takes the lease again, and the agent is back.
-    ended: gone,
+    // Send: the holder's process is gone and nobody holds the lease (released
+    // at session end, or not renewed for `MOD_LEASE_STALE_MS`): nobody can take
+    // a decision now. A resume that takes the lease again answers "here".
+    presence: () => {
+      const seen = look();
+      if (!seen || !holderGone(seen.lease)) return "here";
+      return !seen.lease.owner || seen.stillFor >= MOD_LEASE_STALE_MS ? "gone" : "here";
+    },
+    // The page and the end: not renewed for the whole grace, and the holder is
+    // gone. Not latched: a resume takes the lease again, and the agent is back.
+    ended: () => {
+      const seen = look();
+      return !!seen && seen.stillFor >= MOD_AGENT_GONE_AFTER_MS && holderGone(seen.lease);
+    },
   };
 }
 

@@ -14,8 +14,10 @@
  * - the review the CLI ended for a gone session is reported as a crash.
  */
 import { describe, expect, test } from 'bun:test'
-import { modLeaseAgentWatch } from '../../server/review-agent-watch'
-import { PlannotatorMod } from './controller'
+import { REVIEW_AGENT_GONE_MOD_LOG } from '@plannotator/shared/review-agent-gone-words'
+import { AGENT_GONE_EXIT_CODE, MOD_LEASE_STALE_MS, modLeaseAgentWatch } from '../../server/review-agent-watch'
+import { LEASE_STALE_MS, PlannotatorMod, REVIEW_AGENT_GONE_EXIT_CODE } from './controller'
+import { LOCAL_CHANGES_SUBJECT } from './launch'
 import { fakeHost, type FakeHost, type RunCall } from './testing/fake-host'
 
 const SESSION = { sessionId: 'session-1', dataDir: '/data', interactive: true }
@@ -153,12 +155,21 @@ describe('the review the CLI ended because its session was gone (exit 3)', () =>
     serve(host)
     const mod = new PlannotatorMod(host, SESSION)
     await mod.runCommand('review', '')
-    host.files.set(`${dirOf(host)}/exit`, '3')
+    host.files.set(`${dirOf(host)}/exit`, String(AGENT_GONE_EXIT_CODE))
     await host.tick()
     expect(host.submits).toEqual([])
-    const log = host.logs.join('\n')
-    expect(log).toContain('ended while no Claude Code session was open for it')
-    expect(log).not.toContain('stopped (exit 3)')
+    // The mod's own copy of the owner's line, word for word (this folder cannot import packages/shared).
+    expect(host.logs).toContain(REVIEW_AGENT_GONE_MOD_LOG(LOCAL_CHANGES_SUBJECT))
+    expect(host.logs.join('\n')).not.toContain('without a decision')
     mod.dispose()
+  })
+})
+
+// The mod is its own bundle and keeps copies of the CLI's numbers: a drift
+// reads exit 3 as a crash, or makes Send and the mod disagree on a stale lease.
+describe('the numbers the mod and the review CLI share', () => {
+  test('the exit code and the stale-lease time are the same on both sides', () => {
+    expect(REVIEW_AGENT_GONE_EXIT_CODE).toBe(AGENT_GONE_EXIT_CODE)
+    expect(LEASE_STALE_MS).toBe(MOD_LEASE_STALE_MS)
   })
 })

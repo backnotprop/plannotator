@@ -19,6 +19,7 @@ import {
   AGENT_GONE_EXIT_CODE,
   type AgentWatch,
   MOD_AGENT_GONE_AFTER_MS,
+  MOD_LEASE_STALE_MS,
   PROBE_EVERY_MS,
   PROBE_MAX_GAP_MS,
   endReviewWhenAgentGone,
@@ -218,12 +219,52 @@ describe("a Claude Code mod launch's lease", () => {
     expect(run.watch.presence()).toBe("here");
   });
 
-  test("released at session end and the process quit: here for a quick resume, gone two minutes later", () => {
+  // The page and the end wait out a quick resume; Send never says "sent" to a session that quit.
+  test("released at session end and the process quit: Send refuses at once, the page and the end wait two minutes", () => {
     const run = leaseRun();
     run.set({ owner: null, at: 0, touchedAt: 0, pid: 777 });
     run.hostQuits();
+    expect(run.watch.presence()).toBe("gone");
     expect(run.pass(MOD_AGENT_GONE_AFTER_MS - 10_000)).toBe(false);
+    expect(run.watch.presence()).toBe("gone");
     expect(run.pass(10_000)).toBe(true);
+  });
+
+  test("held but no longer renewed, and the process quit (a crash): Send refuses once the lease is stale", () => {
+    const run = leaseRun();
+    run.renew();
+    run.hostQuits();
+    run.pass(MOD_LEASE_STALE_MS - 10_000);
+    expect(run.watch.presence()).toBe("here");
+    run.pass(10_000);
+    expect(run.watch.presence()).toBe("gone");
+    expect(run.watch.ended()).toBe(false);
+  });
+
+  test("a fresh lease whose pid no longer runs (a resume taking over): Send still sends", () => {
+    const run = leaseRun();
+    run.renew();
+    run.hostQuits();
+    run.pass(5_000, 5_000);
+    run.renew();
+    expect(run.watch.presence()).toBe("here");
+  });
+
+  test("released while the Claude Code process still runs (/clear, an in-process resume): Send still sends", () => {
+    const run = leaseRun();
+    run.set({ owner: null, at: 0, touchedAt: 0, pid: 777 });
+    expect(run.watch.presence()).toBe("here");
+    run.pass(60 * 60_000);
+    expect(run.watch.presence()).toBe("here");
+  });
+
+  test("a resume after Send refused: the next Send is received", () => {
+    const run = leaseRun();
+    run.set({ owner: null, at: 0, touchedAt: 0, pid: 777 });
+    run.hostQuits();
+    expect(run.watch.presence()).toBe("gone");
+    run.renew("mod-b", 888);
+    expect(run.watch.presence()).toBe("here");
   });
 
   test("a resume that takes the lease again within the grace keeps the review", () => {

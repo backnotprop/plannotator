@@ -41,8 +41,9 @@ export interface ExternalAnnotationHandler {
   broadcast: (event: ExternalAnnotationEvent<StorableAnnotation>) => void;
   /**
    * Whether the agent that asked for this review is gone (`agent-gone`):
-   * sent to every open stream when it changes, and to every stream that
-   * opens while it holds, so a tab opened or reloaded later says so too.
+   * sent to every open stream when it changes, and, once set, to every
+   * stream that opens (gone or back), so a tab opened, reloaded or
+   * reconnected later says where things stand.
    * Only the CLI's code review sets it (apps/hook/server/review-agent-watch.ts);
    * Pi's review server lives in Pi's own process, so its agent is never gone
    * while a tab can still reach it.
@@ -86,7 +87,8 @@ export function createExternalAnnotationHandler(
   // Wire store mutations → SSE broadcast
   store.onMutation(broadcast);
 
-  let agentGone = false;
+  // null until a host says (only the CLI's code review does): no stream hears it then.
+  let agentGone: boolean | null = null;
 
   return {
     broadcast,
@@ -128,7 +130,9 @@ export function createExternalAnnotationHandler(
               annotations: store.getAll(),
             };
             controller.enqueue(encoder.encode(serializeSSEEvent(snapshot)));
-            if (agentGone) controller.enqueue(encoder.encode(serializeSSEEvent({ type: "agent-gone", gone: true })));
+            // Every stream hears where things stand, back included: a tab that
+            // reconnects after missing `gone: false` takes its notice down.
+            if (agentGone !== null) controller.enqueue(encoder.encode(serializeSSEEvent({ type: "agent-gone", gone: agentGone })));
 
             subscribers.add(controller);
 
