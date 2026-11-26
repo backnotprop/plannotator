@@ -9416,8 +9416,6 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-fcomp-foot:has(.ib-vline) > .ib-fcomp-chips { display: none; }
 /* Field tools also live in the review toolbar's portal, outside .pn-inbox. */
 .ib-field-voice { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
-.ib-other-input { display: flex; align-items: center; gap: 6px; }
-.ib-other-input textarea { flex: 1; min-width: 0; }
 .ib-field-voice .ib-vhint { display: none; }
 .ib-field-voice .ib-vline { gap: 4px; }
 .ib-field-voice .ib-vbars { max-width: 28px; }

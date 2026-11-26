@@ -111,23 +111,24 @@ for (const phone of [false, true]) {
       await submit.click();
       expect((await owner.agent.nextReply(thread_id, 20)).body).toContain('Ask the support team');
 
-      // Decision mode is a local draft until the person presses Answer.
+      // Decision mode draws the thread's own card, so the same Other field and mic; its Send waits for the words.
       const local = await viewer.agent.send({ project_path: viewer.project_path, subject: 'Preview decisions', body: ask });
       await page.goto(`${viewer.url}#thread=${local.thread_id}`);
-      await page.locator('section.ib-pane [data-open-questions]').click();
+      await expect(page.locator('section.ib-pane [data-open-questions]')).toBeVisible();
+      if (!(await page.locator('[data-open-questions-list]').isVisible())) await page.locator('section.ib-pane [data-open-questions]').click();
       await page.locator('[data-thread-decide]').click();
-      const card = page.locator('[data-decision-card]').last();
-      await card.locator('[data-decision-other]').click();
-      const own = card.getByLabel('Your own answer');
+      const card = page.locator('[data-decision-mode] [data-decision-card]');
+      const own = card.locator('[data-question-other]');
       await own.fill('Ask');
-      const answer = card.locator('[data-decision-other-answer]');
+      const decisionSend = page.locator('[data-decision-mode] [data-decision-send]');
+      await expect(decisionSend).toBeEnabled();
       await speech.take(card.locator('[data-voice-mic]'));
-      await expect(answer).toBeDisabled(); await speech.finish();
+      await expect(decisionSend).toBeDisabled(); await speech.finish();
       await expect(own).toHaveValue('Ask the support team');
+      await expect(decisionSend).toBeEnabled();
       await page.screenshot({ path: join(shots, `${phone ? 'phone' : 'desktop'}-decision.png`) });
+      await decisionSend.click();
       const decisions = async () => (await viewer.agent.readThread(local.thread_id)).messages[0].questions;
-      expect((await decisions()).every((q: { answer?: unknown }) => !q.answer)).toBe(true);
-      await answer.click();
       await expect.poll(async () => (await decisions()).some((q: { answer?: { other?: string } }) => q.answer?.other === 'Ask the support team')).toBe(true);
 
       await page.goto('about:blank'); // leave the Decision dialog before opening another thread
