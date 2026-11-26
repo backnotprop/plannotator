@@ -88,7 +88,7 @@ When you have the reply, quote it back to the person to show the round trip work
 
 ## 6. Tell the person, in plain words
 
-- Where replies go: to the session that asked. Agents with a Plannotator plugin (Claude Code, Pi, OpenCode 2, DeepSeek Harness, Cline, OpenClaw, Hermes Agent), Codex 0.149 or later, Qwen Code 0.24 or later on macOS and Linux, Claude threads in T3 Code, and Antigravity conversations (in agy, once the agent runs `plannotator inbox antigravity` as its send result says) get the reply as a new turn once idle. Other agents read it when they call `read_thread`. Say which one applies to you: the send result in step 4 said it.
+- Where replies go: to the session that asked. Agents with a Plannotator plugin (Claude Code, Pi, OpenCode 2, DeepSeek Harness, Cline, OpenClaw, Hermes Agent), Codex 0.149 or later, Qwen Code 0.24 or later on macOS and Linux, Claude threads in T3 Code, Codex threads in T3 Code on the same computer, and Antigravity conversations (in agy, once the agent runs `plannotator inbox antigravity` as its send result says) get the reply as a new turn once idle. Other agents read it when they call `read_thread`. Say which one applies to you: the send result in step 4 said it.
 - Notifications: the open Inbox page can show a browser notification when a question arrives while its tab is in the background. It asks once. Change it in the Inbox's Settings.
 - Local only: the Inbox listens on `127.0.0.1`. Threads, answers and attached files are files in `~/.plannotator/inbox/`. Nothing leaves the machine.
 - Opening it later: `plannotator inbox`. Agents start a stopped Inbox in the background when they write to it.
