@@ -2,8 +2,8 @@
  * The agent's line (approval "inbox-agent-profile-card"): what the card atop a list filtered to one agent, the
  * agent's row in the Agents view and its profile's Activity say it is doing now. Pure, from what the Inbox already
  * knows of the agent (`InboxAgent`): working (with how long, from `state_since`), asking the person in its terminal
- * (a permission prompt, a question, a sign-in: amber, a pause mark), waiting on the person here, idle since its turn
- * ended, ended. An agent whose host says nothing about its turns (`turns_unknown`, no plugin) gets no line at all,
+ * (a permission prompt, a question, a sign-in: amber, a pause mark), idle since its turn ended, ended. One waiting on
+ * the person here says what it does besides (`turn_state`); "Waiting on you" is said on its threads. An agent whose host says nothing about its turns (`turns_unknown`, no plugin) gets no line at all,
  * and nothing in its place.
  */
 import type { InboxAgent } from '@plannotator/core/inbox-types';
@@ -14,6 +14,11 @@ import { REX_MARK_WORDS } from '../agents/rexMark';
 export interface AgentLineFacts {
   /** Null: the list cannot know (a machine whose agents it does not name). */
   state: InboxAgent['state'] | null;
+  /**
+   * What the line says it does: its state, or for one waiting on the person, what it does besides
+   * (`InboxAgent.turn_state`; "Waiting on you" is said on its threads). Null: not known, no line.
+   */
+  run: Exclude<InboxAgent['state'], 'waiting'> | null;
   /** Live, on a host that never says when it works: no line. */
   turnsUnknown: boolean;
   /** When it was last heard, for an ended one ("Ended 4:10 PM"). */
@@ -24,7 +29,7 @@ export interface AgentLineFacts {
   since: string | null;
 }
 
-export type AgentLineTone = 'working' | 'asking' | 'waiting' | 'idle' | 'ended';
+export type AgentLineTone = 'working' | 'asking' | 'idle' | 'ended';
 
 export interface AgentLine {
   tone: AgentLineTone;
@@ -42,11 +47,13 @@ function askingOf(agent: InboxAgent): AgentLineFacts['asking'] {
 }
 
 export function lineFactsOf(agent: InboxAgent): AgentLineFacts {
+  const run = agent.state === 'waiting' ? (agent.turn_state ?? null) : agent.state;
   return {
     state: agent.state,
+    run,
     turnsUnknown: agent.turns_unknown === true,
-    endedAt: agent.state === 'ended' ? agent.last_seen_at : null,
-    asking: agent.state === 'ended' ? null : askingOf(agent),
+    endedAt: run === 'ended' ? agent.last_seen_at : null,
+    asking: run === 'ended' ? null : askingOf(agent),
     since: agent.state_since ?? null,
   };
 }
@@ -59,11 +66,10 @@ const ASKING: Record<NonNullable<AgentLineFacts['asking']>, string> = {
 
 /** The line, or null: nothing is known that the line could say (no plugin, or a machine that names no agents). */
 export function agentLineOf(facts: AgentLineFacts, now: Date = new Date()): AgentLine | null {
-  if (facts.state === null) return null;
-  if (facts.state === 'ended') return { tone: 'ended', words: facts.endedAt ? `Ended ${shortTime(facts.endedAt, now)}` : 'Ended', from: null };
+  if (facts.run === 'ended') return { tone: 'ended', words: facts.endedAt ? `Ended ${shortTime(facts.endedAt, now)}` : 'Ended', from: null };
   if (facts.asking) return { tone: 'asking', words: ASKING[facts.asking], from: null };
-  if (facts.state === 'waiting') return { tone: 'waiting', words: 'Waiting on you', from: null };
-  if (facts.state === 'working') return { tone: 'working', words: 'Working', from: facts.since };
+  if (facts.run === null) return null;
+  if (facts.run === 'working') return { tone: 'working', words: 'Working', from: facts.since };
   if (facts.turnsUnknown) return null;
   return { tone: 'idle', words: facts.since ? `Idle since ${whenTime(facts.since, now)}` : 'Idle', from: null };
 }
@@ -80,4 +86,4 @@ export function durationWords(ms: number): string {
 
 /** Two facts that draw the same line (the Agents view's memoized row compares them). */
 export const sameLineFacts = (a: AgentLineFacts, b: AgentLineFacts): boolean =>
-  a === b || (a.state === b.state && a.turnsUnknown === b.turnsUnknown && a.endedAt === b.endedAt && a.asking === b.asking && a.since === b.since);
+  a === b || (a.state === b.state && a.run === b.run && a.turnsUnknown === b.turnsUnknown && a.endedAt === b.endedAt && a.asking === b.asking && a.since === b.since);

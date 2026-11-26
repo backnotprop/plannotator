@@ -11,6 +11,7 @@ import type { AgentMarkPicks } from '../agents/AgentMark';
 import { rowTimeIso } from '../rowDelivery';
 import { titleOf } from '../components/rowParts';
 import { rowWaits } from '../agentsView/model';
+import { momentWords } from '../thread/helpers';
 
 export interface ProfileAgent {
   agent: InboxAgent;
@@ -39,8 +40,14 @@ export function otherMachineName(machine: string | null, machines: MachinesModel
  * machine). `always`: the profile, which names this computer too while machines are linked.
  */
 export function agentSubWords(who: ProfileAgent, machines: MachinesModel, always = false): string {
+  const { host, project, machine } = agentSubParts(who, machines, always);
+  return [host, project, machine].filter(Boolean).join(' · ');
+}
+
+/** The same, part by part: the card cuts the project first, so the computer's name stays whole (D1). */
+export function agentSubParts(who: ProfileAgent, machines: MachinesModel, always = false): { host: string; project: string | null; machine: string | null } {
   const machine = always ? (machines.all.find((m) => m.id === who.machine)?.name ?? null) : otherMachineName(who.machine, machines);
-  return [agentHostName(who.agent.host), who.agent.project?.name, machine].filter(Boolean).join(' · ');
+  return { host: agentHostName(who.agent.host), project: who.agent.project?.name || null, machine: machine || null };
 }
 
 /** Which faces its mark offers (agentsView/AgentsList.tsx `picksOf`): all here, the shared ones for a machine that takes them. */
@@ -72,8 +79,20 @@ export function profileThreads(id: string, groups: readonly InboxAgentsGroup[] |
     .sort((a, b) => b.at.localeCompare(a.at) || a.row.thread_id.localeCompare(b.row.thread_id));
 }
 
-/** Details: Started, Last heard, Model, Context (and where it lives in Rex), as its sidebar hover card says them. */
+/** Heard from within this long reads "Just now" (B1). */
+export const JUST_NOW_MS = 60_000;
+
+/**
+ * Details: Started, Last heard, Model, Context (and where it lives in Rex), as its sidebar hover card says them, but
+ * for the times as the approval writes them (B1): Started "Today, 8:40 AM" (the thread's own moments, `momentWords`),
+ * Last heard "Just now" within a minute, else its time.
+ */
 export function profileDetails(who: ProfileAgent, machines: MachinesModel, now: Date = new Date()): [string, string][] {
   const view = machines.all.find((m) => m.id === who.machine) ?? null;
-  return agentFacts({ agent: who.agent, machine: who.machine, name: who.name, thread: null }, view, now).rows;
+  const { started_at: started, last_seen_at: heard, launch } = who.agent;
+  return agentFacts({ agent: who.agent, machine: who.machine, name: who.name, thread: null }, view, now).rows.map(([term, value]): [string, string] => {
+    if (term === 'Started' && started && !launch) return [term, momentWords(started, now) || value];
+    if (term === 'Last heard' && heard && now.getTime() - Date.parse(heard) < JUST_NOW_MS) return [term, 'Just now'];
+    return [term, value];
+  });
 }

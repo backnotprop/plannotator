@@ -72,7 +72,8 @@ export interface ViewAgent {
   turnsUnknown: boolean;
   /** When it was last heard, for an ended one ("Ended 4:10 PM"); null when not known. */
   endedAt: string | null;
-  /** What it asks the person in its terminal now, and when its turn started or ended: its row's line (agentProfile/line.ts). */
+  /** What it does (its state, or a waiting one's `turn_state`), what it asks the person in its terminal now, and when its turn started or ended: its row's line (agentProfile/line.ts). */
+  run: AgentLineFacts['run'];
   asking: AgentLineFacts['asking'];
   since: string | null;
   /** The list names it (else it was rebuilt from a row's session). */
@@ -188,6 +189,7 @@ export function agentFinder({ groups, machines, labels = {}, chains }: AgentsInp
       project: row.project?.name ?? null,
       machine,
       state: (known.get(machine) ?? false) ? 'ended' : null,
+      run: (known.get(machine) ?? false) ? 'ended' : null,
       turnsUnknown: false,
       endedAt: null,
       asking: null,

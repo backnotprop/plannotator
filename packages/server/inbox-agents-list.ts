@@ -148,6 +148,16 @@ const earliest = (...times: (number | null | undefined)[]) => {
 /** Who stays past the cap: waiting on the person, then live, then ended. */
 const keepRank = (agent: InboxAgent) => (agent.state === "waiting" ? 0 : agent.state === "ended" ? 2 : 1);
 
+/**
+ * A waiting agent with `turn_state`: what its state was before its waiting threads made it `waiting`. Idle is said
+ * only when its turns are known (its connection says `busy`, or it is a launch), as `turns_unknown` decides.
+ */
+function withTurnState(agent: InboxAgent, was: InboxAgent["state"] | undefined, busy: boolean | null): InboxAgent {
+  if (agent.state !== "waiting" || was === undefined || was === "waiting") return agent;
+  if (was === "idle" && agent.live && !agent.launch && busy === null) return agent;
+  return { ...agent, turn_state: was };
+}
+
 /** This machine's agents (one group, no `machine`): who is listed, how, and in what order, capped. */
 export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGENTS_LISTED_MAX): InboxAgentsGroup {
   const bySession = new Map<string, InboxAgent>();
@@ -226,6 +236,8 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
     if (first !== null) seen.set(session, first);
   }
 
+  // What a waiting agent's state said before its waiting threads made it `waiting` (its `turn_state`).
+  const before = new Map<InboxAgent, InboxAgent["state"]>();
   for (const wait of evidence.waits) {
     const session = nowAs(wait.session);
     let agent = bySession.get(session);
@@ -245,6 +257,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       bySession.set(session, agent);
     }
     agent.waiting += 1;
+    if (agent.state !== "waiting") before.set(agent, agent.state);
     agent.state = "waiting";
     if (!agent.project) agent.project = wait.project;
     if (!agent.live) agent.last_seen_at = later(agent.last_seen_at, wait.at);
@@ -274,7 +287,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
   })();
   // Each agent's status mark (inbox-agent-mark.ts), from what its session's connection says now.
   const facts = new Map(evidence.sessions.map((entry) => [entry.session, { busy: entry.busy, blocked: entry.blocked ?? null }] as const));
-  const marked = kept.map((agent) => withAgentStatusMark(agent, facts.get(agent.session) ?? null));
+  const marked = kept.map((agent) => withTurnState(withAgentStatusMark(agent, facts.get(agent.session) ?? null), before.get(agent), facts.get(agent.session)?.busy ?? null));
   // Ended on an earlier day: heard from last before today (only an ended session the evidence gave is dated).
   const earlier = new Set(evidence.today === undefined ? [] : evidence.sessions.filter((entry) => !entry.live && entry.lastSeen < evidence.today!).map((entry) => entry.session));
   return { agents: marked, total: all.length, ended_today: all.filter((agent) => agent.state === "ended" && !earlier.has(agent.session)).length };
@@ -286,10 +299,12 @@ export function inboxMergedAgents(self: string, own: InboxAgentsGroup, machines:
 }
 
 function sessionFactsChecked(agent: InboxAgent): InboxAgent {
-  const { model, effort, context, state_since, ...rest } = agent;
+  const { model, effort, context, state_since, turn_state, ...rest } = agent;
   const checked = { model: modelIdOf(model), effort: effortLevelOf(effort), context: contextPercentOf(context) };
   return {
     ...rest,
+    // What a waiting agent does besides, as that machine said it: one of the three, else nothing.
+    ...(rest.state === "waiting" && (turn_state === "working" || turn_state === "idle" || turn_state === "ended") ? { turn_state } : {}),
     // When its turn started or ended, as that machine said it: a time, else nothing.
     ...(typeof state_since === "string" && state_since.length <= 40 && Number.isFinite(Date.parse(state_since)) ? { state_since } : {}),
     ...(checked.model === null ? {} : { model: checked.model }),

@@ -4026,6 +4026,12 @@ export interface InboxAgent {
    * not known (a host that reports no turns, an older Inbox). Additive.
    */
   state_since?: string;
+  /**
+   * While `state` is `waiting` (a thread waits on the person): what `state` would say otherwise, `working`, `idle` or
+   * `ended` (the agent card's line says this, and "Waiting on you" only on the thread). Absent for any other state, and
+   * when its host reports nothing about its turns. Additive.
+   */
+  turn_state?: "working" | "idle" | "ended";
   model?: string;
   effort?: string;
   context?: number;

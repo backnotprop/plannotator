@@ -14,7 +14,7 @@
 @keyframes ib-apl-turn { to { transform: rotate(360deg); } }
 .pn-inbox .ib-apl-pause :is(circle, path) { stroke: var(--ib-apl-amber); }
 .pn-inbox .ib-apl-w { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.pn-inbox .ib-apl:is([data-tone="asking"], [data-tone="waiting"]) .ib-apl-w { color: var(--ib-apl-amber); }
+.pn-inbox .ib-apl[data-tone="asking"] .ib-apl-w { color: var(--ib-apl-amber); }
 .pn-inbox .ib-apl-t { flex: none; font-variant-numeric: tabular-nums; color: color-mix(in oklch, var(--muted-foreground) 88%, var(--card)); }
 .pn-inbox .ib-apl-t::before { content: "·"; margin-right: 6px; }
 /* The profile's Activity row: larger, in the text's colour, the duration at the row's end. */
@@ -33,7 +33,12 @@
 .pn-inbox .ib-apc-b { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 1px; width: 100%; min-height: 60px; padding: 8px 36px 8px 64px; border-radius: 10px; text-align: left; color: var(--foreground); }
 .pn-inbox .ib-apc-1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; white-space: nowrap; }
 .pn-inbox .ib-apc-n { flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; font-size: var(--ib-fs-14-5, 14.5px); font-weight: 600; line-height: 1.35; }
-.pn-inbox .ib-apc-m { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.pn-inbox .ib-apc-m { flex: 0 1 auto; display: flex; min-width: 0; overflow: hidden; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+/* Out of room, the project is cut first (D1), then the computer; the kind ("Pi", "Claude Code") stays whole. */
+.pn-inbox :is(.ib-apc-p, .ib-apc-k) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.pn-inbox .ib-apc-h { flex: none; white-space: pre; }
+.pn-inbox .ib-apc-p { flex: 0 1000 auto; min-width: 2.5em; }
+.pn-inbox .ib-apc-k { flex: 0 1 auto; }
 .pn-inbox .ib-apc-2 { display: flex; min-width: 0; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); line-height: 20px; }
 .pn-inbox .ib-apc-go { position: absolute; right: 12px; top: 50%; translate: 0 -50%; color: color-mix(in oklch, var(--muted-foreground) 70%, var(--card)); }
 .pn-inbox .ib-apc-b[aria-pressed="true"] { background: var(--ib-sel); }

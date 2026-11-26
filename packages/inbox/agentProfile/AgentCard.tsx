@@ -1,6 +1,7 @@
 /**
  * The agent's card atop a list filtered to one agent (approval "inbox-agent-profile-card", A1, A4-A6, D1, E1): its
- * face, its name, "Claude Code · harbor" (and the computer, when it is the other one), then its line (AgentLine.tsx).
+ * face, its name, "Claude Code · harbor" (and the computer, when it is the other one; when space runs out the project is
+ * cut first, the computer's name stays whole: D1), then its line (AgentLine.tsx).
  * A press opens its profile in the reading pane; pressed again, or with the profile open, it closes it. No fill at
  * rest, the hover fill, the selection's fill while its profile is open.
  *
@@ -14,7 +15,7 @@ import { useInboxAgents } from '../agentsList';
 import type { MachinesModel } from '../machines';
 import { agentLineOf, lineFactsOf } from './line';
 import { AgentLine } from './AgentLine';
-import { agentPicks, agentSubWords, profileAgentOf } from './model';
+import { agentPicks, agentSubParts, profileAgentOf } from './model';
 import { useAgentProfileNav } from './nav';
 
 interface AgentCardProps {
@@ -29,6 +30,7 @@ const AgentCard = memo(function AgentCard({ id, machines, pressed, onToggle }: A
   const who = useMemo(() => profileAgentOf(id, groups, machines), [id, groups, machines]);
   if (!who) return null;
   const line = agentLineOf(lineFactsOf(who.agent));
+  const sub = agentSubParts(who, machines);
   return (
     <div className="ib-apc" data-agent-card={id} data-agent-card-line={line ? line.tone : 'none'}>
       <AgentMark id={who.agent.id} host={who.agent.host} name={who.name} agent={who.agent} picks={agentPicks(who.machine, machines)} size={44} />
@@ -37,8 +39,20 @@ const AgentCard = memo(function AgentCard({ id, machines, pressed, onToggle }: A
           <span className="ib-apc-n" dir="auto">
             {who.name}
           </span>
-          <span className="ib-apc-m" dir="auto">
-            {agentSubWords(who, machines)}
+          <span className="ib-apc-m">
+            <span className="ib-apc-h">{sub.host}</span>
+            {sub.project && (
+              <span className="ib-apc-p" dir="auto">
+                {' · '}
+                {sub.project}
+              </span>
+            )}
+            {sub.machine && (
+              <span className="ib-apc-k" dir="auto">
+                {' · '}
+                {sub.machine}
+              </span>
+            )}
           </span>
         </span>
         {line && (

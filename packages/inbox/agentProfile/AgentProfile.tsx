@@ -16,6 +16,7 @@ import { shortTime } from '../format';
 import { AgentMark } from '../agents/AgentMark';
 import { agentHostName } from '../agents/model';
 import { useInboxAgents } from '../agentsList';
+import { useRelativeClock } from '../relativeTime';
 import type { MachinesModel } from '../machines';
 import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
 import { agentLineOf, lineFactsOf } from './line';
@@ -71,7 +72,9 @@ export function AgentProfile({ id, machines, rows, phone, stacked, backLabel, on
     };
   }, [covers, id]);
 
-  const details = who ? profileDetails(who, machines) : [];
+  // Its times read again each minute while it is open ("Just now" goes stale): the rows' shared minute clock.
+  const minute = useRelativeClock(true);
+  const details = who ? profileDetails(who, machines, new Date(Math.max(minute, Date.now()))) : [];
   const name = who?.name ?? agentHostName(null);
   return (
     <section ref={paneRef} className="ib-pane ib-apf" aria-labelledby={headingId} data-agent-profile={id}>
