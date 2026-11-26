@@ -222,7 +222,8 @@ async function shots(page: Page, name: string, schemes: readonly ('light' | 'dar
   await page.emulateMedia({ colorScheme: 'light' });
 }
 
-const item = (page: Page, id: string) => page.locator(`[data-sidebar-item="${id}"]`);
+/** A sidebar row as the person sees it (Settings draws a second sidebar copy, out of sight). */
+const item = (page: Page, id: string) => page.locator(`[data-sidebar-item="${id}"]`).filter({ visible: true });
 /** The line's stamp for the welcome: its claim spent (packages/shared/inbox/reveals.ts `review_welcome`). */
 const welcomeStamp = (dataDir: string) => (savedConfig(dataDir).inboxReveals as Record<string, { shownAt?: string } | undefined> | undefined)?.review_welcome?.shownAt ?? null;
 
