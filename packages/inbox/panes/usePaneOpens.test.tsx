@@ -99,7 +99,7 @@ function mount(start: PaneSet) {
 }
 
 const twoPanes = () => focusPane(split(singlePane('thr_a'), 'main', { id: 'p2', thread: 'thr_b' }, 'right'), 'main');
-const missing = () => new InboxApiError(404, 'not_found', 'Not found');
+const missing = () => new InboxApiError(404, 'thread_not_found', 'Not found');
 const collect = async () => {
   for (let i = 0; i < 4; i += 1) {
     Bun.gc(true);

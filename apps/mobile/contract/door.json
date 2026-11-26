@@ -545,6 +545,22 @@
       "relay": true
     },
     {
+      "name": "GET pulls/pull",
+      "method": "GET",
+      "path": "pulls/pull",
+      "params": [],
+      "call": "getPullsPull",
+      "window": "/api/inbox/pulls/pull",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "GET pulls/details",
       "method": "GET",
       "path": "pulls/details",
