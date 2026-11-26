@@ -780,7 +780,7 @@ export function Sidebar(props: SidebarProps) {
             onToggle={() => fold('agents')}
             labelId={agentsLabelId}
             bodyId={agentsBodyId}
-            header={(icon) => (
+            header={(icon, waitingCount) => (
               <SectionHeader
                 section="agents"
                 id={agentsLabelId}
@@ -788,7 +788,7 @@ export function Sidebar(props: SidebarProps) {
                 label="Agents"
                 iconNode={icon}
                 open={!agentsClosed}
-                count={0}
+                count={waitingCount}
                 onToggle={() => fold('agents')}
               />
             )}
