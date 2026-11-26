@@ -19,10 +19,11 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-reaction-tray-skills.spec.ts`.
  */
 
-import { expect, test, type Browser, type Page } from './inbox-test';
+import { expect, test, type Browser, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { STRIP_SETTLE_MS } from '../../packages/inbox/thread/messageReact';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
@@ -89,6 +90,20 @@ test.afterAll(async () => {
     await removeInboxScratch();
   }
 });
+
+/**
+ * A click on a message's face, then its "All reactions": the full tray opens. The opened face takes no press for
+ * `STRIP_SETTLE_MS` after the click that opened it (`deliberatePress`, thread/messageReact.ts: a double-click on the
+ * words under the face reacts with nothing), so the second click comes after it, as a person's does.
+ */
+async function allReactionsFrom(page: Page, face: Locator): Promise<void> {
+  await face.click({ force: true });
+  const all = page.locator('[data-react-strip] [data-react-all]');
+  await expect(all).toBeVisible();
+  await page.waitForTimeout(STRIP_SETTLE_MS);
+  await all.click();
+  await expect(page.locator('[data-reaction-tray]')).toBeVisible();
+}
 
 /** + in the open tray, an emoji found by `query`, then `words` typed in the name field over the tray. */
 async function nameWith(page: Page, query: string, emoji: string, words: string): Promise<void> {
@@ -166,9 +181,7 @@ test('a computer: the tray\'s / list is all on screen, above the tray near the b
 
     // A short thread, the tray from the message's face near the top: no room above, so the list opens below.
     await page.goto(`${world.url}#thread=${world.short}`);
-    await page.locator('section.ib-pane [data-react-face]').first().click({ force: true });
-    await page.locator('[data-react-all]').first().click();
-    await expect(page.locator('[data-reaction-tray]')).toBeVisible();
+    await allReactionsFrom(page, page.locator('section.ib-pane [data-react-face]').first());
     await nameWith(page, 'rocket', '🚀', '/br');
     const top = await allRowsShown(page);
     expect(top.side).toBe('below');
@@ -231,9 +244,7 @@ test('a computer, the tray mid-window: the list keeps under the thread\'s header
       last.closest<HTMLElement>('.ib-pbody')!.scrollTop += off;
       return false;
     });
-    await page.locator('section.ib-pane [data-react-face]').last().click({ force: true });
-    await page.locator('[data-react-all]').first().click();
-    await expect(page.locator('[data-reaction-tray]')).toBeVisible();
+    await allReactionsFrom(page, page.locator('section.ib-pane [data-react-face]').last());
     await nameWith(page, 'ship', '🚢', '/br');
     const head = await cardWhereHeaderWasCovered(page);
     const mid = await allRowsShown(page);
