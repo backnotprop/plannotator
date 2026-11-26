@@ -13,16 +13,20 @@ import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-mock.module('@plannotator/review-editor/components/AllFilesCodeView', () => ({
-  AllFilesCodeView: ({ fontFamily }: { fontFamily?: string }) => <div data-diff-stand-in={fontFamily ?? ''} />,
-}));
-mock.module('@plannotator/review-editor/worker-pool', () => ({
-  ReviewWorkerPoolProvider: ({ children }: { children: unknown }) => children,
-  useIsWorkerPoolReadyOrDisabled: () => true,
-  useWorkerPoolThemeSync: () => {},
-}));
-
 const hasDom = typeof document !== 'undefined';
+
+// Only under happy-dom: the unit lanes run many files in one process, where a module mock would replace the real
+// AllFilesCodeView for every other file.
+if (hasDom) {
+  mock.module('@plannotator/review-editor/components/AllFilesCodeView', () => ({
+    AllFilesCodeView: ({ fontFamily }: { fontFamily?: string }) => <div data-diff-stand-in={fontFamily ?? ''} />,
+  }));
+  mock.module('@plannotator/review-editor/worker-pool', () => ({
+    ReviewWorkerPoolProvider: ({ children }: { children: unknown }) => children,
+    useIsWorkerPoolReadyOrDisabled: () => true,
+    useWorkerPoolThemeSync: () => {},
+  }));
+}
 const { GuideDiff } = (hasDom ? await import('./GuideReader') : {}) as typeof import('./GuideReader');
 const { GuideHostProvider } = (hasDom ? await import('@plannotator/guide-viewer') : {}) as typeof import('@plannotator/guide-viewer');
 const { configStore } = (hasDom ? await import('@plannotator/ui/config') : {}) as typeof import('@plannotator/ui/config');
