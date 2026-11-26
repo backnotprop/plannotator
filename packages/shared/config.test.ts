@@ -1563,6 +1563,29 @@ describe("machine state lives in state.json, not config.json (#2852)", () => {
     expect(warnings).toEqual([]);
   });
 
+  test("inboxNotifications.allowedOrigin lands in state.json and config.json keeps settings (#3779)", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }, null, 2) + "\n");
+    expect(saveConfig({ inboxNotifications: { enabled: false, dismissed: true, allowedOrigin: "http://localhost:51234" } })).toBe(true);
+    expect(json(configPath())).toEqual({ displayName: "Ada", inboxNotifications: { enabled: false, dismissed: true } });
+    expect(json(statePath())).toEqual({ inboxNotifications: { allowedOrigin: "http://localhost:51234" } });
+    expect(loadConfig().inboxNotifications).toEqual({ enabled: false, dismissed: true, allowedOrigin: "http://localhost:51234" });
+
+    // Saving settings alone does not wipe out allowedOrigin from state.json
+    expect(saveConfig({ inboxNotifications: { ...loadConfig().inboxNotifications, enabled: true } })).toBe(true);
+    expect(json(configPath()).inboxNotifications).toEqual({ enabled: true, dismissed: true });
+    expect(json(statePath()).inboxNotifications).toEqual({ allowedOrigin: "http://localhost:51234" });
+    expect(loadConfig().inboxNotifications).toEqual({ enabled: true, dismissed: true, allowedOrigin: "http://localhost:51234" });
+  });
+
+  test("inboxCloudflareAccess lands in state.json and leaves config.json untouched (#3779)", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }, null, 2) + "\n");
+    const cf = { on: true, host: "inbox.example.com", port: 8443, team: "acme" };
+    expect(saveConfig({ inboxCloudflareAccess: cf })).toBe(true);
+    expect(json(configPath())).toEqual({ displayName: "Ada" });
+    expect(json(statePath()).inboxCloudflareAccess).toEqual(cf);
+    expect(loadConfig().inboxCloudflareAccess).toEqual(cf);
+  });
+
   test("a fresh machine gets no config.json from a dialog record alone", () => {
     expect(saveConfig({ starAsk: { shownAt: "2026-11-06T00:00:00.000Z" } })).toBe(true);
     expect(existsSync(configPath())).toBe(false);
@@ -1717,6 +1740,23 @@ describe("machine state lives in state.json, not config.json (#2852)", () => {
       expect(merged("inboxSound", { dialogDueFor: "0.28.10" }, { dialogShownFor: "0.28.10" })).toEqual({ dialogShownFor: "0.28.10" });
       // Builds that are not versions: state.json's own fields.
       expect(merged("inboxSound", { dialogShownFor: "tidy-e2e" }, { dialogDueFor: "0.0.0-dev" })).toEqual({ dialogDueFor: "0.0.0-dev" });
+    });
+
+    test("inboxNotifications: state.json allowedOrigin wins over config.json (#3779)", () => {
+      expect(merged("inboxNotifications", { enabled: true, allowedOrigin: "http://config:5000" }, { allowedOrigin: "http://state:3000" }))
+        .toEqual({ enabled: true, allowedOrigin: "http://state:3000" });
+      expect(merged("inboxNotifications", { enabled: false, allowedOrigin: "http://config:5000" }, {}))
+        .toEqual({ enabled: false, allowedOrigin: "http://config:5000" });
+      expect(merged("inboxNotifications", { enabled: true }, { allowedOrigin: "http://state:3000" }))
+        .toEqual({ enabled: true, allowedOrigin: "http://state:3000" });
+    });
+
+    test("inboxCloudflareAccess: state.json copy wins over config.json (#3779)", () => {
+      const configCf = { on: false, host: "old.example.com", port: 1000 };
+      const stateCf = { on: true, host: "new.example.com", port: 2000, team: "my-team" };
+      expect(merged("inboxCloudflareAccess", configCf, stateCf)).toEqual(stateCf);
+      expect(merged("inboxCloudflareAccess", configCf, {})).toEqual(configCf);
+      expect(merged("inboxCloudflareAccess", {}, stateCf)).toEqual(stateCf);
     });
   });
 

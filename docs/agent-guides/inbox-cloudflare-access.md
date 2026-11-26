@@ -3,7 +3,7 @@
 Opt-in reach for the Inbox and for `--cloudflare-access` sessions through the person's own Cloudflare account (Tunnel + Access), for people who do not use Tailscale. It follows the tailnet's model: one owner gets everything, and nobody else gets in. Off and invisible until `plannotator inbox cloudflare-access setup` runs. Bun only: the Inbox has no Pi twin, and Pi sessions have no `--cloudflare-access` (they have no `--tailscale` either).
 
 **Files.**
-- `packages/shared/inbox/cf-access.ts`: settings (config.json `inboxCloudflareAccess`, `PLANNOTATOR_INBOX_CF_ACCESS`), Host, edge headers, the door's `Sec-Fetch-Site` rule.
+- `packages/shared/inbox/cf-access.ts`: machine state in `state.json` (#3779; loaded merged into config `inboxCloudflareAccess`, `PLANNOTATOR_INBOX_CF_ACCESS`), Host, edge headers, the door's `Sec-Fetch-Site` rule.
 - `cf-access-verify.ts`: the token check.
 - `cf-access-door.ts`: session registrations and routing.
 - `door-base-shim.ts`: the base for a session page.
