@@ -10989,6 +10989,9 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
 .ib-rv-dest-lone .ib-rv-dest-mark { width: 15px; height: 15px; }
 .ib-rv-dest-lone .ib-atile { width: 16px; height: 16px; background: transparent; }
 .ib-prreview .ib-prp-row2 .ib-prr-note { flex: none; margin: 0; white-space: nowrap; }
+/* Power Up's face on a phone's row (guide/PowerUpMark.tsx): no box of its own, so an empty host adds no gap. */
+.ib-prp-powerup { display: contents; }
+.ib-powerup { display: inline-flex; flex: none; align-items: center; }
 /* Every control in the bar and the phone's row one height. */
 .ib-prreview { --ib-prp-h: 28px; }
 .pn-inbox .ib-prreview .ib-vhead .ib-rv-decide button { height: var(--ib-prp-h); }

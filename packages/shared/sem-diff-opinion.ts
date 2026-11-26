@@ -175,6 +175,19 @@ function withApiKeyAuth(init: RequestInit | undefined): RequestInit {
   return { ...init, headers };
 }
 
+// Every call that carries the key goes through this: a redirect is a failed call, never followed, so the key in its
+// header never reaches a host the person did not name. One wrapper per fetch, so the askers' memory (keyed by fetch)
+// still holds between asks.
+const noRedirectFetches = new WeakMap<Fetch, Fetch>();
+export function withoutRedirects(fetchImpl: Fetch): Fetch {
+  let wrapped = noRedirectFetches.get(fetchImpl);
+  if (!wrapped) {
+    wrapped = ((input: RequestInfo | URL, init?: RequestInit) => fetchImpl(input, { ...init, redirect: "error" })) as Fetch;
+    noRedirectFetches.set(fetchImpl, wrapped);
+  }
+  return wrapped;
+}
+
 // @plannotator/sem-jiff hardcodes TypeSafe's endpoint and Bearer header in its post helper.
 function systemoneFetch(fetchImpl: Fetch, target: SystemoneTarget): Fetch {
   if (!target.url && target.auth === "bearer") return fetchImpl;
@@ -324,7 +337,7 @@ export async function saveOpinionKey(
   if (!parsed.secret) return { ok: false, failure: parsed.failure ?? "missing", reason: parsed.reason ?? "Invalid settings." };
   const config = readOpinionEnv(env);
   if (usesSystemone(parsed.secret) && config.error) return { ok: false, failure: "noAnswer", reason: config.error };
-  const check = await verifyOpinionSecret(parsed.secret, config, fetchImpl);
+  const check = await verifyOpinionSecret(parsed.secret, config, withoutRedirects(fetchImpl));
   if (!check.ok) return { ok: false, failure: check.failure, reason: check.reason };
   await writeOpinionSecret(dataDir, parsed.secret);
   return { ok: true, provider: parsed.secret.provider, ms: check.ms };
@@ -422,7 +435,7 @@ export async function askOpinion(
   if (!secret) return { ok: false, state: "off", reason: "Power Up has no key." };
   if (usesSystemone(secret) && config.error) return { ok: false, state: "failed", reason: config.error };
   try {
-    return { ok: true, answers: await askerFor(secret, config, fetchImpl)(candidates) };
+    return { ok: true, answers: await askerFor(secret, config, withoutRedirects(fetchImpl))(candidates) };
   } catch (err) {
     return classifyOpinionError(err);
   }

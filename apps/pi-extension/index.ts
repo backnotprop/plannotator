@@ -24,7 +24,6 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Key } from "@earendil-works/pi-tui";
 import { bundledSkillPaths } from "./bundled-skill.ts";
 import { buildPromptVariables, formatTodoList, loadPlannotatorConfig, renderTemplate, resolveExecutionMode, resolvePhaseProfile } from "./config.ts";
 import {
@@ -1810,7 +1809,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		};
 	}
 
-	pi.registerShortcut(Key.ctrlAlt("p"), {
+	pi.registerShortcut("ctrl+alt+p", {
 		description: "Toggle plannotator",
 		handler: async (ctx) => {
 			await togglePlanMode(ctx);
