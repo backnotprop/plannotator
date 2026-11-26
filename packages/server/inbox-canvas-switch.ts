@@ -8,7 +8,7 @@
 import { InboxError } from "@plannotator/shared/inbox/schema";
 
 /** A canvas route's answer while the canvas is off (the agent's command prints it as `canvas_off: …`). */
-export const INBOX_CANVAS_OFF_ANSWER = { error: "The canvas is off in this Inbox (Settings → Capabilities).", code: "canvas_off" } as const;
+export const INBOX_CANVAS_OFF_ANSWER = { error: "The canvas is off in this Inbox (plannotator inbox capability canvas on).", code: "canvas_off" } as const;
 
 export interface CanvasSwitchDeps {
   /** config.json `inboxCanvas` as read now. */

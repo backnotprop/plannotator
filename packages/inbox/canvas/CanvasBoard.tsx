@@ -26,7 +26,7 @@ import { heldWords, InboxHeldError, type MachineView, type OutboxView } from '..
 import { machineOf, rememberMachine } from '../inboxUrl';
 import { CANVAS_WINDOW, canvasApi, canvasLooked, subscribeCanvasFrames, type CanvasFrame, type CanvasJob, type CanvasReply } from './canvasApi';
 import { boardLine, farChanges, farParts, heldEnd, joinHeld, saveTimer, type BoardLine, type HeldSave, type SaveState } from './farSave';
-import { clearSpotView, drawnThisVisit } from './freshVisit';
+import { clearSpotView, drawnThisVisit, sketchPictures } from './freshVisit';
 
 export interface CanvasBoardProps {
   threadId: string;
@@ -1278,18 +1278,17 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
         const whole = await drawPlaced(sent, files);
         if (whole) png(whole, 'canvas.png');
         await strip(sent, 'canvas');
-        // Each freehand drawing as its own picture, so nobody groups a face by hand and no model has to find it in the whole.
+        // Each freehand drawing as its own picture, so nobody groups a face by hand and no model has to find it in the whole;
+        // a fresh visit's canvas.png is already just the new drawing, so it is the one picture (freshVisit.ts).
         const things = thingsOf({ type: 'excalidraw', version: 2, source: '', elements: asCanvas(sent), appState: {}, files: {} });
-        const sketches = things.filter((t) => t.kind === 'sketch').sort((a, b) => b.box.w * b.box.h - a.box.w * a.box.h).slice(0, 6);
-        if (things.length === 1 && sketches.length === 1) pictures[sketches[0]!.id] = 'canvas.png';
-        else {
-          for (const [i, sketch] of sketches.entries()) {
-            const part = whole ? await cut(whole, sketch.box) : null;
-            if (!part) continue;
-            const name = `sketch-${i + 1}.png`;
-            out.push(new File([part], name, { type: 'image/png' }));
-            pictures[sketch.id] = name;
-          }
+        const { own, whole: inWhole } = sketchPictures(things, !!visit);
+        for (const id of inWhole) if (whole) pictures[id] = 'canvas.png';
+        for (const [i, sketch] of own.entries()) {
+          const part = whole ? await cut(whole, sketch.box) : null;
+          if (!part) continue;
+          const name = `sketch-${i + 1}.png`;
+          out.push(new File([part], name, { type: 'image/png' }));
+          pictures[sketch.id] = name;
         }
         sceneFile(sent, 'canvas.excalidraw');
         onSend({ words: words.trim(), files: out, sketch: { kind: 'sketch', elements: visit ? visit.map((e) => e.id) : [], pictures } });

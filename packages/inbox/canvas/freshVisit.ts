@@ -18,6 +18,17 @@ export function drawnThisVisit<E extends { id: string; isDeleted?: boolean }>(el
 }
 
 /**
+ * The pictures a Send with nothing selected gives its freehand sketches. On the whole board each sketch gets a picture
+ * of its own (cut from canvas.png) when the board holds more than that one thing, so no reader has to find it among the
+ * rest. On a fresh visit canvas.png is already only the new drawing, so it is the one picture: every sketch points at it.
+ */
+export function sketchPictures<T extends { id: string; kind: string; box: Box }>(things: readonly T[], fresh: boolean): { own: T[]; whole: string[] } {
+  const sketches = things.filter((t) => t.kind === 'sketch').sort((a, b) => b.box.w * b.box.h - a.box.w * a.box.h);
+  if (fresh || (things.length === 1 && sketches.length === 1)) return { own: [], whole: sketches.map((s) => s.id) };
+  return { own: sketches.slice(0, 6), whole: [] };
+}
+
+/**
  * The view (Excalidraw's `scrollX`, `scrollY` at zoom 1) that puts its top-left corner a gap right of everything on
  * the board, level with the drawing's top: an empty place, with the drawing a pan away. Null for an empty board.
  */

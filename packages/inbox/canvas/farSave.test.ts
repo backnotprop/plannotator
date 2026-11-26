@@ -63,7 +63,7 @@ describe('how a held save ended', () => {
     expect(heldEnd(entry({ state: 'sending' }), macbook)).toBeNull();
     expect(heldEnd(entry({ state: 'delivered', status: 200, answer: { rev: 4 } }), macbook)).toEqual({ landed: true });
     const at = '2026-11-25T08:05:00Z';
-    expect(heldEnd(entry({ state: 'refused', status: 409, answer: { error: 'The canvas is off in this Inbox (Settings → Capabilities).' }, notice: { kind: 'refused', at } }), macbook)).toEqual({ landed: false, words: 'Not delivered: The canvas is off in this Inbox (Settings → Capabilities).' });
+    expect(heldEnd(entry({ state: 'refused', status: 409, answer: { error: 'The canvas is off in this Inbox (plannotator inbox capability canvas on).' }, notice: { kind: 'refused', at } }), macbook)).toEqual({ landed: false, words: 'Not delivered: The canvas is off in this Inbox (plannotator inbox capability canvas on).' });
     // The link went: the window no longer knows the machine, the entry keeps its name.
     expect(heldEnd(entry({ state: 'dropped', notice: { kind: 'not_delivered', at }, machine_name: 'MacBook' }), null)).toEqual({ landed: false, words: 'Not delivered: MacBook was unlinked before it went.' });
     expect(heldEnd(entry({ state: 'parked', notice: { kind: 'may_have_been_delivered', at } }), macbook)).toEqual({ landed: false, words: 'May have been delivered. Check on MacBook.' });

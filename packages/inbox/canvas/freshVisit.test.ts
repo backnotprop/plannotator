@@ -1,14 +1,16 @@
 /**
  * A visit from the reply box's + → Canvas to a canvas that already holds something (freshVisit.ts, CanvasBoard.tsx
  * `fresh`): Send carries only what was drawn on this visit, never what the board held when it opened, what an agent
- * added meanwhile, or what this visit already sent; and the view opens on a spot clear of the whole drawing.
+ * added meanwhile, or what this visit already sent; it carries one picture of that drawing; and the view opens on a
+ * spot clear of the whole drawing.
  *
  * What regresses: Send posting the whole board again; an agent's box counted as the person's drawing; a second Send
- * repeating the first; a "clear" spot that lands on the drawing.
+ * repeating the first; a fresh Send with a second picture cut from the first; a "clear" spot that lands on the drawing.
  */
 import { describe, expect, test } from 'bun:test';
-import { boxesOverlap, unionBox, type Box } from '@plannotator/shared/inbox/canvas/scene';
-import { clearSpotView, drawnThisVisit } from './freshVisit';
+import { thingsOf } from '@plannotator/shared/inbox/canvas/reading';
+import { boxesOverlap, emptyScene, unionBox, type Box, type CanvasElement } from '@plannotator/shared/inbox/canvas/scene';
+import { clearSpotView, drawnThisVisit, sketchPictures } from './freshVisit';
 
 describe('what Send carries on a fresh visit', () => {
   test('only what was drawn on this visit: not what the board held, an agent added, was deleted, or was sent already', () => {
@@ -21,6 +23,30 @@ describe('what Send carries on a fresh visit', () => {
     // Sent: those join what the board knows, and the next Send carries only what is drawn after.
     for (const e of drawnThisVisit(now, known)) known.add(e.id);
     expect(drawnThisVisit([...now, { id: 'stroke-4' }], known).map((e) => e.id)).toEqual(['stroke-4']);
+  });
+});
+
+describe('the pictures a Send carries', () => {
+  // What shot 11 sent: an ellipse and a freehand stroke beside it.
+  const drawn = thingsOf({
+    ...emptyScene(),
+    elements: [
+      { id: 'oval0001', type: 'ellipse', x: 0, y: 0, width: 240, height: 130, version: 1, versionNonce: 1 },
+      { id: 'line0001', type: 'freedraw', x: 260, y: 50, width: 0, height: 0, points: [[0, 10], [140, 0]], version: 1, versionNonce: 1 },
+    ] as CanvasElement[],
+  });
+
+  test('a fresh visit: one picture, canvas.png (already just the new drawing); no sketch cut from it', () => {
+    expect(drawn.map((t) => t.kind).sort()).toEqual(['ellipse', 'sketch']);
+    const { own, whole } = sketchPictures(drawn, true);
+    expect(own).toEqual([]);
+    expect(whole).toEqual(drawn.filter((t) => t.kind === 'sketch').map((t) => t.id));
+  });
+
+  test('the whole board: a sketch among other things still gets a picture of its own', () => {
+    const { own, whole } = sketchPictures(drawn, false);
+    expect(own.map((t) => t.kind)).toEqual(['sketch']);
+    expect(whole).toEqual([]);
   });
 });
 

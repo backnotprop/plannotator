@@ -64,7 +64,7 @@ describe("a thread's canvas on the device door", () => {
 
   test("a linked machine reaches each canvas read with its query, and gets the canvas's own answer, 409 while it is off", async () => {
     let off = false;
-    const d = door(() => (off ? Response.json({ error: "The canvas is off in this Inbox (Settings → Capabilities).", code: "canvas_off" }, { status: 409 }) : Response.json({ rev: 4, scene: { elements: [] } })));
+    const d = door(() => (off ? Response.json({ error: "The canvas is off in this Inbox (plannotator inbox capability canvas on).", code: "canvas_off" }, { status: 409 }) : Response.json({ rev: 4, scene: { elements: [] } })));
     const offer = d.devices.machineDoor.openMachineOffer();
     const machine = await d.pair({ name: "Studio", platform: "machine", secret: offer.secret });
     for (const path of READS) {

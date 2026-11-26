@@ -1,5 +1,6 @@
 /**
- * The canvas as a capability (Settings → Capabilities → Canvas, config.json `inboxCanvas`, off by default):
+ * The canvas as a capability (config.json `inboxCanvas`, on unless false; no Settings row; `plannotator inbox
+ * capability canvas on|off` turns it; the default itself: inbox-canvas-capability.test.ts):
  * the switch's save, no canvas action in the agent tool whatever is on (agents have `plannotator inbox canvas`,
  * inbox-canvas-agent.test.ts), and an off Inbox that touches no stored canvas. The routes' refusal on a running Inbox:
  * inbox-canvas-capability.test.ts.
@@ -35,8 +36,8 @@ describe("the canvas switch", () => {
     return { sw, changes: () => changes, saved: () => saved };
   };
 
-  test("off unless turned on; a save answers the switch and tells every window only when it changed", () => {
-    const h = harness(undefined);
+  test("off while config.json says so until turned on; a save answers the switch and tells every window only when it changed", () => {
+    const h = harness(false);
     expect(h.sw.on()).toBe(false);
     expect(h.sw.answer({})).toEqual({ canvas: { on: false } });
     expect(h.sw.answer({ canvas: { on: true } })).toEqual({ canvas: { on: true } });
