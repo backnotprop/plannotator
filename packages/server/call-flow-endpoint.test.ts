@@ -121,6 +121,12 @@ describe('Call flow endpoint capability guards', () => {
             installSizeBytes: 6 * 1024 * 1024,
           },
         });
+
+        // The panel shows this line; it names where the switch is now, the same in both runtimes.
+        const { snapshotId } = await fetch(`${server.url}/api/diff`).then((r) => r.json()) as { snapshotId: string };
+        const direct = await fetch(`${server.url}/api/call-flow?snapshot=${encodeURIComponent(snapshotId)}`)
+          .then((r) => r.json()) as { status: string; message?: string };
+        expect(direct).toMatchObject({ status: 'disabled', message: 'Call flow is disabled in Settings → Reviews.' });
       } finally {
         server.stop();
       }
