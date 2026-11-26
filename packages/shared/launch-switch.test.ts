@@ -11,9 +11,12 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  LAUNCH_SWITCH_AHEAD_REFRESH_MS,
   LAUNCH_SWITCH_FILE,
   LAUNCH_SWITCH_MAX_BYTES,
+  LAUNCH_SWITCH_OFF_REFRESH_MS,
   LAUNCH_SWITCH_REFRESH_MS,
+  configLaunchShownStore,
   LAUNCH_SWITCH_URL,
   createLaunchSwitch,
   fetchLaunchDoc,
@@ -43,6 +46,7 @@ function memoryShown(): LaunchShownStore & { all: Record<string, LaunchShownReco
     all,
     read: (campaign) => all[campaign],
     write: (campaign, record) => ((all[campaign] = { ...record }), true),
+    stamp: (campaign, record) => (all[campaign]?.shownAt || all[campaign]?.answer ? "taken" : ((all[campaign] = { ...record }), "stamped")),
   };
 }
 
@@ -149,6 +153,16 @@ describe("parseLaunchDoc: the site file's shape", () => {
     expect(parseLaunchDoc(text)).toBeNull();
   });
 
+  test("a body that is not valid UTF-8 is off, even when the rest is a good on file", () => {
+    const good = new TextEncoder().encode(on({ note: "__" }));
+    const at = new TextDecoder().decode(good).indexOf("__");
+    const bad = good.slice();
+    bad[at] = 0xff; // never valid in UTF-8
+    bad[at + 1] = 0xfe;
+    expect(parseLaunchDoc(good)).toMatchObject({ on: true });
+    expect(parseLaunchDoc(bad)).toBeNull();
+  });
+
   test("a valid document over 4 KB is off; at 4 KB it parses", () => {
     const base = on();
     expect(parseLaunchDoc(base + " ".repeat(LAUNCH_SWITCH_MAX_BYTES - base.length))).not.toBeNull();
@@ -229,6 +243,60 @@ describe("the reader", () => {
     now += 1;
     expect(await make().refresh()).toBe("asked");
     expect(f.calls.length).toBe(2);
+  });
+
+  test("how often it asks: 3 hours while off or absent, hourly while an on waits for startsAt, 15 minutes while on", async () => {
+    const cases: { doc: string | null; at: number; fresh: number }[] = [
+      { doc: null, at: T_START, fresh: LAUNCH_SWITCH_OFF_REFRESH_MS },
+      { doc: JSON.stringify({ v: 1, campaign: "product-hunt-2026", on: false }), at: T_START, fresh: LAUNCH_SWITCH_OFF_REFRESH_MS },
+      { doc: on(), at: T_START - 5 * 60 * 60 * 1000, fresh: LAUNCH_SWITCH_AHEAD_REFRESH_MS },
+      { doc: on(), at: T_START + 1000, fresh: LAUNCH_SWITCH_REFRESH_MS },
+      { doc: on(), at: T_END + 1000, fresh: LAUNCH_SWITCH_OFF_REFRESH_MS },
+    ];
+    expect(LAUNCH_SWITCH_OFF_REFRESH_MS).toBe(3 * 60 * 60 * 1000);
+    expect(LAUNCH_SWITCH_AHEAD_REFRESH_MS).toBe(60 * 60 * 1000);
+    for (const { doc, at, fresh } of cases) {
+      const dir = dataDir();
+      writeFileSync(join(dir, LAUNCH_SWITCH_FILE), JSON.stringify({ checkedAt: new Date(at).toISOString(), doc: doc === null ? null : JSON.parse(doc) }));
+      let now = at + fresh - 1;
+      const f = fakeFetch();
+      const service = createLaunchSwitch({ dataDir: () => dir, endpoint: () => ENDPOINT, shown: memoryShown(), fetch: f.fn, now: () => now });
+      expect(await service.refresh()).toBe("fresh");
+      now = at + fresh;
+      expect(await service.refresh()).toBe("asked");
+      expect(f.calls.length).toBe(1);
+    }
+  });
+
+  test("an on copy kept ahead of startsAt becomes due at startsAt with no request", async () => {
+    const dir = dataDir();
+    writeFileSync(join(dir, LAUNCH_SWITCH_FILE), JSON.stringify({ checkedAt: new Date(T_START - 10 * 60 * 1000).toISOString(), doc: JSON.parse(on()) }));
+    let now = T_START - 1;
+    const f = fakeFetch();
+    const service = createLaunchSwitch({ dataDir: () => dir, endpoint: () => ENDPOINT, shown: memoryShown(), fetch: f.fn, now: () => now });
+    expect(service.claim()).toEqual({ show: false });
+    now = T_START;
+    expect(service.claim()).toMatchObject({ show: true, campaign: "product-hunt-2026" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(f.calls.length).toBe(0);
+  });
+
+  test("no timer keeps a process alive: a reader started with a site that never answers lets the process exit", () => {
+    const dir = dataDir();
+    const script = join(dir, "run.ts");
+    const mod = join(import.meta.dir, "launch-switch.ts");
+    writeFileSync(script, `
+      import { createLaunchSwitch, fetchLaunchDoc } from ${JSON.stringify(mod)};
+      const hang = ((_u, init) => new Promise((_, no) => init.signal.addEventListener("abort", () => no(new Error("aborted"))))) as typeof fetch;
+      const store = { read: () => undefined, write: () => true, stamp: () => "stamped" as const };
+      createLaunchSwitch({ dataDir: () => ${JSON.stringify(dir)}, endpoint: () => "http://127.0.0.1:9/launch.json", shown: store, fetch: hang, timeoutMs: 20_000 }).start();
+      void fetchLaunchDoc(hang, "http://127.0.0.1:9/launch.json", 20_000);
+      setTimeout(() => {}, 50);
+    `);
+    const before = Date.now();
+    const run = Bun.spawnSync([process.execPath, script], { env: { PATH: process.env.PATH ?? "", PLANNOTATOR_DATA_DIR: dir, PLANNOTATOR_TEST_SANDBOX: "1" }, timeout: 15_000 });
+    expect(run.exitCode).toBe(0);
+    expect(Date.now() - before).toBeLessThan(10_000);
   });
 
   test("a failure (offline, 500, a redirect, too slow) keeps the last good copy; an invalid 200 replaces it with off", async () => {
@@ -332,6 +400,52 @@ describe("once per computer", () => {
     expect(b.answer("opened")).toEqual({ ok: true });
     expect(a.answer("dismissed")).toEqual({ ok: true });
     expect(shown.all["product-hunt-2026"]?.answer).toBe("opened");
+  });
+
+  test("two surfaces stamping at once (separate processes, one data folder): the first stamp stays, the other gets no", async () => {
+    const original = process.env.PLANNOTATOR_DATA_DIR;
+    const dir = dataDir();
+    process.env.PLANNOTATOR_DATA_DIR = dir;
+    try {
+      writeFileSync(join(dir, LAUNCH_SWITCH_FILE), JSON.stringify({ checkedAt: new Date(T_START).toISOString(), doc: JSON.parse(on()) }));
+      const make = (now: number, shown: LaunchShownStore) =>
+        createLaunchSwitch({ dataDir: () => dir, endpoint: () => "http://127.0.0.1:9/x", shown, fetch: fakeFetch().fn, now: () => now });
+      const b = make(T_START + 1, configLaunchShownStore);
+      let bSaid: { show: boolean } | null = null;
+      let armed = false;
+      // A's checks read the record as it was, then B stamps before A writes: the interleaving of two processes.
+      const interleaved: LaunchShownStore = {
+        ...configLaunchShownStore,
+        read(campaign) {
+          const was = configLaunchShownStore.read(campaign);
+          if (armed && bSaid === null) bSaid = b.shown("product-hunt-2026");
+          return was;
+        },
+      };
+      const a = make(T_START + 2, interleaved);
+      expect(a.claim()).toMatchObject({ show: true });
+      armed = true;
+      const aSaid = a.shown("product-hunt-2026");
+      expect(bSaid).toEqual({ show: true });
+      expect(aSaid).toEqual({ show: false });
+      expect(configLaunchShownStore.read("product-hunt-2026")?.shownAt).toBe(new Date(T_START + 1).toISOString());
+    } finally {
+      if (original === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = original;
+    }
+  });
+
+  test("a stamp that cannot be written counts as shown for this process: it is never claimed here again", async () => {
+    const dir = dataDir();
+    const shown = memoryShown();
+    shown.stamp = () => "failed";
+    shown.write = () => false;
+    const a = createLaunchSwitch({ dataDir: () => dir, endpoint: () => "http://127.0.0.1:9/x", shown, fetch: fakeFetch().fn, now: () => T_START + 1 });
+    await a.refresh();
+    expect(a.claim()).toMatchObject({ show: true });
+    expect(a.shown("product-hunt-2026")).toEqual({ show: true });
+    expect(a.claim()).toEqual({ show: false });
+    expect(a.shown("product-hunt-2026")).toEqual({ show: false });
   });
 
   test("a shown for another campaign, or an answer before any shown, does nothing", async () => {

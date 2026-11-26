@@ -494,8 +494,8 @@ export async function handleStarAsk(req: Request, url: URL, surface: StarAskSurf
 
 /**
  * The launch switch's one-time dialog (packages/shared/launch-switch.ts): `POST /api/launch-switch/claim` (from the
- * kept copy only: `{ show: false }` or `{ show: true, campaign, url, title?, line? }`), `/shown` (stamps it shown on
- * this computer, `{ show }`) and `/answer` (`{ answer: "opened" | "dismissed" }`). Null for any other path. Nothing
+ * kept copy only: `{ show: false }` or `{ show: true, campaign, url }`), `/shown` (stamps it shown on this computer,
+ * `{ show }`) and `/answer` (`{ answer: "opened" | "dismissed" }`). Null for any other path. Nothing
  * here waits on the site: the reader runs in the background (`launchSwitchService().start()` at the server's start).
  */
 export async function handleLaunchSwitch(req: Request, url: URL): Promise<Response | null> {
