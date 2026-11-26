@@ -11,9 +11,12 @@
  * - `onChange`: every setting the page writes goes through it (default: the
  *   config store), like the diff gear's `onChange`.
  * - `rows`: the rows a host cannot honour are left out (Hide whitespace,
- *   Minimap, Hover cards, the Git and Jujutsu defaults).
+ *   Minimap, Hover cards, the Git and Jujutsu defaults, Auto-mark viewed,
+ *   Call flow).
  * - `opinionRoute`: where Power Up's key and provider are kept. It is read
  *   when the Power Up section first comes on screen, not on every open.
+ *   `opinionFetch` sends its requests (the Inbox adds its page session to a
+ *   key write).
  * Every word is in `reviewSettingsWords.ts`.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -34,7 +37,7 @@ import { monoFontStack, normalizeCssFontSize } from '../../utils/cssFontFamily';
 import { DIFF_BACKGROUND_STRENGTH_OPTIONS, DIFF_CHANGE_MARK_OPTIONS, DIFF_CHANGED_WORDS_OPTIONS, DIFF_MINIMAP_OPTIONS } from '../DiffDisplayOptions';
 import { DIFF_TAB_SIZE_MAX, DIFF_TAB_SIZE_MIN, clampDiffTabSize, offersBackgroundStrength } from '../diffDisplayModel';
 import { FontFamilyField } from './FontFamilyField';
-import { PowerUpRows, usePowerUpSettings } from './PowerUpSettings';
+import { PowerUpRows, usePowerUpSettings, type OpinionFetch } from './PowerUpSettings';
 import {
   writeReviewSettingToStore,
   type ReviewSettingChange,
@@ -70,12 +73,14 @@ const JJ_REVIEW_DEFAULTS: VcsReviewSettingsDescriptor = {
   diffOptions: JJ_DEFAULT_DIFF_TYPE_OPTIONS.map(({ value, label, description }) => ({ id: value, label, description })),
 };
 
-const ALL_ROWS: ReviewSettingsRows = { hideWhitespace: true, minimap: true, hoverCards: true, defaultDiffViews: true };
+const ALL_ROWS: ReviewSettingsRows = { hideWhitespace: true, minimap: true, hoverCards: true, defaultDiffViews: true, autoViewed: true, callFlow: true };
 
 export interface ReviewSettingsPageProps {
   controls: ReviewSettingsControls;
   /** The route that keeps Power Up's provider and key (GET, POST, DELETE). */
   opinionRoute: string;
+  /** Sends the requests to `opinionRoute`. Default: the window's fetch. */
+  opinionFetch?: OpinionFetch;
   /** Writes one setting. Default: the config store's `set`. */
   onChange?: ReviewSettingChange;
   /** Rows this host can honour; each defaults to shown. */
@@ -257,9 +262,11 @@ export function MovedCodeSwitch({ controls, onChange = writeReviewSettingToStore
  * under it stays usable while the switch is greyed, so a key can be added or
  * removed with Semantic changes off.
  */
-export function PowerUpSection({ controls, opinionRoute, load = true, onChange = writeReviewSettingToStore }: {
+export function PowerUpSection({ controls, opinionRoute, opinionFetch, load = true, onChange = writeReviewSettingToStore }: {
   controls: ReviewSettingsControls;
   opinionRoute: string;
+  /** Sends the requests to `opinionRoute`. Default: the window's fetch. */
+  opinionFetch?: OpinionFetch;
   /** Read the opinion route now (false until the section is on screen). */
   load?: boolean;
   onChange?: ReviewSettingChange;
@@ -269,7 +276,7 @@ export function PowerUpSection({ controls, opinionRoute, load = true, onChange =
   const semantic = useConfigValue('diffSemantic');
   const powerUp = useConfigValue('diffPowerUp');
   const motion = useConfigValue('diffPowerUpMotion');
-  const state = usePowerUpSettings(opinionRoute, { load, onChange });
+  const state = usePowerUpSettings(opinionRoute, { load, onChange, fetch: opinionFetch });
   const { configured } = state;
   // A greyed switch shows off, like Show moved & renamed code; the saved choice is kept.
   const disabled = !configured || !semantic || !semanticDiffEnabled;
@@ -308,12 +315,14 @@ function FilesSection({ controls, set, rows, sinceBaseUnavailable }: {
       {/* Never write `reviewAutoViewed` directly — setReviewAutoViewed also
           consumes the first-time notice, since an explicit toggle is proof
           the reviewer already found the switch. */}
-      <Switch
-        label={FILES_WORDS.autoViewed}
-        description={FILES_WORDS.autoViewedDescription}
-        checked={reviewAutoViewed}
-        onChange={(v) => setReviewAutoViewed(v, store)}
-      />
+      {rows.autoViewed && (
+        <Switch
+          label={FILES_WORDS.autoViewed}
+          description={FILES_WORDS.autoViewedDescription}
+          checked={reviewAutoViewed}
+          onChange={(v) => setReviewAutoViewed(v, store)}
+        />
+      )}
       {rows.defaultDiffViews && (
         <>
           <Group id="git" title={FILES_WORDS.git}>
@@ -369,6 +378,7 @@ function FilesSection({ controls, set, rows, sinceBaseUnavailable }: {
 export function ReviewSettingsPage({
   controls,
   opinionRoute,
+  opinionFetch,
   onChange = writeReviewSettingToStore,
   rows,
   packageChangesSetting,
@@ -412,22 +422,24 @@ export function ReviewSettingsPage({
       </div>
 
       <div ref={powerUpRef} data-review-settings-section="powerUp" data-power-up-settings="">
-        <PowerUpSection controls={controls} opinionRoute={opinionRoute} load={powerUpShown} onChange={set} />
+        <PowerUpSection controls={controls} opinionRoute={opinionRoute} opinionFetch={opinionFetch} load={powerUpShown} onChange={set} />
       </div>
 
-      <div data-review-settings-section="callFlow">
-        <Section
-          id="callFlow"
-          title={CALL_FLOW_WORDS.label}
-          toggle={{
-            checked: callFlowEnabled,
-            onChange: (on) => set('callFlowEnabled', on),
-            description: SECTION_WORDS.callFlow.description,
-          }}
-        >
-          <Note>{SECTION_WORDS.callFlow.note}</Note>
-        </Section>
-      </div>
+      {shownRows.callFlow && (
+        <div data-review-settings-section="callFlow">
+          <Section
+            id="callFlow"
+            title={CALL_FLOW_WORDS.label}
+            toggle={{
+              checked: callFlowEnabled,
+              onChange: (on) => set('callFlowEnabled', on),
+              description: SECTION_WORDS.callFlow.description,
+            }}
+          >
+            <Note>{SECTION_WORDS.callFlow.note}</Note>
+          </Section>
+        </div>
+      )}
 
       {packageChangesSetting && (
         <div data-review-settings-section="packages">
@@ -451,9 +463,11 @@ export function ReviewSettingsPage({
         </div>
       )}
 
-      <div data-review-settings-section="files">
-        <FilesSection controls={controls} set={set} rows={shownRows} sinceBaseUnavailable={sinceBaseUnavailable} />
-      </div>
+      {(shownRows.autoViewed || shownRows.defaultDiffViews) && (
+        <div data-review-settings-section="files">
+          <FilesSection controls={controls} set={set} rows={shownRows} sinceBaseUnavailable={sinceBaseUnavailable} />
+        </div>
+      )}
     </div>
   );
 }

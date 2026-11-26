@@ -84,8 +84,9 @@ describe('bulkTargets', () => {
   });
   test('Mark read only where the row offers it (never Quiet); Mark unread only on a read row an agent wrote last in', () => {
     const quiet = row('q', { section: 'quiet', waiting_on_person: false, questions: { open: 0, picked: 0, stopped: false, holds_up: [], prompt: null, actions: 0 } as InboxListRow['questions'] });
-    const rows = [row('a'), quiet];
-    expect(bulkTargets(rows, 'read', rules()).map((x) => x.thread_id)).toEqual(['a']);
-    expect(bulkTargets(rows, 'unread', rules()).map((x) => x.thread_id)).toEqual(['q']);
+    // `a` waits on the person, not opened yet (bold); `o` waits too, opened (the owner, 2026-11-25: Mark unread there).
+    const rows = [row('a', { unread: true, unseen: 1 }), quiet, row('o', { unread: false, unseen: 0 })];
+    expect(bulkTargets(rows, 'read', rules()).map((x) => x.thread_id)).toEqual(['a', 'o']);
+    expect(bulkTargets(rows, 'unread', rules()).map((x) => x.thread_id)).toEqual(['q', 'o']);
   });
 });
