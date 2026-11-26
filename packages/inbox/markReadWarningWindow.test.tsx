@@ -193,7 +193,8 @@ test.skipIf(!hasDom)('Mark read on a thread with questions asks first: Cancel wr
   act(() => first.click());
   await until(() => warning() !== null, 'the warning');
   expect(warning()!.querySelector('h2')!.textContent).toBe('Set aside 2 open questions?');
-  expect(rowAction(el, ids.stopped)).not.toBeNull();
+  // The row is drawn as it was: opened, its questions still waiting, so its action is Mark unread (owner, 2026-11-25).
+  expect(el.querySelector(`[data-row="${ids.stopped}"] [data-row-mark-unread]`)).not.toBeNull();
   act(() => warning()!.querySelector<HTMLButtonElement>('[data-mark-read-warning-cancel]')!.click());
   await settle();
   expect(warning()).toBeNull();
