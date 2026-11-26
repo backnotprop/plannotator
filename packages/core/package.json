@@ -135,7 +135,7 @@
     "prepack": "bun run --cwd ../.. build:viewer-pin"
   },
   "dependencies": {
-    "croner": "11.0.0"
+    "croner": "11.0.1"
   },
   "devDependencies": {
     "typescript": "~5.8.2"
