@@ -74,6 +74,8 @@ export interface DisplayOptions {
   planWidth?: string;
   /** Tater mode. */
   taterMode?: boolean;
+  /** HTML pages and live apps open in Annotate (true, the default) or in Interact. */
+  htmlAnnotateOnStartup?: boolean;
   /** Markdown selection mode: 'drag' (shown as Select) or 'pinpoint'. */
   inputMethod?: string;
 }

@@ -38,6 +38,7 @@ const LEAVES = [
   { name: 'planWidth', field: 'planWidth', value: 'wide', bad: ['huge', 1280] },
   { name: 'taterMode', field: 'taterMode', value: true, bad: ['true', 1] },
   { name: 'inputMethod', field: 'inputMethod', value: 'pinpoint', bad: ['click', true] },
+  { name: 'htmlAnnotateOnStartup', field: 'htmlAnnotateOnStartup', value: false, bad: ['false', 0] },
 ] as const;
 
 type LeafName = (typeof LEAVES)[number]['name'];
