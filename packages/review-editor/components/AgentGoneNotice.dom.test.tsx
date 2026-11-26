@@ -14,7 +14,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Toaster } from 'sonner';
-import { AGENT_AWAY_REASON, AGENT_GONE_REASON, NO_SESSION_REASON } from '@plannotator/core/review-agent-gone-words';
+import { AGENT_AWAY_REASON, AGENT_GONE_REASON, NO_SESSION_REASON } from '@plannotator/shared/review-agent-gone-words';
 import { DecisionSendError } from '@plannotator/ui/utils/sendFailure';
 import { agentGoneReasonFor, dismissAgentGoneNotice, noteSendFailureForAgentGone, showAgentGoneNotice } from './AgentGoneNotice';
 

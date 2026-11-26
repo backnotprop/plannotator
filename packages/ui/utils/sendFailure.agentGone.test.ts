@@ -7,8 +7,8 @@
  * instead of saying the agent is gone.
  */
 import { describe, expect, test } from 'bun:test';
-// The servers' codes, from the module both servers use. @plannotator/ui ships
-// against the published core, so it keeps its own copies; this pins them.
+// The servers' codes, from the module both servers use. @plannotator/ui is
+// published and @plannotator/shared is not, so it keeps its own copies; this pins them.
 import {
   AGENT_AWAY_CODE as SERVER_AGENT_AWAY_CODE,
   AGENT_GONE_CODE as SERVER_AGENT_GONE_CODE,

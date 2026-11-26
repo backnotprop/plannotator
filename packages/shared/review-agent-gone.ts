@@ -30,7 +30,7 @@ import {
 	AGENT_GONE_REFUSAL_ERROR,
 	NO_SESSION_CODE,
 	NO_SESSION_REFUSAL_ERROR,
-} from "@plannotator/core/review-agent-gone-words";
+} from "./review-agent-gone-words";
 
 export { AGENT_AWAY_CODE, AGENT_GONE_CODE, NO_SESSION_CODE };
 

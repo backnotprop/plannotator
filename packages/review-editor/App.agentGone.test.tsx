@@ -18,7 +18,7 @@ import {
   type StorageBackend,
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
-import { AGENT_GONE_REASON } from "@plannotator/core/review-agent-gone-words";
+import { AGENT_GONE_REASON } from "@plannotator/shared/review-agent-gone-words";
 
 // Vite-only virtual module (`?worker&inline`): stubbed like App.panelView.test.tsx.
 mock.module("./workerPool", () => ({

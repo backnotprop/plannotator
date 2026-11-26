@@ -239,7 +239,8 @@
     "./inbox/tailnet-refusal": "./inbox/tailnet-refusal.ts",
     "./inbox/agent-link": "./inbox/agent-link.ts",
     "./review-live": "./review-live.ts",
-    "./review-agent-gone": "./review-agent-gone.ts"
+    "./review-agent-gone": "./review-agent-gone.ts",
+    "./review-agent-gone-words": "./review-agent-gone-words.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.68",

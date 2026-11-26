@@ -33,7 +33,7 @@ no tab has had it open for 2 minutes; the comments come back when a review of
 the same changes is opened again. Ending a review under a live agent, or under
 an open tab, is the outcome that must never happen, so every doubt keeps the
 review. Every word a person reads here is in
-`packages/core/review-agent-gone-words.ts` (the owner approves them).
+`packages/shared/review-agent-gone-words.ts` (the owner approves them).
 
 - **Send never pretends (both runtimes).** `startReviewServer` takes
   `agentPresence?: () => "here" | "gone" | "away" | "no-session"` (Bun

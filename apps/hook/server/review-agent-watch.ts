@@ -37,7 +37,7 @@ import { readFileSync, writeSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { AgentPresence } from "@plannotator/shared/review-agent-gone";
-import { AGENT_GONE_CLI_LINE } from "@plannotator/core/review-agent-gone-words";
+import { AGENT_GONE_CLI_LINE } from "@plannotator/shared/review-agent-gone-words";
 import { takeHostResultPath } from "./host-result";
 import { PARENT_CHECK_MS, stdoutIsPipe, watchesParent } from "./orphan-plan-review";
 

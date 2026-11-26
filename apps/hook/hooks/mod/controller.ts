@@ -1682,7 +1682,7 @@ export class PlannotatorMod {
         return
       }
       // The CLI ended a review whose session was gone (no Claude Code process held its lease, and no tab had it open): no decision was taken.
-      // The words are a copy of `REVIEW_AGENT_GONE_MOD_LOG` in packages/core/review-agent-gone-words.ts (this folder imports nothing outside it).
+      // The words are a copy of `REVIEW_AGENT_GONE_MOD_LOG` in packages/shared/review-agent-gone-words.ts (this folder imports nothing outside it).
       if (code === String(REVIEW_AGENT_GONE_EXIT_CODE) && launch.kind === 'review') {
         this.host.log(`The review of ${launch.subject} ended while no Claude Code session was open for it. Your comments are saved as a draft; open a review of the same changes to get them back.`)
         await this.forget(launch)

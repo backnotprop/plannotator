@@ -19,8 +19,8 @@ export const PLAN_REVISED_CODE = 'plan_revised';
 /** The codes a code review server (Bun and Pi) refuses a decision with when
  *  nobody can receive it: nothing was sent and the draft is kept
  *  (packages/shared/review-agent-gone.ts, whose literals live in
- *  packages/core/review-agent-gone-words.ts; this package ships against the
- *  published core, so it keeps its own copies, pinned by
+ *  packages/shared/review-agent-gone-words.ts; this package is published and
+ *  shared is not, so it keeps its own copies, pinned by
  *  sendFailure.agentGone.test.ts). `agent_gone`: the agent quit (410).
  *  `agent_away`: no session right now, one may come back (409, Pi between
  *  sessions). `no_session`: the review never had a session to send to (410).
