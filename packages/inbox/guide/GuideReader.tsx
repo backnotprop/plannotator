@@ -54,6 +54,7 @@ import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/revie
 import type { DiffSelectionActions } from '@plannotator/review-editor/components/SelectionChooser';
 import { extractLinesFromPatch, isLineRangeInPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
+import { useDiffFontFamily } from './useDiffFont';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { reviewSourceLine } from './sourceLine';
@@ -168,7 +169,7 @@ export const GuideDiff: FC<
   const showLineNumbers = useConfigValue('diffShowLineNumbers');
   const showBackground = useConfigValue('diffShowBackground');
   const expandUnchanged = useConfigValue('diffExpandUnchanged');
-  const fontFamily = useConfigValue('diffFontFamily');
+  const fontFamily = useDiffFontFamily();
   const fontSize = useConfigValue('diffFontSize');
   // Code review's reason for a folded generated file (its "Generated file collapsed" strip and the header's badge): the
   // files the guide folds as generated (GuideFileCard, the host's set or the built-in names, as code review's PR mode).

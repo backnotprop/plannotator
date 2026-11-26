@@ -16,10 +16,10 @@ export const DIFF_FONT_URLS: Readonly<Record<string, string>> = {
   'Atkinson Hyperlegible Mono': 'https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@200..700&display=swap',
   'Source Code Pro': 'https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@300..700&display=swap',
   'JetBrains Mono': 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300..700&display=swap',
-  'IBM Plex Mono': 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300..700&display=swap',
+  'IBM Plex Mono': 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap',
   'Inconsolata': 'https://fonts.googleapis.com/css2?family=Inconsolata:wght@300..700&display=swap',
   'Roboto Mono': 'https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300..700&display=swap',
-  'Hack': 'https://cdn.jsdelivr.net/npm/hack-font@3/build/web/hack.css',
+  'Hack': 'https://cdn.jsdelivr.net/npm/hack-font@3.3.0/build/web/hack.css',
 };
 const FONT_URLS = DIFF_FONT_URLS;
 
