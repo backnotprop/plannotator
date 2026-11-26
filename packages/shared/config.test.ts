@@ -218,6 +218,7 @@ describe("parseDisplayOptionsConfig", () => {
       planWidth: "wide",
       taterMode: true,
       inputMethod: "pinpoint",
+      htmlAnnotateOnStartup: false,
     };
     expect(parseDisplayOptionsConfig(all)).toEqual(all);
     expect(parseDisplayOptionsConfig({ textSize: "19", showGrid: 1, extra: true, planWidth: "wide" })).toEqual({ planWidth: "wide" });

@@ -1064,6 +1064,7 @@ const DISPLAY_OPTION_TYPES = {
   planWidth: "string",
   taterMode: "boolean",
   inputMethod: "string",
+  htmlAnnotateOnStartup: "boolean",
 } as const satisfies Record<keyof DisplayOptions, "number" | "string" | "boolean">;
 
 /**

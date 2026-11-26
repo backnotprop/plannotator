@@ -6602,9 +6602,9 @@ ${SANDBOX_SHIM_SCRIPT}
       resizeObserver.observe(document.documentElement);
     }
     watchPageMutations();
-    // Armed is the default on both surfaces, and live sessions default to
-    // pinpoint: show the cursor affordance immediately instead of waiting for
-    // the parent's first set-input-method/set-annotate-mode round trip.
+    // The bridge starts passive (Interact) until the parent's first
+    // set-annotate-mode, which follows this ready message: the startup choice
+    // (Settings → Display) is the parent's.
     updatePinpointCursor();
     var readyMsg = { type: PREFIX + 'ready', protocolVersion: ${BRIDGE_PROTOCOL_VERSION} };
     if (LIVE) readyMsg.pageUrl = currentPageUrl();
