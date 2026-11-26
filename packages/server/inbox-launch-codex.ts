@@ -32,11 +32,12 @@
  */
 
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { INBOX_CODEX_HOST, INBOX_CODEX_NAME, INBOX_CODEX_QUEUE_MIN_VERSION, parseCodexCliVersion, type InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { codexThreadChoice, parseCodexModels } from "@plannotator/core/inbox-launch-choice";
-import { agentVersionRun, codexHome, createAgentEnvironmentFor, INBOX_MCP_SERVER_NAME, readCodexEntry } from "./inbox-agents";
+import { placeKey, readAgentFile } from "./agent-files";
+import { agentVersionRun, codexHome, createAgentEnvironmentFor, INBOX_MCP_SERVER_NAME } from "./inbox-agents";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache, type LaunchChoiceLists } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { createCodexPermissions, CODEX_APPROVALS } from "./inbox-launch-codex-permission";
@@ -65,6 +66,8 @@ const STOP_MS = 5_000;
 const NOTE_TITLE_MAX = 80;
 /** The longest line the app-server may write (a turn's whole command output can be one line): past it, the process is ended. */
 const LINE_MAX = 64 * 1024 * 1024;
+/** Maximum byte size read for a project `.codex/config.toml` layer (matches Claude's project cap). */
+export const CODEX_PROJECT_CONFIG_MAX_BYTES = 256 * 1024;
 
 // ── Pure helpers (unit-tested) ──
 
@@ -190,14 +193,9 @@ function gitdirOf(dotGit: string): string | null {
   return target ? resolve(dirname(dotGit), target) : null;
 }
 
-/**
- * The folder Codex keys a folder's trust by after the folder itself (codex git-utils `resolve_root_git_project_for_trust`):
- * the nearest folder with a `.git`; for a linked worktree, its main checkout, once the worktree's and the main
- * checkout's git metadata agree. Null when there is none, or for a `.git` file that is not a linked worktree.
- */
-export function codexTrustRoot(folder: string): string | null {
+/** Nearest directory with a real git boundary above `folder`, or null when outside a repository. */
+function nearestGitBoundary(folder: string): string | null {
   let base = isDir(folder) ? folder : dirname(folder);
-  let root: string | null = null;
   for (;;) {
     let dir = base;
     let candidate: string | null = null;
@@ -210,13 +208,20 @@ export function codexTrustRoot(folder: string): string | null {
       dir = dirname(dir);
     }
     const dotGit = join(candidate, ".git");
-    if (!isDir(dotGit) || existsSync(join(dotGit, "HEAD"))) {
-      root = candidate;
-      break;
-    }
+    if (!isDir(dotGit) || existsSync(join(dotGit, "HEAD"))) return candidate;
     if (dirname(candidate) === candidate) return null;
     base = dirname(candidate);
   }
+}
+
+/**
+ * The folder Codex keys a folder's trust by after the folder itself (codex git-utils `resolve_root_git_project_for_trust`):
+ * the nearest folder with a `.git`; for a linked worktree, its main checkout, once the worktree's and the main
+ * checkout's git metadata agree. Null when there is none, or for a `.git` file that is not a linked worktree.
+ */
+export function codexTrustRoot(folder: string): string | null {
+  const root = nearestGitBoundary(folder);
+  if (!root) return null;
   const dotGit = join(root, ".git");
   if (isDir(dotGit)) return root;
   const gitDir = gitdirOf(dotGit);
@@ -241,6 +246,125 @@ export function codexTrustRoot(folder: string): string | null {
   } catch {
     return null;
   }
+}
+
+function parseCodexTomlTable(text: string | null): Record<string, unknown> | null {
+  if (!text) return null;
+  try {
+    const parsed = Bun.TOML.parse(text) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeWindowsProjectKey(path: string): string {
+  return path.replace(/^\\\\\?\\/, "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+function lookupCodexProjectEntry(
+  projects: Record<string, unknown>,
+  keys: readonly string[],
+  platform: NodeJS.Platform,
+): unknown {
+  const entries = platform === "win32" ? Object.entries(projects) : null;
+  for (const key of keys) {
+    if (Object.hasOwn(projects, key)) return projects[key];
+    if (entries) {
+      const target = normalizeWindowsProjectKey(key);
+      const match = entries.find(([k]) => normalizeWindowsProjectKey(k) === target);
+      if (match) return match[1];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Whether `CODEX_HOME/config.toml` marks `folder` (or its git/worktree trust root) `trust_level = "trusted"`.
+ * Codex ignores project `.codex/config.toml` files unless the project is trusted here.
+ */
+export function codexFolderTrusted(
+  globalConfigText: string | null,
+  folder: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const projects = parseCodexTomlTable(globalConfigText)?.projects;
+  if (!projects || typeof projects !== "object" || Array.isArray(projects)) return false;
+  const realFolder = realPathOr(folder);
+  const trustRoot = codexTrustRoot(realFolder);
+  const keys = [realFolder, folder, ...(trustRoot ? [realPathOr(trustRoot), trustRoot] : [])];
+  const entry = lookupCodexProjectEntry(projects as Record<string, unknown>, keys, platform);
+  return !!entry && typeof entry === "object" && !Array.isArray(entry) && (entry as { trust_level?: unknown }).trust_level === "trusted";
+}
+
+/**
+ * Directories whose `.codex/config.toml` layers Codex applies to `folder`, from root to leaf:
+ * the nearest git boundary down to `folder` inside a repo, or `folder` alone outside one.
+ */
+export function codexProjectConfigDirs(folder: string): string[] {
+  const realFolder = realPathOr(folder);
+  const boundary = nearestGitBoundary(realFolder);
+  if (!boundary) return [realFolder];
+  const realBoundary = realPathOr(boundary);
+  const dirs: string[] = [];
+  for (let dir = realFolder; ; dir = dirname(dir)) {
+    dirs.push(dir);
+    if (dir === realBoundary) break;
+    const parent = dirname(dir);
+    if (parent === dir) return [realFolder];
+  }
+  return dirs.reverse();
+}
+
+function readCodexProjectConfig(dir: string): Record<string, unknown> | null {
+  const path = join(dir, ".codex", "config.toml");
+  const inside = placeKey(dir);
+  const real = placeKey(path);
+  if (!real.startsWith(inside.endsWith(sep) ? inside : `${inside}${sep}`)) return null;
+  const read = readAgentFile(real, CODEX_PROJECT_CONFIG_MAX_BYTES);
+  return read.kind === "file" ? parseCodexTomlTable(read.text) : null;
+}
+
+function codexMcpRecord(parsed: Record<string, unknown> | null): Record<string, unknown> | null {
+  const servers = parsed?.mcp_servers;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null;
+  const entry = (servers as Record<string, unknown>)[INBOX_MCP_SERVER_NAME];
+  return entry && typeof entry === "object" && !Array.isArray(entry) ? (entry as Record<string, unknown>) : null;
+}
+
+function codexMcpRecordUsable(record: Record<string, unknown> | null): boolean {
+  if (!record || record.enabled === false) return false;
+  const hasCommand = typeof record.command === "string" && record.command.trim().length > 0;
+  const hasArrayCommand =
+    Array.isArray(record.command) &&
+    record.command.length > 0 &&
+    record.command.every((part) => typeof part === "string") &&
+    (record.command[0] as string).trim().length > 0;
+  const hasUrl = typeof record.url === "string" && record.url.trim().length > 0;
+  return hasCommand || hasArrayCommand || hasUrl;
+}
+
+/**
+ * Whether `plannotator-inbox` is enabled in `CODEX_HOME/config.toml` or (when `folders` are given) in at least
+ * one folder's layered trusted `.codex/config.toml` setup, mirroring Codex's global + trusted-project config merge.
+ */
+export function codexInboxMcpConfigured(
+  globalConfigText: string | null,
+  folders: readonly string[] = [],
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const globalRecord = codexMcpRecord(parseCodexTomlTable(globalConfigText));
+  if (folders.length === 0) return codexMcpRecordUsable(globalRecord);
+  return folders.some((folder) => {
+    let merged: Record<string, unknown> | null = globalRecord ? { ...globalRecord } : null;
+    if (codexFolderTrusted(globalConfigText, folder, platform)) {
+      for (const dir of codexProjectConfigDirs(folder)) {
+        const layerRecord = codexMcpRecord(readCodexProjectConfig(dir));
+        if (layerRecord) merged = merged ? { ...merged, ...layerRecord } : { ...layerRecord };
+      }
+    }
+    return codexMcpRecordUsable(merged);
+  });
 }
 
 export async function listCodexModels(codex: string, env: Readonly<Record<string, string>>, cwd: string, ms: number): Promise<LaunchChoiceLists | null> {
@@ -661,36 +785,19 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
     shellNames: ["CODEX_HOME"],
 
     /**
-     * `codex` on the plain env's PATH and new enough, the person's Codex has Plannotator's Inbox MCP entry (it is
-     * how a Codex session answers in the Inbox), and Codex has a login or a provider that requires no OpenAI account.
+     * `codex` on the plain env's PATH and new enough, the person's Codex has Plannotator's Inbox MCP entry (in
+     * `CODEX_HOME/config.toml`, or in a trusted project's `.codex/config.toml` layers when `folders` are checked),
+     * and Codex has a login or a provider that requires no OpenAI account.
      */
     async available(folders: readonly string[] = []): Promise<LaunchAvailability> {
       const e = await ctx.environment();
       const path = e.which("codex");
       if (!path) return { ok: false, missing: true, reason: "codex is not on the Inbox's PATH", code: "missing" };
-      const entry = readCodexEntry(join(codexHomeDir(), "config.toml"));
-      let connected = entry.kind === "ours" || entry.kind === "other";
-      if (!connected) {
-        try {
-          const config = Bun.TOML.parse(configText() ?? "") as { projects?: Record<string, { trust_level?: string }> };
-          connected = folders.some((folder) => {
-            const real = realPathOr(folder);
-            const root = codexTrustRoot(real);
-            const trust = [real, folder, ...(root ? [realPathOr(root), root] : [])]
-              .map((path) => config.projects?.[path])
-              .find((project) => project !== undefined);
-            if (trust?.trust_level !== "trusted") return false;
-            const projectPath = join(folder, ".codex", "config.toml");
-            const projectEntry = readCodexEntry(projectPath);
-            if (projectEntry.kind !== "ours" && projectEntry.kind !== "other") return false;
-            const projectConfig = Bun.TOML.parse(readFileSync(projectPath, "utf8")) as { mcp_servers?: Record<string, { enabled?: boolean }> };
-            return projectConfig.mcp_servers?.[INBOX_MCP_SERVER_NAME]?.enabled !== false;
-          });
-        } catch {
-          // Codex cannot read an invalid configuration either.
-        }
+      const globalRead = readAgentFile(join(codexHomeDir(), "config.toml"));
+      const globalText = globalRead.kind === "file" ? globalRead.text : null;
+      if (!codexInboxMcpConfigured(globalText, folders, ctx.platform)) {
+        return { ok: false, missing: false, reason: "Plannotator's Inbox is not connected to Codex (Settings → Agents)", code: "tool_off" };
       }
-      if (!connected) return { ok: false, missing: false, reason: "Plannotator's Inbox is not connected to Codex (Settings → Agents)", code: "tool_off" };
       const version = parseCodexCliVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
       const shown = version?.join(".") ?? null;
       if (!shown || !versionAtLeast(shown, CODEX_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Codex ${shown ?? "?"} is older than ${CODEX_LAUNCH_MIN_VERSION}`, code: "too_old" };
