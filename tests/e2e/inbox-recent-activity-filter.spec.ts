@@ -467,13 +467,18 @@ test('Escape, one layer at a time: the open thread closes first, the view stays;
   const { page, threads } = world;
   await rowButton(page, threads.bob).click();
   await expect(page.locator('section.ib-pane [aria-label="Close the thread"]')).toBeVisible();
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  // Focus where the app leaves it: no blur before either Escape.
+  const focusedRow = () => page.evaluate(() => document.activeElement?.closest('.ib-lbody [data-thread-id]')?.getAttribute('data-thread-id') ?? null);
   await page.keyboard.press('Escape');
   await expect(page.locator('section.ib-pane [aria-label="Close the thread"]')).toHaveCount(0);
   await expect(recentBar(page)).toBeVisible();
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  // The close puts focus back on Bob Tully's row.
+  await expect.poll(focusedRow).toBe(threads.bob);
   await page.keyboard.press('Escape');
   await expect(recentBar(page)).toHaveCount(0);
+  // The groups drawn back: focus stays on Bob Tully's row (it waits on the person, so a group shows it), never on the page.
+  await expect.poll(focusedRow).toBe(threads.bob);
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
   await expect(page.locator('[data-list-filter-count]')).toHaveCount(0);
   await openQuiet(page);
   for (const id of Object.values(threads)) await expect(rowButton(page, id)).toBeVisible();

@@ -7,16 +7,23 @@
  */
 import { useEffect, useState } from 'react';
 import { Icon } from '../icons';
-import { leaveRecentView, useRecentView } from '../listRecentView';
+import { leaveRecentView, recentViewTurn, useRecentView } from '../listRecentView';
 
 const TITLE = 'Recent activity';
 const NOTE = '· threads you acted in, newest first';
+/** The view's turn already said: the list drawn anew with the view still on (a full-screen file closed) says nothing. */
+let saidTurn = 0;
 
 export function RecentViewBar({ place, picking }: { place: string; picking: boolean }) {
   const on = useRecentView(place);
   // Said through a live region already on the page, filled once the view is on (one filled as it mounts may go unsaid).
   const [said, setSaid] = useState('');
-  useEffect(() => setSaid(on ? `${TITLE} ${NOTE}` : ''), [on]);
+  useEffect(() => {
+    if (!on) return setSaid('');
+    if (recentViewTurn() === saidTurn) return;
+    saidTurn = recentViewTurn();
+    setSaid(`${TITLE} ${NOTE}`);
+  }, [on]);
   return (
     <>
       <span className="ib-sr" role="status" aria-live="polite" data-recent-view-said="">
@@ -32,6 +39,7 @@ export function RecentViewBar({ place, picking }: { place: string; picking: bool
               <button
                 type="button"
                 className="ib-pick-btn ib-pick-end ib-rview-done"
+                aria-label={`Done, leave ${TITLE}`}
                 onClick={(event) => {
                   const column = event.currentTarget.closest('.ib-listcol');
                   leaveRecentView();

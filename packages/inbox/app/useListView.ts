@@ -5,6 +5,7 @@
  */
 
 import { useCallback, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import type { InboxListRow, InboxListSection, InboxThread } from '@plannotator/core/inbox-types';
 import { patchedRow, withCombining, withPinPatches } from '../rowActions';
 import { filterMachineRows, machineCounts, machineProjectNames } from '../machines';
@@ -18,6 +19,7 @@ import { routineHold, useRoutineThreads } from '../listFilterRoutines';
 import { useRecentActivity } from '../listFilterRecent';
 import { leaveRecentView, recentViewSections, recentViewShown, useRecentView, useRecentViewLeaves } from '../listRecentView';
 import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
+import { STRANGERS_MARKUP } from '../selectionToolbar';
 import { useRecentActs } from '../recentActs';
 import { listCovered } from './focus';
 import type { ListSort } from '../listView';
@@ -197,18 +199,39 @@ export function listPlaceOf(route: Route): string | null {
   return route.page === 'inbox' && !route.reviews && !route.card ? [route.project, route.machine, route.agent, route.tag].join('\n') : null;
 }
 
+/** A layer open anywhere on the page (a dialog, a menu, a listbox, a popover, the Customize sidebar panel): its Escape. */
+const OPEN_LAYERS = 'dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-popover-layer], [data-sidebar-customizer]';
+
+/**
+ * Something else may own this Escape: a field, a layer open anywhere (some listen on the window after App, so they
+ * never get to mark the key used first), or a popup open from where focus is (a tooltip). A message body's raw HTML is
+ * no layer.
+ */
+function escapeOwnedElsewhere(from: Element | null): boolean {
+  if (modalOpen()) return true;
+  if (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[aria-expanded="true"], [data-popup-open]'))) return true;
+  return [...document.querySelectorAll(OPEN_LAYERS)].some((layer) => !layer.closest(`${STRANGERS_MARKUP}, [hidden], [inert]`));
+}
+
 /**
  * Escape's last rung on the Inbox list (App's ladder, after an open thread closes; no shortcut of its own): Recent
- * activity's view goes. Not while something else may own the key (a field, a menu, a dialog, a popover) or used it
- * already. Focus on the bar's Done goes to the filter button.
+ * activity's view goes. Not while something else may own the key or used it already, and not on a held key's repeats
+ * (the press that closed a thread runs on no further). Focus that the swap back to the groups would drop goes to the
+ * same thread's row where they draw it, else to the filter button.
  */
 export function leaveRecentViewOnEscape(event: KeyboardEvent, route: Route): void {
   if (event.key !== 'Escape' || !recentViewShown() || listPlaceOf(route) === null || route.thread || route.file) return;
-  if (event.defaultPrevented || isComposingKey(event) || modalOpen()) return;
+  if (event.defaultPrevented || event.repeat || isComposingKey(event)) return;
   const from = keyTarget(event);
-  if (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"], [aria-expanded="true"]'))) return;
+  if (escapeOwnedElsewhere(from)) return;
   event.preventDefault();
-  const column = from?.closest('[data-recent-view]') ? from.closest('.ib-listcol') : null;
-  leaveRecentView();
-  column?.querySelector<HTMLElement>('[data-list-filter]')?.focus();
+  const column = from?.closest('.ib-listcol') ?? null;
+  const row = from?.closest('[data-thread-id]')?.getAttribute('data-thread-id') ?? null;
+  // Drawn now, so focus can follow before the frame paints.
+  flushSync(leaveRecentView);
+  if (!column || (from?.isConnected && document.activeElement === from)) return;
+  // The list draws some rows twice (the wide and the three-line row), one hidden: the one on screen.
+  const rows = row ? [...column.querySelectorAll<HTMLElement>(`.ib-lbody [data-thread-id="${CSS.escape(row)}"]`)] : [];
+  const again = rows.find((el) => el.getClientRects().length > 0) ?? rows.find((el) => getComputedStyle(el).display !== 'none');
+  (again ?? column.querySelector<HTMLElement>('[data-list-filter]'))?.focus();
 }

@@ -27,6 +27,9 @@ const { useListShown, leaveRecentViewOnEscape } = (hasDom ? await import('./app/
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { ListFilterEmpty, RecentViewEmpty, clearedFrom } = (hasDom ? await import('./components/ListFilter') : {}) as typeof import('./components/ListFilter');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
+const { SidebarCustomizer } = (hasDom ? await import('./components/SidebarCustomizer') : {}) as typeof import('./components/SidebarCustomizer');
+const { drawnSidebarItems } = await import('./sidebarItems');
+const { openSidebarCustomizer, resetSidebarLayoutForTests } = await import('./sidebarLayout');
 const { listGroups } = await import('./held');
 const { LIST_FILTER_COOKIE, NO_LIST_FILTER, resetListFilterForTests } = await import('./listFilter');
 const { resetRecentViewForTests } = await import('./listRecentView');
@@ -105,6 +108,7 @@ afterEach(() => {
   resetListFilterForTests();
   resetRecentViewForTests();
   resetScheduledForTests();
+  resetSidebarLayoutForTests();
   if (!hasDom) return;
   for (const node of document.body.querySelectorAll('[data-base-ui-portal], [role="presentation"]')) node.remove();
   host?.remove();
@@ -135,6 +139,9 @@ function Harness({ route }: { route: Route }) {
     tags: { listTags: [], across: null, rowOf: () => undefined, showError: () => {}, showToast: () => {}, dismissToast: () => {}, refreshList: async () => {}, openTag: () => {}, tagGone: () => {} },
   });
   return (
+    <>
+    {/* The Customize sidebar panel, as App draws it: nothing while closed. */}
+    <SidebarCustomizer drawn={drawnSidebarItems({ board: false, reviews: false, usage: false, phone: false })} />
     <InboxList
       title={s.listTitle}
       path={null}
@@ -150,6 +157,7 @@ function Harness({ route }: { route: Route }) {
       listFilter={{ rows: s.listFilterRows, scoped: s.listFilterScoped, names: s.projectNames, filter: s.listFilterPicks, onChange: s.setListFilter, place: [route.project, route.machine, route.agent, route.tag].join('\n') }}
       empty={s.listHeld ? null : s.recentEmpty ? <RecentViewEmpty /> : s.listFilterEmpty ? <ListFilterEmpty onClear={() => s.setListFilter(clearedFrom(s.listFilterPicks, s.listFilterScoped))} /> : null}
     />
+    </>
   );
 }
 
@@ -214,8 +222,11 @@ describe.skipIf(!hasDom)('Recent activity is a view, not a filter', () => {
 
     await press(recentRow);
     expect(menu()).toBeNull();
-    expect(bar()?.textContent).toBe('Recent activity· threads you acted in, newest firstDone');
-    expect(bar()!.querySelector('button[data-recent-view-done]')?.textContent).toBe('Done');
+    expect(bar()).not.toBeNull();
+    // Done names what it leaves, and keeps its visible word in that name (voice control says "Done").
+    const doneName = bar()!.querySelector('button[data-recent-view-done]')?.getAttribute('aria-label') ?? '';
+    expect(doneName).toContain('Done');
+    expect(doneName).toContain('Recent activity');
     // One list, newest act first; the Snoozed band folded under it with its own count (its row was never acted in).
     expect(rowIds()).toEqual(['t-ledger', 't-harbor']);
     expect(bands()).toEqual(['snoozed']);
@@ -231,12 +242,21 @@ describe.skipIf(!hasDom)('Recent activity is a view, not a filter', () => {
     expect($('[data-list-filter-menu] [data-list-filter-recent] .ib-pc-tick svg')).toBeNull();
   });
 
-  test("a screen reader hears the bar's words as the view turns on; Done is a real button that leaves it, focus on the funnel", async () => {
+  test("a screen reader hears the bar's words as the view turns on, not again when the list is drawn anew; Done is a real button that leaves it, focus on the funnel", async () => {
     draw();
     expect($('[data-recent-view-said]')?.textContent).toBe('');
     await turnOn();
     expect($('[data-recent-view-said]')?.getAttribute('role')).toBe('status');
-    expect($('[data-recent-view-said]')?.textContent).toBe('Recent activity · threads you acted in, newest first');
+    const said = $('[data-recent-view-said]')?.textContent ?? '';
+    expect(said).toContain('Recent activity');
+    // The list drawn again with the view still on (a full-screen file closed): nothing said again.
+    act(() => root!.unmount());
+    root = null;
+    host?.remove();
+    draw();
+    expect(bar()).not.toBeNull();
+    await settle();
+    expect($('[data-recent-view-said]')?.textContent).toBe('');
     await act(async () => $('[data-recent-view-done]')!.click());
     expect(bar()).toBeNull();
     expect(document.activeElement).toBe(funnel());
@@ -363,5 +383,49 @@ describe.skipIf(!hasDom)("Escape: the window's ladder, one layer at a time", () 
     await escape(done);
     expect(bar()).toBeNull();
     expect(document.activeElement).toBe(funnel());
+  });
+
+  test("from a row (where closing a thread puts focus): focus stays on that thread's row where the groups draw it; a row they fold away hands it to the funnel, never to the page", async () => {
+    draw();
+    await turnOn();
+    const harbor = $('.ib-lbody [data-thread-id="t-harbor"]')!;
+    harbor.focus();
+    await escape(harbor);
+    expect(bar()).toBeNull();
+    expect(document.activeElement?.getAttribute('data-thread-id')).toBe('t-harbor');
+    await turnOn();
+    // Charlie Dunn's ledger thread: in Quiet, folded once the groups are back.
+    const ledger = $('.ib-lbody [data-thread-id="t-ledger"]')!;
+    ledger.focus();
+    await escape(ledger);
+    expect(bar()).toBeNull();
+    expect(rowIds()).not.toContain('t-ledger');
+    expect(document.activeElement).toBe(funnel());
+  });
+
+  test('an open layer keeps its Escape (the Customize sidebar panel, any dialog), and a held Escape never runs on to the view', async () => {
+    draw();
+    await turnOn();
+    await act(async () => openSidebarCustomizer(null));
+    await settle();
+    expect($('[data-sidebar-customizer]')).not.toBeNull();
+    // The person clicked a row in the list: focus is outside the panel.
+    const harbor = $('.ib-lbody [data-thread-id="t-harbor"]')!;
+    harbor.focus();
+    await escape(harbor);
+    expect($('[data-sidebar-customizer]')).toBeNull();
+    expect(bar()).not.toBeNull();
+    // Any open dialog, not only the panel.
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    document.body.append(dialog);
+    await escape(harbor);
+    expect(bar()).not.toBeNull();
+    dialog.remove();
+    // Escape held down (it closed a thread on its first press): its repeats leave nothing.
+    await act(async () => void harbor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', repeat: true, bubbles: true, cancelable: true })));
+    expect(bar()).not.toBeNull();
+    await escape(harbor);
+    expect(bar()).toBeNull();
   });
 });

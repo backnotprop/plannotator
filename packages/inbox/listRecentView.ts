@@ -22,6 +22,8 @@ import { rowRecentlyActed } from './listFilterRecent';
 
 /** The list the view was turned on in (its place: the sidebar's project, machine, agent and tag), or null: off. */
 let shownIn: string | null = null;
+/** How many times the view has been turned on on this page: the bar says its words once per turn, not per redraw. */
+let turns = 0;
 const listeners = new Set<() => void>();
 const emit = () => {
   for (const listener of [...listeners]) listener();
@@ -37,7 +39,13 @@ const none = () => null;
 export function showRecentView(place: string): void {
   if (shownIn === place) return;
   shownIn = place;
+  turns += 1;
   emit();
+}
+
+/** This turn of the view (RecentViewBar.tsx: announced once per turn). */
+export function recentViewTurn(): number {
+  return turns;
 }
 
 /** Done, Escape, or the list left: the view goes. */
