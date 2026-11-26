@@ -444,6 +444,17 @@ describe("Settings → Agents: Start new agents in T3 Code", () => {
     const none = setup({ t3: false, startIn: "inbox" });
     expect(await none.settings()).toMatchObject({ t3_here: false, t3_open: false });
   });
+
+  test("offered in this Inbox's tailnet window too, as Rex is (a Send from there starts in T3 Code here); never asked for the device door", async () => {
+    const t = setup({ startIn: "inbox" });
+    const at = "/api/inbox/launch/settings";
+    const read = async (via: string, door?: { platform: string; window: boolean }) =>
+      ((await (await t.launch.route(new Request(`http://127.0.0.1:4000${at}`, { headers: { host: "127.0.0.1:4000" } }), at, via, door ?? null))!.json()) as { launch: Record<string, unknown> }).launch;
+    expect(await read("tailnet")).toMatchObject({ t3_here: true, t3_open: true });
+    const doorRead = await read("local", { platform: "darwin", window: true });
+    expect(doorRead.t3_here).toBeUndefined();
+    expect(doorRead.t3_open).toBeUndefined();
+  });
 });
 
 describe("T3 start pieces", () => {

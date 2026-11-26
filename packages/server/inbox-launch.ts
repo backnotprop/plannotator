@@ -1696,7 +1696,7 @@ ${result.text}`);
           rex_agents: hostList.filter((host) => host.rexCommand).map((host) => host.agent),
           // T3 Code: offered while it is on this computer (`t3_here`, its `t3` is there) or while it is the choice;
           // `t3_open` whether it runs now (the row says new agents start in the background until it does). Read for
-          // this computer's own Settings → Agents read only, as Rex is (files only: nothing is run or contacted).
+          // Settings → Agents' own read from any window of this Inbox, as Rex is (files only: nothing is run or contacted).
           ...(t3Here ? { t3_here: t3Here.installed, t3_open: t3Here.open } : {}),
           t3_agents: hostList.filter((host) => Object.hasOwn(INBOX_T3_DRIVERS, host.agent)).map((host) => host.agent),
         }
