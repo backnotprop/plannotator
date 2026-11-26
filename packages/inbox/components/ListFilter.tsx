@@ -8,8 +8,8 @@
  * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): first, alone,
  *   the row that opens Filter by typing (`TITLE_FILTER_LABEL`, the search mark, no count; it closes the menu and the
  *   field under the header takes focus: TitleFilter.tsx), then Not seen (one
- *   row: only the rows drawn bold) and Recent activity (one row, the cursor mark, not Updated's clock: the threads the
- *   person did something in lately, newest first by that; listFilterRecent.ts), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only
+ *   row: only the rows drawn bold) and Recent activity (one row, the cursor mark, not Updated's clock; no count and no
+ *   tick: it closes the menu and turns on a view of the list, not a filter: listRecentView.ts), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only
  *   with two agents or more), Routine (Routine threads, Other threads; only while Routines are on and a routine's thread
  *   is in the list), Pull request (Open, Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), Tag (several, each
  *   with the `#` mark; only once a tag holds a thread in the list, never on a tag's own list), then Project last, since the
@@ -38,13 +38,14 @@ import { CountBadge } from './CountBadge';
 import { useThreadTags } from '../threadTags';
 import { toggledTagPick, withLiveTagPicks } from '../listFilterTags';
 import { useRoutineThreads } from '../listFilterRoutines';
-import { rowRecentlyActed } from '../listFilterRecent';
+import { showRecentView } from '../listRecentView';
 import { sectionIsLong } from '../listFilterSearch';
 import { TITLE_FILTER_LABEL, filterRowsByTitle } from '../listTitleFilter';
 import { openTitleFilter, useTitleFilterTextWhen } from '../listTitleFilterStore';
 import { noteTravelFrom } from './titleFilterMotion';
 import { FilterMenuRows, rowKeyToField, type FilterSection } from './ListFilterSections';
 export { useTitleFilterList } from './TitleFilter';
+export { RecentViewBar, RecentViewSaid } from './RecentViewBar';
 import {
   NO_LIST_FILTER,
   PULL_OPTIONS,
@@ -208,7 +209,8 @@ export const ListFilterButton = memo(function ListFilterButton({ source, phone }
       title: null,
       rows: [
         { key: 'notSeen', label: 'Not seen', on: filter.notSeen, count: countOf('notSeen', rowNotSeen), onToggle: () => set({ notSeen: !source.filter.notSeen }), mark: <Icon name="envelope" />, data: { 'data-list-filter-not-seen': '' } },
-        { key: 'recent', label: 'Recent activity', on: filter.recent, count: countOf('recent', (row) => rowRecentlyActed(row, now)), onToggle: () => set({ recent: !source.filter.recent }), mark: <Icon name="clickHere" />, data: { 'data-list-filter-recent': '' } },
+        // Recent activity: a view, not a pick (listRecentView.ts). It opens something, as Filter by typing does: no count, no tick.
+        { key: 'recent', label: 'Recent activity', on: false, count: null, onToggle: () => { setOpen(false); showRecentView(source.place ?? ''); }, mark: <Icon name="clickHere" />, data: { 'data-list-filter-recent': '' }, opens: 'Recent activity' },
       ],
     },
     {
@@ -514,6 +516,15 @@ export function ListFilterEmpty({ onClear }: { onClear: () => void }) {
       >
         Clear filters
       </button>
+    </div>
+  );
+}
+
+/** Recent activity's view (listRecentView.ts) with no thread to show: one line in the list's own empty style. */
+export function RecentViewEmpty() {
+  return (
+    <div className="ib-empty-list" data-recent-view-empty="">
+      Nothing you acted in during the last month.
     </div>
   );
 }

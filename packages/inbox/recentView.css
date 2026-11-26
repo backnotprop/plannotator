@@ -1,0 +1,25 @@
+/* Recent activity's bar (components/RecentViewBar.tsx, listRecentView.ts; design A, approved for this view only): a
+   slim line directly above the list while the view is on, in the look of Filter by typing's field (.ib-tflt): its
+   insets, its line as wide as the group bands, its muted mark. Done is the picks' button (picks.css .ib-pick-btn).
+   It eases in pushing the list down by its own height only, as that field does; none with reduced motion. */
+.ib-rview { flex: none; display: grid; grid-template-rows: 1fr; padding: 0 10px 4px; }
+.ib-rview-in { min-height: 0; overflow: hidden; }
+.ib-rview-row { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 4px 0 8px; border-bottom: 1px solid var(--ib-line); color: var(--foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-rview-row > svg.ib-ic { width: 15px; height: 15px; flex: none; color: var(--muted-foreground); }
+.ib-rview-t { flex: none; font-weight: 600; white-space: nowrap; }
+.ib-rview-note { min-width: 0; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-rview .ib-rview-done { height: 28px; }
+/* Beside an open thread the list is narrow: the title and Done only. */
+.ib-listcol.ib-narrow .ib-rview-note { display: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-rview { animation: ib-rview-in 200ms cubic-bezier(0.32, 0.72, 0, 1); }
+  @keyframes ib-rview-in { from { grid-template-rows: 0fr; } }
+}
+/* A phone: Filter by typing's phone insets; Done a thumb's target, 44 px tall. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-rview { padding: 2px 12px 6px; }
+  .ib-rview-row { height: 52px; gap: 10px; padding: 0 4px 0 6px; font-size: var(--ib-fs-15, 15px); }
+  .ib-rview-row > svg.ib-ic { width: 18px; height: 18px; }
+  .ib-rview-note { display: none; }
+  .ib-rview .ib-rview-done { height: 44px; padding: 0 18px; font-size: var(--ib-fs-15, 15px); border-radius: 10px; }
+}
