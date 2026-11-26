@@ -11,7 +11,8 @@
  * Where the list opens: the reply box's own way (ComposerField's FloatingSkillMenu), never inside the tray's card,
  * whose clip-path (the field's opening reveal) cut every row more than 60 px above it. It is drawn in the tray's
  * positioner, so a press on a row is inside the tray (its field stays open), hung off the card (above it, or below
- * it when there is no room above, scrolling when neither side has room for all of it), and at least
+ * it when there is no room above, scrolling when neither side has room for all of it) in the room of the pane the tray
+ * opened from (under its header: never over the thread's Back and actions), and at least
  * `SKILL_LIST_WIDTH` wide so a row reads beside the narrow field.
  */
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
@@ -36,8 +37,14 @@ export function SkillNameInput({
   label,
   data,
   own,
+  roomOf,
 }: {
   inputRef: RefObject<HTMLInputElement | null>;
+  /**
+   * What the tray opened from (its 👍, a message's face): the tray is drawn at the window's root, so the list's room
+   * is that element's pane, under the pane's header, as the reply box's list has.
+   */
+  roomOf?: RefObject<HTMLElement | null>;
   value: string;
   onChange: (text: string) => void;
   onEnter: () => void;
@@ -76,7 +83,7 @@ export function SkillNameInput({
   return (
     <span className="ib-sknf" ref={wrapRef}>
       {skills.menu && input && wrap && host ? (
-        <FloatingSkillMenu textarea={input} wrap={wrap} host={host} caret={null} onShown={setShown} minWidth={SKILL_LIST_WIDTH}>
+        <FloatingSkillMenu textarea={input} wrap={wrap} host={host} caret={null} onShown={setShown} minWidth={SKILL_LIST_WIDTH} roomOf={roomOf?.current ?? null}>
           {(boundary, maxListHeight) => (
             <SkillReferenceMenu id={listId} items={skills.menu!.items} activeIndex={skills.menu!.activeIndex} onSelect={skills.select} groupHostRows rowIcon={builtinSkillIcon} boundary={boundary} prefer="above" maxListHeight={maxListHeight} />
           )}
