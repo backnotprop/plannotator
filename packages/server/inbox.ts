@@ -1026,8 +1026,9 @@ const ERROR_STATUS: Record<string, number> = {
  * One more place for styles and fonts: Settings → Reviews → Code Font offers
  * web fonts, and picking one loads its stylesheet and font files from Google
  * Fonts (`fonts.googleapis.com`, `fonts.gstatic.com`) or, for Hack, from its
- * one folder on jsDelivr (`DIFF_FONT_SOURCES`, core/diff-fonts.ts, next to the
- * menu's table). Only stylesheets and font files: no script, picture, media or
+ * one folder on jsDelivr (`DIFF_FONT_SOURCES`, core/diff-fonts.ts; the menu's
+ * table, ui/utils/diffFonts.ts, is checked against it by
+ * inbox-code-fonts.test.ts). Only stylesheets and font files: no script, picture, media or
  * request comes from there. A srcdoc frame under this policy (an agent page's
  * small preview) inherits them, so such a page can make the browser fetch a
  * stylesheet or font from those two places when it is drawn (Google or
