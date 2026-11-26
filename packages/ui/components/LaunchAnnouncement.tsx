@@ -10,7 +10,7 @@
  *    working (useFirstRunAnnouncementWindow); without it (the Inbox) as soon as the host allows.
  *  - Shown: right before it draws, `shown` stamps it on this computer (a compare-and-set across every surface); it draws
  *    only on `{ show: true }`.
- *  - Answer: `opened` ("See the launch") or `dismissed` (Not now, Escape, the close button, the backdrop). Either way it
+ *  - Answer: `opened` ("See the launch") or `dismissed` (Not now, Escape, the backdrop). Either way it
  *    never shows again for that campaign.
  *
  * `holds`: the other one-time dialogs of this load yield while it is true, so only one dialog appears: while the claim

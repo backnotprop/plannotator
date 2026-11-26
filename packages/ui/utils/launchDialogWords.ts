@@ -11,12 +11,12 @@ export const LAUNCH_DIALOG_WORDS = {
 } as const;
 
 /**
- * The art band's picture: one 16:9 image (1120×630 source, WebP) for both themes, carrying its own ground, published
- * in the site's hosted folder, never bundled (as the personal agents banner, core/inbox-personal-agents.ts). The Inbox's
- * window policy already lets pictures load from that folder (`img-src … https://plannotator.ai/assets/hosted/`); the
- * plan, review and annotate pages set no picture policy.
+ * The art band's picture: one 16:9 image (1120×630, WebP) for both themes, carrying its own ground. Committed to the
+ * marketing site (`apps/marketing/public/launch/<campaign>.webp`), so a reviewed merge deploys it;
+ * `apps/marketing/launch-art.test.ts` holds the campaign launch.json names to it. The Inbox's window policy allows
+ * pictures from this one folder (`WINDOW_CSP` img-src); the plan, review and annotate pages set no picture policy.
  */
-export const LAUNCH_ART_BASE = 'https://plannotator.ai/assets/hosted/launch/';
+export const LAUNCH_ART_BASE = 'https://plannotator.ai/launch/';
 
 /** A campaign as the launch switch accepts it (packages/shared/launch-switch.ts `CAMPAIGN`). */
 const CAMPAIGN = /^[a-z0-9-]{1,40}$/;

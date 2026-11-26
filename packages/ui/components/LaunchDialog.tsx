@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, X } from 'lucide-react';
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
+import { ArrowUpRight } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
 import { LAUNCH_ART_ALT, LAUNCH_ART_WAIT_MS, LAUNCH_DIALOG_WORDS, launchArtUrl } from '../utils/launchDialogWords';
 
 /**
@@ -10,13 +10,15 @@ import { LAUNCH_ART_ALT, LAUNCH_ART_WAIT_MS, LAUNCH_DIALOG_WORDS, launchArtUrl }
  *
  * The shell of the Inbox announcement (InboxAnnouncementDialog): the shared dialog (Base UI), modal, focus trapped and
  * restored on close, focus starting on "See the launch". 560 wide, the full width on a phone. An art band on top
- * (16:9), then the title, the line and two buttons side by side.
+ * (16:9) edge to edge under the rounded top corners with a hairline below it, then the title, the line and two
+ * buttons side by side, right-aligned (the owner's pick, c2c). No close button: "Not now", Escape and the backdrop
+ * close it.
  *
  * The art keeps its 16:9 band while it loads, so nothing moves when it arrives. If it fails, or has not arrived in
  * LAUNCH_ART_WAIT_MS, the band goes and the dialog is its words alone.
  *
  * "See the launch" is a plain link from the person's click (new tab, rel noopener) and answers `opened`; "Not now",
- * Escape, the close button and the backdrop answer `dismissed`. Escape and Mod+Enter are swallowed on the capture
+ * Escape and the backdrop answer `dismissed`. Escape and Mod+Enter are swallowed on the capture
  * phase, as the other announcements do, so no App handler behind it acts on them. No keyboard shortcut of its own.
  */
 
@@ -94,7 +96,7 @@ export function LaunchDialog({ campaign, url, onAnswer, artWaitMs = LAUNCH_ART_W
         className="max-h-full max-w-none rounded-xl bg-card text-card-foreground shadow-2xl motion-reduce:transition-none"
       >
         {artSrc && art !== 'gone' && (
-          <div className="relative w-full shrink-0 overflow-hidden bg-muted" style={{ aspectRatio: '16 / 9' }} data-launch-art-band>
+          <div className="relative w-full shrink-0 overflow-hidden border-b border-border bg-muted" style={{ aspectRatio: '16 / 9' }} data-launch-art-band>
             <img
               src={artSrc}
               alt={LAUNCH_ART_ALT}
@@ -109,19 +111,8 @@ export function LaunchDialog({ campaign, url, onAnswer, artWaitMs = LAUNCH_ART_W
           </div>
         )}
 
-        {/* The close button: on the art it sits on a chip of the card's own colour, so it reads on any picture. */}
-        <DialogClose
-          aria-label="Close"
-          data-launch-close
-          data-pn-touch-target="true"
-          data-pn-touch-target-icon="true"
-          className={`absolute right-3 top-3 z-10 inline-flex items-center justify-center rounded-full p-1.5 text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary ${art === 'gone' ? '' : 'bg-card/85 backdrop-blur-sm'}`}
-        >
-          <X className="size-4" aria-hidden="true" />
-        </DialogClose>
-
-        <div className="flex min-h-0 flex-col gap-5 overflow-y-auto px-5 pb-5 pt-5 sm:px-7 sm:pb-6 sm:pt-6">
-          <div className="min-w-0 pr-6">
+        <div className="flex min-h-0 flex-col gap-5 overflow-y-auto px-5 pb-5 pt-5 sm:gap-6 sm:px-7 sm:pb-6 sm:pt-6">
+          <div className="min-w-0">
             <DialogTitle className="text-balance text-xl font-semibold tracking-tight">{LAUNCH_DIALOG_WORDS.title}</DialogTitle>
             <DialogDescription className="mt-1.5 text-pretty leading-relaxed">{LAUNCH_DIALOG_WORDS.line}</DialogDescription>
           </div>
@@ -131,7 +122,7 @@ export function LaunchDialog({ campaign, url, onAnswer, artWaitMs = LAUNCH_ART_W
               type="button"
               data-launch-not-now
               onClick={() => answer('dismissed')}
-              className="min-h-10 flex-1 rounded-lg border border-border px-4 text-sm font-medium text-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:flex-none"
+              className="min-h-10 flex-1 whitespace-nowrap rounded-lg border border-border px-4 text-sm font-medium text-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:flex-none"
             >
               {LAUNCH_DIALOG_WORDS.notNow}
             </button>
@@ -145,7 +136,7 @@ export function LaunchDialog({ campaign, url, onAnswer, artWaitMs = LAUNCH_ART_W
               onClick={() => {
                 setTimeout(() => answer('opened'), 0);
               }}
-              className="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground outline-none transition-opacity motion-reduce:transition-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:flex-none"
+              className="inline-flex min-h-10 flex-1 items-center whitespace-nowrap justify-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground outline-none transition-opacity motion-reduce:transition-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:flex-none"
             >
               {LAUNCH_DIALOG_WORDS.open}
               <ArrowUpRight className="size-4" aria-hidden="true" />

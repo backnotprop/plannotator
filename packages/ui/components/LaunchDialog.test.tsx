@@ -3,8 +3,7 @@
  *
  * What regresses: a dialog a screen reader cannot name (role, labelled by its title); focus starting anywhere but
  * "See the launch"; the link not being a plain new-tab link with rel noopener (a popup blocker eats a tab opened after
- * an async call); a button that records the wrong answer, or answers twice; Escape or the close button not closing
- * it; a band that moves the layout while the art loads; a broken or slow picture leaving an empty band instead of
+ * an async call); a button that records the wrong answer, or answers twice; Escape not closing it; a band that moves the layout while the art loads; a broken or slow picture leaving an empty band instead of
  * the words alone; the art loading from anywhere but the hosted launch folder.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -67,13 +66,12 @@ describe.skipIf(!hasDom)('LaunchDialog', () => {
     expect(log).toEqual(['opened']);
   });
 
-  test('Not now, Escape and the close button each answer dismissed', async () => {
-    for (const how of ['not-now', 'escape', 'close'] as const) {
+  test('Not now and Escape each answer dismissed', async () => {
+    for (const how of ['not-now', 'escape'] as const) {
       const log: string[] = [];
       await mount((a) => log.push(a));
       await act(async () => {
         if (how === 'not-now') document.querySelector<HTMLElement>('[data-launch-not-now]')!.click();
-        else if (how === 'close') document.querySelector<HTMLElement>('[data-launch-close]')!.click();
         else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       });
       await wait(5);

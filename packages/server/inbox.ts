@@ -1030,9 +1030,10 @@ export const WINDOW_CSP = [
   // diagram's) must not make the browser call a site when the person reads it.
   // An attached HTML page shows its web pictures from a document of its own,
   // under its own policy (inbox-pages.ts), never as a srcdoc under this one.
-  // The one exception is the project's own hosted folder, for the one-time
-  // dialogs' banners (core/inbox-personal-agents.ts).
-  `img-src 'self' data: blob: ${PERSONAL_AGENTS_BANNER_BASE}`,
+  // The exceptions are two folders of the project's own site: the hosted
+  // folder, for the one-time dialogs' banners (core/inbox-personal-agents.ts),
+  // and the launch dialog's art (ui utils/launchDialogWords.ts LAUNCH_ART_BASE).
+  `img-src 'self' data: blob: ${PERSONAL_AGENTS_BANNER_BASE} https://plannotator.ai/launch/`,
   // Video and audio as the pictures: an attached HTML page drawn as a srcdoc
   // inherits this policy, so its `<video src="data:…">` (or a blob:) plays.
   // Never from the web, for the same reason.
