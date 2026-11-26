@@ -441,7 +441,7 @@ One renderer slot and one canvas render every Mermaid and Graphviz diagram — t
 
 ### Pele engine (on, where it can)
 
-`pele` 1.3.0 is a dependency and the engine switch (`DIAGRAM_ENGINE_MODE` in `utils/diagram-engine.ts`) is `'pele-where-safe'`: `utils/diagram-render` draws every Mermaid fence it can with Pele, loaded lazily through `pele/lazy`, and a fence Pele cannot parse or does not know falls back to Mermaid, whose runtime is loaded only then. A host gets this with nothing to do; a host that fills the Mermaid slot still has it used for the fences that fall back. Under `'mermaid'` no build carries any of Pele (its one import is behind `PELE_IN_BUILD` in `utils/pele.ts`, a constant the bundler folds). See [PELE.md](PELE.md) for the switch, what Pele costs, the capability map and the theme adapter.
+`pele` 1.13.0 is a dependency and the engine switch (`DIAGRAM_ENGINE_MODE` in `utils/diagram-engine.ts`) is `'pele-where-safe'`: `utils/diagram-render` draws every Mermaid fence it can with Pele, loaded lazily through `pele/lazy`, and a fence Pele cannot parse or does not know falls back to Mermaid, whose runtime is loaded only then. A host gets this with nothing to do; a host that fills the Mermaid slot still has it used for the fences that fall back. Under `'mermaid'` no build carries any of Pele (its one import is behind `PELE_IN_BUILD` in `utils/pele.ts`, a constant the bundler folds). See [PELE.md](PELE.md) for the switch, what Pele costs, the capability map and the theme adapter.
 
 ### Host toolbar seams (0.43.0)
 
