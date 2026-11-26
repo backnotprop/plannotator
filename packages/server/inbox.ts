@@ -267,6 +267,7 @@ import { createInboxT3Wake, createT3ModOwner, type InboxT3Wake, type T3Connect }
 import { createInboxAntigravityWake, type InboxAntigravityWake } from "./inbox-antigravity-wake";
 import { CloudAgentError, createInboxCloudAgents, hasCloudWake } from "./inbox-cloud-agents";
 import { PERSONAL_AGENTS_BANNER_BASE } from "@plannotator/core/inbox-personal-agents";
+import { DIFF_FONT_SOURCES } from "@plannotator/shared/diff-fonts";
 import { personalAgentConnectedHere } from "./inbox-personal-agents";
 import { createInboxAgentDoor, INBOX_AGENT_DOOR_PATH } from "./inbox-agent-door";
 import { createInboxCloudWake, type InboxCloudWaker } from "./inbox-cloud-wake";
@@ -1023,13 +1024,24 @@ const ERROR_STATUS: Record<string, number> = {
  * policy allows inline code and code from this origin only. Nothing may frame
  * it (but the apps config.json `inboxFrameAncestors` lists, on this
  * computer's port: inbox-framing.ts), and it may only talk to this server.
+ *
+ * One more place for styles and fonts: Settings → Reviews → Code Font offers
+ * web fonts, and picking one loads its stylesheet and font files from Google
+ * Fonts (`fonts.googleapis.com`, `fonts.gstatic.com`) or, for Hack, from its
+ * one folder on jsDelivr (`DIFF_FONT_SOURCES`, shared/diff-fonts.ts; the menu's
+ * table, ui/utils/diffFonts.ts, is checked against it by
+ * inbox-code-fonts.test.ts). Only stylesheets and font files: no script, picture, media or
+ * request comes from there. A srcdoc frame under this policy (an agent page's
+ * small preview) inherits them, so such a page can make the browser fetch a
+ * stylesheet or font from those two places when it is drawn (Google or
+ * jsDelivr see the request), never from anywhere else.
  */
 export const WINDOW_CSP = [
   "default-src 'self'",
   // 'wasm-unsafe-eval' lets the Graphviz engine (@viz-js/viz) compile its
   // WebAssembly; it does not allow eval() or new Function().
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
-  "style-src 'self' 'unsafe-inline'",
+  `style-src 'self' 'unsafe-inline' ${DIFF_FONT_SOURCES.stylesheets.join(" ")}`,
   // Never a picture from the web: an agent's text (a markdown image, a
   // diagram's) must not make the browser call a site when the person reads it.
   // An attached HTML page shows its web pictures from a document of its own,
@@ -1042,7 +1054,7 @@ export const WINDOW_CSP = [
   // inherits this policy, so its `<video src="data:…">` (or a blob:) plays.
   // Never from the web, for the same reason.
   "media-src 'self' data: blob:",
-  "font-src 'self' data:",
+  `font-src 'self' data: ${DIFF_FONT_SOURCES.files.join(" ")}`,
   "connect-src 'self'",
   "worker-src 'self' blob:",
   "frame-ancestors 'none'",
