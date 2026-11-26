@@ -16,4 +16,6 @@ export interface InboxDiffOptions {
   tab_size: number | null;
   semantic: boolean | null;
   expand_unchanged: boolean | null;
+  /** Power Up (code review's Settings › Semantic diffs): off, the Inbox never asks a provider either. Absent from an older Inbox. */
+  power_up?: boolean | null;
 }
