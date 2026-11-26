@@ -309,6 +309,7 @@
   "review-arrow-ctrl-click.spec.ts": 5,
   "review-arrow-press-webkit.spec.ts": 10,
   "review-diagrams.spec.ts": 27,
+  "review-diff-opens-at-left.spec.ts": 8,
   "review-explorer.spec.ts": 20,
   "review-file-list-stays-put.spec.ts": 21,
   "review-guide-plus-button-firefox.spec.ts": 45,
