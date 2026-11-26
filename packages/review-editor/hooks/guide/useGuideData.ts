@@ -10,6 +10,7 @@ export interface UseGuideDataReturn {
   error: string | null;
   reviewed: boolean[];
   toggleReviewed: (index: number) => void;
+  markReviewed: (indices: ReadonlySet<number>) => void;
   retry: () => void;
 }
 
@@ -31,15 +32,9 @@ export function useGuideData(jobId: string): UseGuideDataReturn {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingReviewedRef = useRef<boolean[] | null>(null);
   // Gates the persistence effect below: true = the next `reviewed` change is
-  // a SEED (fetch resolved / demo short-circuit), not a user toggle, so skip
-  // the PUT. Starts true (initial empty array) and is re-armed at every seed
-  // site (see fetchGuide) — it's only ever cleared inside toggleReviewed
-  // itself (the real user action), never by the persistence effect. That
-  // makes it immune to React StrictMode's dev-only mount→cleanup→remount
-  // replay of effects: however many times the persistence effect happens to
-  // run for the same seeded state, the flag still reads whatever the last
-  // real call site (seed or toggle) wrote, so it can't be "consumed" into a
-  // false negative by an extra replay.
+  // a SEED (fetch resolved / demo short-circuit), not a progress update, so
+  // skip the PUT. Seed and update call sites write this flag; the persistence
+  // effect never clears it, so StrictMode's effect replay can't consume it.
   const skipNextSaveRef = useRef(true);
   // Bumped by retry() to re-run the fetch effect without calling fetchGuide
   // directly — a direct call would return a fresh cleanup closure that the
@@ -132,9 +127,13 @@ export function useGuideData(jobId: string): UseGuideDataReturn {
     });
   }, []);
 
+  const markReviewed = useCallback((indices: ReadonlySet<number>) => {
+    skipNextSaveRef.current = false;
+    setReviewed((prev) => prev.map((checked, index) => checked || indices.has(index)));
+  }, []);
+
   // Persists whenever `reviewed` changes, except for the initial seed from
-  // fetch/demo (skipNextSaveRef — see its declaration above for why toggling
-  // it only from seed/toggle call sites, never from here, is StrictMode-safe).
+  // fetch/demo.
   // saveReviewed always receives the CURRENT `reviewed` (this effect's
   // closure), so pendingReviewedRef.current — read by the unmount flush below
   // — always reflects the latest change, not a stale one.
@@ -161,5 +160,5 @@ export function useGuideData(jobId: string): UseGuideDataReturn {
 
   const retry = useCallback(() => setRefreshNonce((n) => n + 1), []);
 
-  return { guide, loading, error, reviewed, toggleReviewed, retry };
+  return { guide, loading, error, reviewed, toggleReviewed, markReviewed, retry };
 }

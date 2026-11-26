@@ -4280,12 +4280,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const readAt = row?.read_at ?? null;
   const markReadOffered = !resolved && row != null && onMarkRead !== undefined;
   const markReadEnabled = markReadOffered && canToggleRead(row!, drawn);
-  // Mark unread takes Mark read's place on a thread the person read by opening it, an agent having written last
-  // (markRead.ts `canMarkUnread`), as the row's hover action does: the list still holding the row in New
-  // (`seenHeldInNew`) and the look still on its way (App.tsx `looking`) included (the owner, 2026-11-02: "If I open
-  // a thread, and it transitions to [read] because there's no questions or anything, then I need the ability to
-  // mark unread"). Mark read stays only while the thread is unread or waits on the person. A thread marked read
-  // keeps the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
+  // Mark unread is offered on a thread the person read by opening it, an agent having written last (markRead.ts
+  // `canMarkUnread`), as the row's hover action does: the list still holding the row in New (`seenHeldInNew`), the
+  // look still on its way (App.tsx `looking`) and a thread whose questions still wait included (the owner, 2026-11-02,
+  // then 2026-11-25: on an opened thread with questions too). Mark read stays beside it in the ⋯ while the thread
+  // waits on the person (`markReadEnabled`). A thread marked read keeps Move back (design record "inbox-mark-read").
+  // `E` stays Mark read's.
   const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!);
   // The header's ⋯ More offers it where that button does not: a thread marked read, and a phone, whose bar has no read
   // button (approval "inbox-thread-header": its ⋯ sheet leads with the read actions).
