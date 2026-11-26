@@ -169,7 +169,8 @@ describe("a thread's canvas across linked computers", () => {
 
       // No window open on A: A answers B's next drawing job at once, so B's agent is not kept waiting the job's 8 s.
       hearA.stop();
-      await Bun.sleep(200);
+      // Its stream has gone on A's side too.
+      await Bun.sleep(1_000);
       const started = Date.now();
       const unseen = (await (await agent(b.port, { thread_id: onB, picture: true })).json()) as Json;
       expect(Date.now() - started).toBeLessThan(4_000);
