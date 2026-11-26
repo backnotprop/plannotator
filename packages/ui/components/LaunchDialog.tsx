@@ -52,7 +52,7 @@ export function LaunchDialog({ campaign, url, art, onAnswer }: LaunchDialogProps
   };
 
   const artSrc = art ? launchArtUrl(campaign) : null;
-  const button = 'min-h-11 text-sm sm:text-base';
+  const button = 'min-h-11 text-sm sm:text-[16px]';
 
   return (
     <AnnouncementShell
@@ -65,8 +65,8 @@ export function LaunchDialog({ campaign, url, art, onAnswer }: LaunchDialogProps
     >
       <div className="flex min-h-0 flex-col gap-5 overflow-y-auto px-5 pb-5 pt-5 sm:gap-6 sm:px-7 sm:pb-6 sm:pt-7">
         <div className="min-w-0">
-          <DialogTitle className="text-balance text-xl font-semibold tracking-tight sm:text-2xl">{LAUNCH_DIALOG_WORDS.title}</DialogTitle>
-          <DialogDescription className="mt-2 text-pretty text-sm leading-relaxed sm:text-base sm:leading-6">{LAUNCH_DIALOG_WORDS.line}</DialogDescription>
+          <DialogTitle className="text-balance text-xl font-semibold tracking-tight sm:text-[24px] sm:leading-8">{LAUNCH_DIALOG_WORDS.title}</DialogTitle>
+          <DialogDescription className="mt-2 text-pretty text-sm leading-relaxed sm:text-[16px] sm:leading-6">{LAUNCH_DIALOG_WORDS.line}</DialogDescription>
         </div>
 
         <div className="flex items-center justify-end gap-2">
@@ -74,7 +74,7 @@ export function LaunchDialog({ campaign, url, art, onAnswer }: LaunchDialogProps
             type="button"
             data-launch-not-now
             onClick={() => answer('dismissed')}
-            className={`flex-1 whitespace-nowrap rounded-[10px] border border-border px-4 font-medium ${button} text-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:flex-none sm:px-5`}
+            className={`flex-1 whitespace-nowrap rounded-[10px] border border-border px-4 font-medium ${button} text-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:flex-none`}
           >
             {LAUNCH_DIALOG_WORDS.notNow}
           </button>
@@ -89,7 +89,7 @@ export function LaunchDialog({ campaign, url, art, onAnswer }: LaunchDialogProps
               onClick={() => {
                 setTimeout(() => answer('opened'), 0);
               }}
-              className={`${GLOW_FACE} inline-flex flex-1 items-center whitespace-nowrap justify-center gap-1.5 px-4 font-semibold ${button} sm:px-6`}
+              className={`${GLOW_FACE} inline-flex flex-1 items-center whitespace-nowrap justify-center gap-1.5 px-4 font-semibold ${button} sm:px-5`}
             >
               {LAUNCH_DIALOG_WORDS.open}
               <ArrowUpRight className="size-4" aria-hidden="true" />

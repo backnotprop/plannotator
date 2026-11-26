@@ -15,7 +15,7 @@ import './glowStars.css';
 export const GLOW_FACE = 'pn-glow-face';
 
 interface Star {
-  /** In the stars' layer, which reaches 16 px past the control's top, right and bottom edges. */
+  /** In the stars' layer, which reaches 20 px past the control's top, right and bottom edges. */
   readonly at: CSSProperties;
   readonly size: number;
   readonly hue: 0 | 1 | 2 | 3;
@@ -28,12 +28,12 @@ interface Star {
 
 /** Above, below and right of the control (the left edge stays clear). */
 const STARS: readonly Star[] = [
-  { at: { left: '10%', top: 3 }, size: 9, hue: 0, path: 'pn-glow-a', drift: 6.2, twinkle: 3.1, phase: -0.4 },
-  { at: { left: '62%', top: 2 }, size: 6, hue: 3, path: 'pn-glow-c', drift: 7.1, twinkle: 3.7, phase: -2.2 },
-  { at: { right: 3, top: 'calc(50% - 4px)' }, size: 7, hue: 2, path: 'pn-glow-b', drift: 5.4, twinkle: 2.6, phase: -1.3 },
-  { at: { left: '40%', bottom: 3 }, size: 5, hue: 1, path: 'pn-glow-b', drift: 6.6, twinkle: 4.2, phase: -0.9 },
-  { at: { right: 9, bottom: 5 }, size: 5, hue: 0, path: 'pn-glow-a', drift: 5.8, twinkle: 3.3, phase: -2.6 },
-  { at: { left: '4%', bottom: 5 }, size: 4, hue: 2, path: 'pn-glow-c', drift: 5.0, twinkle: 2.9, phase: -1.8 },
+  { at: { left: '9%', top: 2 }, size: 13, hue: 0, path: 'pn-glow-a', drift: 6.2, twinkle: 3.1, phase: -0.4 },
+  { at: { left: '58%', top: 4 }, size: 9, hue: 3, path: 'pn-glow-c', drift: 7.1, twinkle: 3.7, phase: -2.2 },
+  { at: { right: 2, top: 'calc(50% - 6px)' }, size: 12, hue: 2, path: 'pn-glow-b', drift: 5.4, twinkle: 2.6, phase: -1.3 },
+  { at: { left: '36%', bottom: 3 }, size: 8, hue: 1, path: 'pn-glow-b', drift: 6.6, twinkle: 4.2, phase: -0.9 },
+  { at: { right: 10, bottom: 4 }, size: 10, hue: 0, path: 'pn-glow-a', drift: 5.8, twinkle: 3.3, phase: -2.6 },
+  { at: { right: 8, top: 3 }, size: 7, hue: 1, path: 'pn-glow-c', drift: 5.0, twinkle: 2.9, phase: -1.8 },
 ];
 
 export interface GlowStarsProps {

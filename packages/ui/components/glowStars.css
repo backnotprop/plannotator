@@ -1,7 +1,7 @@
 /*
  * The lit look (GlowStars.tsx): the Swarm badge's "on" look as a shared piece. A soft glow around one control, its face
  * in the badge's gradient, and a few small stars drifting behind it. The stars sit behind the face, so they never
- * cover its label; their layer reaches 16 px past the top, right and bottom edges and never past the left one (where
+ * cover its label; their layer reaches 20 px past the top, right and bottom edges and never past the left one (where
  * a neighbouring button sits), and clips them there, so they never cause a scrollbar or a layout shift.
  *
  * Cost at rest: six stars, each a drift layer and a twinkle layer, animating transform and opacity only (the
@@ -13,9 +13,9 @@
 .pn-glow { --pn-glow-radius: 10px; position: relative; display: inline-flex; isolation: isolate; }
 
 .pn-glow-halo, .pn-glow-halo::after { position: absolute; inset: 0; z-index: 0; border-radius: var(--pn-glow-radius); pointer-events: none; }
-.pn-glow-halo { box-shadow: 0 0 0 4px rgb(165 160 255 / 0.16), 0 0 22px 2px rgb(112 159 255 / 0.45), 0 1px 2px rgb(70 33 172 / 0.2); }
+.pn-glow-halo { box-shadow: 0 0 0 5px rgb(165 160 255 / 0.2), 0 0 28px 3px rgb(112 159 255 / 0.5), 0 1px 2px rgb(70 33 172 / 0.2); }
 /* The pointer brightens the glow: a second glow, faded in (opacity only). */
-.pn-glow-halo::after { content: ''; box-shadow: 0 0 0 5px rgb(165 160 255 / 0.22), 0 0 30px 4px rgb(112 159 255 / 0.5); opacity: 0;
+.pn-glow-halo::after { content: ''; box-shadow: 0 0 0 6px rgb(165 160 255 / 0.26), 0 0 36px 6px rgb(112 159 255 / 0.55); opacity: 0;
   transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 @media (hover: hover) and (pointer: fine) {
   .pn-glow:hover .pn-glow-halo::after { opacity: 1; }
@@ -27,10 +27,11 @@
   color: oklch(0.30 0.16 285); box-shadow: 0 0 0 1px rgb(126 114 231 / 0.45); outline: none;
   -webkit-tap-highlight-color: transparent; transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1); }
 .pn-glow-face:active { transform: scale(0.97); }
-/* The focus ring in the page's text colour, outside the glow's ring, so it reads over the glow in either theme. */
-.pn-glow-face:focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
+/* The focus ring outside the glow's ring: the brand colour pulled toward the page's text colour, so it reads over the
+   glow in either theme (deep indigo on light, pale violet on dark). */
+.pn-glow-face:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 65%, var(--foreground)); outline-offset: 3px; }
 
-.pn-glow-stars { position: absolute; inset: -16px -16px -16px 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.pn-glow-stars { position: absolute; inset: -20px -20px -20px 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .pn-glow-star { position: absolute; display: block; }
 .pn-glow-star > i, .pn-glow-star > i > i { display: block; width: 100%; height: 100%; }
 .pn-glow-star > i > i { clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); }
