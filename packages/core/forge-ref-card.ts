@@ -10,7 +10,7 @@
  * shape before it runs anything.
  */
 
-import { classifyForgeHost, FORGE_SPECS, gitlabHostsSnapshot, normalizeForgeHost, type ForgePlatform } from "./forge-refs";
+import { classifyForgeHost, FORGE_SPECS, gitlabHostsSnapshot, normalizeForgeHost, readGitlabShortMr, type ForgePlatform } from "./forge-refs";
 import type { Problem } from "./problem";
 
 export type { ForgePlatform } from "./forge-refs";
@@ -224,7 +224,6 @@ export const FORGE_REF_BODY_MAX = 4000;
 export const FORGE_REF_COMMENT_MAX = 600;
 
 const SHORT_GITHUB_PULL = /^([A-Za-z0-9_.-]{1,100})\/([A-Za-z0-9_.-]{1,100})#([1-9]\d{0,9})$/;
-const SHORT_GITLAB_PULL = /^([A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.-]{1,100})*)\/([A-Za-z0-9_.-]{1,100})!([1-9]\d{0,9})$/;
 
 /**
  * A pull or merge request as an agent or the person names one for a thread
@@ -249,9 +248,9 @@ export function parseForgePullRef(text: string, projectHost?: string | null): Fo
   if (github && github[1] !== "." && github[1] !== ".." && github[2] !== "." && github[2] !== "..") {
     return { platform: "github", host: "github.com", owner: github[1]!, repo: github[2]!, number: Number(github[3]), kind: "pull" };
   }
-  const gitlab = SHORT_GITLAB_PULL.exec(value);
-  if (gitlab && ![...gitlab[1]!.split("/"), gitlab[2]!].some((part) => part === "." || part === "..")) {
-    return { platform: "gitlab", host: shortGitlabHost(projectHost), owner: gitlab[1]!, repo: gitlab[2]!, number: Number(gitlab[3]), kind: "pull" };
+  const gitlab = readGitlabShortMr(value);
+  if (gitlab) {
+    return { platform: "gitlab", host: shortGitlabHost(projectHost), owner: gitlab.namespace, repo: gitlab.project, number: gitlab.number, kind: "pull" };
   }
   return null;
 }

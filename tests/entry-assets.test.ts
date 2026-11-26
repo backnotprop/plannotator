@@ -223,8 +223,8 @@ describe('review entry assets', () => {
     // The Post to GitHub/GitLab dialog of a pull request's review (the review app's own) is a lazy module too: `#platform-post`. The PR page's
     // All files (the review app's tree and file view) rides the reader's chunk, re-exported by GuideReader.tsx. So do
     // the rendered Markdown files (renderedFiles.tsx), which only GuideReader.tsx imports, and the review app's keys on
-    // a review (ReviewKeys.tsx, with reviewWalk.ts).
-    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx','packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx', 'packages/inbox/guide/PullChangesTree.tsx', 'packages/inbox/guide/useSemDiffClient.ts', 'packages/inbox/guide/renderedFiles.tsx', 'packages/inbox/guide/ReviewKeys.tsx', 'packages/inbox/guide/reviewWalk.ts'];
+    // a review (ReviewKeys.tsx, with reviewWalk.ts), and Power Up's hook and mark (usePowerUp.ts, PowerUpMark.tsx).
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx','packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx', 'packages/inbox/guide/PullChangesTree.tsx', 'packages/inbox/guide/useSemDiffClient.ts', 'packages/inbox/guide/renderedFiles.tsx', 'packages/inbox/guide/ReviewKeys.tsx', 'packages/inbox/guide/reviewWalk.ts', 'packages/inbox/guide/usePowerUp.ts', 'packages/inbox/guide/PowerUpMark.tsx'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
     // The window's parts (lazyParts.tsx): fetched in idle time, each through its dynamic import only.
@@ -255,6 +255,23 @@ describe('review entry assets', () => {
     expect(eager).toEqual([]);
     expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#search-palette'))");
     expect(read('packages/inbox/package.json')).toContain('"#search-palette": "./search/SearchPalette.tsx"');
+  });
+
+  // Settings → Reviews (packages/inbox/reviewSettings/) is code review's own page, hosted through its seams. It
+  // reaches the window only through lazyParts.tsx's dynamic import of `#reviews-settings`, so neither it nor the shared
+  // page it draws rides the window's first chunk. A type-only import is erased.
+  test('the Inbox window mounts Settings → Reviews only through its dynamic import', () => {
+    const page = /^import\s+(?!type\b)[^;]*from\s+['"](?:#reviews-settings|[^'"]*reviewSettings\/ReviewsSettings(?:\.tsx)?|@plannotator\/ui\/components\/settings\/ReviewSettingsPage(?:\.tsx)?)['"]/m;
+    const walk = (dir: string): string[] =>
+      readdirSync(resolve(root, dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? entry.name === 'node_modules' ? [] : walk(`${dir}/${entry.name}`)
+          : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
+      );
+    const eager = [...walk('packages/inbox'), ...walk('apps/inbox')].filter((path) => path !== 'packages/inbox/reviewSettings/ReviewsSettings.tsx' && page.test(read(path)));
+    expect(eager).toEqual([]);
+    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#reviews-settings'))");
+    expect(read('packages/inbox/package.json')).toContain('"#reviews-settings": "./reviewSettings/ReviewsSettings.tsx"');
   });
 
   // Built-artifact check: a lost eager import would still type-check and pass
@@ -566,6 +583,8 @@ describe('review entry assets', () => {
     // KaTeX's own error text: its class names are also in Plannotator's
     // label code (`utils/pele-labels.ts` reads `katex-display`).
     KaTeX: 'KaTeX parse error',
+    // Settings → Reviews (#reviews-settings): the shared page's section mark.
+    'Settings → Reviews (#reviews-settings)': 'data-review-settings-section',
     // Pele is in no build while the engine switch is 'mermaid' (checked
     // above); on, it is a lazy part like Mermaid.
     ...(DIAGRAM_ENGINE_MODE === 'mermaid' ? {} : { Pele: 'pele-shape-' }),

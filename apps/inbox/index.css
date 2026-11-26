@@ -11,6 +11,8 @@
 /* The guided review: the guide chain and the read-only diff renderer it draws with (packages/inbox/guide). */
 @source "../../packages/guide-viewer/**/*.tsx";
 @source "../../packages/review-editor/components/**/*.tsx";
+/* Power Up's status mark in a review's bar (packages/review-editor/semDiff/PowerUpStatusSlot.tsx). */
+@source "../../packages/review-editor/semDiff/**/*.tsx";
 /* System: the project setup dialog (packages/inbox/system). */
 @source "../../packages/inbox/system/**/*.tsx";
 /* Floating reply drafts (packages/inbox/floaters/). */
@@ -29,6 +31,8 @@
 @source "../../packages/inbox/plans/**/*.tsx";
 /* Grid: the page of every agent's work (packages/inbox/grid/). */
 @source "../../packages/inbox/grid/**/*.tsx";
+/* Settings → Reviews (packages/inbox/reviewSettings/), and code review's page it hosts (packages/ui/components/settings/). */
+@source "../../packages/inbox/reviewSettings/**/*.tsx";
 /* The shared page frame a plan is drawn in (packages/ui/components/frame: its .tsx and its .ts class recipes, not its
    tests). frame.css below points Tailwind at the same files; these lines keep the rule of one @source per directory. */
 @source "../../packages/ui/components/frame/**/*.tsx";
@@ -83,6 +87,8 @@
 @import "../../packages/inbox/cloudflare.css";
 /* Picking thread rows: the boxes, the picks' bar and a phone's sheet (packages/inbox/picks.css). */
 @import "../../packages/inbox/picks.css";
+/* Recent activity's bar above the list while its view is on (packages/inbox/recentView.css). */
+@import "../../packages/inbox/recentView.css";
 @import "../../packages/inbox/cloud/cloud.css";
 @import "../../packages/inbox/cloud/how/how.css";
 /* A phone's composer card and its picker sheet (components/BottomSheet.tsx, PhoneReplyRecipient.tsx, compose/PhoneToSheet.tsx). */
@@ -90,6 +96,8 @@
 /* A touch tablet's bar under the open file (packages/inbox/touchStepBar.ts). */
 @import "../../packages/inbox/touchStepBar.css";
 @import "../../packages/inbox/scheduled/scheduled.css";
+/* Settings → Reviews: code review's own page in the Inbox's settings look (packages/inbox/reviewSettings/). */
+@import "../../packages/inbox/reviewSettings/reviewSettings.css";
 
 /* Window controls (inbox-window.md): read-only, for a desktop host, the line the panes' heads centre on while it has
    set its variables; its buttons go there. A length once computed, so a host reads a number. Here and not in inbox.css:

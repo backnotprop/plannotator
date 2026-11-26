@@ -39,6 +39,8 @@ import {
 	handleAnnotateMediaRequest,
 	handleImageRequest,
 	handleStarAskRequest,
+	handleLaunchSwitchRequest,
+	piLaunchSwitch,
 	handleReferenceSkillsRequest,
 	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
@@ -370,6 +372,8 @@ export async function startPlanReviewServer(options: {
 
 	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
+	// The launch switch's reader (generated/launch-switch.ts): in the background, never awaited.
+	piLaunchSwitch().start();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
@@ -521,6 +525,9 @@ export async function startPlanReviewServer(options: {
 		} else if (url.pathname.startsWith("/api/star-ask/")) {
 			// The "Star the repo" ask on the done screen (generated/star-ask.ts).
 			if (!(await handleStarAskRequest(req, res, url, "plan", isRemoteSession()))) handleApiNotFound(res, url.pathname);
+		} else if (url.pathname.startsWith("/api/launch-switch/")) {
+			// The launch switch's one-time dialog (generated/launch-switch.ts).
+			if (!(await handleLaunchSwitchRequest(req, res, url))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {

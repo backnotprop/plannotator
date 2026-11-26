@@ -7,7 +7,9 @@
  *    would be stuck until a reload);
  *  - a finished analysis with no trees rendering an empty tree view instead of
  *    the structural-match notice;
- *  - the loading state rendering a tree or an error.
+ *  - the loading state rendering a tree or an error;
+ *  - a changed-files-only analysis (large repository) hiding its notice in the
+ *    collapsed diagnostics or in the empty state's headline.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -87,5 +89,22 @@ describe('ReviewCallFlowPanel states', () => {
     }));
     expect(container.querySelector('.call-flow-empty')).not.toBeNull();
     expect(container.querySelector('.call-flow-trees, [role="tree"]')).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('a changed-files-only result shows its notice openly, outside the empty state', async () => {
+    const notice = 'Covers only the changed files.';
+    const container = await render(stateWith({
+      status: 'ready',
+      data: {
+        status: 'ok', snapshotId: 's', provider: 'calldiff', version: '0.6.0', from: 'a', to: 'b',
+        notice, raw: '', trees: [], fileImpacts: {},
+        summary: { entries: 0, changedNodes: 0, added: 0, removed: 0, impactedFiles: 0, warnings: 0 },
+        diagnostics: [], skippedLanguages: [],
+      },
+    }));
+    const status = [...container.querySelectorAll('[role="status"]')].find((node) => node.textContent === notice);
+    expect(status).toBeDefined();
+    expect(status?.closest('details, .call-flow-empty')).toBeNull();
+    expect(container.querySelector('.call-flow-empty')?.textContent).not.toContain(notice);
   });
 });

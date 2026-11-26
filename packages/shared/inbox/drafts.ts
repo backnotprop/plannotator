@@ -28,6 +28,7 @@ import {
   type InboxDraftFile,
   type InboxDraftPasted,
   type InboxDraftTo,
+  type InboxUpload,
 } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 import { readInboxUpload } from "./uploads";
@@ -229,7 +230,8 @@ function checkPasted(value: unknown, index: number, bodyLength: number, list = "
  * New message's drafts and reply drafts check their files alike.
  */
 export function checkInboxDraftFiles(
-  inboxDirPath: string,
+  /** This Inbox's folder (its pending uploads), or where another's are known (a linked machine's held draft). */
+  inboxDirPath: string | InboxUploadLookup,
   input: unknown,
   bodyLength: number,
   how: { list?: string; skipGone?: boolean } = {},
@@ -246,7 +248,7 @@ export function checkInboxDraftFiles(
       throw new InboxError("validation_error", `${list}[${index}]: an upload id, or { upload_id, pasted }.`, { field: `${list}[${index}]` });
     }
     const pasted = checkPasted(object?.pasted, index, bodyLength, list);
-    const upload = readInboxUpload(inboxDirPath, uploadId);
+    const upload = typeof inboxDirPath === "string" ? readInboxUpload(inboxDirPath, uploadId) : inboxDirPath(uploadId);
     if (!upload) {
       // `skipGone`: a file sent or swept since is simply not added (a reply draft's added files).
       if (how.skipGone) return;
@@ -256,6 +258,9 @@ export function checkInboxDraftFiles(
   });
   return files;
 }
+
+/** An upload by id, where the draft's uploads are known; null: not known there. */
+export type InboxUploadLookup = (uploadId: string) => InboxUpload | null;
 
 /** Long pastes' places in the words: `{ upload_id, pasted }` each (a place for a file the draft does not hold is ignored). */
 export function checkInboxDraftPlaces(input: unknown, bodyLength: number, list: string): { upload_id: string; pasted: InboxDraftPasted }[] {

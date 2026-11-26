@@ -41,6 +41,7 @@ import { registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders'
 import { linearLinkCardProvider } from '@plannotator/ui/utils/linearLinkCards';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
+import { useLaunchAnnouncement } from '@plannotator/ui/components/LaunchAnnouncement';
 import {
   closePendingTab,
   openPendingTab,
@@ -85,7 +86,7 @@ import { createSemDiffClient } from './semDiff/semDiffClient';
 import { loadSemDiffWorker } from './semDiff/loadSemDiffWorker';
 import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type PowerUpStatus } from './semDiff/powerUp';
 import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
-import { POWER_UP_CHANGED_EVENT, type PowerUpProvider } from '@plannotator/ui/components/settings/SemanticDiffsTab';
+import { usePowerUpConfig } from './semDiff/usePowerUpConfig';
 import { computeReviewSemanticDiff, loadReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
 import type { SemanticDiffChange, SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
 
@@ -845,26 +846,6 @@ const ReviewApp: React.FC = () => {
   const semanticDiffUsable = semDiffClient != null;
   const diffSemanticOn = useConfigValue('diffSemantic');
   const diffPowerUpOn = useConfigValue('diffPowerUp');
-  const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: PowerUpProvider | null; endpoint?: string; revision: number }>({ configured: false, provider: null, revision: 0 });
-  useEffect(() => {
-    if (!semDiffClient) return;
-    let request = 0;
-    const load = () => {
-      const id = ++request;
-      fetch('/api/sem-diff/opinion/settings')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: { configured: boolean; provider: PowerUpProvider | null; endpoint?: string } | null) => {
-          if (id === request && data) setPowerUpConfigured((previous) => ({ ...data, revision: previous.revision + 1 }));
-        })
-        .catch(() => {});
-    };
-    load();
-    window.addEventListener(POWER_UP_CHANGED_EVENT, load);
-    return () => {
-      request++;
-      window.removeEventListener(POWER_UP_CHANGED_EVENT, load);
-    };
-  }, [semDiffClient]);
   const [powerUpRejected, setPowerUpRejected] = useState<readonly string[]>(() => readPowerUpRejected());
   const rejectPowerUpLink = useCallback((candidateId: string) => {
     setPowerUpRejected((previous) => {
@@ -872,15 +853,12 @@ const ReviewApp: React.FC = () => {
       return next;
     });
   }, []);
-  const powerUpActive = semDiffClient != null && diffSemanticOn && diffPowerUpOn && powerUpConfigured.configured;
-  const [powerUpRetry, setPowerUpRetry] = useState(0);
-  const powerUp = useMemo(() => ({
-    active: powerUpActive,
+  // Power Up's settings read and config (semDiff/usePowerUpConfig.ts, shared with the Inbox's readers).
+  const { active: powerUpActive, powerUp, settings: powerUpConfigured, retry: retryPowerUp } = usePowerUpConfig({
+    client: semDiffClient,
+    on: diffSemanticOn && diffPowerUpOn,
     rejected: powerUpRejected,
-    provider: powerUpConfigured.provider,
-    settingsRevision: powerUpConfigured.revision,
-    retry: powerUpRetry,
-  }), [powerUpActive, powerUpRejected, powerUpConfigured, powerUpRetry]);
+  });
   const [powerUpStatus, setPowerUpStatus] = useState<PowerUpStatus | null>(null);
   useEffect(() => {
     const root = document.documentElement;
@@ -3555,11 +3533,18 @@ const ReviewApp: React.FC = () => {
     fileKey: isAllFilesActive ? 'all' : activeFileIndex,
   });
   const handleAutoView = autoViewedNotice.show;
+  // The launch dialog (the launch switch; LaunchAnnouncement.tsx): as the page opens, before the reader starts
+  // working; the star ask yields on that load. Never without a live session; the VS Code panel shows it too.
+  const launch = useLaunchAnnouncement({
+    ready: !isLoading,
+    eligible: !!origin,
+    firstRunWindow: true,
+  });
   // The update toast waits behind the guide takeover and every first-run
   // dialog of this load (useUpdateToast).
   useUpdateToast({
     advert: updateAdvert,
-    blocked: isLoading || guideOpen,
+    blocked: isLoading || guideOpen || launch.open,
     autoUpdateActive,
     position: 'top-right',
   });
@@ -5554,11 +5539,12 @@ const ReviewApp: React.FC = () => {
 
   // The "Star the repo" ask (approval "star-ask"): claimed once the page loads (the server stops on the decision),
   // shown on the done screen only, once a decision was sent (approved or feedback; never a closed session), never in
-  // the VS Code webview or without a live session. The server decides the rest.
+  // the VS Code webview or without a live session, and never on a load that showed the launch dialog. The server
+  // decides the rest.
   const starAskFooter = useStarAskDoneScreen({
     ready: !isLoading,
     decided: submitted === 'approved' || submitted === 'feedback',
-    eligible: !!origin && !isVSCodeWebview(),
+    eligible: !!origin && !isVSCodeWebview() && !launch.shownThisLoad,
   });
   // Explorer keys (the `review-explorer` scope): never over a dialog, the
   // guide, or while the review is settling; only Go to File works from a text
@@ -6171,7 +6157,7 @@ const ReviewApp: React.FC = () => {
                     status={powerUpStatus}
                     provider={powerUpConfigured.provider}
                     endpoint={powerUpConfigured.endpoint}
-                    onRetry={() => setPowerUpRetry((n) => n + 1)}
+                    onRetry={retryPowerUp}
                     onSettings={() => setOpenSettingsMenu('powerUp')}
                   />
                 )}
@@ -6482,6 +6468,7 @@ const ReviewApp: React.FC = () => {
                 onOpenSavedGuide={handleOpenGuide}
                 launchOff={!aiUIEnabled}
                 onMarkFilesViewed={handleGuideMarkFilesViewed}
+                viewedReady={reviewProgressStatus !== 'loading'}
                 onAddGlobalComment={submitted || busyWithDecision ? undefined : handleAddGeneralComment}
                 onShowGlobalComment={handleShowGlobalComment}
                 barSlot={guideBarSlot}
@@ -6834,6 +6821,9 @@ const ReviewApp: React.FC = () => {
             }))
             : undefined}
         />
+
+        {/* The launch dialog: as the page opens, once per computer. */}
+        {launch.dialog}
 
         {/* GitHub general comment dialog */}
         <ReviewSubmissionDialog

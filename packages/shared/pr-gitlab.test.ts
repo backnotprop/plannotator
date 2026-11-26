@@ -2,7 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fetchGlMR, fetchGlMRContext, parsePaginatedArray, submitGlMRReview } from "./pr-gitlab";
+import { checkGlAuth, fetchGlMR, fetchGlMRContext, parsePaginatedArray, submitGlMRReview } from "./pr-gitlab";
 import type { CommandResult, PRReviewFileComment, PRRuntime } from "./pr-types";
 
 describe("fetchGlMR", () => {
@@ -1007,5 +1007,31 @@ describe("submitGlMRReview positions", () => {
     expect(positions).toEqual([
       { position_type: "text", base_sha: "base", head_sha: "head", start_sha: "start", new_path: "src/keep.ts", old_path: "src/keep.ts", new_line: 3 },
     ]);
+  });
+});
+
+describe("checkGlAuth", () => {
+  const runtimeFor = (signedIn: string[], calls: string[][]): PRRuntime => ({
+    async runCommand(command, args) {
+      calls.push([command, ...args]);
+      const at = args.indexOf("--hostname");
+      // A newer glab without --hostname checks the current context's host: here a self-hosted one that is signed out.
+      const host = at >= 0 ? args[at + 1]! : "git.northwind.example";
+      return signedIn.includes(host)
+        ? { stdout: `${host}\n  ✓ Logged in to ${host} as dana\n`, stderr: "", exitCode: 0 }
+        : { stdout: "", stderr: `${host}\n  x ${host} has not been authenticated with glab.`, exitCode: 1 };
+    },
+  });
+
+  test("gitlab.com is checked by name, not as whatever host the current context names", async () => {
+    const calls: string[][] = [];
+    await expect(checkGlAuth(runtimeFor(["gitlab.com"], calls), "gitlab.com")).resolves.toBeUndefined();
+    expect(calls).toEqual([["glab", "auth", "status", "--hostname", "gitlab.com"]]);
+  });
+
+  test("a self-hosted host is checked by name, and a signed-out one says how to sign in", async () => {
+    const calls: string[][] = [];
+    await expect(checkGlAuth(runtimeFor([], calls), "git.northwind.example")).rejects.toThrow("glab auth login --hostname git.northwind.example");
+    expect(calls).toEqual([["glab", "auth", "status", "--hostname", "git.northwind.example"]]);
   });
 });

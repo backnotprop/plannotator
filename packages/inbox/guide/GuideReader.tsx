@@ -34,11 +34,14 @@ import type {
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
 import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
+import { LineFeedbackToolsProvider } from '@plannotator/review-editor/components/LineFeedbackTools';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { openedLinesQuote } from '../attachments';
 import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
 import { useSemDiffClient } from './useSemDiffClient';
 import type { GuideFileNote, GuideLineMark, GuideLineNote, GuideReaderProps, OnGuideLineMark } from './types';
+import { usePowerUp, usePowerUpReport, type InboxPowerUp } from './usePowerUp';
+import { PowerUpMark } from './PowerUpMark';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
 import { GuideCodeSpanContext } from '@plannotator/guide-viewer/renderInlineMarkdown';
@@ -51,6 +54,7 @@ import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/revie
 import type { DiffSelectionActions } from '@plannotator/review-editor/components/SelectionChooser';
 import { extractLinesFromPatch, isLineRangeInPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
+import { useDiffFontFamily } from './useDiffFont';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { reviewSourceLine } from './sourceLine';
@@ -149,8 +153,14 @@ export const GuideDiff: FC<
     /** Context notes on this file's lines (review-editor's seam). Absent: none, as before. */
     contextNotes?: AllFilesCodeViewProps['contextNotes'];
     renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
+    /** Power Up (usePowerUp.ts): asked about these files' unsure calls. Absent: none. */
+    powerUp?: AllFilesCodeViewProps['powerUp'];
+    /** Hears this view's Power Up status under its own key, and null once it is no longer drawn. */
+    powerUpReport?: InboxPowerUp['report'];
   }
-> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, lineMarks, onLineMark, wholeFileNotes, contextNotes, renderContextNote, ...props }) => {
+> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, lineNotes, lineMarks, onLineMark, wholeFileNotes, contextNotes, renderContextNote, powerUpReport, ...props }) => {
+  // Power Up's status for this view only, taken back when it goes (another chapter), so a failure here never sticks.
+  const onPowerUpStatus = usePowerUpReport(powerUpReport);
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -159,7 +169,7 @@ export const GuideDiff: FC<
   const showLineNumbers = useConfigValue('diffShowLineNumbers');
   const showBackground = useConfigValue('diffShowBackground');
   const expandUnchanged = useConfigValue('diffExpandUnchanged');
-  const fontFamily = useConfigValue('diffFontFamily');
+  const fontFamily = useDiffFontFamily();
   const fontSize = useConfigValue('diffFontSize');
   // Code review's reason for a folded generated file (its "Generated file collapsed" strip and the header's badge): the
   // files the guide folds as generated (GuideFileCard, the host's set or the built-in names, as code review's PR mode).
@@ -172,6 +182,7 @@ export const GuideDiff: FC<
   return (
     <AllFilesCodeView
       {...props}
+      {...(onPowerUpStatus ? { onPowerUpStatus } : {})}
       {...(generated ?? {})}
       readOnly={!comments}
       commentOnly={!!comments}
@@ -328,14 +339,16 @@ function usePackageChangeCards(images: GuideReaderImages | undefined): AllFilesC
  * Highlighting runs off the page's thread, or a long file freezes it. The pool's three workers start with the first
  * reader on screen and end with the last, so a page with no diff does not hold them.
  */
-export default function GuideReader(props: GuideReaderProps) {
+export default function GuideReader({ lineFeedbackTools = null, ...props }: GuideReaderProps) {
   // A reader that throws while it draws says so in its place; the review's bar and comments stay (ui's RegionBoundary,
   // inside the lazy part: a chunk that cannot arrive is still PanePart's "Couldn't load this view").
   return (
     <ReviewWorkerPoolProvider>
-      <RegionBoundary name="Guide reader">
-        <Reader {...props} />
-      </RegionBoundary>
+      <LineFeedbackToolsProvider value={lineFeedbackTools}>
+        <RegionBoundary name="Guide reader">
+          <Reader {...props} />
+        </RegionBoundary>
+      </LineFeedbackToolsProvider>
     </ReviewWorkerPoolProvider>
   );
 }
@@ -359,6 +372,7 @@ function Reader({
   highlight = null,
   bare = false,
   controlsHost = null,
+  powerUpHost = null,
   fileContents,
   threadHeading = false,
   signComments = false,
@@ -376,6 +390,8 @@ function Reader({
   const wholeFiles = useRef<KeptWholeFiles>(new Map());
   const fetchFileContent = useMemo<AllFilesCodeViewProps['fetchFileContent']>(() => (fileContents ? wholeFileReader(fileContents, wholeFiles.current) : undefined), [fileContents]);
   const semDiffClient = useSemDiffClient();
+  // Power Up beside the semantic client (code review's second opinion), with its mark in the review's bar.
+  const power = usePowerUp(semDiffClient);
   // Code review's image previews, where the host's reader part names where its images are read (ReaderPart `images`).
   const readerImages = useContext(ReviewImagesContext);
   const imagePreviews = useImagePreviews(readerImages);
@@ -562,6 +578,8 @@ function Reader({
   const viewedSet = useMemo(() => (viewed ? new Set(viewed.files) : undefined), [viewedFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // Nothing marked as changed (a walkthrough): Split would draw the same code twice.
   const asItIs = files.length > 0 && files.every((file) => file.additions === 0 && file.deletions === 0);
+  // Power Up's mark: only once it is asked and a file has said how it went, so no empty row or slot is drawn before.
+  const powerShown = !!power.powerUp && !!power.status && !asItIs;
   // The pull request page's flat review, whose bar holds its actions, draws the tab as two marks.
   const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch icons={!!controlsHost} /> : null), [controlsHost]);
 
@@ -645,6 +663,8 @@ function Reader({
       wholeFileNotes?: readonly GuideFileNote[];
       contextNotes?: AllFilesCodeViewProps['contextNotes'];
       renderContextNote?: AllFilesCodeViewProps['renderContextNote'];
+      powerUp?: AllFilesCodeViewProps['powerUp'];
+      powerUpReport?: InboxPowerUp['report'];
     } => ({
       ...(lineNotes ? { lineNotes: fileNotes(file.path) } : {}),
       ...(lineMarks ? { lineMarks: fileMarks(file.path) } : {}),
@@ -658,6 +678,7 @@ function Reader({
       ...(asItIs && { plainSeparators: true }),
       ...(fetchFileContent && { fetchFileContent }),
       ...(fetchFileContent && semDiffClient && !asItIs && { semDiffClient }),
+      ...(fetchFileContent && semDiffClient && !asItIs && power.powerUp && { powerUp: power.powerUp, powerUpReport: power.report }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
@@ -677,7 +698,7 @@ function Reader({
           }
         : {}),
     }),
-    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, fileOpenIn, lineNotes, fileNotes, lineMarks, fileMarks, onLineMark, wholeFileNotes, wholeNotesFor],
+    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, power.powerUp, power.report, fileOpenIn, lineNotes, fileNotes, lineMarks, fileMarks, onLineMark, wholeFileNotes, wholeNotesFor],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -781,12 +802,14 @@ function Reader({
         sourceLine={reviewSourceLine(snapshot)}
         bare={bare}
         actionsHost={controlsHost}
+        {...(powerShown && !powerUpHost ? { headerActions: <PowerUpMark power={power} compact={phone} /> } : {})}
         threadHeading={threadHeading}
         // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
         fitFileHeights
         rootRef={proseRef}
       />
       {refCard}
+      {powerShown && powerUpHost && <PowerUpMark power={power} compact={phone} host={powerUpHost} />}
       </GuideCodeSpanContext.Provider>
       </RenderedFilesProvider>
       {globalAnchor && globalDraftKey && (

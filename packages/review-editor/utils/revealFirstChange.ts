@@ -10,7 +10,10 @@ export function revealFirstChange(node: HTMLElement): boolean {
     if (!span) continue;
     const box = code.getBoundingClientRect();
     const mark = span.getBoundingClientRect();
-    if (mark.right <= box.right && mark.left >= box.left) continue;
+    // Only a change that starts out of sight is brought in. One that starts on
+    // screen but runs past the right edge (a whole new long line) is already
+    // seen; scrolling to it would hide the start of every line in the column.
+    if (mark.left >= box.left && mark.left + FIRST_CHANGE_LEAD_PX <= box.right) continue;
     code.scrollLeft = Math.max(0, mark.left - box.left - FIRST_CHANGE_LEAD_PX);
     moved = true;
   }

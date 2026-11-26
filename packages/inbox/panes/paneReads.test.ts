@@ -2,7 +2,9 @@
  * Each pane's open and reads (panes/paneReads.ts), with two panes as a second pane will have them: a read draws in the
  * pane showing its thread and nowhere else. What regresses: one pane's failure, look or "opened with" drawn in the
  * other; a pane moving on giving up the other pane's read; a read of a thread no pane shows drawing anything; an older
- * read of a pane's thread overwriting a newer one.
+ * read of a pane's thread overwriting a newer one; a thread on screen dropped by a re-read's 404 (the owner,
+ * 2026-11-23: what is open stays open), any 404 but the Inbox's own `thread_not_found` taken as "deleted", or a thread
+ * the person deleted in this window kept.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { QueryClient } from '@tanstack/react-query';
@@ -11,6 +13,8 @@ import { InboxApiError, type ThreadModel } from '../api';
 import { createKeyedSignal } from '../signal';
 import { focusPane, open as openIn, singlePane, split, type PaneSet } from './model';
 import { createPaneReads, type PaneOpenView } from './paneReads';
+import { heldThread } from '../data/queries/thread';
+import { noteDeletedHere } from '../data/deletedHere';
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'billing-abcdef', name: 'billing', root: '/work/billing', created_at: '2026-10-12T09:00:00.000Z' };
 
@@ -44,8 +48,9 @@ function harness(start: PaneSet) {
   const pending: Pending[] = [];
   const drawn: ReadonlyMap<string, PaneOpenView>[] = [];
   const opened: string[] = [];
+  const client = new QueryClient();
   const reads = createPaneReads({
-    client: new QueryClient(),
+    client,
     panes: () => panes,
     read: (threadId, _ms, signal) =>
       new Promise<ThreadModel>((resolve, reject) => {
@@ -73,7 +78,7 @@ function harness(start: PaneSet) {
     expect(at).toBeGreaterThanOrEqual(0);
     return pending.splice(at, 1)[0]!;
   };
-  return { reads, show, take, pending, drawn, opened, setPanes: (next: PaneSet) => (panes = next), stopAll: () => stops.forEach(({ stop }) => stop()) };
+  return { reads, client, show, take, pending, drawn, opened, setPanes: (next: PaneSet) => (panes = next), stopAll: () => stops.forEach(({ stop }) => stop()) };
 }
 
 const settle = async () => {
@@ -109,7 +114,7 @@ describe('two panes, one open each', () => {
     const h = harness(twoPanes('thr_a', 'thr_b'));
     stop = h.stopAll;
     h.show(twoPanes('thr_a', 'thr_b'));
-    h.take('thr_b').fail(new InboxApiError(404, 'not_found', 'Not found'));
+    h.take('thr_b').fail(new InboxApiError(404, 'thread_not_found', 'No such thread.'));
     await settle();
     expect(h.reads.view('p2').load).toMatchObject({ threadId: 'thr_b', state: 'missing' });
     expect(h.reads.view('main').load).toBeNull();
@@ -170,5 +175,72 @@ describe('two panes, one open each', () => {
     // The active pane's look is what Back from snooze reads.
     h.setPanes(focusPane(twoPanes('thr_a', 'thr_b'), 'main'));
     expect(h.reads.activeLook.current?.threadId).toBe('thr_a');
+  });
+});
+
+describe('a thread on screen stays on screen', () => {
+  /** The pane opens `id` and its first read lands: the thread is on screen. */
+  async function onScreen(id: string) {
+    const h = harness(singlePane(id));
+    stop = h.stopAll;
+    h.show(singlePane(id));
+    h.take(id).answer(threadOf(id, [2, 4]));
+    await settle();
+    expect(heldThread(h.client, id)?.thread.messages).toHaveLength(2);
+    return h;
+  }
+
+  test('deleted elsewhere (404 thread_not_found): it stays, says it is gone, and is not read again', async () => {
+    const h = await onScreen('thr_a');
+    void h.reads.refreshThread('thr_a');
+    h.take('thr_a').fail(new InboxApiError(404, 'thread_not_found', 'No such thread.'));
+    await settle();
+    expect(heldThread(h.client, 'thr_a')?.thread.messages).toHaveLength(2);
+    expect(h.reads.view('main').load).toMatchObject({ state: 'failed', gone: true });
+    // The answer was definite: no retry storm.
+    await new Promise((done) => setTimeout(done, 1500));
+    expect(h.pending.some((p) => p.threadId === 'thr_a')).toBe(false);
+  });
+
+  for (const [why, cause] of [
+    ['a linked machine briefly not known (404 machine_not_linked)', new InboxApiError(404, 'machine_not_linked', 'That machine is not linked.')],
+    ['a network failure', new Error('Failed to fetch')],
+  ] as const) {
+    test(`a re-read that answers ${why} keeps its last read, and reads again`, async () => {
+      const h = await onScreen('thr_a');
+      void h.reads.refreshThread('thr_a');
+      h.take('thr_a').fail(cause);
+      await settle();
+      expect(heldThread(h.client, 'thr_a')?.thread.messages).toHaveLength(2);
+      expect(h.reads.view('main').load?.state).toBe('failed');
+      // Read again, as after any failure.
+      await new Promise((done) => setTimeout(done, 300));
+      expect(h.pending.some((p) => p.threadId === 'thr_a')).toBe(true);
+      h.take('thr_a').answer(threadOf('thr_a', [2, 4, 6]));
+      await settle();
+      expect(heldThread(h.client, 'thr_a')?.thread.messages).toHaveLength(3);
+      expect(h.reads.view('main').load).toBeNull();
+    });
+  }
+
+  test('one the person deleted in this window goes as before', async () => {
+    const h = await onScreen('thr_gone');
+    noteDeletedHere({ thread: 'thr_gone' });
+    void h.reads.refreshThread('thr_gone');
+    h.take('thr_gone').fail(new InboxApiError(404, 'thread_not_found', 'No such thread.'));
+    await settle();
+    expect(heldThread(h.client, 'thr_gone')).toBeUndefined();
+    expect(h.reads.view('main').load?.state).toBe('missing');
+  });
+
+  test('a thread never on screen: only thread_not_found is "missing"; another 404 is read again', async () => {
+    const h = harness(twoPanes('thr_x', 'thr_y'));
+    stop = h.stopAll;
+    h.show(twoPanes('thr_x', 'thr_y'));
+    h.take('thr_x').fail(new InboxApiError(404, 'machine_not_linked', 'That machine is not linked.'));
+    h.take('thr_y').fail(new InboxApiError(404, 'thread_not_found', 'No such thread.'));
+    await settle();
+    expect(h.reads.view('main').load?.state).toBe('failed');
+    expect(h.reads.view('p2').load?.state).toBe('missing');
   });
 });

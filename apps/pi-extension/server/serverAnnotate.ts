@@ -32,7 +32,7 @@ import { getPlanVersion, getVersionCount, listVersions } from "../generated/stor
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
 import { ANNOTATE_LIVE_VERSION_PATH, annotateLiveVersionFilePath, saveAnnotateLiveVersion } from "../generated/annotate-live-version.ts";
 import { htmlDiff } from "../generated/html-diff.ts";
-import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, saveConfig, detectGitUser, getServerConfig, parseDisplayOptionsConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveSharingEnabled, resolveAnnotateHistory, resolveFeedbackHistory, type PromptRuntime } from "../generated/config.ts";
+import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, saveConfig, detectGitUser, getServerConfig, parseDisplayOptionsConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveSharingEnabled, resolveAnnotateHistory, resolveFeedbackHistory, resolveHtmlStartsInInteract, type PromptRuntime } from "../generated/config.ts";
 import { currentPiHost } from "../pi-host.ts";
 import { appendFeedbackRecord, type FeedbackDecision, type FeedbackSurface } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
@@ -62,6 +62,8 @@ import {
 	handleAnnotateMediaRequest,
 	handleImageRequest,
 	handleStarAskRequest,
+	handleLaunchSwitchRequest,
+	piLaunchSwitch,
 	handleReferenceSkillsRequest,
 	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
@@ -926,6 +928,8 @@ export async function startAnnotateServer(options: {
 
 	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
+	// The launch switch's reader (generated/launch-switch.ts): in the background, never awaited.
+	piLaunchSwitch().start();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
@@ -1241,6 +1245,9 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname.startsWith("/api/star-ask/")) {
 			// The "Star the repo" ask on the done screen (generated/star-ask.ts).
 			if (!(await handleStarAskRequest(req, res, url, "annotate", isRemoteSession()))) handleApiNotFound(res, url.pathname);
+		} else if (url.pathname.startsWith("/api/launch-switch/")) {
+			// The launch switch's one-time dialog (generated/launch-switch.ts).
+			if (!(await handleLaunchSwitchRequest(req, res, url))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/annotate-media" && req.method === "GET") {
@@ -1629,6 +1636,8 @@ export async function startAnnotateServer(options: {
 					annotationCss: options.liveApp.annotationCss,
 					bridgeBootstrap: options.liveApp.bridgeBootstrap,
 					bridgeScript: options.liveApp.bridgeScript,
+					// Each page load starts in the mode Settings → Display names.
+					startInteract: resolveHtmlStartsInInteract(loadConfig()),
 				}),
 			});
 			// Advertise the proxy under the LOCALHOST spelling, carrying the

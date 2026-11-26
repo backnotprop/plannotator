@@ -310,6 +310,9 @@ export interface InboxPullDiffAnswer {
   head_sha?: string | null;
   /** The PR's own description as Markdown (a stack's whole diff too: this layer's): null when it has none or the forge did not say. */
   description?: string | null;
+  /** The PR's state as the forge said at this read: one merged or closed elsewhere shows so on its open page. Absent: not read. */
+  state?: InboxPullState;
+  merged_at?: string | null;
 }
 
 /**

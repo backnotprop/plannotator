@@ -1,7 +1,7 @@
 /**
  * Links in annotate's HTML surfaces follow one rule with the Inbox (the
  * owner's ruling html-link-click and its amendment, 2026-10-20), proved in a
- * real browser against the compiled binary: armed (Annotate, the default), a
+ * real browser against the compiled binary: once armed (Annotate), a
  * plain click on a link follows it and a Cmd/Ctrl-click pins it for a
  * comment; on a phone a tap follows and a press-and-hold pins, and the
  * release after a hold follows nothing. On a touchscreen laptop (touch seen,
@@ -32,6 +32,7 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = process.env.PLANNOTATOR_HTML_LINKS_SHOTS ?? '';
 
+const INTERACTION_PROBE = '<details><summary>Show details</summary><p>The page handled the click.</p></details>';
 const STYLE = '<style>body{font:16px/1.5 system-ui;margin:32px;color:#222;background:#fafaf7}a{color:#2563eb;display:inline-block;padding:6px 0}</style>';
 
 async function shot(page: Page, name: string) {
@@ -44,7 +45,7 @@ async function shot(page: Page, name: string) {
 /** A live app on loopback: two pages that link to each other. */
 async function liveApp(): Promise<{ server: Server; origin: string }> {
   const pages: Record<string, string> = {
-    '/': `<!doctype html><html><head><meta charset="utf-8"><title>Live home</title>${STYLE}</head><body><h1>Live home</h1><p>An app running on this computer.</p><p><a href="/settings">Settings</a></p><script>/* A press library's shape: open on pointerdown, closed on pointerup or pointercancel. */window.__press=false;window.__cancels=0;var l=document.querySelector('a');l.addEventListener('pointerdown',function(){window.__press=true});l.addEventListener('pointerup',function(){window.__press=false});l.addEventListener('pointercancel',function(){window.__press=false;window.__cancels++});</script></body></html>`,
+    '/': `<!doctype html><html><head><meta charset="utf-8"><title>Live home</title>${STYLE}</head><body><h1>Live home</h1>${INTERACTION_PROBE}<p>An app running on this computer.</p><p><a href="/settings">Settings</a></p><script>/* A press library's shape: open on pointerdown, closed on pointerup or pointercancel. */window.__press=false;window.__cancels=0;var l=document.querySelector('a');l.addEventListener('pointerdown',function(){window.__press=true});l.addEventListener('pointerup',function(){window.__press=false});l.addEventListener('pointercancel',function(){window.__press=false;window.__cancels++});</script></body></html>`,
     '/settings': `<!doctype html><html><head><meta charset="utf-8"><title>Settings</title>${STYLE}</head><body><h1>Settings page</h1><p><a href="/">Home</a></p></body></html>`,
   };
   const server = createServer((req, res) => {
@@ -148,7 +149,7 @@ async function holdLink(page: Page, link: Locator, browserName: string, ms = 750
   }, ms);
 }
 
-const LOCAL_INDEX = `<!doctype html><html><head><meta charset="utf-8"><title>Index</title>${STYLE}</head><body><h1>Report index</h1><p id="lead">Start with <a href="02-detail.html">the detail page</a> today.</p></body></html>`;
+const LOCAL_INDEX = `<!doctype html><html><head><meta charset="utf-8"><title>Index</title>${STYLE}</head><body><h1>Report index</h1>${INTERACTION_PROBE}<p id="lead">Start with <a href="02-detail.html">the detail page</a> today.</p></body></html>`;
 const LOCAL_DETAIL = `<!doctype html><html><head><meta charset="utf-8"><title>Detail</title>${STYLE}</head><body><h1>Detail page</h1><p><a href="index.html">Back to the index</a></p></body></html>`;
 
 function writeSite(root: string) {
@@ -159,13 +160,44 @@ function writeSite(root: string) {
   return join(site, 'index.html');
 }
 
-test('a local HTML file, armed: a plain click follows the link, a Cmd/Ctrl-click pins it', async ({ browser }) => {
+async function openStartupSetting(page: Page) {
+  await page.getByRole('button', { name: 'Options', exact: true }).click();
+  await page.getByText('Settings', { exact: true }).click();
+  await page.getByRole('button', { name: 'Display', exact: true }).click();
+  return page.getByRole('switch', { name: 'Start in Annotate mode' });
+}
+
+test('a local HTML file starts armed by default and remembers the startup choice', async ({ browser }) => {
   const { url, close } = await annotate(writeSite);
   try {
     const { context, page } = await newSession(browser, url, { viewport: { width: 1280, height: 860 } });
     try {
       const frame = page.frameLocator('iframe[sandbox]');
       await expect(frame.locator('h1')).toHaveText('Report index');
+      const pen = page.locator('[data-html-annotate-toggle]');
+      await expect(pen).toHaveAttribute('aria-pressed', 'true');
+      const startup = await openStartupSetting(page);
+      await expect(startup).toHaveAttribute('aria-checked', 'true');
+      await startup.click();
+      await expect(startup).toHaveAttribute('aria-checked', 'false');
+      await expect(pen).toHaveAttribute('aria-pressed', 'true');
+      await shot(page, 'annotate-startup-setting');
+      await page.reload();
+      await expect(pen).toHaveAttribute('aria-pressed', 'false');
+      await frame.getByText('Show details', { exact: true }).click();
+      await expect(frame.locator('details')).toHaveAttribute('open', '');
+      await expect(page.locator('[data-comment-popover]')).toHaveCount(0);
+      await shot(page, 'annotate-startup-interact');
+      await page.keyboard.press('ControlOrMeta+Shift+A');
+      await expect(pen).toHaveAttribute('aria-pressed', 'true');
+      await page.reload();
+      await expect(pen).toHaveAttribute('aria-pressed', 'false');
+      const enableStartup = await openStartupSetting(page);
+      await enableStartup.click();
+      await expect(enableStartup).toHaveAttribute('aria-checked', 'true');
+      await page.reload();
+      await expect(pen).toHaveAttribute('aria-pressed', 'true');
+      await expect(frame.locator('body')).toHaveAttribute('data-plannotator-pinpoint-cursor', '');
       await frame.getByRole('link', { name: 'the detail page' }).click({ modifiers: ['ControlOrMeta'] });
       const composer = page.locator('[data-comment-popover]');
       await expect(composer).toBeVisible();
@@ -209,6 +241,7 @@ test('a local HTML file, armed: shift-click joins more elements to one comment, 
     try {
       const frame = page.frameLocator('iframe[sandbox]');
       await expect(frame.locator('h1')).toHaveText('Report index');
+      await expect(frame.locator('body')).toHaveAttribute('data-plannotator-pinpoint-cursor', '');
       await frame.locator('h1').click();
       const composer = page.locator('[data-comment-popover]');
       await expect(composer).toBeVisible();
@@ -233,6 +266,7 @@ test('a touchscreen laptop: after a touch, a mouse drag across a link still quot
     try {
       const frame = page.frameLocator('iframe[sandbox]');
       await expect(frame.locator('h1')).toHaveText('Report index');
+      await expect(frame.locator('body')).toHaveAttribute('data-plannotator-pinpoint-cursor', '');
       // One touch: a tap on the heading pins it; Escape closes the composer.
       await frame.locator('h1').tap();
       const composer = page.locator('[data-comment-popover]');
@@ -279,6 +313,18 @@ test('a live app, armed: a plain click navigates the app for real, a Cmd/Ctrl-cl
     try {
       const frame = page.frameLocator('iframe:not([sandbox])');
       await expect(frame.locator('h1')).toHaveText('Live home');
+      const pen = page.locator('[data-html-annotate-toggle]');
+      await expect(pen).toHaveAttribute('aria-pressed', 'true');
+      const startup = await openStartupSetting(page);
+      await startup.click();
+      await page.reload();
+      await expect(pen).toHaveAttribute('aria-pressed', 'false');
+      await frame.getByText('Show details', { exact: true }).click();
+      await expect(frame.locator('details')).toHaveAttribute('open', '');
+      await expect(page.locator('[data-comment-popover]')).toHaveCount(0);
+      await shot(page, 'live-startup-interact');
+      await pen.click();
+      await expect(frame.locator('body')).toHaveAttribute('data-plannotator-pinpoint-cursor', '');
       await frame.getByRole('link', { name: 'Settings' }).click({ modifiers: ['ControlOrMeta'] });
       const composer = page.locator('[data-comment-popover]');
       await expect(composer).toBeVisible();
@@ -313,6 +359,7 @@ for (const phone of [
       const { context, page } = await newSession(browser, url, { ...phone.device });
       const frame = page.frameLocator('iframe:not([sandbox])');
       await expect(frame.locator('h1')).toHaveText('Live home');
+      await expect(frame.locator('body')).toHaveAttribute('data-plannotator-pinpoint-cursor', '');
       await holdLink(page, frame.getByRole('link', { name: 'Settings' }), phone.browserName);
       const composer = page.locator('[data-comment-popover]');
       await expect(composer).toBeVisible();
@@ -345,6 +392,7 @@ for (const phone of [
       const frame = page.frameLocator('iframe[sandbox]');
       await expect(frame.locator('h1')).toHaveText('Report index');
       const link = frame.getByRole('link', { name: 'the detail page' });
+      await expect(frame.locator('body')).toHaveAttribute('data-plannotator-pinpoint-cursor', '');
       await holdLink(page, link, phone.browserName);
       const composer = page.locator('[data-comment-popover]');
       await expect(composer).toBeVisible();

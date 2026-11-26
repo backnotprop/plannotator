@@ -69,12 +69,29 @@ const caret = () => host!.querySelector('[data-open-in-caret]');
 const fileReads = () => asked.filter((a) => a.url.includes('/open-in/file') && !a.url.includes('/file/code') && a.method === 'GET');
 
 // First: a page keeps the apps route's first real answer, and a refusal is not one.
-test.skipIf(!hasDom)('through the tailnet: the apps route refuses, so nothing draws and no file is asked about', async () => {
+test.skipIf(!hasDom)('through the tailnet: the apps route refuses, so no app is offered; a file that is here has Copy path alone', async () => {
   answers.apps = { status: 403, body: { code: 'local_only' } };
   await act(async () => root!.render(<OpenInFile scope={{ thread: 'msg_tailnet' }} path="src/a.ts" />));
   await settle();
+  expect(fileReads()).toHaveLength(1);
+  expect(caret()).toBeNull();
+  const copied: string[] = [];
+  const savedClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+  try {
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-open-in-copy-path]')!.click());
+    await settle();
+  } finally {
+    if (savedClipboard) Object.defineProperty(navigator, 'clipboard', savedClipboard);
+    else delete (navigator as { clipboard?: unknown }).clipboard;
+  }
+  expect(copied).toEqual([REAL]);
+  expect(asked.filter((a) => a.method === 'POST')).toEqual([]);
+  // A file that is not here over the tailnet: nothing.
+  answers.file = { status: 200, body: { found: false } };
+  await act(async () => root!.render(<OpenInFile scope={{ thread: 'msg_tailnet' }} path="src/gone.ts" />));
+  await settle();
   expect(host!.innerHTML).toBe('');
-  expect(fileReads()).toHaveLength(0);
 });
 
 test.skipIf(!hasDom)('a file on disk: the split button; its primary launches with the scope, the path and the line, and no root', async () => {

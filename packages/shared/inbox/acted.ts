@@ -16,7 +16,7 @@
  *   inbox/acted.json   { v: 1, threads: { <thread id>: <ISO time> } }, 0600, written whole (temp, then rename)
  *
  * Written at most once per `INBOX_ACTED_FLUSH_MS` (a draft saved as the person types is one write, not one per save),
- * keeping the newest `INBOX_ACTED_MAX` threads, none older than the filter reaches (`INBOX_RECENT_ACTIVITY_DAYS`), none
+ * keeping the newest `INBOX_ACTED_MAX` threads, none older than `INBOX_ACTED_KEPT_DAYS` (more than the view shows), none
  * ahead of the clock (`INBOX_ACTED_FUTURE_MS`: a clock set back; never read either) and
  * none of a thread this store held and no longer does (deleted; `sweep`). A file from a newer Plannotator is never
  * written over (the notes hold in memory); one that does not read is moved aside first (`acted.json.unreadable-<time>`),
@@ -28,10 +28,10 @@
 
 import { chmodSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_RECENT_ACTIVITY_DAYS, isInboxId, isInboxNote, type InboxAnnotationRecord, type InboxMessage, type InboxQuestionRecord } from "@plannotator/core/inbox-types";
+import { INBOX_ACTED_KEPT_DAYS, isInboxId, isInboxNote, type InboxAnnotationRecord, type InboxMessage, type InboxQuestionRecord } from "@plannotator/core/inbox-types";
 
 export const INBOX_ACTED_FILE = "acted.json";
-/** The threads the file keeps, newest first: far more than the list's last 30 days ever show. */
+/** The threads the file keeps, newest first: far more than the list's Recent activity view ever shows. */
 export const INBOX_ACTED_MAX = 2000;
 /** How long a note waits for others before the file is written. */
 export const INBOX_ACTED_FLUSH_MS = 2000;
@@ -173,10 +173,10 @@ export function createInboxActed(inboxDirPath: string, options: { now?: () => Da
   };
   // Read at once: a deletion before the first note must know which of the file's threads this store held.
   loaded();
-  /** What the file keeps: no deleted thread's time, none past the filter's reach or ahead of the clock, the newest `INBOX_ACTED_MAX`. */
+  /** What the file keeps: no deleted thread's time, none past `INBOX_ACTED_KEPT_DAYS` or ahead of the clock, the newest `INBOX_ACTED_MAX`. */
   const pruned = (all: Map<string, string>): Map<string, string> => {
     const clock = now().getTime();
-    const reach = clock - INBOX_RECENT_ACTIVITY_DAYS * DAY_MS;
+    const reach = clock - INBOX_ACTED_KEPT_DAYS * DAY_MS;
     const kept = [...all].filter(([id, at]) => Date.parse(at) >= reach && actedNotAhead(at, clock) && !(own.has(id) && !held(id)));
     for (const id of own) if (!held(id)) own.delete(id);
     kept.sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]));
