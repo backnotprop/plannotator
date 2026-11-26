@@ -60,6 +60,19 @@ export interface FilterSection {
 const CLEAR_WORDS = 'Clear search';
 const NO_PINS: ReadonlySet<string> = new Set();
 
+/** The Tag and Project sections' line when their find matches nothing (ListFilter.tsx), and the title picker's. */
+export const noTagsMatch = (query: string) => `No tags match “${query}”`;
+export const noProjectsMatch = (query: string) => `No projects match “${query}”`;
+
+/** The visible line under a find that matches nothing. */
+export function NoneLine({ words }: { words: string }) {
+  return (
+    <div className="ib-lflt-none" data-list-filter-none="">
+      {words}
+    </div>
+  );
+}
+
 const tick = (on: boolean) => <span className="ib-pc-tick">{on && <Icon name="check" />}</span>;
 
 /** A row's label with the match drawn bold, from `labelStart` ("…" for what it drops). */
@@ -495,11 +508,7 @@ export function FilterMenuRows({
                   {parted && <div className="ib-pm-sep" aria-hidden="true" />}
                   <div data-list-filter-rows="">{f.rows.map((item) => drawRow(item, item === first))}</div>
                 </div>
-                {f.searching && f.matches === 0 && (
-                  <div className="ib-lflt-none" data-list-filter-none="">
-                    {section.find.none(query.trim())}
-                  </div>
-                )}
+                {f.searching && f.matches === 0 && <NoneLine words={section.find.none(query.trim())} />}
               </Menu.Group>
             ) : (
               <Menu.Group data-list-filter-group={section.id === 'projects' ? undefined : section.id}>

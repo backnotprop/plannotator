@@ -1093,8 +1093,9 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-lhead-switch:hover, .pn-inbox .ib-lhead-switch[data-popup-open] { background: var(--ib-hb-hover-s, var(--muted)); color: var(--foreground); }
 .pn-inbox .ib-lhead-switch:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  /* A phone: a thumb's height, narrow, and tucked into the header's gap, so a short name ("harbor") keeps its room. */
-  .pn-inbox .ib-lhead-switch { width: 32px; height: 44px; margin-left: -4px; border-radius: 8px; }
+  /* A phone: a thumb's height, narrow, and 8 px clear of the title's box (its ↻ room is unseen there but still
+     refreshes), so a tap beside the ⌄ never lands on the title instead. */
+  .pn-inbox .ib-lhead-switch { width: 32px; height: 44px; margin-left: 4px; border-radius: 8px; }
 }
 .ib-lbody { padding: 0 10px 10px; overflow-y: auto; flex: 1; min-height: 0; position: relative; }
 /* A row that left the rows on screen when the list settled (settle.ts): a copy drawn where it was, fading
