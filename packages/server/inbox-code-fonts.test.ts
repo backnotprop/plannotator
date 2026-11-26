@@ -54,7 +54,13 @@ test("no more of those hosts than the fonts need, and nothing but styles and fon
   const LOCAL = new Set(["'self'", "'none'", "'unsafe-inline'", "'wasm-unsafe-eval'", "data:", "blob:"]);
   const remote = (name: string) => (policy.get(name) ?? []).filter((source) => !LOCAL.has(source));
   for (const name of ["default-src", "script-src", "connect-src", "media-src", "worker-src"]) expect([name, remote(name)]).toEqual([name, []]);
-  expect(remote("img-src")).toEqual(["https://plannotator.ai/assets/hosted/"]);
+  // The font places in no directive but style-src and font-src, every directive the policy has (img-src's own places
+  // are inbox-pages.test.ts's to pin).
+  const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com", "cdn.jsdelivr.net"];
+  for (const [name, sources] of policy) {
+    if (name === "style-src" || name === "font-src") continue;
+    for (const source of sources) expect([name, source, FONT_HOSTS.some((host) => source.includes(host))]).toEqual([name, source, false]);
+  }
 });
 
 test("styles and fonts come from exactly Google Fonts' two hosts and one pinned jsDelivr folder: no wildcard, no scheme-only source, no http:", () => {
