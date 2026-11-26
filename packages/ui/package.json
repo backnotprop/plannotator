@@ -24,6 +24,7 @@
     "./components/html-viewer/bridge-script.asset.js": "./components/html-viewer/bridge-script.asset.js",
     "./components/html-viewer/bridge-script.lite": "./components/html-viewer/bridge-script.lite.ts",
     "./components/sidebar/*": "./components/sidebar/*.tsx",
+    "./components/settings/reviewSettingsWords": "./components/settings/reviewSettingsWords.ts",
     "./components/plan-diff/*": "./components/plan-diff/*.tsx",
     "./utils/*": "./utils/*.ts",
     "./lib/*": "./lib/*.ts",

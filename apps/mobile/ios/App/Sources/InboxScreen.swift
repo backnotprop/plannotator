@@ -628,7 +628,7 @@ struct ThreadRow: View {
 
   private var title: String { row.threadName ?? row.subject ?? row.project.name }
   /// At the largest sizes the project alone: the agent's mark already says who.
-  private var lead: String { large ? row.project.name : "\(Names.agent(row.author)) · \(row.project.name)" }
+  private var lead: String { large ? row.project.name : "\(Names.agent(Names.rowAgent(row))) · \(row.project.name)" }
   private var time: String { TimeWords().short(row.lastAt) }
   /// The row's two marks as the window draws them (`rowMarks`): each has its own number and its own step.
   private var marks: RowMarks { RowMarks(row) }
@@ -644,7 +644,7 @@ struct ThreadRow: View {
 
   var body: some View {
     HStack(alignment: .top, spacing: Space.step) {
-      AgentMark(author: row.author, size: 32, ground: picked ? Token.background : Token.muted).padding(.top, Space.hair)
+      AgentMark(author: Names.rowAgent(row), size: 32, ground: picked ? Token.background : Token.muted).padding(.top, Space.hair)
       VStack(alignment: .leading, spacing: Space.hair) {
         if large {
           // At the largest sizes the title keeps the whole line; the time and the count share the next one.
@@ -691,7 +691,7 @@ struct ThreadRow: View {
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
       [
-        row.unread ? PhoneWords.unreadMark : nil, title, "\(Names.agent(row.author)) · \(row.project.name)", starred ? PhoneWords.starred : nil, snoozedWhen.map(PhoneWords.snoozedUntil), spoken, row.latestPreview,
+        row.unread ? PhoneWords.unreadMark : nil, title, "\(Names.agent(Names.rowAgent(row))) · \(row.project.name)", starred ? PhoneWords.starred : nil, snoozedWhen.map(PhoneWords.snoozedUntil), spoken, row.latestPreview,
         row.snoozeBack != nil ? PhoneWords.backFromSnooze : nil, time,
       ].compactMap { $0 }.joined(separator: ", ")
     )

@@ -20087,6 +20087,7 @@
         "setting:sidebar",
         "setting:diff_options",
         "setting:diff_style",
+        "setting:review_analysis",
         "setting:chapter_diagrams",
         "setting:experimental",
         "setting:bro",
@@ -20094,7 +20095,7 @@
       ],
       "flows": [],
       "mobile": "later",
-      "why": "L-door: update checks, the agent tools switch and Tailscale are slice S9 (SCOPE 64, Settings map 3 and 6); chapter diagrams and the Experimental group are capability switches (SCOPE 178). L-size: prompts (Settings map 5), the sidebar (74), diff options and style (F 130, 132). L-off: Bro mode and floating drafts (115, M 28).",
+      "why": "L-door: update checks, the agent tools switch and Tailscale are slice S9 (SCOPE 64, Settings map 3 and 6); chapter diagrams and the Experimental group are capability switches (SCOPE 178). L-size: prompts (Settings map 5), the sidebar (74), diff options and style (F 130, 132), and code review's Semantic changes switch, which goes with them. L-off: Bro mode and floating drafts (115, M 28).",
       "reason": "L-door",
       "source": "seed: SCOPE 64, 74, 115, 178, Settings map 3, 5, 6, F 130, 132, M 28",
       "ios": {
@@ -23503,6 +23504,20 @@
       }
     },
     {
+      "id": "undecided-field-inboxrowdelivery-script",
+      "title": "field:InboxRowDelivery.script",
+      "surface": [
+        "field:InboxRowDelivery.script"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-door-get-threads-id-swarm",
       "title": "door:GET threads/:id/swarm",
       "surface": [
@@ -23511,7 +23526,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23525,7 +23540,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23539,7 +23554,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23553,7 +23568,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23567,7 +23582,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23581,7 +23596,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23595,7 +23610,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23609,7 +23624,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23623,7 +23638,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23637,7 +23652,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23651,7 +23666,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23665,7 +23680,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23679,7 +23694,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23693,7 +23708,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23707,7 +23722,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23721,7 +23736,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23735,7 +23750,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23749,7 +23764,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23763,7 +23778,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23777,7 +23792,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23791,7 +23806,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23805,7 +23820,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23819,7 +23834,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23833,7 +23848,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23847,7 +23862,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23861,7 +23876,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23875,7 +23890,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23889,7 +23904,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23903,7 +23918,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23917,7 +23932,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23931,7 +23946,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23945,7 +23960,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23959,7 +23974,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23973,7 +23988,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23987,7 +24002,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
