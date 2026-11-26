@@ -39,6 +39,7 @@ import { useCommentPictures } from '../../commentPictures';
 export function MessageBody({
   message,
   projectRoot,
+  threadAttachments,
   openInFiles = false,
   repo,
   onOpenAttachment,
@@ -100,7 +101,7 @@ export function MessageBody({
   // computer's, `capability-set`; off there, it answers nothing): none for a machine too old to serve it.
   useLinkedReadsRev();
   const codeHovers = openInFiles && readsServedFor(message.id);
-  const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback, refsOn, openFileRefRef });
+  const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, threadAttachments, openInFiles, onOpenAttachment, setFallback, refsOn, openFileRefRef });
   const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, movedThread, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, renderRunBlock, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
   const pictures = useCommentPictures();
   const { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion, embedAnnotate } = useBodyComments({ comments, message, blocks, onPick, pictures });

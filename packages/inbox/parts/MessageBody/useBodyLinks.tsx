@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
-import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink } from '../../links';
+import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, newestAttachmentForLink, openAttachmentTitle, projectFileOfLink } from '../../links';
 import { resolveReplyLink } from '../../replyFileLinks';
 import { OpenInCodeHover } from '../../components/OpenIn';
 import { paintSkillReferences } from '../../skillHighlight';
@@ -21,12 +21,13 @@ export function useBodyLinks({
   replyFiles,
   replyFileList,
   projectRoot,
+  threadAttachments,
   openInFiles,
   onOpenAttachment,
   setFallback,
   refsOn,
   openFileRefRef,
-}: Pick<MessageBodyProps, 'message' | 'replyFiles' | 'projectRoot' | 'onOpenAttachment'> & {
+}: Pick<MessageBodyProps, 'message' | 'replyFiles' | 'projectRoot' | 'threadAttachments' | 'onOpenAttachment'> & {
   refsOn: boolean;
   openFileRefRef: OpenFileRefRef;
   openInFiles: boolean;
@@ -56,9 +57,10 @@ export function useBodyLinks({
       onMarks: (next) => setTagMarks((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next)),
     });
   }, [message.id, tagLabels]);
-  // A link to a file this message attached opens it beside the thread; any
-  // other local link is inert text (links.ts). Kept stable across renders,
-  // so raw-HTML blocks do not redraw their links on every pick.
+  // A link to a file this message or another of the thread attached opens its
+  // newest version beside the thread; any other local link is inert text
+  // (links.ts). Kept stable across renders, so raw-HTML blocks do not redraw
+  // their links on every pick.
   const openRef = useRef(onOpenAttachment);
   openRef.current = onOpenAttachment;
   const openReplyFileRef = useRef(replyFiles?.onOpen);
@@ -81,7 +83,7 @@ export function useBodyLinks({
         const src = replyLink.src;
         return { kind: 'open', title: 'Show the drawing', href: src, open: () => setFallback({ src, alt: 'Your drawing' }) };
       }
-      const attachment = attachmentForLink(href, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
+      const attachment = newestAttachmentForLink(href, { attachments: threadAttachments ?? message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
       const named = !attachment && refsOn ? projectFileOfLink(href) : null;
       if (named) {
         // A click opens it beside the thread; with Code review on, its code still shows on hover, with Open in.
@@ -124,7 +126,7 @@ export function useBodyLinks({
         open: () => openRef.current(attachment, attachment.kind === 'html' ? prototypeStart(href) || undefined : undefined),
       };
     },
-    [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles, refsOn],
+    [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, threadAttachments, replyFileList, openInFiles, refsOn],
   );
   return { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink };
 }

@@ -23,10 +23,14 @@
  * plus the thread's guided reviews and html blocks ("2 of 10" in the viewer,
  * "11 artifacts" in the grid when one message carries a guide).
  *
+ * A file attached again by later messages (one realpath) is one artifact, the
+ * newest record, at its message: agents re-send a plan or a mock as it changes,
+ * and the person wants its latest version, not one tile per send.
+ *
  * Pure: no DOM, no fetch.
  */
 
-import type { InboxAttachmentState, InboxGuideRef, InboxMessageWire } from '@plannotator/core/inbox-types';
+import type { InboxAttachment, InboxAttachmentState, InboxGuideRef, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { isInboxAnnotatableKind } from '@plannotator/core/inbox-types';
 import { inboxHtmlBlocksOf } from '@plannotator/core/inbox-artifact-pins';
 import { inboxHtmlArtifactKey } from '@plannotator/core/inbox-html-blocks';
@@ -54,9 +58,10 @@ export interface FileArtifact extends ArtifactOrigin {
   /** An image the message's text shows (`inline_images`), not an attached file. */
   inline: boolean;
   /**
-   * The same file attached to the same message as well as shown in its text
-   * (one artifact, two records): the other record's id. Opening either opens
-   * this artifact, and the viewer's stepping counts it once.
+   * The other records this artifact stands for (one artifact, several records):
+   * the same file attached to the same message as well as shown in its text,
+   * and the earlier records of a file attached again by later messages.
+   * Opening any of them opens this artifact, and the viewer's stepping counts it once.
    */
   alsoIds: readonly string[];
 }
@@ -126,8 +131,8 @@ function originNow(message: Pick<InboxMessageWire, 'id' | 'author' | 'created_at
  * review. An image both shown in the text and
  * attached to the same message (the same file on disk) is one artifact, the
  * one in the text, carrying the attached record's id in `alsoIds`. A file
- * whose message is not in the thread (it should not happen) goes last, so the
- * count always matches the records.
+ * attached again by later messages is one artifact (`foldReattachedFiles`). A
+ * file whose message is not in the thread (it should not happen) goes last.
  */
 export function threadArtifacts(
   messages: readonly InboxMessageWire[],
@@ -175,6 +180,47 @@ export function threadArtifacts(
       placed.add(attachment.id);
       out.push({ type: 'file', messageId: attachment.message_id, sender: 'the agent', sentAt: whenTime(attachment.sent_at), at: attachment.sent_at, fromPerson: false, host: null, attachment, inline, alsoIds: [] });
     }
+  }
+  return foldReattachedFiles(out);
+}
+
+/**
+ * Attached files with the same path are one artifact: the newest record stays,
+ * at its message; the earlier records leave the list and their ids (newest
+ * first) join its `alsoIds`. Images a message's text shows are left as they
+ * are (an attached twin of one is already folded into it).
+ */
+function foldReattachedFiles(artifacts: Artifact[]): Artifact[] {
+  const byPath = new Map<string, FileArtifact[]>();
+  for (const artifact of artifacts) {
+    if (artifact.type !== 'file' || artifact.inline) continue;
+    byPath.set(artifact.attachment.path, [...(byPath.get(artifact.attachment.path) ?? []), artifact]);
+  }
+  const dropped = new Set<Artifact>();
+  for (const records of byPath.values()) {
+    if (records.length < 2) continue;
+    const [newest, ...older] = records
+      .map((artifact, order) => ({ artifact, order }))
+      .sort((a, b) => b.artifact.attachment.sent_at.localeCompare(a.artifact.attachment.sent_at) || b.order - a.order)
+      .map(({ artifact }) => artifact);
+    newest!.alsoIds = [...newest!.alsoIds, ...older.flatMap((artifact) => [artifact.attachment.id, ...artifact.alsoIds])];
+    for (const artifact of older) dropped.add(artifact);
+  }
+  return dropped.size === 0 ? artifacts : artifacts.filter((artifact) => !dropped.has(artifact));
+}
+
+const linkAttachments = new WeakMap<readonly InboxMessageWire[], readonly InboxAttachment[]>();
+
+/**
+ * Every attachment of every message of the thread, what a link in any of its
+ * messages may open (links.ts `newestAttachmentForLink`). The same array for
+ * the same messages, so a message that did not change does not draw again.
+ */
+export function threadLinkAttachments(messages: readonly InboxMessageWire[]): readonly InboxAttachment[] {
+  let out = linkAttachments.get(messages);
+  if (!out) {
+    out = messages.flatMap((message) => message.attachments ?? []);
+    linkAttachments.set(messages, out);
   }
   return out;
 }
