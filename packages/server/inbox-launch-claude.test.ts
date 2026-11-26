@@ -47,6 +47,58 @@ describe("agentByShort", () => {
   });
 });
 
+describe("claude agents --json --all past 64 KiB", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A listing like one seen in use (274 sessions, 72 KB): over the 64 Ki every other call keeps. */
+  const listing = (count: number) =>
+    JSON.stringify(
+      Array.from({ length: count }, (_, i) => {
+        const hex = i.toString(16).padStart(8, "0");
+        return { id: hex, cwd: "/home/someone/projects/a-repository-with-a-long-name", kind: "bg", startedAt: 1764075600000 + i, sessionId: `${hex}-0000-4000-8000-000000000000`, name: `Inbox session number ${i}`, state: "stopped" };
+      }).concat([{ id: "f08bbdb5", cwd: "/p", kind: "bg", startedAt: 1, sessionId: "f08bbdb5-0000-4000-8000-000000000000", name: "waits", state: "blocked", status: "waiting", waitingFor: "permission prompt" } as never]),
+    );
+
+  test.skipIf(process.platform === "win32")("the real spawn keeps all of it: every entry parses and the last one's permission prompt reads", async () => {
+    const root = mkdtempSync(join(tmpdir(), "claude-agents-big-"));
+    dirs.push(root);
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    const out = join(root, "agents.json");
+    const text = listing(400);
+    expect(Buffer.byteLength(text)).toBeGreaterThan(64 * 1024);
+    writeFileSync(out, text);
+    writeFileSync(join(bin, "claude"), ["#!/bin/sh", `[ "$1" = agents ] && cat ${JSON.stringify(out)}`].join("\n"), { mode: 0o755 });
+    const env = () => createAgentEnvironmentFor({ platform: process.platform, homeDir: root, env: { HOME: root, PATH: `${bin}:/usr/bin:/bin` } });
+    const logged: string[] = [];
+    const host = createClaudeHost({ environment: async () => env(), files: env, log: (line) => logged.push(line) });
+    const agents = await host.agents();
+    expect(agents?.length).toBe(401);
+    expect(agentByShort(agents!, "f08bbdb5")).toMatchObject({ status: "waiting", waitingFor: "permission prompt" });
+    expect(logged).toEqual([]);
+  });
+
+  test("output that does not parse is logged with its byte count, never read silently as no host", async () => {
+    const cut = listing(400).slice(0, 64 * 1024);
+    const env: AgentEnvironment = { platform: "darwin", homeDir: "/home", env: {}, which: () => "/bin/claude", run: async () => ({ exitCode: 0, timedOut: false, stdout: cut, stderr: "" }) };
+    const logged: string[] = [];
+    const host = createClaudeHost({ environment: async () => env, files: () => env, log: (line) => logged.push(line) });
+    expect(await host.agents()).toBeNull();
+    expect(logged).toEqual([`claude agents --json --all: ${64 * 1024} bytes of stdout that are not a JSON list; no host read`]);
+  });
+
+  test("a failed read is logged too", async () => {
+    const env: AgentEnvironment = { platform: "darwin", homeDir: "/home", env: {}, which: () => "/bin/claude", run: async () => ({ exitCode: 1, timedOut: false, stdout: "", stderr: "boom\nmore" }) };
+    const logged: string[] = [];
+    const host = createClaudeHost({ environment: async () => env, files: () => env, log: (line) => logged.push(line) });
+    expect(await host.agents("/p")).toBeNull();
+    expect(logged).toEqual(["claude agents --json --all --cwd /p: exit 1, 0 bytes of stdout; no host read (boom)"]);
+  });
+});
+
 describe("startFailureOf", () => {
   test("Claude's untrusted-folder error becomes the run line's untrusted cause with the folder", () => {
     const failure = startFailureOf({ exitCode: 1, timedOut: false, stdout: "", stderr: "Error: Workspace not trusted. Run claude in /x first." }, "~/oss/side");
