@@ -34,7 +34,7 @@ import { applyStreamRecord } from './data/apply/stream';
 import { useRowWrites, type RowDrawing } from './data/actions/rows';
 import { keepSavedQuestions } from './data/actions/picks';
 import { useSettingsSaves } from './data/actions/settings';
-import { useListShown } from './app/useListView';
+import { leaveRecentViewOnEscape, useListShown } from './app/useListView';
 import { useListTags } from './app/useListTags';
 import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
 import { decideAwayToast, tuckDecide } from './app/decideTuck';
@@ -81,7 +81,7 @@ import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { readListView, useListView, type ListSort } from './listView';
 import { useShowLight } from './showLight';
 import { useHeldRead } from './app/useHeldRead';
-import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
+import { ListFilterEmpty, RecentViewEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, drawnSection, listGroups, markHeldRowArchived, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, shownAfter, waitingCount, type OpenThread, priorityChangedRows } from './held';
 import { deliveriesReadList } from './rowDelivery';
 import { inboxAgentsWatched, setInboxAgents, inboxAgentsNow } from './agentsList';
@@ -252,6 +252,7 @@ import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/Perso
 import { usePriorityReveal } from './components/usePriorityReveal';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
+import { InboxLaunchDialog } from './launchDialog';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
 import { TabIconChoice } from './components/TabIconChoice';
@@ -2041,8 +2042,8 @@ function Inbox() {
         closeTo(systemBack);
         return;
       }
-      // An open file owns Escape (the HTML viewer's ladder, the composers).
-      if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return;
+      // An open file owns Escape (the HTML viewer's ladder, the composers). With no thread open, the list's last rung: Recent activity's view goes.
+      if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return leaveRecentViewOnEscape(event, routeRef.current);
       // Something inside the thread already used this Escape (the reply's choice at Send goes back to the reply).
       if (event.defaultPrevented) return;
       const target = event.target as HTMLElement | null;
@@ -3651,7 +3652,7 @@ function Inbox() {
   useEffect(() => {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
-  const { listSortShown, latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
+  const { recentEmpty, listSortShown, latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
     latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, listSort, combining: bulk.combines.waiting,
     tags: {
       listTags,
@@ -5494,7 +5495,7 @@ function Inbox() {
           phone={phone}
           reconnecting={streamDead}
           empty={
-            listHeld ? null : listFilterEmpty ? (
+            listHeld ? null : recentEmpty ? <RecentViewEmpty /> : listFilterEmpty ? (
               <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped, filterTag !== null))} />
             ) : filterTag ? (
               <div className="ib-empty-list" data-tag-empty="">
@@ -5915,14 +5916,13 @@ function Inbox() {
         <GrillMeTip phone={phone} onClose={grillMeTipReveal.close} />
       )}
       {starReveal.stage === 'open' && (
-        <StarAskCard
-          shape="corner"
-          canStar={starReveal.canStar}
+        <StarAskCard shape="corner" canStar={starReveal.canStar} onLeave={starReveal.close}
           onStar={() => inboxApi.starAskStar().then((answer) => answer.starred === true)}
           onAnswer={(answer) => void inboxApi.starAskAnswer(answer)}
-          onLeave={starReveal.close}
         />
       )}
+      {/* The launch dialog (launchDialog.tsx): ahead of every other one-time dialog, once per computer. */}
+      <InboxLaunchDialog due={settings?.reveal?.launch === true} ready={latest !== null && !firstRun && !tourOn && soonClear} heldBack={oneTimeHeldBack} />
       {sidebarTip.stage === 'open' && <SidebarTipCard gone={!sidebarDocked || !listIntroClear || sidebarCustomizing} onSay={say} onLeave={sidebarTip.close} />}
       {listViewChoiceOpen && (
         <ListViewIntro

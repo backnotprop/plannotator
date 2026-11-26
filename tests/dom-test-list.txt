@@ -99,6 +99,7 @@ packages/inbox/replyBoxTyping.test.tsx
 packages/inbox/paneFailureKeepsReply.test.tsx
 packages/inbox/replyFootPhone.test.tsx
 packages/inbox/replyDraftNeverLost.test.tsx
+packages/inbox/farReplyDrafts.test.tsx
 packages/inbox/composeAutosave.test.tsx
 packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
@@ -207,6 +208,7 @@ packages/inbox/listLook.test.tsx
 packages/inbox/threadPanel.test.tsx
 packages/inbox/listViewMenu.test.tsx
 packages/inbox/listRecentHolds.test.tsx
+packages/inbox/listRecentView.test.tsx
 packages/inbox/agentsView/agentsList.test.tsx
 packages/inbox/archivedGroup.test.tsx
 packages/inbox/lineLatch.test.tsx
@@ -956,6 +958,10 @@ packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx
 packages/inbox/skillFileOpen.dom.test.tsx
 packages/inbox/reviewAnalysis.test.tsx
+packages/ui/components/LaunchDialog.test.tsx
+packages/ui/components/LaunchAnnouncement.test.tsx
+packages/ui/components/GlowStars.test.tsx
+packages/inbox/launchDialog.test.tsx
 packages/inbox/reviewSettings/reviewsSettings.test.tsx
 packages/inbox/guide/usePowerUp.test.tsx
 packages/inbox/guide/useViewedTicks.test.tsx

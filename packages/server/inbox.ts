@@ -352,6 +352,8 @@ import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routin
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
+import { configLaunchShownStore, createLaunchSwitch, launchSwitchEndpointNow } from "@plannotator/shared/launch-switch";
+import { createInboxLaunchQueue } from "./inbox-launch-queue";
 import { createInboxEmbedPages, createInboxEmbeds } from "./inbox-embeds";
 import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
@@ -1044,9 +1046,10 @@ export const WINDOW_CSP = [
   // diagram's) must not make the browser call a site when the person reads it.
   // An attached HTML page shows its web pictures from a document of its own,
   // under its own policy (inbox-pages.ts), never as a srcdoc under this one.
-  // The one exception is the project's own hosted folder, for the one-time
-  // dialogs' banners (core/inbox-personal-agents.ts).
-  `img-src 'self' data: blob: ${PERSONAL_AGENTS_BANNER_BASE}`,
+  // The exceptions are two folders of the project's own site: the hosted
+  // folder, for the one-time dialogs' banners (core/inbox-personal-agents.ts),
+  // and the launch dialog's art (ui utils/launchDialogWords.ts LAUNCH_ART_BASE).
+  `img-src 'self' data: blob: ${PERSONAL_AGENTS_BANNER_BASE} https://plannotator.ai/launch/`,
   // Video and audio as the pictures: an attached HTML page drawn as a srcdoc
   // inherits this policy, so its `<video src="data:…">` (or a blob:) plays.
   // Never from the web, for the same reason.
@@ -1415,6 +1418,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
   // The sidebar's Update button (packages/server/inbox-updates.ts): the release
   // check, the binary on disk, Update now, Remind me tomorrow.
+  // The launch switch (packages/shared/launch-switch.ts): its reader runs in the background from the start, at most
+  // every 3 hours while no launch is on (launchRefreshMs); the window's claim answers from the kept copy only.
+  const launchSwitch = createLaunchSwitch({ dataDir: () => dataDir, endpoint: () => launchSwitchEndpointNow(), shown: configLaunchShownStore });
+  launchSwitch.start();
+  // Its place in the line of one-time dialogs: first, until a claim is answered (inbox-launch-queue.ts).
+  const launchQueue = createInboxLaunchQueue(launchSwitch, () => dataDir);
   let lastDailyPingCheck = 0;
   const updates = createInboxUpdates({
     dataDir,
@@ -3904,8 +3913,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The star ask's show (aside): the grill-me tip (`lastResort`) never goes on its day.
       // The grill-me tip's too: the gap counts from either (`revealGapFree`).
       asideShownAt: revealLastShown([reveals?.star?.shownAt, reveals?.grill_me_tip?.shownAt]),
-      // The tips outside the line (the Sidebar tip, the Launch tip): they start the gap too.
-      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt]),
+      // The tips outside the line (the Sidebar tip, the Launch tip) and the launch dialog: they start the gap too.
+      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt, ...Object.values(config.launch ?? {}).map((record) => record?.shownAt)]),
+      // The launch dialog (launch-switch.ts), due here: ahead of everything, so the line holds until it is shown.
+      launchDue: launchQueue.holdsLine(),
     };
     // The offers, each one's "undecided" while unshown. They read the state above (Routines' walk waits while the line
     // would refuse it anyway), so they come after it.
@@ -4091,6 +4102,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
   const againIn = (at: number | null, now: Date): number | null => (at === null ? null : at - now.getTime());
+  const soonest = (a: number | null, b: number | null): number | null => (a === null ? b : b === null ? a : Math.min(a, b));
   /** `state` with the waits `revealNow` starts at `now` (reveals.ts `revealWaitStarts`) kept. */
   const waitingFrom = (state: RevealState, now: Date): RevealState => {
     const starts = revealWaitStarts(state, now);
@@ -4112,13 +4124,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // null when none can: a page left loaded asks again once, then, and keeps no other timer for the line.
       // With `next` and the `ahead` offers waiting from this read on (`revealNow` has just kept them), so the end of
       // their patience and their 14 days is named too.
-      again_in: snoozeIntroRelease ? againIn(revealAgainAt(waitingFrom(state, now), now), now) : null,
+      // A kept launch that starts later names its start too (inbox-launch-queue.ts `startsIn`).
+      again_in: soonest(snoozeIntroRelease ? againIn(revealAgainAt(waitingFrom(state, now), now), now) : null, launchQueue.startsIn(now.getTime())),
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
       launch_tip: launchTipDue(launchTipState()) && revealLineFree("setup", state, now),
       // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.
       sidebar_tip: sidebarTipDue(sidebarTipState(), now.toISOString()) && revealLineFree("setup", state, now),
       // The Group tip (outside the line): the page may claim it at the first hover of a band with a menu.
       band_tip: bandTipDue(bandTipState(), now.toISOString()) && revealLineFree("setup", state, now),
+      // The launch dialog (launch-switch.ts): due on this computer, so the page claims it now (`/api/inbox/launch-switch`).
+      launch: launchQueue.due(),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build. */
@@ -4427,10 +4442,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Windows only: the phone's door (contract 7.9) gets hello, record, status and the heartbeat.
         const sendReach = () => send(`event: reach\ndata: ${JSON.stringify(windows.reach(notificationsState().enabled))}\n\n`);
         const stopReach = windowId ? windows.subscribe(sendReach) : () => {};
-        // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows only.
+        // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows, and a
+        // linked machine that asks (`drafts=1`, mark `reply-drafts`: its windows show this Inbox's threads' drafts).
         // A compose draft has no thread: `{ compose: true }` (additive; a window that predates it skips the frame).
         const onDraft = (threadId: string | null) => send(`event: drafts\ndata: ${JSON.stringify(threadId === null ? { compose: true } : { thread_id: threadId })}\n\n`);
-        if (windowId) draftListeners.add(onDraft);
+        if (windowId || url.searchParams.get("drafts") === "1") draftListeners.add(onDraft);
         // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
         const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
         if (windowId && ask.allowed(req, via)) askListeners.add(onAsk);
@@ -5755,6 +5771,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onDraftsChange: () => {
       for (const listener of draftListeners) listener(null);
     },
+    farReplies: () => machines.replyDraftRows(),
     onSent: noteSend,
   });
   compose.sweep();
@@ -7851,6 +7868,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json(await inboxStarAction(starAsk, body));
       }
 
+      // The launch switch's one-time dialog (packages/shared/launch-switch.ts): `action` claim (the kept copy only),
+      // shown (stamps it shown on this computer, once across every surface) or answer (`opened` | `dismissed`).
+      if (path === "/api/inbox/launch-switch") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const action = body.action;
+        if (action !== "claim" && action !== "shown" && action !== "answer") return json({ error: "action: claim, shown or answer." }, 400);
+        const answered = launchQueue.action(action, body);
+        return json(answered.body, answered.status);
+      }
+
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this
       // computer or the owner's phone to open the Board claims it, once per machine (config.json
       // `inboxBoardIntro.shownAt`).
@@ -8997,6 +9026,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     machines = createInboxMachines({
       dataDir,
       serverSession,
+      follows,
       computerName: devices.machineDoor.computerName,
       door: devices.machineDoor,
       readBody,

@@ -1,6 +1,7 @@
 /**
- * The list filter's "Recent activity" (approval "inbox-recent-activity-filter") in a real Chromium against the
- * compiled binary, agents writing through `plannotator inbox mcp` (scripts/inbox-sim.ts):
+ * "Recent activity" (approval "inbox-recent-activity-filter"; since 2026-11-26 a view of the list, not a filter:
+ * listRecentView.ts, the bar RecentViewBar.tsx) in a real Chromium against the compiled binary, agents writing
+ * through `plannotator inbox mcp` (scripts/inbox-sim.ts):
  *
  *  - before anything else, three threads seeded with the person's replies minutes apart (Ada Novak's 4 min ago, Bob
  *    Tully's 18, Charlie Dunn's 41, which its agent has answered since, 30 min ago): with the pick on they draw newest
@@ -10,25 +11,28 @@
  *  - the person opens two threads by clicking their rows (Charlie Dunn's, then Bob Tully's: both wait on them), gives
  *    a third a 👍 Looks good (Ada Novak's, which goes to Quiet), stars a fourth (tidying, which never counts) and
  *    leaves a fifth alone (only an agent wrote there);
- *  - the funnel's menu offers Recent activity beside Not seen, with a mark of its own (not Updated's clock), counting
- *    the three;
+ *  - the funnel's menu offers Recent activity right under Not seen, with a mark of its own (not Updated's clock), with
+ *    no count and no tick; picking it closes the menu and the bar shows above the list ("Recent activity", Done);
  *  - on, the list holds those three only, as one list with no group bands, newest act first: Ada Novak's (the 👍, in
- *    Quiet), Bob Tully's, Charlie Dunn's (though Charlie Dunn's has the newest message); a reload keeps it, and so does
- *    the Agents view;
- *  - with the pick on, the person opens a row: it stays where it is while the thread is open and through the opening
+ *    Quiet), Bob Tully's, Charlie Dunn's (though Charlie Dunn's has the newest message); the funnel has no badge (it is
+ *    not a filter); the Agents view keeps it; a reload ends it (it is kept nowhere), and so does leaving the list;
+ *  - with the view on, the person opens a row: it stays where it is while the thread is open and through the opening
  *    look's list read, and a thread acted in meanwhile (a film played in another window) is not drawn yet; closing
- *    the thread settles the list, both now at the top;
- *  - ticked again, it turns off: the Smart groups back as they were, every thread in the list's own order, no badge.
+ *    the thread settles the list, both now at the top, the view still on;
+ *  - Escape, one layer at a time: with a thread open it closes the thread and the view stays; the next leaves the
+ *    view; Done leaves it too: the Smart groups back as they were, every thread in the list's own order, no badge.
  *
  * What this catches: an open by the person that the server never records (the opening look without `opened`), a 👍
- * that does not count, a star that does, the filter sorting by the newest message instead of the person's own act, a
- * pick that does not hold a reload or does not turn off from the same row, the pick drawn with Updated's clock, a
- * filtered list that still draws groups (a fresh act in Quiet under an old one waiting), a view that does not come back,
- * the opened row jumping to the top under the pointer, a thread pushed in at the top while the list holds, a row time
- * that is the thread's newest message's while the list is sorted by the act (the times then read out of order).
+ * that does not count, a star that does, the view sorting by the newest message instead of the person's own act, a
+ * view counted as a filter (a badge, a count or a tick), one that survives a reload or leaving the list, one that a
+ * thread's open or close ends, an Escape that leaves it before the open thread closes or does not leave it after, the
+ * row drawn with Updated's clock, a list that still draws groups (a fresh act in Quiet under an old one waiting), a view
+ * that does not come back, the opened row jumping to the top under the pointer, a thread pushed in at the top while the
+ * list holds, a row time that is the thread's newest message's while the list is sorted by the act (the times then
+ * read out of order).
  *
- * Shots land in PLANNOTATOR_E2E_PROOF_DIR/recent-activity-filter: 01 the menu open, 02 the list with the filter on,
- * 03 the list after turning it off, 08 (dark) and 09 (light) the seeded threads filtered, one list newest first by
+ * Shots land in PLANNOTATOR_E2E_PROOF_DIR/recent-activity-filter: 01 the menu open, 02 the list with the view on,
+ * 03 the list after leaving it, 04 a thread open with the view on, 08 (dark) and 09 (light) the seeded threads filtered, one list newest first by
  * replies minutes apart, each row at its act's time (no pointer, no focus ring on them), 10 (dark) and 11 (light) the
  * same on a phone 390 wide, 12 (light) on a phone 320 wide. Build the binary first (see inbox.spec.ts), then
  * `bun run test:e2e:inbox`.
@@ -71,6 +75,18 @@ test.describe.configure({ mode: 'serial' });
 const rowButton = (page: Page, id: string) => page.locator(`.ib-lbody [data-thread-id="${id}"]`);
 const listFilter = (page: Page) => page.locator('.ib-lhead [data-list-filter]');
 const recentPick = (page: Page) => page.locator('[data-list-filter-menu] [data-list-filter-recent]');
+/** Recent activity's bar above the list (shown while its view is on). */
+const recentBar = (page: Page) => page.locator('.ib-listcol [data-recent-view]');
+
+/** The menu's Recent activity row: the menu closes, the bar shows, and the funnel stays at rest (not a filter). */
+async function viewOn(page: Page) {
+  await listFilter(page).click();
+  await recentPick(page).click();
+  await expect(page.locator('[data-list-filter-menu]')).toHaveCount(0);
+  await expect(recentBar(page)).toBeVisible();
+  await expect(recentBar(page)).toContainText('Recent activity');
+  await expect(page.locator('[data-list-filter-count]')).toHaveCount(0);
+}
 /** The list's thread ids, top to bottom. */
 const listOrder = (page: Page) => page.locator('.ib-lbody [data-thread-id]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-thread-id')));
 
@@ -284,10 +300,7 @@ test("the seeded replies minutes apart: one list newest first, each row at its a
   const [off] = await rowTimes(page, [seeded.charlie]);
   expect(off!.shown).toBe(off!.own);
   expect(off!.shown).not.toBe(off!.act);
-  await listFilter(page).click();
-  await recentPick(page).click();
-  await expect(recentPick(page)).toHaveAttribute('aria-checked', 'true');
-  await page.keyboard.press('Escape');
+  await viewOn(page);
   await expect.poll(() => listOrder(page)).toEqual([seeded.ada, seeded.bob, seeded.charlie]);
   await expect(bands(page)).toHaveCount(0);
   await timesReadDown(page, seeded);
@@ -299,6 +312,9 @@ test("the seeded replies minutes apart: one list newest first, each row at its a
   await expect(bands(page)).toHaveCount(0);
   await timesReadDown(page, seeded);
   await noOverflow(page);
+  // Done is a thumb's target on a phone.
+  const done = await page.locator('[data-recent-view-done]').boundingBox();
+  expect(done!.height).toBeGreaterThanOrEqual(44);
   await still(page);
   await shotBoth(page, '10-phone-act-times-dark.png', '11-phone-act-times-light.png');
   // The narrowest phone, 320 wide: the same, and nothing wider than the screen.
@@ -311,11 +327,10 @@ test("the seeded replies minutes apart: one list newest first, each row at its a
   await shot(page, '12-phone-320-light.png');
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(listFilter(page)).toBeVisible();
-  // Off again for what follows.
-  await listFilter(page).click();
-  await recentPick(page).click();
-  await expect(recentPick(page)).toHaveAttribute('aria-checked', 'false');
-  await page.keyboard.press('Escape');
+  // Done leaves it for what follows.
+  await page.locator('[data-recent-view-done]').click();
+  await expect(recentBar(page)).toHaveCount(0);
+  await expect(bands(page).first()).toBeVisible();
   await expect(page.locator('[data-list-filter-count]')).toHaveCount(0);
   expect(world.errors).toEqual([]);
 });
@@ -349,7 +364,7 @@ test('the person opens two threads, gives a third a 👍 and stars a fourth; onl
   expect(world.errors).toEqual([]);
 });
 
-test("the funnel's menu offers Recent activity beside Not seen, with its own mark, counting the six", async () => {
+test("the funnel's menu offers Recent activity right under Not seen, with its own mark, no count and no tick", async () => {
   const { page, threads } = world;
   // Back to the list with no thread open.
   await page.goto(world.url);
@@ -357,9 +372,10 @@ test("the funnel's menu offers Recent activity beside Not seen, with its own mar
   await listFilter(page).click();
   await expect(recentPick(page)).toBeVisible();
   await expect(recentPick(page)).toHaveText(/Recent activity/);
-  // The three just done and the three seeded.
-  await expect(recentPick(page).locator('.ib-pmi-n')).toHaveText('6');
-  await expect(recentPick(page)).toHaveAttribute('aria-checked', 'false');
+  // A view, not a pick: no count and no tick.
+  await expect(recentPick(page).locator('.ib-pmi-n')).toHaveCount(0);
+  await expect(recentPick(page).locator('.ib-pc-tick svg')).toHaveCount(0);
+  expect(await recentPick(page).getAttribute('aria-checked')).toBeNull();
   // It sits right under Not seen, before Updated (Filter by typing's row is alone above them).
   const items = page.locator('[data-list-filter-menu] [role="menuitemcheckbox"], [data-list-filter-menu] [role="menuitem"]');
   const words = await items.evaluateAll((all) => all.map((item) => item.querySelector('.ib-pmi-l')?.textContent ?? ''));
@@ -372,15 +388,17 @@ test("the funnel's menu offers Recent activity beside Not seen, with its own mar
   expect(world.errors).toEqual([]);
 });
 
-test('on: only the six, one list newest first by the act, no group bands; a reload and the Agents view keep it', async () => {
+test('on: only the six, one list newest first by the act, no group bands, no badge; the Agents view keeps it; a reload and leaving the list end it', async () => {
   const { page, threads, seeded } = world;
   const newestFirst = [threads.ada, threads.bob, threads.charlie, seeded.ada, seeded.bob, seeded.charlie];
   await recentPick(page).click();
-  await expect(recentPick(page)).toHaveAttribute('aria-checked', 'true');
-  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-list-filter-menu]')).toHaveCount(0);
+  await expect(recentBar(page)).toBeVisible();
   await expect(rowButton(page, threads.starred)).toHaveCount(0);
   await expect(rowButton(page, threads.untouched)).toHaveCount(0);
-  await expect(page.locator('[data-list-filter-count]')).toHaveText('1');
+  // Not a filter: no badge, and nothing kept in the filter's cookie.
+  await expect(page.locator('[data-list-filter-count]')).toHaveCount(0);
+  expect((await world.context.cookies()).find((c) => c.name === 'plannotator-inbox-list-filter')?.value ?? '').not.toContain('recent');
   // One list: Ada Novak's 👍 (in Quiet) first, then Bob Tully's and Charlie Dunn's opens (both waiting on the person),
   // then the seeded replies, minutes old.
   await expect.poll(() => listOrder(page)).toEqual(newestFirst);
@@ -388,14 +406,29 @@ test('on: only the six, one list newest first by the act, no group bands; a relo
   await still(page);
   await shot(page, '02-filter-on.png');
 
-  await page.reload();
-  await expect(rowButton(page, threads.bob)).toBeVisible();
-  await expect.poll(() => listOrder(page)).toEqual(newestFirst);
-  // The Agents view draws the same one list while the pick is on, and the groups' view is chosen back.
+  // The Agents view draws the same one list while the view is on, and the groups' view is chosen back.
   await chooseView(page, 'agents');
   await expect.poll(() => listOrder(page)).toEqual(newestFirst);
   await expect(bands(page)).toHaveCount(0);
   await chooseView(page, 'grouped');
+  await expect(recentBar(page)).toBeVisible();
+
+  // A reload: kept nowhere, so the list comes back as it was.
+  await page.reload();
+  await expect(rowButton(page, threads.bob)).toBeVisible();
+  await expect(recentBar(page)).toHaveCount(0);
+  await expect(bands(page).first()).toBeVisible();
+  // Leaving the list (Artifacts) and coming back: off too.
+  await viewOn(page);
+  await page.evaluate(() => void (location.hash = 'artifacts'));
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#artifacts');
+  await page.waitForTimeout(400);
+  await page.evaluate(() => void (location.hash = ''));
+  await expect(rowButton(page, threads.bob)).toBeVisible();
+  await expect(recentBar(page)).toHaveCount(0);
+  // On again for what follows.
+  await viewOn(page);
+  await expect.poll(() => listOrder(page)).toEqual(newestFirst);
   expect(world.errors).toEqual([]);
 });
 
@@ -420,18 +453,41 @@ test('on, an opened row stays put through its look and the read after it; a thre
   // Held: nothing moved, and the untouched thread is not drawn yet.
   expect(await listOrder(page)).toEqual(before);
   await expect(rowButton(page, threads.untouched)).toHaveCount(0);
-  // The close settles the list: the film's thread and the opened one on top, newest first.
+  await expect(recentBar(page)).toBeVisible();
+  await still(page);
+  await shot(page, '04-thread-open.png');
+  // The close settles the list: the film's thread and the opened one on top, newest first; the view stays.
   await page.locator('section.ib-pane [aria-label="Close the thread"]').click();
   await expect.poll(() => listOrder(page)).toEqual([threads.untouched, threads.charlie, threads.ada, threads.bob, seeded.ada, seeded.bob, seeded.charlie]);
+  await expect(recentBar(page)).toBeVisible();
   expect(world.errors).toEqual([]);
 });
 
-test('ticked again it turns off: the Smart groups back, every thread in the list order, no badge', async () => {
+test('Escape, one layer at a time: search closed first leaves no hold; the open thread closes first, the view stays; the next Escape leaves it: the Smart groups back, no badge', async () => {
   const { page, threads } = world;
-  await listFilter(page).click();
-  await recentPick(page).click();
-  await expect(recentPick(page)).toHaveAttribute('aria-checked', 'false');
+  // Search once and close it: App keeps its <dialog> (and the results' listbox) mounted, closed. Its Escape is its own,
+  // and once closed it never takes the view's.
+  await expect(recentBar(page)).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(page.locator('dialog[data-search-palette][open]')).toBeVisible();
   await page.keyboard.press('Escape');
+  await expect(page.locator('dialog[data-search-palette][open]')).toHaveCount(0);
+  await expect(page.locator('dialog[data-search-palette]')).toHaveCount(1);
+  await expect(recentBar(page)).toBeVisible();
+  await rowButton(page, threads.bob).click();
+  await expect(page.locator('section.ib-pane [aria-label="Close the thread"]')).toBeVisible();
+  // Focus where the app leaves it: no blur before either Escape.
+  const focusedRow = () => page.evaluate(() => document.activeElement?.closest('.ib-lbody [data-thread-id]')?.getAttribute('data-thread-id') ?? null);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('section.ib-pane [aria-label="Close the thread"]')).toHaveCount(0);
+  await expect(recentBar(page)).toBeVisible();
+  // The close puts focus back on Bob Tully's row.
+  await expect.poll(focusedRow).toBe(threads.bob);
+  await page.keyboard.press('Escape');
+  await expect(recentBar(page)).toHaveCount(0);
+  // The groups drawn back: focus stays on Bob Tully's row (it waits on the person, so a group shows it), never on the page.
+  await expect.poll(focusedRow).toBe(threads.bob);
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
   await expect(page.locator('[data-list-filter-count]')).toHaveCount(0);
   await openQuiet(page);
   for (const id of Object.values(threads)) await expect(rowButton(page, id)).toBeVisible();

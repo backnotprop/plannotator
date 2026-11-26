@@ -26,6 +26,7 @@ const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as t
 const { resetListViewForTests } = await import('./listView');
 const { NO_LIST_FILTER, filterListSections } = await import('./listFilter');
 const { useRecentActivity, resetActedHereForTests } = await import('./listFilterRecent');
+const { recentViewSections } = await import('./listRecentView');
 const { personOpened, resetRecentActsForTests, routeChanged, useRecentActs } = await import('./recentActs');
 const { shortTime } = await import('./format');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
@@ -60,7 +61,6 @@ afterEach(() => {
 const TIDY: TidyController = { surface: 'list', scope: null, plan: null, run: null, start: async () => null, refresh: () => {} };
 const NOW = Date.now();
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
-const ON = { ...NO_LIST_FILTER, recent: true };
 
 /** Each row's newest message: three days back, so its time never reads as one of the acts' (minutes ago). */
 const LAST = ago(3 * 24 * 60);
@@ -91,13 +91,13 @@ function sections(rows: InboxListRow[]): InboxListSection[] {
 }
 
 /**
- * The list as App draws it with the pick on (`on`): the filter, then Recent activity's held rows and places. `open`:
+ * The list as App draws it with the view on (`on`): the filter, then Recent activity's held rows and places. `open`:
  * the thread open; `covered`: it covers the list (a phone, a stacked window).
  */
 function Shown({ listed, sort, open, on = true, covered = false, phone = false }: { listed: InboxListSection[]; sort: ListSort; open: string | null; on?: boolean; covered?: boolean; phone?: boolean }) {
   const recent = useRecentActivity(on, sort, open, () => covered);
-  const kept = filterListSections(listed, on ? ON : NO_LIST_FILTER, Date.now());
-  const drawn = recent.held ? recent.held(listed, kept, Date.now()) : kept;
+  const kept = filterListSections(listed, NO_LIST_FILTER, Date.now());
+  const drawn = recent.held ? recentViewSections(listed, kept, recent.held, Date.now()) : kept;
   return (
     <SidebarProvider>
       <InboxList
