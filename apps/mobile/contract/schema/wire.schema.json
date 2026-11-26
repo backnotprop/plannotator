@@ -6382,6 +6382,10 @@
         "another_session": {
           "type": "boolean"
         },
+        "script": {
+          "type": "boolean",
+          "const": true
+        },
         "asking": {
           "type": "object",
           "properties": {

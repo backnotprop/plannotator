@@ -14,6 +14,7 @@
  * whole sentence, uncut: the button's accessible name, the tooltip while anything is cut, the live region. Pure.
  */
 import { inboxAgentName, type InboxListRow } from '@plannotator/core/inbox-types';
+import { rowAgentName } from './scriptAuthor';
 
 /** What came on a thread: a thread new to the list, an agent's question, an agent's reply, or a snoozed thread back. */
 export type ArrivalKind = 'thread' | 'question' | 'reply' | 'back';
@@ -53,7 +54,8 @@ function writer(row: InboxListRow): string {
   if (row.last_agent) return inboxAgentName({ kind: 'agent', host: row.last_agent.host, name: row.last_agent.name ?? null });
   // A thread the person started: its agent is the one it is addressed to (InboxList's `rowAgent`).
   if (row.addressee) return inboxAgentName({ kind: 'agent', host: row.addressee.host, name: null });
-  return inboxAgentName(row.author);
+  // As the row's tiles name it: "Script" for a script's thread, the session for one a session took over.
+  return rowAgentName(row, row.author);
 }
 
 /**
