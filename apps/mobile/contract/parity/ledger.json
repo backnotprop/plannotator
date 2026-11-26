@@ -24006,6 +24006,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-post-threads-id-swarm-add",
+      "title": "door:POST threads/:id/swarm/add",
+      "surface": [
+        "door:POST threads/:id/swarm/add"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-swarm-add",
+      "title": "window:/api/inbox/threads/:id/swarm/add",
+      "surface": [
+        "window:/api/inbox/threads/:id/swarm/add"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

@@ -5,8 +5,9 @@
  * - Words in a ghost thread (another member's `swarm say`, or the person's from the ghost pane): a notice
  *   (`moved` with its own first line, `notice`), so it never reads as the person's reply and asks for no answer in
  *   the thread (`SWARM_WORDS.wake`: answer in the ghost thread only when asked or needed, never only to acknowledge).
- * - The person's message that started a swarm (its skills block names `/swarm`): the words, then the join line with
- *   the thread's id (`swarmJoinLine`), so each agent can run it as it is.
+ * - The person's message that started a swarm (its skills block names `/swarm`), or a later one of theirs that names it
+ *   in a swarm's thread (Add an agent): the words, then the join line with the thread's id (`swarmJoinLine`), so each
+ *   agent can run it as it is.
  */
 
 import type { InboxMessage } from "@plannotator/core/inbox-types";
@@ -57,8 +58,10 @@ export function swarmWakeOf(store: InboxStore, reply: InboxMessage, command: Inb
   }
   // Decided from the root itself, never from whether the swarm's record is written yet: a held poll or a far member's
   // wake builds this inside the very write that starts it (inbox.ts). Only a swarm the person turned off says no.
-  if (reply.thread_id === reply.id && inboxMessageStartsSwarm(reply) && (store.swarmOf(reply.id)?.on ?? true)) {
-    return { ...command, body: `${command.body}\n\n${swarmJoinLine(reply.id)}` };
+  // A later message of the person's that names `/swarm` in a swarm's thread (Add an agent's) carries it the same way.
+  const swarm = store.swarmOf(reply.thread_id);
+  if (inboxMessageStartsSwarm(reply) && (reply.thread_id === reply.id ? (swarm?.on ?? true) : !!swarm?.on)) {
+    return { ...command, body: `${command.body}\n\n${swarmJoinLine(reply.thread_id)}` };
   }
   return command;
 }

@@ -352,6 +352,9 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST swarm": "now",
   // The ghost pane's press on another computer's thread: the person's words to the agents, Turn off, or "looked at".
   "POST threads/:id/swarm": "now",
+  // Swarm's Add an agent: the person's message to the agent, written once under its key, so it waits for a computer
+  // that is away and goes when it is back, as a reply does.
+  "POST threads/:id/swarm/add": "append",
   // A routine on a linked computer (mark `routines`), from a press in a window here. A create carries its
   // `idempotency_key`, which that computer keeps on the routine (one key, one routine); an edit, a turn, a delete
   // and a restore put a state; a Stop names the run it was pressed for (`run`), so a late one never ends a later run.

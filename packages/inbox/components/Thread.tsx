@@ -19,7 +19,7 @@ import { useMessageRefRepos } from '../messageRefRepo';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
-import { afterDraw, useThreadSwarm } from '../swarm/useThreadSwarm';
+import { useThreadSwarm } from '../swarm/useThreadSwarm';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
@@ -4298,7 +4298,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
   const fileOpen = openAttachment !== null || (namedFile !== null && file === null);
-  const swarmUi = useThreadSwarm({ thread, title: barName || heading, phone, fileOpen, closeFile: () => (file ? onOpenFile(null) : onOpenNamedFile?.(null)), onAddAgent: () => { if (!box.open) openBox(); afterDraw(tagAnother); } });
+  const swarmUi = useThreadSwarm({ thread, title: barName || heading, phone, fileOpen, closeFile: () => (file ? onOpenFile(null) : onOpenNamedFile?.(null)), onToast, changed: onChanged });
   // The questions inside the open Markdown file (issue #2828): its cards answer like the body's, through the same
   // pick, draft and Send. A version changed since it was sent may ask otherwise: only the sent text takes answers then.
   const fileOwner = openAttachment ? thread.messages.find((m) => m.id === openAttachment.message_id) : undefined;

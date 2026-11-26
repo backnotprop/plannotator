@@ -119,6 +119,31 @@ test.skipIf(!hasDom)('the Swarm tip up, one Escape still closes New message', as
   expect(closed).toBe(1);
 });
 
+test.skipIf(!hasDom)('the Swarm tip says only what is true today (no task list yet), and goes for good once Swarm is turned on', async () => {
+  const { resetSwarmTipForTests } = await import('./useSwarmTip');
+  resetSwarmTipForTests();
+  revealShows = true;
+  adoptSwarmOn(true);
+  await open();
+  click(inDialog('[data-compose-add-agent]'));
+  click(document.querySelector('[data-compose-session="ses_codex"]'));
+  // It shows once the badge has settled (about two seconds).
+  for (let i = 0; i < 300 && !document.querySelector('[data-swarm-tip]'); i++) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+  }
+  const tip = document.querySelector('[data-swarm-tip]')!;
+  expect([...tip.querySelectorAll<HTMLElement>('[data-swarm-tip-line]')].map((l) => [l.dataset.swarmTipLine, l.textContent])).toEqual([
+    ['together', 'Agents work together'],
+    ['ghost', 'Ghost thread'],
+  ]);
+  // Typing `/swarm` turns it on as the badge does: the tip goes.
+  type(words(), 'Refunds are off by a cent. /swarm ');
+  await until(() => document.querySelector('[data-swarm-tip]') === null, 'the tip gone');
+  expect(inDialog('[data-swarm-badge]')?.getAttribute('aria-pressed')).toBe('true');
+});
+
 test.skipIf(!hasDom)('a phone: the other agents sit inline after To in the foot\'s row, never a row of their own', async () => {
   adoptSwarmOn(true);
   await open({ phone: true });

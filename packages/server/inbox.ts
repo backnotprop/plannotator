@@ -1946,6 +1946,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     farWakes,
     ownSession: (session) => live.allLive().some((entry) => entry.session === session),
     wakes: (session) => live.wakesTagged(session),
+    // Add an agent: the agent picked, resolved as a reply's tag is (this computer's, or a linked one's).
+    tagOf: async (value) => {
+      await farTags.prepare(value);
+      return farTags.targets(value, live.tagTargets);
+    },
     serverSession,
   });
   // `plannotator inbox capability` (inbox-capability-agent.ts): this computer's switches, turned through the settings
@@ -4771,7 +4776,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         subject,
         body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply)),
         url: threadPageUrl(baseUrl, reply.thread_id),
-        tagged: { owner: hostAgentName(store.recipientOf(reply)?.host) },
+        // A message addressed to nobody else (Swarm's Add an agent): the thread's owner.
+        tagged: { owner: hostAgentName((store.recipientOf(reply) ?? store.threadOwner(reply.thread_id))?.host) },
         // Added to the thread ("Add instead"): it works alongside the owner.
         ...(tag.joined ? { added: true } : {}),
         ...(tag.deliver_now_at && sendNow ? { now: true } : {}),
@@ -7593,7 +7599,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const answer = await swarmRoute(req, url, swarmCtx, readBody, fromDeviceDoor.has(req));
         if (answer) return answer;
       }
-      if (path.endsWith("/swarm") && path.startsWith("/api/inbox/threads/")) {
+      if ((path.endsWith("/swarm") || path.endsWith("/swarm/add")) && path.startsWith("/api/inbox/threads/")) {
         const answer = await swarmWindowRoute(req, url, swarmCtx, readBody);
         if (answer) return answer;
       }

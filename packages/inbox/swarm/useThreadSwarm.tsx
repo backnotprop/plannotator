@@ -6,6 +6,7 @@ import { shareThreadSwarm } from './swarmThreadShare';
 import { GhostButton } from './GhostButton';
 import { GhostPane } from './GhostPane';
 import { SwarmSummary } from './SwarmSummary';
+import type { SwarmRemoveHost } from './swarmRemove';
 
 /**
  * Whether the ghost pane covers its thread instead of opening beside it: on the rule an open file follows (stack.ts),
@@ -31,15 +32,6 @@ function useGhostCovers(active: boolean): boolean {
   return active && covers;
 }
 
-/** Runs `fn` once the next frame has drawn (the reply box opened by a press is in the page by then). */
-export function afterDraw(fn: () => void): void {
-  if (typeof requestAnimationFrame !== 'function') {
-    setTimeout(fn, 0);
-    return;
-  }
-  requestAnimationFrame(() => requestAnimationFrame(fn));
-}
-
 /**
  * A swarm thread's pieces in its pane (docs/agent-guides/inbox-swarm.md; approval "inbox-swarm-thread-ui"), only while
  * Swarm is on (swarmOn.ts) and the thread is a swarm (its read's `swarm`): the Ghost button for the top bar, the
@@ -54,8 +46,10 @@ export function useThreadSwarm(input: {
   /** A file is open beside the thread: the ghost pane gives way to it, and opening the ghost pane closes it. */
   fileOpen: boolean;
   closeFile: () => void;
-  /** "Add an agent": the reply box with `@` typed. */
-  onAddAgent: () => void;
+  /** The thread's toast (Remove's, with Undo). */
+  onToast?: SwarmRemoveHost['onToast'];
+  /** Read the thread again (after Add an agent or Remove). */
+  changed?: SwarmRemoveHost['changed'];
 }): { open: boolean; beside: boolean; button: ReactNode; row: ReactNode; pane: ReactNode } {
   const switchOn = useSwarmSwitch();
   const swarm = switchOn ? (input.thread.swarm ?? null) : null;
@@ -85,7 +79,7 @@ export function useThreadSwarm(input: {
     open: shown,
     beside: shown && !input.phone && !covers,
     button: <GhostButton unread={swarm.ghost_unread ?? 0} open={shown} onToggle={() => (shown ? close() : show())} />,
-    row: <SwarmSummary threadId={threadId} swarm={swarm} phone={input.phone} onAddAgent={input.onAddAgent} onGhost={show} />,
+    row: <SwarmSummary threadId={threadId} swarm={swarm} phone={input.phone} host={{ onToast: input.onToast, changed: input.changed }} onGhost={show} />,
     pane: shown ? <GhostPane threadId={threadId} title={input.title} swarm={swarm} phone={input.phone} full={input.phone || covers} onClose={close} /> : null,
   };
 }

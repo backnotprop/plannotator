@@ -95,7 +95,7 @@ export function useSwarmPicks(input: {
     input.after();
   };
 
-  const tip = useSwarmTip(anchor && highlight > 0);
+  const tip = useSwarmTip(anchor && highlight > 0, on);
   if (!anchor) return { row: null, phoneLine: null, picker: null, send: {}, picks, on: false };
 
   const chips = picks.map((p) => (

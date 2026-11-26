@@ -3984,7 +3984,9 @@ export class InboxStore {
     const messages = this.threadMessages(threadId);
     const standing = inboxRemovedNow(messages).get(session);
     if (standing) return { removal: standing, root };
-    const member = this.participantsOf(messages).find((p) => p.session === session);
+    // A swarm's member counts as in its thread, though it never wrote there (a sub-agent that joined).
+    const joined = this.swarmsByThread.get(threadId)?.members.find((m) => m.session === session);
+    const member = this.participantsOf(messages).find((p) => p.session === session) ?? (joined ? { host: joined.host, session, name: joined.name } : undefined);
     if (!member) throw new InboxError("not_in_thread", "That agent is not in this thread.", { field: "session" });
     if (!inboxCanRemove(messages, session)) throw new InboxError("last_agent", "It is the last agent in this thread, so it stays.", { field: "session" });
     const at = this.stamp();
@@ -8703,10 +8705,19 @@ export class InboxStore {
     return (message.tags ?? []).filter((tag) => !tag.delivery && tag.session !== author && this.isSwarmMember(parent, tag.session)).map((tag) => tag.session);
   }
 
-  /** Whether `session` joined the swarm of `threadId`, while it and the switch are on. */
+  /** Whether `session` joined the swarm of `threadId`, while it and the switch are on, and the person has not removed it. */
   isSwarmMember(threadId: string, session: string): boolean {
     const swarm = this.swarmsByThread.get(threadId);
-    return this.swarmSwitchOn() && !!swarm?.on && swarm.members.some((member) => member.session === session);
+    return this.swarmSwitchOn() && !!swarm?.on && swarm.members.some((member) => member.session === session) && !this.swarmRemoved(threadId).has(session);
+  }
+
+  /**
+   * The sessions the person removed from a swarm's thread (Remove, approval "inbox-remove-agent-from-thread"): out of
+   * its members, its status and its ghost thread's "everyone" until the person adds them again. Empty, without reading
+   * the thread, when nobody was ever removed from it.
+   */
+  swarmRemoved(threadId: string): ReadonlyMap<string, InboxRemoval> {
+    return (this.messages.get(threadId)?.removed?.length ?? 0) > 0 ? this.removedFrom(threadId) : new Map();
   }
 
   /**
@@ -8776,6 +8787,24 @@ export class InboxStore {
     const at = this.stamp();
     const message: InboxMessage = { id: inboxId("msg"), project_id: root.project_id, thread_id: ghostId, reply_to: ghostId, author, subject: null, body, created_at: at, resolved_at: null, idempotency_key: key, ...(to.length > 0 ? { tags: to } : {}) };
     this.appendMessage(message, at);
+    return message;
+  }
+
+  /**
+   * Swarm's Add an agent: the person's message in the swarm's own thread to one more agent, `tag` (joined: the agent works
+   * on the thread with the others), whose body carries the `/swarm` skill. It answers the thread's first message and is
+   * addressed to nobody else, so only that agent is handed it; a removed agent is back, as any message of the person's
+   * to it brings it back. Written once per `key`.
+   */
+  writeSwarmAdd(threadId: string, tag: InboxTag, body: string, key: string): InboxMessage {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId || this.ghostParents.has(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const again = this.replyByKey(threadId, key);
+    if (again) return again;
+    const at = this.stamp();
+    const message: InboxMessage = { id: inboxId("msg"), project_id: root.project_id, thread_id: threadId, reply_to: threadId, author: { kind: "person" }, subject: null, body, created_at: at, resolved_at: null, idempotency_key: key, tags: [tag] };
+    this.appendMessage(message, at);
+    this.endSnooze(threadId);
     return message;
   }
 

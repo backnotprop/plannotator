@@ -8,11 +8,13 @@
  *   there, through that computer's door (`POST swarm`, a machine's token only), as that computer's own agents are.
  * - `GET|POST /api/inbox/threads/:id/swarm`: the window's (and the phone's, through the door's allowlist): the swarm,
  *   the ghost thread's words, the person's words to the agents, Turn off, and "looked at" for the Ghost button.
+ * - `POST /api/inbox/threads/:id/swarm/add`: Add an agent (the status view's): one more agent, here or on a linked
+ *   computer, is handed the `/swarm` skill in the swarm's thread (`addSwarmAgent`), as the first agents were.
  *
  * Nothing here is an action of the agent tool (the owner, 2026-11-24: "don't bloat or change the tool").
  */
 
-import type { InboxMessage } from "@plannotator/core/inbox-types";
+import type { InboxMessage, InboxTag } from "@plannotator/core/inbox-types";
 import type { InboxThreadSwarm } from "@plannotator/core/inbox-swarm-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -36,6 +38,7 @@ import {
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { FAR_REPLY_WORDS } from "./inbox-mcp-far-reply";
+import { inboxSkillsBlockFor } from "./inbox-skills";
 import type { SwarmFarJoins, SwarmFarPlace, SwarmHeldSay } from "./inbox-swarm-far";
 
 export const INBOX_SWARM_ROUTE = "/api/inbox/swarm";
@@ -75,12 +78,18 @@ export interface SwarmRouteContext {
   ownSession?: (session: string) => boolean;
   /** Whether this computer's connection of `session` wakes it with the person's reply (the plan card's `wakes`). */
   wakes?: (session: string) => boolean;
+  /**
+   * Add an agent: the agent picked, resolved as a reply's tag is (inbox.ts: the far tags' `targets` over `tagTargets`,
+   * so one on a linked computer is a far tag and its wake goes there through the outbox), refusals unchanged. Absent:
+   * nobody can be added.
+   */
+  tagOf?: (value: unknown) => Promise<InboxTag[]>;
   /** The Inbox's server session: a window write from a page of an earlier run is refused (409), as every window write is. */
   serverSession?: string;
 }
 
 const ASK_FIELDS = ["action", "thread", "as", "for", "text", "to", "by"];
-const STATUS: Record<string, number> = { validation_error: 422, thread_not_found: 404, not_a_swarm: 409, swarm_off: 409, not_in_swarm: 409, several_swarms: 409, name_taken: 409, member_not_found: 404, not_your_session: 403 };
+const STATUS: Record<string, number> = { validation_error: 422, thread_not_found: 404, not_a_swarm: 409, swarm_off: 409, not_in_swarm: 409, several_swarms: 409, name_taken: 409, member_not_found: 404, not_your_session: 403, removed_from_swarm: 409, session_not_live: 409, tag_needs_update: 409 };
 
 /** The command's ask, checked: an unknown field or action is refused. */
 export function swarmAskOf(body: Record<string, unknown>): SwarmAsk {
@@ -220,6 +229,41 @@ export function farSwarmAnswer(ctx: SwarmRouteContext, machine: string, body: Re
   return swarmAgentAnswer(ctx, swarmAskOf(rest), caller, key) as unknown as Record<string, unknown>;
 }
 
+/** What Add an agent hands the agent: `/swarm` and the approved skill text, as a Send pastes it (never a skill of the person's own). */
+export function swarmAddBody(): string {
+  const block = inboxSkillsBlockFor(["swarm"], { codeReview: false, routines: false, diagrams: false, swarm: true }, { discovered: () => [], read: () => null });
+  return ["/swarm", block].filter((part) => part !== "").join("\n\n");
+}
+
+/**
+ * Add an agent (`POST threads/:id/swarm/add`, `{ session, host?, machine?, label?, idempotency_key }`): the agent picked
+ * is handed the `/swarm` skill in the swarm's thread, the person's message to it alone (`store.writeSwarmAdd`), so it
+ * reads the thread and joins as the first agents did (its wake carries the join line, inbox-swarm-wake.ts). It is a
+ * member that has not joined until it runs join. A live agent is added to the thread ("Add instead"); one that reads
+ * the Inbox only is tagged. One the person removed is back. A joined member still in writes nothing. Written once per
+ * key: the outbox sends it again to a linked computer that was away.
+ */
+export async function addSwarmAgent(ctx: SwarmRouteContext, threadId: string, body: Record<string, unknown>): Promise<void> {
+  const { store } = ctx;
+  const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
+  if (!key || key.length > 200) throw new InboxError("validation_error", "idempotency_key: required.");
+  const session = typeof body.session === "string" ? body.session.trim() : "";
+  if (!session) throw new InboxError("validation_error", "session: the agent to add.");
+  for (const field of ["host", "machine", "label"] as const) {
+    if (body[field] !== undefined && body[field] !== null && typeof body[field] !== "string") throw new InboxError("validation_error", `${field}: a string.`);
+  }
+  const swarm = store.swarmOf(threadId);
+  if (!swarm) throw new InboxError("not_a_swarm", SWARM_WORDS.notSwarm(threadId));
+  if (store.replyByKey(threadId, key)) return;
+  if (!swarm.on) throw new InboxError("swarm_off", SWARM_WORDS.turnedOff(threadId));
+  if (!ctx.tagOf) throw new InboxError("session_not_live", "Agents cannot be added here.");
+  const item = { session, ...(body.host ? { host: body.host } : {}), ...(body.machine ? { machine: body.machine } : {}), ...(body.label ? { label: body.label } : {}) };
+  const tag = (await ctx.tagOf([item]))[0];
+  if (!tag) throw new InboxError("session_not_live", "That agent is not live any more: nothing was sent.");
+  if (swarm.members.some((m) => m.session === tag.session) && !store.swarmRemoved(threadId).has(tag.session)) return;
+  store.writeSwarmAdd(threadId, { ...tag, ...(tag.wakes && tag.host ? { joined: true } : {}) }, swarmAddBody(), key);
+}
+
 /** The window's read of a ghost thread: its words, oldest first. */
 export interface SwarmGhostRead {
   swarm: InboxThreadSwarm | null;
@@ -232,7 +276,7 @@ export interface SwarmGhostRead {
  * Null for any other path, and while the switch is off.
  */
 export async function swarmWindowRoute(req: Request, url: URL, ctx: SwarmRouteContext, readBody: (req: Request) => Promise<Record<string, unknown>>): Promise<Response | null> {
-  const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_-]{1,80})\/swarm$/.exec(url.pathname);
+  const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_-]{1,80})\/swarm(\/add)?$/.exec(url.pathname);
   if (!match) return null;
   if (!ctx.on()) return Response.json({ error: "Not found", code: "not_found" }, { status: 404 });
   const { store } = ctx;
@@ -242,6 +286,15 @@ export async function swarmWindowRoute(req: Request, url: URL, ctx: SwarmRouteCo
       const swarm = swarmWire(store, threadId, ctx.live, ctx.far?.nameOf) ?? null;
       return { swarm, ghost: swarm?.ghost_id ? store.ghostMessages(swarm.ghost_id) : [] };
     };
+    if (match[2]) {
+      if (req.method !== "POST") return Response.json({ error: "Use POST." }, { status: 405 });
+      const raw = await readBody(req);
+      if (ctx.serverSession !== undefined && checkServerSession(raw, ctx.serverSession) === "mismatch") {
+        return Response.json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), { status: 409 });
+      }
+      await addSwarmAgent(ctx, threadId, raw);
+      return Response.json(read());
+    }
     if (req.method === "GET") return Response.json(read());
     if (req.method !== "POST") return Response.json({ error: "Use GET or POST." }, { status: 405 });
     // The door's writes carry an idempotency key in the body; these are answered now, never held, so it is not kept. The

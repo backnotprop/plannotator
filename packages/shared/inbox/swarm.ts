@@ -50,6 +50,12 @@ export const SWARM_WORDS = {
   doing: (line: string) => `Your status: ${line}`,
   left: (thread: string) => `You left the swarm of thread ${thread}.`,
   notIn: (thread: string) => `You were not in the swarm of thread ${thread}. Nothing changed.`,
+  /**
+   * The refusal for an agent the person removed from the swarm's thread, on any swarm command there. The words main's
+   * Remove already tells an agent (inbox-mcp.ts `INBOX_REMOVED_FROM_THREAD_TEXT`, approved), its first sentence; a
+   * swarm's own sentence waits for the owner's words.
+   */
+  removed: "You were removed from this thread.",
   ghostNone: "Ghost thread: no messages yet.",
   ghostLatest: (shown: number, all: number) => (shown === all ? `Ghost thread (${all}):` : `Ghost thread, the latest ${shown} of ${all}:`),
   /** The wake's first line for a ghost message (one line, at most 300 characters). */
@@ -76,8 +82,11 @@ export function swarmThreadOf(store: InboxStore, ref: string): string {
 /** The swarm a caller means: the thread it named, else the one swarm it is in. */
 export function callerSwarmThread(store: InboxStore, caller: SwarmCaller, thread?: string | null): string {
   if (thread) return swarmThreadOf(store, thread);
-  const mine = store.allSwarms().filter((swarm) => swarm.on && swarm.members.some((m) => m.session === caller.session));
-  if (mine.length === 0) throw refuse("not_in_swarm", SWARM_WORDS.notJoined);
+  const mine = store.allSwarms().filter((swarm) => swarm.on && swarm.members.some((m) => m.session === caller.session) && !store.swarmRemoved(swarm.thread_id).has(caller.session));
+  if (mine.length === 0) {
+    const out = store.allSwarms().some((swarm) => swarm.on && swarm.members.some((m) => m.session === caller.session));
+    throw out ? refuse("removed_from_swarm", SWARM_WORDS.removed) : refuse("not_in_swarm", SWARM_WORDS.notJoined);
+  }
   if (mine.length > 1) throw refuse("several_swarms", SWARM_WORDS.several(mine.map((swarm) => swarm.thread_id)));
   return mine[0]!.thread_id;
 }
@@ -124,6 +133,8 @@ export function joinSwarm(store: InboxStore, threadId: string, caller: SwarmCall
   const root = store.message(threadId);
   if (!store.swarmOf(threadId) && root && root.thread_id === threadId && inboxMessageStartsSwarm(root)) startSwarm(store, threadId);
   const swarm = onSwarm(store, threadId);
+  // Removed by the person: out until the person adds it again (Add an agent, or any message of theirs to it).
+  if (store.swarmRemoved(threadId).has(caller.session)) throw refuse("removed_from_swarm", SWARM_WORDS.removed);
   const others = swarm.members.filter((m) => m.session !== caller.session);
   const existing = swarm.members.find((m) => m.session === caller.session) ?? null;
   const asked = options.as ? memberName(options.as) : "";
@@ -160,17 +171,24 @@ export function leaveSwarm(store: InboxStore, threadId: string, session: string)
   return true;
 }
 
-/** The caller as a member, or the refusal. */
-function memberOf(swarm: InboxSwarmRecord, session: string): InboxSwarmMember {
+/** The caller as a member, or the refusal (one the person removed is refused as removed). */
+function memberOf(store: InboxStore, swarm: InboxSwarmRecord, session: string): InboxSwarmMember {
   const member = swarm.members.find((m) => m.session === session);
+  if (store.swarmRemoved(swarm.thread_id).has(session)) throw refuse("removed_from_swarm", SWARM_WORDS.removed);
   if (!member) throw refuse("not_in_swarm", SWARM_WORDS.notJoined);
   return member;
+}
+
+/** The members the person has not removed from the thread. */
+function inSwarm(store: InboxStore, swarm: InboxSwarmRecord): InboxSwarmMember[] {
+  const removed = store.swarmRemoved(swarm.thread_id);
+  return removed.size === 0 ? swarm.members : swarm.members.filter((m) => !removed.has(m.session));
 }
 
 /** `swarm doing`: the caller's one line, cleaned. */
 export function setSwarmDoing(store: InboxStore, threadId: string, session: string, text: string): string {
   const swarm = onSwarm(store, threadId);
-  memberOf(swarm, session);
+  memberOf(store, swarm, session);
   const line = sanitizeSwarmDoing(text);
   if (!line) throw refuse("validation_error", SWARM_WORDS.emptyDoing);
   const at = new Date().toISOString();
@@ -222,7 +240,7 @@ export function swarmPlanText(plan: Pick<InboxSwarmPlan, "summary" | "parts">): 
  */
 export function proposeSwarm(store: InboxStore, threadId: string, caller: SwarmCaller, text: string, wakes = false): { plan: InboxSwarmPlan; lines: number; first: boolean } {
   const swarm = onSwarm(store, threadId);
-  const me = memberOf(swarm, caller.session);
+  const me = memberOf(store, swarm, caller.session);
   const asked = parseSwarmPlan(text, me.name);
   if (asked.parts.length === 0 && !asked.summary) throw refuse("validation_error", SWARM_WORDS.emptyPlan);
   const at = new Date().toISOString();
@@ -261,8 +279,9 @@ export function saySwarm(store: InboxStore, threadId: string, from: SwarmCaller 
   const words = text.trim();
   if (!words) throw refuse("validation_error", SWARM_WORDS.emptySay);
   if (words.length > SWARM_SAY_MAX) throw refuse("validation_error", SWARM_WORDS.tooLong);
-  const me = from ? memberOf(swarm, from.session) : null;
-  const others = swarm.members.filter((m) => m.session !== from?.session);
+  const me = from ? memberOf(store, swarm, from.session) : null;
+  // "To everyone" is the members the person has not removed.
+  const others = inSwarm(store, swarm).filter((m) => m.session !== from?.session);
   let targets = others;
   if (to) {
     if (me && sameName(me.name, to)) throw refuse("validation_error", SWARM_WORDS.notYourself);
@@ -308,7 +327,9 @@ function addressed(store: InboxStore, threadId: string): { session: string; host
 export function swarmWire(store: InboxStore, threadId: string, live: SwarmLiveState, nameOf?: (machine: string) => string | null): InboxThreadSwarm | undefined {
   const swarm = store.swarmOf(threadId);
   if (!swarm) return undefined;
-  const joined: InboxSwarmMemberWire[] = swarm.members.map((m) => ({
+  // One the person removed is in neither list until the person adds it again (its ghost words stay).
+  const removed = store.swarmRemoved(threadId);
+  const joined: InboxSwarmMemberWire[] = inSwarm(store, swarm).map((m) => ({
     session: m.session,
     host: m.host,
     name: m.name,
@@ -318,7 +339,7 @@ export function swarmWire(store: InboxStore, threadId: string, live: SwarmLiveSt
     state: live(m, threadId),
     doing: m.doing ?? null,
   }));
-  const waiting = addressed(store, threadId).filter((a) => !swarm.members.some((m) => m.session === a.session));
+  const waiting = addressed(store, threadId).filter((a) => !swarm.members.some((m) => m.session === a.session) && !removed.has(a.session));
   const seen = swarm.person_seen_at ?? "";
   const unread = swarm.ghost_id ? store.ghostMessages(swarm.ghost_id).filter((m) => m.author.kind === "agent" && m.created_at > seen).length : 0;
   return {

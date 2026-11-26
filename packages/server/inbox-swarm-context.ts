@@ -23,6 +23,7 @@ export function inboxSwarmContext(deps: {
   ownSession: (session: string) => boolean;
   /** This computer's connection of `session` wakes it with the person's reply. */
   wakes?: (session: string) => boolean;
+  tagOf?: SwarmRouteContext["tagOf"];
   serverSession?: string;
 }): SwarmRouteContext {
   const { store } = deps;
@@ -47,6 +48,7 @@ export function inboxSwarmContext(deps: {
     live,
     ownSession: deps.ownSession,
     wakes: deps.wakes,
+    tagOf: deps.tagOf,
     serverSession: deps.serverSession,
     far: {
       placeOf: async (ref) => {

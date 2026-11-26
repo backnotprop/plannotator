@@ -250,6 +250,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // thread and write the person's words to the agents on the thread's own computer.
   { method: "GET", route: /^threads\/([^/]+)\/swarm$/, window: (m) => `/api/inbox/threads/${m[1]}/swarm` },
   { method: "POST", route: /^threads\/([^/]+)\/swarm$/, window: (m) => `/api/inbox/threads/${m[1]}/swarm` },
+  // Swarm's Add an agent: the person's message to one more agent, on the thread's own computer.
+  { method: "POST", route: /^threads\/([^/]+)\/swarm\/add$/, window: (m) => `/api/inbox/threads/${m[1]}/swarm/add` },
   { method: "POST", route: /^pins$/, window: () => "/api/inbox/pins" },
   // Add to Priority, Remove from Priority and their Undo (contract 7.66). A linked machine sends the same for this
   // Inbox's threads (approval "inbox-linked-marks").

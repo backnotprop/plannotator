@@ -311,6 +311,24 @@
       "relay": true
     },
     {
+      "name": "POST threads/:id/swarm/add",
+      "method": "POST",
+      "path": "threads/{thread}/swarm/add",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadSwarmAdd",
+      "window": "/api/inbox/threads/{thread}/swarm/add",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "hold",
+      "write": "append",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST pins",
       "method": "POST",
       "path": "pins",

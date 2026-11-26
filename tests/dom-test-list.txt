@@ -949,5 +949,6 @@ packages/inbox/swarm/swarmCompose.test.tsx
 packages/inbox/swarm/swarmThread.test.tsx
 packages/inbox/swarm/swarmPlanCard.test.tsx
 packages/inbox/swarm/swarmSettings.test.tsx
+packages/inbox/swarm/swarmAddRemove.test.tsx
 packages/inbox/compose/threadNameChipHold.test.tsx
 packages/inbox/reviewAnalysis.test.tsx

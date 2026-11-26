@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxSwarmMemberWire, InboxThreadSwarm } from '@plannotator/core/inbox-swarm-types';
 import { HostMark, Icon } from '../icons';
 import { inboxAgentsFlat, useInboxAgents } from '../agentsList';
@@ -9,6 +9,10 @@ import { GhostGlyph } from './GhostGlyph';
 import { swarmApi } from './swarmApi';
 import { swarmEscapeIsOurs } from './escape';
 import { swarmMemberTree, swarmStateWords, swarmSummaryWords } from './swarmModel';
+import { SwarmAddList } from './SwarmAddList';
+import { SwipeToRemove } from '../components/SwipeToRemove';
+import { removeSwarmAgent, type SwarmRemoveHost } from './swarmRemove';
+import type { TagOption } from '../tags';
 
 /** The most marks the row draws. */
 const ROW_MARKS = 4;
@@ -18,22 +22,23 @@ const ROW_MARKS = 4;
  * "inbox-swarm-thread-ui", B2 "Under the title"; shots 3-folded and 4-status-view): the Swarm chip, then one pressable
  * row with the members' marks, "N agents · X working · Y waiting on you" and a chevron. A press opens the status view
  * in place: each member with where it runs (its project · its computer), its state as quiet words, its `doing` line and
- * when, a sub-agent indented under the member it works for; its foot holds Add an agent (the reply's tag picker), Ghost
- * thread with its count, and Turn off. No task line in this piece; the plan is its own card in the thread
+ * when, a sub-agent indented under the member it works for, and Remove on a member (main's, on hover and focus; a
+ * phone's row swipes left); its foot holds Add an agent (the agents the thread reaches: a pick hands that agent the
+ * thread with the `/swarm` skill, and it shows as not joined yet), Ghost thread with its count, and Turn off. No task line in this piece; the plan is its own card in the thread
  * (SwarmPlanCard.tsx), never in the status view.
  */
 export function SwarmSummary({
   threadId,
   swarm,
   phone,
-  onAddAgent,
+  host,
   onGhost,
 }: {
   threadId: string;
   swarm: InboxThreadSwarm;
   phone: boolean;
-  /** "Add an agent": the reply box with `@` typed, today's tagging. */
-  onAddAgent: () => void;
+  /** Its toast (Remove's, with Undo) and the thread's read again after Add or Remove. */
+  host: Omit<SwarmRemoveHost, 'threadId'>;
   /** "Ghost thread": the ghost pane. */
   onGhost: () => void;
 }) {
@@ -89,10 +94,8 @@ export function SwarmSummary({
         <SwarmStatus
           threadId={threadId}
           swarm={swarm}
-          onAddAgent={() => {
-            setOpen(false);
-            onAddAgent();
-          }}
+          phone={phone}
+          host={host}
           onGhost={() => {
             setOpen(false);
             onGhost();
@@ -104,12 +107,23 @@ export function SwarmSummary({
 }
 
 /** The status view: who does what, and the foot. */
-function SwarmStatus({ threadId, swarm, onAddAgent, onGhost }: { threadId: string; swarm: InboxThreadSwarm; onAddAgent: () => void; onGhost: () => void }) {
+function SwarmStatus({ threadId, swarm, phone, host, onGhost }: { threadId: string; swarm: InboxThreadSwarm; phone: boolean; host: Omit<SwarmRemoveHost, 'threadId'>; onGhost: () => void }) {
   const agents = inboxAgentsFlat(useInboxAgents());
   const now = useRelativeClock(true);
   const [ghostCount, setGhostCount] = useState<number | null>(null);
   const [turning, setTurning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const closeAdd = useCallback(() => setAdding(false), []);
+  const add = (option: TagOption) => {
+    setAdding(false);
+    setError(null);
+    swarmApi.add(threadId, { session: option.id, host: option.host, ...(option.machine ? { machine: option.machine } : {}), label: option.label }).then(
+      () => void host.changed?.(),
+      (cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)),
+    );
+  };
+  const remove = (m: InboxSwarmMemberWire) => void removeSwarmAgent({ threadId, ...host }, m.session, m.name);
   // The ghost thread's count: its whole length, read when the view opens and again each time the thread is read again
   // (the stream's swarm event, a ghost message included, reads it: a new `swarm`).
   useEffect(() => {
@@ -148,8 +162,8 @@ function SwarmStatus({ threadId, swarm, onAddAgent, onGhost }: { threadId: strin
         {swarmMemberTree(swarm.members).map(({ member: m, depth }) => {
           const state = swarmStateWords(m);
           const where = whereOf(m);
-          return (
-            <li key={m.session} className="ib-swarm-row" data-depth={depth} data-state={m.joined ? (m.state ?? 'unknown') : 'not_joined'} data-swarm-member={m.session}>
+          const row = (
+            <div className="ib-swarm-row" data-depth={depth} data-state={m.joined ? (m.state ?? 'unknown') : 'not_joined'} data-swarm-member={m.session}>
               <span className="ib-swarm-mk" aria-hidden="true">
                 <HostMark host={m.host} agent={m.session} />
               </span>
@@ -157,14 +171,32 @@ function SwarmStatus({ threadId, swarm, onAddAgent, onGhost }: { threadId: strin
                 <bdi>{m.name}</bdi>
                 {where && <span className="ib-swarm-wh">{where}</span>}
               </span>
-              <span className="ib-swarm-st" data-swarm-state="">
-                {state}
+              <span className="ib-swarm-se">
+                <span className="ib-swarm-st" data-swarm-state="">
+                  {state}
+                </span>
+                {!phone && (
+                  <button type="button" className="ib-rpick-rm ib-swarm-rm" data-swarm-remove={m.session} aria-label={`Remove ${m.name} from this thread`} onClick={() => remove(m)}>
+                    Remove
+                  </button>
+                )}
               </span>
               {m.doing && (
                 <span className="ib-swarm-now" data-swarm-doing="">
                   <bdi>{m.doing.text}</bdi>
                   <span className="ib-swarm-when"> · {relativeWords(m.doing.at, now)}</span>
                 </span>
+              )}
+            </div>
+          );
+          return (
+            <li key={m.session} className="ib-swarm-li">
+              {phone ? (
+                <SwipeToRemove session={m.session} onRemove={() => remove(m)}>
+                  {row}
+                </SwipeToRemove>
+              ) : (
+                row
               )}
             </li>
           );
@@ -176,10 +208,13 @@ function SwarmStatus({ threadId, swarm, onAddAgent, onGhost }: { threadId: strin
         </p>
       )}
       <div className="ib-swarm-foot">
-        <button type="button" className="ib-swarm-fb" onClick={onAddAgent} data-swarm-add="">
-          <Icon name="plus" size={15} />
-          <span>Add an agent</span>
-        </button>
+        <span className="ib-swarm-addwrap">
+          <button type="button" className="ib-swarm-fb" aria-expanded={adding} onClick={() => setAdding((was) => !was)} data-swarm-add="">
+            <Icon name="plus" size={15} />
+            <span>Add an agent</span>
+          </button>
+          {adding && <SwarmAddList threadId={threadId} members={new Set(swarm.members.map((m) => m.session))} onPick={add} onClose={closeAdd} />}
+        </span>
         <button type="button" className="ib-swarm-fb" onClick={onGhost} data-swarm-ghost="">
           <GhostGlyph size={16} />
           <span>Ghost thread</span>
