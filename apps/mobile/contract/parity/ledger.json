@@ -23516,6 +23516,21 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-window-api-inbox-launch-switch",
+      "title": "Launch switch: the one-time launch dialog's claim, shown and answer (no window draws it yet)",
+      "surface": [
+        "window:/api/inbox/launch-switch"
+      ],
+      "flows": [],
+      "mobile": "later",
+      "why": "L-size: a one-time launch dialog, mechanism only; the window does not draw it yet",
+      "reason": "L-size",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

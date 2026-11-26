@@ -129,7 +129,8 @@ import { createCommitAvatarResolver } from "@plannotator/shared/commit-avatars";
 import { detectGeneratedFiles, detectGeneratedFilesByName } from "@plannotator/shared/generated-files";
 import { getRepoInfo } from "./repo";
 import { createRefCardsWithLinear, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
-import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleLaunchSwitch, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse, type OpencodeClient } from "./shared-handlers";
+import { launchSwitchService } from "@plannotator/shared/launch-switch";
 import { contentHash } from "./draft";
 import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "@plannotator/shared/review-draft";
 import { captureReviewProgress, handleReviewProgress } from "@plannotator/shared/review-progress";
@@ -2241,6 +2242,8 @@ export async function startReviewServer(
   });
 
   const requestHostGuard = createRequestHostGuard();
+  // The launch switch's reader (packages/shared/launch-switch.ts): in the background, never awaited.
+  launchSwitchService().start();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve(withPlannotatorServerHeader({
         hostname: getServerHostname(),
@@ -4098,6 +4101,11 @@ export async function startReviewServer(
           // The "Star the repo" ask on the done screen (packages/shared/star-ask.ts).
           if (url.pathname.startsWith("/api/star-ask/")) {
             return (await handleStarAsk(req, url, "review", { remote: isRemote })) ?? handleApiNotFound(url.pathname);
+          }
+
+          // The launch switch's one-time dialog (packages/shared/launch-switch.ts).
+          if (url.pathname.startsWith("/api/launch-switch/")) {
+            return (await handleLaunchSwitch(req, url)) ?? handleApiNotFound(url.pathname);
           }
 
           // API: Serve images (local paths or temp uploads)

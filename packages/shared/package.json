@@ -80,6 +80,7 @@
     "./update-check": "./update-check.ts",
     "./daily-ping": "./daily-ping.ts",
     "./star-ask": "./star-ask.ts",
+    "./launch-switch": "./launch-switch.ts",
     "./prompts": "./prompts.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
     "./pfm-reminder": "./pfm-reminder.ts",

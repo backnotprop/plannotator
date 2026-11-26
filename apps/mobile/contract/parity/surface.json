@@ -251,6 +251,7 @@
       "/api/inbox/initiatives",
       "/api/inbox/initiatives/:id",
       "/api/inbox/lan",
+      "/api/inbox/launch-switch",
       "/api/inbox/launch/:id/delete",
       "/api/inbox/launch/:id/open",
       "/api/inbox/launch/:id/permission",

@@ -349,6 +349,7 @@ import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routin
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
+import { configLaunchShownStore, createLaunchSwitch, launchSwitchAction, launchSwitchEndpointNow } from "@plannotator/shared/launch-switch";
 import { createInboxEmbedPages, createInboxEmbeds } from "./inbox-embeds";
 import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
@@ -1400,6 +1401,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
   // The sidebar's Update button (packages/server/inbox-updates.ts): the release
   // check, the binary on disk, Update now, Remind me tomorrow.
+  // The launch switch (packages/shared/launch-switch.ts): its reader runs in the background from the start, at most
+  // every 15 minutes; the window's claim answers from the kept copy only.
+  const launchSwitch = createLaunchSwitch({ dataDir: () => dataDir, endpoint: () => launchSwitchEndpointNow(), shown: configLaunchShownStore });
+  launchSwitch.start();
   let lastDailyPingCheck = 0;
   const updates = createInboxUpdates({
     dataDir,
@@ -7812,6 +7817,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json(await inboxStarAction(starAsk, body));
+      }
+
+      // The launch switch's one-time dialog (packages/shared/launch-switch.ts): `action` claim (the kept copy only),
+      // shown (stamps it shown on this computer, once across every surface) or answer (`opened` | `dismissed`).
+      if (path === "/api/inbox/launch-switch") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const action = body.action;
+        if (action !== "claim" && action !== "shown" && action !== "answer") return json({ error: "action: claim, shown or answer." }, 400);
+        const answered = launchSwitchAction(launchSwitch, action, body);
+        return json(answered.body, answered.status);
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this

@@ -22,6 +22,7 @@ import { checkServerSession, serverSessionMismatchBody } from "../generated/serv
 import { localImageContentType, localImageResponseHeaders } from "../generated/local-image.ts";
 import { annotateMediaAnswer } from "../generated/html-assets-node.ts";
 import { starAskRoute, starAskService, type StarAskSurface } from "../generated/star-ask.ts";
+import { launchSwitchRoute, launchSwitchService } from "../generated/launch-switch.ts";
 import { piPingVersion } from "./daily-ping.ts";
 import { json, parseBody, send, toWebRequest } from "./helpers.ts";
 import { isSameOriginRequest } from "./request-origin-guard.ts";
@@ -452,6 +453,22 @@ export async function handleStarAskRequest(
 	if (!url.pathname.startsWith("/api/star-ask/")) return false;
 	const body = req.method === "POST" ? await parseBody(req) : undefined;
 	const answered = await starAskRoute(starAskService(() => piPingVersion() !== undefined), surface, req.method ?? "GET", url.pathname, body, { remote });
+	if (!answered) return false;
+	json(res, answered.body, answered.status);
+	return true;
+}
+
+/** This process's launch switch (generated/launch-switch.ts): a release is the published package (release CI's `release.json`). */
+export const piLaunchSwitch = () => launchSwitchService(() => piPingVersion() !== undefined);
+
+/**
+ * The launch switch's one-time dialog (generated/launch-switch.ts, the Bun servers' `handleLaunchSwitch`):
+ * `POST /api/launch-switch/claim`, `/shown` and `/answer`, answered from the kept copy only. False for any other path.
+ */
+export async function handleLaunchSwitchRequest(req: IncomingMessage, res: import("node:http").ServerResponse, url: URL): Promise<boolean> {
+	if (!url.pathname.startsWith("/api/launch-switch/")) return false;
+	const body = req.method === "POST" ? await parseBody(req) : undefined;
+	const answered = launchSwitchRoute(piLaunchSwitch(), req.method ?? "GET", url.pathname, body);
 	if (!answered) return false;
 	json(res, answered.body, answered.status);
 	return true;

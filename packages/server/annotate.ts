@@ -21,7 +21,8 @@ import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-gu
 import { getSourceRepoInfo } from "./repo";
 import { createRefCardsWithLinear, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
 import type { Origin } from "@plannotator/shared/agents";
-import { handleAnnotateMedia, handleImage, handleStarAsk, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse } from "./shared-handlers";
+import { handleAnnotateMedia, handleImage, handleStarAsk, handleLaunchSwitch, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse } from "./shared-handlers";
+import { launchSwitchService } from "@plannotator/shared/launch-switch";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
 import { getExtraMarkdownExtensions, isAnnotatableTextPath, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
@@ -911,6 +912,8 @@ export async function startAnnotateServer(
   let liveAppUrl = "";
 
   const requestHostGuard = createRequestHostGuard();
+  // The launch switch's reader (packages/shared/launch-switch.ts): in the background, never awaited.
+  launchSwitchService().start();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve<AgentTerminalSocketData>(withPlannotatorServerHeader({
         hostname: getServerHostname(),
@@ -1268,6 +1271,11 @@ export async function startAnnotateServer(
           // The "Star the repo" ask on the done screen (packages/shared/star-ask.ts).
           if (url.pathname.startsWith("/api/star-ask/")) {
             return (await handleStarAsk(req, url, "annotate", { remote: isRemote })) ?? handleApiNotFound(url.pathname);
+          }
+
+          // The launch switch's one-time dialog (packages/shared/launch-switch.ts).
+          if (url.pathname.startsWith("/api/launch-switch/")) {
+            return (await handleLaunchSwitch(req, url)) ?? handleApiNotFound(url.pathname);
           }
 
           // API: Serve images (local paths or temp uploads)

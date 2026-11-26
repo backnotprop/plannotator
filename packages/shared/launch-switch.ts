@@ -1,0 +1,518 @@
+/**
+ * The launch switch: a remote on/off switch, carrying a launch link, that lets one dialog appear once per computer
+ * (a Product Hunt launch). This module is the mechanism only: the strict parser, the reader that keeps the last good
+ * copy in the data folder, the one-time record, and the routes. No page draws anything from it yet.
+ *
+ * The document, https://plannotator.ai/launch.json (apps/marketing/public/launch.json), at most 4 KB:
+ *
+ *   { "v": 1, "campaign": "product-hunt-2026", "on": true,
+ *     "url": "https://www.producthunt.com/posts/plannotator?utm_source=plannotator",
+ *     "startsAt": "2026-12-02T08:01:00Z", "endsAt": "2026-12-03T08:00:00Z" }
+ *
+ * The dialog's words ship in the release: the file carries only the switch, the link and the dates. Keys not listed
+ * are ignored (a later version may add fields) and never kept or passed on.
+ * `{ "v": 1, "campaign": "…", "on": false }` is a valid off. Anything else is off: not JSON, over 4 KB, another `v`, a
+ * campaign not [a-z0-9-]{1,40}, a url that is not exactly https on www.producthunt.com (no port, no
+ * user info, no hash, path /posts/<slug> or /products/<slug>[/…], query only `launch=<slug>` and `utm_*` keys), dates
+ * that are not ISO instants, an end not after the start, a span over 14 days. `launchActive(doc, now)`: on, and
+ * startsAt <= now < endsAt, so a kept "on" copy turns itself off at endsAt with no request.
+ *
+ * Who asks (every gate, in order; `launchSwitchEndpoint`): no request at all when
+ *  - PLANNOTATOR_LAUNCH_URL=off;
+ *  - update checks are off (PLANNOTATOR_UPDATE_CHECK=0, or `updateCheck: false` in config.json);
+ *  - the daily ping's environment opt-outs are set (NO_ANON_PING, DO_NOT_TRACK, a CI variable: parseTelemetryEnvOff);
+ *  - under the test sandbox (PLANNOTATOR_TEST_SANDBOX or NODE_ENV=test), unless PLANNOTATOR_LAUNCH_URL is a loopback
+ *    http URL (tests only); outside it the variable is ignored (but `off`), so nothing can point real apps elsewhere;
+ *  - it is not a release build (release CI's compiled mark, or a host's own word: Pi's and OpenCode's release.json).
+ * Those gates also close the claim: switched off means no dialog either.
+ *
+ * The request, from the local server only (never a page): GET, no query, no cookies, `user-agent: plannotator`, 3 s for
+ * the whole answer, 4 KB cap, redirects refused. At start, then at most every 15 minutes across every process sharing
+ * the data folder (`checkedAt` in the kept file), in the background: nothing waits on it and it fails silently. A
+ * 200 replaces the kept copy with what it parsed to (an invalid answer keeps an off); a failure keeps the last copy.
+ *
+ * Kept: `<data dir>/launch-switch.json` `{ checkedAt, doc }` (0600, written whole). The claim reads only this.
+ * Shown once per computer, on whichever surface comes first: `launch[campaign]` in the machine state
+ * (`{ shownAt, answer?: "opened" | "dismissed", answeredAt? }`), written through saveConfig.
+ */
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { loadConfig, parseTelemetryEnvOff, resolveUpdateCheck, saveConfig, type PlannotatorConfig } from "./config";
+import { isMarkedReleaseBuild } from "./daily-ping";
+import { getPlannotatorDataDir } from "./data-dir";
+
+export const LAUNCH_SWITCH_URL = "https://plannotator.ai/launch.json";
+export const LAUNCH_SWITCH_FILE = "launch-switch.json";
+export const LAUNCH_SWITCH_MAX_BYTES = 4 * 1024;
+export const LAUNCH_SWITCH_TIMEOUT_MS = 3_000;
+export const LAUNCH_SWITCH_REFRESH_MS = 15 * 60 * 1000;
+export const LAUNCH_SWITCH_MAX_SPAN_MS = 14 * 24 * 60 * 60 * 1000;
+
+export type LaunchDoc =
+  | { v: 1; campaign: string; on: false; url?: string; startsAt?: string; endsAt?: string }
+  | { v: 1; campaign: string; on: true; url: string; startsAt: string; endsAt: string };
+
+export type LaunchAnswer = "opened" | "dismissed";
+
+/** `launch[campaign]` in the machine state. */
+export interface LaunchShownRecord {
+  shownAt?: string;
+  answer?: LaunchAnswer;
+  answeredAt?: string;
+}
+
+export type LaunchClaim = { show: false } | { show: true; campaign: string; url: string };
+
+// ── The parser ──
+
+const CAMPAIGN = /^[a-z0-9-]{1,40}$/;
+const SLUG = "[a-z0-9-]{1,80}";
+const URL_SHAPE = new RegExp(`^https://www\\.producthunt\\.com/(?:posts/${SLUG}|products/${SLUG}(?:/${SLUG})*)(?:\\?([^#]*))?$`);
+const QUERY_VALUE = /^[A-Za-z0-9._-]{1,80}$/;
+const LAUNCH_VALUE = new RegExp(`^${SLUG}$`);
+const UTM_KEY = /^utm_[a-z]{1,20}$/;
+const URL_MAX = 400;
+
+/** The url's query: only `launch=<slug>` and `utm_*` keys, each once, each with a plain value. */
+function queryOk(query: string): boolean {
+  if (query === "") return false;
+  const seen = new Set<string>();
+  for (const pair of query.split("&")) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) return false;
+    const key = pair.slice(0, eq);
+    const value = pair.slice(eq + 1);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    if (key === "launch") {
+      if (!LAUNCH_VALUE.test(value)) return false;
+    } else if (!UTM_KEY.test(key) || !QUERY_VALUE.test(value)) return false;
+  }
+  return true;
+}
+
+/** Exactly a Product Hunt post or product page over https (see the header). */
+export function launchUrlOk(raw: unknown): raw is string {
+  if (typeof raw !== "string" || raw.length > URL_MAX) return false;
+  const shape = URL_SHAPE.exec(raw);
+  if (!shape) return false;
+  if (shape[1] !== undefined && !queryOk(shape[1])) return false;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  // The parser's own reading must be the text as written: no normalising a port, case, dots or escapes away.
+  return url.href === raw && url.protocol === "https:" && url.hostname === "www.producthunt.com" && url.port === ""
+    && url.username === "" && url.password === "" && url.hash === "";
+}
+
+const INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|([+-])(\d{2}):(\d{2}))$/;
+
+/** An ISO instant (a date, a time, and Z or an offset) that names a real moment, as milliseconds; else null. */
+export function launchInstant(raw: unknown): number | null {
+  if (typeof raw !== "string") return null;
+  const m = INSTANT.exec(raw);
+  if (!m) return null;
+  const [y, mo, d, h, mi] = [m[1], m[2], m[3], m[4], m[5]].map(Number) as [number, number, number, number, number];
+  const s = Number(m[6] ?? "0");
+  const ms = Number((m[7] ?? "0").padEnd(3, "0"));
+  if (mo < 1 || mo > 12 || d < 1 || h > 23 || mi > 59 || s > 59) return null;
+  const local = Date.UTC(y, mo - 1, d, h, mi, s, ms);
+  const check = new Date(local);
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return null;
+  let offset = 0;
+  if (m[8] !== "Z") {
+    const oh = Number(m[10]);
+    const om = Number(m[11]);
+    if (oh > 23 || om > 59) return null;
+    offset = (m[9] === "-" ? -1 : 1) * (oh * 60 + om) * 60_000;
+  }
+  return local - offset;
+}
+
+/**
+ * The document from the site's bytes or text, or null (off) for anything that is not exactly the shape above. An `on:
+ * false` document may still carry the other fields (a launch set up ahead): each one present must be valid too.
+ */
+export function parseLaunchDoc(input: string | Uint8Array): LaunchDoc | null {
+  const bytes = typeof input === "string" ? new TextEncoder().encode(input) : input;
+  if (bytes.byteLength > LAUNCH_SWITCH_MAX_BYTES) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    return null;
+  }
+  return launchDocFrom(value);
+}
+
+/** The same rules for a value already parsed (the kept copy is checked again on every read). */
+export function launchDocFrom(value: unknown): LaunchDoc | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  // Keys it does not know are ignored (a later version may add fields); only the ones below are kept.
+  if (r.v !== 1 || typeof r.campaign !== "string" || !CAMPAIGN.test(r.campaign) || typeof r.on !== "boolean") return null;
+  const doc: Record<string, unknown> = { v: 1, campaign: r.campaign, on: r.on };
+  if (r.url !== undefined) {
+    if (!launchUrlOk(r.url)) return null;
+    doc.url = r.url;
+  }
+  if ((r.startsAt === undefined) !== (r.endsAt === undefined)) return null;
+  if (r.startsAt !== undefined) {
+    const start = launchInstant(r.startsAt);
+    const end = launchInstant(r.endsAt);
+    if (start === null || end === null || end <= start || end - start > LAUNCH_SWITCH_MAX_SPAN_MS) return null;
+    doc.startsAt = r.startsAt;
+    doc.endsAt = r.endsAt;
+  }
+  if (r.on === true && (doc.url === undefined || doc.startsAt === undefined)) return null;
+  return doc as unknown as LaunchDoc;
+}
+
+/** The switch is on now: an on document, inside [startsAt, endsAt). */
+export function launchActive(doc: LaunchDoc | null | undefined, now: number): doc is Extract<LaunchDoc, { on: true }> {
+  if (!doc || doc.on !== true) return false;
+  const start = launchInstant(doc.startsAt);
+  const end = launchInstant(doc.endsAt);
+  return start !== null && end !== null && now >= start && now < end;
+}
+
+// ── Who asks ──
+
+let releaseOverride: boolean | null = null;
+
+/** A host that knows better than the compiled mark says whether this process is a release (OpenCode). Null: the mark. */
+export function setLaunchSwitchRelease(release: boolean | null): void {
+  releaseOverride = release;
+}
+
+export function launchSwitchRelease(): boolean {
+  return releaseOverride ?? isMarkedReleaseBuild();
+}
+
+/** A loopback http URL (tests under the sandbox only), or null. */
+function loopbackUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^\[|\]$/g, "");
+    const loopback = host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+    return url.protocol === "http:" && loopback && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where this process may ask, or null for nowhere (every gate in the header). `updateCheck`: resolveUpdateCheck for
+ * this process (config.json and PLANNOTATOR_UPDATE_CHECK).
+ */
+export function launchSwitchEndpoint(env: NodeJS.ProcessEnv, release: boolean, updateCheck: boolean): string | null {
+  const override = env.PLANNOTATOR_LAUNCH_URL?.trim();
+  if (override?.toLowerCase() === "off") return null;
+  if (!updateCheck) return null;
+  if (parseTelemetryEnvOff(env)) return null;
+  if (env.PLANNOTATOR_TEST_SANDBOX || env.NODE_ENV === "test") return loopbackUrl(override);
+  return release ? LAUNCH_SWITCH_URL : null;
+}
+
+/** `launchSwitchEndpoint` for this process now: its environment, config.json's update check, the release gate. */
+export function launchSwitchEndpointNow(release: boolean = launchSwitchRelease()): string | null {
+  return launchSwitchEndpoint(process.env, release, resolveUpdateCheck(loadConfig({ quiet: true })));
+}
+
+// ── The kept copy ──
+
+export interface LaunchKept {
+  checkedAt?: string;
+  doc: LaunchDoc | null;
+}
+
+export function readLaunchKept(dataDir: string): LaunchKept {
+  try {
+    const raw = JSON.parse(readFileSync(join(dataDir, LAUNCH_SWITCH_FILE), "utf-8")) as Record<string, unknown> | null;
+    const checkedAt = typeof raw?.checkedAt === "string" && launchInstant(raw.checkedAt) !== null ? raw.checkedAt : undefined;
+    return { ...(checkedAt ? { checkedAt } : {}), doc: launchDocFrom(raw?.doc) };
+  } catch {
+    return { doc: null };
+  }
+}
+
+function writeLaunchKept(dataDir: string, kept: LaunchKept): void {
+  mkdirSync(dataDir, { recursive: true });
+  const path = join(dataDir, LAUNCH_SWITCH_FILE);
+  const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify({ checkedAt: kept.checkedAt, doc: kept.doc })}\n`, { mode: 0o600 });
+  renameSync(tmp, path);
+}
+
+/**
+ * One GET within `timeoutMs` for the whole answer: the bytes of a 200 of at most LAUNCH_SWITCH_MAX_BYTES, "invalid"
+ * for a 200 that is too big, or null (a redirect, another status, offline, too slow). Never throws.
+ */
+export async function fetchLaunchDoc(fetcher: typeof fetch, url: string, timeoutMs: number = LAUNCH_SWITCH_TIMEOUT_MS): Promise<Uint8Array | "invalid" | null> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, fail) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      fail(new Error("timed out"));
+    }, timeoutMs);
+  });
+  late.catch(() => {});
+  try {
+    const res = await Promise.race([
+      fetcher(url, { method: "GET", redirect: "manual", credentials: "omit", signal: controller.signal, headers: { "user-agent": "plannotator", accept: "application/json" } }),
+      late,
+    ]);
+    if (res.status !== 200) {
+      void res.body?.cancel().catch(() => {});
+      return null;
+    }
+    const length = Number(res.headers.get("content-length") ?? "");
+    if (Number.isFinite(length) && length > LAUNCH_SWITCH_MAX_BYTES) {
+      void res.body?.cancel().catch(() => {});
+      return "invalid";
+    }
+    const reader = res.body?.getReader();
+    if (!reader) return new Uint8Array(0);
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), late]);
+      if (done) break;
+      total += value.byteLength;
+      if (total > LAUNCH_SWITCH_MAX_BYTES) {
+        void reader.cancel().catch(() => {});
+        return "invalid";
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let at = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, at);
+      at += chunk.byteLength;
+    }
+    return bytes;
+  } catch {
+    controller.abort();
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ── The one-time record ──
+
+export interface LaunchShownStore {
+  read(campaign: string): LaunchShownRecord | undefined;
+  /** Write the record; true when it reached the file. */
+  write(campaign: string, record: LaunchShownRecord): boolean;
+}
+
+/** `launch[campaign]` as the machine state holds it, keeping only the fields written here. */
+export function readLaunchShown(config: Pick<PlannotatorConfig, "launch"> | undefined, campaign: string): LaunchShownRecord | undefined {
+  const all = config?.launch as unknown;
+  if (!all || typeof all !== "object" || Array.isArray(all)) return undefined;
+  const raw = (all as Record<string, unknown>)[campaign];
+  if (raw === undefined) return undefined;
+  // A hand edit that is not a record: closed, as if shown.
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { shownAt: "unknown" };
+  const r = raw as Record<string, unknown>;
+  const out: LaunchShownRecord = {};
+  if (typeof r.shownAt === "string") out.shownAt = r.shownAt;
+  if (r.answer === "opened" || r.answer === "dismissed") out.answer = r.answer;
+  if (typeof r.answeredAt === "string") out.answeredAt = r.answeredAt;
+  return out;
+}
+
+/** The machine state (state.json, through the locked read-merge-write); other campaigns kept as they are. */
+export const configLaunchShownStore: LaunchShownStore = {
+  read: (campaign) => readLaunchShown(loadConfig({ quiet: true }), campaign),
+  write(campaign, record) {
+    const all = loadConfig({ quiet: true }).launch;
+    const others = all && typeof all === "object" && !Array.isArray(all) ? all : {};
+    if (!saveConfig({ launch: { ...others, [campaign]: record } })) return false;
+    const back = configLaunchShownStore.read(campaign);
+    return back?.shownAt === record.shownAt && back?.answer === record.answer;
+  },
+};
+
+// ── The service ──
+
+export interface LaunchSwitchDeps {
+  dataDir: () => string;
+  /** `launchSwitchEndpoint` for this process now (null: no request, and no dialog). */
+  endpoint: () => string | null;
+  shown: LaunchShownStore;
+  fetch?: typeof fetch;
+  now?: () => number;
+  refreshMs?: number;
+  timeoutMs?: number;
+}
+
+export interface LaunchSwitchService {
+  /** Ask the site now unless it was asked within refreshMs (any process) or an ask is running. Never throws. */
+  refresh(): Promise<"asked" | "fresh" | "off" | "busy">;
+  /** At a server's start: one refresh in the background, then one every refreshMs (an unref'd timer). Once a process. */
+  start(): void;
+  /** May a surface show the dialog: the kept copy only (and a background refresh when due). */
+  claim(): LaunchClaim;
+  /** The surface draws it now: a compare-and-set stamping `launch[campaign].shownAt`. */
+  shown(campaign?: string): { show: boolean };
+  /** How it ended: the link opened, or closed. Once. */
+  answer(answer: LaunchAnswer, campaign?: string): { ok: boolean };
+}
+
+export function createLaunchSwitch(deps: LaunchSwitchDeps): LaunchSwitchService {
+  const now = () => (deps.now ? deps.now() : Date.now());
+  const refreshMs = deps.refreshMs ?? LAUNCH_SWITCH_REFRESH_MS;
+  let running: Promise<"asked" | "fresh" | "off" | "busy"> | null = null;
+  let started = false;
+  const no: LaunchClaim = { show: false };
+
+  const current = (): Extract<LaunchDoc, { on: true }> | null => {
+    if (!deps.endpoint()) return null;
+    const { doc } = readLaunchKept(deps.dataDir());
+    return launchActive(doc, now()) ? doc : null;
+  };
+  const open = (campaign: string) => {
+    const record = deps.shown.read(campaign);
+    return !record?.shownAt && !record?.answer;
+  };
+
+  const service: LaunchSwitchService = {
+    refresh() {
+      if (running) return Promise.resolve("busy");
+      running = (async () => {
+        try {
+          const endpoint = deps.endpoint();
+          if (!endpoint) return "off" as const;
+          const dataDir = deps.dataDir();
+          const kept = readLaunchKept(dataDir);
+          const last = kept.checkedAt ? launchInstant(kept.checkedAt) : null;
+          const at = now();
+          if (last !== null && at - last < refreshMs && last <= at) return "fresh" as const;
+          // Stamped before the request: other processes sharing the data folder wait their turn.
+          writeLaunchKept(dataDir, { checkedAt: new Date(at).toISOString(), doc: kept.doc });
+          const got = await fetchLaunchDoc(deps.fetch ?? fetch, endpoint, deps.timeoutMs ?? LAUNCH_SWITCH_TIMEOUT_MS);
+          if (got !== null) writeLaunchKept(dataDir, { checkedAt: new Date(at).toISOString(), doc: got === "invalid" ? null : parseLaunchDoc(got) });
+          return "asked" as const;
+        } catch {
+          return "off" as const;
+        }
+      })().finally(() => {
+        running = null;
+      });
+      return running;
+    },
+
+    start() {
+      if (started) return;
+      started = true;
+      const kick = () => void service.refresh().catch(() => {});
+      const first = setTimeout(kick, 0);
+      (first as { unref?: () => void }).unref?.();
+      const every = setInterval(kick, refreshMs);
+      (every as { unref?: () => void }).unref?.();
+    },
+
+    claim() {
+      try {
+        const due = setTimeout(() => void service.refresh().catch(() => {}), 0);
+        (due as { unref?: () => void }).unref?.();
+        const doc = current();
+        if (!doc || !open(doc.campaign)) return no;
+        return { show: true, campaign: doc.campaign, url: doc.url };
+      } catch {
+        return no;
+      }
+    },
+
+    shown(campaign) {
+      try {
+        const doc = current();
+        if (!doc || (campaign !== undefined && campaign !== doc.campaign) || !open(doc.campaign)) return { show: false };
+        const record: LaunchShownRecord = { shownAt: new Date(now()).toISOString() };
+        // Not written (a read-only data dir): showing it anyway would show it on every load.
+        if (!deps.shown.write(doc.campaign, record)) return { show: false };
+        // Two processes stamping at once: only the one whose stamp is read back shows it.
+        return { show: deps.shown.read(doc.campaign)?.shownAt === record.shownAt };
+      } catch {
+        return { show: false };
+      }
+    },
+
+    answer(answer, campaign) {
+      try {
+        const name = campaign ?? readLaunchKept(deps.dataDir()).doc?.campaign;
+        if (!name || !CAMPAIGN.test(name)) return { ok: false };
+        const record = deps.shown.read(name);
+        if (!record?.shownAt) return { ok: false };
+        if (record.answer) return { ok: true };
+        return { ok: deps.shown.write(name, { ...record, answer, answeredAt: new Date(now()).toISOString() }) };
+      } catch {
+        return { ok: false };
+      }
+    },
+  };
+  return service;
+}
+
+// ── The routes ──
+
+export type LaunchSwitchAction = "claim" | "shown" | "answer";
+
+/**
+ * One action, runtime-free (the Bun servers, the Pi servers and the Inbox hand in the parsed body): `claim` →
+ * `{ show: false }` or `{ show: true, campaign, url }` (the dialog's words ship in the release); `shown` (`{ campaign? }`) → `{ show }`;
+ * `answer` (`{ answer: "opened" | "dismissed", campaign? }`) → `{ ok }`, 400 for another answer.
+ */
+export function launchSwitchAction(service: LaunchSwitchService, action: LaunchSwitchAction, body: unknown): { status: number; body: unknown } {
+  const b = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+  const campaign = typeof b.campaign === "string" && CAMPAIGN.test(b.campaign) ? b.campaign : undefined;
+  if (action === "claim") return { status: 200, body: service.claim() };
+  if (action === "shown") return { status: 200, body: service.shown(campaign) };
+  if (b.answer !== "opened" && b.answer !== "dismissed") return { status: 400, body: { error: "answer: opened or dismissed." } };
+  return { status: 200, body: service.answer(b.answer, campaign) };
+}
+
+const ROUTE_PREFIX = "/api/launch-switch/";
+
+/**
+ * `POST /api/launch-switch/claim`, `/shown` and `/answer` on the plan, review and annotate servers (both runtimes).
+ * Null for any other path; 405 for another method.
+ */
+export function launchSwitchRoute(service: LaunchSwitchService, method: string, path: string, body: unknown): { status: number; body: unknown } | null {
+  if (!path.startsWith(ROUTE_PREFIX)) return null;
+  const action = path.slice(ROUTE_PREFIX.length);
+  if (action !== "claim" && action !== "shown" && action !== "answer") return null;
+  if (method !== "POST") return { status: 405, body: { error: "Use POST." } };
+  return launchSwitchAction(service, action, body);
+}
+
+let defaultService: LaunchSwitchService | null = null;
+let serviceForTests: LaunchSwitchService | null = null;
+
+/**
+ * This process's switch: the data folder, config.json's update check, the environment, and the release gate
+ * (`release`: a host's own word, as Pi's `release.json`; default `launchSwitchRelease()`).
+ */
+export function launchSwitchService(release?: () => boolean): LaunchSwitchService {
+  if (serviceForTests) return serviceForTests;
+  defaultService ??= createLaunchSwitch({
+    dataDir: () => getPlannotatorDataDir(),
+    endpoint: () => launchSwitchEndpointNow(release ? release() : launchSwitchRelease()),
+    shown: configLaunchShownStore,
+  });
+  return defaultService;
+}
+
+/** Tests only: the service every route uses (null: back to the real one). */
+export function setLaunchSwitchServiceForTests(service: LaunchSwitchService | null): void {
+  serviceForTests = service;
+  defaultService = null;
+}

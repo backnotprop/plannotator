@@ -626,6 +626,12 @@ export interface PlannotatorConfig {
     canStar?: boolean;
   };
   /**
+   * The launch switch's one-time dialog (packages/shared/launch-switch.ts reads and writes it, nothing else does),
+   * per campaign: `shownAt` once a surface showed it, so none shows it again on this computer; `answer`: `opened`
+   * (the launch link opened) or `dismissed`.
+   */
+  launch?: Record<string, { shownAt?: string; answer?: "opened" | "dismissed"; answeredAt?: string }>;
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): something the person turns on, off by default. On: the
    * review skills in the reply box's "/" list, the review card and its
@@ -1117,7 +1123,7 @@ function getStatePath(): string {
  */
 const MACHINE_STATE_KEYS = [
   "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
-  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro",
+  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "launch",
 ] as const;
 type MachineStateKey = (typeof MACHINE_STATE_KEYS)[number];
 /** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */
@@ -1234,6 +1240,7 @@ const starAskTime = (record: Record<string, unknown>) => String(record.answeredA
  * | inboxSnoozeIntro                        | stamps, earliest `firstUseAt`                                           |
  * | inboxBoardIntro, inboxVoiceIntro,       | stamps: shown, skipped, used or not-needed anywhere stays so            |
  * | inboxThemeChooser, inboxPriorityIntro   |                                                                         |
+ * | launch                                  | stamps per campaign: shown anywhere stays shown                         |
  * | inboxSound dialog fields                | newer `dialogShownFor` and `dialogDueFor`; due only while the due       |
  * |                                         | version is newer than the shown one (soundDialog)                       |
  */
