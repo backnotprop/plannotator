@@ -23516,6 +23516,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-settings-reviews",
+      "title": "settings:reviews",
+      "surface": [
+        "settings:reviews"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

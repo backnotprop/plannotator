@@ -946,3 +946,4 @@ packages/inbox/sidebarStickyHeadings.test.tsx
 packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx
 packages/inbox/reviewAnalysis.test.tsx
+packages/inbox/reviewSettings/reviewsSettings.test.tsx
