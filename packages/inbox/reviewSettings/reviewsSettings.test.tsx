@@ -127,6 +127,26 @@ test.skipIf(!hasDom)("a change on the Inbox's Reviews page writes code review's 
   expect(classic.querySelector(`#review-settings-semantic`)?.closest('[role="switch"]')?.getAttribute('aria-checked')).toBe('false');
 });
 
+test.skipIf(!hasDom)("Code Font is picked from the Inbox's own menu, and code review's select shows the font picked", async () => {
+  const sent = fakeInbox();
+  configStore.seed('diffFontFamily', '');
+  const inbox = await render(<ReviewsSettings />);
+  // The Inbox's choice list, not a browser select.
+  expect(inbox.querySelector('select')).toBeNull();
+  const trigger = inbox.querySelector<HTMLButtonElement>(`button[aria-label^="${FONT_WORDS.label}:"]`)!;
+  expect(trigger.textContent).toContain('Theme Default');
+  await act(async () => trigger.click());
+  const hack = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((el) => el.textContent?.trim() === 'Hack');
+  await act(async () => hack!.click());
+  await flush();
+
+  expect(configStore.get('diffFontFamily')).toBe('Hack');
+  expect(Object.assign({}, ...settingsPosts(sent).map((body) => body.diff_options ?? {}))).toMatchObject({ font_family: 'Hack' });
+  expect(inbox.querySelector(`button[aria-label^="${FONT_WORDS.label}:"]`)!.textContent).toContain('Hack');
+  const classic = await render(<ReviewSettingsPage controls={CLASSIC_REVIEW_SETTINGS_CONTROLS} opinionRoute="/api/sem-diff/opinion/settings" />);
+  expect(classic.querySelector<HTMLSelectElement>(`select[aria-label="${FONT_WORDS.label}"]`)!.value).toBe('Hack');
+});
+
 test.skipIf(!hasDom)("a change on code review's page shows on the Inbox's", async () => {
   fakeInbox();
   const classic = await render(<ReviewSettingsPage controls={CLASSIC_REVIEW_SETTINGS_CONTROLS} opinionRoute="/api/sem-diff/opinion/settings" />);

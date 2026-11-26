@@ -6,10 +6,13 @@
  * heading. A row is the Inbox's settings row (`ib-prow`): words first, the
  * control at its end, or under the words when they do not fit beside it (a
  * phone) and always for a `wide` row (a form). Switches are the Inbox's
- * (`ib-sw`), choices its segmented control (`ib-seg`), fields its key field
- * (`ib-vkey`). Styles: reviewSettings.css.
+ * (`ib-sw`), choices its segmented control (`ib-seg`), a long list of choices
+ * its menu (`ib-pm`), fields its key field (`ib-vkey`). Styles:
+ * reviewSettings.css.
  */
-import { useId } from 'react';
+import { createContext, useContext, useId, useLayoutEffect, useRef, useState } from 'react';
+import { Menu } from '@base-ui/react/menu';
+import { Icon } from '../icons';
 import {
   CLASSIC_REVIEW_SETTINGS_CONTROLS,
   type ReviewSettingsButtonProps,
@@ -121,15 +124,50 @@ function Segmented<T extends string>({ label, value, options, onChange, disabled
   );
 }
 
+/** A phone opens a choice list as the Inbox's bottom sheet. Given by ReviewsSettings. */
+export const InboxReviewPhone = createContext(false);
+
+/**
+ * The Inbox's choice list (as PlaybackSpeed and the list's menus): a button that names the choice, opening the Inbox
+ * menu with a check on the chosen one; on a phone, its bottom sheet. Drawn inside the window's root, as every Inbox
+ * menu is, so the root's styles reach it.
+ */
 function Select<T extends string>({ label, value, options, onChange, fontFamily }: ReviewSettingsSelectProps<T>) {
+  const phone = useContext(InboxReviewPhone);
+  const ref = useRef<HTMLButtonElement>(null);
+  const [root, setRoot] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const found = ref.current?.closest<HTMLElement>('.pn-inbox') ?? null;
+    if (found !== root) setRoot(found);
+  });
+  const chosen = options.find((opt) => opt.value === value);
   return (
-    <select className="ib-rs-select" aria-label={label} value={value} onChange={(e) => onChange(e.target.value as T)} style={fontFamily ? { fontFamily } : undefined}>
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
+    <Menu.Root modal={false}>
+      <Menu.Trigger ref={ref} className="ib-btn ib-sm ib-rs-pick" aria-label={`${label}: ${chosen?.label ?? value}`} data-rs-select={value}>
+        <span className="ib-rs-pick-l" style={fontFamily ? { fontFamily } : undefined}>
+          {chosen?.label ?? value}
+        </span>
+        <Icon name="chevD" size={13} />
+      </Menu.Trigger>
+      <Menu.Portal container={root ?? undefined}>
+        {phone && <Menu.Backdrop className="ib-pm-scrim" />}
+        <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4} data-phone={phone ? '' : undefined}>
+          <Menu.Popup className="ib-pm ib-rs-pick-menu" aria-label={label}>
+            <div className="ib-pm-title" aria-hidden="true">
+              {label}
+            </div>
+            <Menu.RadioGroup value={value} onValueChange={(next: T) => onChange(next)}>
+              {options.map((opt) => (
+                <Menu.RadioItem key={opt.value} value={opt.value} closeOnClick className="ib-pmi" label={opt.label} data-rs-option={opt.value}>
+                  {opt.value === value ? <Icon name="check" size={13} /> : <span className="ib-pmi-slot" aria-hidden="true" />}
+                  {opt.label}
+                </Menu.RadioItem>
+              ))}
+            </Menu.RadioGroup>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }
 

@@ -39,12 +39,15 @@
 .ib-rs .ib-rs-range { flex: 1; min-width: 0; accent-color: var(--primary); cursor: pointer; }
 .ib-rs .ib-rs-val { min-width: 4ch; text-align: right; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 
-/* Fields: the Inbox's key field, at full width; a select in the same frame. */
+/* Fields: the Inbox's key field, at full width. */
 .pn-inbox .ib-rs .ib-rs-text { width: 100%; }
 .pn-inbox .ib-rs .ib-rs-sans { font-family: inherit; }
 .pn-inbox .ib-rs .ib-rs-text[aria-invalid="true"] { border-color: var(--warning, var(--destructive)); }
-.pn-inbox .ib-rs .ib-rs-select { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--ib-line); border-radius: 7px; background: var(--background); color: var(--foreground); font-size: var(--ib-fs-13, 13px); }
-.pn-inbox .ib-rs .ib-rs-select:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* A long list of choices: the Inbox's button naming the choice, opening its menu. */
+.pn-inbox .ib-rs .ib-rs-pick { align-self: flex-start; justify-content: space-between; gap: 8px; min-width: 200px; max-width: 100%; }
+.ib-rs .ib-rs-pick-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-rs .ib-rs-pick .ib-ic { flex: none; color: var(--muted-foreground); }
+.ib-rs-pick-menu { max-height: min(360px, var(--available-height, 360px)); overflow-y: auto; }
 .ib-rs .ib-rs-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .ib-rs .ib-rs-cap { font-size: var(--ib-fs-12, 12px); font-weight: 500; color: var(--foreground); }
 
