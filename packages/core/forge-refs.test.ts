@@ -252,4 +252,27 @@ describe("GitLab merge requests: !123 and group/sub/project!45", () => {
     expect(readGitlabShortMr("harbor-group/harbor#45")).toBeNull();
     expect(readGitlabShortMr("harbor!45")).toBeNull();
   });
+
+  test("with no repo, a guessed GitLab host links owner/repo#N but never group/project!N", () => {
+    const guessed = { host: "gitlab.harbor.dev", withoutRepo: true };
+    expect(matchCrossRepoRef("harbor-group/harbor!45", "", guessed)).toBeNull();
+    expect(matchCrossRepoRef("harbor-group/sub/harbor!45", "", guessed)).toBeNull();
+    expect(findCrossRepoRef("see harbor-group/harbor!45", 24, guessed)).toBe(-1);
+    expect(matchCrossRepoRef("harbor-group/harbor#7", "", guessed)?.href).toBe("https://gitlab.harbor.dev/harbor-group/harbor/-/issues/7");
+    expect(findCrossRepoRef("see harbor-group/harbor#7", 24, guessed)).toBe(4);
+  });
+
+  test("a 50 kB message of slashes, bangs and deep paths is scanned in linear time", () => {
+    const deepNoMark = ` ${`${"x".repeat(99)}/`.repeat(22)}!`;
+    const shapes = ["a/", "a/b!", "a!1/", "/!1", " g/s/p!1x", ` ${"a/".repeat(30)}!1`, deepNoMark, " a/b!0123", "a/b/c!".repeat(3) + " "];
+    for (const project of [{ host: "gitlab.harbor.dev" }, { host: "github.com" }, { host: "gitlab.harbor.dev", withoutRepo: true }]) {
+      for (const shape of shapes) {
+        const text = `x${shape.repeat(Math.ceil(50_000 / shape.length))}`.slice(0, 50_000);
+        const start = performance.now();
+        findCrossRepoRef(text, text.length, project, () => false);
+        matchCrossRepoRef(text, "", project);
+        expect(performance.now() - start).toBeLessThan(250);
+      }
+    }
+  });
 });

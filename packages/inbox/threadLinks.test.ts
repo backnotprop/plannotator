@@ -83,6 +83,10 @@ describe('what the message draws as a link', () => {
     ]);
     expect(hrefs(body, repo)).toEqual([]);
     expect(hrefs(body)).toEqual([]);
+    // No repo, even with most projects on a GitLab (defaultRefHost.ts): the `!` forms need a real GitLab project.
+    const noRepo = 'Merged !12 and harbor-group/harbor!45, see harbor-group/harbor#7.';
+    expect(linksOfBody(noRepo, null, 'gitlab.harbor.dev').map((l) => l.href)).toEqual(['https://gitlab.harbor.dev/harbor-group/harbor/-/issues/7']);
+    expect(threadLinks([{ id: 'nr', body: noRepo }], null, 'gitlab.harbor.dev').repos.map((r) => r.links.map((l) => l.text))).toEqual([['#7']]);
     // The list names them as GitLab does, in their own projects.
     const { repos } = threadLinks([{ id: 'mr', body }], gitlab);
     expect(repos.map((r) => [r.host, r.path, r.links.map((l) => [l.kind, l.text])])).toEqual([

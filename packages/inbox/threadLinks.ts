@@ -188,7 +188,8 @@ function readInline(text: string, repo: RefRepo, out: WrittenLink[], fallbackHos
           continue;
         }
       } else if (/[A-Za-z0-9]/.test(ch)) {
-        const cross = matchCrossRepoRef(text.slice(i), prev, { host: repo ? repo.host : fallbackHost });
+        // With no repo the host is a guess: GitLab's `group/project!12` stays plain there, as the message draws it.
+        const cross = matchCrossRepoRef(text.slice(i), prev, repo ? { host: repo.host } : { host: fallbackHost, withoutRepo: true });
         if (cross?.href) {
           out.push({ href: cross.href, words: null, fromRef: true });
           i += cross.label.length;

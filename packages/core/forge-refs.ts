@@ -202,12 +202,15 @@ export interface CrossRepoRef {
  * `/issues/N` to `/pull/N`, so one URL serves both. A `!45` is a ref only
  * when that host is a GitLab (its own host, self-hosted too): anywhere else it
  * is no ref at all. A caller that does not know its project at all passes no
- * project and gets no ref.
+ * project and gets no ref. A caller that names no repo but guesses a host
+ * (the Inbox's `crossRepoRefsWithoutRepo`) passes `withoutRepo`: `!45` forms
+ * need a real GitLab project, so they stay plain there; `owner/repo#123` links
+ * on the guessed host as before.
  */
 export function matchCrossRepoRef(
   text: string,
   previousChar: string,
-  project: { host?: string },
+  project: { host?: string; withoutRepo?: boolean },
 ): CrossRepoRef | null {
   if (previousChar && /[\w./@-]/.test(previousChar)) return null;
   const m = text.match(CROSS_REPO_REF_AT_START);
@@ -221,7 +224,7 @@ export function matchCrossRepoRef(
     if (parts.length !== 1) return null;
     return { label, path, href: forgeRefLinks({ display: path, host: project.host })?.issue(number) ?? null };
   }
-  const mergeRequest = readGitlabShortMr(label) ? forgeRefLinks({ display: path, host: project.host })?.mergeRequest : null;
+  const mergeRequest = !project.withoutRepo && readGitlabShortMr(label) ? forgeRefLinks({ display: path, host: project.host })?.mergeRequest : null;
   return mergeRequest ? { label, path, href: mergeRequest(number) } : null;
 }
 
@@ -235,7 +238,7 @@ export function matchCrossRepoRef(
 export function findCrossRepoRef(
   text: string,
   end: number,
-  project: { host?: string },
+  project: { host?: string; withoutRepo?: boolean },
   accept: (ref: CrossRepoRef) => boolean = () => true,
 ): number {
   // Only a word's start can begin a ref; a sticky match there reads no further than the ref itself, so the scan

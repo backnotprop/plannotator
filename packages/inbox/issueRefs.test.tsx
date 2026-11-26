@@ -136,6 +136,21 @@ test.skipIf(!hasDom)('in a repoless thread of a mostly-GitLab Inbox, owner/repo#
   }
 });
 
+test.skipIf(!hasDom)('in a repoless thread of a mostly-GitLab Inbox, !N and group/project!N stay plain: they need a real GitLab project', async () => {
+  await import('./App');
+  const { learnDefaultRefHost, resetDefaultRefHost } = await import('./defaultRefHost');
+  try {
+    learnDefaultRefHost([{ repo_host: 'gitlab.example.com' }, { repo_host: 'gitlab.example.com' }, { repo_host: 'github.com' }]);
+    await render('Merged !12, group/project!45 and group/sub/project!46; issue group/project#7.', null);
+    expect([...host!.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+      ['group/project#7', 'https://gitlab.example.com/group/project/-/issues/7'],
+    ]);
+    expect(host!.textContent).toContain('Merged !12, group/project!45 and group/sub/project!46;');
+  } finally {
+    resetDefaultRefHost();
+  }
+});
+
 const hrefsByText = () => [...host!.querySelectorAll<HTMLAnchorElement>('a')].map((a) => [a.textContent, a.getAttribute('href')]);
 
 test.skipIf(!hasDom)("a GitLab project's !N and group/sub/project!N link to merge requests on its own host; look-alikes stay plain", async () => {

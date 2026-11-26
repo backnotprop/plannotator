@@ -605,11 +605,12 @@ export function getDigitHexIssueRefs(): boolean {
  * every mounted `InlineMarkdown`.
  */
 export type CrossRepoRefsWithoutRepo = boolean | { host: string };
-let crossRepoDefault: { host?: string } | null = null;
+// `withoutRepo`: the host is a guess, so GitLab's `group/project!45` stays plain (it needs a real GitLab project).
+let crossRepoDefault: { host?: string; withoutRepo: true } | null = null;
 const crossRepoListeners = new Set<() => void>();
 
 export function setCrossRepoRefsWithoutRepo(on: CrossRepoRefsWithoutRepo): void {
-  const next = on === false ? null : on === true ? {} : { host: on.host };
+  const next = on === false ? null : on === true ? { withoutRepo: true as const } : { host: on.host, withoutRepo: true as const };
   if (next?.host === crossRepoDefault?.host && (next === null) === (crossRepoDefault === null)) return;
   crossRepoDefault = next;
   for (const listener of crossRepoListeners) listener();
@@ -1231,7 +1232,7 @@ export const InlineMarkdown: React.FC<{
     }
 
     // GitLab merge request: !123, on a GitLab project only, with `#123`'s boundary.
-    // An image's `![` was read above; GitHub's `!123` stays plain text.
+    // An image's `![` never matches (a digit must follow the `!`) and is read below; GitHub's `!123` stays plain text.
     const mergeRequest = !linkLabel && refLinks?.mergeRequest && !/\w/.test(previousChar) ? remaining.match(BARE_MR_REF) : null;
     if (mergeRequest) {
       const href = refLinks!.mergeRequest!(mergeRequest[1]);
