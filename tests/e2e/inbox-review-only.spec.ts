@@ -319,7 +319,8 @@ test('a first run of --review: code review only, the welcome once over Reviews, 
   await expect(page.locator('[data-settings-board]')).toBeVisible();
   await expect(page.locator('[data-settings-steps]')).toBeVisible();
   await expect(page.locator('[data-settings-code-review]')).toBeVisible();
-  await expect(item(page, 'inbox')).toBeVisible();
+  // Settings keeps the sidebar closed, so the hover peek (shell/SidebarPeek.tsx) holds a second, hidden copy of it.
+  await expect(item(page, 'inbox').filter({ visible: true })).toBeVisible();
   await shots(page, 'settings-switched-back-{s}');
   await page.goto(url.replace(/#.*$/, ''));
   await expect(item(page, 'inbox')).toBeVisible();
