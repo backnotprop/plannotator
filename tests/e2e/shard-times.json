@@ -193,6 +193,7 @@
   "inbox-remove-agent.spec.ts": 20,
   "inbox-replaced.spec.ts": 9,
   "inbox-reply-draft-files.spec.ts": 4,
+  "inbox-reply-drafts-machines.spec.ts": 45,
   "inbox-reply-drafts.spec.ts": 14,
   "inbox-reply-feedback-size.spec.ts": 6,
   "inbox-reply-file-links.spec.ts": 6,

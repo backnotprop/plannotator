@@ -3831,11 +3831,16 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * `linked-reads`: its door serves a linked machine's window a thread's steps, a guided review's whole files, image
  * sides, package changes and Viewed ticks, a referenced file's hover text and file check, and a search with a Tag
  * filter (by any machine's id of the tag), so that window shows them on this Inbox's threads as on its own.
+ * `reply-drafts`: a reply draft of one of its threads is kept there, written from a linked machine's window through
+ * its door (`threads/:id/draft`, `threads/:id/draft/delete`), and its stream says when one changes (`drafts=1`), so
+ * every window of either machine shows the same draft.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through", "linked-reads"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through", "linked-reads", "reply-drafts"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 /** The mark of an Inbox whose door serves a linked machine's window its reads (`linked-reads` above). */
 export const INBOX_LINKED_READS_MARK: InboxLinkedMark = "linked-reads";
+/** Whether a linked machine's list marks say it takes `mark` (none known: it does not). */
+export const inboxMarksHave = (marks: readonly string[] | null | undefined, mark: InboxLinkedMark): boolean => marks?.includes(mark) === true;
 
 /**
  * A thread pinned to the window's sidebar (approval "inbox-pinned-threads"):

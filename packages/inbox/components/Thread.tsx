@@ -72,6 +72,7 @@ import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, useLateVoiceMiss } from '../lateVoice';
 import { replyBoxSetAside } from '../floaters/model';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
+import { keepsReplyDraft, lostDraftFilesOf, replyDraftHost } from '../machineDrafts';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
 import { saveOverConflicts } from '../pickConflict';
 import { usePageLeave } from '../pageLeave';
@@ -388,7 +389,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const takeTheirWords = useRef<(threadId: string, draft: InboxReplyDraft, was: string) => ReplyBoxTook>(() => 'differs');
   const ownedFor = useRef<string | null>(null);
   const ownedBox = useRef<(threadId: string) => { text: string; files: ReplyDraftFiles } | null>(() => null);
-  const replyDraft = useReplyDraft(thread.thread_id, {
+  const replyDraft = useReplyDraft(thread.thread_id, { ...replyDraftHost,
     onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted),
     onWords: (threadId, draft, was) => takeTheirWords.current(threadId, draft, was),
     ownedBox: (threadId) => ownedBox.current(threadId),
@@ -422,7 +423,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       set: (text) => changeReply(text, true),
     },
     // The thread pane goes while files upload (a phone's Back): they land in the draft all the same.
-    onUnmountUploads: machine ? undefined : (uploads) => landLater(threadRef.current.thread_id, uploads),
+    onUnmountUploads: keepsReplyDraft(thread.thread_id) ? (uploads) => landLater(threadRef.current.thread_id, uploads) : undefined,
   });
   const replyUploads = replyFiles.uploaded.map((upload) => upload.upload_id);
   /**
@@ -432,7 +433,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
    */
   const filesSaved = useRef('');
   const takeDraftFiles = (files: readonly InboxDraftFile[], words: string, mode: 'replace' | 'add' = 'replace', alsoKeep: readonly string[] = []) => {
-    replyFiles.restoreDraft(files, words, mode, alsoKeep);
+    replyFiles.restoreDraft(files, words, mode, alsoKeep, lostDraftFilesOf(threadRef.current.thread_id));
     // What the draft holds is saved already; tiles the person attached before it was read (`add`) are saved with it:
     // the box's next save names what changed from the draft's files.
     const held = mode === 'add' ? files : replyFiles.draftFiles();
@@ -453,7 +454,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       return upload ? [{ ...upload, ...(file.pasted ? { pasted: file.pasted } : {}) }] : [];
     });
   const filesNow = pastedSignature(replyFiles.draftFiles());
-  /** Files that leave the box still uploading go on, and join this thread's draft once in (not another machine's thread). */
+  /** Files that leave the box still uploading go on, and join this thread's draft once in (where its draft is kept). */
   const landLater = (threadId: string, uploads: readonly Promise<InboxUpload | null>[]) => {
     for (const upload of uploads) void landInReplyDraft(threadId, upload);
   };
@@ -483,7 +484,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     ownedFor.current = null;
     setBox({ open: false, text: '' });
     setTaggedIds([]);
-    if (!discarded && !machine) landLater(thread.thread_id, replyFiles.detach());
+    if (!discarded && keepsReplyDraft(thread.thread_id)) landLater(thread.thread_id, replyFiles.detach());
     replyFiles.reset();
   };
   /** T6's down arrow or Escape: the box closes and keeps its draft, which floats in the corner (approval "inbox-reply-floaters"). */
@@ -1533,10 +1534,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const filesFor = useRef(thread.thread_id);
   useEffect(() => {
     // Another thread: nothing of the last one carries over. Its files are in its draft already; one still
-    // uploading joins it once in (another machine's thread keeps no draft: it stops).
+    // uploading joins it once in (a thread whose draft is not kept, on an older linked machine: it stops).
     const previous = filesFor.current;
     filesFor.current = thread.thread_id;
-    if (previous !== thread.thread_id && !machineOf(previous)) landLater(previous, replyFiles.detach());
+    if (previous !== thread.thread_id && keepsReplyDraft(previous)) landLater(previous, replyFiles.detach());
     setPending(new Map());
     setBox({ open: false, text: '' });
     ownedFor.current = null;
@@ -2176,11 +2177,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   hasFilesRef.current = replyFiles.files.length > 0;
   /** Read the reply draft again: another window (or this one) saved or discarded it (`event: drafts`). */
   const draftMoved = () => {
-    // The box's words as the answer comes (a restore or typing may change them meanwhile): edits there
-    // win, and the next save is refused if the draft moved.
-    void reloadDraft(() =>
-      boxRef.current.open ? { text: boxRef.current.text, files: replyFiles.draftFiles(boxRef.current.text) } : null,
-    ).then((answer) => {
+    // The box's words as the answer comes (a restore or typing may change them meanwhile): edits there win, and the
+    // next save is refused if the draft moved. Words held for another computer, put to the person now, go in the box.
+    void reloadDraft(() => (boxRef.current.open ? { text: boxRef.current.text, files: replyFiles.draftFiles(boxRef.current.text) } : null)).then((answer) => {
+      if (answer?.offered !== undefined && boxRef.current.open) return void (setBox({ open: true, text: answer.offered }), takeDraftFiles(draftFilesWithMine(answer.draft?.files ?? []), answer.offered));
       if (!answer?.replaceBox) return;
       if (answer.draft) {
         setBox({ open: true, text: answer.draft.body });
@@ -2282,10 +2282,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // unsaved, a file landing in a closed box's draft: replyDraftUnsaved, read when the guard asks), would be lost.
   const unsentSubject = thread.subject ?? 'this thread';
   // A file the reply draft holds on the server is not lost by a restart. One still uploading, waiting for its save,
-  // refused (its upload gone), or on another machine's thread (whose drafts are not saved) would be: the guard asks.
+  // refused (its upload gone), or on a thread whose drafts are not kept (an older linked machine) would be: the guard asks.
   const heldFiles = new Set((replyDraft.draft?.files ?? []).map((file) => file.upload_id));
-  const unsentFiles =
-    box.open && replyFiles.files.some((file) => !(file.state === 'done' && file.upload && !machine && heldFiles.has(file.upload.upload_id)));
+  const unsentFiles = box.open && replyFiles.files.some((file) => !(file.state === 'done' && file.upload && keepsReplyDraft(thread.thread_id) && heldFiles.has(file.upload.upload_id)));
 
   // Files dropped on the reply box attach there (a dashed "Drop to attach"; approval "inbox-reply-attach").
   const boxDrop = useFileDrop((list) => {
@@ -2301,13 +2300,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   // The stale page notice's Reload (stalePage.ts) saves first: the reply box's words as its draft, and every answer on
   // the cards. Files in the box that the draft does not keep would be lost, so they stop the reload too, as do words in
-  // the box of another machine's thread (its drafts live on that machine, which keeps none from here).
+  // the box of a linked machine's thread whose older Plannotator keeps no draft from here.
   const reloadFlush = useRef<() => Promise<boolean>>(async () => true);
   reloadFlush.current = async () => {
     const current = boxRef.current;
     const text = current.open ? current.text : null;
     const [reply, answers] = await Promise.all([replyDraft.settle(text, text === null ? undefined : replyFiles.draftFiles(text)), pickQueue.settled()]);
-    const awayWords = !!machine && text !== null && text.trim() !== '';
+    const awayWords = !keepsReplyDraft(thread.thread_id) && text !== null && text.trim() !== '';
     return reply && answers && !unsentFiles && !awayWords;
   };
   useEffect(() => registerReloadFlush(() => reloadFlush.current()), []);
@@ -3980,7 +3979,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const routeChoiceOpen = route.open && asking;
   const offerHost = () => ({ replyDraft, replyText, setBox, takeDraftFiles, draftFilesWithMine, changeReply, focusReplyEnd, announce, textRef });
   const restoreDraft = () => takeOffered(offerHost());
-  /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box. */
+  /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box (read again: words held for another computer that waited on this choice are offered now). */
   const discardMine = () => {
     const draft = replyDraft.takeTheirs();
     const theirs = draft?.body ?? '';
@@ -3988,6 +3987,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     takeDraftFiles(draft?.files ?? [], theirs);
     announce(theirs.trim() ? 'Your words were discarded; the other window’s are in the box.' : 'Your words were discarded.');
     requestAnimationFrame(() => textRef.current?.focus());
+    draftMoved();
   };
   const draftStamp = <DraftStamp savedAt={stampSavedAt} tooLong={stampTooLong} failed={stampFailed} onDiscard={discardReply} />;
   // The box's row (approval "inbox-reply-box", T6; ReplyRow.tsx). What goes with the reply: chips on a computer that

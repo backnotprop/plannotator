@@ -99,6 +99,7 @@ packages/inbox/replyBoxTyping.test.tsx
 packages/inbox/paneFailureKeepsReply.test.tsx
 packages/inbox/replyFootPhone.test.tsx
 packages/inbox/replyDraftNeverLost.test.tsx
+packages/inbox/farReplyDrafts.test.tsx
 packages/inbox/composeAutosave.test.tsx
 packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx

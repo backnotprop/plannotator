@@ -4415,10 +4415,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Windows only: the phone's door (contract 7.9) gets hello, record, status and the heartbeat.
         const sendReach = () => send(`event: reach\ndata: ${JSON.stringify(windows.reach(notificationsState().enabled))}\n\n`);
         const stopReach = windowId ? windows.subscribe(sendReach) : () => {};
-        // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows only.
+        // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows, and a
+        // linked machine that asks (`drafts=1`, mark `reply-drafts`: its windows show this Inbox's threads' drafts).
         // A compose draft has no thread: `{ compose: true }` (additive; a window that predates it skips the frame).
         const onDraft = (threadId: string | null) => send(`event: drafts\ndata: ${JSON.stringify(threadId === null ? { compose: true } : { thread_id: threadId })}\n\n`);
-        if (windowId) draftListeners.add(onDraft);
+        if (windowId || url.searchParams.get("drafts") === "1") draftListeners.add(onDraft);
         // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
         const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
         if (windowId && ask.allowed(req, via)) askListeners.add(onAsk);
@@ -5743,6 +5744,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onDraftsChange: () => {
       for (const listener of draftListeners) listener(null);
     },
+    farReplies: () => machines.replyDraftRows(),
     onSent: noteSend,
   });
   compose.sweep();
@@ -8985,6 +8987,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     machines = createInboxMachines({
       dataDir,
       serverSession,
+      follows,
       computerName: devices.machineDoor.computerName,
       door: devices.machineDoor,
       readBody,

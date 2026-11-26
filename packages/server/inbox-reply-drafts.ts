@@ -9,7 +9,11 @@
  *   POST /api/inbox/threads/:id/draft          `{ body, base, files_add?, files_remove?, files_place? }`: save (a
  *                                              compare-and-set on `updated_at`; 409 `draft_conflict` with the
  *                                              newer draft); an empty body with no files deletes it
- *   POST /api/inbox/threads/:id/draft/delete   Discard
+ *   POST /api/inbox/threads/:id/draft/delete   Discard (`{ base? }`: only while the draft is still that version, else
+ *                                              409 `draft_conflict` with it; a linked machine's door always names it)
+ *
+ * A save may carry `idempotency_key` (a linked machine's, through the door): the draft it makes keeps it (`last_key`),
+ * and the same save again, while that is still the draft, is answered with it: nothing written, no window told.
  *
  * The draft's files are every file in the box (paperclip, drop, paste), each a
  * pending upload, a long paste (approval "inbox-paste-attachment") with where
@@ -77,6 +81,12 @@ export function createInboxReplyDrafts(options: {
     if (checkServerSession(body, serverSession) === "mismatch" && (match[2] || !earlierRun(body))) return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     if (match[2]) {
       if (!store.thread(threadId)) return json({ error: `No thread ${threadId}.`, code: "thread_not_found" }, 404);
+      // `base` (a linked machine's Discard that waited there, inbox-machine-drafts.ts): only the draft the person threw
+      // away goes. One saved since (newer words typed here meanwhile) stays, and is answered as a save's conflict is.
+      if ("base" in body) {
+        const existing = store.replyDraft(threadId);
+        if (existing && existing.updated_at !== body.base) return json({ error: "This reply changed in another window since you opened it.", code: "draft_conflict", draft: existing }, 409);
+      }
       const deleted = store.deleteReplyDraft(threadId);
       if (deleted) {
         options.onChange(threadId);
@@ -84,6 +94,10 @@ export function createInboxReplyDrafts(options: {
       }
       return json({ ok: true, deleted });
     }
+    // A save under the key the draft was last saved with (a linked machine's whose answer was lost): the draft as it is,
+    // nothing written and no window told (store.ts `replyDraftSavedBy`).
+    const replayed = store.replyDraftSavedBy(threadId, body);
+    if (replayed) return json({ draft: replayed });
     const before = store.replyDraft(threadId);
     const draft = store.saveReplyDraft(threadId, body);
     options.onChange(threadId);

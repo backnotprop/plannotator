@@ -8181,6 +8181,9 @@
         "waiting": {
           "type": "number"
         },
+        "drafts_held": {
+          "type": "number"
+        },
         "list_cursor": {
           "anyOf": [
             {

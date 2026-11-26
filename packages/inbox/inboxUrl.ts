@@ -11,6 +11,7 @@
  * learned from what that machine sent (its list rows, its projects, its
  * thread reads): every id is a ULID, so an id names one machine's record.
  */
+import { inboxMarksHave, type InboxLinkedMark } from '@plannotator/core/inbox-types';
 
 /** This Inbox's own machine id (`ibx_…`), from the merged list; null before it (or from an Inbox that cannot link). */
 let selfMachine: string | null = null;
@@ -100,6 +101,17 @@ export function selfMachineName(): string | null {
 /** A linked machine's facts as the merged list last said them, or null (not linked, or not heard of yet). */
 export function linkedMachineFacts(id: string): LinkedMachineFacts | null {
   return linkedFacts.get(id) ?? null;
+}
+
+/**
+ * Whether a machine takes `mark`: this Inbox itself always does (null, its own id, or no machine at all); a linked one
+ * (its id, or its view) when its list says so; one not heard of yet, or an older one, does not.
+ */
+export function hasMachineMark(machineOrId: string | { id: string; marks?: readonly string[] } | null | undefined, mark: InboxLinkedMark): boolean {
+  if (!machineOrId) return true;
+  const id = typeof machineOrId === 'string' ? machineOrId : machineOrId.id;
+  if (id === selfMachine) return true;
+  return inboxMarksHave(typeof machineOrId === 'string' ? linkedFacts.get(id)?.marks : machineOrId.marks, mark);
 }
 
 /** Every linked machine the merged list last named that can be read (not one too old to link, nor revoked), by id. */

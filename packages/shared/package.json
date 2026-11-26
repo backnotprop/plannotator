@@ -227,6 +227,7 @@
     "./inbox/markups": "./inbox/markups.ts",
     "./inbox/uploads": "./inbox/uploads.ts",
     "./inbox/drafts": "./inbox/drafts.ts",
+    "./inbox/reply-drafts": "./inbox/reply-drafts.ts",
     "./inbox/connection": "./inbox/connection.ts",
     "./inbox/antigravity-links": "./inbox/antigravity-links.ts",
     "./inbox/claims": "./inbox/claims.ts",

@@ -1240,6 +1240,42 @@
       "relay": true
     },
     {
+      "name": "POST threads/:id/draft",
+      "method": "POST",
+      "path": "threads/{thread}/draft",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadDraft",
+      "window": "/api/inbox/threads/{thread}/draft",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "now",
+      "write": "draft",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/draft/delete",
+      "method": "POST",
+      "path": "threads/{thread}/draft/delete",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadDraftDelete",
+      "window": "/api/inbox/threads/{thread}/draft/delete",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "now",
+      "write": "draft",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "GET threads/:id/attachments",
       "method": "GET",
       "path": "threads/{thread}/attachments",
