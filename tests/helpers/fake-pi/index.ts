@@ -58,6 +58,14 @@ export interface FakePiConfig {
   settles?: boolean;
   /** One turn of the RPC process's own as the session starts (no Inbox message). */
   turnOnStart?: boolean;
+  /** Oh My Pi only: a start with no `--resume` reopens the newest session in its folder (its Auto Resume setting). */
+  autoResume?: boolean;
+  /** Oh My Pi only: RPC `new_session` is refused (an extension cancelled it); the session stays. */
+  newSessionCancelled?: boolean;
+  /** Oh My Pi only: `--resume <id>` answers as another copy of the conversation (a new id), or one of no lineage. */
+  resumeAs?: "continuation" | "fork" | "stranger" | null;
+  /** `get_state` reports this as the session id instead of its own. */
+  stateId?: string | null;
 }
 
 export interface FakePiCall {

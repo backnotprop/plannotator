@@ -6,6 +6,9 @@
  * plainly instead of started under another id; its extension dialog is answered Cancel under Oh My Pi's name; the row
  * is offered only with `omp` new enough and the extension in Oh My Pi's plugin record (or its settings), and the
  * not-ready line names the one command; the stopped line; the scratch purge in Oh My Pi's own sessions folder.
+ * Its own ids: a new start that Auto Resume put in an earlier session asks for a new one (or refuses, nothing sent);
+ * a resume answered as a newer copy that leads back is taken, one that does not is refused once and not started
+ * again; an id that is not one is never taken; a session never saved gets no "your reply continues it"; the article.
  * A small bridge in the test's data dir stands in for the Inbox's.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -21,7 +24,8 @@ import type { FakePi } from "../../tests/helpers/fake-pi";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import type { LaunchHostContext, LaunchLive } from "./inbox-launch-host";
 import type { LaunchEnv } from "./inbox-launch-env";
-import { createOhMyPiLaunchHost, ompPluginsDirs, ompSessionDirOf, OMP_STOPPED_NOTE } from "./inbox-launch-omp";
+import { createOhMyPiLaunchHost, ompAgentDir, ompPluginsDirs, ompSessionDirOf, ompSessionsRoot, OMP_STOPPED_NOTE } from "./inbox-launch-omp";
+import { piSessionContinues, piSessionProcesses } from "./inbox-launch-pi";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -118,7 +122,7 @@ function setup(config: Parameters<typeof installFakeOmp>[0]["config"] = { noConn
     n += 1;
     const launch: InboxLaunchRecord = { id: `lch_01J0000000000000000000000${n}`, agent: "oh-my-pi", session_ref: null, folder, scratch: false, started_at: new Date().toISOString() };
     mkdirSync(ctx.launchDir(launch.id), { recursive: true });
-    const message = store.startPersonThread({ project_id: project.id, body: "Tidy the readme.", to: { host: "oh-my-pi", session: `launch:${launch.id}` }, idempotency_key: `send-${n}`, thread_name: "Tidy the readme", launch }).message;
+    const message = store.startPersonThread({ project_id: project.id, body: "Tidy the readme.", to: { host: "oh-my-pi", session: `launch:${launch.id}` }, idempotency_key: `send-${n}`, thread_name: n === 1 ? "Tidy the readme" : `Tidy the readme ${n}`, launch }).message;
     roots.set(launch.id, message);
     const result = await host.start(launch, { name: "Tidy the readme", login: env });
     if (!result.ok) throw new Error(result.text);
@@ -132,8 +136,139 @@ function setup(config: Parameters<typeof installFakeOmp>[0]["config"] = { noConn
       .map((id) => store.message(id)!)
       .filter((m) => m.author.kind === "agent");
   const names = () => (existsSync(join(fake.state, "names.jsonl")) ? readFileSync(join(fake.state, "names.jsonl"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { sessionId: string; name: string }) : []);
-  return { root, home, folder, fake, host, store, env, bridge, started, agentNotes, names };
+  const rpc = () => (existsSync(join(fake.state, "rpc.jsonl")) ? readFileSync(join(fake.state, "rpc.jsonl"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type: string; from: string }) : []);
+  /** The Inbox started again: a new host over the same data dir and launches. */
+  const restarted = () => {
+    const again = createOhMyPiLaunchHost(ctx);
+    again.permissions({ store, launchDir: ctx.launchDir, rootOf: (id) => roots.get(id) ?? null, roots: () => [...roots.values()], displayFolder: (path) => path, host: { stateOf: () => null, readAt: () => 0 }, onChange: () => {} });
+    cleanup.push(() => again.close?.());
+    return again;
+  };
+  /** A session Oh My Pi saved (its first turn answered), then stopped. */
+  const saved = async () => {
+    const made = await started();
+    await until("the session file", () => fake.sessionFiles().length >= 1 && fake.sessionFiles().some((file) => file.endsWith(`_${made.session}.jsonl`)));
+    await host.stop(made.session);
+    fake.configure({ turnOnStart: false });
+    return made;
+  };
+  return { root, home, folder, fake, host, store, env, bridge, started, agentNotes, names, rpc, restarted, saved };
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+describe("Oh My Pi's own session ids, against the fake omp", () => {
+  test("Auto Resume on: a new start never lands in the earlier conversation; the Inbox asks for a new session and takes that one", async () => {
+    const { fake, host, started, saved, names, rpc } = setup({ noConnect: true, turnOnStart: true, turnError: "401 expired" });
+    const first = await saved();
+    const [firstFile] = fake.sessionFiles();
+    const before = readFileSync(firstFile!, "utf8");
+    fake.configure({ autoResume: true });
+    const second = await started();
+    expect(second.session).toMatch(UUID);
+    expect(second.session).not.toBe(first.session);
+    // It opened the first session, so the Inbox asked for a new one, named that one, and left the first alone.
+    expect(rpc()).toEqual([{ type: "new_session", from: first.session }]);
+    expect(names().at(-1)).toEqual({ sessionId: second.session, name: "Tidy the readme" });
+    expect(readFileSync(firstFile!, "utf8")).toBe(before);
+    expect((await host.sessions())(second.session)).toMatchObject({ state: "running" });
+  }, 15_000);
+
+  test("Auto Resume on and the new session refused: nothing starts, nothing is sent, and the line says what to do", async () => {
+    const { fake, host, saved, env } = setup({ noConnect: true, turnOnStart: true, turnError: "401 expired" });
+    const first = await saved();
+    fake.configure({ autoResume: true, newSessionCancelled: true });
+    const launch: InboxLaunchRecord = { id: "lch_01J00000000000000000000099", agent: "oh-my-pi", session_ref: null, folder: first.launch.folder, scratch: false, started_at: new Date().toISOString() };
+    const result = await host.start(launch, { name: "Second", login: env });
+    expect(result).toEqual({ ok: false, code: "failed", text: "Oh My Pi reopened an earlier session instead of starting a new one, so nothing was sent. Turn off Auto Resume in Oh My Pi's settings, then try again." });
+    await until("that omp ended", () => fake.starts().every((call) => !fake.alive(call.pid)));
+  }, 15_000);
+
+  test("a resume that answers as a newer copy of the conversation (its header leads back): the thread takes that id", async () => {
+    for (const kind of ["continuation", "fork"] as const) {
+      const { fake, host, saved } = setup({ noConnect: true, turnOnStart: true, turnError: "401 expired" });
+      const { launch, session } = await saved();
+      fake.configure({ resumeAs: kind });
+      const resumed = await host.resume(launch);
+      expect(resumed.failure).toBeNull();
+      expect(fake.starts().at(-1)!.argv).toEqual(["--mode", "rpc", "--allow-home", "--resume", session]);
+      expect(resumed.session).toMatch(UUID);
+      expect(resumed.session).not.toBe(session);
+      expect((await host.sessions())(resumed.session!)).toMatchObject({ state: "running" });
+      // Stop reaches it under its new id.
+      await host.stop(resumed.session!);
+      expect(fake.starts().every((call) => !fake.alive(call.pid))).toBe(true);
+    }
+  }, 30_000);
+
+  test("a resume that answers as a session that does not lead back: refused once, and a later reply starts nothing", async () => {
+    const { fake, host, saved } = setup({ noConnect: true, turnOnStart: true, turnError: "401 expired" });
+    const { launch } = await saved();
+    fake.configure({ resumeAs: "stranger" });
+    const words = "Oh My Pi opened another session in place of this one, so it can't continue it here. Start a new Oh My Pi session.";
+    expect((await host.resume(launch)).failure).toEqual({ code: "failed", text: words });
+    expect(fake.starts()).toHaveLength(2);
+    await until("that omp ended", () => fake.starts().every((call) => !fake.alive(call.pid)));
+    expect((await host.resume(launch)).failure).toEqual({ code: "failed", text: words });
+    expect(fake.starts()).toHaveLength(2);
+  }, 15_000);
+
+  test("an id that is not a session id is never taken", async () => {
+    const { fake, host, started } = setup({ noConnect: true, stateId: "../../etc --resume x" });
+    await expect(started()).rejects.toThrow("It answered something else.");
+    await until("that omp ended", () => fake.starts().every((call) => !fake.alive(call.pid)));
+  });
+
+  test("a session Oh My Pi never saved: neither stopped line promises a reply continues it", async () => {
+    const { fake, host, started, restarted, saved } = setup({ noConnect: true });
+    const { launch, session } = await started();
+    const pid = fake.starts()[0]!.pid;
+    process.kill(pid, "SIGKILL"); // inbox-guard: own child (the test's fake omp, not an Inbox)
+    await until("it ended", () => !fake.alive(pid));
+    await Bun.sleep(100);
+    const unsaved = "Oh My Pi had not saved this session yet, so there is nothing to continue. Start a new Oh My Pi session.";
+    expect(host.stoppedNote(launch)).toBe(unsaved);
+    expect(restarted().stoppedNote(launch)).toBe(unsaved);
+    // One it saved still says a reply continues it.
+    fake.configure({ turnOnStart: true, turnError: "401 expired" });
+    const kept = await saved();
+    expect(restarted().stoppedNote(kept.launch)).toBe(OMP_STOPPED_NOTE);
+  }, 15_000);
+
+  test("an Oh My Pi from an earlier Inbox still on the session: the line reads “An Oh My Pi process”", async () => {
+    const { started, restarted } = setup({ noConnect: true });
+    const { launch } = await started();
+    const result = await restarted().resume(launch);
+    expect(result.failure?.text).toMatch(/^An Oh My Pi process from before \(pid \d+\) still runs this session, so it did not start again\.$/);
+  });
+});
+
+describe("Oh My Pi's session lineage", () => {
+  test("a copy leads back through continuationOf or parentSession, copy after copy; a session of no lineage never does", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-omp-lineage-")));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    const ids = { a: "0190a000-0000-7000-8000-00000000000a", b: "0190a000-0000-7000-8000-00000000000b", c: "0190a000-0000-7000-8000-00000000000c", d: "0190a000-0000-7000-8000-00000000000d" };
+    const file = (id: string, header: Record<string, unknown>) => {
+      const path = join(dir, `2026-11-25T00-00-00-000Z_${id}.jsonl`);
+      writeFileSync(path, `${JSON.stringify({ type: "session", id, cwd: "/srv/harbor", ...header })}\n`);
+      return path;
+    };
+    file(ids.a, {});
+    file(ids.b, { continuationOf: ids.a, parentSession: ids.a });
+    const c = file(ids.c, { parentSession: ids.b });
+    const d = file(ids.d, { parentSession: "/not/an/id.jsonl" });
+    expect(piSessionContinues(c, ids.c, ids.a, [dir])).toBe(true);
+    expect(piSessionContinues(c, ids.c, ids.b, [dir])).toBe(true);
+    expect(piSessionContinues(d, ids.d, ids.a, [dir])).toBe(false);
+    // The file must be the session get_state named.
+    expect(piSessionContinues(c, ids.d, ids.a, [dir])).toBe(false);
+  });
+
+  test("a session id with pattern characters names only itself on a command line", () => {
+    const listing = "  4100 1 omp --mode rpc --resume 0190a000X0000-7000-8000-00000000000a\n";
+    expect(piSessionProcesses(listing, "0190a000.0000-7000-8000-00000000000a", [], [], "--resume")).toEqual([]);
+  });
+});
 
 describe("Oh My Pi's launch host, against the fake omp", () => {
   test("start: Oh My Pi picks the session id, the Inbox reads it from get_state and names the session for its thread", async () => {
@@ -245,6 +380,27 @@ describe("Oh My Pi's folders", () => {
     expect(ompPluginsDirs(env({}), "/home/ada", "linux")).toEqual(["/home/ada/.omp/plugins"]);
     expect(ompPluginsDirs(env({ PI_CONFIG_DIR: ".omp-work", OMP_PROFILE: "quill" }), "/home/ada", "linux")).toEqual(["/home/ada/.omp-work/profiles/quill/plugins"]);
     expect(ompPluginsDirs(env({ XDG_DATA_HOME: "/nowhere-at-all" }), "/home/ada", "linux")).toEqual(["/home/ada/.omp/plugins"]);
+  });
+
+  test("its profile, agent dir and sessions root as Oh My Pi resolves them (XDG, `default`, an override a parent's profile set)", () => {
+    const env = (values: Record<string, string>) => (name: string) => values[name];
+    const xdg = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-omp-xdg-")));
+    cleanup.push(() => rmSync(xdg, { recursive: true, force: true }));
+    // `default` and an empty OMP_PROFILE are the default profile (an empty one wins over PI_PROFILE).
+    expect(ompAgentDir(env({ OMP_PROFILE: "default" }), "/home/ada")).toBe("/home/ada/.omp/agent");
+    expect(ompAgentDir(env({ OMP_PROFILE: "", PI_PROFILE: "quill" }), "/home/ada")).toBe("/home/ada/.omp/agent");
+    expect(ompAgentDir(env({ PI_PROFILE: "quill" }), "/home/ada")).toBe("/home/ada/.omp/profiles/quill/agent");
+    // A PI_CODING_AGENT_DIR that is PI_PROFILE's own agent dir is a parent's profile, not an override.
+    expect(ompAgentDir(env({ OMP_PROFILE: "", PI_PROFILE: "quill", PI_CODING_AGENT_DIR: "/home/ada/.omp/profiles/quill/agent" }), "/home/ada")).toBe("/home/ada/.omp/agent");
+    expect(ompAgentDir(env({ PI_CODING_AGENT_DIR: "/srv/agent" }), "/home/ada")).toBe("/srv/agent");
+    // Sessions: under the agent dir, until $XDG_DATA_HOME/omp exists (no `agent/` there); never with an override.
+    expect(ompSessionsRoot(env({ XDG_DATA_HOME: xdg }), "/home/ada", "linux")).toBe("/home/ada/.omp/agent/sessions");
+    mkdirSync(join(xdg, "omp", "profiles", "quill"), { recursive: true });
+    expect(ompSessionsRoot(env({ XDG_DATA_HOME: xdg }), "/home/ada", "linux")).toBe(join(xdg, "omp", "sessions"));
+    expect(ompSessionsRoot(env({ XDG_DATA_HOME: xdg }), "/home/ada", "win32")).toBe("/home/ada/.omp/agent/sessions");
+    expect(ompSessionsRoot(env({ XDG_DATA_HOME: xdg, PI_CODING_AGENT_DIR: "/srv/agent" }), "/home/ada", "linux")).toBe("/srv/agent/sessions");
+    expect(ompSessionsRoot(env({ XDG_DATA_HOME: xdg, OMP_PROFILE: "quill" }), "/home/ada", "darwin")).toBe(join(xdg, "omp", "profiles", "quill", "sessions"));
+    expect(ompPluginsDirs(env({ XDG_DATA_HOME: xdg, OMP_PROFILE: "quill" }), "/home/ada", "darwin")[0]).toBe(join(xdg, "omp", "profiles", "quill", "plugins"));
   });
 
   test("its sessions folder names: under the temp root, under home, anywhere else", () => {

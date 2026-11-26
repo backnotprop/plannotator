@@ -37,6 +37,11 @@
  * `$PI_CODING_AGENT_DIR` else `~/.omp/agent`, in Oh My Pi's folder names (`-tmp-<relative>` under the temp
  * root, `-<relative>` under home, else `--<absolute>--`); `omp --resume <id>` alone is the terminal's. Its
  * extension polls as host `pi` and says `plugin.host: "oh-my-pi"`, as Plannotator's Pi extension does there.
+ * Config `autoResume`: a start with no `--resume` reopens the newest session in its folder (Oh My Pi's Auto Resume
+ * setting); RPC `new_session` then makes a new id with its file on disk at once (`newSessionCancelled`: an
+ * extension refused it). Config `resumeAs`: `--resume <id>` answers as another copy of that conversation, a new id
+ * whose header points back (`continuation`: `continuationOf` and `parentSession`; `fork`: `parentSession`), or as
+ * `stranger`, a new id that points back to nothing. rpc.jsonl lists each `new_session`.
  *
  * State in $FAKE_PI_STATE: config.json (read on each use), calls.jsonl (argv,
  * cwd, env names, the data dir and Inbox-tool values it got), pids.log,
@@ -92,7 +97,8 @@ if (terminal && !flag(ID_FLAG)) {
   process.exit(2);
 }
 
-const sessionId = flag(ID_FLAG) || (OMP ? crypto.randomUUID() : undefined);
+// `let`: Oh My Pi's session id changes on `new_session`, on Auto Resume and on a resume that answers as another copy.
+let sessionId = flag(ID_FLAG) || (OMP ? crypto.randomUUID() : undefined);
 if (!terminal && config().startFail) {
   process.stderr.write(`${config().startFail}\n`);
   process.exit(1);
@@ -134,8 +140,36 @@ if (OMP && !sessionFile && flag("--resume")) {
 }
 /** Oh My Pi writes a new session's file only from its first answer on: the lines wait until then. */
 let unwritten = null;
+const idOfFile = (name) => /_([0-9a-f-]{36})\.jsonl$/i.exec(name)?.[1];
+const newestHere = () =>
+  fs
+    .readdirSync(sessionDir)
+    .filter((name) => name.endsWith(".jsonl") && idOfFile(name))
+    .sort()
+    .at(-1);
+if (OMP && !terminal && !flag("--resume") && config().autoResume && newestHere()) {
+  // Auto Resume on (main.ts createSessionManager: `continueRecent`): the newest session in this folder, not a new one.
+  sessionFile = newestHere();
+  sessionId = idOfFile(sessionFile);
+}
 if (sessionFile) sessionFile = path.resolve(sessionDir, sessionFile);
-else if (OMP) {
+if (OMP && !terminal && sessionFile && flag("--resume") && config().resumeAs) {
+  // `--resume <id>` answering as another copy of the conversation (session-listing.ts findSessionContinuation, a
+  // `continuationOf` sibling; session-transfer.ts forkIfMovedAway, a fork): a new id, its header pointing back
+  // through `parentSession` (and `continuationOf`). "stranger": a new id that points back to nothing.
+  const kind = config().resumeAs;
+  const [head, ...rest] = fs.readFileSync(sessionFile, "utf8").split("\n").filter(Boolean);
+  const previous = JSON.parse(head);
+  const next = crypto.randomUUID();
+  const header = { ...previous, id: next, timestamp: new Date().toISOString(), ...(kind === "stranger" ? {} : { parentSession: previous.id }), ...(kind === "continuation" ? { continuationOf: previous.id } : {}) };
+  if (kind === "stranger") delete header.parentSession;
+  const to = path.join(path.dirname(sessionFile), `${new Date().toISOString().replace(/[:.]/g, "-")}_${next}.jsonl`);
+  fs.writeFileSync(to, [JSON.stringify(header), ...rest].map((line) => `${line}\n`).join(""));
+  sessionFile = to;
+  sessionId = next;
+} else if (sessionFile) {
+  // Opened as it is.
+} else if (OMP) {
   sessionFile = path.join(sessionDir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
   unwritten = [`${JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd })}\n`];
 } else {
@@ -175,15 +209,23 @@ const scratchHome = (() => {
 })();
 const claimDataDir = process.env.PLANNOTATOR_DATA_DIR || (scratchHome ? path.join(home, ".plannotator") : null);
 // As the extension: only on a computer that has run the Inbox (`inbox/inbox.json`).
-const claimFile = claimDataDir && fs.existsSync(path.join(claimDataDir, "inbox", "inbox.json")) ? path.join(claimDataDir, "inbox", "pi-sessions", `${sessionId}.${process.pid}.json`) : null;
-if (claimFile) {
+const claimRoot = claimDataDir && fs.existsSync(path.join(claimDataDir, "inbox", "inbox.json")) ? path.join(claimDataDir, "inbox", "pi-sessions") : null;
+let claimFile = null;
+/** Claim the session it runs now, the previous claim released (the extension does so on each session start or switch). */
+const claim = () => {
+  if (!claimRoot) return;
   try {
-    fs.mkdirSync(path.dirname(claimFile), { recursive: true });
+    if (claimFile) fs.rmSync(claimFile, { force: true });
+    claimFile = path.join(claimRoot, `${sessionId}.${process.pid}.json`);
+    fs.mkdirSync(claimRoot, { recursive: true });
     fs.writeFileSync(claimFile, JSON.stringify({ session: sessionId, pid: process.pid, rpc: !terminal, title: process.title, owner: "fake-pi" }));
   } catch {}
+};
+claim();
+if (claimRoot) {
   process.on("exit", () => {
     try {
-      fs.rmSync(claimFile, { force: true });
+      if (claimFile) fs.rmSync(claimFile, { force: true });
     } catch {}
   });
 }
@@ -232,7 +274,8 @@ if (!terminal) process.stdin.on("data", (chunk) => {
       continue;
     }
     if (command.type === "get_state") {
-      const answer = () => out({ id: command.id, type: "response", command: "get_state", success: true, data: { sessionId, sessionFile, messageCount: messageCount(), isStreaming: busy, sessionName } });
+      // Config `stateId`: the id it reports instead of its own (an answer that is not a session id).
+      const answer = () => out({ id: command.id, type: "response", command: "get_state", success: true, data: { sessionId: config().stateId ?? sessionId, sessionFile, messageCount: messageCount(), isStreaming: busy, sessionName } });
       // A Pi slow to come up (config `readyDelayMs`): its first answer waits.
       const delay = config().readyDelayMs ?? 0;
       if (delay > 0) setTimeout(answer, delay);
@@ -240,6 +283,23 @@ if (!terminal) process.stdin.on("data", (chunk) => {
       continue;
     }
     if (command.type === "abort") aborted = true;
+    if (OMP && command.type === "new_session") {
+      append("rpc.jsonl", { type: "new_session", from: sessionId });
+      // An extension's `session_before_switch` may cancel it (agent-session.ts newSession): the session stays.
+      if (config().newSessionCancelled) {
+        out({ id: command.id, type: "response", command: "new_session", success: true, data: { cancelled: true } });
+        continue;
+      }
+      // A new id, its file on disk at once with its header alone (session-manager.ts newSession: ensureOnDisk).
+      sessionId = crypto.randomUUID();
+      sessionFile = path.join(sessionDir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
+      unwritten = null;
+      fs.writeFileSync(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd })}\n`);
+      sessionName = undefined;
+      claim();
+      out({ id: command.id, type: "response", command: "new_session", success: true, data: { cancelled: false } });
+      continue;
+    }
     if (OMP && command.type === "set_session_name") {
       sessionName = command.name;
       append("names.jsonl", { sessionId, name: command.name });

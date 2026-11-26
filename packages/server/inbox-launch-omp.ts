@@ -11,7 +11,12 @@
  *   thread's name is set over RPC (`set_session_name`; it has no `--name`). A reply to a stopped session starts
  *   `omp --mode rpc --resume <id>`, which reopens its session file with the whole conversation. Oh My Pi writes that
  *   file from its first answer on, so a session stopped before it ever answered has nothing to continue: the
- *   restart says so instead of starting an empty one under another id.
+ *   restart says so instead of starting an empty one under another id, and so does the stopped line.
+ * - A new start must be a new session: with its Auto Resume setting on, Oh My Pi reopens the newest session in the
+ *   folder instead (in RPC mode too). Then the Inbox asks it for a new one (RPC `new_session`) and refuses, with
+ *   nothing sent, when it still is not new.
+ * - `--resume <id>` may answer as a newer copy of the conversation (another id): the thread moves to it when its
+ *   header leads back to the thread's session, and is refused once, for good, when it does not.
  * - The extension is read from Oh My Pi's plugin record (`omp plugin install` writes it): the plugins folder's
  *   `package.json` lists the package in `dependencies`, and `omp-plugins.lock.json` does not turn it off. A
  *   `settings.json` `extensions` entry in its agent dir counts too.
@@ -42,28 +47,64 @@ export const OMP_STOPPED_NOTE = piStoppedNote(OMP_NAME);
 
 type Env = (name: string) => string | undefined;
 
-/** `PI_CONFIG_DIR` (the folder name under home, `.omp` by default) and `OMP_PROFILE` / `PI_PROFILE`: Oh My Pi's config root. */
-function ompConfigRoot(env: Env, home: string): string {
+/**
+ * A profile name as Oh My Pi takes it (utils dirs.ts `normalizeProfileName`): trimmed; "" and "default" are the
+ * default profile; one it would refuse counts as the default too, as its startup reads it (`readProfileFromEnvSafe`).
+ */
+function ompProfileName(value: string | undefined): string | undefined {
+  const name = value?.trim();
+  if (!name || name === "default" || name.endsWith(".") || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) return undefined;
+  return /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(name) ? undefined : name;
+}
+
+/** The profile in use: `OMP_PROFILE` when it is set at all (even empty: the default), else `PI_PROFILE` (dirs.ts `resolveProfileEnv`). */
+function ompProfile(env: Env): string | undefined {
+  const omp = env("OMP_PROFILE");
+  return ompProfileName(omp !== undefined ? omp : env("PI_PROFILE"));
+}
+
+/** `~/<PI_CONFIG_DIR or .omp>`, and `/profiles/<name>` under it for a profile: Oh My Pi's config root. */
+function ompConfigRoot(env: Env, home: string, profile = ompProfile(env)): string {
   const root = join(home, env("PI_CONFIG_DIR") || ".omp");
-  const profile = (env("OMP_PROFILE") ?? env("PI_PROFILE"))?.trim();
-  return profile && /^[\w.-]+$/.test(profile) ? join(root, "profiles", profile) : root;
+  return profile ? join(root, "profiles", profile) : root;
 }
 
-/** Oh My Pi's agent dir: `PI_CODING_AGENT_DIR` (the default profile only), else `<config root>/agent`. */
+/**
+ * Oh My Pi's agent dir: `<config root>/agent`, or in the default profile `PI_CODING_AGENT_DIR` unless that is the agent dir
+ * `PI_PROFILE` derives (a parent's profile, passed down: dirs.ts `resolvePreProfileAgentDir`).
+ */
 export function ompAgentDir(env: Env, home: string): string {
-  const profiled = !!(env("OMP_PROFILE") ?? env("PI_PROFILE"))?.trim();
-  const override = profiled ? undefined : env("PI_CODING_AGENT_DIR");
-  return override ? resolve(override) : join(ompConfigRoot(env, home), "agent");
+  const profile = ompProfile(env);
+  if (profile) return join(ompConfigRoot(env, home, profile), "agent");
+  const override = env("PI_CODING_AGENT_DIR");
+  const piProfile = ompProfileName(env("PI_PROFILE"));
+  if (override && !(piProfile && override === join(ompConfigRoot(env, home, piProfile), "agent"))) return resolve(override);
+  return join(ompConfigRoot(env, home), "agent");
 }
 
-/** Where `omp plugin install` keeps its record: `$XDG_DATA_HOME/omp/plugins` once that folder exists (macOS and Linux), else `<config root>/plugins`. */
-export function ompPluginsDirs(env: Env, home: string, platform: NodeJS.Platform = process.platform): string[] {
-  const out: string[] = [];
+/**
+ * Oh My Pi's XDG data root (dirs.ts `DirResolver`), or null: on macOS and Linux, with its agent dir the default one,
+ * `$XDG_DATA_HOME/omp` (a profile's `$XDG_DATA_HOME/omp/profiles/<name>`) once that folder exists.
+ */
+function ompXdgData(env: Env, home: string, platform: NodeJS.Platform): string | null {
   const xdg = env("XDG_DATA_HOME");
-  const profiled = !!(env("OMP_PROFILE") ?? env("PI_PROFILE"))?.trim();
-  if (xdg && !profiled && (platform === "darwin" || platform === "linux") && existsSync(join(xdg, "omp"))) out.push(join(xdg, "omp", "plugins"));
-  out.push(join(ompConfigRoot(env, home), "plugins"));
-  return out;
+  if (!xdg || (platform !== "darwin" && platform !== "linux")) return null;
+  const profile = ompProfile(env);
+  if (ompAgentDir(env, home) !== join(ompConfigRoot(env, home, profile), "agent")) return null;
+  const root = profile ? join(xdg, "omp", "profiles", profile) : join(xdg, "omp");
+  return existsSync(root) ? root : null;
+}
+
+/** Where `omp plugin install` keeps its record (dirs.ts `getPluginsDir`): `<XDG data root>/plugins`, else `<config root>/plugins`. */
+export function ompPluginsDirs(env: Env, home: string, platform: NodeJS.Platform = process.platform): string[] {
+  const xdg = ompXdgData(env, home, platform);
+  return [...(xdg ? [join(xdg, "plugins")] : []), join(ompConfigRoot(env, home), "plugins")];
+}
+
+/** Oh My Pi's sessions root (dirs.ts `getSessionsDir`): `<XDG data root>/sessions` (XDG drops the `agent/`), else `<agent dir>/sessions`. */
+export function ompSessionsRoot(env: Env, home: string, platform: NodeJS.Platform = process.platform): string {
+  const xdg = ompXdgData(env, home, platform);
+  return xdg ? join(xdg, "sessions") : join(ompAgentDir(env, home), "sessions");
 }
 
 const readJson = (file: string): Record<string, unknown> | null => {
@@ -92,6 +133,11 @@ export function ompPluginInstalled(dir: string): boolean {
  * under home `-<relative>`, anywhere else `--<absolute>--`, each separator a `-`.
  */
 export function ompSessionDirOf(agentDir: string, cwd: string, home: string, temp: string = tmpdir()): string {
+  return ompSessionDirIn(join(agentDir, "sessions"), cwd, home, temp);
+}
+
+/** The same folder under a sessions root (`ompSessionsRoot`). */
+export function ompSessionDirIn(sessionsRoot: string, cwd: string, home: string, temp: string = tmpdir()): string {
   const at = resolve(cwd);
   // Oh My Pi compares canonical paths (links resolved), so the roots are taken as they really are.
   const real = (dir: string) => {
@@ -112,7 +158,7 @@ export function ompSessionDirOf(agentDir: string, cwd: string, home: string, tem
   const inTemp = within(temp);
   const inHome = within(home);
   const name = inTemp !== null ? encode("-tmp", inTemp) : inHome !== null ? encode("-", inHome) : `--${at.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
-  return join(resolve(agentDir), "sessions", name);
+  return join(resolve(sessionsRoot), name);
 }
 
 export const OMP_FLAVOR: PiLaunchFlavor = {
@@ -136,7 +182,11 @@ export const OMP_FLAVOR: PiLaunchFlavor = {
     return piExtensionListed(settings) ? { ok: true } : { ok: false, reason: OMP_NOT_INSTALLED, code: "plugin_off" };
   },
   // Its temp root is the one its process sees: the login's TMPDIR, else /tmp (the folder's header decides what goes).
-  sessionDirs: (agentDir, cwd, home, env) => [...new Set([env("TMPDIR"), tmpdir(), "/tmp"].filter((t): t is string => !!t).map((temp) => ompSessionDirOf(agentDir, cwd, home, temp)))],
+  // Under its sessions root, which XDG may move (`ompSessionsRoot`).
+  sessionDirs: (_agentDir, cwd, home, env) => {
+    const root = ompSessionsRoot(env, home);
+    return [...new Set([env("TMPDIR"), tmpdir(), "/tmp"].filter((t): t is string => !!t).map((temp) => ompSessionDirIn(root, cwd, home, temp)))];
+  },
   choices: false,
 };
 

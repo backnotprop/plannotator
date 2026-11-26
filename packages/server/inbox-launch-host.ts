@@ -323,8 +323,11 @@ export interface LaunchHost {
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */
   live(session: string): LaunchLive | null;
-  /** Start a session that is not live again (a reply to it, Try again). `failure` when it did not take. */
-  resume(launch: InboxLaunchRecord): Promise<LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null }>;
+  /**
+   * Start a session that is not live again (a reply to it, Try again). `failure` when it did not take. `session`: it
+   * goes on under that id now (Oh My Pi resumed a newer copy of the conversation), and the thread moves to it.
+   */
+  resume(launch: InboxLaunchRecord): Promise<LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null; session?: string }>;
   stop(ref: string): Promise<LaunchHostResult>;
   /** Delete, after stop: the host forgets the session. */
   remove(ref: string): Promise<LaunchHostResult>;

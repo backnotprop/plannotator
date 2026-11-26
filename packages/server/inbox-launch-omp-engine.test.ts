@@ -4,10 +4,11 @@
  * "Oh My Pi" as its own row beside "Pi" once `omp` and Plannotator's extension in its plugin record are there, and not
  * before; a Send starts `omp --mode rpc` in the project's folder and addresses the thread to the session id Oh My Pi
  * picked, as host `pi` (its extension polls the Inbox as Pi does), which takes the root; Pi's own row still starts Pi.
+ * A reply that Oh My Pi resumes under a newer copy's id moves the thread to that id, and that session takes the reply.
  * A small bridge stands in for the Inbox's: no Inbox is started.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -125,4 +126,35 @@ describe("Oh My Pi through the launch engine, against the fake omp", () => {
     await until("the root marked delivered to that session", () => store.message(root.id)!.delivery);
     expect(store.message(root.id)!.delivery).toMatchObject({ host: "pi", session });
   });
+
+  test("a reply Oh My Pi resumes as a newer copy of its conversation: the thread moves to that session, which takes the reply", async () => {
+    const t = setup();
+    const target = t.launch.target({ launch: { agent: "oh-my-pi", project_id: t.project.id } })!;
+    const prepared = await t.launch.prepare(target, { name: "Tidy the readme", body: "Tidy the readme.", resolveProject: async () => t.project });
+    const root = t.store.startPersonThread({ project_id: t.project.id, body: "Tidy the readme.", to: prepared.to, idempotency_key: "send-1", thread_name: "Tidy the readme", launch: prepared.launch }).message;
+    t.launch.begin(root);
+    const session = await until("the session", () => t.store.message(root.id)!.launch!.session_ref);
+    // It answers the root, so its session file is saved; then the Inbox stops (its omp with it) and starts again.
+    await until("the session saved", () => t.fake.sessionFiles().some((file) => file.endsWith(`_${session}.jsonl`) && readFileSync(file, "utf8").split("\n").filter(Boolean).length >= 3));
+    await t.launch.stop();
+    await until("the first omp ended", () => !t.fake.alive(t.fake.starts()[0]!.pid));
+    const after = t.makeLaunch();
+    t.clock.ahead = 120_000;
+    // The window reads the thread once (the engine looks at the host then), as it does after a restart.
+    await after.runOf(root.id);
+    t.fake.configure({ resumeAs: "continuation" });
+    const { reply } = t.store.sendReply(root.id, { words: "Please go on.", idempotency_key: "reply-1" });
+    // The server sweeps every second; here the test does (the bridge still reads the old omp live for two seconds).
+    const again = await until("a second start", () => (after.sweep(true), t.fake.starts()[1]));
+    expect(again.argv).toEqual(["--mode", "rpc", "--allow-home", "--resume", session]);
+    const moved = await until("the thread moved", () => {
+      const ref = t.store.message(root.id)!.launch!.session_ref;
+      return ref !== session ? ref : null;
+    });
+    expect(t.store.message(root.id)!.to).toEqual({ host: "pi", session: moved });
+    await until("the reply delivered to that session", () => t.store.message(reply.id)!.delivery);
+    expect(t.store.message(reply.id)!.delivery).toMatchObject({ host: "pi", session: moved });
+    after.sweep(true);
+    expect(t.fake.starts()).toHaveLength(2);
+  }, 30_000);
 });
