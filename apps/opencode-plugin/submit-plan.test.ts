@@ -174,17 +174,19 @@ describe("formatWithLineNumbers", () => {
 // ── getPlanBackingPath ─────────────────────────────────────────────────────
 
 describe("getPlanBackingPath", () => {
-  test("returns path inside data dir active/{project}/_active-plan.md", () => {
-    const result = getPlanBackingPath("myproject");
+  test("stores each session's plan inside the project's data directory", () => {
+    const result = getPlanBackingPath("myproject", "/workspace/myproject", "session-a");
     // The test preload sandboxes the data dir; never compare against the real one.
     const dataDir = process.env.PLANNOTATOR_DATA_DIR!;
     expect(dataDir).toBeTruthy();
-    expect(result).toBe(path.join(dataDir, "active", "myproject", "_active-plan.md"));
+    expect(path.dirname(result)).toBe(path.join(dataDir, "active", "myproject"));
+    expect(result).toBe(getPlanBackingPath("myproject", "/workspace/myproject", "session-a"));
   });
 
-  test("uses the provided project name as the directory segment", () => {
-    const result = getPlanBackingPath("some-project");
-    expect(result).toContain(path.join("active", "some-project"));
-    expect(result).toContain("_active-plan.md");
+  test("separates sessions and equally named projects, without using session IDs as paths", () => {
+    const result = getPlanBackingPath("some-project", "/one/some-project", "../session");
+    expect(result).not.toBe(getPlanBackingPath("some-project", "/one/some-project", "session"));
+    expect(result).not.toBe(getPlanBackingPath("some-project", "/two/some-project", "../session"));
+    expect(path.dirname(result)).toBe(path.join(process.env.PLANNOTATOR_DATA_DIR!, "active", "some-project"));
   });
 });

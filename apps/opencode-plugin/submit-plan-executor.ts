@@ -74,7 +74,7 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
   }
 
   const project = sanitizeTag(path.basename(invocation.directory)) || "_unknown";
-  const backingPath = getPlanBackingPath(project);
+  const backingPath = getPlanBackingPath(project, invocation.directory, invocation.sessionId);
   mkdirSync(path.dirname(backingPath), { recursive: true });
 
   const existingContent = existsSync(backingPath)
