@@ -1995,18 +1995,63 @@ export interface InboxThreadSummary {
   waiting_on_person: boolean;
 }
 
-/** The list's sections, in the approved order (Workspaces' inbox model). */
-export type InboxSectionId = "stopped" | "holding" | "waiting" | "new" | "sent" | "quiet";
+/**
+ * The list's sections, in the approved order (Workspaces' inbox model). `tagged` ("Tagged you", the owner's ruling
+ * for Spaces, 2026-11-25: fourth, after Waiting on you) is drawn only when a server sends it: the hosted Spaces
+ * server, where one person tags another. This computer's Inbox has one person and never places a row there
+ * (shared/inbox/list.ts `inboxSectionOf`).
+ */
+export type InboxSectionId = "stopped" | "holding" | "waiting" | "tagged" | "new" | "sent" | "quiet";
 
 export const INBOX_SECTIONS: readonly { readonly id: InboxSectionId; readonly label: string }[] = [
   { id: "stopped", label: "Stopped on you" },
   { id: "holding", label: "Holding up work" },
   { id: "waiting", label: "Waiting on you" },
+  { id: "tagged", label: "Tagged you" },
   { id: "new", label: "New since you looked" },
   // Sent waits on the agent, not on the person: below what is new to them.
   { id: "sent", label: "Sent" },
   { id: "quiet", label: "Quiet" },
 ];
+
+/** The sections this computer's Inbox places rows in and sends, in order: every one but Tagged you (one person, no one to tag them). */
+export const INBOX_LOCAL_SECTIONS: readonly { readonly id: Exclude<InboxSectionId, "tagged">; readonly label: string }[] = INBOX_SECTIONS.filter(
+  (section): section is { readonly id: Exclude<InboxSectionId, "tagged">; readonly label: string } => section.id !== "tagged",
+);
+
+/** A section id this code does not know is a type error here; at run time (a newer server's id) it waits on no one. */
+function unknownSection(id: never): false {
+  void id;
+  return false;
+}
+
+/**
+ * The sections whose rows wait on the person: Stopped, Holding up work, Waiting on you, and Tagged you (the owner's
+ * decision, 2026-11-25: "A · It counts"; a thread where someone tagged you counts like one waiting on you). Every
+ * count and rule of what waits on the person reads this: the sidebar's Inbox, project, machine and tag counts, the
+ * phone's badge, Mark read, the Agents view, the board, a pinned row's calm.
+ */
+export function inboxSectionWaitsOnPerson(id: InboxSectionId): boolean {
+  switch (id) {
+    case "stopped":
+    case "holding":
+    case "waiting":
+    case "tagged":
+      return true;
+    case "new":
+    case "sent":
+    case "quiet":
+      return false;
+    default:
+      return unknownSection(id);
+  }
+}
+
+/** A list group (a section, Priority, Snoozed, Archived, or none) whose rows wait on the person (`inboxSectionWaitsOnPerson`). */
+export function inboxGroupWaitsOnPerson(id: string | null | undefined): boolean {
+  const section = INBOX_SECTIONS.find((s) => s.id === id);
+  return section ? inboxSectionWaitsOnPerson(section.id) : false;
+}
 
 /** How far back the list filter's "Recent activity" reaches (`acted_at`), and how long acted.json keeps a time. */
 export const INBOX_RECENT_ACTIVITY_DAYS = 30;
@@ -2300,6 +2345,16 @@ export const INBOX_ROW_WAIT_ENTRY_MAX = 120;
  */
 export type InboxListGroupId = InboxSectionId | "snoozed" | "priority" | "archived";
 
+/**
+ * A list of groups that names every section: one that misses a section (a new id) is a type error naming it, so no
+ * order list can leave a section out by accident. Returns the list as given.
+ */
+export function inboxEverySection<const L extends readonly InboxListGroupId[]>(
+  list: L & ([Exclude<InboxSectionId, L[number]>] extends [never] ? unknown : { readonly missingSection: Exclude<InboxSectionId, L[number]> }),
+): L {
+  return list;
+}
+
 /** Why a row is in Priority (`InboxListRow.priority`). */
 export interface InboxRowPriority {
   person: boolean;
@@ -2341,12 +2396,7 @@ export interface InboxListSection {
 
 /** Something in the thread waits on the person: a question, or news they have not looked at. */
 export function inboxRowWaitsOnPerson(row: Pick<InboxListRow, "section" | "unseen" | "answered_not_sent">): boolean {
-  return (
-    row.section === "stopped" ||
-    row.section === "holding" ||
-    row.section === "waiting" ||
-    (row.section === "new" && (row.unseen > 0 || row.answered_not_sent))
-  );
+  return inboxSectionWaitsOnPerson(row.section) || (row.section === "new" && (row.unseen > 0 || row.answered_not_sent));
 }
 
 /**

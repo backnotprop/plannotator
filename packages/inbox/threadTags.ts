@@ -9,7 +9,7 @@
  * rows name those. A thread's tag lives on the thread's own machine, like its Priority.
  */
 import { createContext, useContext } from 'react';
-import { inboxInitiativeNameKey, type InboxInitiative, type InboxListRow, type InboxListSection, type InboxTagLook } from '@plannotator/core/inbox-types';
+import { inboxGroupWaitsOnPerson, inboxInitiativeNameKey, type InboxInitiative, type InboxListRow, type InboxListSection, type InboxTagLook } from '@plannotator/core/inbox-types';
 import { plural } from '@plannotator/core/inbox-format';
 import type { MachinesModel } from './machines';
 
@@ -147,7 +147,7 @@ export function filterTagRows(sections: readonly InboxListSection[], tag: string
 export function tagWaitingCounts(sections: readonly InboxListSection[], tagsOf: RowTags = ownTags): Map<string, number> {
   const counts = new Map<string, number>();
   for (const section of sections) {
-    if (section.id !== 'stopped' && section.id !== 'holding' && section.id !== 'waiting') continue;
+    if (!inboxGroupWaitsOnPerson(section.id)) continue;
     for (const row of section.threads) for (const tag of tagsOf(row)) counts.set(tag, (counts.get(tag) ?? 0) + 1);
   }
   return counts;

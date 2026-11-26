@@ -16,6 +16,11 @@
       "parts": [],
       "source": "packages/core/inbox-types.ts INBOX_SECTIONS waiting"
     },
+    "section.tagged": {
+      "text": "Tagged you",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_SECTIONS tagged"
+    },
     "section.new": {
       "text": "New since you looked",
       "parts": [],

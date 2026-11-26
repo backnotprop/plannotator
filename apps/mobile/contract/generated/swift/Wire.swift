@@ -5578,11 +5578,12 @@ public enum InboxListGroupId: Codable, Hashable, Sendable, RawRepresentable {
   case sent
   case snoozed
   case stopped
+  case tagged
   case waiting
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxListGroupId] = [.archived, .holding, .new, .priority, .quiet, .sent, .snoozed, .stopped, .waiting]
+  public static let known: [InboxListGroupId] = [.archived, .holding, .new, .priority, .quiet, .sent, .snoozed, .stopped, .tagged, .waiting]
 
   public init(rawValue: String) {
     switch rawValue {
@@ -5594,6 +5595,7 @@ public enum InboxListGroupId: Codable, Hashable, Sendable, RawRepresentable {
     case "sent": self = .sent
     case "snoozed": self = .snoozed
     case "stopped": self = .stopped
+    case "tagged": self = .tagged
     case "waiting": self = .waiting
     default: self = .unknown(rawValue)
     }
@@ -5609,6 +5611,7 @@ public enum InboxListGroupId: Codable, Hashable, Sendable, RawRepresentable {
     case .sent: return "sent"
     case .snoozed: return "snoozed"
     case .stopped: return "stopped"
+    case .tagged: return "tagged"
     case .waiting: return "waiting"
     case .unknown(let value): return value
     }
@@ -9866,11 +9869,12 @@ public enum InboxSectionId: Codable, Hashable, Sendable, RawRepresentable {
   case quiet
   case sent
   case stopped
+  case tagged
   case waiting
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxSectionId] = [.holding, .new, .quiet, .sent, .stopped, .waiting]
+  public static let known: [InboxSectionId] = [.holding, .new, .quiet, .sent, .stopped, .tagged, .waiting]
 
   public init(rawValue: String) {
     switch rawValue {
@@ -9879,6 +9883,7 @@ public enum InboxSectionId: Codable, Hashable, Sendable, RawRepresentable {
     case "quiet": self = .quiet
     case "sent": self = .sent
     case "stopped": self = .stopped
+    case "tagged": self = .tagged
     case "waiting": self = .waiting
     default: self = .unknown(rawValue)
     }
@@ -9891,6 +9896,7 @@ public enum InboxSectionId: Codable, Hashable, Sendable, RawRepresentable {
     case .quiet: return "quiet"
     case .sent: return "sent"
     case .stopped: return "stopped"
+    case .tagged: return "tagged"
     case .waiting: return "waiting"
     case .unknown(let value): return value
     }

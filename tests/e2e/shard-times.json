@@ -79,6 +79,7 @@
   "inbox-explicit-skip.spec.ts": 8,
   "inbox-feedback-search-phone-webkit.spec.ts": 14,
   "inbox-feedback-search.spec.ts": 22,
+  "inbox-field-voice.spec.ts": 22,
   "inbox-filter-by-typing.spec.ts": 20,
   "inbox-filter-section-fields.spec.ts": 25,
   "inbox-first-run.spec.ts": 26,

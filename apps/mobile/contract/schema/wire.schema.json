@@ -3769,6 +3769,7 @@
         "sent",
         "snoozed",
         "stopped",
+        "tagged",
         "waiting"
       ],
       "x-open": true,
@@ -7023,6 +7024,7 @@
         "quiet",
         "sent",
         "stopped",
+        "tagged",
         "waiting"
       ],
       "x-open": true,

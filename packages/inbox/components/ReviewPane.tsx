@@ -49,6 +49,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, PanePart, PullChangesTreePart, ReaderPart, ReviewKeysHere } from '../lazyParts';
+import { FieldVoice } from './FieldVoice';
 import { CommentPictures } from '../commentPictures';
 import { inboxPullIsOpen, inboxPullUrlOfKey, type InboxMessageWire, type InboxPull, type InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
@@ -974,6 +975,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview}>
               <ContextNotesProvider api={noteRows.api}>
               <GuideReader
+                lineFeedbackTools={message.guide && !isReview ? FieldVoice : null}
                 snapshot={readerSnapshot!}
                 reviewed={reviewed}
                 onReviewedChange={changeReviewed}
