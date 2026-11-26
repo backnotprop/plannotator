@@ -95,8 +95,9 @@ describe("plannotator inbox --tailscale (processes, a fake tailscale on PATH)", 
     const started = run(["--background"], { PLANNOTATOR_INBOX_TAILSCALE: "1" });
     expect(started.code).toBe(0);
     const entry = registry(w);
-    // Stdout stays the local URL alone; the tailnet goes to stderr.
-    expect(started.stdout).toBe(`${entry.url}\n`);
+    // Browser output advertises the publication; the registry and connection surface stay local.
+    expect(started.stdout).toBe(`https://${MAGIC}:${entry.port}/\n`);
+    expect(entry.url).toBe(`http://localhost:${entry.port}/`);
     expect(started.stderr).toContain(`Over your tailnet: https://${MAGIC}:${entry.port}/`);
 
     const target = mappings()[String(entry.port)]!;
@@ -127,7 +128,9 @@ describe("plannotator inbox --tailscale (processes, a fake tailscale on PATH)", 
 
     const asked = run(["--background", "--tailscale"]);
     expect(asked.code).toBe(0);
-    expect(asked.stdout).toBe(`${before.url}\n`);
+    expect(started.stdout).toBe(`${before.url}\n`);
+    expect(asked.stdout).toBe(`https://${MAGIC}:${before.port}/\n`);
+    expect(registry(w).url).toBe(before.url);
     expect(asked.stderr).toContain(`Over your tailnet: https://${MAGIC}:${before.port}/ (only ${OWNER})`);
     expect(asked.stderr).toContain("Published for this run");
     // The same Inbox, not a second one.
