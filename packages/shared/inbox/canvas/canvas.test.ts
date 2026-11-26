@@ -389,6 +389,52 @@ describe("what the recheck found (round 4)", () => {
     expect(roomy.scene.elements.find((e) => e.type === "arrow")!.points).toHaveLength(2);
   });
 
+  test("18b: a bowed arrow shows past its label: the editor hides the arrow under its words, so each leg leaves them by a visible stretch", () => {
+    // Three boxes in a row with a label wider than the gap between two: the bow once sat so close that the words
+    // covered all of it, and the arrow drew as two short stubs under floating words.
+    const made = applyOps(emptyScene(), [
+      { add: "box", text: "Booking form", at: [0, 0] },
+      { add: "box", text: "Booking worker", at: [320, 0] },
+      { add: "box", text: "Berth API", at: [640, 0] },
+      { connect: "Booking form", to: "Booking worker", label: "submit" },
+      { connect: "Booking worker", to: "Berth API", label: "reserve (8 s timeout)" },
+    ], agent);
+    expect(made.ok).toBe(true);
+    const arrows = made.scene.elements.filter((e) => e.type === "arrow");
+    const arrow = arrows[1]!;
+    expect(arrow.points).toHaveLength(3);
+    const label = made.scene.elements.find((e) => e.type === "text" && e.containerId === arrow.id)!;
+    // The editor's mask: the label's box and its padding (Excalidraw BOUND_TEXT_PADDING). The editor lays the words out
+    // itself, up to its run (at least 11 times the font size, 220): drawn on one line, "reserve (8 s timeout)" is 208
+    // wide. So the box is as wide as that run, about the label's centre.
+    const pad = 5;
+    const run = Math.max(label.width, 220);
+    const box = { x: label.x + label.width / 2 - run / 2 - pad, y: label.y - pad, w: run + pad * 2, h: label.height + pad * 2 };
+    const [p0, p1, p2] = [0, 1, 2].map((i) => [arrow.x + arrow.points![i]![0]!, arrow.y + arrow.points![i]![1]!]) as [number, number][];
+    /** The editor's curve through three points (rough.js: Catmull-Rom, ends repeated), one leg as a cubic. */
+    const leg = (a: [number, number], b: [number, number], before: [number, number], after: [number, number]) => (t: number) => {
+      const c1 = [a[0] + (b[0] - before[0]) / 6, a[1] + (b[1] - before[1]) / 6];
+      const c2 = [b[0] - (after[0] - a[0]) / 6, b[1] - (after[1] - a[1]) / 6];
+      const u = 1 - t;
+      return [0, 1].map((k) => u * u * u * a[k]! + 3 * u * u * t * c1[k]! + 3 * u * t * t * c2[k]! + t * t * t * b[k]!) as [number, number];
+    };
+    /** How much of a leg lies outside the cleared box. */
+    const shown = (curve: (t: number) => [number, number]) => {
+      let length = 0;
+      let prev = curve(0);
+      for (let i = 1; i <= 400; i++) {
+        const now = curve(i / 400);
+        const [x, y] = [(prev[0] + now[0]) / 2, (prev[1] + now[1]) / 2];
+        if (x < box.x || x > box.x + box.w || y < box.y || y > box.y + box.h) length += Math.hypot(now[0] - prev[0], now[1] - prev[1]);
+        prev = now;
+      }
+      return length;
+    };
+    expect([shown(leg(p0, p1, p0, p2)), shown(leg(p1, p2, p0, p2))].map((n) => n >= 30)).toEqual([true, true]);
+    // And its words still lie on no thing.
+    for (const shape of made.scene.elements.filter((e) => e.type === "rectangle")) expect(boxesOverlap(boxOf(shape), boxOf(label))).toBe(false);
+  });
+
   test("19: words with marks that stack on letters are drawn in the plain face, which carries them", () => {
     const made = applyOps(emptyScene(), [{ add: "diamond", text: "approves? Z\u0351\u034c\u0300a\u0310\u0311l\u0352g\u0301o\u0300" }, { add: "box", text: "\u0110\u1eb7ng Th\u1ecb Ng\u1ecdc H\u00e2n", at: [0, 400] }], agent);
     const [zalgo, viet] = made.scene.elements.filter((e) => e.type === "text");

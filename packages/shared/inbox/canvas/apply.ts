@@ -326,6 +326,15 @@ function labelSize(container: CanvasElement, words: string): { w: number; h: num
   return { w: Math.min(size.w, Math.max(10, Math.round(run))), h: size.h };
 }
 
+/**
+ * The most a label may cover once the editor has laid it out: our guess runs wide per letter, so words it wraps to
+ * two lines the editor may draw on one, as wide as its run. The guess's height and the run's width cover both.
+ */
+function labelReach(container: CanvasElement, words: string): { w: number; h: number } {
+  const size = labelSize(container, words);
+  return { w: Math.max(size.w, Math.min(Math.round(labelRun(container)), textSize([words]).w)), h: size.h };
+}
+
 /** The middle of an arrow, where the editor puts its label: its middle point, or the middle of its middle stretch. */
 function midOf(arrow: CanvasElement): [number, number] {
   const points = arrow.points ?? [];
@@ -610,11 +619,47 @@ function route(arrow: CanvasElement, from: Box, to: Box, via?: [number, number])
   return { x, y, width: Math.max(0, mx, dx) - Math.min(0, mx, dx), height: Math.max(0, my, dy) - Math.min(0, my, dy), points: [[0, 0], [mx, my], [dx, dy]] };
 }
 
+/** The editor clears the arrow under its label: the label's box and this much around it (Excalidraw BOUND_TEXT_PADDING). */
+const LABEL_MASK = 5;
+/** How much of each leg of a bowed arrow shows past its label, at least, so it reads as one arrow and not two stubs. */
+const LEG_SHOWN = 32;
+
+/**
+ * How much of each leg of a bowed arrow (three points, drawn as the editor's curve through them) lies outside its
+ * label's cleared box: the smaller of the two. The editor curves a rounded arrow as rough.js does (Catmull-Rom
+ * through the points, its ends repeated), so near its ends the bow rises more steeply than its straight legs.
+ */
+function legShown(bowed: Partial<CanvasElement>, at: [number, number], size: { w: number; h: number }): number {
+  const p = bowed.points!.map(([px, py]) => [bowed.x! + px!, bowed.y! + py!] as [number, number]);
+  const box = { x: at[0] - size.w / 2 - LABEL_MASK, y: at[1] - size.h / 2 - LABEL_MASK, w: size.w + LABEL_MASK * 2, h: size.h + LABEL_MASK * 2 };
+  const outside = (x: number, y: number) => x < box.x || x > box.x + box.w || y < box.y || y > box.y + box.h;
+  const pt = (i: number) => p[Math.max(0, Math.min(p.length - 1, i))]!;
+  let least = Infinity;
+  for (let i = 0; i + 1 < p.length; i++) {
+    const [p0, p1, p2, p3] = [pt(i - 1), pt(i), pt(i + 1), pt(i + 2)];
+    const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    let shown = 0;
+    let prev = p1;
+    for (let s = 1; s <= 64; s++) {
+      const t = s / 64;
+      const u = 1 - t;
+      const x = u * u * u * p1[0] + 3 * u * u * t * c1[0]! + 3 * u * t * t * c2[0]! + t * t * t * p2[0];
+      const y = u * u * u * p1[1] + 3 * u * u * t * c1[1]! + 3 * u * t * t * c2[1]! + t * t * t * p2[1];
+      if (outside((prev[0] + x) / 2, (prev[1] + y) / 2)) shown += Math.hypot(x - prev[0], y - prev[1]);
+      prev = [x, y];
+    }
+    least = Math.min(least, shown);
+  }
+  return least;
+}
+
 /**
  * An arrow between two things, with room for its words. The editor draws an arrow's label on the arrow's middle,
  * wrapped by words to a width of its own choosing (at least 220), so between two things that stand close the label
  * would lie over them. Then the arrow bows out to one side, through the nearest free spot that holds the label: the
- * words sit beside the things, never on one.
+ * words sit beside the things, never on one. The editor hides the arrow under its words, so the bow goes out far
+ * enough that each leg shows past them (`legShown`): a bow no deeper than its label read as two stubs under words.
  */
 function routeLabelled(work: Work, arrow: CanvasElement, from: Box, to: Box, words: string): Partial<CanvasElement> {
   const straight = route(arrow, from, to);
@@ -636,7 +681,7 @@ function routeLabelled(work: Work, arrow: CanvasElement, from: Box, to: Box, wor
   for (const [dx, dy] of spots) {
     const via: [number, number] = [mid[0] + dx, mid[1] + dy];
     const bowed = route(arrow, from, to, via);
-    if (!free(via, bowed)) continue;
+    if (!free(via, bowed) || legShown(bowed, via, labelReach({ ...arrow, ...bowed } as CanvasElement, words)) < LEG_SHOWN) continue;
     const p = bowed.points!;
     const out: Segment = [bowed.x! + p[0]![0]!, bowed.y! + p[0]![1]!, bowed.x! + p[1]![0]!, bowed.y! + p[1]![1]!];
     const back: Segment = [bowed.x! + p[1]![0]!, bowed.y! + p[1]![1]!, bowed.x! + p[2]![0]!, bowed.y! + p[2]![1]!];
