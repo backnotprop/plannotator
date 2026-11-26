@@ -256,6 +256,8 @@ function writeForge(dir: string) {
     'if [ "$1" = api ] && [ "$4" = graphql ]; then',
     '  case "$*" in *"query InboxPullsOthers"*) echo "glab others" >> "$calls"; echo \'{"data":{"currentUser":{"username":"dana"}}}\'; exit 0;; esac',
     '  case "$*" in *reviewRequestedMergeRequests*) echo "glab pulls" >> "$calls"; cat "$dir/glab-pulls.json"; exit 0;; esac',
+    // The read's other lists, a query each: one "glab pulls" line a read.
+    '  case "$*" in *"query InboxPulls "*) cat "$dir/glab-pulls.json"; exit 0;; esac',
     '  echo "glab graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',

@@ -446,6 +446,8 @@
       "/api/inbox/window",
       "/api/plans",
       "/api/plans/*",
+      "/api/sem-diff/opinion",
+      "/api/sem-diff/opinion/settings",
       "/app-icon/*",
       "/apple-touch-icon.png",
       "/assets/sem-diff/*",
@@ -1780,6 +1782,7 @@
       "general",
       "machines",
       "prompts",
+      "reviews",
       "rows",
       "storage",
       "voice"

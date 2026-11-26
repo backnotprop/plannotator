@@ -1,9 +1,9 @@
 /**
- * One spacing rule for the sidebar's Pinned, Agents and Projects, proved in a
+ * One spacing rule for the sidebar's Pinned, Tags, Agents and Projects, proved in a
  * real Chromium against the compiled binary under a temp HOME and data dir: a
  * header sits 2 px under a closed section with no row left and 12 px (8 on a
  * phone) under rows, a closed section's kept row included, and rows sit directly
- * under their header. Agents is a section like the others (no panel), its rows 2 px under its header.
+ * under their header. Agents is a section like the others (no panel), its rows right under its header too.
  * The row around the Projects header is exactly that header,
  * so the gap above it is no hover.
  *
@@ -53,10 +53,10 @@ async function unlessGone(handle: () => Promise<void>): Promise<void> {
 const layout = (page: Page, scope: string) =>
   page.evaluate((selector) => {
     const root = document.querySelector(selector)!;
-    const short: Record<string, string> = { pinned: 'Pin', agents: 'Ag', projects: 'Proj' };
+    const short: Record<string, string> = { pinned: 'Pin', tags: 'Tag', agents: 'Ag', projects: 'Proj' };
     let line = '';
     let bottom: number | null = null;
-    for (const el of root.querySelectorAll('[data-sidebar-section], .ib-sidescroll .ib-pins, .ib-sidescroll .ib-agents-body, .ib-sidescroll .ib-projs')) {
+    for (const el of root.querySelectorAll('[data-sidebar-section], .ib-sidescroll .ib-pins, .ib-sidescroll .ib-tags, .ib-sidescroll .ib-agents-body, .ib-sidescroll .ib-projs')) {
       const section = el.getAttribute('data-sidebar-section');
       const rows = section ? [el] : [...el.children];
       if (rows.length === 0) continue;
@@ -151,7 +151,7 @@ test.afterAll(async () => {
 });
 
 // Agents is a section like the others, straight on the sidebar's ground (the owner, 2026-11-09: no panel behind it):
-// its header keeps the sections' gaps, and its rows sit 2 px under it. No agent runs here, so its one row is its
+// its header keeps the sections' gaps, and its rows sit right under it, as Projects' do. No agent runs here, so its one row is its
 // empty line (a machine with no agent shows nothing).
 // A phone's sheet (approval "inbox-phone-sidebar-sheet"): every heading sits 8 px under what is above it, closed or open
 // (a 44 px heading every 52 px), since each heading is a sticky row of its own there.
@@ -160,8 +160,8 @@ for (const [device, phone, set, shut] of [['desktop', false, 12, 2], ['phone', t
     const { page } = world;
     expect(await layout(page, await open(['pinned', 'agents'], phone))).toBe(`Pin -${shut}- Ag -${shut}- Proj -0- rows`);
     expect(await layout(page, await open(['pinned', 'agents', 'projects'], phone))).toBe(`Pin -${shut}- Ag -${shut}- Proj`);
-    expect(await layout(page, await open([], phone))).toBe(`Pin -0- rows -${set}- Ag -2- rows -${set}- Proj -0- rows`);
-    expect(await layout(page, await open(['pinned'], phone))).toBe(`Pin -${shut}- Ag -2- rows -${set}- Proj -0- rows`);
+    expect(await layout(page, await open([], phone))).toBe(`Pin -0- rows -${set}- Ag -0- rows -${set}- Proj -0- rows`);
+    expect(await layout(page, await open(['pinned'], phone))).toBe(`Pin -${shut}- Ag -0- rows -${set}- Proj -0- rows`);
     expect(await layout(page, await open(['agents'], phone))).toBe(`Pin -0- rows -${set}- Ag -${shut}- Proj -0- rows`);
   });
 }
@@ -236,3 +236,35 @@ test("Tags' New tag sits right above Agents' Add agent, and the headings' button
   await settled(agentsOn);
   await page.mouse.move(900, 600);
 });
+
+/** Each header's icon centre and name start, and Inbox's above them: one icon column, one name column. */
+const columns = (page: Page, scope: string) =>
+  page.evaluate((selector) => {
+    const root = document.querySelector(selector)!;
+    const centre = (icon: Element) => {
+      const box = icon.getBoundingClientRect();
+      return Math.round(box.left + box.width / 2);
+    };
+    const inbox = root.querySelector('[data-inbox-nav]')!;
+    const words = document.createRange();
+    words.selectNodeContents([...inbox.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent!.trim())!);
+    const want = [centre(inbox.querySelector('.ib-ic-inbox')!), Math.round(words.getBoundingClientRect().left)];
+    const headers = [...root.querySelectorAll('[data-sidebar-section]')].map((h) => [centre(h.querySelector('svg')!), Math.round(h.querySelector('.ib-side-sec-l')!.getBoundingClientRect().left)]);
+    return { want, headers };
+  }, scope);
+
+// Last, with the tag the test above made (a thread tagged with it, so open Tags holds one row): Tags folds like the
+// other sections. Its heading and its rows sit one level deeper (.ib-tagsec), which the rule once missed: a closed Tags
+// left 12 px over Agents, and a closed Starred 12 px over Tags, beside Agents' 2 px over Projects.
+for (const [device, phone, set, shut] of [['desktop', false, 12, 2], ['phone', true, 8, 8]] as const) {
+  test(`${device}: Tags sits like the other sections, closed or open, and every header shares Inbox's columns`, async () => {
+    const { page } = world;
+    expect(await layout(page, await open(['pinned', 'tags', 'agents', 'projects'], phone))).toBe(`Pin -${shut}- Tag -${shut}- Ag -${shut}- Proj`);
+    expect(await layout(page, await open(['tags'], phone))).toBe(`Pin -0- rows -${set}- Tag -${shut}- Ag -0- rows -${set}- Proj -0- rows`);
+    expect(await layout(page, await open(['pinned'], phone))).toBe(`Pin -${shut}- Tag -0- rows -${set}- Ag -0- rows -${set}- Proj -0- rows`);
+    const scope = await open([], phone);
+    expect(await layout(page, scope)).toBe(`Pin -0- rows -${set}- Tag -0- rows -${set}- Ag -0- rows -${set}- Proj -0- rows`);
+    const { want, headers } = await columns(page, scope);
+    expect(headers).toEqual(headers.map(() => want));
+  });
+}

@@ -529,6 +529,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true, drawn);
   // Global comment sits in the bar. A phone keeps it in the comments' sheet.
   const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null);
+  // A phone's Power Up face (GuideReader's PowerUpMark), in the row under the bar beside Files and the gear.
+  const [powerUpHost, setPowerUpHost] = useState<HTMLSpanElement | null>(null);
   const [railWidth, setRailWidth] = useState(() => {
     try {
       const kept = Number(window.localStorage.getItem(RAIL_WIDTH.key));
@@ -1113,6 +1115,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
               </button>
             )}
             {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
+            <span ref={setPowerUpHost} className="ib-prp-powerup" data-pull-power-up-host="" />
           </div>
         )}
         {detailsOpen && (
@@ -1217,6 +1220,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
                 <GuideReader
                   bare
                   controlsHost={controlsHost}
+                  {...(phone ? { powerUpHost } : {})}
                   hostDiffControls
                   {...(collapseAll ? { collapseAll } : {})}
                   snapshot={snapshot}

@@ -354,7 +354,7 @@ export function ClipText({ className, text }: { className: string; text: string 
 }
 
 /**
- * A row and its quiet hover action: Mark read on a row that waits on the
+ * A row and its quiet hover action: Mark read on a bold row that waits on the
  * person, Mark unread on a read row (markRead.ts `canMarkUnread`), shown on
  * hover or keyboard focus where the count and time are. It
  * never opens the thread. The action is the row's sibling (a button cannot
@@ -383,7 +383,7 @@ export function RowWithAction({
   // The action toggles (owner, 2026-10-31): on a read row (the row menu's rule, `canMarkUnread`) it is Mark unread.
   // That includes a row the person read that the list still holds in New (the thread open, or the one just left;
   // markRead.ts `seenHeldInNew`): the owner, 2026-11-02, "I opened it. I still want the ability to mark it unread."
-  // Its Mark read (move it to Quiet now) stays in the row menu and the header.
+  // And an opened row whose questions still wait (the owner, 2026-11-25). Mark read stays in the row menu and the header.
   const unread = !onUnarchive && onMarkUnread && canMarkUnread(row);
   const offer = !onUnarchive && !unread && onMarkRead && offersRowMarkRead(row, drawn);
   // A reply waiting on a busy agent that can take it now: Send now, on hover and keyboard focus as Mark read.
