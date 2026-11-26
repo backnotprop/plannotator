@@ -1509,7 +1509,10 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                 {activeTab === 'display' && mode !== 'review' && (
                   <>
-                    {annotateDocumentTabs && showHtmlAnnotateStartup && <HtmlAnnotateStartupSetting />}
+                    {annotateDocumentTabs && showHtmlAnnotateStartup && (<>
+                    <HtmlAnnotateStartupSetting />
+                    <div className="border-t border-border" />
+                    </>)}
                     {/* Text size (#2066): the document only, not the app around it */}
                     {showDocumentTextSize && (<>
                     <div className="space-y-3" data-document-text-size-setting>
