@@ -451,7 +451,8 @@ test("5. Search: the Tag chip lists Laptop's tag, and picking it finds Laptop's 
   await expect(option).toBeVisible();
   await option.click();
   await expect(chip).toHaveText('Tagged Tide window');
-  await expect(palette.locator(`[data-result-id="${far.harbor.thread}"]`)).toBeVisible({ timeout: 15_000 });
+  // The thread's row (its first message shares its id, and may be listed too).
+  await expect(palette.locator(`[data-result="thread"][data-result-id="${far.harbor.thread}"]`)).toBeVisible({ timeout: 15_000 });
   // The tagged search asked with Laptop's tag, through the merged route.
   expect(requests.some((r) => r === 'GET /api/inbox/search')).toBe(true);
   await shoot(page, '06-search-tag');
