@@ -47,7 +47,15 @@ export type ExternalAnnotationEvent<T = unknown> =
    * "agent" when the agent asked to close it, "session" when plan mode or the
    * agent session itself ended (Pi's plan review).
    */
-  | { type: "session-closed"; by: "agent" | "session"; unsentAnnotations: number };
+  | { type: "session-closed"; by: "agent" | "session"; unsentAnnotations: number }
+  /**
+   * Not an annotation change: whether the agent that asked for this code
+   * review is gone, so nothing can receive its decision
+   * (packages/shared/review-agent-gone.ts). Sent when it changes, and, once a
+   * host has set it, to every stream that opens. The review stays open: the tab keeps
+   * every comment and its draft, and says so.
+   */
+  | { type: "agent-gone"; gone: boolean };
 
 // ---------------------------------------------------------------------------
 // SSE helpers

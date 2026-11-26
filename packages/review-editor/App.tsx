@@ -60,8 +60,9 @@ import { monoFontStack, normalizeCssFontSize } from '@plannotator/ui/utils/cssFo
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { adoptServerSession, currentServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
 import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
-import { assertSendOk, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
+import { assertSendOk, sendErrorAfterAgentGone, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
+import { agentGoneReasonFor, dismissAgentGoneNotice, noteSendFailureForAgentGone, showAgentGoneNotice } from './components/AgentGoneNotice';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
@@ -784,11 +785,19 @@ const ReviewApp: React.FC = () => {
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | 'exited' | false>(false);
   // A decided review has nothing left to retry: take any send failure down.
   useEffect(() => {
-    if (submitted) dismissSendFailureToast();
+    if (!submitted) return;
+    dismissSendFailureToast();
+    dismissAgentGoneNotice();
   }, [submitted]);
   // The agent that opened this review closed it (POST /api/host/close); the
   // reviewer's unsent comments stay in the draft for a reopen.
   const [agentClosed, setAgentClosed] = useState<{ unsentAnnotations: number } | null>(null);
+  // The agent that asked for this local review is gone (`agent-gone`,
+  // packages/shared/review-agent-gone.ts): the review stays as it is, every
+  // comment on screen and in its draft, and a notice says nobody can receive
+  // a decision, with Copy feedback. The server refuses Send meanwhile; a send
+  // that fails while it holds says the agent is gone, whatever it ran into.
+  const agentGoneRef = useRef(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   // A committed review-level note waiting for its one-render deferred submit
   // (the payload builders close over `allAnnotations`, so the send has to wait
@@ -1107,6 +1116,18 @@ const ReviewApp: React.FC = () => {
     onSessionClosed: (event) => {
       setAgentClosed(event);
       setSubmitted((current) => current || 'exited');
+    },
+    onAgentGone: (gone) => {
+      const wasGone = agentGoneRef.current;
+      agentGoneRef.current = gone;
+      // Heard again on a reconnect: a notice the person closed stays closed.
+      if (gone) {
+        if (!wasGone) showAgentGoneNotice({ copyText: () => retryDecisionRef.current.feedbackMarkdown });
+        return;
+      }
+      dismissAgentGoneNotice();
+      // Back: a refused Send's "not sent" no longer says what Send would do.
+      if (wasGone) dismissSendFailureToast('agent-gone');
     },
   });
   const agentJobs = useAgentJobs({ enabled: !!origin && aiUIEnabled });
@@ -4944,9 +4965,12 @@ const ReviewApp: React.FC = () => {
     } catch (err) {
       console.error('Failed to send feedback:', err);
       setIsSendingFeedback(false);
+      const sendError = sendErrorAfterAgentGone(err, agentGoneRef.current);
+      noteSendFailureForAgentGone(sendError);
       showSendFailureToast({
         what: 'feedback',
-        error: err,
+        error: sendError,
+        reason: agentGoneReasonFor(sendError),
         onRetry: () => { void retryDecisionRef.current.sendFeedback(); },
         // What the Copy feedback button copies, read when clicked: what
         // Retry would send now.
@@ -5011,9 +5035,12 @@ const ReviewApp: React.FC = () => {
     } catch (err) {
       console.error('Failed to approve:', err);
       setIsApproving(false);
+      const sendError = sendErrorAfterAgentGone(err, agentGoneRef.current);
+      noteSendFailureForAgentGone(sendError);
       showSendFailureToast({
         what: 'approval',
-        error: err,
+        error: sendError,
+        reason: agentGoneReasonFor(sendError),
         onRetry: () => { void retryDecisionRef.current.approve(options); },
         // The approval's text as Retry would send it now; a bare approval
         // has none to copy.

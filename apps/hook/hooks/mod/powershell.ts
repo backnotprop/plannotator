@@ -232,6 +232,11 @@ $buffer.WriteTo($file)
 $file.Close()
 exit 0`,
 
+  /** Prints the pid of the process that started this PowerShell (the Claude Code process). */
+  'host-pid': String.raw`$self = Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction SilentlyContinue
+if ($self) { Write-Line ([string]$self.ParentProcessId) }
+exit 0`,
+
   /** Exit 0 when process `argv[0]` runs, 1 when it does not. */
   alive: String.raw`if (Get-Process -Id ([int]$argv[0]) -ErrorAction SilentlyContinue) { exit 0 }
 exit 1`,

@@ -39,6 +39,18 @@ export interface ExternalAnnotationHandler {
   addAnnotations: (body: unknown) => { ids: string[] } | { error: string };
   /** Send an event that is not a store mutation (session-closed) to every open stream. */
   broadcast: (event: ExternalAnnotationEvent<StorableAnnotation>) => void;
+  /**
+   * Whether the agent that asked for this review is gone (`agent-gone`):
+   * sent to every open stream when it changes, and, once set, to every
+   * stream that opens (gone or back), so a tab opened, reloaded or
+   * reconnected later says where things stand.
+   * Only the CLI's code review sets it (apps/hook/server/review-agent-watch.ts);
+   * Pi's review server lives in Pi's own process, so its agent is never gone
+   * while a tab can still reach it.
+   */
+  setAgentGone: (gone: boolean) => void;
+  /** How many tabs hold the stream open now. */
+  openStreams: () => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,8 +87,19 @@ export function createExternalAnnotationHandler(
   // Wire store mutations → SSE broadcast
   store.onMutation(broadcast);
 
+  // null until a host says (only the CLI's code review does): no stream hears it then.
+  let agentGone: boolean | null = null;
+
   return {
     broadcast,
+
+    setAgentGone(gone: boolean) {
+      if (gone === agentGone) return;
+      agentGone = gone;
+      broadcast({ type: "agent-gone", gone });
+    },
+
+    openStreams: () => subscribers.size,
 
     addAnnotations(body: unknown): { ids: string[] } | { error: string } {
       const parsed = transform(body);
@@ -107,6 +130,9 @@ export function createExternalAnnotationHandler(
               annotations: store.getAll(),
             };
             controller.enqueue(encoder.encode(serializeSSEEvent(snapshot)));
+            // Every stream hears where things stand, back included: a tab that
+            // reconnects after missing `gone: false` takes its notice down.
+            if (agentGone !== null) controller.enqueue(encoder.encode(serializeSSEEvent({ type: "agent-gone", gone: agentGone })));
 
             subscribers.add(controller);
 

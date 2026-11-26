@@ -672,7 +672,11 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
   const settings = allowed
   if (!settings) return null
   const sessionId = await $.session.id()
-  if (mod && !mod.isDisposed && mod.session.sessionId === sessionId) return mod
+  if (mod && !mod.isDisposed && mod.session.sessionId === sessionId) {
+    // Every hook that reaches the mod looks at the launch timer too.
+    void mod.ensureLaunchTicking().catch(() => undefined)
+    return mod
+  }
   if (switching) return switching
   switching = (async () => {
     // `session.end` has usually disposed it already; its tracker is read after (carryQueued below).
@@ -788,7 +792,10 @@ async function startSelfHeal($: Engine): Promise<void> {
       const action = healAction(mod, endedAt, await $.clock.now())
       if (action === 'wait') return
       // Live and still this session's: only its tick is looked at. A session id that moved with no hook is rebuilt.
-      if (action === 'check' && mod && mod.session.sessionId === (await $.session.id())) return await mod.inbox?.ensureTicking()
+      if (action === 'check' && mod && mod.session.sessionId === (await $.session.id())) {
+        await mod.ensureLaunchTicking().catch(() => undefined)
+        return await mod.inbox?.ensureTicking()
+      }
       const previous = mod
       const instance = await currentMod($, { healed: true })
       if (instance && instance !== previous && allowed?.debugPath) {

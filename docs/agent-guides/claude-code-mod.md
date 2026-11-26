@@ -428,10 +428,29 @@ is logged. The launch
 directory is created owner-only (`umask 077`, `chmod 700`) before `stdin` is
 written; once a decision is delivered its files are removed (`cleanupArgv`),
 except `feedback.md`, which Claude reads afterwards. A launch whose server
-crashed keeps its directory (its `stderr` explains why). Servers outlive Claude Code on purpose:
-the wrapper ignores SIGHUP and starts the CLI under `nohup` (a closing terminal
-otherwise took the server with it), so closing the terminal does not lose a
-review; verified live, `claude --continue` reattached and delivered it.
+crashed keeps its directory (its `stderr` explains why). Servers outlive the
+terminal on purpose: the wrapper ignores SIGHUP and starts the CLI under
+`nohup` (a closing terminal otherwise took the server with it), so closing the
+terminal does not lose a review; verified live, `claude --continue` reattached
+and delivered it. They do not outlive the session for long: every lease
+write names the Claude Code process (`pid`, asked once per instance through
+the `host-pid` script, `$PPID` / the PowerShell parent; recorded only when two
+runs agree and it is over 1; Git Bash records none), and a code review whose
+lease stamp has not moved for 2 minutes of the CLI's own clock while that pid
+no longer runs tells its page that nobody can take a Send, and once no tab has
+had it open for 2 more minutes ends by itself, keeping its draft and writing no result (exit 3:
+the mod then logs "The review of <subject> ended while no Claude Code session
+was open for it. Your comments are saved as a draft; open a review of the same
+changes to get them back." when the session is resumed). An idle or compacting
+session never loses its review: its process still runs. The launch timer is
+re-armed when it went silent for 10 s (`ensureLaunchTicking`, from every hook
+through `currentMod` and from the 30 s self-heal look). A review open across
+`/clear` or an in-process `/resume` stays with the conversation that asked for
+it: its lease is released but names a process that still runs, so it is not
+ended, and its decision waits for that conversation to be resumed. A decision
+written before an end is delivered on resume as before.
+Tests: `apps/hook/hooks/mod/review-agent-gone.test.ts`. See "When the agent
+that asked for a review is gone" in `code-review.md`.
 
 *Two processes on one session.* `claude --continue` while the first process
 still runs gives two Claude Code processes the same session id, and both
