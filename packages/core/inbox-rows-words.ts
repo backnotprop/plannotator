@@ -132,6 +132,7 @@ export const INBOX_ROWS_SETTINGS: readonly InboxRowsSetting[] = [
   },
   showSetting("project-name", "hideProject", "Project name", "The project's name on each row."),
   showSetting("pull-requests", "hidePulls", "Pull requests", "A pull request's state at the end of the row."),
+  showSetting("machine-names", "hideMachineNames", "Machine names on projects", "Machine suffixes on project names. Same-name projects keep theirs so they stay distinguishable."),
   {
     name: "new-threads",
     label: "New threads",
