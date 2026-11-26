@@ -1507,6 +1507,7 @@
       "InboxRowDelivery.name",
       "InboxRowDelivery.read_by",
       "InboxRowDelivery.reason",
+      "InboxRowDelivery.script",
       "InboxRowDelivery.send_now",
       "InboxRowDelivery.state",
       "InboxRowDelivery.steerable",

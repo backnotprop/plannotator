@@ -1252,7 +1252,7 @@ export async function startReviewServer(options: {
 			return { status: "stale", reason: "snapshot-mismatch", message: "The review changed before call flow could start. Refresh and try again." };
 		}
 		if (!callFlowEnabled()) {
-			return { status: "disabled", reason: "disabled", message: "Call flow is disabled in Settings → Analysis." };
+			return { status: "disabled", reason: "disabled", message: "Call flow is disabled in Settings → Reviews." };
 		}
 		if (workspace) {
 			return { status: "unsupported", reason: "workspace-unsupported", message: "Call flow does not yet support multi-repository workspace reviews." };

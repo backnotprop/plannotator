@@ -225,6 +225,7 @@
   "inbox-row-swipe.spec.ts": 15,
   "inbox-row-time-webkit.spec.ts": 14,
   "inbox-row-unread-size.spec.ts": 4,
+  "inbox-script-posts.spec.ts": 8,
   "inbox-search-type-filter.spec.ts": 13,
   "inbox-search.spec.ts": 26,
   "inbox-seen-on-sight.spec.ts": 33,
