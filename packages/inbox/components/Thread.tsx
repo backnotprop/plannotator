@@ -2180,11 +2180,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   hasFilesRef.current = replyFiles.files.length > 0;
   /** Read the reply draft again: another window (or this one) saved or discarded it (`event: drafts`). */
   const draftMoved = () => {
-    // The box's words as the answer comes (a restore or typing may change them meanwhile): edits there
-    // win, and the next save is refused if the draft moved.
-    void reloadDraft(() =>
-      boxRef.current.open ? { text: boxRef.current.text, files: replyFiles.draftFiles(boxRef.current.text) } : null,
-    ).then((answer) => {
+    // The box's words as the answer comes (a restore or typing may change them meanwhile): edits there win, and the
+    // next save is refused if the draft moved. Words held for another computer, put to the person now, go in the box.
+    void reloadDraft(() => (boxRef.current.open ? { text: boxRef.current.text, files: replyFiles.draftFiles(boxRef.current.text) } : null)).then((answer) => {
+      if (answer?.offered !== undefined && boxRef.current.open) return void (setBox({ open: true, text: answer.offered }), takeDraftFiles(draftFilesWithMine(answer.draft?.files ?? []), answer.offered));
       if (!answer?.replaceBox) return;
       if (answer.draft) {
         setBox({ open: true, text: answer.draft.body });
@@ -3983,7 +3982,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const routeChoiceOpen = route.open && asking;
   const offerHost = () => ({ replyDraft, replyText, setBox, takeDraftFiles, draftFilesWithMine, changeReply, focusReplyEnd, announce, textRef });
   const restoreDraft = () => takeOffered(offerHost());
-  /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box. */
+  /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box (read again: words held for another computer that waited on this choice are offered now). */
   const discardMine = () => {
     const draft = replyDraft.takeTheirs();
     const theirs = draft?.body ?? '';
@@ -3991,6 +3990,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     takeDraftFiles(draft?.files ?? [], theirs);
     announce(theirs.trim() ? 'Your words were discarded; the other window’s are in the box.' : 'Your words were discarded.');
     requestAnimationFrame(() => textRef.current?.focus());
+    draftMoved();
   };
   const draftStamp = <DraftStamp savedAt={stampSavedAt} tooLong={stampTooLong} failed={stampFailed} onDiscard={discardReply} />;
   // The box's row (approval "inbox-reply-box", T6; ReplyRow.tsx). What goes with the reply: chips on a computer that

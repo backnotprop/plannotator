@@ -55,7 +55,7 @@ const threadOf = (id: string, subject: string): InboxThread => ({
 });
 
 /** The Mini: its drafts, its uploads, and every draft write that reached its door. */
-let mini: { drafts: Map<string, InboxReplyDraft>; uploads: Map<string, InboxUpload>; writes: { route: string; body: string; status: number }[]; clock: number };
+let mini: { drafts: Map<string, InboxReplyDraft>; uploads: Map<string, InboxUpload>; writes: { route: string; body: string; status: number }[]; answered: Map<string, { status: number; text: string }>; clock: number };
 /** Every reply the window sent to the Mini. */
 let replies: Record<string, unknown>[] = [];
 /** Draft requests that went to this computer's own draft routes (a far thread's never should). */
@@ -75,37 +75,47 @@ let signal: Signal;
 
 const stamp = () => new Date(Date.UTC(2026, 10, 2, 11, 0, (mini.clock += 1))).toISOString();
 
-/** The Mini's door for a thread's draft, as its store answers (inbox-reply-drafts.ts): the compare-and-set on `base`, or on the words (`base_body`). */
+/**
+ * The Mini's door for a thread's draft, as its store answers (inbox-reply-drafts.ts): the compare-and-set on `base`, or
+ * on the words (`base_body`); a Discard naming `base` only while the draft is still that version. As its door does
+ * (inbox-devices.ts), a key it answered once is answered the same again, never applied twice.
+ */
 function miniDoor(route: string, method: string, body: Record<string, unknown> = {}): Response {
   const match = /^threads\/([^/]+)\/draft(\/delete)?$/.exec(route);
   if (!match) return Response.json({ code: 'device_route_not_found' }, { status: 404 });
   const thread = match[1]!;
   const current = mini.drafts.get(thread) ?? null;
   if (method === 'GET') return Response.json({ draft: current });
-  let answer: Response;
+  const key = typeof body.idempotency_key === 'string' ? `${route} ${body.idempotency_key}` : null;
+  const replay = key ? mini.answered.get(key) : undefined;
+  if (replay) return new Response(replay.text, { status: replay.status, headers: { 'Content-Type': 'application/json' } });
+  const conflict = { status: 409, json: { error: 'This reply changed in another window since you opened it.', code: 'draft_conflict', draft: current } };
+  let out: { status: number; json: unknown };
   if (match[2]) {
-    mini.drafts.delete(thread);
-    answer = Response.json({ ok: true, deleted: current !== null });
+    if ('base' in body && current && current.updated_at !== body.base) out = conflict;
+    else {
+      mini.drafts.delete(thread);
+      out = { status: 200, json: { ok: true, deleted: current !== null } };
+    }
   } else {
     const base = (body.base as string | null | undefined) ?? null;
-    if ((current?.updated_at ?? null) !== base && !(current && typeof body.base_body === 'string' && current.body === body.base_body)) {
-      answer = Response.json({ error: 'This reply changed in another window since you opened it.', code: 'draft_conflict', draft: current }, { status: 409 });
-    } else {
+    if ((current?.updated_at ?? null) !== base && !(current && typeof body.base_body === 'string' && current.body === body.base_body)) out = conflict;
+    else {
       const add = ((body.files_add as { upload_id: string }[] | undefined) ?? []).flatMap((ref) => (mini.uploads.has(ref.upload_id) ? [mini.uploads.get(ref.upload_id)!] : []));
       const files = applyReplyDraftFileOps<InboxDraftFile>(current?.files ?? [], { add, remove: (body.files_remove as string[] | undefined) ?? [], place: [] });
       const words = String(body.body ?? '');
-      if (words.trim() === '' && files.length === 0) {
-        mini.drafts.delete(thread);
-        answer = Response.json({ draft: null });
-      } else {
+      if (words.trim() === '' && files.length === 0) mini.drafts.delete(thread);
+      else {
         const at = stamp();
         mini.drafts.set(thread, { v: 1, thread_id: thread, body: words, created_at: current?.created_at ?? at, updated_at: at, ...(files.length > 0 ? { files } : {}) });
-        answer = Response.json({ draft: mini.drafts.get(thread) });
       }
+      out = { status: 200, json: { draft: mini.drafts.get(thread) ?? null } };
     }
   }
-  mini.writes.push({ route, body: String(body.body ?? ''), status: answer.status });
-  return answer;
+  mini.writes.push({ route, body: String(body.body ?? ''), status: out.status });
+  const text = JSON.stringify(out.json);
+  if (key) mini.answered.set(key, { status: out.status, text });
+  return new Response(text, { status: out.status, headers: { 'Content-Type': 'application/json' } });
 }
 
 /** The Mini's own window saves the thread's draft (on the draft it holds), and its stream tells this Inbox. */
@@ -158,7 +168,7 @@ class FakeXhr {
 
 beforeEach(() => {
   if (!hasDom) return;
-  mini = { drafts: new Map(), uploads: new Map(), writes: [], clock: 0 };
+  mini = { drafts: new Map(), uploads: new Map(), writes: [], answered: new Map(), clock: 0 };
   draftPostsFail = false;
   draftPostsRefused = false;
   replies = [];
@@ -675,5 +685,111 @@ test.skipIf(!hasDom)("a held conflict's words after another window saved on the 
   await settle(10);
   expect(conflictShown(again)).toBe(false);
   await discardInBox(again);
+  await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
+});
+
+for (const choice of ['Keep mine', 'Discard mine'] as const) {
+  test.skipIf(!hasDom)(`a window showing its own conflict when words held for the Mini meet newer words there: after ${choice} on its own, the held words are offered in the box, never let go unseen`, async () => {
+    peer.state = 'offline';
+    linked(['reply-drafts']);
+    const el = await open();
+    await reply(el);
+    // Words typed here, and before they are saved a closed tab's words for the Mini are held here: this window's own
+    // save meets them, so its own conflict shows.
+    typeOn(el, 'Gamma typed in this window.');
+    const held = await forward.write(peer, FAR, false, { body: 'Alpha from a closed tab.', base: null, files_add: [], files_remove: [], files_place: [] });
+    expect('status' in held && held.status).toBe(200);
+    await until(() => conflictShown(el), "this window's own conflict");
+    expect(box(el)!.value).toBe('Gamma typed in this window.');
+    // Newer words on the Mini; it wakes, and the held words meet them there.
+    await typedOnTheMini(FAR, 'Beta typed on the Mini.');
+    peer.state = 'online';
+    linked(['reply-drafts']);
+    await act(async () => forward.drain(MINI));
+    await until(() => forward.notLanded(MINI, FAR)?.words === 'Alpha from a closed tab.', 'the held words offered');
+    forward.farChanged(MINI, FAR);
+    await act(async () => signal.emit());
+    await settle(10);
+    expect(box(el)!.value).toBe('Gamma typed in this window.');
+    const button = el.querySelector<HTMLButtonElement>(choice === 'Keep mine' ? '[data-draft-keep-mine]' : '[data-draft-conflict] [data-draft-discard]');
+    await act(async () => button!.click());
+    // The held words now: in the box, the conflict line beside the Mini's draft; still kept there.
+    await until(() => box(el)?.value === 'Alpha from a closed tab.' && conflictShown(el), 'the held words offered in the box');
+    const theirs = choice === 'Keep mine' ? 'Gamma typed in this window.' : 'Beta typed on the Mini.';
+    expect(mini.drafts.get(FAR)?.body).toBe(theirs);
+    expect(forward.notLanded(MINI, FAR)?.words).toBe('Alpha from a closed tab.');
+    // Their own choice: Discard mine lets them go, and the Mini's draft comes into the box.
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-draft-conflict] [data-draft-discard]')!.click());
+    await until(() => forward.notLanded(MINI, FAR) === null && box(el)?.value === theirs, 'the held words let go by the person');
+    await settle(10);
+    expect(conflictShown(el)).toBe(false);
+    await discardInBox(el);
+    await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
+  });
+}
+
+test.skipIf(!hasDom)('two held saves meet newer words on the Mini in a row: the first stays offered, and once the person lets it go the second is offered in the box', async () => {
+  linked(['reply-drafts']);
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'Start.');
+  await until(() => mini.drafts.get(FAR)?.body === 'Start.', 'the first save on the Mini');
+  peer.state = 'offline';
+  linked(['reply-drafts']);
+  typeOn(el, ' First held.');
+  await until(() => forward.read(peer, FAR)?.draft?.body === 'Start. First held.', 'the save held here');
+  await typedOnTheMini(FAR, 'Start. Mini one.');
+  peer.state = 'online';
+  linked(['reply-drafts']);
+  await act(async () => forward.drain(MINI));
+  forward.farChanged(MINI, FAR);
+  await act(async () => signal.emit());
+  await until(() => conflictShown(el) && box(el)?.value === 'Start. First held.', 'the first held words offered');
+  // Another window here, which never showed them, saves on the Mini's draft while it sleeps; the Mini types again.
+  peer.state = 'offline';
+  linked(['reply-drafts']);
+  const one = mini.drafts.get(FAR)!;
+  const second = await forward.write(peer, FAR, false, { body: 'Start. Mini one. Second held.', base: one.updated_at, base_body: one.body, files_add: [], files_remove: [], files_place: [] });
+  expect('status' in second && second.status).toBe(200);
+  await typedOnTheMini(FAR, 'Start. Mini two.');
+  peer.state = 'online';
+  linked(['reply-drafts']);
+  await act(async () => forward.drain(MINI));
+  forward.farChanged(MINI, FAR);
+  await act(async () => signal.emit());
+  await settle(10);
+  // The first words are still the ones offered, here and there.
+  expect(box(el)!.value).toBe('Start. First held.');
+  expect(forward.notLanded(MINI, FAR)?.words).toBe('Start. First held.');
+  await act(async () => el.querySelector<HTMLButtonElement>('[data-draft-conflict] [data-draft-discard]')!.click());
+  await until(() => box(el)?.value === 'Start. Mini one. Second held.' && conflictShown(el), 'the second held words offered in the box');
+  expect(mini.drafts.get(FAR)?.body).toBe('Start. Mini two.');
+  await act(async () => el.querySelector<HTMLButtonElement>('[data-draft-keep-mine]')!.click());
+  await until(() => mini.drafts.get(FAR)?.body === 'Start. Mini one. Second held.' && forward.notLanded(MINI, FAR) === null, 'Keep mine of the second words');
+  await settle(10);
+  expect(conflictShown(el)).toBe(false);
+  await discardInBox(el);
+  await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
+});
+
+test.skipIf(!hasDom)("Discard in the Mini's thread after newer words were typed there that this window never showed: those words stay there and come into view", async () => {
+  linked(['reply-drafts']);
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'Words this window saw.');
+  await until(() => mini.drafts.get(FAR)?.body === 'Words this window saw.', 'the draft on the Mini');
+  // Typed on the Mini, its stream not heard here yet.
+  const seen = mini.drafts.get(FAR)!;
+  expect(miniDoor(`threads/${FAR}/draft`, 'POST', { body: 'Newer words on the Mini.', base: seen.updated_at, files_add: [], files_remove: [], files_place: [] }).status).toBe(200);
+  await discardInBox(el);
+  await settle(10);
+  expect(mini.drafts.get(FAR)?.body).toBe('Newer words on the Mini.');
+  act(() => draw(HERE));
+  await settle();
+  act(() => draw(FAR));
+  await settle(6);
+  if (!box(el)) await reply(el);
+  await until(() => box(el)?.value === 'Newer words on the Mini.', "the Mini's words in the box");
+  await discardInBox(el);
   await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
 });

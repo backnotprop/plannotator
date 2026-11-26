@@ -218,6 +218,12 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
         }
         if (changed !== threadId) return;
         void draft.reload(() => ({ text: textRef.current, files: files.draftFiles(textRef.current) })).then((answer) => {
+          // Words of the person's held for another computer, put to them now as the conflict: in the box.
+          if (answer?.offered !== undefined) {
+            setText(answer.offered);
+            textRef.current = answer.offered;
+            return;
+          }
           if (!answer?.replaceBox) return;
           if (!answer.draft) {
             onGone();
@@ -429,6 +435,12 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
                 setText(kept?.body ?? '');
                 textRef.current = kept?.body ?? '';
                 fieldRef.current?.focus();
+                // Read again: words of the person's held for another computer that waited on this choice are offered now.
+                void draft.reload(() => ({ text: textRef.current, files: files.draftFiles(textRef.current) })).then((answer) => {
+                  if (answer?.offered === undefined) return;
+                  setText(answer.offered);
+                  textRef.current = answer.offered;
+                });
               },
             }}
           />

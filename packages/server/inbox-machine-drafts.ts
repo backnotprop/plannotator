@@ -136,8 +136,17 @@ const waits = (record: HeldDraft) => record.sent !== null || record.next !== nul
  * Words a conflict offers that stay offered beside `draft`: they go only by the person's choice in some window (Keep
  * mine saves them, Discard mine names them), or once the draft holds them. Another window's write never settles them.
  */
-const stillOffered = (record: HeldDraft | null | undefined, draft: InboxReplyDraft | null): { conflict?: InboxReplyDraft } =>
-  record?.conflict && !(draft?.body ?? "").includes(record.conflict.body) ? { conflict: record.conflict } : {};
+const stillOffered = (record: HeldDraft | null | undefined, draft: InboxReplyDraft | null): Offered =>
+  offeredAs(offeredOf(record).filter((one) => !(draft?.body ?? "").includes(one.body)));
+type Offered = { conflict?: InboxReplyDraft; more?: InboxReplyDraft[] };
+/** Every set of words a held record offers, oldest first: the one a read offers now (`conflict`), then those after it. */
+const offeredOf = (record: HeldDraft | null | undefined): InboxReplyDraft[] => (record?.conflict ? [record.conflict, ...(record.more ?? [])] : []);
+const offeredAs = (list: readonly InboxReplyDraft[]): Offered => (list.length === 0 ? {} : { conflict: list[0], ...(list.length > 1 ? { more: list.slice(1) } : {}) });
+/** The record with no offered words of its own (they are given again by `offeredAs`). */
+const unoffered = (record: HeldDraft): HeldDraft => {
+  const { conflict: _conflict, more: _more, ...rest } = record;
+  return rest;
+};
 /** Any upload id is one, for checking a save's shape and places only (that machine knows which files it holds). */
 const anyUpload = (id: string): InboxUpload => ({ upload_id: id, name: id, size: 0, kind: "file", sha256: "", created_at: "" }) as InboxUpload;
 
@@ -251,6 +260,11 @@ export function createMachineDrafts(options: {
   const draining = new Map<string, Promise<void>>();
   const again = new Set<string>();
   const retries = new Map<string, { timer: ReturnType<typeof setTimeout> | null; ms: number }>();
+  /**
+   * Per thread: the draft a held save made there as it landed (`there`), and the version this Inbox showed for it while
+   * it was held (`here`, the `base` a window that saw it names): a Discard naming `here` goes for `there`.
+   */
+  const landedAs = new Map<string, { here: string; there: string }>();
   let failedOnce = false;
 
   /** Written to disk first: memory follows only once the file holds it (a full disk leaves both as they were). */
@@ -321,14 +335,25 @@ export function createMachineDrafts(options: {
   };
   const refusal = (error: InboxError) => ({ status: error.code.endsWith("_not_found") ? 404 : 422, body: { error: error.message, code: error.code, ...error.details } });
 
-  /** The version there a Discard made now throws away (undefined: the one the write that left leaves there, set as it lands). */
+  /**
+   * The version there a Discard made now throws away (undefined: the one the write that left leaves there, set as it
+   * lands). With nothing waiting here, the one the window names (`base`): never a newer one heard there since, which
+   * that window never showed. Only an older page, naming none, goes for the last one heard.
+   */
   const discardBase = (record: HeldDraft | null, k: string, body: Body): string | null | undefined => {
-    if (!record) return known.has(k) ? (known.get(k)?.updated_at ?? null) : typeof body.base === "string" || body.base === null ? body.base : undefined;
-    if (record.sent) return undefined;
-    if (record.next?.discard) return record.next.discard.base;
-    if (record.next?.save) return typeof record.next.save.base === "string" ? record.next.save.base : null;
-    if (record.conflict) return record.view?.updated_at ?? null;
-    return undefined;
+    if (record && waits(record)) {
+      if (record.sent) return undefined;
+      if (record.next?.discard) return record.next.discard.base;
+      if (record.next?.save) return typeof record.next.save.base === "string" ? record.next.save.base : null;
+      if (record.conflict) return record.view?.updated_at ?? null;
+      return undefined;
+    }
+    if (typeof body.base === "string" || body.base === null) {
+      const was = landedAs.get(k);
+      return was && body.base === was.here ? was.there : body.base;
+    }
+    if (record?.conflict) return record.view?.updated_at ?? null;
+    return known.has(k) ? (known.get(k)?.updated_at ?? null) : undefined;
   };
 
   /**
@@ -371,12 +396,16 @@ export function createMachineDrafts(options: {
     return deleting ? { status: 200, body: { ok: true, deleted: prior !== null } } : { status: 200, body: { draft: view } };
   };
 
-  /** Discard mine, after a conflict a held save met there: its words go; that machine's draft stays. */
+  /**
+   * Discard mine, after a conflict a held save met there: the words of that version go (any others offered stay, the
+   * next of them offered now); that machine's draft stays.
+   */
   const dropConflict = (machine: string, threadId: string, version: unknown): DraftAnswer => {
     const record = held.get(key(machine, threadId));
-    if (record?.conflict && record.conflict.updated_at === version) {
-      const { conflict: _gone, ...rest } = record;
-      if (waits(record) || record.gone) put(rest);
+    const offered = offeredOf(record);
+    if (record && offered.some((one) => one.updated_at === version)) {
+      const left = offered.filter((one) => one.updated_at !== version);
+      if (left.length > 0 || waits(record) || record.gone) put({ ...unoffered(record), ...offeredAs(left) });
       else drop(machine, threadId);
       changed(machine, threadId);
     }
@@ -388,17 +417,20 @@ export function createMachineDrafts(options: {
     if (deleting && typeof body.not_landed === "string") return dropConflict(peer.id, threadId, body.not_landed);
     const { not_landed: _notLanded, ...rest } = body;
     let sent: Body = { ...rest, idempotency_key: keyOf(rest) };
-    const record = held.get(key(peer.id, threadId));
+    const k = key(peer.id, threadId);
+    const record = held.get(k);
     // Nothing waits for this thread and that machine is there: its answer is the window's, a conflict included.
     if ((!record || !waits(record)) && peer.state === "online") {
       let left = false;
+      // A Discard goes only for the version the window threw away: one changed there since is refused there, and stays.
+      const base = deleting ? discardBase(record ?? null, k, rest) : undefined;
       try {
         const send = () => {
           left = true;
           return peer.request(`threads/${threadId}/draft${deleting ? "/delete" : ""}`, "", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(deleting ? { idempotency_key: sent.idempotency_key } : sent),
+            body: JSON.stringify(deleting ? { idempotency_key: sent.idempotency_key, ...(base !== undefined ? { base } : {}) } : sent),
             signal,
             timeoutMs: DRAFT_WAIT_MS,
           });
@@ -414,14 +446,19 @@ export function createMachineDrafts(options: {
         }
         if (far.status < 500) {
           // Landed: what was held here is settled, but words a conflict offers stay until the person chooses (a window
-          // that never showed them saved).
-          if (far.ok && record) {
-            const landed = deleting ? null : draftOf(await far.clone().json().catch(() => null));
-            const offered = stillOffered(record, landed);
-            if (offered.conflict) put({ v: 1, machine: peer.id, thread_id: threadId, view: landed, sent: null, next: null, ...offered });
+          // that never showed them saved). Read again after the wait: what was held meanwhile (another window's save
+          // as that machine stopped answering, a Send's mark) stays, to land after this.
+          const landed = far.ok && !deleting ? draftOf(await far.clone().json().catch(() => null)) : null;
+          const latest = held.get(k);
+          if (far.ok && latest) {
+            const offered = stillOffered(latest, landed);
+            if (latest !== record && waits(latest)) put({ ...unoffered(latest), ...offered });
+            else if (offered.conflict) put({ v: 1, machine: peer.id, thread_id: threadId, view: landed, sent: null, next: null, ...offered });
             else drop(peer.id, threadId);
             changed(peer.id, threadId);
           }
+          // A Discard refused there (the draft changed there since): it stays, and every window shows it.
+          if (deleting && far.status === 409) changed(peer.id, threadId);
           void noteAnswer(peer.id, threadId, deleting, far.clone());
           return { far };
         }
@@ -468,7 +505,10 @@ export function createMachineDrafts(options: {
   const met = (current: HeldDraft, far: InboxReplyDraft | null, mine: InboxReplyDraft): HeldDraft => {
     if (!far) return { ...current, sent: null, next: { save: saveOf(mine, null) }, stopped: undefined };
     if (mine.body.trim() === "" || mine.body === far.body) return { ...current, sent: null, next: { save: saveOf(mine, far, mine.body.trim() === "" ? far.body : mine.body) }, stopped: undefined };
-    return { ...current, view: far, sent: null, next: null, stopped: undefined, conflict: mine };
+    // Words offered before and not chosen on yet stay offered, first: these are offered after them (words these or that
+    // draft hold are offered by them).
+    const before = offeredOf(current).filter((one) => !mine.body.includes(one.body) && !far.body.includes(one.body));
+    return { ...unoffered(current), view: far, sent: null, next: null, stopped: undefined, ...offeredAs([...before, mine]) };
   };
 
   /** A reply that carried the draft is delivered there (it settles as that machine settles it) or not (its words come back). */
@@ -565,6 +605,8 @@ export function createMachineDrafts(options: {
         // A file it added that machine swept since is not in the draft there: never dropped unsaid, its tile says so.
         const gone = goneAfter(save, landed, current);
         const { gone: _was, ...rest } = current;
+        // The draft the windows were shown while it waited is this one there now: a Discard naming it goes for this.
+        if (!next && current.view && landed) landedAs.set(k, { here: current.view.updated_at, there: landed.updated_at });
         put({ ...rest, sent: null, next, ...(gone.length > 0 ? { gone, ...(next ? {} : { view: landed }) } : {}) });
         if (gone.length > 0 && !next) {
           await peer.refreshList().catch(() => {});
@@ -792,7 +834,7 @@ export function createMachineDrafts(options: {
       for (const record of [...held.values()]) {
         if (record.machine !== machine) continue;
         if (waits(record)) add(record.thread_id, record.view);
-        add(record.thread_id, record.conflict);
+        for (const offered of offeredOf(record)) add(record.thread_id, offered);
         add(record.thread_id, record.sending?.before);
         drop(machine, record.thread_id);
       }
@@ -800,6 +842,7 @@ export function createMachineDrafts(options: {
       if (retry?.timer) clearTimeout(retry.timer);
       retries.delete(machine);
       for (const k of [...known.keys()]) if (k.startsWith(`${machine} `)) known.delete(k);
+      for (const k of [...landedAs.keys()]) if (k.startsWith(`${machine} `)) landedAs.delete(k);
       return lost;
     },
   };

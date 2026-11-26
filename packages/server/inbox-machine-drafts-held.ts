@@ -42,6 +42,11 @@ export interface HeldDraft {
    */
   conflict?: InboxReplyDraft;
   /**
+   * More words of the person's that met a newer draft there while `conflict` was still offered (another window's held
+   * save, oldest first): each is offered in turn once the one before it is settled, never written over.
+   */
+  more?: InboxReplyDraft[];
+  /**
    * Files a held save added that the draft there did not take as it landed (that machine had swept the upload since: a
    * held draft does not keep it there). Shown on their tiles as not attached until the person writes again.
    */

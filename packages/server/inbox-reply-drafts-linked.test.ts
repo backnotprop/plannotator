@@ -314,6 +314,41 @@ describe("a reply draft on a linked machine's thread, two real Inboxes linked bo
     }
   }, 300_000);
 
+  test("two held saves meet newer words there in a row: the first stays offered until it is let go, then the second; a Discard naming a version not shown leaves the newer words there; both ways", async () => {
+    for (const [here, there] of both()) {
+      await seesOnline(here, there);
+      const start = await draftOf(await writeHere(here, there, { body: "Shared start", base: null }));
+      await away(here, there);
+      const first = await draftOf(await writeHere(here, there, { body: `First, from the ${here.name}`, base: start.updated_at, base_body: start.body }));
+      await wakesWhileHereIsDown(here, there);
+      const one = await draftOf(await typedThere(there, `One, typed on the ${there.name}`, start.updated_at));
+      startInbox(here.w);
+      await waitFor("the first words offered here", async () => ((await readHere(here, there)).not_landed?.conflict ? true : null), 60_000);
+      // Another window here saves on the draft there while it sleeps again; that machine types again.
+      await away(here, there);
+      const second = await draftOf(await writeHere(here, there, { body: `Second, from the ${here.name}`, base: one.updated_at, base_body: one.body }));
+      await wakesWhileHereIsDown(here, there);
+      const two = await draftOf(await typedThere(there, `Two, typed on the ${there.name}`, one.updated_at));
+      startInbox(here.w);
+      const read = await waitFor("the second held save answered there", async () => {
+        const seen = await readHere(here, there);
+        return seen.draft?.body === two.body ? seen : null;
+      }, 60_000);
+      // The first words are still the ones offered; the second come once they are let go.
+      expect(read.not_landed).toMatchObject({ words: first.body, version: first.updated_at, conflict: true });
+      expect((await discardHere(here, there, { not_landed: first.updated_at })).status).toBe(200);
+      expect((await readHere(here, there)).not_landed).toMatchObject({ words: second.body, version: second.updated_at, conflict: true });
+      expect((await discardHere(here, there, { not_landed: second.updated_at })).status).toBe(200);
+      expect((await readHere(here, there)).not_landed).toBeUndefined();
+      expect(await heldFor(here, there)).toBe(0);
+      // A Discard naming a version the window saw before the newer words there: refused, and they stay.
+      expect((await discardHere(here, there, { base: one.updated_at })).status).toBe(409);
+      expect((await draftThere(there))?.body).toBe(two.body);
+      expect((await discardHere(here, there, { base: two.updated_at })).status).toBe(200);
+      expect(await draftThere(there)).toBeNull();
+    }
+  }, 300_000);
+
   test("a held save naming a file swept there before it landed: the words land and the read names the file as not attached, both ways", async () => {
     for (const [here, there] of both()) {
       await seesOnline(here, there);
