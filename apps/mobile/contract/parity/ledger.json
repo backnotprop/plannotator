@@ -23630,6 +23630,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-enum-inboxlistgroupid-tagged",
+      "title": "enum:InboxListGroupId.tagged",
+      "surface": [
+        "enum:InboxListGroupId.tagged"
+      ],
+      "flows": [],
+      "mobile": "v1",
+      "why": "The list: a server that places rows in Tagged you (Spaces) gets them drawn fourth and counted as waiting on the person, never dropped (owner, 2026-11-25: \"A · It counts\").",
+      "decoded": true,
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsectionid-tagged",
+      "title": "enum:InboxSectionId.tagged",
+      "surface": [
+        "enum:InboxSectionId.tagged"
+      ],
+      "flows": [],
+      "mobile": "v1",
+      "why": "The list: a server that places rows in Tagged you (Spaces) gets them drawn fourth and counted as waiting on the person, never dropped (owner, 2026-11-25: \"A · It counts\").",
+      "decoded": true,
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
