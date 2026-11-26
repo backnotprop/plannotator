@@ -25,7 +25,7 @@ async function openEditorTab(): Promise<void> {
     );
   });
   const tab = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-    .find((button) => button.textContent?.trim() === 'Editor');
+    .find((button) => button.textContent?.trim() === 'Reviews');
   if (!tab) throw new Error('review display tab did not render');
   await act(async () => tab.click());
 }

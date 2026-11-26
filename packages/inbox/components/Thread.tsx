@@ -202,7 +202,7 @@ import { useKeptScroll } from '../thread/keptScroll';
 import { sentActionsOf } from '../thread/sentActions';
 import { leftoverWords } from '../thread/leftover';
 import { answersItself, replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
-import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
+import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, isScriptPost, messageAuthorName, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, SCRIPT_AUTHOR_NAME, spanWords, stillHidden, threadAskerName, type FoldState } from '../thread/helpers';
 import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
 import { ThreadBarTitle } from '../thread/ThreadBarTitle';
@@ -244,7 +244,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const startedTo = root.started_by_person && root.to ? root.to : null;
   const cloudName = [...thread.messages].reverse().find((m) => m.cloud_wake)?.cloud_wake?.name ?? null;
   const addresseeName = (host: string) => (isInboxCloudHost(host) && cloudName ? cloudName : hostName(host));
-  const asker = startedTo ? addresseeName(startedTo.host) : agentName(root.author);
+  const asker = startedTo ? addresseeName(startedTo.host) : threadAskerName(thread.messages);
   // Launch: the person started this agent from New message, or a reply started a new session (packages/server/inbox-launch.ts).
   const launchedAt = [...thread.messages].reverse().find((m) => !!m.launch) ?? root;
   const launched = launchedAt.launch ?? null;
@@ -301,7 +301,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Whom a reply to `message` goes to, named: a second agent by its own name, the thread's first agent as `asker`
   // (so a thread with one agent reads as it always did). Handoff "multi-agent-thread-model", option A.
   const firstAgent = startedTo ?? (root.author.kind === 'agent' ? root.author : null);
-  const recipientName = (message: InboxMessageWire | null | undefined) => (isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker);
+  const recipientName = (message: InboxMessageWire | null | undefined) => (isScriptPost(message) ? SCRIPT_AUTHOR_NAME : isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker);
   const agentMessages = thread.messages.filter((m) => m.author.kind === 'agent');
   const lastAgent = agentMessages[agentMessages.length - 1] ?? root;
   // The foot's 👍 Looks good (design record "inbox-acknowledge"): on the agent's latest message, while no question waits.
@@ -1254,7 +1254,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const messageCommentName = (record: InboxAnnotationRecord) => {
     const message = thread.messages.find((m) => m.id === record.message_id);
     if (message?.author.kind === 'person') return `${OWN_MESSAGE_COMMENT_ROW} ${whenTime(record.message?.at ?? message.created_at)}`;
-    const who = message ? agentName(message.author) : 'Agent';
+    const who = message ? messageAuthorName(message) : 'Agent';
     return `${who}'s message, ${whenTime(record.message?.at ?? message?.created_at ?? '')}`;
   };
   const saveMessageComment = async (messageId: string, annotation: Annotation): Promise<boolean> => {
@@ -1817,7 +1817,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const first = added[0]!;
     const asks = added.some((m) => (m.questions ?? []).some((q) => q.state === 'open'));
     announce(
-      added.length === 1 ? `New message from ${agentName(first.author)}${asks ? ', with a question' : ''}` : `${added.length} new messages${asks ? ', with a question' : ''}`,
+      added.length === 1 ? `New message from ${messageAuthorName(first)}${asks ? ', with a question' : ''}` : `${added.length} new messages${asks ? ', with a question' : ''}`,
     );
     // Room a fold step borrowed keeps only its part still in view under the arrival, so following it ends on the thread, not in blank.
     shrinkRoom();
@@ -2671,7 +2671,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           const id = `${m.id}/${q.key}`;
           const answer = pending.has(id) ? pending.get(id)! : q.answer;
           if (!answer || isQuestionAnswerEmpty(answer)) return [];
-          const messageName = `${agentName(m.author)}'s message, ${whenTime(m.created_at)}`;
+          const messageName = `${messageAuthorName(m)}'s message, ${whenTime(m.created_at)}`;
           // A question inside an attached file (issue #2828): its own group, named by the file.
           return [{ id, messageId: m.id, key: q.key, number: q.position + 1, prompt: q.prompt, answer: draftAnswerWords(answer), messageName: q.attachment ? fileGroupName(q.attachment.name, messageName) : messageName, ...(q.attachment ? { fileId: q.attachment.id } : {}) }];
         }),
@@ -2702,7 +2702,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const out = new Map<string, SentAnswerGroup[]>();
     for (const m of thread.messages) {
       if (m.author.kind !== 'person') continue;
-      const groups = sentAnswersOf(m, thread.messages, (asked) => `${agentName(asked.author)}'s message, ${whenTime(asked.created_at)}`);
+      const groups = sentAnswersOf(m, thread.messages, (asked) => `${messageAuthorName(asked)}'s message, ${whenTime(asked.created_at)}`);
       if (groups.length > 0) out.set(m.id, groups);
     }
     return (heldSentAnswers.current = keepEqualByKey(heldSentAnswers.current, out));
@@ -4473,7 +4473,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf, setPageStart, openFileRef };
   const acts = useRef(newest);
   acts.current = newest;
-  const reactApi = useMessageReactApi({ thread, onAck, agentOf: (m) => agentName(m.author), liveOf: liveMessage, reply: (m) => acts.current.replyToMessage(m), onToast, onChanged, announce });
+  const reactApi = useMessageReactApi({ thread, onAck, agentOf: (m) => messageAuthorName(m), liveOf: liveMessage, reply: (m) => acts.current.replyToMessage(m), onToast, onChanged, announce });
   const copyHost: CopyMenuHost = {
     thread,
     phone,
@@ -4873,7 +4873,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // append to, so it never proves who wrote (the agent's name and mark stay, and the server refuses "You").
           // In a thread with two or more sessions the header's name for the session leads, its agent in the mark,
           // the tooltip and after it for a screen reader: "Billing refactor", heard "Billing refactor, Claude Code".
-          const kind = message.author.kind === 'agent' ? agentName(message.author) : null;
+          const kind = message.author.kind === 'agent' ? messageAuthorName(message) : null;
           const sessionName = message.author.kind === 'agent' ? (sessionNames.get(message.author.session ?? '') ?? null) : null;
           const named = sessionName && sessionName !== kind ? sessionName : null;
           const authorLabel = message.author.kind === 'agent' && !named ? labelOf(sessionLabels, message.author.session) : null;
@@ -5617,11 +5617,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               {ackOffered && !waiting && !draftKept && (
                 <ReactionTray
                   messageId={ackTarget!.id}
-                  agent={agentName(ackTarget!.author)}
+                  agent={messageAuthorName(ackTarget!)}
                   on={ackOn}
                   current={ackTarget!.ack?.reaction ?? null}
                   phone={phone}
-                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
+                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, messageAuthorName(ackTarget!), reaction, was)}
                   onSkill={(reaction, from) => reactApi.react(ackTarget!, reaction, from)}
                   openRequest={trayRequest}
                 />
@@ -5805,7 +5805,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       </ThreadSkillFilter.Provider>
     )}
     {!openAttachment && file === null && namedFile && (
-      <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />
+      <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} skillMessage={namedFile.skill ? thread.messages.find((m) => m.id === namedFile.messageId) : undefined} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />
     )}
     </>
     </ReuseContext.Provider>

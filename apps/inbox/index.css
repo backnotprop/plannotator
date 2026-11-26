@@ -13,6 +13,8 @@
 @source "../../packages/review-editor/components/**/*.tsx";
 /* A thread's canvas (packages/inbox/canvas). */
 @source "../../packages/inbox/canvas/**/*.tsx";
+/* Power Up's status mark in a review's bar (packages/review-editor/semDiff/PowerUpStatusSlot.tsx). */
+@source "../../packages/review-editor/semDiff/**/*.tsx";
 /* System: the project setup dialog (packages/inbox/system). */
 @source "../../packages/inbox/system/**/*.tsx";
 /* Floating reply drafts (packages/inbox/floaters/). */

@@ -198,6 +198,7 @@ packages/inbox/runTrustHowto.test.tsx
 packages/inbox/runLineClone.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
 packages/inbox/sessionLabels.test.tsx
+packages/inbox/scriptPosts.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
 packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx
@@ -857,6 +858,7 @@ packages/review-editor/components/image-diff/ImageStage.test.tsx
 packages/review-editor/workspace/ReviewWorkspace.test.tsx
 packages/review-editor/workspace/JumpHistoryFloat.test.tsx
 packages/ui/components/settings/SemanticDiffsTab.test.tsx
+packages/ui/components/settings/ReviewSettingsPage.test.tsx
 packages/inbox/data/queries/heldThreadOpen.test.tsx
 packages/inbox/inlineReuseMark.test.tsx
 packages/ui/components/Viewer.blockRedraws.test.tsx
@@ -945,4 +947,6 @@ packages/inbox/commentRowFiles.test.tsx
 packages/inbox/sidebarStickyHeadings.test.tsx
 packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx
+packages/inbox/skillFileOpen.dom.test.tsx
 packages/inbox/reviewAnalysis.test.tsx
+packages/inbox/guide/usePowerUp.test.tsx

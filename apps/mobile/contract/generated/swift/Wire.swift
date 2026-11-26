@@ -8838,6 +8838,7 @@ public struct InboxRowDelivery: Codable, Hashable, Sendable {
   public var host: String?
   public var name: String?
   public var anotherSession: Bool?
+  public var script: Bool?
   public var asking: InboxRowDeliveryAsking?
   public var waitingSince: String?
   public var steerable: Bool?
@@ -8848,9 +8849,9 @@ public struct InboxRowDelivery: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["kind", "state", "reason", "send_now", "message_id", "read_by", "at", "host", "name", "another_session", "asking", "waiting_since", "steerable", "auto_send_at", "auto_after_min", "turn_ended", "t3_wait"]
+  static let knownKeys: Set<String> = ["kind", "state", "reason", "send_now", "message_id", "read_by", "at", "host", "name", "another_session", "script", "asking", "waiting_since", "steerable", "auto_send_at", "auto_after_min", "turn_ended", "t3_wait"]
 
-  public init(kind: InboxRowDeliveryKind, state: InboxDeliveryState, reason: InboxDeliveryReason, sendNow: Bool, messageId: MessageID, readBy: String? = nil, at: String? = nil, host: String? = nil, name: String? = nil, anotherSession: Bool? = nil, asking: InboxRowDeliveryAsking? = nil, waitingSince: String? = nil, steerable: Bool? = nil, autoSendAt: String? = nil, autoAfterMin: Double? = nil, turnEnded: Bool? = nil, t3Wait: InboxRowDeliveryT3Wait? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(kind: InboxRowDeliveryKind, state: InboxDeliveryState, reason: InboxDeliveryReason, sendNow: Bool, messageId: MessageID, readBy: String? = nil, at: String? = nil, host: String? = nil, name: String? = nil, anotherSession: Bool? = nil, script: Bool? = nil, asking: InboxRowDeliveryAsking? = nil, waitingSince: String? = nil, steerable: Bool? = nil, autoSendAt: String? = nil, autoAfterMin: Double? = nil, turnEnded: Bool? = nil, t3Wait: InboxRowDeliveryT3Wait? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.kind = kind
     self.state = state
     self.reason = reason
@@ -8861,6 +8862,7 @@ public struct InboxRowDelivery: Codable, Hashable, Sendable {
     self.host = host
     self.name = name
     self.anotherSession = anotherSession
+    self.script = script
     self.asking = asking
     self.waitingSince = waitingSince
     self.steerable = steerable
@@ -8883,6 +8885,7 @@ public struct InboxRowDelivery: Codable, Hashable, Sendable {
     self.host = try c.decodeIfPresent(String.self, forKey: WireKey("host"))
     self.name = try c.decodeIfPresent(String.self, forKey: WireKey("name"))
     self.anotherSession = try c.decodeIfPresent(Bool.self, forKey: WireKey("another_session"))
+    self.script = try c.decodeIfPresent(Bool.self, forKey: WireKey("script"))
     self.asking = try c.decodeIfPresent(InboxRowDeliveryAsking.self, forKey: WireKey("asking"))
     self.waitingSince = try c.decodeIfPresent(String.self, forKey: WireKey("waiting_since"))
     self.steerable = try c.decodeIfPresent(Bool.self, forKey: WireKey("steerable"))
@@ -8905,6 +8908,7 @@ public struct InboxRowDelivery: Codable, Hashable, Sendable {
     try c.encode(self.host, forKey: WireKey("host"))
     try c.encode(self.name, forKey: WireKey("name"))
     try c.encodeIfPresent(self.anotherSession, forKey: WireKey("another_session"))
+    try c.encodeIfPresent(self.script, forKey: WireKey("script"))
     try c.encodeIfPresent(self.asking, forKey: WireKey("asking"))
     try c.encodeIfPresent(self.waitingSince, forKey: WireKey("waiting_since"))
     try c.encodeIfPresent(self.steerable, forKey: WireKey("steerable"))

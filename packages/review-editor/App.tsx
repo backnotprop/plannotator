@@ -84,7 +84,7 @@ import { createSemDiffClient } from './semDiff/semDiffClient';
 import { loadSemDiffWorker } from './semDiff/loadSemDiffWorker';
 import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type PowerUpStatus } from './semDiff/powerUp';
 import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
-import { POWER_UP_CHANGED_EVENT, type PowerUpProvider } from '@plannotator/ui/components/settings/SemanticDiffsTab';
+import { usePowerUpConfig } from './semDiff/usePowerUpConfig';
 import { computeReviewSemanticDiff, loadReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
 import type { SemanticDiffChange, SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
 
@@ -561,7 +561,7 @@ const ReviewApp: React.FC = () => {
     useState<LineAnnotationComposeRequest | null>(null);
   const nextLineAnnotationComposeRequestId = useRef(0);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'semantic'>(false);
+  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'powerUp'>(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   // A real session whose first /api/diff failed: the load error state, never
@@ -836,26 +836,6 @@ const ReviewApp: React.FC = () => {
   const semanticDiffUsable = semDiffClient != null;
   const diffSemanticOn = useConfigValue('diffSemantic');
   const diffPowerUpOn = useConfigValue('diffPowerUp');
-  const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: PowerUpProvider | null; endpoint?: string; revision: number }>({ configured: false, provider: null, revision: 0 });
-  useEffect(() => {
-    if (!semDiffClient) return;
-    let request = 0;
-    const load = () => {
-      const id = ++request;
-      fetch('/api/sem-diff/opinion/settings')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: { configured: boolean; provider: PowerUpProvider | null; endpoint?: string } | null) => {
-          if (id === request && data) setPowerUpConfigured((previous) => ({ ...data, revision: previous.revision + 1 }));
-        })
-        .catch(() => {});
-    };
-    load();
-    window.addEventListener(POWER_UP_CHANGED_EVENT, load);
-    return () => {
-      request++;
-      window.removeEventListener(POWER_UP_CHANGED_EVENT, load);
-    };
-  }, [semDiffClient]);
   const [powerUpRejected, setPowerUpRejected] = useState<readonly string[]>(() => readPowerUpRejected());
   const rejectPowerUpLink = useCallback((candidateId: string) => {
     setPowerUpRejected((previous) => {
@@ -863,15 +843,12 @@ const ReviewApp: React.FC = () => {
       return next;
     });
   }, []);
-  const powerUpActive = semDiffClient != null && diffSemanticOn && diffPowerUpOn && powerUpConfigured.configured;
-  const [powerUpRetry, setPowerUpRetry] = useState(0);
-  const powerUp = useMemo(() => ({
-    active: powerUpActive,
+  // Power Up's settings read and config (semDiff/usePowerUpConfig.ts, shared with the Inbox's readers).
+  const { active: powerUpActive, powerUp, settings: powerUpConfigured, retry: retryPowerUp } = usePowerUpConfig({
+    client: semDiffClient,
+    on: diffSemanticOn && diffPowerUpOn,
     rejected: powerUpRejected,
-    provider: powerUpConfigured.provider,
-    settingsRevision: powerUpConfigured.revision,
-    retry: powerUpRetry,
-  }), [powerUpActive, powerUpRejected, powerUpConfigured, powerUpRetry]);
+  });
   const [powerUpStatus, setPowerUpStatus] = useState<PowerUpStatus | null>(null);
   useEffect(() => {
     const root = document.documentElement;
@@ -6144,8 +6121,8 @@ const ReviewApp: React.FC = () => {
                     status={powerUpStatus}
                     provider={powerUpConfigured.provider}
                     endpoint={powerUpConfigured.endpoint}
-                    onRetry={() => setPowerUpRetry((n) => n + 1)}
-                    onSettings={() => setOpenSettingsMenu('semantic')}
+                    onRetry={retryPowerUp}
+                    onSettings={() => setOpenSettingsMenu('powerUp')}
                   />
                 )}
                 {!isCompactTouchLayout && <ReviewHeaderStatus variant="pill" {...reviewStatusProps} />}
@@ -6694,10 +6671,11 @@ const ReviewApp: React.FC = () => {
             agentToolSetting={agentTool.setting}
             onAgentToolChange={agentTool.save}
             externalOpen={openSettingsMenu !== false}
-            externalTab={openSettingsMenu === 'semantic' ? 'semantic' : undefined}
+            externalTab={openSettingsMenu === 'powerUp' ? 'reviews' : undefined}
+            externalSection={openSettingsMenu === 'powerUp' ? 'powerUp' : undefined}
             onExternalClose={() => setOpenSettingsMenu(false)}
             // Local git session where since-base isn't offered (base ref
-            // unresolvable): Settings → Review → Git notes that the Git-status preference
+            // unresolvable): Settings → Reviews › Files and defaults › Git notes that the Git-status preference
             // can't take effect in THIS repo. PR/workspace/jj sessions say
             // nothing — the preference isn't about them.
             sinceBaseUnavailable={
