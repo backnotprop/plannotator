@@ -392,6 +392,8 @@ test('3. Laptop stopped: a Viewed tick shows ticked with the held words and no e
   await other.close();
 
   await start(laptop);
+  // Away until Studio sees it back: a read in between is Studio's "cannot be reached now" (503), as while it was down.
+  await expect.poll(() => stateOf(studio, laptop), { timeout: 30_000 }).toBe('online');
   laptopDown = false;
   await expect.poll(() => viewedOn(laptop, far.review.thread, far.review.message), { timeout: 45_000 }).toEqual([MAP, ROUTES].sort());
   // Landed: the held line goes, with no reload, and nothing is left waiting.
