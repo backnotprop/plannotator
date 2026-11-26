@@ -4971,7 +4971,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const meta = params?._meta;
         const thread = codexThreadOfCall(meta);
         const antigravity = thread ? null : antigravityConversationOfCall(meta);
-        if (antigravity && (!session || session === antigravity.conversation)) {
+        if (session && args?.agent_host === INBOX_T3_HOST && isT3ThreadId(session)) {
+          // A T3 Code thread (inbox-t3-wake.ts; the shim names it from T3CODE_THREAD_ID): it is there, and while
+          // a saved T3 grant reaches it, it is live for New message, compose and tags.
+          t3Wake.noteToolCall(session);
+          if (await t3Wake.wakes(INBOX_T3_HOST, session)) await live.seenWakeOnly(session, INBOX_T3_HOST, args?.project_path);
+        } else if (antigravity && (!session || session === antigravity.conversation)) {
           // An Antigravity conversation (inbox-antigravity-wake.ts): it names itself on every call, so a tool without a
           // session counts too. While a server that holds it answers, it is live for New message, compose and tags.
           if (!session) live.seenOverMcp(antigravity.conversation, { host: INBOX_ANTIGRAVITY_HOST });
@@ -4983,11 +4988,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (await codexWake.wakes(INBOX_CODEX_HOST, thread, meta)) {
             await live.seenWakeOnly(thread, INBOX_CODEX_HOST, args?.project_path);
           }
-        } else if (session && args?.agent_host === INBOX_T3_HOST && isT3ThreadId(session)) {
-          // A T3 Code thread (inbox-t3-wake.ts; the shim names it from T3CODE_THREAD_ID): it is there, and while
-          // a saved T3 grant reaches it, it is live for New message, compose and tags.
-          t3Wake.noteToolCall(session);
-          if (await t3Wake.wakes(INBOX_T3_HOST, session)) await live.seenWakeOnly(session, INBOX_T3_HOST, args?.project_path);
         } else if (session && args?.agent_host === INBOX_CODEX_HOST && isCodexThreadId(session)) {
           codexWake.noteToolCall(session, null);
         } else if (session && args?.agent_host === INBOX_QWEN_HOST && isQwenSessionId(session)) {

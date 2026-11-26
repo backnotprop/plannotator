@@ -278,6 +278,7 @@ export function inboxCallHostSession(
   meta: unknown,
   clientName: string | null,
 ): InboxHostSession | null {
+  if (hostSession?.host === INBOX_T3_HOST) return hostSession;
   const named = qwenSessionOfCall(meta);
   if (named) return qwenHostSession(named);
   const fromEnv = qwen?.envSession ?? null;
@@ -400,9 +401,10 @@ export function fillInboxToolArguments(
   sessionProject?: InboxSessionProject | null,
 ): JsonRpc {
   if (message.method !== "tools/call" || !message.params) return message;
-  const codexThread = codexThreadOfCall(message.params._meta, clientName);
+  const t3Thread = hostSession?.host === INBOX_T3_HOST;
+  const codexThread = t3Thread ? null : codexThreadOfCall(message.params._meta, clientName);
   if (codexThread) hostSession = { host: INBOX_CODEX_HOST, session: codexThread, name: INBOX_CODEX_NAME };
-  const antigravity = codexThread ? null : antigravityConversationOfCall(message.params._meta);
+  const antigravity = t3Thread || codexThread ? null : antigravityConversationOfCall(message.params._meta);
   if (antigravity) hostSession = { host: INBOX_ANTIGRAVITY_HOST, session: antigravity.conversation, name: INBOX_ANTIGRAVITY_NAME };
   const name = message.params.name;
   if (typeof name !== "string") return message;
@@ -435,16 +437,19 @@ export function fillInboxToolArguments(
   return { ...message, params: { ...message.params, arguments: args } };
 }
 
+/** Providers T3 Code runs with `T3CODE_THREAD_ID`: an agent naming itself as one is still that T3 thread. */
+const T3_PROVIDER_HOSTS = new Set(["claude-code", "codex", "pi", "acp"]);
+
 /**
  * Whether a call that names `agentHost` (or none) is filed as the host
  * session: when it names no host or that same host. In a T3 Code thread the
- * agent is Claude, which may name itself `claude-code`: that is still the
- * thread (T3 sets T3CODE_THREAD_ID only for Claude). Any other host it names
- * is not this session, and a reply to it must not wake the thread.
+ * agent may be Claude, Codex, Pi or an ACP agent naming itself as its
+ * provider: that is still the thread. Any other host it names is not this
+ * session, and a reply to it must not wake the thread.
  */
 function adoptsHostSession(hostSession: Partial<InboxHostSession>, agentHost: unknown): boolean {
   if (agentHost === undefined || agentHost === hostSession.host) return true;
-  return hostSession.host === INBOX_T3_HOST && agentHost === "claude-code";
+  return hostSession.host === INBOX_T3_HOST && typeof agentHost === "string" && T3_PROVIDER_HOSTS.has(agentHost);
 }
 
 /** What a request other than initialize, tools/list and ping gets from a shim with no tools. */
