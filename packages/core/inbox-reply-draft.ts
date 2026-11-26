@@ -339,9 +339,11 @@ export interface ReplyDraftStore {
   save(threadId: string, input: ReplyDraftSaveInput, options: { keepalive: boolean }): Promise<{ draft: InboxReplyDraft | null }>;
   /**
    * `base`: the version the person threw away (a store that holds the draft for another computer discards only that
-   * one there). `notLanded`: Discard mine after a conflict the last read offered (`notLanded`): only those words go.
+   * one there). `baseBody`: the words this window saved last (a save still on its way may land them under a newer
+   * version: still the one thrown away). `notLanded`: Discard mine after a conflict the last read offered (`notLanded`):
+   * only those words go.
    */
-  discard(threadId: string, options?: { base?: string | null; notLanded?: string }): Promise<void>;
+  discard(threadId: string, options?: { base?: string | null; baseBody?: string; notLanded?: string }): Promise<void>;
   /**
    * Words of the person's the last read of the thread found the draft does not hold (a store that holds the draft for
    * another computer: a conflict met there, or words refused there). Absent or null: none.

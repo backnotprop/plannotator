@@ -20,7 +20,7 @@ const THREAD = /^[A-Za-z0-9_]+$/;
 /** One write of a thread's draft for that machine: a Discard, then a save, either or both, each under its own key. */
 export interface HeldDraftWrite {
   /** `base`: the version there the person threw away (undefined: the one the write before it leaves there). */
-  discard?: { idempotency_key: string; base?: string | null };
+  discard?: { idempotency_key: string; base?: string | null; base_body?: string };
   save?: Record<string, unknown>;
 }
 
@@ -51,8 +51,11 @@ export interface HeldDraft {
    * held draft does not keep it there). Shown on their tiles as not attached until the person writes again.
    */
   gone?: InboxDraftFile[];
-  /** A reply held for that machine carried this draft: `view` shows what it leaves, `before` what it held, until it is delivered or refused. */
-  sending?: { key: string; before: InboxReplyDraft | null; after: string | null; clear_draft: string; words?: string; uploads: string[] };
+  /**
+   * A reply held for that machine carried this draft: `view` shows what it leaves, `before` what it held, until it is
+   * delivered or refused. `offered`: words a conflict offered that the reply carried, offered again only if it is refused.
+   */
+  sending?: { key: string; before: InboxReplyDraft | null; after: string | null; clear_draft: string; words?: string; uploads: string[]; offered?: InboxReplyDraft[] };
 }
 
 const dirOf = (dataDir: string, machine: string) => join(inboxDir(dataDir), INBOX_MACHINE_DRAFTS_DIR, machine);

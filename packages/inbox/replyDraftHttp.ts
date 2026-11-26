@@ -65,7 +65,7 @@ export const httpReplyDraftStore: ReplyDraftStore = {
       if (far) await inboxApi.discardReplyDraft(threadId, { not_landed: options.notLanded });
       return;
     }
-    await inboxApi.discardReplyDraft(threadId, far && options.base !== undefined ? { base: options.base } : {});
+    await inboxApi.discardReplyDraft(threadId, far && options.base !== undefined ? { base: options.base, ...(options.baseBody !== undefined ? { base_body: options.baseBody } : {}) } : {});
   },
 };
 

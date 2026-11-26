@@ -19,7 +19,7 @@ const settling = new Map<string, string>();
  * and while words of theirs not saved (`failed`) are not among them.
  */
 export function offerHeld(target: string, lost: ReplyDraftNotLanded, draft: InboxReplyDraft | null, waiting: boolean, failed: string | undefined): string | undefined {
-  if ((draft?.body ?? '').includes(lost.words) || waiting || (failed !== undefined && !lost.words.includes(failed))) return undefined;
+  if ((draft?.body ?? '').trim() === lost.words.trim() || waiting || (failed !== undefined && !lost.words.includes(failed))) return undefined;
   offered.set(target, lost.version);
   return lost.words;
 }

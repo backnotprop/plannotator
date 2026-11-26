@@ -69,6 +69,9 @@ let host: HTMLElement | null = null;
 let draftPostsFail = false;
 /** The Mini refuses a draft write (422), while true. */
 let draftPostsRefused = false;
+/** The next draft save waits for this before it reaches the Mini (`saveHeld` once it does). */
+let saveGate: Promise<void> | null = null;
+let saveHeld = false;
 let savedFetch: typeof fetch;
 let savedXhr: typeof XMLHttpRequest;
 let signal: Signal;
@@ -171,6 +174,8 @@ beforeEach(() => {
   mini = { drafts: new Map(), uploads: new Map(), writes: [], answered: new Map(), clock: 0 };
   draftPostsFail = false;
   draftPostsRefused = false;
+  saveGate = null;
+  saveHeld = false;
   replies = [];
   localDraftCalls = [];
   signal = createSignal();
@@ -183,6 +188,12 @@ beforeEach(() => {
       if (peer.state !== 'online') throw new Error('unreachable');
       if (draftPostsFail && init.method === 'POST') throw new Error('no answer');
       if (draftPostsRefused && init.method === 'POST') return Response.json({ error: 'Not this time.', code: 'validation_error' }, { status: 422 });
+      if (saveGate && init.method === 'POST' && !route.endsWith('/delete')) {
+        const gate = saveGate;
+        saveGate = null;
+        saveHeld = true;
+        await gate;
+      }
       return miniDoor(route, init.method, init.body ? (JSON.parse(init.body) as Record<string, unknown>) : {});
     },
     poke() {},
@@ -792,4 +803,23 @@ test.skipIf(!hasDom)("Discard in the Mini's thread after newer words were typed 
   await until(() => box(el)?.value === 'Newer words on the Mini.', "the Mini's words in the box");
   await discardInBox(el);
   await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
+});
+
+test.skipIf(!hasDom)("Discard pressed while a save of the box is still on its way to the Mini: the words it lands are gone too, in every window", async () => {
+  linked(['reply-drafts']);
+  const el = await open();
+  await reply(el);
+  typeOn(el, 'First.');
+  await until(() => mini.drafts.get(FAR)?.body === 'First.', 'the first save on the Mini');
+  let release = () => {};
+  saveGate = new Promise<void>((done) => (release = done));
+  typeOn(el, ' Second.');
+  await until(() => saveHeld, 'the next save on its way');
+  await discardInBox(el);
+  release();
+  await until(() => mini.writes.some((write) => write.body === 'First. Second.'), 'the save landing on the Mini');
+  await until(() => !mini.drafts.has(FAR), 'Discard reaching the Mini');
+  await settle(10);
+  expect(box(el)?.value ?? '').toBe('');
+  expect(forward.heldCount(MINI)).toBe(0);
 });

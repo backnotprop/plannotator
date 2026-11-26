@@ -1190,9 +1190,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       return;
     }
     bump(target);
-    // The version thrown away (a store holding it for another computer discards only that one there), and whether a
-    // draft was shown: one the host holds while it keeps none for the thread goes too, so it never comes back.
-    const base = baseOf(target);
+    // The version thrown away (a store for another computer discards only it, or the words this window saved last, which
+    // a save on its way lands as newer), and whether a draft was shown: a host's one goes too, so it never comes back.
+    const [base, baseBody] = [baseOf(target), sentWords.current.get(target)];
     const shown = base !== null || stateRef.current.draft !== null;
     // A file still landing from an earlier Cancel or thread switch was thrown away with the rest.
     replyDraftDiscarded(target);
@@ -1211,7 +1211,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     unsavedChanged();
     setState({ loadedFor: target, draft: null, conflict: null, tooLong: false, failed: false });
     if (!keeps(target) && !shown) return;
-    chain.current = chain.current.then(() => storeRef.current.discard(target, { base }).then(() => undefined, () => undefined));
+    chain.current = chain.current.then(() => storeRef.current.discard(target, { base, ...(baseBody !== undefined ? { baseBody } : {}) }).then(() => undefined, () => undefined));
   }, []);
 
   /**

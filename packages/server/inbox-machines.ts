@@ -742,15 +742,19 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // A reply draft held for it is lost with the link, as a write waiting for it is: its words join the "Not sent"
     // list (a write that was waiting, dropped below), never gone silently. Only here does a draft enter the outbox.
     // Every word goes (its files and quote named after them): a draft longer than one held write fits is said in parts.
-    for (const lost of drafts.forget(id)) {
+    // Written to "Not sent" first: the held files go only once every part is there.
+    let handedOver = true;
+    for (const lost of drafts.forget(id, true)) {
       for (const part of lostDraftParts(lost)) {
         try {
           outbox.submit(id, `threads/${lost.thread}/draft`, { idempotency_key: crypto.randomUUID(), body: part }, lost.thread);
-        } catch {
-          // Not a machine id this outbox keeps: nothing more can be done for them.
+        } catch (error) {
+          handedOver = false;
+          console.error(`Plannotator Inbox: a reply draft held for an unlinked computer could not be put in "Not sent" (${error instanceof Error ? error.message : String(error)}); it stays on disk.`);
         }
       }
     }
+    if (handedOver) drafts.forget(id);
     outbox.dropMachine(id, link?.name ?? null);
     // The last link gone: with Phones off the tailnet door has nothing left to serve (but a refusal owed).
     if (closeDoor === "after_answer") closeDoorAfterAnswer();

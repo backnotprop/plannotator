@@ -24,7 +24,7 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxListRow, InboxReplyDraft } from "@plannotator/core/inbox-types";
 import { receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
-import { createMachineDrafts, lostDraftParts, type DraftAnswer, type DraftPeer } from "./inbox-machine-drafts";
+import { createMachineDrafts, lostDraftParts, MORE_OFFERED_MAX, type DraftAnswer, type DraftPeer } from "./inbox-machine-drafts";
 import { INBOX_MACHINE_DRAFTS_DIR } from "./inbox-machine-drafts-held";
 
 const MACHINE = "ibx_01HZZZZZZZZZZZZZZZZZZZZZZZ";
@@ -683,6 +683,124 @@ describe("a linked machine's reply draft, from this Inbox", () => {
     const there = l.far.store.replyDraft(l.far.thread);
     expect(there?.body).toBe("");
     expect(there?.files?.map((f) => f.upload_id)).toEqual([left.upload_id]);
+  });
+
+  /** A held save meets newer words there: `words` are offered as a conflict. */
+  const offeredConflict = async (l: ReturnType<typeof linked>, words: string) => {
+    l.peer.state = "offline";
+    const there = l.far.store.replyDraft(l.far.thread);
+    await answerOf(await l.save({ body: words, base: there?.updated_at ?? null, ...(there ? { base_body: there.body } : {}) }));
+    l.far.store.saveReplyDraft(l.far.thread, { body: `Typed on the MacBook ${Math.random()}`, base: there?.updated_at ?? null });
+    await l.back();
+    return l.drafts.notLanded(MACHINE, l.far.thread)!;
+  };
+
+  for (const outcome of ["delivered", "refused"] as const) {
+    test(`a Send of a held conflict's words: no longer offered while it goes (never sent twice); ${outcome === "delivered" ? "delivered, they stay settled through a restart" : "refused, they are offered again, once"}`, async () => {
+      const l = linked();
+      l.peer.state = "online";
+      await answerOf(await l.save({ body: "Shared start", base: null }));
+      const offered = await offeredConflict(l, "Words offered here");
+      expect(offered.conflict).toBe(true);
+      l.drafts.afterReply(l.peer, l.far.thread, { words: offered.words, clear_draft: "", uploads: [] }, "reply-c");
+      expect(l.drafts.notLanded(MACHINE, l.far.thread)).toBeNull();
+      l.peer.state = "offline";
+      expect(l.drafts.read(l.peer, l.far.thread)?.not_landed).toBeUndefined();
+      l.peer.state = "online";
+      l.replies.set("reply-c", outcome);
+      l.drafts.replySettled(MACHINE, "reply-c");
+      await l.drafts.drain(MACHINE);
+      l.restart();
+      if (outcome === "delivered") expect(l.drafts.notLanded(MACHINE, l.far.thread)).toBeNull();
+      else expect(l.drafts.notLanded(MACHINE, l.far.thread)).toMatchObject({ words: offered.words, version: offered.version, conflict: true });
+      expect(l.far.store.replyDraft(l.far.thread)?.body.startsWith("Typed on the MacBook")).toBe(true);
+    });
+  }
+
+  for (const outcome of ["delivered", "refused"] as const) {
+    test(`a Send while that machine sleeps, its draft saved there: the sent words do not come back from the draft last heard; ${outcome === "delivered" ? "delivered, the draft goes there" : "refused, they are the draft again"}`, async () => {
+      const l = linked();
+      l.peer.state = "online";
+      const saved = await answerOf(await l.save({ body: "Words saved there", base: null }));
+      await Bun.sleep(5);
+      l.peer.state = "offline";
+      expect(l.drafts.read(l.peer, l.far.thread)?.draft?.body).toBe("Words saved there");
+      l.drafts.afterReply(l.peer, l.far.thread, { words: "Words saved there", clear_draft: saved.body.draft.updated_at, uploads: [] }, "reply-s");
+      expect(l.drafts.read(l.peer, l.far.thread)?.draft).toBeNull();
+      expect(l.drafts.overlay([l.row()])[0]!.unsent).toBeNull();
+      expect(await l.drafts.rowsFor([l.peer], l.drafts.overlay([l.row()]))).toEqual([]);
+      l.restart();
+      expect(l.drafts.read(l.peer, l.far.thread)?.draft).toBeNull();
+      l.replies.set("reply-s", outcome);
+      l.drafts.replySettled(MACHINE, "reply-s");
+      if (outcome === "refused") expect(l.drafts.read(l.peer, l.far.thread)?.draft?.body).toBe("Words saved there");
+      await l.back();
+      expect(l.far.store.replyDraft(l.far.thread)?.body ?? null).toBe(outcome === "delivered" ? null : "Words saved there");
+    });
+  }
+
+  test("Discard while a save is still on its way: the version it lands as goes too (online, and after a restart with a held save landed); newer words typed there still stay", async () => {
+    const l = linked();
+    l.peer.state = "online";
+    const shown = await answerOf(await l.save({ body: "Words", base: null }));
+    // The window's next save landed there, its answer not back yet as Discard is pressed: it names the version shown.
+    l.far.store.saveReplyDraft(l.far.thread, { body: "Words and more", base: shown.body.draft.updated_at });
+    expect((await answerOf(await l.drafts.write(l.peer, l.far.thread, true, { base: shown.body.draft.updated_at, base_body: "Words and more" }))).status).toBe(200);
+    expect(l.far.store.replyDraft(l.far.thread)).toBeNull();
+    // Held while it slept, landed, then this Inbox restarted: a Discard naming the version shown while it was held.
+    l.peer.state = "offline";
+    const held = await answerOf(await l.save({ body: "Typed while it slept", base: null }));
+    await l.back();
+    l.restart();
+    expect((await answerOf(await l.drafts.write(l.peer, l.far.thread, true, { base: held.body.draft.updated_at, base_body: "Typed while it slept" }))).status).toBe(200);
+    expect(l.far.store.replyDraft(l.far.thread)).toBeNull();
+    // The same while it sleeps again: the Discard is held, and goes once it is back.
+    l.peer.state = "offline";
+    const again = await answerOf(await l.save({ body: "Typed again while it slept", base: null }));
+    await l.back();
+    l.restart();
+    l.peer.state = "offline";
+    expect((await answerOf(await l.drafts.write(l.peer, l.far.thread, true, { base: again.body.draft.updated_at, base_body: "Typed again while it slept" }))).status).toBe(200);
+    await l.back();
+    expect(l.far.store.replyDraft(l.far.thread)).toBeNull();
+    // Other words there: refused, and they stay.
+    const mine = await answerOf(await l.save({ body: "Mine", base: null }));
+    l.far.store.saveReplyDraft(l.far.thread, { body: "Newer words typed on the MacBook", base: mine.body.draft.updated_at });
+    expect((await answerOf(await l.drafts.write(l.peer, l.far.thread, true, { base: mine.body.draft.updated_at, base_body: "Mine" }))).status).toBe(409);
+    expect(l.far.store.replyDraft(l.far.thread)?.body).toBe("Newer words typed on the MacBook");
+  });
+
+  test("offered words are settled only by a draft of those very words, never one that merely contains them", async () => {
+    const l = linked();
+    l.peer.state = "online";
+    await answerOf(await l.save({ body: "Shared start", base: null }));
+    const offered = await offeredConflict(l, "ok");
+    const there = l.far.store.replyDraft(l.far.thread)!;
+    await answerOf(await l.save({ body: "ok, but not before the deploy", base: there.updated_at, base_body: there.body }));
+    expect(l.drafts.notLanded(MACHINE, l.far.thread)).toEqual(offered);
+  });
+
+  test("offered words waiting in turn are bounded: the oldest stay, a new one past the cap takes the newest's place", async () => {
+    const l = linked();
+    l.peer.state = "online";
+    await answerOf(await l.save({ body: "Shared start", base: null }));
+    for (let n = 0; n <= MORE_OFFERED_MAX + 1; n++) await offeredConflict(l, `Held words ${n}`);
+    const words: string[] = [];
+    for (let left = l.drafts.notLanded(MACHINE, l.far.thread); left; left = l.drafts.notLanded(MACHINE, l.far.thread)) {
+      words.push(left.words);
+      await answerOf(await l.drafts.write(l.peer, l.far.thread, true, { not_landed: left.version }));
+    }
+    expect(words).toEqual([...Array.from({ length: MORE_OFFERED_MAX }, (_, n) => `Held words ${n}`), `Held words ${MORE_OFFERED_MAX + 1}`]);
+  });
+
+  test("Unlink while a held reply carries the draft: its words are not handed back a second time (the reply is in Not sent); kept on disk when asked", async () => {
+    const l = linked();
+    const held = await answerOf(await l.save({ body: "Words the reply carries", base: null }));
+    l.drafts.afterReply(l.peer, l.far.thread, { words: "Words the reply carries", clear_draft: held.body.draft.updated_at, uploads: [] }, "reply-u");
+    expect(l.drafts.forget(MACHINE, true)).toEqual([]);
+    expect(l.heldFiles().length).toBe(1);
+    l.drafts.forget(MACHINE);
+    expect(l.heldFiles()).toEqual([]);
   });
 
   test("a save held after that machine said its draft changed (this Inbox's own write) stands on the draft last heard: its file and quote stay", async () => {

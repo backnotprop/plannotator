@@ -125,6 +125,12 @@ const withOps = (ops: ReplyDraftFileOps): Body => ({ files_add: ops.add, files_r
 const refOf = (file: InboxDraftFile): ReplyDraftFileRef => ({ upload_id: file.upload_id, ...(file.pasted ? { pasted: file.pasted } : {}) });
 const placesOf = (draft: InboxReplyDraft | null) => (draft?.files ?? []).flatMap((file) => (file.pasted ? [{ upload_id: file.upload_id, pasted: file.pasted }] : []));
 const codeOf = (answer: unknown) => (answer && typeof answer === "object" ? (answer as { code?: unknown }).code : undefined);
+/** A Discard refused there whose draft is the words thrown away (`baseBody`), under a newer version: that version (else null). */
+const rebased = (answer: { status: number; body: unknown }, baseBody: unknown): string | null => {
+  if (typeof baseBody !== "string" || codeOf(answer.body) !== "draft_conflict") return null;
+  const there = draftOf(answer.body);
+  return there && there.body === baseBody ? there.updated_at : null;
+};
 const draftOf = (answer: unknown): InboxReplyDraft | null => {
   const draft = answer && typeof answer === "object" ? (answer as { draft?: unknown }).draft : null;
   return draft && typeof draft === "object" && typeof (draft as InboxReplyDraft).body === "string" ? (draft as InboxReplyDraft) : null;
@@ -134,10 +140,14 @@ const keyOf = (body: Body) => (typeof body.idempotency_key === "string" && body.
 const waits = (record: HeldDraft) => record.sent !== null || record.next !== null || !!record.stopped || !!record.sending;
 /**
  * Words a conflict offers that stay offered beside `draft`: they go only by the person's choice in some window (Keep
- * mine saves them, Discard mine names them), or once the draft holds them. Another window's write never settles them.
+ * mine saves them, Discard mine names them), or once the draft is those very words (never merely containing them: a
+ * short "ok" is not settled by any draft that has it). Another window's write never settles them.
  */
 const stillOffered = (record: HeldDraft | null | undefined, draft: InboxReplyDraft | null): Offered =>
-  offeredAs(offeredOf(record).filter((one) => !(draft?.body ?? "").includes(one.body)));
+  offeredAs(offeredOf(record).filter((one) => !sameWords(draft, one)));
+const sameWords = (draft: InboxReplyDraft | null | undefined, one: InboxReplyDraft) => (draft?.body ?? "").trim() === one.body.trim();
+/** At most this many sets of words wait behind the one offered now: past it, a new one takes the newest's place. */
+export const MORE_OFFERED_MAX = 8;
 type Offered = { conflict?: InboxReplyDraft; more?: InboxReplyDraft[] };
 /** Every set of words a held record offers, oldest first: the one a read offers now (`conflict`), then those after it. */
 const offeredOf = (record: HeldDraft | null | undefined): InboxReplyDraft[] => (record?.conflict ? [record.conflict, ...(record.more ?? [])] : []);
@@ -370,7 +380,7 @@ export function createMachineDrafts(options: {
     let write: HeldDraftWrite;
     if (deleting) {
       const base = discardBase(record, k, body);
-      write = { discard: { idempotency_key, ...(base !== undefined ? { base } : {}) } };
+      write = { discard: { idempotency_key, ...(base !== undefined ? { base } : {}), ...(typeof body.base_body === "string" ? { base_body: body.base_body } : {}) } };
     } else {
       // A second window here a step behind the held draft is refused as that machine's store would refuse it. With
       // nothing held, that machine judges the save when it lands.
@@ -423,7 +433,7 @@ export function createMachineDrafts(options: {
     if ((!record || !waits(record)) && peer.state === "online") {
       let left = false;
       // A Discard goes only for the version the window threw away: one changed there since is refused there, and stays.
-      const base = deleting ? discardBase(record ?? null, k, rest) : undefined;
+      let base = deleting ? discardBase(record ?? null, k, rest) : undefined;
       try {
         const send = () => {
           left = true;
@@ -442,6 +452,15 @@ export function createMachineDrafts(options: {
           if (!next) break;
           await far.body?.cancel().catch(() => {});
           sent = next;
+          far = await send();
+        }
+        // Refused, but the draft there is the words thrown away under a newer version (the save they came with was still
+        // on its way, or landed while held by an earlier run of this Inbox): those go.
+        const thrown = deleting && far.status === 409 ? rebased({ status: 409, body: await far.clone().json().catch(() => null) }, rest.base_body) : null;
+        if (thrown !== null) {
+          await far.body?.cancel().catch(() => {});
+          base = thrown;
+          sent = { ...sent, idempotency_key: crypto.randomUUID() };
           far = await send();
         }
         if (far.status < 500) {
@@ -507,8 +526,10 @@ export function createMachineDrafts(options: {
     if (mine.body.trim() === "" || mine.body === far.body) return { ...current, sent: null, next: { save: saveOf(mine, far, mine.body.trim() === "" ? far.body : mine.body) }, stopped: undefined };
     // Words offered before and not chosen on yet stay offered, first: these are offered after them (words these or that
     // draft hold are offered by them).
-    const before = offeredOf(current).filter((one) => !mine.body.includes(one.body) && !far.body.includes(one.body));
-    return { ...unoffered(current), view: far, sent: null, next: null, stopped: undefined, ...offeredAs([...before, mine]) };
+    const before = offeredOf(current).filter((one) => !sameWords(mine, one) && !sameWords(far, one));
+    // Bounded: the oldest stay; past the cap a new one takes the newest's place.
+    const list = before.length > MORE_OFFERED_MAX ? [...before.slice(0, MORE_OFFERED_MAX), mine] : [...before, mine];
+    return { ...unoffered(current), view: far, sent: null, next: null, stopped: undefined, ...offeredAs(list) };
   };
 
   /** A reply that carried the draft is delivered there (it settles as that machine settles it) or not (its words come back). */
@@ -518,13 +539,16 @@ export function createMachineDrafts(options: {
     // Unchanged since the Send: the person typed nothing after it.
     const untouched = (record.view?.updated_at ?? null) === sending.after;
     if (!delivered) {
-      put(untouched ? { ...rest, view: sending.before } : rest);
+      // Refused: its words come back, once: the draft it held, and words a conflict offered that it carried, offered again.
+      const back = sending.offered ? { ...unoffered(rest), ...offeredAs([...sending.offered, ...offeredOf(rest)]) } : rest;
+      put(untouched ? { ...back, view: sending.before } : back);
       return changed(peer.id, record.thread_id);
     }
     put(rest);
     if (!untouched || !sending.before) return;
     const after = settleReplyDraftAfterSend(sending.before, { clearDraft: sending.clear_draft, words: sending.words, uploads: sending.uploads });
-    if (after.kind === "delete") hold(peer, record.thread_id, true, {});
+    // Only the version it carried goes (newer words typed there since stay).
+    if (after.kind === "delete") hold(peer, record.thread_id, true, { base: sending.before.updated_at });
     else if (after.kind === "files") {
       const left = new Set(after.files.map((file) => file.upload_id));
       const view = rest.view;
@@ -568,7 +592,12 @@ export function createMachineDrafts(options: {
       const write = record.sent!;
       if (write.discard) {
         const { base } = write.discard;
-        const answer = await post(peer, threadId, true, { idempotency_key: write.discard.idempotency_key, ...(base !== undefined ? { base } : {}) });
+        let answer = await post(peer, threadId, true, { idempotency_key: write.discard.idempotency_key, ...(base !== undefined ? { base } : {}) });
+        if (!answer) return false;
+        // Refused, but the draft there is the words thrown away under a newer version (the save they came with landed
+        // after, or an earlier run of this Inbox landed it): those go.
+        const thrown = rebased(answer, write.discard.base_body);
+        if (thrown !== null) answer = await post(peer, threadId, true, { idempotency_key: crypto.randomUUID(), base: thrown });
         if (!answer) return false;
         const latest = held.get(k);
         if (!latest) return true;
@@ -756,15 +785,28 @@ export function createMachineDrafts(options: {
      * never come back while it waits. It settles once the reply is delivered there; refused, its words are the draft again.
      */
     afterReply(peer: DraftPeer, threadId: string, body: Body, replyKey: string): void {
-      const record = held.get(key(peer.id, threadId));
-      const view = record?.view;
-      if (!record || !view || typeof body.clear_draft !== "string") return;
+      if (typeof body.clear_draft !== "string") return;
+      const k = key(peer.id, threadId);
+      const record = held.get(k) ?? null;
+      // The draft shown here: the one held while it waits, else the one last heard there (a Send while that machine
+      // sleeps, or before a window reads it again, must not bring the sent words back from it).
+      const view = record && waits(record) ? record.view : known.has(k) ? (known.get(k) ?? null) : (record?.view ?? null);
       const uploadsSent = strings(body.uploads);
       const wordsSent = typeof body.words === "string" ? body.words : undefined;
-      const after = settleReplyDraftAfterSend(view, { clearDraft: body.clear_draft, words: wordsSent, uploads: uploadsSent });
-      if (after.kind === "unchanged") return;
-      const shown = after.kind === "delete" ? null : projectReplyDraft(threadId, view, { body: "", files: after.files, mentions: [] }, now().toISOString());
-      put({ ...record, view: shown, sending: { key: replyKey, before: view, after: shown?.updated_at ?? null, clear_draft: body.clear_draft, ...(wordsSent !== undefined ? { words: wordsSent } : {}), uploads: uploadsSent } });
+      const sentAs = { clearDraft: body.clear_draft, words: wordsSent, uploads: uploadsSent };
+      const after = view ? settleReplyDraftAfterSend(view, sentAs) : ({ kind: "unchanged" } as const);
+      // Words a conflict offered that this reply carries: no longer offered (never sent twice), back if it is refused.
+      const offered = offeredOf(record);
+      const carried = offered.filter((one) => settleReplyDraftAfterSend(one, sentAs).kind !== "unchanged");
+      if (after.kind === "unchanged" && carried.length === 0) return;
+      const shown = after.kind === "unchanged" ? view : after.kind === "delete" ? null : projectReplyDraft(threadId, view, { body: "", files: after.files, mentions: [] }, now().toISOString());
+      const base: HeldDraft = record ? unoffered(record) : { v: 1, machine: peer.id, thread_id: threadId, view: null, sent: null, next: null };
+      put({
+        ...base,
+        view: shown,
+        ...offeredAs(offered.filter((one) => !carried.includes(one))),
+        sending: { key: replyKey, before: view, after: shown?.updated_at ?? null, clear_draft: body.clear_draft, ...(wordsSent !== undefined ? { words: wordsSent } : {}), uploads: uploadsSent, ...(carried.length > 0 ? { offered: carried } : {}) },
+      });
       changed(peer.id, threadId);
     },
     /** A reply held for that machine was delivered there, refused or cancelled: a draft it carried settles, or comes back. */
@@ -822,9 +864,10 @@ export function createMachineDrafts(options: {
     /**
      * That machine is no longer linked: what is held for it goes. Each draft whose words did not land there (the one
      * shown while it waits, words a conflict offers, a Send's words not delivered), for the "Not sent" list (as a write
-     * that was waiting for it): every word, its files' names and its quote, so it can still be copied.
+     * that was waiting for it): every word, its files' names and its quote, so it can still be copied. `keepHeld`: the
+     * files stay on disk (those words could not be put in "Not sent").
      */
-    forget(machine: string): LostDraft[] {
+    forget(machine: string, keepHeld = false): LostDraft[] {
       const lost: LostDraft[] = [];
       const add = (thread: string, draft: InboxReplyDraft | null | undefined) => {
         if (!draft) return;
@@ -837,8 +880,8 @@ export function createMachineDrafts(options: {
         if (record.machine !== machine) continue;
         if (waits(record)) add(record.thread_id, record.view);
         for (const offered of offeredOf(record)) add(record.thread_id, offered);
-        add(record.thread_id, record.sending?.before);
-        drop(machine, record.thread_id);
+        // Words a held reply carried are in "Not sent" as that reply (dropped with the link): never a second time here.
+        if (!keepHeld) drop(machine, record.thread_id);
       }
       const retry = retries.get(machine);
       if (retry?.timer) clearTimeout(retry.timer);
