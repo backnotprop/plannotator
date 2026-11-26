@@ -15,7 +15,11 @@
  * unread took back: a question that arrives during the toast stays open and
  * new. A stale row, where the server wrote nothing, gets no toast. Mark read
  * on a row whose Mark read stands only gives the look back, and its Undo is
- * Mark unread again, never a Move back.
+ * Mark unread again, never a Move back. An opened thread whose question still
+ * waits (the owner, 2026-11-25): the row's hover action and the header's ⋯
+ * offer Mark unread, the ⋯ keeps Mark read beside it, and Mark unread leaves
+ * the row in Waiting on you, bold, its question open; one not opened keeps
+ * Mark read.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -70,7 +74,7 @@ async function serverSection(threadId: string): Promise<string | undefined> {
   return model.sections.find((s) => s.threads.some((t) => t.thread_id === threadId))?.id;
 }
 
-const TESTS = 7;
+const TESTS = 8;
 
 /** An agent writing while a test runs (inbox-dom-server.ts `send`). */
 function agentWrites(send: { project: string; session: string; body: string; reply_to: string }) {
@@ -404,3 +408,45 @@ test.skipIf(!hasDom)('Mark read on a row whose Mark read stands gives the look b
   expect(posted.some((p) => p.path === `/api/inbox/threads/${id}/unread`)).toBe(false);
   expect((await threadOf(id)).thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.state))).toEqual(['closed']);
 });
+
+test.skipIf(!hasDom)('an opened thread whose question waits: the row and ⋯ offer Mark unread, ⋯ keeps Mark read, and it stays in Waiting on you, its question open', async () => {
+  const id = ids.waiting;
+  expect(await serverSection(id)).toBe('waiting');
+  await renderList(id);
+  await until(() => sectionOfRow(id) === 'waiting', 'the row in Waiting on you');
+  // Not opened yet: bold, Mark read on the row; so is the thread the agent is stopped on.
+  expect(rowButton(id)!.classList.contains('ib-u')).toBe(true);
+  expect(rowAction(id, 'read')).not.toBeNull();
+  expect(rowAction(id, 'unread')).toBeNull();
+  expect(rowAction(ids.stopped, 'read')).not.toBeNull();
+  expect(rowAction(ids.stopped, 'unread')).toBeNull();
+
+  await act(async () => rowButton(id)!.click());
+  await until(() => !!head(), 'the thread header');
+  await until(async () => (await serverSection(id)) === 'waiting' && posted.some((p) => p.path === `/api/inbox/threads/${id}/seen`), 'the look');
+  // Opened: not bold, still in Waiting on you, and the row's hover action is Mark unread.
+  await until(() => rowAction(id, 'unread') !== null, 'Mark unread on the opened row');
+  expect(rowAction(id, 'read')).toBeNull();
+  expect(rowButton(id)!.classList.contains('ib-u')).toBe(false);
+  expect(sectionOfRow(id)).toBe('waiting');
+  // The header's ⋯ agrees, and Mark read (set the question aside) is still there beside it.
+  expect(await moreUnreadItem()).not.toBeNull();
+  expect(moreReadItem()).not.toBeNull();
+  await press(head()!.querySelector<HTMLElement>('[data-thread-more]')!);
+  await until(() => !document.querySelector('[data-thread-menu]'), 'the ⋯ menu to close');
+
+  const messages = (await threadOf(id)).thread.messages.length;
+  await act(async () => rowAction(id, 'unread')!.click());
+  await until(() => posted.at(-1)?.path === `/api/inbox/threads/${id}/mark-unread`, 'the write');
+  await until(() => !window.location.hash.includes('thread='), 'the thread to close');
+  // Only the look moved: Waiting on you, bold, its question open, nothing sent; the toast promises no move.
+  await until(() => toast()?.querySelector('.ib-tlead')?.textContent === 'Marked unread', 'the toast');
+  expect(toast()?.textContent).not.toContain('back in New');
+  const list = JSON.parse((await loopback('/api/inbox/threads')).text) as { sections: InboxListSection[] };
+  expect(list.sections.flatMap((s) => s.threads).find((t) => t.thread_id === id)).toMatchObject({ section: 'waiting', unseen: 1, unread: true, questions: { open: 1 } });
+  expect((await threadOf(id)).thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.state))).toEqual(['open']);
+  expect((await threadOf(id)).thread.messages.length).toBe(messages);
+  await until(() => sectionOfRow(id) === 'waiting' && rowButton(id)?.classList.contains('ib-u') === true, 'the row bold in Waiting on you');
+  // Bold again, so Mark read is the row's action again.
+  await until(() => rowAction(id, 'read') !== null && rowAction(id, 'unread') === null, 'Mark read on the row again');
+}, 15_000);
