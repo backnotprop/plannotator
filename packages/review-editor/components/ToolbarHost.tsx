@@ -1,4 +1,5 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo } from 'react';
+import { LineFeedbackToolsContext } from './LineFeedbackTools';
+import React, { useContext, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo } from 'react';
 import type {
   CodeAnnotation,
   CodeAnnotationType,
@@ -56,7 +57,7 @@ interface ToolbarHostProps {
   aiHistoryMessages?: AIChatEntry[];
   /** Selected lines can only be asked about (no comments): the toolbar is the Ask box. */
   askOnly?: boolean;
-  /** A host's choices before the comment box (Comment · Ask · Show me). Absent: the comment box opens at once. */
+  /** A host's choices before the comment box (Comment · Ask). Absent: the comment box opens at once. */
   selectionActions?: DiffSelectionActions;
 }
 
@@ -165,6 +166,9 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     return formatLineRange(toolbarState.range.start, toolbarState.range.end);
   }, [toolbar.editingAnnotationId, toolbar.toolbarState]);
 
+  const feedbackTools = useContext(LineFeedbackToolsContext);
+  const target = toolbar.toolbarState?.range;
+  const fieldKey = feedbackTools && target ? JSON.stringify([filePath, target.side, target.start, target.end, toolbar.editingAnnotationId]) : undefined;
   const canSubmitAnnotation = toolbar.commentText.trim().length > 0 || toolbar.suggestedCode.trim().length > 0;
 
   const takeSelection = useCallback(
@@ -183,15 +187,9 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
         toolbarRef={toolbar.toolbarRef}
         position={toolbar.toolbarState.position}
         range={toolbar.toolbarState.range}
-        // A picture is of the code as it is now: Show me only when both ends are on the new side (added or unchanged lines).
-        actions={
-          toolbar.toolbarState.range.side === 'deletions' || (toolbar.toolbarState.range.endSide ?? toolbar.toolbarState.range.side) === 'deletions'
-            ? { ...selectionActions, onShowMe: undefined }
-            : selectionActions
-        }
+        actions={selectionActions}
         onComment={toolbar.chooseComment}
         onAsk={() => takeSelection(selectionActions.onAsk)}
-        onShowMe={() => takeSelection(selectionActions.onShowMe)}
       />
     );
   }
@@ -200,6 +198,7 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     <>
       {toolbar.toolbarState && !toolbar.showCodeModal && (askOnly || !toolbar.showCommentModal) && (
         <AnnotationToolbar
+          voiceTarget={fieldKey ?? undefined}
           toolbarState={toolbar.toolbarState}
           toolbarRef={toolbar.toolbarRef}
           commentText={toolbar.commentText}
@@ -234,6 +233,7 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
 
       {toolbar.toolbarState && toolbar.showCommentModal && !askOnly && (
         <ExpandedCommentDialog
+          voiceTarget={fieldKey ?? undefined}
           title={expandedCommentTitle}
           commentText={toolbar.commentText}
           setCommentText={toolbar.setCommentText}

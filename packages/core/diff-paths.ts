@@ -142,6 +142,13 @@ export function parseDiffGitHeader(header: string): DiffPathPair {
     }
   }
 
+  // Like git apply: when both sides name the same path, split the header at its
+  // middle, so a path containing " b/" is not cut at that inner " b/".
+  const half = (rest.length - 1) / 2;
+  if (Number.isInteger(half) && rest.startsWith("a/") && rest.slice(half, half + 3) === " b/" && rest.slice(2, half) === rest.slice(half + 3)) {
+    return { oldPath: rest.slice(2, half), newPath: rest.slice(2, half) };
+  }
+
   const match = header.match(/^diff --git a\/(.+) b\/(.+)$/);
   if (!match) return {};
   return { oldPath: match[1], newPath: match[2] };

@@ -6,7 +6,7 @@
  * linked: every label, line and filter needs a linked machine. Pure.
  */
 
-import type { InboxLinkedMark, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { inboxGroupWaitsOnPerson, type InboxLinkedMark, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { shortTime } from './format';
 import type { MachineView, OutboxView } from './api';
 import { windowProjectNames } from './projectLabels';
@@ -175,7 +175,7 @@ export function filterMachineRows(sections: readonly InboxListSection[], model: 
 export function machineCounts(sections: readonly InboxListSection[], model: MachinesModel): Map<string, number> {
   const counts = new Map<string, number>(model.all.map((m) => [m.id, 0]));
   for (const section of sections) {
-    if (section.id !== 'stopped' && section.id !== 'holding' && section.id !== 'waiting') continue;
+    if (!inboxGroupWaitsOnPerson(section.id)) continue;
     for (const row of section.threads) {
       const owner = row.machine ?? model.self;
       if (owner && counts.has(owner)) counts.set(owner, counts.get(owner)! + 1);

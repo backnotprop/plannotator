@@ -3,6 +3,7 @@ import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { inboxApi, post, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
 import { inboxUrl } from '../../inboxUrl';
 import { scheduledApi } from '../../scheduled/client';
+import { noteDeletedHere } from '../deletedHere';
 
 export interface SettingsHost {
   setSettings: Dispatch<SetStateAction<SettingsModel | null>>;
@@ -65,15 +66,19 @@ export function useSettingsSaves(
   const toggleChapterDiagrams = (next: boolean) =>
     saveSetting((s) => ({ ...s, chapter_diagrams: { on: next } }), () => inboxApi.saveChapterDiagrams(next), (s, saved) => ({ ...s, chapter_diagrams: saved.chapter_diagrams ?? { on: next } }));
 
-  const toggleShape = (next: boolean) => saveSetting((s) => ({ ...s, shape: { on: next } }), () => inboxApi.saveShape(next), (s, saved) => ({ ...s, shape: saved.shape }), reloadSkillCatalog);
 
   const toggleScheduled = (next: boolean) =>
     saveSetting((s) => ({ ...s, scheduled_threads: { ...s.scheduled_threads, on: next } }), () => scheduledApi.saveSwitch(next), (s, saved) => ({ ...s, scheduled_threads: saved.scheduled_threads ?? { on: next } }), reloadSkillCatalog);
 
-  const toggleExperimental = (next: boolean) =>
+  /** Decision mode (Settings → Capabilities): on unless turned off; every window follows through `event: capabilities`. */
+  const toggleDecisionMode = (next: boolean) =>
+    saveSetting((s) => ({ ...s, decision_mode: { ...s.decision_mode, on: next } }), () => inboxApi.saveDecisionMode(next), (s, saved) => ({ ...s, decision_mode: { ...s.decision_mode, ...saved.decision_mode } }));
+
+  /** The one experimental switch with a row: Grid (approval "inbox-agent-grid"). */
+  const toggleExperimental = (next: boolean, _feature: 'grid' = 'grid') =>
     saveSetting(
-      (s) => ({ ...s, experimental: { decision_mode: { on: next, env: s.experimental?.decision_mode.env ?? null } } }),
-      () => inboxApi.saveExperimental({ decision_mode: next }),
+      (s) => ({ ...s, experimental: { ...s.experimental, grid: { on: next, env: s.experimental?.grid?.env ?? null } } }),
+      () => inboxApi.saveExperimental({ grid: next }),
       (s, saved) => ({ ...s, experimental: saved.experimental }),
     );
 
@@ -95,6 +100,8 @@ export function useSettingsSaves(
   const deleteThread = async (threadId: string) => {
     setSettingsError(null);
     try {
+      // A pane still holding it (off the page) lets it go on its next read, as before (data/deletedHere.ts).
+      noteDeletedHere({ thread: threadId });
       adoptStore((await inboxApi.deleteThread(threadId)).store);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The thread was not deleted.');
@@ -105,6 +112,7 @@ export function useSettingsSaves(
   const deleteProject = async (projectId: string) => {
     setSettingsError(null);
     try {
+      noteDeletedHere({ project: projectId });
       adoptStore((await inboxApi.deleteProject(projectId)).store);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The project was not deleted.');
@@ -112,7 +120,7 @@ export function useSettingsSaves(
     }
     await refreshList(true);
   };
-  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
 }
 
 /** App's settings take a saved thread panes switch through this (set where App runs `useSettingsSaves`). */

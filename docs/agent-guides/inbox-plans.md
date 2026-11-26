@@ -14,7 +14,7 @@ On screen the panel is "Spaces" (approval "plans-home", `.product/approved/plans
 
 `packages/server/plans-capability.test.ts` holds all of it:
 
-- Every `/api/plans` path is the Inbox's unknown-route `404`, as if absent (as Shape's).
+- Every `/api/plans` path is the Inbox's unknown-route `404`, as if absent.
 - The library is not opened, read or imported; no file appears under the data dir.
 - `GET /api/inbox/settings` has no `plans` key (it is present only while on, as `plans: { on: true }`; the window draws Plans only when it reads that key, see The Plans page).
 - Plan review writes exactly what it wrote before (`history/` stays the source). On, it also writes the session that submitted a version beside it (`NNN.agent.json`, `saveToHistory`'s `agent`; the hook passes one only while `plansOn()`, `planHistoryAgent` in `apps/hook/server/index.ts`).
@@ -86,7 +86,7 @@ Read-only: it reads `history/`, `plans/` and `feedback/` and writes only under `
 
 ### The capability seam (`packages/server/inbox-capability.ts`)
 
-`InboxCapability` (`key`, `on`, `save`, `prefix`, `route`, `settingsWire`, `started`) and `InboxCore` (only `dataDir` and `changed` for now). `inbox.ts` routes (`routeInboxCapabilities`), answers the settings (`capabilitiesWire`, `checkInboxCapabilities`, `answerInboxCapabilities`) and starts (`startInboxCapabilities`, after listen) through the list, and never imports Plans. The route guard is Shape's: off, or reached any way but the owner's window on this computer (the tailnet, a phone's door, a linked machine), `404`; another site `403`; a POST with another page's `serverSession` `409`. Plans is not on any door route. The same windows the routes refuse are never told of Plans: the settings answer and the `event: capabilities` frame carry the capability keys only for a window on this computer that came in by no door (`capabilitiesWire(list, local)`, `capabilitiesFrame(list, changed, local)`), so a phone or a linked window shows no Plans row. Plans is the only capability on the seam; Shape, Routines, the Board and code review stay wired by hand. A capability's agent tool and the window's capability rows come with the first capability that has them.
+`InboxCapability` (`key`, `on`, `save`, `prefix`, `route`, `settingsWire`, `started`) and `InboxCore` (only `dataDir` and `changed` for now). `inbox.ts` routes (`routeInboxCapabilities`), answers the settings (`capabilitiesWire`, `checkInboxCapabilities`, `answerInboxCapabilities`) and starts (`startInboxCapabilities`, after listen) through the list, and never imports Plans. The route guard: off, or reached any way but the owner's window on this computer (the tailnet, a phone's door, a linked machine), `404`; another site `403`; a POST with another page's `serverSession` `409`. Plans is not on any door route. The same windows the routes refuse are never told of Plans: the settings answer and the `event: capabilities` frame carry the capability keys only for a window on this computer that came in by no door (`capabilitiesWire(list, local)`, `capabilitiesFrame(list, changed, local)`), so a phone or a linked window shows no Plans row. Plans is the only capability on the seam; Routines, the Board and code review stay wired by hand. A capability's agent tool and the window's capability rows come with the first capability that has them.
 
 ### The command (`apps/hook/server/plans-command.ts`)
 

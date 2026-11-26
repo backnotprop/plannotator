@@ -28,6 +28,7 @@ export type ShellScriptId =
   | 'inbox-release'
   | 'inbox-project'
   | 'probe'
+  | 'host-pid'
 
 export interface ModShell {
   /** The argv that runs script `id` with `args`; `posix` is its `sh` text and `tag` its `$0`. */

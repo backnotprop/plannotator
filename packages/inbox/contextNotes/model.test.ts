@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxPullRiskJudgment } from '@plannotator/core/inbox-types';
-import { askRiskPlaces, guideNotes, noteHolds, noteReviews, pictureNotes, RISK_PLACES_ASK_MS, riskNotes, staleWords, takeRiskPlaces, threadNotes, type NoteFile, type NoteMessage } from './model';
+import { askRiskPlaces, guideNotes, noteHolds, noteReviews, reviewDrawnOn, RISK_PLACES_ASK_MS, riskNotes, staleWords, takeRiskPlaces, threadNotes, type NoteFile, type NoteMessage } from './model';
 
 const patch = (...body: string[]) => `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,3 +1,${body.length} @@\n${body.join('\n')}\n`;
 /** Round 1: new lines 1 one, 2 two, 3 three, 4 four. */
@@ -83,18 +83,6 @@ describe('the other writers', () => {
     expect(riskNotes(null, ROUND_1)).toEqual([]);
   });
 
-  test('a board’s parts on code: one note per part and place, none outside the diff', () => {
-    const part = { board: 'b1', title: 'Flow', part: 'Retry', words: 'Retries once.', lines: [2, 2] as [number, number], path: 'a.ts', agent: 'Claude' };
-    const notes = pictureNotes([part, part, { ...part, lines: [20, 21] }], ROUND_1);
-    expect(notes.map((n) => [n.writer, n.lineStart, n.text, n.picture?.board])).toEqual([['picture', 2, 'Retries once.', 'b1']]);
-  });
-
-  test('a part drawn on an earlier round whose code changed is stale, in the picture’s words', () => {
-    const part = { board: 'b1', title: 'Flow', part: 'Retry', words: 'Retries once.', lines: [2, 2] as [number, number], path: 'a.ts', agent: 'Claude', stale: { round: 1, lines: [2, 2] as [number, number] } };
-    const [note] = pictureNotes([part], ROUND_3);
-    expect(staleWords(note!)).toBe('The code here changed after this picture (drawn on round 1, lines 2).');
-  });
-
   test('the PR page’s ask for the places is taken once, by that PR only', () => {
     askRiskPlaces('github.com/a/b#1');
     expect(takeRiskPlaces('github.com/a/b#1')).toBe(true);
@@ -132,5 +120,34 @@ describe('the thread’s chips', () => {
     expect(noteHolds(newNote, { path: 'a.ts', line: 3, side: 'old' })).toBe(false);
     expect(noteHolds(newNote, { path: 'a.ts', line: 4, side: 'new' })).toBe(true);
     expect(noteHolds(newNote, { path: 'a.ts', line: 5, side: 'new' })).toBe(false);
+  });
+});
+
+describe('which review a message counts its lines in', () => {
+  const messages = [
+    { id: 'ask', created_at: '2026-01-01T10:00:00.000Z' },
+    { id: 'r1', created_at: '2026-01-01T11:00:00.000Z', guide: { review: {} } },
+    { id: 'reply1', created_at: '2026-01-01T12:00:00.000Z' },
+    { id: 'r2', created_at: '2026-01-01T13:00:00.000Z', guide: { review: {} } },
+    { id: 'reply2', created_at: '2026-01-01T14:00:00.000Z' },
+  ];
+  test('the newest review at or before the message', () => {
+    expect(reviewDrawnOn('r1', messages)).toBe('r1');
+    expect(reviewDrawnOn('reply1', messages)).toBe('r1');
+    expect(reviewDrawnOn('r2', messages)).toBe('r2');
+    expect(reviewDrawnOn('reply2', messages)).toBe('r2');
+  });
+  test('a message before any review, or not in the thread: the newest review at its time', () => {
+    expect(reviewDrawnOn(null, messages, '2026-01-01T12:30:00.000Z')).toBe('r1');
+    expect(reviewDrawnOn(null, messages, '2026-01-01T13:30:00.000Z')).toBe('r2');
+    expect(reviewDrawnOn('ask', messages, '2026-01-01T12:30:00.000Z')).toBe('r1');
+    expect(reviewDrawnOn('elsewhere', messages, '2026-01-01T13:30:00.000Z')).toBe('r2');
+    // At the very moment of the review counts as after it.
+    expect(reviewDrawnOn(null, messages, '2026-01-01T11:00:00.000Z')).toBe('r1');
+  });
+  test('before any review, or with no time: none', () => {
+    expect(reviewDrawnOn(null, messages, '2026-01-01T10:30:00.000Z')).toBeNull();
+    expect(reviewDrawnOn('ask', messages, '2026-01-01T10:30:00.000Z')).toBeNull();
+    expect(reviewDrawnOn(null, messages)).toBeNull();
   });
 });

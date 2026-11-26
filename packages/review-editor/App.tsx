@@ -41,6 +41,7 @@ import { registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders'
 import { linearLinkCardProvider } from '@plannotator/ui/utils/linearLinkCards';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
+import { useLaunchAnnouncement } from '@plannotator/ui/components/LaunchAnnouncement';
 import {
   closePendingTab,
   openPendingTab,
@@ -59,8 +60,9 @@ import { monoFontStack, normalizeCssFontSize } from '@plannotator/ui/utils/cssFo
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { adoptServerSession, currentServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
 import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
-import { assertSendOk, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
+import { assertSendOk, sendErrorAfterAgentGone, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
+import { agentGoneReasonFor, dismissAgentGoneNotice, noteSendFailureForAgentGone, showAgentGoneNotice } from './components/AgentGoneNotice';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
@@ -84,7 +86,7 @@ import { createSemDiffClient } from './semDiff/semDiffClient';
 import { loadSemDiffWorker } from './semDiff/loadSemDiffWorker';
 import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type PowerUpStatus } from './semDiff/powerUp';
 import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
-import { POWER_UP_CHANGED_EVENT } from '@plannotator/ui/components/settings/SemanticDiffsTab';
+import { usePowerUpConfig } from './semDiff/usePowerUpConfig';
 import { computeReviewSemanticDiff, loadReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
 import type { SemanticDiffChange, SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
 
@@ -197,6 +199,7 @@ import { DEMO_DIFF } from './demoData';
 import { ReviewLoadError } from './components/ReviewLoadError';
 import { diffLoadFailureFromResponse, diffLoadFailureInfo, diffLoadUnreachable, type DiffLoadFailureInfo } from './utils/diffLoadFailure';
 import { exportReviewFeedback, buildProseFeedback, commitShaFromMode } from './utils/exportFeedback';
+import { newFileComment } from './utils/fileComment';
 import { parseDiffToFiles } from './utils/diffParser';
 import {
   ReviewSubmissionDialog,
@@ -291,7 +294,8 @@ declare const __APP_VERSION__: string;
 // text, and on a touch screen the toolbar sits below the selection (clear of
 // iOS's edit menu), inside the screen, with thumb-sized buttons;
 // @plannotator/ui hosts keep both unchanged unless they opt in.
-configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
+// A click on a #12 or a pasted PR / issue URL in the text opens its card pinned (utils/refCardClick).
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true, refCardClick: true });
 
 function getReviewRecoveryStorage(): ReviewRecoveryStorage | null {
   try {
@@ -559,7 +563,7 @@ const ReviewApp: React.FC = () => {
     useState<LineAnnotationComposeRequest | null>(null);
   const nextLineAnnotationComposeRequestId = useRef(0);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'semantic'>(false);
+  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'powerUp'>(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   // A real session whose first /api/diff failed: the load error state, never
@@ -781,11 +785,19 @@ const ReviewApp: React.FC = () => {
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | 'exited' | false>(false);
   // A decided review has nothing left to retry: take any send failure down.
   useEffect(() => {
-    if (submitted) dismissSendFailureToast();
+    if (!submitted) return;
+    dismissSendFailureToast();
+    dismissAgentGoneNotice();
   }, [submitted]);
   // The agent that opened this review closed it (POST /api/host/close); the
   // reviewer's unsent comments stay in the draft for a reopen.
   const [agentClosed, setAgentClosed] = useState<{ unsentAnnotations: number } | null>(null);
+  // The agent that asked for this local review is gone (`agent-gone`,
+  // packages/shared/review-agent-gone.ts): the review stays as it is, every
+  // comment on screen and in its draft, and a notice says nobody can receive
+  // a decision, with Copy feedback. The server refuses Send meanwhile; a send
+  // that fails while it holds says the agent is gone, whatever it ran into.
+  const agentGoneRef = useRef(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   // A committed review-level note waiting for its one-render deferred submit
   // (the payload builders close over `allAnnotations`, so the send has to wait
@@ -834,25 +846,6 @@ const ReviewApp: React.FC = () => {
   const semanticDiffUsable = semDiffClient != null;
   const diffSemanticOn = useConfigValue('diffSemantic');
   const diffPowerUpOn = useConfigValue('diffPowerUp');
-  const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: 'jev' | 'clef' | null }>({ configured: false, provider: null });
-  useEffect(() => {
-    if (!semDiffClient) return;
-    let cancelled = false;
-    const load = () => {
-      fetch('/api/sem-diff/opinion/settings')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: { configured: boolean; provider: 'jev' | 'clef' | null } | null) => {
-          if (!cancelled && data) setPowerUpConfigured(data);
-        })
-        .catch(() => {});
-    };
-    load();
-    window.addEventListener(POWER_UP_CHANGED_EVENT, load);
-    return () => {
-      cancelled = true;
-      window.removeEventListener(POWER_UP_CHANGED_EVENT, load);
-    };
-  }, [semDiffClient]);
   const [powerUpRejected, setPowerUpRejected] = useState<readonly string[]>(() => readPowerUpRejected());
   const rejectPowerUpLink = useCallback((candidateId: string) => {
     setPowerUpRejected((previous) => {
@@ -860,9 +853,12 @@ const ReviewApp: React.FC = () => {
       return next;
     });
   }, []);
-  const powerUpActive = semDiffClient != null && diffSemanticOn && diffPowerUpOn && powerUpConfigured.configured;
-  const [powerUpRetry, setPowerUpRetry] = useState(0);
-  const powerUp = useMemo(() => ({ active: powerUpActive, rejected: powerUpRejected, provider: powerUpConfigured.provider, retry: powerUpRetry }), [powerUpActive, powerUpRejected, powerUpConfigured.provider, powerUpRetry]);
+  // Power Up's settings read and config (semDiff/usePowerUpConfig.ts, shared with the Inbox's readers).
+  const { active: powerUpActive, powerUp, settings: powerUpConfigured, retry: retryPowerUp } = usePowerUpConfig({
+    client: semDiffClient,
+    on: diffSemanticOn && diffPowerUpOn,
+    rejected: powerUpRejected,
+  });
   const [powerUpStatus, setPowerUpStatus] = useState<PowerUpStatus | null>(null);
   useEffect(() => {
     const root = document.documentElement;
@@ -897,8 +893,8 @@ const ReviewApp: React.FC = () => {
     let cached: { key: string; promise: Promise<SemanticDiffResponse> } | null = null;
     setSemanticDiffSource(() => {
       const { files, base, snapshot, generated, powerUp: current } = semContentRef.current;
-      const opinion = current?.active ? { rejected: current.rejected } : undefined;
-      const key = `${base ?? ''}|${snapshot ?? ''}|${[...generated].join(',')}|${opinion ? `power:${opinion.rejected.join(',')}:${current?.retry ?? 0}` : 'plain'}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
+      const opinion = current?.active ? current : undefined;
+      const key = `${base ?? ''}|${snapshot ?? ''}|${[...generated].join(',')}|${opinion ? `power:${opinion.settingsRevision}:${opinion.rejected.join(',')}:${opinion.retry}` : 'plain'}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
       if (cached?.key === key) return cached.promise;
       const promise = computeReviewSemanticDiff(files, semDiffClient, read, new AbortController().signal, generated, opinion);
       cached = { key, promise };
@@ -1120,6 +1116,18 @@ const ReviewApp: React.FC = () => {
     onSessionClosed: (event) => {
       setAgentClosed(event);
       setSubmitted((current) => current || 'exited');
+    },
+    onAgentGone: (gone) => {
+      const wasGone = agentGoneRef.current;
+      agentGoneRef.current = gone;
+      // Heard again on a reconnect: a notice the person closed stays closed.
+      if (gone) {
+        if (!wasGone) showAgentGoneNotice({ copyText: () => retryDecisionRef.current.feedbackMarkdown });
+        return;
+      }
+      dismissAgentGoneNotice();
+      // Back: a refused Send's "not sent" no longer says what Send would do.
+      if (wasGone) dismissSendFailureToast('agent-gone');
     },
   });
   const agentJobs = useAgentJobs({ enabled: !!origin && aiUIEnabled });
@@ -3234,46 +3242,19 @@ const ReviewApp: React.FC = () => {
     handleAddAnnotationForFile(files[activeFileIndex].path, type, text, suggestedCode, originalCode, conventionalLabel, decorations, tokenMeta);
   }, [files, activeFileIndex, handleAddAnnotationForFile]);
 
-  const handleAddFileComment = useCallback((text: string) => {
-    const activeFile = files[activeFileIndex];
-    const trimmed = text.trim();
-    if (!activeFile || !trimmed) return;
-
-    const newAnnotation: CodeAnnotation = {
-      id: generateId(),
-      type: 'comment',
-      scope: 'file',
-      filePath: activeFile.path,
-      lineStart: 1,
-      lineEnd: 1,
-      side: 'new',
-      text: trimmed,
-      createdAt: Date.now(),
-      author: identity,
-    };
-
-    addCodeAnnotationsWithHistory([withPRContext(newAnnotation)]);
-  }, [files, activeFileIndex, identity, withPRContext, addCodeAnnotationsWithHistory]);
-
-  const handleAddFileCommentForFile = useCallback((filePath: string, text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-
-    const newAnnotation: CodeAnnotation = {
-      id: generateId(),
-      type: 'comment',
-      scope: 'file',
-      filePath,
-      lineStart: 1,
-      lineEnd: 1,
-      side: 'new',
-      text: trimmed,
-      createdAt: Date.now(),
-      author: identity,
-    };
-
+  // A file's comment keeps what the box attached (pictures, files), as a
+  // whole-file line comment does: saved in the draft, shown on the card, sent.
+  const handleAddFileCommentForFile = useCallback((filePath: string, text: string, images?: ImageAttachment[]) => {
+    const newAnnotation = newFileComment({ id: generateId(), filePath, text, images, createdAt: Date.now(), author: identity });
+    if (!newAnnotation) return;
     addCodeAnnotationsWithHistory([withPRContext(newAnnotation)]);
   }, [identity, withPRContext, addCodeAnnotationsWithHistory]);
+
+  const handleAddFileComment = useCallback((text: string, images?: ImageAttachment[]) => {
+    const activeFile = files[activeFileIndex];
+    if (!activeFile) return;
+    handleAddFileCommentForFile(activeFile.path, text, images);
+  }, [files, activeFileIndex, handleAddFileCommentForFile]);
 
   // A comment made in a whole-file view (explorer, step 2): a changed file's
   // Whole file, or a file the review does not change. Inside a hunk it is an
@@ -3281,7 +3262,8 @@ const ReviewApp: React.FC = () => {
   // was written on, so the agent and a PR's review body get the code quoted.
   const handleAddWholeFileAnnotation = useCallback((input: CodeFileAnnotationInput, options: { inDiff: boolean }) => {
     const text = input.text.trim();
-    if (!text) return;
+    // Pictures alone are a comment too (the box saves them): never dropped.
+    if (!text && !input.images?.length) return;
     const base: CodeAnnotation = {
       id: generateId(),
       type: 'comment',
@@ -3290,7 +3272,7 @@ const ReviewApp: React.FC = () => {
       lineStart: input.lineStart,
       lineEnd: input.lineEnd,
       side: 'new',
-      text,
+      ...(text ? { text } : {}),
       ...(input.images?.length ? { images: input.images } : {}),
       originalCode: input.originalCode,
       createdAt: Date.now(),
@@ -3551,11 +3533,18 @@ const ReviewApp: React.FC = () => {
     fileKey: isAllFilesActive ? 'all' : activeFileIndex,
   });
   const handleAutoView = autoViewedNotice.show;
+  // The launch dialog (the launch switch; LaunchAnnouncement.tsx): as the page opens, before the reader starts
+  // working; the star ask yields on that load. Never without a live session; the VS Code panel shows it too.
+  const launch = useLaunchAnnouncement({
+    ready: !isLoading,
+    eligible: !!origin,
+    firstRunWindow: true,
+  });
   // The update toast waits behind the guide takeover and every first-run
   // dialog of this load (useUpdateToast).
   useUpdateToast({
     advert: updateAdvert,
-    blocked: isLoading || guideOpen,
+    blocked: isLoading || guideOpen || launch.open,
     autoUpdateActive,
     position: 'top-right',
   });
@@ -4976,9 +4965,12 @@ const ReviewApp: React.FC = () => {
     } catch (err) {
       console.error('Failed to send feedback:', err);
       setIsSendingFeedback(false);
+      const sendError = sendErrorAfterAgentGone(err, agentGoneRef.current);
+      noteSendFailureForAgentGone(sendError);
       showSendFailureToast({
         what: 'feedback',
-        error: err,
+        error: sendError,
+        reason: agentGoneReasonFor(sendError),
         onRetry: () => { void retryDecisionRef.current.sendFeedback(); },
         // What the Copy feedback button copies, read when clicked: what
         // Retry would send now.
@@ -5043,9 +5035,12 @@ const ReviewApp: React.FC = () => {
     } catch (err) {
       console.error('Failed to approve:', err);
       setIsApproving(false);
+      const sendError = sendErrorAfterAgentGone(err, agentGoneRef.current);
+      noteSendFailureForAgentGone(sendError);
       showSendFailureToast({
         what: 'approval',
-        error: err,
+        error: sendError,
+        reason: agentGoneReasonFor(sendError),
         onRetry: () => { void retryDecisionRef.current.approve(options); },
         // The approval's text as Retry would send it now; a bare approval
         // has none to copy.
@@ -5544,11 +5539,12 @@ const ReviewApp: React.FC = () => {
 
   // The "Star the repo" ask (approval "star-ask"): claimed once the page loads (the server stops on the decision),
   // shown on the done screen only, once a decision was sent (approved or feedback; never a closed session), never in
-  // the VS Code webview or without a live session. The server decides the rest.
+  // the VS Code webview or without a live session, and never on a load that showed the launch dialog. The server
+  // decides the rest.
   const starAskFooter = useStarAskDoneScreen({
     ready: !isLoading,
     decided: submitted === 'approved' || submitted === 'feedback',
-    eligible: !!origin && !isVSCodeWebview(),
+    eligible: !!origin && !isVSCodeWebview() && !launch.shownThisLoad,
   });
   // Explorer keys (the `review-explorer` scope): never over a dialog, the
   // guide, or while the review is settling; only Go to File works from a text
@@ -6160,8 +6156,9 @@ const ReviewApp: React.FC = () => {
                   <PowerUpStatusSlot
                     status={powerUpStatus}
                     provider={powerUpConfigured.provider}
-                    onRetry={() => setPowerUpRetry((n) => n + 1)}
-                    onSettings={() => setOpenSettingsMenu('semantic')}
+                    endpoint={powerUpConfigured.endpoint}
+                    onRetry={retryPowerUp}
+                    onSettings={() => setOpenSettingsMenu('powerUp')}
                   />
                 )}
                 {!isCompactTouchLayout && <ReviewHeaderStatus variant="pill" {...reviewStatusProps} />}
@@ -6471,6 +6468,7 @@ const ReviewApp: React.FC = () => {
                 onOpenSavedGuide={handleOpenGuide}
                 launchOff={!aiUIEnabled}
                 onMarkFilesViewed={handleGuideMarkFilesViewed}
+                viewedReady={reviewProgressStatus !== 'loading'}
                 onAddGlobalComment={submitted || busyWithDecision ? undefined : handleAddGeneralComment}
                 onShowGlobalComment={handleShowGlobalComment}
                 barSlot={guideBarSlot}
@@ -6710,10 +6708,11 @@ const ReviewApp: React.FC = () => {
             agentToolSetting={agentTool.setting}
             onAgentToolChange={agentTool.save}
             externalOpen={openSettingsMenu !== false}
-            externalTab={openSettingsMenu === 'semantic' ? 'semantic' : undefined}
+            externalTab={openSettingsMenu === 'powerUp' ? 'reviews' : undefined}
+            externalSection={openSettingsMenu === 'powerUp' ? 'powerUp' : undefined}
             onExternalClose={() => setOpenSettingsMenu(false)}
             // Local git session where since-base isn't offered (base ref
-            // unresolvable): Settings → Review → Git notes that the Git-status preference
+            // unresolvable): Settings → Reviews › Files and defaults › Git notes that the Git-status preference
             // can't take effect in THIS repo. PR/workspace/jj sessions say
             // nothing — the preference isn't about them.
             sinceBaseUnavailable={
@@ -6822,6 +6821,9 @@ const ReviewApp: React.FC = () => {
             }))
             : undefined}
         />
+
+        {/* The launch dialog: as the page opens, once per computer. */}
+        {launch.dialog}
 
         {/* GitHub general comment dialog */}
         <ReviewSubmissionDialog

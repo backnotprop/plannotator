@@ -13,7 +13,11 @@
  *  - the owner's report (2026-11-02): the open row (while its look is still
  *    on its way) and the row just left offer Mark unread on hover, and
  *    marking it unread sticks through the close and a reload; the open
- *    thread's header says Mark unread there too.
+ *    thread's header says Mark unread there too;
+ *  - the owner's ask (2026-11-25): an opened thread whose question still
+ *    waits offers Mark unread on hover and in the header's ⋯ (Mark read stays
+ *    there beside it); Mark unread leaves it in Waiting on you, bold, its
+ *    question open; one not opened keeps Mark read.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-mark-unread.spec.ts`.
@@ -282,5 +286,58 @@ test('the owner’s report (2026-11-02): the open row, and the row just left, of
   expect(await sectionOf(page, first)).toBe('new');
   await expect(row(page, first)).toHaveClass(/\bib-u\b/);
   expect(await messageCount(first)).toBe(1);
+  expect(world.errors).toEqual([]);
+});
+
+test('the owner’s ask (2026-11-25): an opened thread whose question waits offers Mark unread, and stays in Waiting on you with its question open', async () => {
+  const { page, threads } = world;
+  const id = threads.search;
+  const pane = page.locator('section.ib-pane');
+  const action = (kind: 'read' | 'unread') => page.locator(`.ib-lbody [data-row="${id}"] [data-row-mark-${kind}]`);
+  const questionStates = async () => {
+    const model = (await (await fetch(new URL(`/api/inbox/threads/${id}`, world.url))).json()) as { thread: { messages: { questions?: { state: string }[] }[] } };
+    return model.thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.state));
+  };
+  await page.goto(world.url);
+  await expect(row(page, id)).toBeVisible();
+  expect(await sectionOf(page, id)).toBe('waiting');
+  // Not opened yet: bold, Mark read.
+  await expect(row(page, id)).toHaveClass(/\bib-u\b/);
+  await row(page, id).hover();
+  await expect(action('read')).toBeVisible();
+  await expect(action('unread')).toHaveCount(0);
+
+  // Opened: read, still in Waiting on you, and the hover action is Mark unread.
+  await row(page, id).click();
+  await expect(pane.getByRole('heading', { name: 'Search for the docs site' })).toBeVisible();
+  await expect(row(page, id)).not.toHaveClass(/\bib-u\b/);
+  await row(page, id).hover();
+  await expect(action('unread')).toBeVisible();
+  await expect(action('unread')).toHaveText('Mark unread');
+  await expect(action('read')).toHaveCount(0);
+  expect(await sectionOf(page, id)).toBe('waiting');
+  // The header's ⋯ agrees, with Mark read (set the question aside) still beside it.
+  await pane.locator('[data-thread-more]').click();
+  await expect(page.locator('[data-thread-menu] [data-thread-unread-item]')).toBeVisible();
+  await expect(page.locator('[data-thread-menu] [data-thread-read-item]')).toBeVisible();
+  await page.locator('[data-thread-menu]').press('Escape');
+
+  await row(page, id).hover();
+  await action('unread').click();
+  // Only the look moves: the thread closes, the row is bold in Waiting on you, its question open, nothing sent.
+  await expect(pane).toHaveCount(0);
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Marked unread');
+  await expect(page.locator('[data-inbox-toast]')).not.toContainText('back in New');
+  await expect.poll(() => serverSection(id)).toBe('waiting');
+  await expect(row(page, id)).toHaveClass(/\bib-u\b/);
+  expect(await sectionOf(page, id)).toBe('waiting');
+  expect(await questionStates()).toEqual(['open']);
+  expect(await messageCount(id)).toBe(1);
+  await page.reload();
+  await expect(row(page, id)).toBeVisible();
+  expect(await sectionOf(page, id)).toBe('waiting');
+  await expect(row(page, id)).toHaveClass(/\bib-u\b/);
+  await row(page, id).hover();
+  await expect(action('read')).toBeVisible();
   expect(world.errors).toEqual([]);
 });

@@ -21,6 +21,7 @@ export type BandMenuAction = 'read' | 'archive' | 'reask';
 
 /**
  * The groups Re-ask all is offered on (the owner is still choosing the list, 2026-11-21): the one place to change it.
+ * Never Tagged you: a person's tag there is no agent's question to ask again.
  */
 export const REASK_GROUPS: ReadonlySet<InboxListGroupId> = new Set<InboxListGroupId>(['stopped', 'holding', 'waiting']);
 

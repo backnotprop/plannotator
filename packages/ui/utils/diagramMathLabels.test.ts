@@ -18,6 +18,10 @@ import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { renderDiagram } from './diagram-render';
 import { getMathRenderer, getMathRendererSource, resetMathRenderer, setMathRenderer } from './math';
 import { __setMermaidRuntimeLoaderForTests } from './mermaid';
+import { drawMermaidFencesWithMermaid } from '../test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 const hasDom = typeof document !== 'undefined';
 const THEME = { colorTheme: 'plannotator', mode: 'light' } as const;

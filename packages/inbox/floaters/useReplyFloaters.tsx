@@ -22,13 +22,14 @@ import type { InboxReplyDraftRow } from '@plannotator/core/inbox-types';
 import type { ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { ChatWindowStore } from '@plannotator/ui/components/chat';
 import { AuthorMark } from '../icons';
+import { rowWho } from '../scriptAuthor';
 import { inboxApi } from '../api';
 import { AskSparkle } from '../ask/AskChatMenu';
 import type { AskCorner } from '../ask/useInboxAsk';
-import { SIDE_CORNER_HIT } from '../ask/scoop';
+import { SIDE_CORNER, SIDE_CORNER_HIT, SIDE_CORNER_R } from '../ask/scoop';
 import type { InboxToastModel } from '../components/Toast';
 import { Icon } from '../icons';
-import { machineOf } from '../inboxUrl';
+import { keepsReplyDraft } from '../machineDrafts';
 import { FloaterBox } from './FloaterBox';
 import { floatingDrafts, floatsAfterVisit, floatThread, floaterName, onFloaterEvent, onReplyBoxSetAside, staleFloats, unfloatThread, useFloatEntries } from './model';
 
@@ -56,6 +57,13 @@ export interface ReplyFloatersOptions {
 const TILE = 44;
 /** A draft window's bottom offset while the minimized chat's circle is in the corner: clear of its 44 px box. */
 const CIRCLE_CLEAR = SIDE_CORNER_HIT + 8;
+/**
+ * The pile's right offset while it rests above the minimized chat's circle: on the circle's centre line (SIDE_CORNER_R
+ * in from the window's edge) as near as the window lets it, never nearer the edge than the circle itself (5 px).
+ * Exactly centred, 3 px of the 44 px tile and 8 of its count badge would be past the edge; so its right edge is the
+ * circle's, 8 px left of the centre line.
+ */
+const CIRCLE_LINE_RIGHT = Math.max(SIDE_CORNER_R - TILE / 2, SIDE_CORNER_R - SIDE_CORNER.d / 2);
 /** How long a closed box's or a left thread's draft is looked at again while its save lands. */
 const SETTLE_WINDOW_MS = 5_000;
 
@@ -73,7 +81,7 @@ interface CornerItem {
 function draftMark(row: InboxReplyDraftRow) {
   return (
     <span className="ib-rf-mark">
-      <AuthorMark author={row.author} />
+      <AuthorMark author={rowWho(row, row.author)} />
       {row.unseen > 0 && <span className="ib-rf-markdot" aria-hidden="true" />}
     </span>
   );
@@ -153,7 +161,8 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     }
     const left = visit.current;
     visit.current = null;
-    if (threadId && !machineOf(threadId)) {
+    // A linked machine's thread floats as this Inbox's own does, once that machine keeps its draft (machineDrafts.ts).
+    if (threadId && keepsReplyDraft(threadId)) {
       // Its draft as the drafts list knows it (`reply_at` is the draft's `updated_at`): no read of its own.
       const known = rowsNow.current.read ? (rowsNow.current.rows.find((row) => row.thread_id === threadId)?.unsent?.reply_at ?? null) : undefined;
       visit.current = { id: threadId, updated: known };
@@ -275,11 +284,13 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     [openThread],
   );
   const sent = useCallback(
-    (row: InboxReplyDraftRow, agent: string) => {
+    (row: InboxReplyDraftRow, agent: string, held: string | null) => {
       setOpenId(null);
       unfloatThread(row.thread_id);
       void refresh.current();
-      toast({
+      // Held for a linked machine that is away: the clock toast every held write gives, never "Sent".
+      if (held) toast({ icon: 'clock', lead: held, wrap: true });
+      else toast({
         icon: 'check',
         lead: `Sent to ${agent}`,
         detail: `in ${row.project.name}`,
@@ -383,9 +394,15 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
 
   // Where the button sits: level with Send at the foot's right end; beside Ask's window while that is open.
   const askGeom = !phone && askOpen && !ask.store.fullscreen ? ask.store.geometry() : null;
-  const place: CSSProperties = askGeom ? { right: askGeom.right + askGeom.w + 12, bottom: askGeom.bottom } : { right: room.right, bottom: room.bottom };
-  // In the window's very corner (no reply foot on screen): the minimized chat's circle keeps off it (SideChatCorner).
   const spot: StackProps['spot'] = askGeom ? 'ask' : room.foot ? 'foot' : 'corner';
+  // In the window's very corner (no reply foot on screen) while the minimized chat's circle shows there: both show, the
+  // pile straight above the circle, clear of its 44 px box as a draft's window is (CIRCLE_CLEAR).
+  const aboveCircle = spot === 'corner' && ask.circle;
+  const place: CSSProperties = askGeom
+    ? { right: askGeom.right + askGeom.w + 12, bottom: askGeom.bottom }
+    : aboveCircle
+      ? { right: CIRCLE_LINE_RIGHT, bottom: CIRCLE_CLEAR }
+      : { right: room.right, bottom: room.bottom };
   const showCorner = items.length > 0 && !room.hidden && !(phone && (room.boxOpen || askOpen || openRow !== null)) && !(!phone && openRow !== null) && !(askOpen && ask.store.fullscreen);
   const onAll = () => {
     setMenu(false);
@@ -414,7 +431,7 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
             onMinimize={() => minimize(openRow.thread_id)}
             onPutAway={() => putAway(openRow.thread_id)}
             onOpenThread={() => toThread(openRow.thread_id)}
-            onSent={(agent) => sent(openRow, agent)}
+            onSent={(agent, held) => sent(openRow, agent, held)}
             onDiscarded={(words, files) => discarded(openRow, words, files)}
             onGone={() => gone(openRow.thread_id)}
           />

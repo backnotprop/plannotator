@@ -10,12 +10,13 @@
  * closed by default, count from when this page loaded.
  */
 import { useState, useSyncExternalStore } from 'react';
-import type { InboxListGroupId } from '@plannotator/core/inbox-types';
+import { inboxEverySection, type InboxListGroupId } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
 
 export const LIST_GROUPS_COOKIE = 'plannotator-inbox-list-groups';
 
-const GROUPS: readonly InboxListGroupId[] = ['priority', 'stopped', 'holding', 'waiting', 'new', 'sent', 'quiet', 'snoozed'];
+// Tagged you (drawn only from a Spaces server) folds like any group and starts open.
+const GROUPS: readonly InboxListGroupId[] = inboxEverySection(['priority', 'stopped', 'holding', 'waiting', 'tagged', 'new', 'sent', 'quiet', 'snoozed']);
 const CLOSED_BY_DEFAULT: ReadonlySet<InboxListGroupId> = new Set(['quiet', 'snoozed']);
 const PAGE_LOADED = Date.now();
 

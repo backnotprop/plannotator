@@ -3,7 +3,6 @@ import { usePhoneHeadFit } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import type { InboxPull, InboxPullLink, InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import type { InboxShapeSummary } from '../api';
 import { Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { Tip } from '../components/Tip';
@@ -14,6 +13,7 @@ import { LaunchpadLines, type LaunchPicturePage } from './LaunchpadLines';
 import { LaunchpadLiveAsks, type LaunchAsks } from './LaunchpadLiveAsks';
 import { latestPictureItPage } from './usePictureItAsk';
 import { useLaunchpadThread } from './useLaunchpadThread';
+import { shutWord } from './stateWord';
 
 export interface LaunchpadStart {
   onStart: (opener: HTMLElement) => void;
@@ -116,14 +116,13 @@ export function PullLaunchpad({
   start,
   startThread = null,
   untiedThread = null,
-  shapes,
   risk = null,
+  ship = null,
   onClose,
   onDiff,
   onThread,
   onGuide,
   onPicture,
-  onShape,
   onAsked,
   onHide,
   foot,
@@ -139,14 +138,14 @@ export function PullLaunchpad({
   start: LaunchpadStart | null;
   startThread?: (() => void) | null;
   untiedThread?: string | null;
-  shapes: ReadonlyMap<string, InboxShapeSummary> | null;
   risk?: ReactNode;
+  /** The ship log while the PR ships (useShipping.tsx `PageShipLog`). */
+  ship?: ReactNode;
   onClose: () => void;
   onDiff: () => void;
   onThread: (threadId: string) => void;
   onGuide: (threadId: string, messageId: string) => void;
   onPicture: (threadId: string, page: LaunchPicturePage) => void;
-  onShape: (shape: InboxShapeSummary) => void;
   onAsked: () => void;
   onHide?: () => void;
   foot: ReactNode;
@@ -160,7 +159,6 @@ export function PullLaunchpad({
   const live = link && !link.agent?.ended ? link : null;
   const thread = useLaunchpadThread(link?.thread_id ?? null, [link?.last?.message_id, link?.ask, link?.guide?.message_id, link?.picture_it_asked_at, link?.picture_it_page?.message_id].join('|'));
   const read = thread && thread !== 'failed' ? thread : null;
-  const shape = shapes && link ? (shapes.get(link.thread_id) ?? null) : null;
   const checks = checksWords(pr);
   const inThread = read ? latestPictureItPage(read) : null;
   const known = link?.picture_it_page ?? null;
@@ -188,11 +186,6 @@ export function PullLaunchpad({
         {startThread && !link && !named && (
           <button type="button" className="ib-btn" onClick={startThread} data-launch-go="start-thread">
             {START_THREAD}
-          </button>
-        )}
-        {shape && (
-          <button type="button" className="ib-btn" onClick={() => onShape(shape)} data-launch-go="shape">
-            Shape board
           </button>
         )}
       </div>
@@ -225,6 +218,7 @@ export function PullLaunchpad({
           </h2>
           <div className="ib-pr-meta ib-lp-meta" data-launch-facts="">
             {pr.state === 'draft' && <span data-launch-draft="">Draft</span>}
+            {shutWord(pr.state) && <span data-launch-state={pr.state}>{shutWord(pr.state)}</span>}
             {pr.author && <span dir="auto">by {pr.mine ? 'you' : pr.author}</span>}
             <span className="ib-lp-ref">
               <Tip cut content={pr.head}>
@@ -247,6 +241,7 @@ export function PullLaunchpad({
             )}
           </div>
           {risk}
+          {ship}
           {live && read ? (
             <LaunchpadLiveAsks thread={read} stack={stack} pr={pr} link={live} onDiff={onDiff} onAsked={onAsked} onThread={onThread}>
               {draw}

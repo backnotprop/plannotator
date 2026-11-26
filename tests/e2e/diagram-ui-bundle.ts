@@ -25,6 +25,11 @@
  * `buildDiagramUiBundle({ realKatex: true })` keeps the real KaTeX (the webview
  * options stub it out) so a `$$...$$` label is typeset as in the apps
  * (diagram-math-labels.spec.ts, with `katexCss()` on the page).
+ *
+ * Mermaid draws every fence on this page (`engine`, default `'mermaid'`): the
+ * specs that use it are about Mermaid's own drawing, which the shipped switch
+ * ('pele-where-safe') still uses for a fence Pele cannot draw. Pele's labels
+ * have their own spec (pele-labels.spec.ts).
  */
 import type { Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -36,7 +41,7 @@ import { dirname, join, resolve } from 'node:path';
 const EXTENSION = resolve(__dirname, '../../apps/vscode-extension');
 const UI = resolve(__dirname, '../../packages/ui');
 
-export function buildDiagramUiBundle(options: { splitPurify?: boolean; realKatex?: boolean } = {}): string {
+export function buildDiagramUiBundle(options: { splitPurify?: boolean; realKatex?: boolean; engine?: 'mermaid' | 'pele-where-safe' | 'pele' } = {}): string {
   const work = mkdtempSync(join(tmpdir(), 'pn-diagram-scrub-'));
   try {
     const entry = join(work, 'entry.ts');
@@ -50,6 +55,8 @@ import { parseDiagramSvg, renderDiagram, sanitizeDiagramSvg } from ${JSON.string
 import { loadMermaidRuntime } from ${JSON.stringify(join(UI, 'utils/mermaid.ts'))};
 import { applyMermaidTheme, mermaidThemeKey } from ${JSON.stringify(join(UI, 'utils/mermaidTheme.ts'))};
 import { configurePlannotatorUI } from ${JSON.stringify(join(UI, 'configure.ts'))};
+import { __setDiagramEngineModeForTests } from ${JSON.stringify(join(UI, 'utils/diagram-engine.ts'))};
+__setDiagramEngineModeForTests(${JSON.stringify(options.engine ?? 'mermaid')});
 const host = () => document.getElementById('host')!;
 let seq = 0;
 /** A reference the post-pass always dropped (not a fragment, not http(s)). */
@@ -116,10 +123,22 @@ const alias = ${JSON.stringify(!!options.realKatex)} ? Object.fromEntries(Object
 await build({ ...options, alias, plugins, absWorkingDir: ${JSON.stringify(EXTENSION)}, entryPoints: [${JSON.stringify(entry)}], outfile: ${JSON.stringify(out)}, logLevel: 'silent' });
 `);
     execFileSync('bun', [build], { cwd: EXTENSION, stdio: 'pipe' });
-    return readFileSync(out, 'utf8');
+    return asciiOnly(readFileSync(out, 'utf8'));
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+/**
+ * The bundle with every non-ASCII code unit written as `\uXXXX`, so the page reads the same
+ * whatever charset a browser decodes it with (WebKit read the fulfilled page as windows-1252
+ * even with `charset=utf-8`, and Pele's raw `[ -‍﻿]` became a range out of
+ * order). esbuild leaves them raw only inside regex literals, where the escape means the same
+ * character; after a backslash it would not, so that throws instead.
+ */
+function asciiOnly(code: string): string {
+  if (/\\[^\x00-\x7f]/.test(code)) throw new Error('the diagram bundle escapes a non-ASCII character; asciiOnly cannot rewrite it safely');
+  return code.replace(/[^\x00-\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }
 
 /** KaTeX's own stylesheet, as the apps load it (packages/ui/theme.css imports it). Its font URLs resolve to nothing on the test page. */
@@ -173,7 +192,9 @@ export async function openDiagramPage(page: Page, bundle: string, options: { til
   let html = '';
   await page.route(/^(?!data:|about:)/, (route) => {
     const url = route.request().url();
-    if (home && url === home) return route.fulfill({ status: 200, contentType: 'text/html', body: html });
+    // UTF-8 said out loud: without it the page decodes as windows-1252, and the bundle's raw
+    // non-ASCII (Pele's own `[ -‍﻿]` class) turns into a range out of order.
+    if (home && url === home) return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html });
     if (url.startsWith(`${PICTURE_HOST}/`)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
     requests.push(`${route.request().resourceType()} ${url}`);
     return route.abort();
@@ -199,14 +220,17 @@ ${box}
   return { requests, navigations, errors };
 }
 
-/** Click the middle of every element drawn in a label, then press Enter in each field. */
-export async function clickEveryLabelElement(page: Page): Promise<number> {
-  const points = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('#host foreignObject *'))
+/**
+ * Click the middle of every element drawn in a label, then press Enter in each field. `selector`: what a label is
+ * drawn as (Mermaid's HTML labels by default; Pele draws its labels as svg text).
+ */
+export async function clickEveryLabelElement(page: Page, selector = '#host foreignObject *'): Promise<number> {
+  const points = await page.evaluate((sel) =>
+    Array.from(document.querySelectorAll(sel))
       .map((e) => e.getBoundingClientRect())
       .filter((b) => b.width > 0 && b.height > 0)
       .map((b) => [b.x + b.width / 2, b.y + b.height / 2] as const),
-  );
+  selector);
   for (const [x, y] of points) await page.mouse.click(x, y);
   for (const field of await page.locator('#host input, #host textarea').all()) await field.press('Enter').catch(() => {});
   return points.length;

@@ -4,9 +4,11 @@
  * "Diff display" popover behind a gear. The guided review draws them before
  * Close, the full-window review after its title. Every setting is code
  * review's own (diffOptions.ts), so a choice here holds there too; the popover
- * leaves out Whole file and Hide whitespace, which need the local repository.
- * Collapse all is this view's only: it folds or opens every file's diff and is
- * not remembered. A phone draws every diff Unified and has none of these.
+ * leaves out Hide whitespace, which needs the local repository, but keeps
+ * code review's Whole file switch: the diffs obey it, so the Inbox offers the
+ * way back from it. Collapse all is this view's only: it folds or opens every
+ * file's diff and is not remembered. A phone draws every diff Unified, so it
+ * has no Split / Unified and no Collapse all, only the gear.
  */
 
 import { useConfigValue } from '@plannotator/ui/config';
@@ -55,7 +57,14 @@ export function DiffControls({
   const phone = usePhone();
   const style = useConfigValue('diffStyle');
   const semanticOption = useSemDiffAdvert() != null && layout;
-  if (phone) return null;
+  const change = (key: string, value: unknown) => chooseDiffOption(key as never, value as never);
+  if (phone) {
+    return (
+      <span className="ib-dctl" role="group" aria-label="Diff display" data-diff-controls="">
+        <DiffDisplayOptionsPopover repositoryOptions={false} wholeFileOption semanticOption={semanticOption} onChange={change} compactTouchLayout triggerClassName="ib-iconbtn ib-dctl-b" triggerTitleSide="bottom" />
+      </span>
+    );
+  }
   const folded = collapseAll?.collapsed === true;
   return (
     <span className="ib-dctl" role="group" aria-label="Diff display" data-diff-controls="">
@@ -71,7 +80,7 @@ export function DiffControls({
           </button>
         </Tip>
       )}
-      <DiffDisplayOptionsPopover repositoryOptions={false} semanticOption={semanticOption} onChange={(key, value) => chooseDiffOption(key as never, value as never)} triggerClassName="ib-iconbtn ib-dctl-b" triggerTitleSide="bottom" />
+      <DiffDisplayOptionsPopover repositoryOptions={false} wholeFileOption semanticOption={semanticOption} onChange={change} triggerClassName="ib-iconbtn ib-dctl-b" triggerTitleSide="bottom" />
     </span>
   );
 }

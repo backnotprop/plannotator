@@ -209,6 +209,33 @@ afterEach(() => {
   }
 });
 
+test.skipIf(!hasDom)('a phone thread title stays visible when its words fit and its mark overflows vertically', async () => {
+  // A project badge extends below the plain title, but not below the phone's 44px button.
+  const heights = ['clientHeight', 'scrollHeight'] as const;
+  const savedHeights = heights.map((key) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, key));
+  for (const [i, key] of heights.entries()) {
+    Object.defineProperty(HTMLElement.prototype, key, {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (!this.hasAttribute('data-header-title')) return savedHeights[i]?.get?.call(this) ?? 0;
+        if (this.tagName === 'BUTTON') return 44;
+        return key === 'clientHeight' ? 25 : 29;
+      },
+    });
+  }
+  try {
+    cutTo(false);
+    await render(thread(null, 1));
+    expect(barWords()!.textContent).toBe(SUBJECT);
+    expect(bar()!.querySelector('button')).toBeNull();
+  } finally {
+    for (const [i, key] of heights.entries()) {
+      if (savedHeights[i]) Object.defineProperty(HTMLElement.prototype, key, savedHeights[i]!);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+    }
+  }
+});
+
 // Review of #3528: a phone has no hover, so a cut title must open by a tap. No key of its own: it is a button.
 test.skipIf(!hasDom)('a cut title is a button: a click opens it whole, wrapped, and another closes it; one that fits is no button', async () => {
   for (const name of ['session-refresh', null]) {

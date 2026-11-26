@@ -6,7 +6,9 @@ import { machineNotice, machineStatus } from '../machines';
 import { MachineUpdateButton } from './MachineUpdate';
 import { CodeBox, CopyButton } from './ConnectPicker';
 import { UnlinkLink } from './Devices';
+import { LinkThroughRows } from './LinkThrough';
 import { errorText } from '../toastError';
+import { forgetPullMachines } from '../pulls/pullMachines';
 
 /**
  * What a refused link means, in the window's words. The server's messages
@@ -109,12 +111,15 @@ export function MachinesSection({ machines, onChanged, onMachineUpdate }: Machin
               {onMachineUpdate && <MachineUpdateButton machine={machine} onPress={() => onMachineUpdate(machine.id)} />}
               <UnlinkLink
                 name={machine.name}
-                warning={machine.waiting > 0 ? `${waitingText(machine.waiting)} will be lost.` : undefined}
+                // A reply draft held for it (never "waiting" in its line) is lost with the link too.
+                warning={machine.waiting + (machine.drafts_held ?? 0) > 0 ? `${waitingText(machine.waiting + (machine.drafts_held ?? 0))} will be lost.` : undefined}
                 onRemove={async () => {
                   setError(null);
                   setUnlinkedNote(null);
                   try {
                     const answer = await inboxApi.unlinkMachine(machine.id);
+                    // Its PRs this window remembered (a page open on one, a reload) are read here from now on.
+                    forgetPullMachines(machine.id);
                     if (!answer.told) setUnlinkedNote(`Unlinked here. ${machine.name} could not be reached, so it drops the link the next time it is in touch. This computer stays reachable on your tailnet for it for up to 7 days, until it hears.`);
                   } catch (cause) {
                     setError(linkErrorText(cause));
@@ -125,6 +130,7 @@ export function MachinesSection({ machines, onChanged, onMachineUpdate }: Machin
             </span>
           </div>
         ))}
+        <LinkThroughRows view={machines.find((machine) => machine.self)?.link_through} onChanged={onChanged} />
         {linking ? (
           <LinkForm
             onCancel={() => {
@@ -251,7 +257,7 @@ function UnsentWrites({ linked }: { linked: readonly MachineView[] }) {
               </span>
               {entry.words ? (
                 <span className="ib-desc ib-held-words" dir="auto">
-                  {entry.words}
+                  {entry.words.length > UNSENT_WORDS_SHOWN ? `${entry.words.slice(0, UNSENT_WORDS_SHOWN)}…` : entry.words}
                 </span>
               ) : (
                 <span className="ib-desc">{unsentWhat(entry.route)}</span>
@@ -279,6 +285,9 @@ function UnsentWrites({ linked }: { linked: readonly MachineView[] }) {
 }
 
 /** A held write with no words, said by what it did. */
+/** At most this much of a "Not sent" line's words shows (Copy copies them all: a lost reply draft's words come whole). */
+const UNSENT_WORDS_SHOWN = 2_000;
+
 function unsentWhat(route: string): string {
   if (/\/picks$/.test(route)) return 'A pick';
   if (/\/(read|seen)$/.test(route)) return 'Mark read';

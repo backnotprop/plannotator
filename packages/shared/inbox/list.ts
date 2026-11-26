@@ -65,7 +65,7 @@
  */
 
 import {
-  INBOX_SECTIONS,
+  INBOX_LOCAL_SECTIONS,
   type InboxListRow,
   type InboxListSection,
   inboxHasUnsent,
@@ -83,7 +83,8 @@ export type InboxSectionFacts = Pick<
 
 export { inboxHasUnsent };
 
-export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
+/** This Inbox's placement: never Tagged you (its type says so), which only a Spaces server places. */
+export function inboxSectionOf(row: InboxSectionFacts): (typeof INBOX_LOCAL_SECTIONS)[number]["id"] {
   if (row.resolved_at !== null && row.back_from_archive !== true) return "quiet";
   const unsent = inboxHasUnsent(row.unsent);
   // Mark unread took the look back from a Mark read that still stands (store.markUnread): its news is new again.
@@ -110,6 +111,22 @@ export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
 }
 
 /**
+ * A routine's run is going in the thread (the owner, 2026-11-24: while a routine's run is going, its thread sits under
+ * New, with its Running mark, until the run ends). A run starts with the person's divider, which its session takes at
+ * once, so by the rules above the thread is Sent for a moment and then Quiet (folded) for the whole run. New is the
+ * floor while it goes: Sent and Quiet come up to New, whatever the delivery or a Mark read says; Stopped on you,
+ * Holding up work and Waiting on you keep their place (never a demotion), and an archived thread stays archived (the
+ * archive is the person's "done"; the run's reply brings it back as any agent's does). When the run ends the row is
+ * placed by the rules above again: New when the run left agent words not looked at, else Quiet. It is not bold and
+ * counts nowhere (`unread`, `unseen` and the waiting counts are the rules' own): it is shown, not announced. Applied
+ * where the run line is known (packages/server/inbox-launch.ts `decorate`), so every reader of the list agrees.
+ */
+export function inboxSectionWhileRoutineRuns(row: Pick<InboxListRow, "section" | "resolved_at" | "back_from_archive">): InboxSectionId {
+  if (inboxRowArchived(row)) return row.section;
+  return row.section === "sent" || row.section === "quiet" ? "new" : row.section;
+}
+
+/**
  * Bold in the list: something is new to the person. A row in Stopped, Holding
  * up work or Waiting on you is bold until the person has seen its latest agent
  * message (`unseen` 0: they opened the thread), then reads as read where it is:
@@ -118,10 +135,29 @@ export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
  * the latest message ... Then they just stay where they are"). A row in New is
  * bold, except one there only for the person's own unsent words or comments
  * (`draftOnly`): nothing new arrived, and its "Draft" label says what is there.
+ * A row in Tagged you (only a Spaces server sends it) is bold until the person
+ * has seen the message that tagged them, as in the other sections that wait on
+ * them.
  */
 export function inboxRowUnread(section: InboxSectionId, unseen: number, draftOnly: boolean): boolean {
-  if (section === "stopped" || section === "holding" || section === "waiting") return unseen > 0;
-  return section === "new" && !draftOnly;
+  switch (section) {
+    case "stopped":
+    case "holding":
+    case "waiting":
+    case "tagged":
+      return unseen > 0;
+    case "new":
+      return !draftOnly;
+    case "sent":
+    case "quiet":
+      return false;
+    default: {
+      // A section this code does not know is a type error; at run time it is not bold.
+      const unknown: never = section;
+      void unknown;
+      return false;
+    }
+  }
 }
 
 /**
@@ -140,9 +176,12 @@ function newestFirst(left: InboxListRow, right: InboxListRow): number {
   return right.last_at.localeCompare(left.last_at) || byId(left, right);
 }
 
-/** Every section, in the approved order, each with its rows in order (empty ones included). */
+/**
+ * Every section this Inbox places rows in (`INBOX_LOCAL_SECTIONS`: never Tagged you), in the approved order, each with
+ * its rows in order (empty ones included).
+ */
 export function inboxListSections(rows: readonly InboxListRow[]): InboxListSection[] {
-  return INBOX_SECTIONS.map(({ id, label }) => ({
+  return INBOX_LOCAL_SECTIONS.map(({ id, label }) => ({
     id,
     label,
     threads: rows.filter((row) => row.section === id).sort(newestFirst),

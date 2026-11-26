@@ -9,6 +9,9 @@
  * an Experimental group ("Experimental just needs to be within
  * Capabilities"). `#settings/experimental`, Experimental's own page for a
  * while, reads as Capabilities landing on that group, so an old link works.
+ * Reviews, after Rows (spec "sem-diffs" §A, the owner's "Everything about
+ * reading a review" on one page), is code review's own Settings → Reviews,
+ * shown while Code review is on.
  * Activity (the owner, 2026-11-07; named so on 2026-11-08, since the sidebar's
  * Usage is Claude account limits) is the Inbox's threads hour by hour, first of
  * "your data" (components/ActivityChart.tsx). Since 2026-11-08 (approval
@@ -17,12 +20,13 @@
  * Activity and becomes `#settings/activity` in place.
  */
 
-export const SETTINGS_SECTIONS = ['general', 'rows', 'agents', 'cloud-agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'activity', 'archived', 'storage', 'about'] as const;
+export const SETTINGS_SECTIONS = ['general', 'rows', 'reviews', 'agents', 'cloud-agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'activity', 'archived', 'storage', 'about'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export const SETTINGS_SECTION_LABEL: Record<SettingsSection, string> = {
   general: 'General',
   rows: 'Rows',
+  reviews: 'Reviews',
   agents: 'Agents',
   'cloud-agents': 'Cloud agents',
   accounts: 'Accounts',

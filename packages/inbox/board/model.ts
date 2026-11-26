@@ -22,6 +22,7 @@ import {
   INBOX_CARD_LIVE_COLUMNS,
   inboxAgentName,
   inboxCardLine,
+  inboxGroupWaitsOnPerson,
   isInboxCardDropUnseen,
   isInboxCardPersonColumn,
   isInboxCardSentWaiting,
@@ -190,9 +191,6 @@ export function boardLanes(cards: readonly InboxCardWire[], now: number = Date.n
   }));
 }
 
-/** The Inbox sections that say a thread waits on the person (Stopped on you, Holding up work, Waiting on you). */
-const WAITING_SECTIONS: ReadonlySet<string> = new Set(['stopped', 'holding', 'waiting']);
-
 /**
  * "Waiting on you" (display only): a card on the lanes before In review with a
  * linked thread the Inbox already lists as waiting on the person (an agent's
@@ -202,7 +200,8 @@ const WAITING_SECTIONS: ReadonlySet<string> = new Set(['stopped', 'holding', 'wa
  */
 export function waitingThread(card: Pick<InboxCardWire, 'column' | 'threads'>, rowOf: (threadId: string) => { section?: string } | null | undefined): string | null {
   if (!INBOX_CARD_LIVE_COLUMNS.includes(card.column) || isInboxCardPersonColumn(card.column)) return null;
-  return card.threads.find((threadId) => WAITING_SECTIONS.has(rowOf(threadId)?.section ?? '')) ?? null;
+  // The sections that say a thread waits on the person (core's `inboxGroupWaitsOnPerson`: Stopped on you, Holding up work, Waiting on you, Tagged you).
+  return card.threads.find((threadId) => inboxGroupWaitsOnPerson(rowOf(threadId)?.section)) ?? null;
 }
 
 /**

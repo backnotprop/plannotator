@@ -254,7 +254,10 @@ export class ClaudeSession {
       healing = true
       void (async () => {
         const action = healAction(this.mod, this.endedAt, Date.now(), everyMs)
-        if (action === 'check') return await this.mod.inbox?.ensureTicking()
+        if (action === 'check') {
+          await this.mod.ensureLaunchTicking().catch(() => undefined)
+          return await this.mod.inbox?.ensureTicking()
+        }
         if (action === 'wait') return
         const previous = this.mod
         this.mod = new PlannotatorMod(this.host, {

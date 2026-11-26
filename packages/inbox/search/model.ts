@@ -31,25 +31,10 @@ export type SearchOption =
   // Compose's actions (the "Actions" group): "New message…" and "Message <host> in <project>".
   | { kind: 'action'; action: ComposeAction }
   | { kind: 'more'; group: InboxSearchGroupId; total: number; shown: number }
-  | { kind: 'recent-q'; q: string }
-  // Shape's boards (approval "shape-inbox-placement": the "Shape" group, a small preview, the title, "project · …").
-  | { kind: 'shape'; shape: SearchShape };
-
-/** A board the search found by its title or project. */
-export interface SearchShape {
-  id: string;
-  title: string;
-  project: string;
-  /** The right-hand words: "no thread", or when it changed. */
-  meta: string;
-  /** The window's hash that opens it. */
-  hash: string;
-  picture: import('@plannotator/core/shape').ShapeDrawnView | null;
-  refs: readonly import('@plannotator/core/shape').ShapeRef[];
-}
+  | { kind: 'recent-q'; q: string };
 
 export interface SearchGroupView {
-  id: InboxSearchGroupId | 'recent' | 'recent-searches' | 'actions' | 'shapes';
+  id: InboxSearchGroupId | 'recent' | 'recent-searches' | 'actions';
   heading: string;
   /** The group's total when it holds more than it shows (the heading's quiet count). */
   total: number | null;

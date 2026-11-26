@@ -20,6 +20,9 @@
  * Tags (approval "inbox-thread-tags", step 2): several, kept by id (listFilterTags.ts reads them against the live
  * tags, across linked machines); on a tag's own list they step aside, as Project picks do on a project's page.
  *
+ * Recent activity is not here: the menu's row turns on a view of the list (listRecentView.ts), never a pick. An older
+ * cookie's `recent: true` (when it was a pick) is read as nothing, so no one opens the Inbox stuck in it.
+ *
  * Routines (the owner: "I should be able to filter routines in the main inbox list"): Routine threads, Other threads,
  * either or both, as Has a PR and No PR are. A row is a routine's when it is the thread of one of this computer's
  * routines (listFilterRoutines.ts, the row look's own rule). They apply only while Routines are on and read: off, the

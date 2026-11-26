@@ -13,7 +13,7 @@
     "#surface-guide-reader": "./guide/SurfaceGuideReader.tsx",
     "#search-palette": "./search/SearchPalette.tsx",
     "#platform-post": "./guide/PlatformPost.tsx",
-    "#shape-board": "./shape/ShapeBoard.tsx"
+    "#reviews-settings": "./reviewSettings/ReviewsSettings.tsx"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

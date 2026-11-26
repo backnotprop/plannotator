@@ -2,6 +2,7 @@
 
 import { tourStepOf } from '../tour/model';
 import { systemRouteOf } from '../system/route';
+import { localRouteOf, type LocalOpen } from '../pulls/localRoute';
 import { withoutClickSignal } from '../history';
 import { parseFileView } from '../fileView';
 import { parseSettingsHash, type SettingsSection } from '../settingsRoute';
@@ -9,11 +10,11 @@ import type { SheetView } from '../prs/SheetPage';
 import { sheetLayoutOf, type SheetLayout } from '../prs/tableModel';
 import { pullFilterOf, type PullFilter } from '../pulls/model';
 import { boardInitiativeOf, boardViewOf, type BoardView } from '../board/model';
-import { shapeReviewAtOf, type ReviewAt } from '../shape/review';
+import { reviewAtOf, type ReviewAt } from './reviewAt';
 import { viewScopeOf, type PullViewScope } from '../pulls/viewScope';
 
 export interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans' | 'grid';
   /**
    * Plans (`#plans`, only while config.json `inboxPlans` is on; approval "inbox-plans"): the plan open (`#plans=pln_…`),
    * the version read (`&v=3`; absent: the newest), the two versions compared (`&from=3&to=5`), and `#plans&new` for
@@ -52,6 +53,12 @@ export interface Route {
   layer?: string | null;
   scope?: PullViewScope;
   /**
+   * The layer whose diff closed back to this stack's page (`&back=`, `layerClosed`), or to the list it was opened from
+   * (a layer's row, focus.ts `listUnder`): the list shows that layer's row selected, its stack unfolded. Only a diff's
+   * Back writes it, so any other way to the stack (a row, a thread, a tile) shows the stack's.
+   */
+  backLayer?: string | null;
+  /**
    * A thread opened from Reviews (`#reviews&thread=…`): the same thread and pane as the Inbox's (`page: 'inbox'`), with
    * Reviews' list beside it and its filter kept. It doesn't move threads: a different list on the same thread.
    */
@@ -68,11 +75,8 @@ export interface Route {
   system?: string | null;
   sheet?: string | null;
   full?: boolean;
-  /**
-   * Shape (approval "shape-inbox-placement"): the board open in its thread's pane (`#thread=…&shape=shp_…`), or
-   * over the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
-   */
-  shape?: string | null;
+  /** Reviews' "On this computer" (pulls/localRoute.ts): the row whose diff is open beside the list (`&local=prj_…&branch=…`). */
+  local?: LocalOpen | null;
   /** The Board's list (`#board`, `#board=done`, `#board=cancelled`; `#board=shipped` before the rename opens Done, `#board=icebox` from before v2 Cancelled). */
   board?: BoardView;
   /** The opened Board card (`#board&card=crd_…`), or on a thread the card it was opened from (its "‹ Board" way back). */
@@ -117,14 +121,14 @@ export interface Route {
   /**
    * A file an agent's message names, beside the thread, read only until a comment attaches it (approval
    * "inbox-file-refs-open-viewer"). `ref=` its path as written, `in=` the message, `line=` / `to=` its lines. Never with `file`.
+   * `skill`: `ref=` names a skill the person's message used, whose SKILL.md is shown (SkillFilePane).
    */
-  ref?: { path: string; messageId: string; line?: number; lineEnd?: number } | null;
+  ref?: { path: string; messageId: string; line?: number; lineEnd?: number; skill?: true } | null;
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
   /**
-   * Where that review opens (a Shape board's place in code, such as a drawn part's `data-code`): `&code=path:line`,
-   * `&step=N` or `&files` (a context note's lines on the removed side add `&side=old`). Dropped from the address once
-   * the review is there.
+   * Where that review opens: `&code=path:line`, `&step=N` or `&files` (a context note's lines on the removed side
+   * add `&side=old`). Dropped from the address once the review is there.
    */
   guideAt?: ReviewAt | null;
   /**
@@ -153,6 +157,11 @@ export function listProjectOf(route: Pick<Route, 'page' | 'project'>): string | 
   return route.page === 'reviews' || route.page === 'prs' ? null : (route.project ?? null);
 }
 
+/** A layer's diff in Reviews closed (its Back, a verdict sent): its stack's page, that layer still the list's selection. */
+export function layerClosed(route: Route): Route {
+  return { ...route, layer: null, scope: 'layer', backLayer: route.layer ?? null };
+}
+
 export function readRoute(): Route {
   return routeOf(window.location.hash);
 }
@@ -165,6 +174,8 @@ export function routeOf(fullHash: string): Route {
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
+  // Grid (approval "inbox-agent-grid"): `#grid`; with the switch off the page sends the address to the Inbox.
+  if (params.has('grid') && !params.get('thread')) return { page: 'grid', project: null, thread: null };
   // The Artifacts wall (the sidebar's Artifacts row). `#thread=…&artifacts` is a thread's own grid, below.
   if (params.has('artifacts') && !params.get('thread')) return { page: 'artifacts', project: null, thread: null, pinned: params.get('artifacts') === 'pinned' };
   if (params.has('routine') || params.has('routines')) {
@@ -172,7 +183,6 @@ export function routeOf(fullHash: string): Route {
     return { page: 'scheduled', project: null, thread: null, scheduled, ...(scheduled && params.has('runs') ? { routineRuns: true } : {}) };
   }
   if (params.has('plans')) return plansRouteOf(params);
-  if (params.has('shapes')) return { page: 'shapes', project: null, thread: null, shape: params.get('shape') };
   if (params.has('prs')) {
     const stack = params.get('stack') || null;
     const layer = stack ? params.get('layer') || null : null;
@@ -203,8 +213,10 @@ export function routeOf(fullHash: string): Route {
       stack,
       layer,
       scope: layer ? viewScopeOf(params) : 'layer',
+      backLayer: !layer ? params.get('back') || null : null,
       new: params.has('new'),
       ...systemRouteOf(params),
+      ...localRouteOf(params),
     };
   }
   if (params.has('board'))
@@ -226,11 +238,10 @@ export function routeOf(fullHash: string): Route {
     agent: fromReviews ? null : params.get('agent'),
     tag: fromReviews ? null : params.get('tag'),
     thread,
-    ref: thread && !fileId && params.get('ref') && params.get('in') ? { path: params.get('ref')!, messageId: params.get('in')!, ...(Number(params.get('line')) > 0 ? { line: Number(params.get('line')) } : {}), ...(Number(params.get('to')) > 0 ? { lineEnd: Number(params.get('to')) } : {}) } : null,
+    ref: thread && !fileId && params.get('ref') && params.get('in') ? { path: params.get('ref')!, messageId: params.get('in')!, ...(Number(params.get('line')) > 0 ? { line: Number(params.get('line')) } : {}), ...(Number(params.get('to')) > 0 ? { lineEnd: Number(params.get('to')) } : {}), ...(params.has('skill') ? { skill: true as const } : {}) } : null,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
-    guideAt: thread && params.get('guide') ? shapeReviewAtOf(params) : null,
-    shape: thread ? params.get('shape') : null,
+    guideAt: thread && params.get('guide') ? reviewAtOf(params) : null,
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
     links: thread ? params.has('artifacts') && params.has('links') : false,

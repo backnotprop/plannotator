@@ -14,6 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { scheduleDailyPing, type DailyPingTool } from "@plannotator/shared/daily-ping";
 import { setStarAskRelease } from "@plannotator/shared/star-ask";
+import { setLaunchSwitchRelease } from "@plannotator/shared/launch-switch";
 
 /** The file release CI writes into `dist/` to mark a published build. */
 export const OPENCODE_RELEASE_MARK = "release.json";
@@ -49,6 +50,8 @@ export function scheduleOpenCodeDailyPing(tool: DailyPingTool): void {
     if (version === null) version = versionForTests ? versionForTests.version : openCodePingVersion();
     // The "Star the repo" ask (shared/star-ask.ts) runs in the same release builds: the plugin carries no compiled mark.
     setStarAskRelease(version !== undefined);
+    // So does the launch switch's reader (shared/launch-switch.ts).
+    setLaunchSwitchRelease(version !== undefined);
     scheduleDailyPing({ version, release: version !== undefined, tool });
   } catch {
     // Never the session's problem.

@@ -18,6 +18,8 @@ import { isAbsolutePath, trimTrailingSeparators } from './paths'
 import type { ModShell, ShellHost, ShellScriptId } from './shell'
 
 const MSYS_SCRIPTS: Partial<Record<ShellScriptId, string>> = {
+  // MSYS's $PPID is not a Windows pid (and is 1 under a native parent): say nothing.
+  'host-pid': 'exit 0',
   mkdir: 'umask 077 && mkdir -p "$1" && chmod 700 "$1" && pwd -W',
   stop: [
     'pid=$1; shift',

@@ -14,11 +14,13 @@ import { PHONE_QUERY, usePhone, useTouchPhone } from '../phone';
 import { Tip } from './Tip';
 import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
-import { markupWords, noteOnto } from '../markup';
+import { addedToComment, markupOf, markupWords, noteOnto } from '../markup';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
 import { FullScreenCommentBin, FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
 import { useRowDraft } from '../fileCommentDrafts';
 import { markImageComposer } from '../pageMarks';
+import { useCommentFiles } from '../commentFiles';
+import { InboxComposerField } from './ComposerField';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -146,15 +148,23 @@ export function ImageAttachmentView({
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
   // Words (and a drawing) the box held when this file last closed: back in it, and read again as it closes.
-  const waiting = useRowDraft(() => (readOnly || sentWords.current === text ? null : { kind: 'row', text, markup }));
+  const waiting = useRowDraft(() => {
+    const files = commentFiles.kept();
+    const late = commentFiles.flying();
+    return readOnly || (sentWords.current === text && files.length === 0 && late.length === 0) ? null : { kind: 'row', text, markup, files, late };
+  });
   const [text, setText] = useState(waiting?.text ?? suggestion ?? '');
   const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
   /** The row's words as a save took them: the file closing before the save answers (and the row clears) keeps no draft of them. */
   const sentWords = useRef<string | null>(null);
   const sendRow = async (annotation: Annotation) => {
     sentWords.current = text;
+    const back = commentFiles.sending(annotation.images);
     const ok = await onSave(annotation);
-    if (!ok) sentWords.current = null;
+    if (!ok) {
+      sentWords.current = null;
+      back();
+    }
     return ok;
   };
   // The drawing the ✓ just added to the reply: its comment's id, for a note, a redraw or ×.
@@ -216,6 +226,17 @@ export function ImageAttachmentView({
   // Fit's axis (`imageFitAxis`, the swipe's neighbour picture's too): a panorama keeps a readable height from the left,
   // whole on a phone; a tall screenshot fits its width from the top.
   const phone = usePhone();
+  // Pictures and files added to the comment (the reply box's paperclip, paste and drop): they go with its words.
+  const textNow = useRef(text);
+  textNow.current = text;
+  const commentFiles = useCommentFiles({
+    initial: waiting?.files,
+    late: waiting?.late,
+    phone,
+    inCard: composer !== null,
+    field: () => textRef.current,
+    text: { get value() { return textNow.current; }, set: setText },
+  });
   const wide = natural !== null && natural.width > natural.height * WIDE_IMAGE_RATIO;
   const tall = natural !== null && natural.height > natural.width * 2;
   const fitAxis: FitAxis = natural ? imageFitAxis(natural, phone) : 'contain';
@@ -268,7 +289,7 @@ export function ImageAttachmentView({
 
   // A selected comment that carries a drawing shows the drawing over the image.
   const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
-  const selectedMarkup = selected?.images?.[0] ?? null;
+  const selectedMarkup = markupOf(selected);
   // The kept drawing's comment as it reads now; gone once removed (the panel, Undo) or sent, and the box lets it go.
   const keptNow = kept ? annotations.find((a) => a.id === kept.id) ?? null : null;
   useEffect(() => {
@@ -281,35 +302,38 @@ export function ImageAttachmentView({
 
   const submit = async () => {
     const words = text.trim();
-    if (saving) return;
+    if (saving || commentFiles.uploading) return;
+    const added = commentFiles.images();
     // A note: onto the drawing the ✓ added, the same comment.
     if (kept && keptNow) {
       // (A redraw whose save failed waits as `markup`: it goes with the note.)
-      if (!words && !markup) return;
+      if (!words && !markup && added.length === 0) return;
       setSaving(true);
-      const ok = await sendRow({ ...keptNow, text: noteOnto(keptNow, words), ...(markup ? { images: [markup] } : {}) });
+      const images = markup ? [markup, ...addedToComment(keptNow)] : (keptNow.images ?? []);
+      const ok = await sendRow({ ...keptNow, text: noteOnto(keptNow, words), ...(markup || added.length > 0 ? { images: [...images, ...added] } : {}) });
       setSaving(false);
       if (ok) {
         setText('');
         setMarkup(null);
         setKept(null);
+        commentFiles.clear();
       }
       return;
     }
-    if (!words && !markup) return;
+    if (!words && !markup && added.length === 0) return;
     setSaving(true);
-    const ok = await sendRow(
-      imageCommentAnnotation({
-        id: newId(),
-        name: attachment.name,
-        text: markupWords(words, markup !== null),
-        markup,
-      }),
-    );
+    const annotation = imageCommentAnnotation({
+      id: newId(),
+      name: attachment.name,
+      text: markupWords(words, markup !== null),
+      markup,
+    });
+    const ok = await sendRow(added.length > 0 ? { ...annotation, images: [...(annotation.images ?? []), ...added] } : annotation);
     setSaving(false);
     if (ok) {
       setText('');
       setMarkup(null);
+      commentFiles.clear();
     }
   };
 
@@ -330,11 +354,10 @@ export function ImageAttachmentView({
     // A redraw: the comment as it reads now, its picture replaced (and any words typed, as a note).
     const redraw = kept && keptNow ? keptNow : null;
     const id = redraw?.id ?? newId();
-    const ok = await sendRow(
-      redraw
-        ? { ...redraw, text: noteOnto(redraw, words), images: [image] }
-        : imageCommentAnnotation({ id, name: attachment.name, text: markupWords(words, true), markup: image }),
-    );
+    // Pictures and files added in the box go with the words typed (with none, they wait for the note).
+    const added = words && !commentFiles.uploading ? commentFiles.images() : [];
+    const made = redraw ? { ...redraw, text: noteOnto(redraw, words), images: [image, ...addedToComment(redraw)] } : imageCommentAnnotation({ id, name: attachment.name, text: markupWords(words, true), markup: image });
+    const ok = await sendRow(added.length > 0 ? { ...made, images: [...(made.images ?? []), ...added] } : made);
     if (!ok) {
       // Not saved (the error shows): the drawing waits in the box for Comment, as before.
       setMarkup(image);
@@ -342,6 +365,7 @@ export function ImageAttachmentView({
     }
     setMarkup(null);
     setText('');
+    if (added.length > 0) commentFiles.clear();
     setKept(words ? null : { id, image });
     onSelect?.(id);
     // A new comment says so, with Undo; a redraw only replaced the picture (Undo would take the whole comment).
@@ -350,7 +374,9 @@ export function ImageAttachmentView({
 
   // The comment row: at the image's foot beside the thread, inside the full-screen composer's Comment tab in full screen.
   const commentCard = (
-    <div className="ib-ccard">
+    <div className="ib-ccard" onPaste={commentFiles.onPaste} {...commentFiles.drop?.handlers}>
+      {commentFiles.tiles}
+      {commentFiles.dropTarget}
       {kept && <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} />}
       {markup && (
         <Tip content="Your marked-up copy rides this comment">
@@ -362,33 +388,38 @@ export function ImageAttachmentView({
           </span>
         </Tip>
       )}
-      <textarea
-        ref={textRef}
-        className="ib-ta"
-        rows={1}
-        value={text}
-        placeholder={kept ? 'Note (optional)' : markup ? 'What should change?' : 'Comment on this image…'}
-        aria-label={kept ? `A note with your drawing on ${attachment.name}` : `Comment on ${attachment.name}`}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (isCommentSubmitKey(event, enterSavesComment)) {
-            event.preventDefault();
-            event.stopPropagation();
-            void submit();
-            return;
-          }
-          // Escape leaves the field first (approval "inbox-keyboard-shortcuts": one layer per Escape): focus goes
-          // to the file's pane, the words stay; the next Escape is the pane's. Full screen's Escape ladder has
-          // this rung already (AttachmentPane, "Left the comment box."); beside the thread it is this one.
-          if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented) {
-            const paneEl = event.currentTarget.closest<HTMLElement>('[data-attachment-pane]');
-            if (!paneEl || paneEl.closest('[data-full-view]')) return;
-            event.preventDefault();
-            event.stopPropagation();
-            paneEl.focus({ preventScroll: true });
-          }
-        }}
-      />
+      {/* The reply's field (`/` and `$` skills), at the row's one-line size (inbox.css `.ib-crowfield`). */}
+      <div className="ib-fcomp-field ib-crowfield">
+        <InboxComposerField
+          textareaRef={textRef}
+          rows={1}
+          value={text}
+          onChange={setText}
+          placeholder={kept ? 'Note (optional)' : markup ? 'What should change?' : 'Comment on this image…'}
+          ariaLabel={kept ? `A note with your drawing on ${attachment.name}` : `Comment on ${attachment.name}`}
+          destination="your comment"
+          // An open skill list takes Escape first, even before a query is typed; the row's own Escape comes next.
+          escapeClosesMenu
+          onKeyDown={(event) => {
+            if (isCommentSubmitKey(event, enterSavesComment)) {
+              event.preventDefault();
+              event.stopPropagation();
+              void submit();
+              return;
+            }
+            // Escape leaves the field first (approval "inbox-keyboard-shortcuts": one layer per Escape): focus goes
+            // to the file's pane, the words stay; the next Escape is the pane's. Full screen's Escape ladder has
+            // this rung already (AttachmentPane, "Left the comment box."); beside the thread it is this one.
+            if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented) {
+              const paneEl = event.currentTarget.closest<HTMLElement>('[data-attachment-pane]');
+              if (!paneEl || paneEl.closest('[data-full-view]')) return;
+              event.preventDefault();
+              event.stopPropagation();
+              paneEl.focus({ preventScroll: true });
+            }
+          }}
+        />
+      </div>
       <Tip content="Draw on the image (pen, arrow, circle)">
         <button type="button" className="ib-btn ib-cbtn" onClick={() => setAnnotating(true)} disabled={failed} data-markup-open="" aria-label={markup || kept ? 'Redraw' : 'Mark up'}>
           <Icon name="pen" size={15} />
@@ -397,16 +428,18 @@ export function ImageAttachmentView({
           </span>
         </button>
       </Tip>
+      {commentFiles.clip}
       <FullScreenCommentBin />
       <button
         type="button"
         className="ib-btn ib-pri ib-csave"
         onClick={() => void submit()}
-        disabled={saving || (!text.trim() && !markup)}
+        disabled={saving || commentFiles.uploading || (!text.trim() && !markup && commentFiles.ready === 0)}
         data-image-comment-save=""
       >
         {kept ? 'Add note' : 'Comment'}
       </button>
+      {commentFiles.drop?.cover}
     </div>
   );
 

@@ -89,7 +89,7 @@ export const KNOWN_TOP = [
 const KNOWN_EXT = new Set([
   'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'mts', 'cts', 'md', 'mdx', 'json', 'jsonc', 'jsonl', 'ndjson', 'yaml', 'yml', 'toml', 'txt',
   'css', 'html', 'astro', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'ico', 'icns', 'woff', 'woff2', 'mp4', 'webm',
-  'sh', 'ps1', 'cmd', 'py', 'sql', 'qnt', 'patch', 'xml', 'lock', 'bin', 'tgz',
+  'sh', 'ps1', 'cmd', 'py', 'sql', 'qnt', 'patch', 'xml', 'lock', 'bin', 'tgz', 'mmd',
 ]);
 // Package.resolved: a Swift lockfile (the native app's), data no Bun test reads; it plans like any data file.
 const KNOWN_BARE = /^(LICENSE[-\w]*|NOTICE|README|Dockerfile|_headers|xdg-open|open-in-vscode|Package\.resolved|\.gitignore|\.gitattributes|\.vscodeignore|\.semgrepignore|\.npmignore|\.adr-dir)$/;
@@ -179,8 +179,8 @@ export const SMOKE_ROOTS = [
   'apps/hook/server/index.ts',
   'apps/hook/index.tsx', 'apps/hook/vite.config.ts',
   'apps/review/index.tsx', 'apps/review/vite.config.ts', 'apps/review/diagram-engine/build.ts',
-  'apps/inbox/index.tsx', 'apps/inbox/shape.tsx', 'apps/inbox/surface.tsx',
-  'apps/inbox/vite.config.ts', 'apps/inbox/vite.shape.config.ts', 'apps/inbox/vite.surface.config.ts',
+  'apps/inbox/index.tsx', 'apps/inbox/surface.tsx',
+  'apps/inbox/vite.config.ts', 'apps/inbox/vite.surface.config.ts',
 ];
 
 const closures = new WeakMap<Graph, Map<string, Set<string>>>();

@@ -129,6 +129,32 @@ public enum SendPlan {
     return targets
   }
 
+  /// The agent sessions that wrote in the thread (not a permission prompt's).
+  static func sessions(_ thread: InboxThread) -> Set<String> {
+    Set(thread.messages.compactMap { message in
+      guard message.author.kind == .agent, let session = message.author.session, !session.isEmpty, !isPermissionPrompt(message) else { return nil }
+      return session
+    })
+  }
+
+  /// The replies of a Send whose words the person aimed (↩ on that agent's message): in a thread with more than one
+  /// agent, the words ride the reply to that session, at its own latest message (the window's recipient, approval
+  /// "inbox-reply-recipient"). With one agent, or a session the thread no longer has, the usual replies.
+  public static func targets(in thread: InboxThread, aim: String?) -> [SendTarget] {
+    var targets = targets(in: thread)
+    guard let aim, sessions(thread).count > 1,
+      let wrote = thread.messages.last(where: { $0.author.kind == .agent && $0.author.session == aim && !isPermissionPrompt($0) && $0.scheduledChange == nil })
+    else { return targets }
+    let own = group(of: wrote)
+    let byGroup = Dictionary(thread.messages.map { ($0.id, group(of: $0)) }, uniquingKeysWith: { first, _ in first })
+    if let index = targets.firstIndex(where: { byGroup[$0.message] == own }) {
+      targets.append(targets.remove(at: index))
+    } else {
+      targets.append(SendTarget(message: wrote.id, questions: []))
+    }
+    return targets
+  }
+
   /// Whether a Send has anything to carry: words, a saved pick, or a drafted action item.
   public static func hasSomethingToSend(thread: InboxThread, words: String) -> Bool {
     if !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }

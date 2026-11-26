@@ -254,6 +254,9 @@ describe('remembered per browser', () => {
     ['unknown Routine picks are dropped', JSON.stringify({ routines: ['routine', 'cron', 1] }), { ...NO_LIST_FILTER, routines: ['routine'] }],
     ['a cookie from before Routines loads with no Routine pick', JSON.stringify({ pulls: ['open'], tags: ['ini_release'] }), { ...NO_LIST_FILTER, pulls: ['open'], tags: ['ini_release'] }],
     ['a cookie from before tags loads with no Tag pick', JSON.stringify({ agents: ['Pi'], notSeen: true }), { ...NO_LIST_FILTER, agents: ['Pi'], notSeen: true }],
+    // Recent activity was a pick once (0.29's cookie): now a view kept nowhere, so a saved `recent: true` opens no one's Inbox in it.
+    ['a saved Recent activity pick is ignored', JSON.stringify({ recent: true }), NO_LIST_FILTER],
+    ['a saved Recent activity pick beside real picks keeps only those', JSON.stringify({ recent: true, notSeen: true, pulls: ['open'] }), { ...NO_LIST_FILTER, notSeen: true, pulls: ['open'] }],
     ['a range with a bad day is dropped', JSON.stringify({ updated: { from: '2026-13', to: '2026-11-01' } }), NO_LIST_FILTER],
   ];
   for (const [name, raw, want] of junk) test(name, () => expect(parseListFilter(raw)).toEqual(want));
@@ -347,10 +350,16 @@ describe('Routine picks (Routine threads, Other threads)', () => {
     ]);
   });
 
-  test('only this computer\'s routines: a linked machine\'s row with the same thread id is an ordinary thread', () => {
+  test('a linked computer\'s routine thread is a routine thread too (the merged read lists its routines)', () => {
     expect(isRoutine(ROWS.billingToday)).toBe(true);
-    expect(isRoutine({ ...ROWS.billingToday, machine: OTHER } as InboxListRow)).toBe(false);
+    expect(isRoutine({ ...ROWS.billingToday, machine: OTHER } as InboxListRow)).toBe(true);
+    expect(isRoutine({ ...ROWS.webLateYesterday, machine: OTHER } as InboxListRow)).toBe(false);
     expect(routineThreadTest(null)).toBeNull();
+  });
+
+  test('Routines off here and on a linked computer: the group still applies; off everywhere: it steps aside', () => {
+    expect(routineThreadsState({ on: false, rows: [routine('mixed')], error: null, computers: [{ id: OTHER, on: true, launch_on: true, away: false }] })).toBe('ready');
+    expect(routineThreadsState({ on: false, rows: null, error: null, computers: [{ id: OTHER, on: false, launch_on: true, away: false }] })).toBe('off');
   });
 
   test('a deleted routine leaves the routines list: its thread stays and counts as Other', () => {

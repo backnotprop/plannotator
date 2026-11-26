@@ -310,6 +310,9 @@ export interface InboxPullDiffAnswer {
   head_sha?: string | null;
   /** The PR's own description as Markdown (a stack's whole diff too: this layer's): null when it has none or the forge did not say. */
   description?: string | null;
+  /** The PR's state as the forge said at this read: one merged or closed elsewhere shows so on its open page. Absent: not read. */
+  state?: InboxPullState;
+  merged_at?: string | null;
 }
 
 /**
@@ -334,6 +337,12 @@ export interface InboxFileContents {
 export const INBOX_PULLS_SEARCH_MAX = 50;
 /** Merged PRs are asked back this many days (to put a stack's merged layers under it). */
 export const INBOX_PULLS_MERGED_DAYS = 14;
+
+/**
+ * A reopen (the board's Close, then Undo) is taken only for a PR this Inbox closed this recently. The server refuses
+ * one past it; the board's Undo line goes when it ends.
+ */
+export const INBOX_PULL_REOPEN_WINDOW_MS = 5 * 60_000;
 
 /** `#412` on GitHub, `!61` on GitLab. */
 export function inboxPullLabel(pull: Pick<InboxPull, "platform" | "number">): string {

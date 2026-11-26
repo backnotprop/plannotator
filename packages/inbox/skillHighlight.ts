@@ -50,6 +50,13 @@ function wordsEnd(root: Node): Element | null {
 /** The ranges of the named skills' references in the person's own words under `root` (before the sections a Send writes after them). */
 export function skillReferenceRanges(root: Node, skills: readonly InboxSkillReference[]): { plain: Range[]; human: Range[] } {
   const out = { plain: [] as Range[], human: [] as Range[] };
+  for (const spot of skillReferenceSpots(root, skills)) (spot.humanOnly ? out.human : out.plain).push(spot.range);
+  return out;
+}
+
+/** Each reference in the person's own words under `root`, with the skill it names (the chips that open it, SkillChips.tsx). */
+export function skillReferenceSpots(root: Node, skills: readonly InboxSkillReference[]): { range: Range; name: string; humanOnly: boolean }[] {
+  const out: { range: Range; name: string; humanOnly: boolean }[] = [];
   if (skills.length === 0) return out;
   const catalog: SkillCatalogEntry[] = skills.map((s) => ({ name: s.name, root: 'universal', humanOnly: s.humanOnly }));
   const doc = root.ownerDocument ?? document;
@@ -63,7 +70,7 @@ export function skillReferenceRanges(root: Node, skills: readonly InboxSkillRefe
       const range = doc.createRange();
       range.setStart(node, token.start);
       range.setEnd(node, token.end);
-      (token.entry.humanOnly ? out.human : out.plain).push(range);
+      out.push({ range, name: token.entry.name, humanOnly: token.entry.humanOnly });
     }
   }
   return out;

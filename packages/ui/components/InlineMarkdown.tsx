@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useSyncExternalStore } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
-import { findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
+import { BARE_MR_REF, findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
 import { useHoverPreview } from "../hooks/useHoverPreview";
 import { matchInlineHtml } from '../utils/inlineHtmlTags';
@@ -19,6 +19,7 @@ import { HostTitle } from "./HostTitle";
 import { AuthorColorText } from "./AuthorColorText";
 import { matchAuthorColor } from "../utils/authorColor";
 import { plainTextLinkSpans, usePlainTextLinkers } from "../utils/refCardProviders";
+import { proseRefLinkProps } from "../utils/refCardClick";
 import { autolinkMayFollow, autolinkRunningPast, emailMayFollow, findWwwAutolinks, matchEmailAutolink, matchHtmlEntity, matchWwwAutolink, wwwAutolinkHref } from "../utils/inlineAutolinks";
 import { FOOTNOTE_REF_RE, footnoteKey } from "../utils/footnotes";
 import { FootnoteRef, useFootnoteScope } from "./footnotes/footnoteScope";
@@ -413,6 +414,7 @@ function emitPlainTextWithBareUrls(
           href={span.href ?? span.value}
           target="_blank"
           rel="noopener noreferrer"
+          {...proseRefLinkProps(span.href ?? span.value)}
           className="text-primary underline underline-offset-2 hover:text-primary/80"
         >
           {span.value}
@@ -603,11 +605,12 @@ export function getDigitHexIssueRefs(): boolean {
  * every mounted `InlineMarkdown`.
  */
 export type CrossRepoRefsWithoutRepo = boolean | { host: string };
-let crossRepoDefault: { host?: string } | null = null;
+// `withoutRepo`: the host is a guess, so GitLab's `group/project!45` stays plain (it needs a real GitLab project).
+let crossRepoDefault: { host?: string; withoutRepo: true } | null = null;
 const crossRepoListeners = new Set<() => void>();
 
 export function setCrossRepoRefsWithoutRepo(on: CrossRepoRefsWithoutRepo): void {
-  const next = on === false ? null : on === true ? {} : { host: on.host };
+  const next = on === false ? null : on === true ? { withoutRepo: true as const } : { host: on.host, withoutRepo: true as const };
   if (next?.host === crossRepoDefault?.host && (next === null) === (crossRepoDefault === null)) return;
   crossRepoDefault = next;
   for (const listener of crossRepoListeners) listener();
@@ -878,6 +881,7 @@ export const InlineMarkdown: React.FC<{
               href={safe}
               target="_blank"
               rel="noopener noreferrer"
+              {...proseRefLinkProps(safe)}
               className="text-primary underline underline-offset-2 hover:text-primary/80"
             >
               {url}
@@ -933,6 +937,7 @@ export const InlineMarkdown: React.FC<{
             href={crossRepoRef.href}
             target="_blank"
             rel="noopener noreferrer"
+            {...proseRefLinkProps(crossRepoRef.href)}
             className="text-primary font-medium hover:underline"
           >
             {crossRepoRef.label}
@@ -974,6 +979,7 @@ export const InlineMarkdown: React.FC<{
           href={url}
           target="_blank"
           rel="noopener noreferrer"
+          {...proseRefLinkProps(url)}
           className="text-primary underline underline-offset-2 hover:text-primary/80"
         >
           {url}
@@ -1210,6 +1216,7 @@ export const InlineMarkdown: React.FC<{
               href={href}
               target="_blank"
               rel="noopener noreferrer"
+              {...proseRefLinkProps(href)}
               className="text-primary font-medium hover:underline"
             >
               {label}
@@ -1222,6 +1229,21 @@ export const InlineMarkdown: React.FC<{
         previousChar = match[0][match[0].length - 1];
         continue;
       }
+    }
+
+    // GitLab merge request: !123, on a GitLab project only, with `#123`'s boundary.
+    // An image's `![` never matches (a digit must follow the `!`) and is read below; GitHub's `!123` stays plain text.
+    const mergeRequest = !linkLabel && refLinks?.mergeRequest && !/\w/.test(previousChar) ? remaining.match(BARE_MR_REF) : null;
+    if (mergeRequest) {
+      const href = refLinks!.mergeRequest!(mergeRequest[1]);
+      parts.push(
+        <a key={key++} href={href} target="_blank" rel="noopener noreferrer" {...proseRefLinkProps(href)} className="text-primary font-medium hover:underline">
+          {mergeRequest[0]}
+        </a>,
+      );
+      remaining = remaining.slice(mergeRequest[0].length);
+      previousChar = mergeRequest[0][mergeRequest[0].length - 1];
+      continue;
     }
 
     // @mention — only at word boundary. GitHub-style handle pattern.
