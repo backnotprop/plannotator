@@ -1027,7 +1027,8 @@ export interface InboxMessage {
   review_resolved?: InboxReviewResolved | null;
   /**
    * On a person's reply sent by pressing a skill emoji in the reaction tray (approval
-   * "inbox-reactions-every-message"): the emoji and its skill, so the window draws the reply as one line. The reply's
+   * "inbox-reactions-every-message"): the emoji and its skill, so the window reads the reply's words as
+   * "🦃 /bro" (inbox-skill-reaction.ts). The reply's
    * body is what a typed `/<skill>` reply sends (the window composes it). Absent on every other message; agents
    * never see it (they read the body).
    */

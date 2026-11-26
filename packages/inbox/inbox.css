@@ -12929,10 +12929,6 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 /* While a question waits only the skill emoji are there: they sit at the start, each its own size, not spread out. */
 .ib-emrow[data-skills-only], .ib-pm-pos[data-phone] .ib-emrow[data-skills-only] { justify-content: flex-start; }
 .ib-emrow[data-skills-only] .ib-emrow-c { flex: 0 0 auto; min-width: 44px; }
-/* A skill emoji's reply: its head line says it all ("You 😵‍💫 /bro"). */
-.ib-fl-skr { display: inline-flex; align-items: center; gap: 8px; }
-.ib-skr-e { font-size: var(--ib-fs-18, 18px); line-height: 1; }
-.ib-skr-slash { font-family: var(--font-mono, ui-monospace, monospace); font-weight: 550; color: var(--primary); }
 /* A skill emoji's card: to the left of the strip, tray or menu. */
 .ib-skcard-pos { z-index: 90; pointer-events: none; }
 .ib-skcard { width: 290px; padding: 14px 16px 12px; border-radius: 14px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow); font-size: var(--ib-fs-13, 13px); outline: none; transition: opacity 120ms ease-out; }

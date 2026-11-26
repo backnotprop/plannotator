@@ -11,6 +11,7 @@ import { MessageBody } from './MessageBody/MessageBody';
 import { ReviewAnchorLine } from '../components/ReviewAnchorLine';
 import type { MessageActsRef } from './messageActs';
 import { farChangeMessage } from '../scheduled/farLinks';
+import { skillReactionShownBody } from '@plannotator/core/inbox-folding';
 
 export type MessageBodyData = {
   message: InboxMessageWire;
@@ -44,13 +45,13 @@ export type MessageBodyData = {
 
 export function drawMessageBody(d: MessageBodyData) {
   const { acts } = d;
-  const message = farChangeMessage(d.message, d.farMachine);
+  // A skill emoji's reply is a reply like any other whose words read "🦃 /bro" (core inbox-skill-reaction.ts).
+  const far = farChangeMessage(d.message, d.farMachine);
+  const message = far.skill_reaction ? { ...far, body: skillReactionShownBody(far) } : far;
   const id = message.id;
   const isAgent = message.author.kind === 'agent';
   const questions = message.questions ?? [];
   const at = (key: string) => questions.findIndex((q) => q.key === key);
-  // A skill emoji's reply is drawn as its head line alone ("You 😵‍💫 /bro"): its words and skills block are not shown.
-  if (message.skill_reaction) return null;
   return (
     <>
       {message.review_anchor && <ReviewAnchorLine anchor={message.review_anchor} resolved={!!message.review_resolved} />}

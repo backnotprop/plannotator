@@ -250,6 +250,12 @@ test("the person's reply keeps their words and drops what the Inbox wrote for th
   expect(messageMarkdown(message(M2, { kind: 'person' }, replyBody(undefined), 31))).toBe('Answered 1 question.');
 });
 
+test("a skill emoji's reply copies as the thread draws it, “🦃 /bro”; a typed /bro reply as its words", () => {
+  const skills = '**Skills referenced** (the person is asking you to invoke these skills when acting on this reply):\n- `bro`';
+  expect(messageMarkdown(message(M2, { kind: 'person' }, `/bro\n\n${skills}`, 31, { skill_reaction: { emoji: '🦃', skill: 'bro' } } as Partial<InboxMessageWire>))).toBe('🦃 /bro');
+  expect(messageMarkdown(message(M2, { kind: 'person' }, '/bro', 31))).toBe('/bro');
+});
+
 test('a thread: the subject, the project and count, then each message under its author and time (the approved sample)', () => {
   const t = sample();
   const at = (m: number) => copyTime(t.messages[m]!.created_at);

@@ -3,7 +3,7 @@
  * exactly what a reply typed as only `/<skill>` sends today: the words `/<skill>` and, as the Send's feedback, the
  * skills block the reply box composes for them (skills.ts, the reply wording), from this window's own skills, so a
  * linked computer's thread gets them through the reply's usual forward. The additive `skill_reaction` only tells the
- * thread to draw the reply as one line ("You 😵‍💫 /bro"); the agent reads nothing new.
+ * window to read the reply's words as "😵‍💫 /bro" (core inbox-skill-reaction.ts); the agent reads nothing new.
  */
 import { INBOX_REPLY_SKILL_AUDIENCE } from '@plannotator/core/skill-reference-block';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
