@@ -27,13 +27,30 @@ describe("GitLab query complexity", () => {
 
   test("each query of the person's own lists is under the budget", () => {
     expect(GITLAB_PULLS_QUERIES.length).toBeGreaterThan(0);
-    for (const query of GITLAB_PULLS_QUERIES) expect(estimateGitlabComplexity(query)).toBeLessThan(BUDGET);
-  });
+    for (const query of GITLAB_PULLS_QUERIES) expect(estimateGitlabComplexity(query)).toBeLessThan(BUDGET);  });
 
   test("each Others query is under the budget", () => {
     const queries = largestOthersQueries();
     expect(queries.length).toBe(INBOX_PULLS_OTHERS_CALLS_MAX);
     for (const query of queries) expect(estimateGitlabComplexity(query)).toBeLessThan(BUDGET);
+  });
+
+  test("a field with no known weight fails the estimate, saying where to look its weight up", () => {
+    expect(() => estimateGitlabComplexity("query { currentUser { username userPermissions { canMerge } } }")).toThrow(/"userPermissions".*merge_request_type\.rb/);
+  });
+
+  test("a resolver connection asked without first: is scored at GitLab's page size", () => {
+    const without = estimateGitlabComplexity("query { currentUser { authoredMergeRequests(state: opened) { count nodes { iid } } } }");
+    const hundred = estimateGitlabComplexity("query { currentUser { authoredMergeRequests(state: opened, first: 100) { count nodes { iid } } } }");
+    const one = estimateGitlabComplexity("query { currentUser { authoredMergeRequests(state: opened, first: 1) { count nodes { iid } } } }");
+    expect(without).toBe(hundred);
+    expect(without).toBeGreaterThan(one);
+  });
+
+  test("a search: argument costs 5 more", () => {
+    const plain = estimateGitlabComplexity('query { project(fullPath: "a/b") { fullPath } }');
+    const searched = estimateGitlabComplexity('query { project(fullPath: "a/b", search: "fix") { fullPath } }');
+    expect(searched - plain).toBe(5);
   });
 
   test("each query is under GitLab's 10,000-character limit", () => {

@@ -561,11 +561,14 @@ const GL_QUIET = new Set(["SKIPPED", "MANUAL"]);
 
 /**
  * A GitLab answer (the person's own lists, or the answers of one host's Others queries, `gitlabOthersQueries`) as the
- * current user's name and MRs; null when it is not one, or when any of them is not.
+ * current user's name and MRs; null when it is not one, or when any of them is not. `readAt`: when each answer was
+ * read; an MR in two lists takes its row from the newer answer (a kept answer never overwrites a fresh one).
  */
-export function parseGitlabPulls(stdout: string | readonly string[], host: string, part: PullsPart = "own"): ParsedPulls | null {
+export function parseGitlabPulls(stdout: string | readonly string[], host: string, part: PullsPart = "own", readAt?: readonly number[]): ParsedPulls | null {
   const data: Json = {};
-  for (const one of typeof stdout === "string" ? [stdout] : stdout) {
+  /** Each own list's answer's read time. */
+  const listAt: Record<string, number> = {};
+  for (const [i, one] of (typeof stdout === "string" ? [stdout] : stdout).entries()) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(one);
@@ -576,6 +579,7 @@ export function parseGitlabPulls(stdout: string | readonly string[], host: strin
     const part = obj(obj(parsed).data);
     // Each own-lists query answers its list under `currentUser`: the users merge, the lists with them.
     Object.assign(data, part, part.currentUser ? { currentUser: { ...obj(data.currentUser), ...obj(part.currentUser) } } : {});
+    for (const name of Object.keys(obj(part.currentUser))) listAt[name] = readAt?.[i] ?? 0;
   }
   const user = obj(data.currentUser);
   if (!user.username) return null;
@@ -647,10 +651,15 @@ export function parseGitlabPulls(stdout: string | readonly string[], host: strin
     for (const list of projects) read(list, null);
     return { login, pulls: [...out.values()], avatars, open_total: totalOf(projects, "count"), cut: cutOf(named, "count") };
   }
-  read(user.authored, null);
-  read(user.merged, null);
-  read(user.assigned, "assigned");
-  read(user.requested, "requested");
+  // The last list read gives an MR's row, so the oldest answers are read first (sort is stable: the same age keeps
+  // this order).
+  const own: [name: string, flag: "requested" | "assigned" | null][] = [
+    ["authored", null],
+    ["merged", null],
+    ["assigned", "assigned"],
+    ["requested", "requested"],
+  ];
+  for (const [name, flag] of own.sort(([a], [b]) => (listAt[a] ?? 0) - (listAt[b] ?? 0))) read(user[name], flag);
   const capped = cappedOf([user.requested, user.authored, user.assigned], "count");
   return { login, pulls: [...out.values()], avatars, ...(capped ? { capped } : {}) };
 }
@@ -1366,13 +1375,6 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   };
 
   /**
-   * The person's own lists for one host, for Reviews (scoped to the projects' repositories, `state`) and the Pull
-   * requests board (everywhere, `state.wide`) in one read: Reviews shows the board, so whichever asks first reads
-   * both, and the other is answered by the same read (in flight, or cached). GitHub: one GraphQL call with both sets of
-   * searches (`GITHUB_PULLS_BOTH_QUERY`), or one set when the repositories don't fit the scope (the searches are the
-   * same then). GitLab: its own lists are never scoped, so one answer serves both.
-   */
-  /**
    * GitLab's own lists: its queries (`GITLAB_PULLS_QUERIES`) at once, merged. A query that fails is answered by its
    * last good answer when it has one: the read is then `stale` (that failure), as old as its oldest answer. One with
    * none, or a rate limit, fails the read, as the single query did.
@@ -1391,10 +1393,22 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     const stale = failed[0] ?? null;
     if (stale && GITLAB_PULLS_QUERIES.some((_, i) => !kept[i])) return { failed: stale };
     const parts = GITLAB_PULLS_QUERIES.map((_, i) => kept[i]!);
-    const parsed = parseGitlabPulls(parts.map((p) => p.stdout), host);
+    const parsed = parseGitlabPulls(
+      parts.map((p) => p.stdout),
+      host,
+      "own",
+      parts.map((p) => p.at),
+    );
     return parsed ? { parsed, at: Math.min(...parts.map((p) => p.at)), stale } : { failed: stale ?? { stdout: "", stderr: "", exitCode: 1 } };
   };
 
+  /**
+   * The person's own lists for one host, for Reviews (scoped to the projects' repositories, `state`) and the Pull
+   * requests board (everywhere, `state.wide`) in one read: Reviews shows the board, so whichever asks first reads
+   * both, and the other is answered by the same read (in flight, or cached). GitHub: one GraphQL call with both sets of
+   * searches (`GITHUB_PULLS_BOTH_QUERY`), or one set when the repositories don't fit the scope (the searches are the
+   * same then). GitLab: its own lists are never scoped, so one answer serves both.
+   */
   const read = (host: string, cli: RefCli, state: HostState, repos: readonly string[]): Promise<void> => {
     if (state.pending) return state.pending;
     const wide = state.wide;

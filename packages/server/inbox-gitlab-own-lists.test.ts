@@ -7,7 +7,8 @@
  *  - the answers not merged into one list (a list lost, or an MR asked of the person losing its mark);
  *  - one list failing taking the others' fresh answers with it once that list has answered before, or that list
  *    shown empty instead of its last answer; the host not said to have failed then;
- *  - one list failing on the first read reading as a whole answer with that list empty.
+ *  - one list failing on the first read reading as a whole answer with that list empty;
+ *  - a kept list's old row (its checks, or open for an MR since merged) overwriting a fresh list's row of the same MR.
  */
 import { describe, expect, test } from "bun:test";
 import { createInboxPulls, INBOX_PULLS_FRESH_MS } from "./inbox-pulls";
@@ -120,6 +121,64 @@ describe("GitLab: the person's own lists", () => {
     expect(answer.pulls).toEqual([]);
     expect(answer.hosts[0]!.error).toBe("unavailable");
     expect(answer.hosts[0]!.last_read).toBeUndefined();
+  });
+
+  test("an MR in a fresh list and a kept one shows the fresh row; between two kept ones, the newer", async () => {
+    const saved = { ...LISTS };
+    try {
+      let now = 1_000_000;
+      const g = gitlab();
+      const pulls = createInboxPulls({ run: g.run, now: () => now });
+      // 65 is assigned to the person and asked of them.
+      LISTS.assigned = { count: 2, nodes: [MR(63), MR(65)] };
+      LISTS.requested = { count: 2, nodes: [MR(61), MR(65)] };
+      await pulls.list(repos);
+
+      // Its pipeline fails; the requested list can't be read, so its answer is the one from before.
+      now += INBOX_PULLS_FRESH_MS + 1;
+      LISTS.assigned = { count: 2, nodes: [MR(63), { ...MR(65), headPipeline: { status: "FAILED" } }] };
+      g.failing.set("requested", { stderr: "glab: 502 Bad Gateway", exitCode: 1 });
+      const second = await pulls.list(repos);
+      expect(second.hosts[0]!.error).toBe("unavailable");
+      const row = second.pulls.find((p) => p.number === 65)!;
+      expect(row.checks).toBe("failure");
+      expect(row).toMatchObject({ requested: true, assigned: true });
+
+      // Now neither can be read: the assigned list's answer is the newer of the two kept.
+      now += REF_FAILURE_MS + 1;
+      g.failing.set("assigned", { stderr: "glab: 502 Bad Gateway", exitCode: 1 });
+      const third = await pulls.list(repos, { refresh: true });
+      expect(g.calls).toHaveLength(12);
+      expect(third.hosts[0]!.error).toBe("unavailable");
+      expect(third.pulls.find((p) => p.number === 65)?.checks).toBe("failure");
+    } finally {
+      Object.assign(LISTS, saved);
+    }
+  });
+
+  test("an MR a fresh list says is merged is never shown open from a kept list", async () => {
+    const saved = { ...LISTS };
+    try {
+      let now = 1_000_000;
+      const g = gitlab();
+      const pulls = createInboxPulls({ run: g.run, now: () => now });
+      // The person wrote 66 and reviews it.
+      const mine = { ...MR(66), author: { username: "dana" } };
+      LISTS.authored = { count: 2, nodes: [MR(62), mine] };
+      LISTS.requested = { count: 2, nodes: [MR(61), mine] };
+      await pulls.list(repos);
+
+      // It is merged: it leaves the open authored list for the merged one, and the requested list can't be read.
+      now += INBOX_PULLS_FRESH_MS + 1;
+      LISTS.authored = { count: 1, nodes: [MR(62)] };
+      LISTS.merged = { nodes: [MR(90), { ...mine, state: "merged", mergedAt: "2026-11-03T11:00:00Z" }] };
+      g.failing.set("requested", { stderr: "glab: 502 Bad Gateway", exitCode: 1 });
+      const second = await pulls.list(repos);
+      expect(second.hosts[0]!.error).toBe("unavailable");
+      expect(second.pulls.find((p) => p.number === 66)).toMatchObject({ state: "merged", merged_at: "2026-11-03T11:00:00Z" });
+    } finally {
+      Object.assign(LISTS, saved);
+    }
   });
 
   test("a rate limit on one list holds the host, the others' answers notwithstanding", async () => {
