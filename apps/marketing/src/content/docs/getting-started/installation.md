@@ -375,7 +375,7 @@ Claude threads in T3 Code get the Inbox from the [Claude Code plugin](#claude-co
 plannotator t3 login --url <T3 MCP URL>
 ```
 
-For the MCP URL, open T3 **Settings → Environments**, open the environment's menu and choose **Copy MCP URL**. On T3's sign-in page, choose Supervised or higher, at least the mode your threads run in: Read only cannot send replies. A reply that waits for the sign-in says so in the Inbox. Only Claude threads in T3 get replies; Codex and other agents in T3 read the reply when they next check the Inbox.
+For the MCP URL, open T3 **Settings → Environments**, open the environment's menu and choose **Copy MCP URL**. On T3's sign-in page, choose Supervised or higher, at least the mode your threads run in: Read only cannot send replies. A reply that waits for the sign-in says so in the Inbox. Codex threads in T3 get replies too when T3 runs on the same computer as the Inbox (not on Windows), with no sign-in. Other agents in T3, and Codex threads when T3 runs on another computer, read the reply when they next check the Inbox.
 
 With the Claude Code mod off, or a Claude Code older than 2.1.287, the plugin adds no tool. Sign in as above and add the server for T3 threads instead: `claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3` (it shows its tools only inside T3 threads). `plannotator t3 --help` has the details.
 
