@@ -561,7 +561,7 @@ const ReviewApp: React.FC = () => {
     useState<LineAnnotationComposeRequest | null>(null);
   const nextLineAnnotationComposeRequestId = useRef(0);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'semantic'>(false);
+  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'powerUp'>(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   // A real session whose first /api/diff failed: the load error state, never
@@ -6145,7 +6145,7 @@ const ReviewApp: React.FC = () => {
                     provider={powerUpConfigured.provider}
                     endpoint={powerUpConfigured.endpoint}
                     onRetry={() => setPowerUpRetry((n) => n + 1)}
-                    onSettings={() => setOpenSettingsMenu('semantic')}
+                    onSettings={() => setOpenSettingsMenu('powerUp')}
                   />
                 )}
                 {!isCompactTouchLayout && <ReviewHeaderStatus variant="pill" {...reviewStatusProps} />}
@@ -6694,10 +6694,11 @@ const ReviewApp: React.FC = () => {
             agentToolSetting={agentTool.setting}
             onAgentToolChange={agentTool.save}
             externalOpen={openSettingsMenu !== false}
-            externalTab={openSettingsMenu === 'semantic' ? 'semantic' : undefined}
+            externalTab={openSettingsMenu === 'powerUp' ? 'reviews' : undefined}
+            externalSection={openSettingsMenu === 'powerUp' ? 'powerUp' : undefined}
             onExternalClose={() => setOpenSettingsMenu(false)}
             // Local git session where since-base isn't offered (base ref
-            // unresolvable): Settings → Review → Git notes that the Git-status preference
+            // unresolvable): Settings → Reviews › Files and defaults › Git notes that the Git-status preference
             // can't take effect in THIS repo. PR/workspace/jj sessions say
             // nothing — the preference isn't about them.
             sinceBaseUnavailable={

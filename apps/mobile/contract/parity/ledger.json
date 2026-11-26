@@ -23504,6 +23504,20 @@
       }
     },
     {
+      "id": "undecided-field-inboxrowdelivery-script",
+      "title": "field:InboxRowDelivery.script",
+      "surface": [
+        "field:InboxRowDelivery.script"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-door-post-threads-id-draft",
       "title": "door:POST threads/:id/draft",
       "surface": [
@@ -23512,7 +23526,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23526,7 +23540,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
@@ -23540,7 +23554,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-25",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }
