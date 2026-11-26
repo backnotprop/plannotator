@@ -19,7 +19,6 @@ import {
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
 import { AGENT_GONE_REASON } from "@plannotator/core/review-agent-gone-words";
-import { describeSendFailure } from "@plannotator/ui/utils/sendFailure";
 
 // Vite-only virtual module (`?worker&inline`): stubbed like App.panelView.test.tsx.
 mock.module("./workerPool", () => ({
@@ -323,7 +322,7 @@ describe.if(hasDom)("Send to an agent that is gone", () => {
     expect(feedbackPosts[0]!.annotations?.some((a) => a.scope === "general" && a.text === "Split this into two PRs.")).toBe(true);
     expect(document.querySelector("[data-completion-state]")).toBeNull();
     expect(failureToast()!.textContent).toContain("Feedback not sent");
-    expect(failureToast()!.textContent).toContain(describeSendFailure({ kind: "agent-gone" }));
+    expect(failureToast()!.textContent).toContain(AGENT_GONE_REASON);
     // Retry cannot reach a gone agent: not offered.
     expect(Array.from(failureToast()!.querySelectorAll("button")).some((b) => b.textContent === "Retry")).toBe(false);
     // The comment is still the reviewer's: still on the page, still sendable.

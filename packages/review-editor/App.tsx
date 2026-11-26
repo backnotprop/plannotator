@@ -61,7 +61,7 @@ import { adoptServerSession, currentServerSession, noteServerSessionMismatch, wi
 import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
 import { assertSendOk, sendErrorAfterAgentGone, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
-import { dismissAgentGoneNotice, noteSendFailureForAgentGone, showAgentGoneNotice } from './components/AgentGoneNotice';
+import { agentGoneReasonFor, dismissAgentGoneNotice, noteSendFailureForAgentGone, showAgentGoneNotice } from './components/AgentGoneNotice';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
@@ -4978,6 +4978,7 @@ const ReviewApp: React.FC = () => {
       showSendFailureToast({
         what: 'feedback',
         error: sendError,
+        reason: agentGoneReasonFor(sendError),
         onRetry: () => { void retryDecisionRef.current.sendFeedback(); },
         // What the Copy feedback button copies, read when clicked: what
         // Retry would send now.
@@ -5047,6 +5048,7 @@ const ReviewApp: React.FC = () => {
       showSendFailureToast({
         what: 'approval',
         error: sendError,
+        reason: agentGoneReasonFor(sendError),
         onRetry: () => { void retryDecisionRef.current.approve(options); },
         // The approval's text as Retry would send it now; a bare approval
         // has none to copy.

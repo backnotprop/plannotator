@@ -8,15 +8,6 @@
  * (`SendFailureToast`).
  */
 
-import {
-  AGENT_AWAY_CODE,
-  AGENT_AWAY_REASON,
-  AGENT_GONE_CODE,
-  AGENT_GONE_REASON,
-  NO_SESSION_CODE,
-  NO_SESSION_REASON,
-} from '@plannotator/core/review-agent-gone-words';
-
 /** The `code` every plan, annotate and review server (Bun and Pi) puts on its
  *  409 for a decision that arrives after the review was decided or closed
  *  (also `packages/shared/host-control.ts`). */
@@ -27,11 +18,17 @@ export const PLAN_REVISED_CODE = 'plan_revised';
 
 /** The codes a code review server (Bun and Pi) refuses a decision with when
  *  nobody can receive it: nothing was sent and the draft is kept
- *  (packages/shared/review-agent-gone.ts). `agent_gone`: the agent quit (410).
+ *  (packages/shared/review-agent-gone.ts, whose literals live in
+ *  packages/core/review-agent-gone-words.ts; this package ships against the
+ *  published core, so it keeps its own copies, pinned by
+ *  sendFailure.agentGone.test.ts). `agent_gone`: the agent quit (410).
  *  `agent_away`: no session right now, one may come back (409, Pi between
  *  sessions). `no_session`: the review never had a session to send to (410).
- *  The codes and the reasons below live in packages/core/review-agent-gone-words.ts. */
-export { AGENT_AWAY_CODE, AGENT_GONE_CODE, NO_SESSION_CODE };
+ *  The words a person reads for these come from the review page
+ *  (packages/review-editor/components/AgentGoneNotice.tsx `agentGoneReasonFor`). */
+export const AGENT_GONE_CODE = 'agent_gone';
+export const AGENT_AWAY_CODE = 'agent_away';
+export const NO_SESSION_CODE = 'no_session';
 
 export type SendFailure =
   /** fetch rejected: the server is gone (stopped, crashed) or unreachable. */
@@ -116,12 +113,13 @@ export function describeSendFailure(failure: SendFailure): string {
       return `Plannotator answered with an error (${failure.status}).`;
     case 'decided':
       return 'This review was already decided, in another window or because its session ended.';
+    // The code review page passes its own reason for these
+    // (`showSendFailureToast({ reason })`); anywhere else, the plain refusal.
     case 'agent-gone':
-      return AGENT_GONE_REASON;
-    case 'agent-away':
-      return AGENT_AWAY_REASON;
     case 'no-session':
-      return NO_SESSION_REASON;
+      return 'Plannotator answered with an error (410).';
+    case 'agent-away':
+      return 'Plannotator answered with an error (409).';
     default:
       return 'Something went wrong before it was sent.';
   }

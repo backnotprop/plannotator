@@ -7,14 +7,17 @@
  * instead of saying the agent is gone.
  */
 import { describe, expect, test } from 'bun:test';
-// The codes both review servers answer with (packages/shared/review-agent-gone.ts
-// re-exports them from packages/core/review-agent-gone-words.ts).
+// The servers' codes, from the module both servers use. @plannotator/ui ships
+// against the published core, so it keeps its own copies; this pins them.
 import {
   AGENT_AWAY_CODE as SERVER_AGENT_AWAY_CODE,
   AGENT_GONE_CODE as SERVER_AGENT_GONE_CODE,
   NO_SESSION_CODE as SERVER_NO_SESSION_CODE,
 } from '../../shared/review-agent-gone';
 import {
+  AGENT_AWAY_CODE,
+  AGENT_GONE_CODE,
+  NO_SESSION_CODE,
   assertSendOk,
   canRetrySend,
   DecisionSendError,
@@ -38,7 +41,7 @@ describe('agent gone', () => {
     const failure = await failureFor(Response.json({ error: 'gone', code: SERVER_AGENT_GONE_CODE }, { status: 410 }));
     expect(failure).toEqual({ kind: 'agent-gone' });
     expect(canRetrySend(failure!)).toBe(false);
-    expect(describeSendFailure(failure!)).toContain('gone');
+    // Not an outage: the server answered.
     expect(describeSendFailure(failure!)).not.toBe(describeSendFailure({ kind: 'unreachable' }));
   });
 
@@ -47,7 +50,6 @@ describe('agent gone', () => {
     const failure = await failureFor(Response.json({ error: 'away', code: SERVER_AGENT_AWAY_CODE }, { status: 409 }));
     expect(failure).toEqual({ kind: 'agent-away' });
     expect(canRetrySend(failure!)).toBe(true);
-    expect(describeSendFailure(failure!)).not.toContain('gone');
   });
 
   // L1: OpenCode with no session never had an agent to lose.
@@ -55,7 +57,10 @@ describe('agent gone', () => {
     const failure = await failureFor(Response.json({ error: 'none', code: SERVER_NO_SESSION_CODE }, { status: 410 }));
     expect(failure).toEqual({ kind: 'no-session' });
     expect(canRetrySend(failure!)).toBe(false);
-    expect(describeSendFailure(failure!)).not.toContain('gone');
+  });
+
+  test("the page's codes are the servers' codes", () => {
+    expect([AGENT_GONE_CODE, AGENT_AWAY_CODE, NO_SESSION_CODE]).toEqual([SERVER_AGENT_GONE_CODE, SERVER_AGENT_AWAY_CODE, SERVER_NO_SESSION_CODE]);
   });
 
   test('any other 410 stays a plain rejection', async () => {

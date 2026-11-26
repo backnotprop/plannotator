@@ -1,5 +1,5 @@
 import { toast } from 'sonner';
-import { AGENT_GONE_REASON } from '@plannotator/core/review-agent-gone-words';
+import { AGENT_AWAY_REASON, AGENT_GONE_REASON, NO_SESSION_REASON } from '@plannotator/core/review-agent-gone-words';
 import { CopyFeedbackButton } from '@plannotator/ui/components/SendFailureToast';
 import { sendFailureOf } from '@plannotator/ui/utils/sendFailure';
 
@@ -49,4 +49,18 @@ export function dismissAgentGoneNotice(): void {
 /** A Send failed: when it failed because the agent is gone, its own toast says so. */
 export function noteSendFailureForAgentGone(error: unknown): void {
   if (sendFailureOf(error).kind === 'agent-gone') dismissAgentGoneNotice();
+}
+
+/** The reason a failed Send shows when nobody could receive it (packages/core/review-agent-gone-words.ts). */
+export function agentGoneReasonFor(error: unknown): string | undefined {
+  switch (sendFailureOf(error).kind) {
+    case 'agent-gone':
+      return AGENT_GONE_REASON;
+    case 'agent-away':
+      return AGENT_AWAY_REASON;
+    case 'no-session':
+      return NO_SESSION_REASON;
+    default:
+      return undefined;
+  }
 }

@@ -7,15 +7,16 @@
  * the agent is back; a Send refused because the agent is gone leaves two
  * toasts saying the same thing, or a Send that failed for another reason
  * takes down the only line saying nobody is listening; Copy feedback copies
- * something other than what Send would send.
+ * something other than what Send would send; a refused Send's toast says
+ * an agent is gone when it never had a session, or gives no reason.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Toaster } from 'sonner';
-import { AGENT_GONE_REASON } from '@plannotator/core/review-agent-gone-words';
+import { AGENT_AWAY_REASON, AGENT_GONE_REASON, NO_SESSION_REASON } from '@plannotator/core/review-agent-gone-words';
 import { DecisionSendError } from '@plannotator/ui/utils/sendFailure';
-import { dismissAgentGoneNotice, noteSendFailureForAgentGone, showAgentGoneNotice } from './AgentGoneNotice';
+import { agentGoneReasonFor, dismissAgentGoneNotice, noteSendFailureForAgentGone, showAgentGoneNotice } from './AgentGoneNotice';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -102,5 +103,14 @@ describe.if(hasDom)('the agent-gone notice', () => {
     await settle();
     expect(written).toEqual([feedback]);
     expect(copy.textContent).toBe('Copied');
+  });
+
+  test("a refused Send's reason: gone, away and no session each say their own; anything else keeps the page's usual reason", () => {
+    expect(agentGoneReasonFor(new DecisionSendError({ kind: 'agent-gone' }))).toBe(AGENT_GONE_REASON);
+    expect(agentGoneReasonFor(new DecisionSendError({ kind: 'agent-away' }))).toBe(AGENT_AWAY_REASON);
+    expect(agentGoneReasonFor(new DecisionSendError({ kind: 'no-session' }))).toBe(NO_SESSION_REASON);
+    expect(AGENT_AWAY_REASON).not.toBe(AGENT_GONE_REASON);
+    expect(NO_SESSION_REASON).not.toBe(AGENT_GONE_REASON);
+    expect(agentGoneReasonFor(new DecisionSendError({ kind: 'unreachable' }))).toBeUndefined();
   });
 });

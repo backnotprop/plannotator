@@ -87,8 +87,11 @@ export function showSendFailureToast(options: {
   /** The text Retry would send now, as the page's Copy feedback copies it.
    *  Omitted when the decision carries no text (a bare approval). */
   copyText?: () => string | undefined;
+  /** The sentence under the title, when the page has its own for this failure
+   *  (code review's agent-gone reasons); else `describeSendFailure`. */
+  reason?: string;
 }): void {
-  const { what, error, onRetry, copyText } = options;
+  const { what, error, onRetry, copyText, reason } = options;
   const failure = sendFailureOf(error);
   dismissSendFailureToast(); // replaced, never stacked
   const id = `plannotator-send-failure-${++failures}`;
@@ -99,7 +102,7 @@ export function showSendFailureToast(options: {
   toast.error(what === 'approval' ? 'Approval not sent' : 'Feedback not sent', {
     id,
     onDismiss: forget,
-    description: describeSendFailure(failure),
+    description: reason ?? describeSendFailure(failure),
     duration: Infinity,
     // It stays up, so it sits at the bottom, clear of the header's decision
     // control and the annotation panel the reviewer may want to read.
