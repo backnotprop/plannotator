@@ -77,7 +77,7 @@ import { saveOverConflicts } from '../pickConflict';
 import { usePageLeave } from '../pageLeave';
 import { useReplyHasWords, useReplyTextStore } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
-import { conflictText, DRAFT_OFFER_TEXT, DraftHead, DraftFootNote, DraftOffer, DraftStamp, unsentWords } from './DraftLabel';
+import { conflictText, DRAFT_OFFER_TEXT, DraftFootNote, DraftStamp, unsentWords } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 import { debugNote } from '../debugLog';
@@ -87,7 +87,7 @@ import { T3WaitLine } from './T3WaitLine';
 import { TakeBackButton, UndeliveredBand, UndeliveredText } from './Undelivered';
 import { useThreadTakeBack } from '../thread/useThreadTakeBack';
 import { useSendNow } from '../useSendNow';
-import { TakeBackLine, TakeBackNote } from '../parts/TakeBackLines';
+import { TakeBackLine } from '../parts/TakeBackLines';
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model';
 import { authorWithLabel, labelOf, useSessionLabels } from '../sessionLabels';
@@ -104,7 +104,7 @@ import { useDrawSend, useSendsDrawn } from '../data/actions/sendDraw';
 import { SendingReply } from '../parts/SendingReply';
 import { pickComposerMode } from '../fullScreenComposer';
 import { ReuseContext, sourceOf, type ReuseApi } from '../reuse';
-import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
+import { attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
 import {
   AskerEndedNote,
   CLOSED_ROUTE,
@@ -123,11 +123,9 @@ import {
 import { ReaskNote } from './ReaskNote';
 import { CombineLeftNote, ShipNote, TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
-import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
+import { StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
-import { VoiceMicButton, VoiceStatusLine } from './VoiceMic';
-import { ReplySummary } from './ReplySummary';
-import { ReplyRow } from './ReplyRow';
+import { ReplyBox } from './reply/ReplyBox';
 import { sendFailure } from '../sendFailure';
 import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
@@ -141,7 +139,7 @@ import { useReplyLaunchBlock } from '../data/replyLaunch';
 import { coverVoice, useThreadVoice } from '../thread/useThreadVoice';
 import { useLateVoice } from '../thread/useLateVoice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
-import { ReplyAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
+import { draftAnswerWords, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesPending, actionSavesSettled } from '../actionSaves';
 import { failedCommentWrite, watchCommentWrites, withCommentWrites } from '../commentSaves';
 import { createPickQueue, keepSavedQuestions } from '../pickQueue';
@@ -167,7 +165,7 @@ import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inb
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { type ActionMark } from './ActionChecklist';
 import { Tip } from './Tip';
-import { ReplyQuoteLine, SentQuoteLine } from './ReplyQuote';
+import { SentQuoteLine } from './ReplyQuote';
 import { arrowReply, quoteToSend, selectedWordsIn } from '../replyQuote';
 import { useReplyQuote } from '../useReplyQuote';
 import { useTileArrows } from '../useTileArrows';
@@ -202,16 +200,15 @@ import { sentActionsOf } from '../thread/sentActions';
 import { leftoverWords } from '../thread/leftover';
 import { answersItself, replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, isScriptPost, messageAuthorName, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, SCRIPT_AUTHOR_NAME, spanWords, stillHidden, threadAskerName, type FoldState } from '../thread/helpers';
-import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
+import { NO_SKILLS_HINT_MS, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
 import { ThreadBarTitle } from '../thread/ThreadBarTitle';
 import { SkipChip } from '../parts/SkipChip';
 import { namedTagOptions, useThreadSessions } from '../thread/useThreadSessions';
 import { measureOpenPlaces } from '../thread/openPlaces';
 import { takeMergedFiles as takeMergedFilesInto, takeOffered, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
-import { caretToEndOnFirstFocus, focusReplyEnd as focusReplyEndOf } from '../thread/replyCaret';
+import { focusReplyEnd as focusReplyEndOf } from '../thread/replyCaret';
 import { readFeedbackTexts } from '../data/queries/feedbackTexts';
-import { ReplyTextField } from '../parts/ReplyTextField';
 import { ReviewContextLine } from '../thread/ReviewContextLine';
 import { replyWordsWithMentions, useMentionBoxOpener } from '../threadMentions';
 import { labelledAuthorName } from '../parts/AuthorName';
@@ -5349,209 +5346,103 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             }}
           />
         ) : box.open ? (
-          <>
-            {/* Above the box (approval "inbox-reply-recipient"): after a conflict its line and choice, and on a phone the
-                Draft line (below). On a computer nothing else. */}
-            {offerShown && <DraftOffer onRestore={restoreDraft} />}
-            {replyDraft.conflict !== null && (
-              <DraftHead
-                conflict={{
-                  id: conflictId,
-                  text: conflictText(conflictSentElsewhere),
-                  onKeepMine: () => {
-                    const mine = replyText.get();
-                    replyDraft.keepMine(mine, replyFiles.draftFiles(mine));
-                    announce('Your words are saved.');
-                    requestAnimationFrame(() => textRef.current?.focus());
-                  },
-                  onDiscard: discardMine,
-                }}
-              />
-            )}
-            <TakeBackNote state={takeBack.state} />
-            {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
-            {/* On a phone "Draft  Saved 4:51 PM  Discard" sits above the box, at the right, once something is saved.
-                While the live-session choice stands in for the box's Send it goes, as a computer's bin does, so
-                Discard cannot close the box under the choice. */}
-            {phone && !(route.open && asking) && (
-              <div className="ib-draft-above" data-draft-above="" ref={draftAboveRef}>
-                {draftStamp}
-              </div>
-            )}
-            <div
-              className="ib-rbox"
-              data-drop-over={boxDrop.over ? '' : undefined}
-              {...boxDrop.handlers}
-              // A press beside the text (the row of chips under it) puts the caret in the reply.
-              onMouseDown={(event) => focusReplyFromBox(event, textRef.current)}
-              // A box put back holding words has its caret at their start: its first focus by a key lands after them.
-              onFocus={(event) => caretToEndOnFirstFocus(event.target, textRef.current)}
-              // A paste that carries files (a screenshot, a copied image) attaches them; text pastes as text.
-              onPaste={(event) => {
-                if (replyFiles.paste(event)) setError(null);
-              }}
-            >
-              {/* The one visible way to close for a pointer or a phone (Esc does the same): it keeps the words and files as
-                  the draft, as Cancel did; an empty box leaves none. */}
-              <Tip content="Close (Esc). Your words stay as a draft.">
-                <button type="button" className="ib-rclose" aria-label="Close the reply box (your draft is kept)" data-reply-close="" onClick={() => setAside()}>
-                  <Icon name="chevD" size={phone ? 20 : 16} />
-                </button>
-              </Tip>
-              {/* The message the words answer (approval "inbox-reply-quote"): one quiet line over them, × drops it. */}
-              {quote && quotedMessage && <ReplyQuoteLine message={quotedMessage} words={quote.words} phone={phone} onRemove={removeQuote} />}
-              {/* The words, files, answers and actions scroll in one region capped near half the window (decision D1), so
-                  the row with Send under it is always in view however much the reply holds. */}
-              <div className="ib-rscroll" data-reply-scroll="" ref={replyScrollRef}>
-                <ReplyTextField
-                  replyText={replyText}
-                  mentionThread={thread.thread_id}
-                  sendingWords={wordsAway === thread.thread_id}
-                  textareaRef={textRef}
-                  voice={voice}
-                  voiceNoteGlide
-                  ariaLabel={`Reply to ${replyToNames}`}
-                  ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
-                  placeholder="Write a reply. Type / for a skill"
-                  lead={phone ? undefined : rcptPill}
-                  destination="your reply"
-                  skillFilter={skillFilter}
-                  commands={replyCommands}
-                  tags={composerTags}
-                  onChange={(text) => changeReply(text)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                      event.preventDefault();
-                      // The chord is spent here: the thread's own Send key (a window listener) never sees it, whether or not
-                      // the event is cancelable (a synthetic one is not, and `defaultPrevented` would stay false).
-                      event.stopPropagation();
-                      // With the choice open, the shortcut goes to it.
-                      if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
-                      else {
-                        sentByChord.current = true;
-                        void send();
-                      }
-                    } else if (event.key === 'Escape') {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (route.open) routeBack();
-                      else setAside();
-                    }
-                  }}
-                />
-                {replyFiles.files.length > 0 && (
-                  <div className="ib-rfiles" data-reply-files="">
-                    <ComposeFileTiles
-                      files={replyFiles.files}
-                      onRemove={(key) => {
-                        replyFiles.remove(key);
-                        // The × goes with its tile: focus stays in the reply.
-                        textRef.current?.focus();
-                      }}
-                      onPutBack={(key) => replyFiles.putBack(key, textRef.current)}
-                    />
-                  </div>
-                )}
-                {draftAnswers.length > 0 && <ReplyAnswers answers={draftAnswers} onJump={jumpTo} />}
-                {draftActions.length > 0 && <ReplyActions actions={draftActions} onJump={jumpTo} />}
-              </div>
-              {/* A computer: a draft that did not save says so on its own line over the row, in full (a phone says it in
-                  the Draft line above the box). */}
-              {!phone && (stampTooLong || stampFailed) && (
-                <div className="ib-rnote" data-reply-note="">
-                  {draftStamp}
-                </div>
-              )}
-              {/* A phone: what goes with the reply, on one quiet line over the row (who gets it is in the row). */}
-              {phone && (
-                <div className="ib-rline" data-reply-line="" data-empty={replySummaryShown ? undefined : ''}>
-                  <ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList, onList: setCommentsList } : null} />
-                </div>
-              )}
-              <ReplyRow
-                phone={phone}
-                keepOpen={keepOpen}
-                fold={replyFold}
-                onFold={setReplyFold}
-                fitKey={replyFitKey}
-                send={
-                  routeChoiceOpen ? null : (
-                  // No tooltip: a button that says Send needs none, and ⌘↵ is named only to assistive technology
-                  // (approval "inbox-send-no-shortcut-hint").
-                  <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy} aria-keyshortcuts={sendAria}>
-                    {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
-                    {sending && <span className="ib-spin" aria-hidden="true" />}
-                    {/* A phone: the round arrow; the word stays as the button's name. */}
-                    {phone && <Icon name="arrowUp" size={20} className="ib-rsend-i" />}
-                    <span className="ib-rsend-w">Send</span>
-                  </button>
-                  )
+          // The open box (components/reply/ReplyBox.tsx): drawn from what the thread holds; what it does comes back here.
+          <ReplyBox
+            phone={phone}
+            thread={thread}
+            offerShown={offerShown}
+            onRestoreDraft={restoreDraft}
+            conflict={
+              replyDraft.conflict === null
+                ? null
+                : {
+                    id: conflictId,
+                    text: conflictText(conflictSentElsewhere),
+                    onKeepMine: () => {
+                      const mine = replyText.get();
+                      replyDraft.keepMine(mine, replyFiles.draftFiles(mine));
+                      announce('Your words are saved.');
+                      requestAnimationFrame(() => textRef.current?.focus());
+                    },
+                    onDiscard: discardMine,
+                  }
+            }
+            takeBack={takeBack.state}
+            staleQuestions={staleQuestions}
+            onJump={jumpTo}
+            draftStamp={draftStamp}
+            draftAboveRef={draftAboveRef}
+            draftNotSaved={stampTooLong || stampFailed}
+            dropOver={boxDrop.over}
+            dropHandlers={boxDrop.handlers}
+            onPaste={(event) => {
+              if (replyFiles.paste(event)) setError(null);
+            }}
+            onClose={setAside}
+            quote={quote}
+            quotedMessage={quotedMessage}
+            onRemoveQuote={removeQuote}
+            scrollRef={replyScrollRef}
+            replyText={replyText}
+            sendingWords={wordsAway === thread.thread_id}
+            textRef={textRef}
+            voice={voice}
+            replyToNames={replyToNames}
+            askerNoteId={showAskerNote ? noteId : null}
+            recipientPill={rcptPill}
+            skillFilter={skillFilter}
+            commands={replyCommands}
+            tags={composerTags}
+            onChange={changeReply}
+            onFieldKeyDown={(event) => {
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                // The chord is spent here: the thread's own Send key (a window listener) never sees it, whether or not
+                // the event is cancelable (a synthetic one is not, and `defaultPrevented` would stay false).
+                event.stopPropagation();
+                // With the choice open, the shortcut goes to it.
+                if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
+                else {
+                  sentByChord.current = true;
+                  void send();
                 }
-                clip={
-                  <AttachFilesButton
-                    className="ib-rclip"
-                    iconSize={phone ? 20 : 16}
-                    phone={phone}
-                    inputData="data-reply-attach"
-                    onFiles={(list) => {
-                      if (phone) replyFiles.attach(list);
-                      else replyFiles.add(list);
-                      setError(null);
-                    }}
-                  />
-                }
-                skills={
-                  <Tip content="Skills (or type / in the reply)">
-                    <button type="button" className="ib-ricon" aria-label="Skills" data-reply-skills="" onClick={openSkillsFromBox}>
-                      <Icon name="cube" size={phone ? 20 : 16} />
-                    </button>
-                  </Tip>
-                }
-                mic={<VoiceMicButton voice={voice} phone={phone} />}
-                status={<VoiceStatusLine voice={voice} phone={phone} />}
-                files={
-                  replyFiles.files.length >= REPLY_FILES_SUMMARY_FROM ? (
-                    <button type="button" className="ib-rchip ib-rfilesn" data-reply-files-count="" aria-label={`${replyFiles.files.length} files attached. Show them`} onClick={showReplyFiles}>
-                      <Icon name="clip" size={13} />
-                      {replyFiles.files.length} files
-                    </button>
-                  ) : null
-                }
-                chips={replyChips}
-                summary={<ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList?.card ? null : commentsList, onList: setCommentsList } : null} />}
-                pill={phone ? rcptPill : null}
-                hint={noSkillsHint ? 'No skills are installed' : null}
-                discard={
-                  // While the live-session choice is open it stands in for Send and the bin, as it did for Send's
-                  // row, so nothing can close the box under it. After a conflict the bin is "Discard mine": the
-                  // other window's draft is never deleted from here.
-                  phone || routeChoiceOpen ? null : replyDraft.conflict !== null ? (
-                    <Tip content="Discard your words; the other window’s draft stays">
-                      <button type="button" className="ib-ricon ib-rdiscard" aria-label="Discard my words" data-reply-discard="" onClick={discardMine}>
-                        <Icon name="trash" size={16} />
-                      </button>
-                    </Tip>
-                  ) : (
-                    <Tip content="Discard this draft">
-                      <button type="button" className="ib-ricon ib-rdiscard" aria-label="Discard draft" data-reply-discard="" onClick={discardReply}>
-                        <Icon name="trash" size={16} />
-                      </button>
-                    </Tip>
-                  )
-                }
-              />
-              {boxDrop.over && (
-                <div className="ib-rdrop" aria-hidden="true" data-box-drop="">
-                  <Icon name="clip" size={18} />
-                  Drop to attach
-                </div>
-              )}
-            </div>
-            <div className="ib-sr" role="status">
-              {skipping ? `${plural(skipIds.size, 'question')} will be skipped when you send.` : ''}
-            </div>
-            {route.open && asking ? routeChoice : lineError && errorLine}
-          </>
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                if (route.open) routeBack();
+                else setAside();
+              }
+            }}
+            files={replyFiles.files}
+            onRemoveFile={replyFiles.remove}
+            onPutBackFile={replyFiles.putBack}
+            onAttachFiles={(list) => {
+              if (phone) replyFiles.attach(list);
+              else replyFiles.add(list);
+              setError(null);
+            }}
+            onShowFiles={showReplyFiles}
+            draftAnswers={draftAnswers}
+            draftActions={draftActions}
+            replySkip={replySkip}
+            dropped={dropped.length}
+            comments={takesAnnotations ? { props: commentsListProps, list: commentsList, onList: setCommentsList } : null}
+            replySummaryShown={replySummaryShown}
+            chips={replyChips}
+            fold={replyFold}
+            onFold={setReplyFold}
+            fitKey={replyFitKey}
+            noSkillsHint={noSkillsHint}
+            routeChoiceOpen={!!routeChoiceOpen}
+            routeChoice={routeChoice}
+            sending={sending}
+            sendRef={sendRef}
+            sendAria={sendAria}
+            onSend={() => void send()}
+            onOpenSkills={openSkillsFromBox}
+            onDiscardDraft={discardReply}
+            errorLine={lineError && errorLine}
+          />
         ) : route.open && asking ? (
           routeChoice
         ) : (

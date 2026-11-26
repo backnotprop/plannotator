@@ -49,6 +49,8 @@ export interface DiffOptions {
   semantic?: boolean;
   /** Power Up: ask the chosen model about the engine's unsure calls (code review's Settings › Semantic diffs; on unless false). */
   powerUp?: boolean;
+  /** How Power Up's notes arrive: all at once, or as each answer comes. */
+  powerUpMotion?: 'stream' | 'still';
 }
 
 /**

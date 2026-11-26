@@ -212,6 +212,7 @@
   "inbox-review-selection-bar.spec.ts": 39,
   "inbox-reviews-on-this-computer.spec.ts": 8,
   "inbox-reviews-open-any-branch.spec.ts": 10,
+  "inbox-reviews-settings.spec.ts": 6,
   "inbox-root-scroll.spec.ts": 12,
   "inbox-routine-editor.spec.ts": 14,
   "inbox-routines-machines.spec.ts": 60,

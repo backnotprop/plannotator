@@ -1232,14 +1232,14 @@ describe("the window's routes: settings, restart, favicon", () => {
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
     try {
       mkdirSync(dataDir, { recursive: true });
-      // What code review saved: these read back under the wire's names, Whole file among them; the font and Hide whitespace are code review's own.
+      // What code review saved: these read back under the wire's names, Whole file among them; Hide whitespace is code review's own, and a font size no build writes reads as never chosen.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ diffOptions: { lineDiffType: "char", tabSize: 4, expandUnchanged: true, hideWhitespace: true, fontSize: "13", diffIndicators: "sideways" } }));
       const server = await start(dataDir);
       const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { diff_options: Record<string, unknown>; diff_style: unknown };
       const onDisk = () => (JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { diffOptions?: Record<string, unknown> }).diffOptions;
       const save = (body: Record<string, unknown>) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
       // A value no build writes reads as never chosen.
-      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4, semantic: null, expand_unchanged: true, power_up: null });
+      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4, semantic: null, expand_unchanged: true, font_family: null, font_size: null, power_up: null, power_up_motion: null });
 
       // Every field is checked, and the refusal names it; nothing is written.
       const refusals: [unknown, string][] = [
@@ -1281,9 +1281,15 @@ describe("the window's routes: settings, restart, favicon", () => {
       const saved = await save({ diff_options: { overflow: "wrap", indicators: "classic", line_numbers: false, background_intensity: "strong", tab_size: 8, semantic: false, expand_unchanged: false, power_up: false } });
       expect(saved.status).toBe(200);
       const answer = (await saved.json()) as { diff_options: Record<string, unknown> };
-      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8, semantic: false, expand_unchanged: false, power_up: false });
+      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8, semantic: false, expand_unchanged: false, font_family: null, font_size: null, power_up: false, power_up_motion: null });
       expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 8, expandUnchanged: false, hideWhitespace: true, fontSize: "13", diffIndicators: "classic", overflow: "wrap", showLineNumbers: false, lineBgIntensity: "strong", semantic: false, powerUp: false });
       expect((await read()).diff_options).toEqual(answer.diff_options);
+
+      // Settings → Reviews' code font, its size, Power Up and its motion save under code review's names.
+      const reviews = await save({ diff_options: { font_family: "Hack", font_size: "15px", power_up: false, power_up_motion: "stream" } });
+      expect(reviews.status).toBe(200);
+      expect(((await reviews.json()) as { diff_options: Record<string, unknown> }).diff_options).toMatchObject({ font_family: "Hack", font_size: "15px", power_up: false, power_up_motion: "stream" });
+      expect(onDisk()).toMatchObject({ fontFamily: "Hack", fontSize: "15px", powerUp: false, powerUpMotion: "stream" });
 
       // `diff_style` alone (pages from before) sets the same field and is answered both ways.
       const alias = await save({ diff_style: "unified" });
