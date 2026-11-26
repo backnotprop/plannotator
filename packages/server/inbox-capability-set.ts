@@ -115,10 +115,15 @@ export interface CapabilitySetHost {
   now?: () => number;
 }
 
-/** The set switches a settings save names: its switch keys, and `experimental`'s. */
+/**
+ * The set switches a settings save names: its switch keys, and `experimental`'s. Decision mode has its own key
+ * (`decision_mode`, its Capabilities row) and its old place (`experimental.decision_mode`, an older window's switch).
+ */
 export function capabilitySetKeysIn(body: Record<string, unknown>): InboxCapabilitySetKey[] {
   const experimental = plain(body.experimental) ? body.experimental : {};
-  return INBOX_CAPABILITY_SET_KEYS.filter((key) => (key === "decision_mode" || key === "grid" ? experimental[key] !== undefined : body[key] !== undefined));
+  return INBOX_CAPABILITY_SET_KEYS.filter((key) =>
+    key === "grid" ? experimental[key] !== undefined : key === "decision_mode" ? body[key] !== undefined || experimental[key] !== undefined : body[key] !== undefined,
+  );
 }
 
 export function createCapabilitySet(host: CapabilitySetHost) {

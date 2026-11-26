@@ -109,6 +109,7 @@ import {
   type InboxTag,
   inboxAskingMessage,
   inboxDefaultSkip,
+  inboxScriptAuthor,
   inboxSessionlessSend,
   inboxWordsDefault,
   inboxRemovedNow,
@@ -1545,15 +1546,9 @@ export class InboxStore {
   private loadArtifactPins(): void {
     const before = this.artifactPinList;
     const read = readInboxArtifactPins(this.dir);
-    const keysOf = new Map<string, Set<string>>();
-    const kept = read.filter((pin) => {
-      if (!this.isThreadRoot(pin.thread_id)) return false;
-      let keys = keysOf.get(pin.thread_id);
-      if (!keys) keysOf.set(pin.thread_id, (keys = new Set(this.threadArtifactRefs(pin.thread_id).map((ref) => ref.key))));
-      return keys.has(pin.key);
-    });
+    const kept = this.keyedArtifactPins(read, null);
     this.artifactPinList = kept;
-    if (kept.length !== read.length) {
+    if (kept.length !== read.length || kept.some((pin, index) => pin !== read[index])) {
       try {
         writeInboxArtifactPins(this.dir, kept);
       } catch {
@@ -1561,6 +1556,54 @@ export class InboxStore {
       }
     }
     if (before.some((pin) => !kept.some((k) => k.key === pin.key))) this.artifactPinsChanged();
+  }
+
+  /** A thread's artifacts by every id a pin may name: each key, and an attached twin's id folded into it (`also`). */
+  private artifactKeysOf(threadId: string): Map<string, string> {
+    const keys = new Map<string, string>();
+    for (const ref of this.threadArtifactRefs(threadId)) {
+      keys.set(ref.key, ref.key);
+      for (const id of ref.also) if (!keys.has(id)) keys.set(id, ref.key);
+    }
+    return keys;
+  }
+
+  /**
+   * The pins under each artifact's key now: a film or picture pinned while only its attached copy was an artifact
+   * keeps its pin once a read captured the copy its text shows (the two fold into one artifact under the shown
+   * record's id). Each artifact once. `only` null (a load): every thread, and a pin whose thread or artifact is gone is
+   * dropped; a thread id: that thread's pins moved, nothing dropped.
+   */
+  private keyedArtifactPins(pins: readonly InboxArtifactPin[], only: string | null): InboxArtifactPin[] {
+    const keysOf = new Map<string, Map<string, string>>();
+    const seen = new Set<string>();
+    const out: InboxArtifactPin[] = [];
+    for (const pin of pins) {
+      const mine = only === null || pin.thread_id === only;
+      if (only === null && !this.isThreadRoot(pin.thread_id)) continue;
+      let keys = mine ? keysOf.get(pin.thread_id) : undefined;
+      if (mine && !keys) keysOf.set(pin.thread_id, (keys = this.artifactKeysOf(pin.thread_id)));
+      const key = keys?.get(pin.key) ?? (only === null ? undefined : pin.key);
+      if (key === undefined || seen.has(key)) continue;
+      seen.add(key);
+      out.push(key === pin.key ? pin : { ...pin, key });
+    }
+    return out;
+  }
+
+  /** After a capture added shown records to a thread: its pins under an attached twin's id move to the shown record's. */
+  private rekeyArtifactPins(threadId: string): void {
+    const before = this.artifactPinList;
+    if (!before.some((pin) => pin.thread_id === threadId)) return;
+    const next = this.keyedArtifactPins(before, threadId);
+    if (next.length === before.length && next.every((pin, index) => pin === before[index])) return;
+    try {
+      writeInboxArtifactPins(this.dir, next);
+    } catch {
+      // Best effort: the next load moves it again.
+    }
+    this.artifactPinList = next;
+    this.artifactPinsChanged();
   }
 
   /** Every pinned artifact, in pin order (the oldest pin first). */
@@ -1575,19 +1618,25 @@ export class InboxStore {
 
   /**
    * Pin an artifact of a thread, or unpin it. `key` is the artifact's key
-   * (an attachment id, or `guide:<message id>`) and must be one of the
-   * thread's artifacts. Pinning a pinned artifact, or unpinning one that is
-   * not, changes nothing. Writes no store line.
+   * (an attachment id, `guide:<message id>` or `html:<message id>:<hash>`) and must be one of the
+   * thread's artifacts (an attached record folded into the shown copy of the
+   * same file names that artifact: the pin is kept under its key). Pinning a
+   * pinned artifact, or unpinning one that is not, changes nothing. Writes no store line.
    */
   setArtifactPinned(threadId: string, key: unknown, pinned: boolean): readonly InboxArtifactPin[] {
-    if (!isInboxArtifactKey(key)) throw new InboxError("validation_error", "key: an attachment id (att_) or guide:<message id>.", { field: "key" });
+    if (!isInboxArtifactKey(key)) throw new InboxError("validation_error", "key: an attachment id (att_), guide:<message id> or html:<message id>:<hash>.", { field: "key" });
     if (!this.isThreadRoot(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const has = this.artifactPinList.some((pin) => pin.key === key);
+    // An attached twin's id (a window that read the thread before its shown copy was captured) names the one artifact.
+    const known = this.artifactKeysOf(threadId).get(key);
+    const named = known ?? key;
+    const has = this.artifactPinList.some((pin) => pin.key === named || pin.key === key);
     if (has === pinned) return this.artifactPinList;
-    if (pinned && !this.threadArtifactRefs(threadId).some((ref) => ref.key === key)) {
+    if (pinned && known === undefined) {
       throw new InboxError("artifact_not_found", `No artifact ${key} in thread ${threadId}.`);
     }
-    const next = pinned ? [...this.artifactPinList, { key, thread_id: threadId, pinned_at: this.now().toISOString() }] : this.artifactPinList.filter((pin) => pin.key !== key);
+    const next = pinned
+      ? [...this.artifactPinList, { key: named, thread_id: threadId, pinned_at: this.now().toISOString() }]
+      : this.artifactPinList.filter((pin) => pin.key !== named && pin.key !== key);
     writeInboxArtifactPins(this.dir, next);
     this.artifactPinList = next;
     this.artifactPinsChanged();
@@ -2631,7 +2680,9 @@ export class InboxStore {
       ...(messages.filter((m) => m.guide != null).at(-1)?.guide?.walkthrough ? { guide_walkthrough: true } : {}),
       last_agent_at: lastAgentAt,
       ...(root.started_by_person && root.to ? { addressee: { host: root.to.host, session: root.to.session } } : {}),
-      ...(participants.length > 1 ? { participants } : {}),
+      // One session too when a script's post started the thread (`inboxScriptAuthor`; it has no session of its own):
+      // the window draws that session, not the script, once it took the thread over (packages/inbox/scriptAuthor.ts).
+      ...(participants.length > 1 || (participants.length === 1 && inboxScriptAuthor(root.author)) ? { participants } : {}),
       ...(participants.length > 1 && lastAgent?.author.kind === "agent" ? { last_agent: { host: lastAgent.author.host, ...(lastAgent.author.name ? { name: lastAgent.author.name } : {}) } } : {}),
       // What the Stopped / Holds up badge holds (approval "inbox-row-badges"): the window's hover card.
       ...(waits.length > 0 ? { waits } : {}),
@@ -2858,6 +2909,8 @@ export class InboxStore {
         at: deliveredAt,
         host: author?.host ?? null,
         name: author?.name ?? null,
+        // A script's post (no session, host or name): the window names it "Script" (packages/inbox/scriptAuthor.ts).
+        ...(inboxScriptAuthor(author) ? { script: true as const } : {}),
         ...(decision.state === "delivered" && sent?.read_by ? { read_by: sent.read_by } : {}),
         ...(decision.reason === "ended" && askingAuthor ? { asking: { host: askingAuthor.host ?? null, name: askingAuthor.name ?? null } } : {}),
         ...waitWire(decision),
@@ -2869,7 +2922,7 @@ export class InboxStore {
     const target = lastReal;
     const ack = target.ack;
     if (target.author.kind !== "agent" || !ack || ack.not_sent) return null;
-    const base = { kind: "ack" as const, message_id: target.id, host: target.author.host ?? null, name: target.author.name ?? null, send_now: false };
+    const base = { kind: "ack" as const, message_id: target.id, host: target.author.host ?? null, name: target.author.name ?? null, send_now: false, ...(inboxScriptAuthor(target.author) ? { script: true as const } : {}) };
     const deliveredAt = this.ackDeliveredAt(ack);
     const note = ack.note_id ? this.messages.get(ack.note_id) : undefined;
     if (deliveredAt) {
@@ -3027,6 +3080,8 @@ export class InboxStore {
             .flatMap((other) => other.choices.flatMap((c) => (c.image ? [c.image.src] : []))),
         );
         const images = (message.inline_images ?? [])
+          // Pictures only: a sound or video the text plays is a file of the thread too, never a card's picture.
+          .filter((image) => image.kind === "image")
           .filter((image) => !otherChoices.has(image.ref) || inBlock(image.ref))
           .sort((a, b) => Number(inBlock(b.ref)) - Number(inBlock(a.ref)));
         candidates.push({
@@ -6258,6 +6313,7 @@ export class InboxStore {
     }
     const next: InboxMessage = { ...message, inline_images: merged };
     this.appendMessage(next, this.stamp());
+    this.rekeyArtifactPins(next.thread_id);
     return next;
   }
 

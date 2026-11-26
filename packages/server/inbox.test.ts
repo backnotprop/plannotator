@@ -464,7 +464,8 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
   test("send_message with question blocks, pick, Send, read_thread returns the answer", async () => {
     const root = tempRoot();
     const project = gitProject(root);
-    const server = await start(join(root, "data"));
+    // The default tool list: the switches decided here, never by a config.json an earlier file in this process left on.
+    const server = await start(join(root, "data"), { board: false, steps: false, scheduled: false });
     const client = await mcpClient(server);
 
     expect(client.getInstructions()).toBe(INBOX_MCP_INSTRUCTIONS);
@@ -1300,6 +1301,42 @@ describe("the window's routes: settings, restart, favicon", () => {
       const cross = await post(server, "/api/inbox/settings", { diff_options: { overflow: "scroll" } }, { Origin: "https://evil.example" });
       expect(cross.status).toBe(403);
       expect(onDisk()?.overflow).toBe("wrap");
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  test("code review's \"Semantic changes\" switch (`review_analysis`) reads and writes config.json `reviewAnalysis.semanticDiff`, keeping Call flow", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      // What code review saved: the switch off, Call flow on.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ reviewAnalysis: { semanticDiff: false, callFlow: true } }));
+      const server = await start(dataDir);
+      const read = async () => ((await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { review_analysis: unknown }).review_analysis;
+      const onDisk = () => (JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { reviewAnalysis?: Record<string, unknown> }).reviewAnalysis;
+      const save = (body: Record<string, unknown>) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
+      // The window reads code review's choice, so off there is off here on any address.
+      expect(await read()).toEqual({ semantic_diff: false });
+
+      // Only the switch, as a boolean; Call flow is code review's to turn on. Nothing is written.
+      for (const [bad, field] of [[true, "review_analysis"], [{}, "review_analysis.semantic_diff"], [{ semantic_diff: "on" }, "review_analysis.semantic_diff"], [{ call_flow: false }, "review_analysis.call_flow"]] as const) {
+        const refused = await save({ review_analysis: bad });
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).field).toBe(field);
+      }
+      expect(onDisk()).toEqual({ semanticDiff: false, callFlow: true });
+
+      // Turned on in the Inbox: config.json says so, and Call flow stays.
+      const saved = await save({ review_analysis: { semantic_diff: true } });
+      expect(saved.status).toBe(200);
+      expect(((await saved.json()) as { review_analysis: unknown }).review_analysis).toEqual({ semantic_diff: true });
+      expect(onDisk()).toEqual({ semanticDiff: true, callFlow: true });
+      expect(await read()).toEqual({ semantic_diff: true });
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

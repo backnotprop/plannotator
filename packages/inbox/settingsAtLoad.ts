@@ -1,10 +1,13 @@
 import { inboxApi, type SettingsModel } from './api';
+import { waitForReviewAnalysis } from './reviewAnalysis';
 
 let atLoad: Promise<SettingsModel> | null = null;
 
 export function readSettingsAtLoad(): void {
   atLoad = inboxApi.settings();
   atLoad.catch(() => {});
+  // Readers wait for its "Semantic changes" switch (reviewAnalysis.ts).
+  waitForReviewAnalysis(atLoad);
 }
 
 export function settingsReadAtLoad(): boolean {

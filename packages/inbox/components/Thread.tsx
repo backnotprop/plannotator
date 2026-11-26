@@ -38,7 +38,7 @@ import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, pa
 import { PrototypeWindow, openingOption, type PrototypeOption } from './PrototypeWindow';
 import { prototypeNames, questionPrototypePages } from '../prototypes';
 import { artifactKey, artifactOfFile, newestViewableFile, openArtifactKey, threadArtifacts } from '../artifacts';
-import { ArtifactsView } from './ArtifactsView';
+import { ArtifactsView, HtmlArtifactOpen } from './ArtifactsView';
 import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
 import { threadLinks } from '../threadLinks';
 import { useDefaultRefHost } from '../defaultRefHost';
@@ -73,7 +73,8 @@ import { clearLateVoiceMiss, LATE_VOICE_MISSED, useLateVoiceMiss } from '../late
 import { replyBoxSetAside } from '../floaters/model';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
-import { conflictRevision, onPickConflict } from '../pickConflict';
+import { saveOverConflicts } from '../pickConflict';
+import { usePageLeave } from '../pageLeave';
 import { useReplyHasWords, useReplyTextStore } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DRAFT_OFFER_TEXT, DraftFootNote, DraftStamp, unsentWords } from './DraftLabel';
@@ -198,7 +199,7 @@ import { useKeptScroll } from '../thread/keptScroll';
 import { sentActionsOf } from '../thread/sentActions';
 import { leftoverWords } from '../thread/leftover';
 import { answersItself, replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
-import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
+import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, isScriptPost, messageAuthorName, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, SCRIPT_AUTHOR_NAME, spanWords, stillHidden, threadAskerName, type FoldState } from '../thread/helpers';
 import { NO_SKILLS_HINT_MS, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
 import { ThreadBarTitle } from '../thread/ThreadBarTitle';
@@ -240,7 +241,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const startedTo = root.started_by_person && root.to ? root.to : null;
   const cloudName = [...thread.messages].reverse().find((m) => m.cloud_wake)?.cloud_wake?.name ?? null;
   const addresseeName = (host: string) => (isInboxCloudHost(host) && cloudName ? cloudName : hostName(host));
-  const asker = startedTo ? addresseeName(startedTo.host) : agentName(root.author);
+  const asker = startedTo ? addresseeName(startedTo.host) : threadAskerName(thread.messages);
   // Launch: the person started this agent from New message, or a reply started a new session (packages/server/inbox-launch.ts).
   const launchedAt = [...thread.messages].reverse().find((m) => !!m.launch) ?? root;
   const launched = launchedAt.launch ?? null;
@@ -297,7 +298,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Whom a reply to `message` goes to, named: a second agent by its own name, the thread's first agent as `asker`
   // (so a thread with one agent reads as it always did). Handoff "multi-agent-thread-model", option A.
   const firstAgent = startedTo ?? (root.author.kind === 'agent' ? root.author : null);
-  const recipientName = (message: InboxMessageWire | null | undefined) => (isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker);
+  const recipientName = (message: InboxMessageWire | null | undefined) => (isScriptPost(message) ? SCRIPT_AUTHOR_NAME : isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker);
   const agentMessages = thread.messages.filter((m) => m.author.kind === 'agent');
   const lastAgent = agentMessages[agentMessages.length - 1] ?? root;
   // The foot's 👍 Looks good (design record "inbox-acknowledge"): on the agent's latest message, while no question waits.
@@ -1250,7 +1251,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const messageCommentName = (record: InboxAnnotationRecord) => {
     const message = thread.messages.find((m) => m.id === record.message_id);
     if (message?.author.kind === 'person') return `${OWN_MESSAGE_COMMENT_ROW} ${whenTime(record.message?.at ?? message.created_at)}`;
-    const who = message ? agentName(message.author) : 'Agent';
+    const who = message ? messageAuthorName(message) : 'Agent';
     return `${who}'s message, ${whenTime(record.message?.at ?? message?.created_at ?? '')}`;
   };
   const saveMessageComment = async (messageId: string, annotation: Annotation): Promise<boolean> => {
@@ -1813,7 +1814,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const first = added[0]!;
     const asks = added.some((m) => (m.questions ?? []).some((q) => q.state === 'open'));
     announce(
-      added.length === 1 ? `New message from ${agentName(first.author)}${asks ? ', with a question' : ''}` : `${added.length} new messages${asks ? ', with a question' : ''}`,
+      added.length === 1 ? `New message from ${messageAuthorName(first)}${asks ? ', with a question' : ''}` : `${added.length} new messages${asks ? ', with a question' : ''}`,
     );
     // Room a fold step borrowed keeps only its part still in view under the arrival, so following it ends on the thread, not in blank.
     shrinkRoom();
@@ -2390,29 +2391,23 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       const statesBefore = new Map((threadRef.current.messages.find((m) => m.id === messageId)?.questions ?? []).map((q) => [`${q.message_id}/${q.key}`, q.state] as const));
       try {
         // `unsentOnly`: a save that lands after its question went with a reply never reopens what the agent has.
-        let result: Awaited<ReturnType<typeof inboxApi.pick>>;
-        for (let tries = 0; ; tries += 1) {
-          try {
-            result = await pickSave.mutateAsync({ messageId, key, revision, answer, keepalive: options.keepalive && tries === 0 });
-            break;
-          } catch (cause) {
-            // Another window's answer landed first (pickConflict.ts holds the rule): this one goes again on top of it,
-            // or the Inbox's is drawn. Either way quietly: never the refusal's raw words.
-            const conflict = onPickConflict(cause, tries);
-            if (!conflict) throw cause;
-            const now = conflictRevision(cause)!;
+        // Another window's answer landing first (pickConflict.ts holds the rule): this one goes again on top of it, or
+        // the Inbox's is drawn, quietly; a newer answer of it waiting decides instead, at the revision the Inbox holds.
+        const outcome = await saveOverConflicts((at, tries) => pickSave.mutateAsync({ messageId, key, revision: at, answer, keepalive: options.keepalive && tries === 0 }), revision, {
+          landed: (now) => {
+            revision = now;
             landedRevisions.current.set(id, Math.max(landedRevisions.current.get(id) ?? 0, now));
-            // A newer answer of it is waiting: that one decides, and goes at the revision the Inbox holds now.
-            if (pickQueue.hasNewer(id) || typedSaves.has(id)) return true;
-            if (conflict.action === 'retry') {
-              revision = now;
-              continue;
-            }
+          },
+          newer: () => pickQueue.hasNewer(id) || typedSaves.has(id),
+        });
+        if ('stood' in outcome) {
+          if (outcome.stood === 'adopted') {
             lastAnswers.current.delete(id);
             await onChanged();
-            return true;
           }
+          return true;
         }
+        const result = outcome.saved;
         for (const q of result.questions) {
           revisions.current.set(`${q.message_id}/${q.key}`, q.revision);
           landedRevisions.current.set(`${q.message_id}/${q.key}`, Math.max(landedRevisions.current.get(`${q.message_id}/${q.key}`) ?? 0, q.revision));
@@ -2518,20 +2513,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       void inboxApi.pick(messageId, key, revision, answer, { unsentOnly: true, keepalive: true }).catch(() => {});
     }
   };
-  const saveTypedOnLeaveNow = useRef(saveTypedOnLeave);
-  saveTypedOnLeaveNow.current = saveTypedOnLeave;
-  useEffect(() => {
-    const onHide = () => saveTypedOnLeaveNow.current();
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') onHide();
-    };
-    window.addEventListener('pagehide', onHide);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      window.removeEventListener('pagehide', onHide);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, []);
+  usePageLeave(saveTypedOnLeave);
   // Leaving an answer's field (a click elsewhere, Tab) saves its words now, as the reply box's draft is.
   useEffect(() => {
     const section = sectionRef.current;
@@ -2686,7 +2668,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           const id = `${m.id}/${q.key}`;
           const answer = pending.has(id) ? pending.get(id)! : q.answer;
           if (!answer || isQuestionAnswerEmpty(answer)) return [];
-          const messageName = `${agentName(m.author)}'s message, ${whenTime(m.created_at)}`;
+          const messageName = `${messageAuthorName(m)}'s message, ${whenTime(m.created_at)}`;
           // A question inside an attached file (issue #2828): its own group, named by the file.
           return [{ id, messageId: m.id, key: q.key, number: q.position + 1, prompt: q.prompt, answer: draftAnswerWords(answer), messageName: q.attachment ? fileGroupName(q.attachment.name, messageName) : messageName, ...(q.attachment ? { fileId: q.attachment.id } : {}) }];
         }),
@@ -2717,7 +2699,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const out = new Map<string, SentAnswerGroup[]>();
     for (const m of thread.messages) {
       if (m.author.kind !== 'person') continue;
-      const groups = sentAnswersOf(m, thread.messages, (asked) => `${agentName(asked.author)}'s message, ${whenTime(asked.created_at)}`);
+      const groups = sentAnswersOf(m, thread.messages, (asked) => `${messageAuthorName(asked)}'s message, ${whenTime(asked.created_at)}`);
       if (groups.length > 0) out.set(m.id, groups);
     }
     return (heldSentAnswers.current = keepEqualByKey(heldSentAnswers.current, out));
@@ -4487,7 +4469,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf, setPageStart, openFileRef };
   const acts = useRef(newest);
   acts.current = newest;
-  const reactApi = useMessageReactApi({ thread, onAck, agentOf: (m) => agentName(m.author), liveOf: liveMessage, reply: (m) => acts.current.replyToMessage(m), onToast, onChanged, announce });
+  const reactApi = useMessageReactApi({ thread, onAck, agentOf: (m) => messageAuthorName(m), liveOf: liveMessage, reply: (m) => acts.current.replyToMessage(m), onToast, onChanged, announce });
   const copyHost: CopyMenuHost = {
     thread,
     phone,
@@ -4887,7 +4869,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // append to, so it never proves who wrote (the agent's name and mark stay, and the server refuses "You").
           // In a thread with two or more sessions the header's name for the session leads, its agent in the mark,
           // the tooltip and after it for a screen reader: "Billing refactor", heard "Billing refactor, Claude Code".
-          const kind = message.author.kind === 'agent' ? agentName(message.author) : null;
+          const kind = message.author.kind === 'agent' ? messageAuthorName(message) : null;
           const sessionName = message.author.kind === 'agent' ? (sessionNames.get(message.author.session ?? '') ?? null) : null;
           const named = sessionName && sessionName !== kind ? sessionName : null;
           const authorLabel = message.author.kind === 'agent' && !named ? labelOf(sessionLabels, message.author.session) : null;
@@ -5279,12 +5261,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
         <SendingReply sends={sendsDrawn} held={outbox} machine={machine} />
         {showNew && !phone && newPill}
-        <div className="ib-sr" aria-live="polite" data-fold-live="">
-          {announced}
-        </div>
+        <div className="ib-sr" aria-live="polite" data-fold-live="">{announced}</div>
         {/* The room a step of the middle fold borrows (roomRef, shrinkRoom). */}
         <div className="ib-fold-room" ref={roomRef} aria-hidden="true" data-fold-room="" />
       </div>
+      {/* An html block opened big from the Artifacts grid or wall (HtmlArtifactOpen.tsx), with the message's own comments. */}
+      <HtmlArtifactOpen threadId={thread.thread_id} messages={thread.messages} commentsOf={(m) => ((m.author.kind === 'agent' || !isInboxNote(m)) && liveMessage(m) ? (messageComments.get(m.id) ?? NO_ANNOTATIONS) : null)} acts={acts} />
       {artifactsOn && !phone && <ArtifactsBar onBack={() => onArtifacts?.(false)}>{viewSwitch}</ArtifactsBar>}
       {linksOn && (
         <div className="ib-pbody ib-artbody">
@@ -5526,11 +5508,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               {ackOffered && !waiting && !draftKept && (
                 <ReactionTray
                   messageId={ackTarget!.id}
-                  agent={agentName(ackTarget!.author)}
+                  agent={messageAuthorName(ackTarget!)}
                   on={ackOn}
                   current={ackTarget!.ack?.reaction ?? null}
                   phone={phone}
-                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
+                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, messageAuthorName(ackTarget!), reaction, was)}
                   onSkill={(reaction, from) => reactApi.react(ackTarget!, reaction, from)}
                   openRequest={trayRequest}
                 />

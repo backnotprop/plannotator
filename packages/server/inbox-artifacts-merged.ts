@@ -26,7 +26,8 @@ export const FAR_WALL_WAIT_MS = 2_000;
 /** Pages kept per machine for when it sleeps: one per ask (filters and offset). */
 const FAR_WALL_KEPT = 8;
 
-const ARTIFACT_KEY = /^(?:guide:)?[A-Za-z0-9_-]{1,120}$/;
+// An attachment id, `guide:<message id>`, or an html block's `html:<message id>:<hash>`.
+const ARTIFACT_KEY = /^(?:(?:guide:)?[A-Za-z0-9_-]{1,120}|html:[A-Za-z0-9_-]{1,120}:[a-f0-9]{16})$/;
 const MACHINE_ID = /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /** The pins as the routes send them: key, thread and time only. */

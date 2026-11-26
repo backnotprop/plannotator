@@ -45,6 +45,11 @@ struct AgentMark: View {
           .resizable()
           .scaledToFit()
           .padding(side * 0.18)
+      } else if Names.isScript(author) {
+        // A script's post: a terminal, as the window draws it (packages/inbox/icons.tsx `ScriptMark`).
+        Image(systemName: "terminal")
+          .font(.system(size: side * 0.42, weight: .regular))
+          .foregroundStyle(Token.foreground)
       } else {
         Text(String(Names.agent(author).trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
           .font(.system(size: side * 0.44, weight: .semibold, design: .rounded))
@@ -64,11 +69,25 @@ func run(_ parts: Text...) -> Text {
 }
 
 enum Names {
-  /// An author's name as the window gives it (`inboxAgentName`): its own name, else its agent's, else "An agent".
+  /// An author's name as the window gives it (`inboxAgentName`): its own name, else its agent's, else "An agent";
+  /// a script's post is "Script" (packages/inbox/scriptAuthor.ts).
   static func agent(_ author: InboxAuthor) -> String {
     guard author.kind == .agent else { return PhoneWords.you }
     if let name = author.name, !name.isEmpty { return name }
     if let host = author.host, !host.isEmpty { return Words.agents[host] ?? host }
-    return PhoneWords.anAgent
+    return isScript(author) ? PhoneWords.script : PhoneWords.anAgent
+  }
+
+  /// A script's post by its author alone (`inboxSessionlessSend`, the window's `isScriptAuthor`): an agent with no
+  /// session, no host and no name.
+  static func isScript(_ author: InboxAuthor) -> Bool {
+    author.kind == .agent && (author.session ?? "").isEmpty && (author.host ?? "").isEmpty && (author.name ?? "").isEmpty
+  }
+
+  /// The agent a row stands for, as the window's tiles draw it (scriptAuthor.ts `rowWho`): a thread a script started
+  /// and a session took over is that session's (the first of the row's `participants`), never the script's.
+  static func rowAgent(_ row: InboxListRow) -> InboxAuthor {
+    guard isScript(row.author), let first = row.participants?.first else { return row.author }
+    return InboxAuthor(kind: .agent, host: first.host, session: first.session, name: first.name)
   }
 }
