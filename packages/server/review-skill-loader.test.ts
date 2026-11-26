@@ -483,6 +483,109 @@ describe("the documented ~/.agents/skills root is scanned", () => {
   });
 });
 
+describe("Claude Code's synced and plugin skills", () => {
+  const claudeHome = () => join(home, ".claude");
+
+  /** A plugin folder under the fake ~/.claude/plugins/cache, with an optional manifest `skills` field. */
+  function writePlugin(name: string, skills?: unknown) {
+    const installPath = join(claudeHome(), "plugins", "cache", "market", name, "1.0.0");
+    mkdirSync(join(installPath, ".claude-plugin"), { recursive: true });
+    writeFileSync(
+      join(installPath, ".claude-plugin", "plugin.json"),
+      JSON.stringify(skills === undefined ? { name } : { name, skills }),
+    );
+    return installPath;
+  }
+
+  function writeRegistry(plugins: Record<string, unknown>, version = 2) {
+    mkdirSync(join(claudeHome(), "plugins"), { recursive: true });
+    writeFileSync(
+      join(claudeHome(), "plugins", "installed_plugins.json"),
+      JSON.stringify(version === 2 ? { version: 2, plugins } : plugins),
+    );
+  }
+
+  const names = () => discoverSkills().map((s) => s.name).sort();
+
+  test("a skill synced from claude.ai (skills/synced/<account>/<skill>) is discovered", () => {
+    writeSkill(join(claudeHome(), "skills", "synced", "account-1"), "synced-skill");
+
+    const found = discoverSkills().find((s) => s.name === "synced-skill");
+    expect(found?.root).toBe("claude");
+    expect(found?.sourcePath).toBe(join(claudeHome(), "skills", "synced", "account-1", "synced-skill"));
+  });
+
+  test("a user-scope plugin's skills: its skills/ folder and the folders its manifest declares", () => {
+    const plugin = writePlugin("tools", ["./skills/engineering/tdd", "./skills/productivity"]);
+    writeSkill(join(plugin, "skills"), "flat-skill");
+    writeSkill(join(plugin, "skills", "engineering"), "tdd");
+    writeSkill(join(plugin, "skills", "productivity"), "grill-me");
+    // Shipped in the folder but not declared: Claude Code does not load it, so neither do we.
+    writeSkill(join(plugin, "skills", "in-progress"), "unfinished");
+    writeRegistry({ "tools@market": [{ scope: "user", installPath: plugin, version: "1.0.0" }] });
+
+    expect(names()).toEqual(["flat-skill", "grill-me", "tdd"]);
+  });
+
+  test("a plugin turned off in settings.json, or installed for a project, is left out", () => {
+    const off = writePlugin("off-plugin");
+    writeSkill(join(off, "skills"), "off-skill");
+    const project = writePlugin("project-plugin");
+    writeSkill(join(project, "skills"), "project-skill");
+    const on = writePlugin("on-plugin");
+    writeSkill(join(on, "skills"), "on-skill");
+    writeRegistry({
+      "off-plugin@market": [{ scope: "user", installPath: off }],
+      "project-plugin@market": [{ scope: "project", projectPath: join(home, "repo"), installPath: project }],
+      "on-plugin@market": [{ scope: "user", installPath: on }],
+    });
+    writeFileSync(
+      join(claudeHome(), "settings.json"),
+      JSON.stringify({ enabledPlugins: { "off-plugin@market": false, "on-plugin@market": true } }),
+    );
+
+    expect(names()).toEqual(["on-skill"]);
+  });
+
+  test("the v1 registry (records keyed by plugin id, no scope) is read", () => {
+    const plugin = writePlugin("old");
+    writeSkill(join(plugin, "skills"), "old-skill");
+    writeRegistry({ "old@market": { installPath: plugin, version: "1.0.0" } }, 1);
+
+    expect(names()).toEqual(["old-skill"]);
+  });
+
+  test("a manifest path outside the plugin folder is ignored", () => {
+    // <claude>/plugins/cache/market/escape/1.0.0 + ../../../../outside = <claude>/plugins/outside
+    const plugin = writePlugin("escape", ["../../../../outside"]);
+    writeSkill(join(claudeHome(), "plugins"), "outside");
+    writeRegistry({ "escape@market": [{ scope: "user", installPath: plugin }] });
+
+    expect(discoverSkills().map((s) => s.name)).not.toContain("outside");
+  });
+
+  test("a global skill wins a name clash with a synced or plugin skill", () => {
+    writeSkill(join(home, ".agents", "skills"), "code-review", "# global version");
+    writeSkill(join(claudeHome(), "skills", "synced", "account-1"), "code-review", "# synced version");
+    const plugin = writePlugin("tools");
+    writeSkill(join(plugin, "skills"), "code-review", "# plugin version");
+    writeRegistry({ "tools@market": [{ scope: "user", installPath: plugin }] });
+
+    const dups = discoverSkills().filter((s) => s.name === "code-review");
+    expect(dups).toHaveLength(1);
+    expect(dups[0].sourcePath).toBe(join(home, ".agents", "skills", "code-review"));
+  });
+
+  test("no registry, a broken registry, or a missing install folder finds nothing and never throws", () => {
+    expect(names()).toEqual([]);
+    mkdirSync(join(claudeHome(), "plugins"), { recursive: true });
+    writeFileSync(join(claudeHome(), "plugins", "installed_plugins.json"), "{ not json");
+    expect(names()).toEqual([]);
+    writeRegistry({ "gone@market": [{ scope: "user", installPath: join(home, "nowhere") }] });
+    expect(names()).toEqual([]);
+  });
+});
+
 describe("listAllSkills — the add-a-review picker source", () => {
   test("lists every discovered skill, flagged by enabled state", () => {
     const root = join(home, ".claude", "skills");
