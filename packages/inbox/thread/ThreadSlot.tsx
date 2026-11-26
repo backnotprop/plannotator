@@ -12,7 +12,8 @@ import { useHeldThread } from '../data/queries/thread';
 import type { HeldThread } from '../data/apply/record';
 import { drawnSection } from '../held';
 import { machineOf } from '../inboxUrl';
-import { onLinkedMachine, threadStepsRead, useLinkedReadsRev } from '../linkedReads';
+import { threadStepsRead } from '../linkedReads';
+import { useFarStepsReread } from './useFarStepsReread';
 import { machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from '../machines';
 import { MAIN_PANE, type PaneId } from '../panes/model';
 import type { PaneOnScreen } from '../panes/onScreen';
@@ -88,13 +89,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
   const stepsRead = thread ? threadStepsRead(thread.thread_id, settings?.steps) : null;
-  // A far thread opened before its machine's marks were read asked nothing: its checklist reads once they are.
-  const linkedRev = useLinkedReadsRev();
-  const farThread = thread && onLinkedMachine(thread.thread_id) ? thread.thread_id : null;
-  useEffect(() => {
-    if (farThread && linkedRev > 0) host.stepsBus.emit(farThread);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- read again when the marks move, not when the thread does.
-  }, [linkedRev]);
+  useFarStepsReread(thread?.thread_id, (id) => host.stepsBus.emit(id));
   const backLabel = fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle;
   // A thread that throws while it draws says so in the pane; the sidebar and the list stay (ui's RegionBoundary). Try
   // again mounts the pane afresh, which reads its reply draft back from the server (replyDraft.ts flushes on unmount).
