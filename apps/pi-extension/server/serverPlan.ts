@@ -36,6 +36,7 @@ import {
 	handleCustomThemesScript,
 	customThemesPage,
 	handleFavicon,
+	handleAnnotateMediaRequest,
 	handleImageRequest,
 	handleStarAskRequest,
 	handleReferenceSkillsRequest,
@@ -62,7 +63,7 @@ import {
 } from "./integrations.ts";
 import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
 
-import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory, resolveSharingEnabled } from "../generated/config.ts";
+import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, parseDisplayOptionsConfig, resolveAIEnabled, resolveFeedbackHistory, resolveSharingEnabled } from "../generated/config.ts";
 import { currentPiHost } from "../pi-host.ts";
 import { appendFeedbackRecord, type FeedbackDecision } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
@@ -308,6 +309,8 @@ export async function startPlanReviewServer(options: {
 
 	// Draft key for annotation persistence
 	const draftKey = options.mode !== "archive" ? contentHash(options.plan) : "";
+	// Linked documents this review served: their folders may play local videos.
+	const servedMediaDocuments = new Set<string>();
 	// Per-document draft copies of the plan's linked documents, plus the index
 	// that lets a reload offer them all: mirror of packages/server/index.ts
 	// (#1545, annotate-draft.ts). A document may be saved exactly when this
@@ -482,7 +485,7 @@ export async function startPlanReviewServer(options: {
 				return;
 			}
 			try {
-				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
+				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; displayOptions?: unknown; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
 				const toSave: Record<string, unknown> = {};
 				// OpenCode's agent switch (#1390): a known shape or nothing is saved.
 				const agentSwitch = agentSwitchConfigToSave(body);
@@ -490,6 +493,12 @@ export async function startPlanReviewServer(options: {
 				if (agentSwitch !== undefined) toSave.agentSwitch = agentSwitch;
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
+				// The plan / annotate Display settings and the markdown selection mode: a plain object or nothing is saved.
+				if (body.displayOptions !== undefined) {
+					const displayOptions = parseDisplayOptionsConfig(body.displayOptions);
+					if (!displayOptions) return json(res, { error: "Invalid displayOptions" }, 400);
+					toSave.displayOptions = displayOptions;
+				}
 				if (body.theme !== undefined) toSave.theme = body.theme;
 				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
 				if (typeof body.autoUpdate === "boolean") toSave.autoUpdate = body.autoUpdate;
@@ -564,7 +573,10 @@ export async function startPlanReviewServer(options: {
 				json(res, crossOriginRefusalBody(), 403);
 				return;
 			}
-			await handleDocRequest(res, url, { anyPath: isThisMachineRequest(req) });
+			await handleDocRequest(res, url, { anyPath: isThisMachineRequest(req), onDocumentServed: (path) => servedMediaDocuments.add(path) });
+		} else if (url.pathname === "/api/annotate-media" && req.method === "GET") {
+			// A linked document's local <video> (HtmlBlock rewrites its src here).
+			handleAnnotateMediaRequest(req, res, url, servedMediaDocuments);
 		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
 			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {

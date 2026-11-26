@@ -32,7 +32,7 @@ import { getPlanVersion, getVersionCount, listVersions } from "../generated/stor
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
 import { ANNOTATE_LIVE_VERSION_PATH, annotateLiveVersionFilePath, saveAnnotateLiveVersion } from "../generated/annotate-live-version.ts";
 import { htmlDiff } from "../generated/html-diff.ts";
-import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, saveConfig, detectGitUser, getServerConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveSharingEnabled, resolveAnnotateHistory, resolveFeedbackHistory, type PromptRuntime } from "../generated/config.ts";
+import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, saveConfig, detectGitUser, getServerConfig, parseDisplayOptionsConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveSharingEnabled, resolveAnnotateHistory, resolveFeedbackHistory, type PromptRuntime } from "../generated/config.ts";
 import { currentPiHost } from "../pi-host.ts";
 import { appendFeedbackRecord, type FeedbackDecision, type FeedbackSurface } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
@@ -59,6 +59,7 @@ import {
 	handleCustomThemesScript,
 	customThemesPage,
 	handleFavicon,
+	handleAnnotateMediaRequest,
 	handleImageRequest,
 	handleStarAskRequest,
 	handleReferenceSkillsRequest,
@@ -860,6 +861,8 @@ export async function startAnnotateServer(options: {
 	const bundleSourceSavePaths = bundleFiles ? resolveBundleSourceSavePaths(bundlePaths) : null;
 	const openedSourceFilePaths = new Set<string>();
 	if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
+	const servedMediaDocuments = new Set<string>();
+	if (initialSingleFileSourcePath) servedMediaDocuments.add(initialSingleFileSourcePath);
 	const getPrimarySource = () => {
 		const mode = options.mode || "annotate";
 		if (mode === "annotate-last") {
@@ -1202,7 +1205,7 @@ export async function startAnnotateServer(options: {
 				return;
 			}
 			try {
-				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; agentTerminalSide?: unknown; agentTerminalDefaultAgent?: unknown };
+				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; displayOptions?: unknown; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; agentTerminalSide?: unknown; agentTerminalDefaultAgent?: unknown };
 				const toSave: Record<string, unknown> = {};
 				// OpenCode's agent switch (#1390): a known shape or nothing is saved.
 				const agentSwitch = agentSwitchConfigToSave(body);
@@ -1210,6 +1213,12 @@ export async function startAnnotateServer(options: {
 				if (agentSwitch !== undefined) toSave.agentSwitch = agentSwitch;
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
+				// The plan / annotate Display settings and the markdown selection mode: a plain object or nothing is saved.
+				if (body.displayOptions !== undefined) {
+					const displayOptions = parseDisplayOptionsConfig(body.displayOptions);
+					if (!displayOptions) return json(res, { error: "Invalid displayOptions" }, 400);
+					toSave.displayOptions = displayOptions;
+				}
 				if (body.theme !== undefined) toSave.theme = body.theme;
 				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
 				if (typeof body.autoUpdate === "boolean") toSave.autoUpdate = body.autoUpdate;
@@ -1234,6 +1243,8 @@ export async function startAnnotateServer(options: {
 			if (!(await handleStarAskRequest(req, res, url, "annotate", isRemoteSession()))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
+		} else if (url.pathname === "/api/annotate-media" && req.method === "GET") {
+			handleAnnotateMediaRequest(req, res, url, servedMediaDocuments);
 		} else if (htmlAssets.handle(req, res, url)) {
 			return;
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
@@ -1325,6 +1336,7 @@ export async function startAnnotateServer(options: {
 				sourceSaveFolderPath: options.mode === "annotate-folder" ? options.folderPath : undefined,
 				sourceSaveBundlePaths: bundleSourceSavePaths ?? undefined,
 				onSourceDocumentServed: (path) => openedSourceFilePaths.add(path),
+				onDocumentServed: (path) => servedMediaDocuments.add(path),
 				rootPaths: getReferenceRootPaths(),
 				anyPath: isThisMachineRequest(req),
 				annotateHistory:

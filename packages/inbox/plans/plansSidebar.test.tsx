@@ -77,8 +77,8 @@ test.skipIf(!hasDom)('off: no Plans row, and nothing of it in the menu or Custom
   expect(host.querySelector('[data-plans-nav]')).toBeNull();
   expect(host.textContent).not.toContain('Plans');
   expect(host.textContent).not.toContain('Spaces');
-  expect(drawnSidebarItems({ board: true, reviews: true, shape: true, usage: true, phone: false }).has('plans')).toBe(false);
-  expect(drawnSidebarItems({ board: true, plans: false, reviews: true, shape: true, usage: true, phone: false }).has('plans')).toBe(false);
+  expect(drawnSidebarItems({ board: true, reviews: true, usage: true, phone: false }).has('plans')).toBe(false);
+  expect(drawnSidebarItems({ board: true, plans: false, reviews: true, usage: true, phone: false }).has('plans')).toBe(false);
   act(() => root?.unmount());
   document.body.innerHTML = '';
 
@@ -88,7 +88,7 @@ test.skipIf(!hasDom)('off: no Plans row, and nothing of it in the menu or Custom
   expect(row).not.toBeNull();
   const items = [...host.querySelectorAll('[data-sidebar-item]')].map((el) => el.getAttribute('data-sidebar-item'));
   expect(items.indexOf('plans')).toBe(items.indexOf('inbox') + 1);
-  expect(drawnSidebarItems({ board: true, plans: true, reviews: true, shape: true, usage: true, phone: false }).has('plans')).toBe(true);
+  expect(drawnSidebarItems({ board: true, plans: true, reviews: true, usage: true, phone: false }).has('plans')).toBe(true);
   act(() => row.click());
   expect(opened).toBe(1);
 });
@@ -200,7 +200,7 @@ test.skipIf(!hasDom)('off, Plans is never kept in the cookie; the save sends the
     // Plans on: its row is part of the layout saved and of the cookie.
     setPlansOn(true);
     await writeSidebarLayout({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['copy-prompt'] });
-    expect(saved.at(-1)!.top.indexOf('plans')).toBe(saved.at(-1)!.top.indexOf('inbox') + 1);
+    expect(saved.at(-1)!.top.indexOf('plans')).toBe(INBOX_SIDEBAR_DEFAULT.top.indexOf('plans'));
     expect(cookie.get(SIDEBAR_LAYOUT_COOKIE)).toContain('plans');
   } finally {
     setPlansOn(false);

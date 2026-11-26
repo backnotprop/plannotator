@@ -92,6 +92,7 @@ import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from ".
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxStartTrace } from "./inbox-start-trace";
+import { inboxPairedRouteFetch } from "./inbox-call-command";
 import { loadEmbeddedSemDiff } from "./sem-diff";
 
 export const INBOX_LOG_FILE = "inbox.log";
@@ -833,17 +834,27 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     process.exit(await restartCommand(dataDir, rest.includes("--tailscale")));
   }
 
+  // A paired cloud agent's machine (PLANNOTATOR_PAIRING) has no Inbox of its own: these reach the person's Inbox
+  // through the agent door instead, and work as they do on that computer (inbox-call-command.ts `inboxPairedRouteFetch`).
+  const pairedRoute = (args[0] === "projects" || args[0] === "rows" || args[0] === "icon") && process.env.PLANNOTATOR_PAIRING && !isInboxTurnedOn(dataDir) ? inboxPairedRouteFetch({ env: process.env }) : null;
+  if (pairedRoute && "code" in pairedRoute) {
+    process.stderr.write(`${pairedRoute.code}: ${pairedRoute.message}\n`);
+    process.exit(1);
+  }
+  const fetchRoute = pairedRoute ? { fetchRoute: pairedRoute } : {};
+
   if (args[0] === "projects") {
-    process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir) }));
+    process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir), ...fetchRoute }));
   }
 
   if (args[0] === "rows") {
-    const session = inboxHostSessionFromEnv(process.env);
-    process.exit(await runInboxRowsCommand(args.slice(1), { json: assets.json === true, by: session ? { host: session.host, session: session.session } : null, ensureRunning: () => ensureInboxRunning(dataDir) }));
+    // Through the door the change is the pairing's agent's, named by the Inbox.
+    const session = pairedRoute ? null : inboxHostSessionFromEnv(process.env);
+    process.exit(await runInboxRowsCommand(args.slice(1), { json: assets.json === true, by: session ? { host: session.host, session: session.session } : null, ensureRunning: () => ensureInboxRunning(dataDir), ...fetchRoute }));
   }
 
   if (args[0] === "icon") {
-    process.exit(await runInboxIconCommand(args.slice(1), { json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir) }));
+    process.exit(await runInboxIconCommand(args.slice(1), { json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir), ...fetchRoute }));
   }
 
   if (args[0] === "cloudflare-access") {

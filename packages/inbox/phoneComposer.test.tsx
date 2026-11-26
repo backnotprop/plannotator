@@ -23,6 +23,7 @@ const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
 const { ComposeDialog } = (hasDom ? await import('./compose/ComposeDialog') : {}) as typeof import('./compose/ComposeDialog');
 const { BottomSheet, BOTTOM_SHEET_MS } = (hasDom ? await import('./components/BottomSheet') : {}) as typeof import('./components/BottomSheet');
+const { replyDraftUnsaved } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'acme-web-abcdef', name: 'acme-web', root: '/work/acme-web', created_at: '2026-11-01T10:00:00.000Z' };
 const CLAUDE = { kind: 'agent' as const, host: 'claude-code', session: 'ses_claude', name: null };
@@ -97,14 +98,19 @@ beforeEach(() => {
   }) as typeof fetch;
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
   root = null;
   host = null;
+  // The box's words the pane saves as it goes land on this stub before the real fetch is back: a save that did not
+  // land is kept for its thread (the next test's box would show it).
+  for (let i = 0; i < 100 && replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const left = replyDraftUnsaved();
   globalThis.fetch = savedFetch;
   setSessionLabels({});
+  if (left) throw new Error('the test left a reply draft save on its way, or words not saved');
 });
 
 async function settle(ms = 0) {
@@ -258,7 +264,7 @@ test.skipIf(!hasDom)('a phone: a tap outside the sheet closes it', async () => {
   expect(document.activeElement).toBe(text);
 });
 
-test.skipIf(!hasDom)('a computer is as it was: a one-agent thread has no recipient control, several agents get the pill and its list, and nothing of the phone is drawn', async () => {
+test.skipIf(!hasDom)('a computer: a one-agent thread has no recipient control, several agents get the chip and its list, and nothing of the phone is drawn', async () => {
   await openReply(ONE_AGENT(), false);
   expect(q('[data-recipient]')).toBeNull();
   expect(q('[data-agent-mark], [data-agent-pill], [data-sheet]')).toBeNull();
@@ -268,7 +274,7 @@ test.skipIf(!hasDom)('a computer is as it was: a one-agent thread has no recipie
   host?.remove();
   await openReply(TWO_AGENTS(), false);
   const pill = q<HTMLButtonElement>('[data-recipient]')!;
-  expect(pill.className).toBe('ib-rto');
+  expect(pill.className).toBe('ib-rto-chip');
   await click(pill);
   expect(q('[data-recipient-list]')!.className).toContain('ib-rpick');
   expect(q('[data-agent-mark], [data-agent-pill], [data-sheet], [data-sheet-scrim]')).toBeNull();

@@ -53,7 +53,8 @@ function renderFenceTheme(): string {
 describe('fence theme seam', () => {
   test('without a resolver, resolution is the built-in map', () => {
     expect(resolveFenceTheme('github', 'light')).toBe('github-light');
-    expect(resolveFenceTheme('dracula', 'light')).toBe('pierre-light');
+    // No light counterpart: Pierre's default, with its low-contrast colours fixed (fenceSyntaxThemes.ts).
+    expect(resolveFenceTheme('dracula', 'light')).toBe('plannotator-fence-light');
   });
 
   test('configurePlannotatorUI({ fenceTheme }) overrides, undefined falls through', () => {
@@ -63,8 +64,18 @@ describe('fence theme seam', () => {
   });
 
   test.skipIf(!hasDom)('the override reaches useFenceTheme, which every fence consumer reads', () => {
-    // Outside a ThemeProvider the default context is the plannotator palette, dark.
-    expect(renderFenceTheme()).toBe('pierre-dark');
+    // Outside a ThemeProvider: the plannotator palette, in the page's mode
+    // (theme.css's dark half here: a theme class without `light`).
+    document.documentElement.classList.add('theme-plannotator');
+    try {
+      runOverride();
+    } finally {
+      document.documentElement.classList.remove('theme-plannotator');
+    }
+  });
+
+  function runOverride(): void {
+    expect(renderFenceTheme()).toBe('plannotator-fence-dark');
     if (root) {
       act(() => root!.unmount());
       root = null;
@@ -78,7 +89,7 @@ describe('fence theme seam', () => {
     });
     expect(renderFenceTheme()).toBe('vitesse-black');
     expect(calls).toContainEqual(['plannotator', 'dark']);
-  });
+  }
 
   test('a throwing or empty answer falls back to the default', () => {
     setFenceThemeResolver(() => {

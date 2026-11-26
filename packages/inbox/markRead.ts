@@ -10,7 +10,8 @@
 
 import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
 import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow, type InboxListGroupId, type InboxThread } from '@plannotator/core/inbox-types';
-import { agentName, plural, shortAgentName } from './format';
+import { plural, shortAgentName } from './format';
+import { rowAgentName } from './scriptAuthor';
 
 /** How long the Undo toast stays (the server's set-aside note waits a little longer). */
 export const MARK_READ_UNDO_MS = 7_000;
@@ -219,7 +220,7 @@ export type MarkReadPlace = 'open' | 'held' | 'list';
  * pane. What the agent is told is the thread's Read banner's to say.
  */
 export function markReadToast(
-  before: Pick<InboxListRow, 'subject' | 'author' | 'questions'> & { resolved_at?: string | null; unsent?: InboxListRow['unsent'] },
+  before: Pick<InboxListRow, 'subject' | 'author' | 'questions' | 'participants'> & { resolved_at?: string | null; unsent?: InboxListRow['unsent']; scheduled_running?: true },
   place: MarkReadPlace,
 ): MarkReadToast {
   const subject = `“${before.subject ?? '(no subject)'}”`;
@@ -227,7 +228,8 @@ export function markReadToast(
   // Another thread is open: name the row marked, or the toast reads as if the open thread was.
   if (place === 'held') return { lead: 'Marked read', phoneLead: 'Read', detail: subject, warn };
   if (before.questions.stopped) {
-    const name = agentName(before.author);
+    // The row's agent as its tiles name it: a script's, or the session that took its thread over (scriptAuthor.ts).
+    const name = rowAgentName(before, before.author);
     const short = shortAgentName(name);
     return {
       lead: 'Marked read',
@@ -246,6 +248,9 @@ export function markReadToast(
   // Words typed in the reply box, or comments waiting, keep it out of Quiet (approval "inbox-reply-drafts"; Mark read closes the picks).
   const kept = !archived && before.unsent != null && (before.unsent.reply_at !== null || before.unsent.comments > 0);
   if (kept) return { lead: 'Marked read', phoneLead: 'Read', detail: place === 'open' ? 'Your draft keeps it in New' : `${subject} · your draft keeps it in New`, warn: false };
+  // A routine's run going keeps it in New until the run ends (shared/inbox/list.ts `inboxSectionWhileRoutineRuns`):
+  // no move to promise, so the toast of a row that stays put (`held`, App.tsx `seenStaysPut`).
+  if (place === 'open' && !archived && before.scheduled_running === true) return { lead: 'Marked read', phoneLead: 'Read', detail: subject, warn: false };
   if (place === 'open') return { lead: 'Marked read', phoneLead: 'Read', detail: archived ? 'Goes back to Archived' : 'Moves to Quiet', warn: false };
   return { lead: archived ? 'Back in Archived' : 'Moved to Quiet', detail: subject, warn: false };
 }

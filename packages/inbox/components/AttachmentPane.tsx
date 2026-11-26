@@ -63,18 +63,18 @@ import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepIndexOf, stepKeyIntent, ty
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
-import { contentsButtonMode, INBOX_CONTENTS_MIN_HEADINGS, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
+import { contentsButtonMode, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
 import { scrollerOf } from './fileScroller';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
-import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
-import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
+import { ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
+import { FileContentsRail } from '../parts/FileContentsRail';
 import { FullViewBar, GATHERED, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
 import { ArtifactPinButton } from './ArtifactPinButton';
 import { ReuseButton } from '../reuse';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { forgetComposerOpened, useComposerFolded } from '../fullScreenComposer';
 import { HtmlPageCommentRow, useHtmlPageComment, type PageCommentParking } from './HtmlPageComment';
-import { anchorKeyOf, draftHasWords, FileDraftContext, fileDraftKey, keepFileDrafts, peekFileDrafts, takeFileDrafts, type FileCommentDraft, type FileDraftSeat, type RowDraft } from '../fileCommentDrafts';
+import { anchorKeyOf, draftHasWords, FileDraftContext, fileDraftKey, keepFileDrafts, peekFileDrafts, takeFileDrafts, type CommentDraft, type FileCommentDraft, type FileDraftSeat, type RowDraft } from '../fileCommentDrafts';
 import { releaseWindowZoom, useWindowPinched } from '../windowPinch';
 import { FilePeek, peekSheetHost } from './AttachmentStepper';
 import { CommentCount, EarlierSection, commentsLabel } from './EarlierSection';
@@ -88,8 +88,8 @@ import { OptionCaption } from './OptionCaption';
 import { FIRST_OPTION_NOTE, LAST_OPTION_NOTE, optionAnnouncement, type OptionSet } from '../optionSets';
 import { createPortal } from 'react-dom';
 import type { Notice } from './Markup';
-import { MarkupPicture } from './Markup';
-import { isWordlessMarkup, MARKUP_ONLY_TEXT } from '../markup';
+import { fileCardBody } from './Markup';
+import { isWordlessMarkup, MARKUP_ONLY_TEXT, markupOf } from '../markup';
 import { useShortcutScope } from '../panes/scope';
 import { inboxFileViewerShortcuts } from '../shortcuts/fileViewer.shortcuts';
 import { ShortcutHint, withShortcut } from '../shortcuts/hint';
@@ -1672,7 +1672,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setCommentWaits(full && shownToolbar === 'tucked' && !props.readOnly && unsavedComposer(sectionRef.current, savedTextRef.current) !== null);
   }, [full, shownToolbar, props.readOnly]);
   shownToolbarRef.current = shownToolbar;
-  usePageClear(sectionRef, full && kind === 'html', phone ? 'bar' : shownToolbar === 'tucked' ? 'handle' : null);
+  usePageClear(sectionRef, full && kind === 'html' && phone);
   // Every way back to showing (the corner control, ⌘⇧X, leaving full screen, a pinch let go) forgets
   // what gathered the tools, once the corner control's press has put focus back: the next » brings focus back to ».
   useEffect(() => {
@@ -1761,12 +1761,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       const row = read();
       if (row && draftHasWords(row)) taken.push(row);
     }
-    // An HTML page's row words, its row off screen (out of full screen): kept as the row's draft, as if it were drawn.
-    const parked = pageParking.current;
-    if (parked?.key === draftKeyRef.current && parked.text.trim() !== '') taken.push({ kind: 'row', text: parked.text, markup: null });
+    const parked = pageParking.current; // An HTML page's row words and files, its row off screen (out of full screen): kept as its draft, as if drawn.
+    const parkedRow: RowDraft | null = parked?.key === draftKeyRef.current ? { kind: 'row', text: parked.text, markup: null, files: parked.files, late: parked.late } : null;
+    if (parkedRow && draftHasWords(parkedRow)) taken.push(parkedRow);
     pageParking.current = null;
-    const page = htmlComment.kept() ?? null;
-    if (page) taken.push({ kind: 'comment', annotation: page });
+    const page = htmlComment.kept(); // A phone page's pin card: its words and files.
+    if (page) taken.push(page);
     const caught: FileCommentDraft[] = [];
     capturing.current = caught;
     try {
@@ -1881,7 +1881,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const read = tearing && !taken.some((d) => d.kind !== 'row') ? readComposers().filter(unsaved) : [];
     // A kept comment not back in its box yet (the pane was still moving, or the text still loading) waits on, and so
     // does anything put back whose box has not shown yet.
-    const notShown: FileCommentDraft[] = reopenNext.current ? [{ kind: 'comment', annotation: reopenNext.current }] : [];
+    const notShown: FileCommentDraft[] = reopenNext.current ? [reopenNext.current] : [];
     reopenNext.current = null;
     for (const entry of reopening.current) if (!entry.seen()) notShown.push(entry.draft);
     reopening.current = [];
@@ -1914,7 +1914,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   /** A kept edit of a comment in the panel, put back in its card's edit box. */
   const [panelReopenEdit, setPanelReopenEdit] = useState<{ id: string; text: string } | null>(null);
   /** A kept comment waiting for the viewer to be drawn (the document loads after the pane mounts). */
-  const reopenNext = useRef<Annotation | null>(null);
+  const reopenNext = useRef<CommentDraft | null>(null);
   /** A comment box waiting for the pane to stop moving before it opens (`whenStill`): its way to stop waiting. */
   const settling = useRef<(() => void) | null>(null);
   /** Open a kept comment's box once the pane is still, so it opens where a click on the same words opens one. */
@@ -1961,7 +1961,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         rest.push(draft);
         continue;
       }
-      reopenNext.current = draft.annotation;
+      reopenNext.current = draft;
     }
     waiting.current = [...waiting.current, ...rest];
     // Still on the file: its viewer is drawn. A file just opened waits for its text (the effect on `view` below).
@@ -1973,11 +1973,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     afterSettle(() => reopenNowRef.current());
   };
   const reopenNow = () => {
-    const annotation = reopenNext.current;
+    const draft = reopenNext.current;
     // The file's own text, not the last file's (the view is reset just after a step).
-    if (!annotation || !view || view.attachment.id !== attachment.id) return;
+    if (!draft || !view || view.attachment.id !== attachment.id) return;
     reopenNext.current = null;
-    const draft: FileCommentDraft = { kind: 'comment', annotation };
+    const { annotation } = draft;
     const key = draftKeyRef.current;
     let missed = false;
     const missing = () => {
@@ -2002,11 +2002,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     }
     const viewer = viewerRef.current;
     if (!viewer) {
-      reopenNext.current = annotation;
+      reopenNext.current = draft;
       return;
     }
     trackReopen(draft, () => popoverShown() || (annotation.diagramAnchor != null && sectionRef.current?.querySelector('[data-diagram-composer] textarea') != null) || htmlComment.open);
-    if (phoneHtml && hasComposer) htmlComment.expectWords(annotation.text ?? '');
+    if (phoneHtml && hasComposer) htmlComment.expect(draft);
     if (!viewer.reopenComment?.(annotation, missing)) missing();
   };
   const reopenInViewerRef = useRef(reopenInViewer);
@@ -2841,19 +2841,17 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           {view && hasContents && !phone && (
-            // ui's contents rail (Workspaces' rail, approved 2026-10-03): ticks in the page's right gutter, the panel
-            // opening left over the page. Loaded once the page is interactive; it measures itself and yields where the
-            // gutter is short, then says so and the Contents button takes over. Hidden by choice, it still measures.
-            <DeferredMarkdownContentsRail
+            <FileContentsRail
               key={`rail:${docKey}`}
               blocks={documentBlocks}
-              minHeadings={INBOX_CONTENTS_MIN_HEADINGS}
               scrollViewport={scrollViewport}
-              contentSelector="[data-doc-text-root]"
               // A linked document over the file hides the file's Contents with it.
               hidden={!contentsShown || linkedTop !== null}
               onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
-              panelAction={<ContentsHide onHide={hideContents} />}
+              onHide={hideContents}
+              annotations={annotations}
+              selectedAnnotationId={selectedId}
+              onSelectAnnotation={setSelectedId}
             />
           )}
         </div>
@@ -2917,7 +2915,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 ? (annotation) => {
                     const time = readInboxVideoTime(annotation);
                     if (time === null) return null;
-                    const frame = annotation.images?.[0];
+                    const frame = markupOf(annotation);
                     return (
                       <span className="ib-vcardtop">
                         <Tip content={`Go to ${formatInboxVideoTime(time)}`}>
@@ -2958,7 +2956,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               if (isVideo && readInboxVideoTime(annotation) !== null) return wordless ? { quote: false, images: false, text: false } : { quote: false, images: false };
               return wordless ? { quote: false, images: false, text: false } : {};
             }}
-            renderCardBody={(annotation) => (isWordlessMarkup(annotation) ? <MarkupPicture image={annotation.images![0]!} /> : null)}
+            renderCardBody={(annotation) => fileCardBody(annotation, isVideo)}
             title="Comments"
             // A linked page takes no comments: the panel lists the attached page's, and says so.
             titleNote={isVideo ? 'By time' : linkedTop ? `Off on ${linkedTop.name}` : undefined}

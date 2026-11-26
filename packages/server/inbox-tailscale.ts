@@ -66,11 +66,12 @@ import {
   type InboxTailscaleSource,
 } from "@plannotator/shared/config";
 import { readInboxRegistry, updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
-import { checkTailnetIdentity, isServedTailnetHost, normalizeTailnetLogin, tailnetFetchSiteAllowed, type TailnetCheck } from "@plannotator/shared/inbox/tailnet";
+import { checkTailnetIdentity, fromOwnTailnetNode, isServedTailnetHost, normalizeTailnetLogin, tailnetFetchSiteAllowed, type TailnetCheck } from "@plannotator/shared/inbox/tailnet";
 import { allowIgnoredLine, tailnetNotOwnerResponse } from "@plannotator/shared/inbox/tailnet-refusal";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import {
   describeTailscaleFailure,
+  parseTailscaleSelfAddresses,
   parseTailscaleSelfIdentity,
   runTailscale,
   serveStatusProxy,
@@ -161,8 +162,11 @@ export interface InboxTailscaleContext {
   port: () => number;
   /** This run's registry entry (written in place, then saved). */
   registry: () => InboxRegistryEntry;
-  /** The window's handler, for a request that passed the tailnet checks. */
-  dispatch: (req: Request) => Promise<Response>;
+  /**
+   * The window's handler, for a request that passed the tailnet checks. `ownNode`: opened by this computer itself
+   * on its tailnet address (`fromOwnTailnetNode`), so it is this computer's own window, not another computer's.
+   */
+  dispatch: (req: Request, from?: { ownNode: boolean }) => Promise<Response>;
   /** Tests: a scripted `tailscale`. Default: the CLI, as a child process on the request paths (never blocking the Inbox). */
   tailscale?: TailscaleRunner;
   /** `plannotator inbox --tailscale`: on for this run unless PLANNOTATOR_INBOX_TAILSCALE turns it off. */
@@ -232,6 +236,8 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     error: null as string | null,
     owner: null as string | null,
     allowed: [] as string[],
+    /** This machine's own tailnet addresses, as of the last publish: a request from one is this computer's own window. */
+    self: [] as string[],
     exposed: [] as InboxTailnetExposure[],
   };
 
@@ -373,7 +379,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     if (!tailnetFetchSiteAllowed(req.method, path, req.headers)) {
       return refusal(path, 403, "cross_site", "Requests from other sites are not accepted.");
     }
-    return context.dispatch(req);
+    return context.dispatch(req, { ownNode: fromOwnTailnetNode(req.headers, state.self) });
   };
 
   const openListener = (): number => {
@@ -513,7 +519,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    * Only where Tailscale names no owner (a tagged device) does config.json `inboxTailscaleAllow` say who the owner is;
    * on a machine with an owner it is ignored, said once on stderr. Throws the reason when nobody may.
    */
-  const readAllowed = function* (): TailscaleSteps<{ owner: string | null; allowed: string[] }> {
+  const readAllowed = function* (): TailscaleSteps<{ owner: string | null; allowed: string[]; self: string[] }> {
     const status = yield step(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
     observe(status);
     if (status.error || status.status !== 0) throw new Error(describeTailscaleFailure(status));
@@ -533,7 +539,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
           : "Tailscale did not say who owns this machine. Add your Tailscale login to inboxTailscaleAllow in config.json.",
       );
     }
-    return { owner, allowed };
+    return { owner, allowed, self: parseTailscaleSelfAddresses(status.stdout) };
   };
 
   /**
@@ -574,6 +580,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       const who = yield* readAllowed();
       state.owner = who.owner;
       state.allowed = who.allowed;
+      state.self = who.self;
       state.exposed = (yield* scanExposure()) ?? state.exposed;
       warnExposure();
       if (state.exposed.some((e) => e.https_port === port)) throw new Error(exposureWarning(state.exposed));
@@ -602,7 +609,15 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       // The mapping may have been made before the failure (no URL in serve's answer): take it down, or keep the record.
       const taken = record()?.https_port ? yield* takeDownOwnServeSteps(port, targets) : "none";
       if (taken === "failed" || taken === "later") keepRecord(state.error);
-      else save({ url: null, error: state.error });
+      else {
+        // Refused before `tailscale serve` ran (another mapping on the port, or serve could not be read): nothing ever
+        // pointed at this attempt's listener, so its port leaves `made`. Kept, each failed try would push out the
+        // port a leftover of this Inbox's own points at before the look can take it back (#3591).
+        const neverServed = error instanceof TailscaleServeError && (error.code === "conflict" || error.code === "malformed" || error.code === "unavailable");
+        const kept = record()?.made;
+        const trimmed = neverServed && mine !== undefined && kept ? { made: { https_port: kept.https_port, proxy_ports: kept.proxy_ports.filter((p) => p !== mine) } } : {};
+        save({ url: null, error: state.error, ...trimmed });
+      }
       return false;
     }
   };
@@ -807,7 +822,10 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     // A change still running may publish after this: its record stays for the next start until it is down.
     if (record()) {
       if (pending > 0) keepRecord(`Stopped while publishing; the tailnet address is taken down at the next start, or run "tailscale serve --https=${port} off".`);
-      // Taken down, or found gone while Tailscale runs: nothing is left to know ("later" kept the record above).
+      // Taken down, or found gone: the ports it mapped (`made`) stay known until the switch goes off. "Found gone" can
+      // be a read Tailscale got wrong as the computer shut down, and Tailscale brings back its saved serve config at
+      // the next boot: the next start then re-points that mapping as its own instead of refusing it (#3591).
+      else if (record()?.made) save({ url: null, error: null });
       else save(undefined);
     }
     return { failedPort: null };

@@ -13,6 +13,7 @@ import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { getRichCopyEnabled } from '../utils/richCopyPolicy';
 import { BlockRenderer } from './BlockRenderer';
+import { FootnoteList, FootnoteProvider, useFootnotes } from './footnotes/Footnotes';
 import { sourceLineAttrs } from '../utils/sourceLineAttrs';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
 import { indexQuestionBlocks, isQuestionDirectiveKind, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
@@ -303,6 +304,9 @@ export interface ViewerProps {
    *  `parseQuestionAnswer` are ignored. Absent: answers come from the
    *  annotations carrying `questionAnswer` (Plannotator's own path). */
   questionAnswers?: ReadonlyMap<string, QuestionAnswer> | Readonly<Record<string, QuestionAnswer>>;
+  /** Draw only the question card with this key (the Inbox's decision mode): its key and number are still read from
+   *  the whole document, every other block is left out. Absent: the whole document. */
+  onlyQuestionKey?: string;
   /** Explicit save mode for question cards: edits stay a draft in the card,
    *  which shows Save answer and Cancel (and no Skip); Save calls this with
    *  the question's key and the answer, or null when the draft is empty. Return
@@ -945,6 +949,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   checkboxOverrides,
   onAnswerQuestion,
   questionAnswers: hostQuestionAnswers,
+  onlyQuestionKey,
   onSaveQuestionAnswer,
   saveQuestionAnswerLabel,
   renderQuestionFooter,
@@ -1098,6 +1103,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // anchor ids stay stable across re-renders and duplicate heading texts get
   // `-1`/`-2`/... suffixes rather than colliding on the same id.
   const headingSlugMap = useMemo(() => buildHeadingSlugMap(blocks), [blocks]);
+  // GFM footnotes: null for a document that defines none (then nothing below changes).
+  const footnotes = useFootnotes(blocks);
   // `:::question` blocks: numbered in document order, answers drawn from the
   // annotations that carry `questionAnswer` (matched by question key, so an
   // answer follows its question across re-parses).
@@ -1966,6 +1973,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     <LocalLinkContext.Provider value={resolveLocalLink ?? null}>
     <DiagramAnchorClaimsContext.Provider value={diagramClaims}>
     <CommentDraftScopeContext.Provider value={commentDraftScope}>
+    <FootnoteProvider index={footnotes}>
     <div
       className={`relative z-50 w-full${fillHeight ? ' flex flex-col print:block' : ''}`}
       data-viewer-fill-height={fillHeight ? '' : undefined}
@@ -2061,7 +2069,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
         {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} markdown={markdown} /></>}
         {!frontmatter && blocks.length > 0 && blocks[0].type !== 'heading' && <div className="mt-4" />}
-        {withBelowTitle(groupBlocks(blocks).map(group =>
+        {withBelowTitle(groupBlocks(footnotes ? footnotes.bodyBlocks : blocks).filter((group) => onlyQuestionKey === undefined || (group.type !== 'list-group' && questionIndex.byBlock.get(group.block.id)?.question.key === onlyQuestionKey)).map(group =>
           group.type === 'list-group' ? (
             (() => {
               const indices = computeListIndices(group.blocks);
@@ -2277,6 +2285,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             })()
           )
         ))}
+
+        {footnotes && (
+          <FootnoteList
+            index={footnotes}
+            imageBaseDir={imageBaseDir}
+            onImageClick={onBlockImageClick}
+            onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
+            githubRepo={linkRepo?.display}
+            repoHost={linkRepo?.host}
+            onNavigateAnchor={scrollToAnchor}
+          />
+        )}
 
         {/* Text selection toolbar */}
         {selectionCommentsOn && !hostComposes && toolbarState && (
@@ -2528,6 +2549,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         document.body
       )}
     </div>
+    </FootnoteProvider>
     </CommentDraftScopeContext.Provider>
     </DiagramAnchorClaimsContext.Provider>
     </LocalLinkContext.Provider>

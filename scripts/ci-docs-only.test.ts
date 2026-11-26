@@ -260,6 +260,9 @@ describe('no code reads an allowlisted file', () => {
     'packages/shared/inbox/search.test.ts': 'an attachment path in a fixture',
     'tests/e2e/inbox-search-world.ts': 'writes its own file at that path in a temp project',
     'tests/e2e/inbox-ack.spec.ts': 'words in an agent message',
+    'scripts/ci-affected.ts': 'PUSH_LIGHT: globs of the paths a light push to main may change, matched against a diff',
+    'scripts/ci-affected-map.test.ts': 'paths a test of PUSH_LIGHT classifies',
+    'scripts/site-lane.test.ts': 'paths a test of the site lane classifies, and files of a throwaway git history',
   };
 
   test('the allowlist covers real files', () => {

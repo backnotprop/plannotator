@@ -1,9 +1,9 @@
 /**
  * A routine's thread: each run opens with its divider ("Run 7"), a late one says when it was due and how
  * many times were missed, a skip line stands in for a due time that did not run, and a run that ended with no reply
- * says "Didn't finish". All of it comes from the messages, so another machine's thread reads the same; its Reply-row
- * mark then names that machine and links nowhere. What regresses: a late run drawn as on time, a skip drawn as a
- * run, "Didn't finish" under a run that replied or is still going, or a far thread's mark opening this computer's page.
+ * says "Didn't finish". All of it comes from the messages, so another machine's thread reads the same, and its
+ * Reply-row mark opens that computer's routine here. What regresses: a late run drawn as on time, a skip drawn as a
+ * run, "Didn't finish" under a run that replied or is still going, or a far thread's routine not managed from here.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -18,6 +18,8 @@ const hasDom = typeof document !== 'undefined';
 const { RunDivider, ScheduledFoot } = (hasDom ? await import('./thread') : {}) as typeof import('./thread');
 const { resetScheduledForTests } = (hasDom ? await import('./store') : {}) as typeof import('./store');
 const { farChangeMessage } = await import('./farLinks');
+const { machineOf, rememberMachine, resetMachineRoutes } = await import('../inboxUrl');
+const STUDIO = 'ibx_01HZZZZZZZZZZZZZZZZZZZZZZZ';
 
 let root: Root | null = null;
 afterEach(() => {
@@ -110,7 +112,7 @@ function foot(machine: { name: string } | null): HTMLElement {
   return host;
 }
 
-test.skipIf(!hasDom)('the Reply row mark: Edit on this computer, the machine\'s name and no link on another\'s', () => {
+test.skipIf(!hasDom)('the Reply row mark: Edit on this computer, and the same Edit on a linked computer\'s routine', () => {
   resetScheduledForTests([scheduledRow('sch_pr', { name: 'Weekday PR summary', thread_id: 'msg_thread' })], true);
   let host = foot(null);
   const mark = host.querySelector<HTMLButtonElement>('button[data-scheduled-foot="sch_pr"]')!;
@@ -120,19 +122,23 @@ test.skipIf(!hasDom)('the Reply row mark: Edit on this computer, the machine\'s 
   act(() => root?.unmount());
   document.body.innerHTML = '';
 
+  // A linked computer's routine is in the merged list with its computer: its thread's mark opens its editor here.
+  resetScheduledForTests([scheduledRow('sch_pr', { name: 'Weekday PR summary', thread_id: 'msg_thread', machine: STUDIO })], false, [{ id: STUDIO, on: true, launch_on: true, away: false }]);
   host = foot({ name: 'Studio Mac' });
-  expect(host.querySelector('button, a')).toBeNull();
-  expect(host.querySelector('[data-scheduled-foot-far]')?.textContent).toBe('Routine on Studio Mac. Manage it there.');
+  expect(host.querySelector('[data-scheduled-foot-far]')).toBeNull();
+  expect(host.querySelector('button[data-scheduled-foot="sch_pr"]')?.textContent).toContain('Edit');
 });
 
-test('an agent\'s change message in another machine\'s thread: the editor link becomes the name, and where to manage it', () => {
+test('an agent\'s change message in a linked computer\'s thread keeps its editor link, and the routine is that computer\'s', () => {
+  resetMachineRoutes();
   const change = message('msg_change', '2026-11-10T13:00:00.000Z', { author: AGENT, body: 'Made the routine [Weekday PR summary](#routine=sch_pr). It is off until you turn it on.', scheduled_change: { scheduled_id: 'sch_pr', name: 'Weekday PR summary', op: 'create' } });
   expect(farChangeMessage(change, null)).toBe(change);
-  const far = farChangeMessage(change, 'Studio Mac');
-  expect(far.body).not.toContain('#scheduled');
-  expect(far.body).toContain('Made the routine Weekday PR summary.');
-  expect(far.body).toContain('Routine on Studio Mac. Manage it there.');
-  expect(farChangeMessage(change, 'Studio Mac')).toBe(far);
+  expect(machineOf('sch_pr')).toBeNull();
+  rememberMachine(['msg_change'], STUDIO);
+  expect(farChangeMessage(change, 'Studio Mac')).toBe(change);
+  expect(change.body).toContain('[Weekday PR summary](#routine=sch_pr)');
+  expect(machineOf('sch_pr')).toBe(STUDIO);
+  resetMachineRoutes();
 });
 
 test.skipIf(!hasDom)('a fold over earlier runs hides whole runs: it starts at a run line and the next line shown is a run line', async () => {

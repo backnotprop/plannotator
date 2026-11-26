@@ -8,7 +8,7 @@ export interface ReviewSettingsDiffOption {
   description: string;
 }
 
-/** The default-diff choices Settings → Review offers for one VCS. */
+/** The default-diff choices Settings → Reviews › Files and defaults offers for one VCS. */
 export interface VcsReviewSettingsDescriptor {
   id: string;
   label: string;
@@ -40,8 +40,11 @@ export interface VcsReviewSettingsDescriptor {
  * 'sections'.
  */
 
-/** Store seam for tests (fresh ConfigStoreForTest); production always uses the singleton. */
-type PanelViewConfigStore = typeof configStore;
+/**
+ * Store seam: tests pass a fresh ConfigStoreForTest; Settings → Reviews passes
+ * the singleton's `get` with its host's writer, so a host routes these writes.
+ */
+type PanelViewConfigStore = Pick<typeof configStore, 'get' | 'set'>;
 
 export function setReviewPanelView(
   view: 'sections' | 'tree',
@@ -130,7 +133,7 @@ export function setProviderReviewDefaultDiffType(
  * meaningful revision can re-show it.
  *
  * It lives beside the setting rather than in the review app because BOTH
- * writers of the setting (Settings → Review here, and the file-list gear in the
+ * writers of the setting (Settings → Reviews here, and the file-list gear in the
  * review app) must consume the gate: someone who found the switch has
  * demonstrably discovered the feature and must never be told about it.
  */

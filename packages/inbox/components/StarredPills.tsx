@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
-import { agentName, formatCount } from '../format';
+import { formatCount } from '../format';
+import { rowAgentName, rowWho } from '../scriptAuthor';
 import { AuthorMark, Icon } from '../icons';
 import { fitPills, moreName, pillName, pillWaits, starredPills, type StarredPill } from '../starredPills';
 import { rowAgent, titleOf } from './InboxList';
@@ -392,9 +393,9 @@ function PillTip({ pill }: { pill: StarredPill }) {
         </span>
       )}
       <span className="ib-tip-sub ib-star-tipag" data-pill-tip-agent="">
-        <AuthorMark author={agent} />
+        <AuthorMark author={rowWho(pill.row, agent)} />
         <span>
-          {agentName(agent)} in <bdi>{pill.project}</bdi>
+          {rowAgentName(pill.row, agent)} in <bdi>{pill.project}</bdi>
         </span>
       </span>
     </span>

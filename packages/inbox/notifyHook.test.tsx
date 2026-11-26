@@ -386,7 +386,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
     expect(raised.every((r) => r.silent)).toBe(true);
   });
 
-  test('"for every agent message": three new threads seconds apart, one ring, every notice silent', async () => {
+  test('"every agent message": three new threads seconds apart, one ring, every notice silent', async () => {
     bell = true;
     bellEvery = true;
     away();
@@ -630,6 +630,19 @@ describe.if(hasDom)('useInboxNotifications', () => {
     const { steps, end } = await addressesDuring('#thread=old', () => notices.at(-1)!.onclick!());
     expect(steps[0]).toMatch(/^#thread=t1&click=\d+$/);
     expect(end).toBe('#thread=t1');
+  });
+
+  test("a click on a thread's notice makes the open the person's (Recent activity); the thread opened with no click is not", async () => {
+    const { personOpened, resetRecentActsForTests, routeChanged } = await import('./recentActs');
+    resetRecentActsForTests();
+    // Opened with no click here (an agent's open): not the person's.
+    routeChanged(Date.now(), 'old');
+    expect(personOpened('old')).toBe(false);
+    await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
+    onOpenThread = (threadId) => routeChanged(Date.now(), threadId);
+    await act(async () => notices.at(-1)!.onclick!());
+    expect(personOpened('t1')).toBe(true);
+    resetRecentActsForTests();
   });
 
   test("a click on a burst's notice, the list already at rest: the address changes and ends with no hash", async () => {

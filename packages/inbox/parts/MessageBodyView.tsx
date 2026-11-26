@@ -3,6 +3,7 @@ import type { InboxAttachmentState, InboxMessageWire, InboxProjectRepo, InboxQue
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { actionForBlock } from '../actions';
 import { ActionChecklist } from '../components/ActionChecklist';
+import { hasRunBlocks, runBlockFor } from './RunBlocks/RunBlock';
 import { ReplacedQuestionCard, ReplacesLine, type Replacement } from '../components/ReplacedQuestion';
 import type { ActionRow } from '../components/ReplyAnswers';
 import type { SentAnswerGroup } from '../sentReply';
@@ -17,6 +18,8 @@ export type MessageBodyData = {
   footers: readonly (string | null)[];
   replaced: readonly (readonly [Replacement | null, QuestionAnswer | null | undefined, InboxQuestion[]])[];
   readOnly: boolean;
+  /** The thread's questions moved to another thread (its root's `moved_to`). */
+  movedThread?: boolean;
   live: boolean;
   sentAnswers: readonly SentAnswerGroup[] | undefined;
   sentActions: readonly ActionRow[] | undefined;
@@ -46,6 +49,8 @@ export function drawMessageBody(d: MessageBodyData) {
   const isAgent = message.author.kind === 'agent';
   const questions = message.questions ?? [];
   const at = (key: string) => questions.findIndex((q) => q.key === key);
+  // A skill emoji's reply is drawn as its head line alone ("You 😵‍💫 /bro"): its words and skills block are not shown.
+  if (message.skill_reaction) return null;
   return (
     <>
       {message.review_anchor && <ReviewAnchorLine anchor={message.review_anchor} resolved={!!message.review_resolved} />}
@@ -61,10 +66,13 @@ export function drawMessageBody(d: MessageBodyData) {
         repo={d.repo}
         onOpenAttachment={(attachment, start) => acts.current.openFromMessage(attachment, null, start ? () => acts.current.setPageStart({ id: attachment.id, start }) : undefined)}
         onOpenFileRef={d.fileRefs ? (ref) => acts.current.openFileRef(id, ref) : undefined}
+        // A skill the person's message used: read where it was typed when the message says, else here, else on a linked computer.
+        onOpenSkill={isAgent ? undefined : (name) => acts.current.openFileRef(id, { path: name, skill: true })}
         onOpenInlineImage={(image) => acts.current.openFromMessage(image)}
         onOpenOptionSet={(key, image, choice) => acts.current.openOptionSet(id, key, image, choice)}
         onTryPrototype={isAgent ? (key) => acts.current.tryPrototype(id, key) : undefined}
         readOnly={d.readOnly}
+        movedThread={d.movedThread}
         answers={d.answers}
         onPick={(key, answer) => acts.current.pick(id, key, answer)}
         footerFor={(key) => d.footers[at(key)] ?? null}
@@ -79,6 +87,7 @@ export function drawMessageBody(d: MessageBodyData) {
           const old = d.replaced[at(key)]?.[2] ?? [];
           return old.length > 0 ? <ReplacesLine old={old} onJump={(target) => acts.current.jumpTo(target)} /> : null;
         }}
+        renderRunBlock={isAgent && hasRunBlocks(message.body) ? (block) => runBlockFor(message, block, d.name) : undefined}
         renderActions={
           isAgent && (message.actions?.length ?? 0) > 0
             ? {

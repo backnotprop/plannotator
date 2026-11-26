@@ -302,8 +302,19 @@ test.skipIf(!hasDom)('the pill does the old choice\'s job: Send opens its list o
   const el = await render(threadOf(asking()));
   const text = await writeReply(el);
   expect(pillList(el)).toBeNull();
-  act(() => button(el, 'Send').click());
-  await settle();
+  // The chip scrolls with the words: Send brings it into view before its list opens against it.
+  const scrolled: { node: Element; how: unknown }[] = [];
+  const scrollIntoView = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element, how?: boolean | ScrollIntoViewOptions) {
+    scrolled.push({ node: this, how });
+  };
+  try {
+    act(() => button(el, 'Send').click());
+    await settle();
+  } finally {
+    Element.prototype.scrollIntoView = scrollIntoView;
+  }
+  expect(scrolled.filter((s) => s.node === pill(el)).map((s) => s.how)).toEqual([{ block: 'nearest', inline: 'nearest' }]);
   expect(replies()).toEqual([]);
   // "Where should this reply go?" is gone (approval "inbox-reply-recipient").
   expect(el.querySelector('[data-route-choice]')).toBeNull();
@@ -1335,7 +1346,7 @@ test.skipIf(!hasDom)('the person answers the script\'s own question: that reply,
   expect(replies()[0]!.body.words).toBe(WORDS);
 });
 
-test.skipIf(!hasDom)('a thread only a script wrote in: the reply is the script\'s, and its line is as before', async () => {
+test.skipIf(!hasDom)('a thread only a script wrote in: the reply is the script\'s, and its line names it Script', async () => {
   sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
   const only = scripted({ id: M1, reply_to: null, subject: 'Disk alert' });
   const el = await render(threadOf(only));
@@ -1349,7 +1360,7 @@ test.skipIf(!hasDom)('a thread only a script wrote in: the reply is the script\'
   act(() => root?.unmount());
   host?.remove();
   const after = await render(threadOf(only, personReply({ body: WORDS })), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
-  expect(after.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe('Saved for An agent. It sees it when it next reads this thread.');
+  expect(after.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe('Saved for Script. It sees it when it next reads this thread.');
 });
 
 test.skipIf(!hasDom)('the script\'s own question answered after the session that wrote ended: the sent line is the script\'s, never "That session has ended"', async () => {
@@ -1357,5 +1368,5 @@ test.skipIf(!hasDom)('the script\'s own question answered after the session that
   liveness = { ses_asker: false };
   const answered = scripted({ body: BODY, questions: questions(false, SCRIPT_ID).map((q) => ({ ...q, state: 'sent' as const, revision: 1, sent_revision: 1 })) });
   const el = await render(threadOf(asking(), answered, personReply({ reply_to: SCRIPT_ID })), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
-  expect(el.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe('Saved for An agent. It sees it when it next reads this thread.');
+  expect(el.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe('Saved for Script. It sees it when it next reads this thread.');
 });

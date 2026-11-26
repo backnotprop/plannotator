@@ -19,6 +19,8 @@ import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
 import type { InboxAuthor, InboxQuestion } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 import { InboxStore } from "./store";
+import { splitThreadActions } from "../../inbox/actions";
+import { sentActionsOf } from "../../inbox/thread/sentActions";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -286,19 +288,11 @@ describe("in the reply draft (approval \"inbox-action-items-in-reply\")", () => 
 
     const timed = setup();
     timed.store.markAction(timed.asked.id, timed.action.key, { outcome: "done" });
-    expect(() =>
-      timed.store.sendMessage({ project_id: timed.project.id, author: AGENT, reply_to: timed.asked.id, body: "Never mind.", supersedes: [`${timed.asked.id}/${timed.action.key}`] }),
-    ).toThrow(/the person already marked it; their answer reaches you in a few seconds/);
-    // The refusal's list agrees with it: the marked item is not offered as open; the question still is.
-    let refusal: InboxError | null = null;
-    try {
-      timed.store.sendMessage({ project_id: timed.project.id, author: AGENT, reply_to: timed.asked.id, body: "Never mind.", supersedes: [`${timed.asked.id}/${timed.action.key}`] });
-    } catch (error) {
-      refusal = error as InboxError;
-    }
-    const listed = (refusal!.details as { open_questions: { id: string }[] }).open_questions.map((q) => q.id);
-    expect(listed).toEqual([`${timed.asked.id}/${timed.question.key}`]);
-    expect(refusal!.message).not.toContain(`${timed.asked.id}/${timed.action.key} (`);
+    const timedRef = `${timed.asked.id}/${timed.action.key}`;
+    const sent = timed.store.sendMessage({ project_id: timed.project.id, author: AGENT, reply_to: timed.asked.id, body: "Never mind.", supersedes: [timedRef] });
+    expect(sent.skipped).toEqual([{ ref: timedRef, id: timedRef, was: "marked", new_question: null }]);
+    expect(actionOf(timed.store, timed.asked.id)).toMatchObject({ state: "picked", superseded_by: null });
+    expect(timed.store.openQuestionsOf(timed.asked.thread_id).map((q) => q.id)).toEqual([`${timed.asked.id}/${timed.question.key}`]);
   });
 
   test("a Send of only action items that left the draft meanwhile is nothing to send, not a refusal", () => {
@@ -393,6 +387,87 @@ describe("in the reply draft (approval \"inbox-action-items-in-reply\")", () => 
   });
 });
 
+describe("Skip (the owner's variant A, 2026-11-19)", () => {
+  test("one mark with no words, into the draft like Done: the row keeps its section and counts it skipped; the tick takes it back", () => {
+    const { store, asked, action } = setup();
+    store.markAction(asked.id, action.key, { outcome: "skip", staged: true });
+    expect(actionOf(store, asked.id)).toMatchObject({ state: "picked", action_result: { outcome: "skip", note: null, by: "person", staged: true } });
+    const row = rowOf(store, asked.thread_id);
+    expect(row.unsent).toMatchObject({ skipped: 1 });
+    expect(row.unsent?.done ?? 0).toBe(0);
+    // Q2: the agent is still stopped until the Send carries it.
+    expect(row.section).toBe("stopped");
+    expect(store.settleActions(0)).toEqual([]);
+    store.markAction(asked.id, action.key, { outcome: null, staged: true });
+    expect(actionOf(store, asked.id)).toMatchObject({ state: "open", action_result: null });
+    expect(rowOf(store, asked.thread_id).unsent?.skipped ?? 0).toBe(0);
+  });
+
+  test("the Send carries it: the reply's first line names both kinds, the item says the person skipped it, and it waits on nobody after", () => {
+    const { store, asked, action, question } = setup();
+    store.markAction(asked.id, action.key, { outcome: "skip", staged: true });
+    pickYes(store, asked.id, store.questionsOf(asked.id).find((q) => q.key === question.key)!);
+    const { reply } = store.sendReply(asked.id, {
+      idempotency_key: "k1",
+      words: "",
+      questions: [{ key: question.key, revision: store.questionsOf(asked.id).find((q) => q.key === question.key)!.revision }],
+      actions: [{ key: action.key }],
+    });
+    expect(reply.body.startsWith("Answered 1 question, skipped 1 action item.\n\n")).toBe(true);
+    expect(reply.body).toMatch(/\n\n0 of 1 done\.\n\n### A1\. Approve the production deploy on Vercel\nSkipped by the person, \d{1,2}:\d{2}\s[AP]M\.$/);
+    expect(actionOf(store, asked.id)).toMatchObject({ state: "sent", sent_reply_id: reply.id });
+    const row = rowOf(store, asked.thread_id);
+    expect(row.section).not.toBe("stopped");
+    expect(row.unsent?.skipped ?? 0).toBe(0);
+  });
+
+  test("a note sent with a skip is dropped: the reply never carries it", () => {
+    const { store, asked, action } = setup();
+    store.markAction(asked.id, action.key, { outcome: "skip", note: "Not this week.", staged: true });
+    expect(actionOf(store, asked.id).action_result).toMatchObject({ outcome: "skip", note: null });
+    const { reply } = store.sendReply(asked.id, { idempotency_key: "k1", words: "", actions: [{ key: action.key }] });
+    expect(reply.body).not.toContain("Not this week.");
+  });
+
+  test("the agent's own done settles a skip in the draft and one already sent; the message is never refused", () => {
+    // In the draft (Q3): the agent's, the skip kept under person, nothing left to send.
+    const draft = setup();
+    draft.store.markAction(draft.asked.id, draft.action.key, { outcome: "skip", staged: true });
+    const ref = `${draft.asked.id}/${draft.action.key}`;
+    const seen = draft.store.sendMessage({ project_id: draft.project.id, author: AGENT, body: "I deployed it from the CLI.", reply_to: draft.asked.id, done: [ref] });
+    expect(seen.done).toEqual([ref]);
+    expect(actionOf(draft.store, draft.asked.id)).toMatchObject({ state: "closed", action_result: { outcome: "done", by: "agent", person: { outcome: "skip", note: null } } });
+    expect(rowOf(draft.store, draft.asked.thread_id).unsent?.skipped ?? 0).toBe(0);
+
+    // Sent: the same record shape, and the send goes through rather than "invalid_done … Nothing was sent".
+    const sent = setup();
+    sent.store.markAction(sent.asked.id, sent.action.key, { outcome: "skip", staged: true });
+    const { reply } = sent.store.sendReply(sent.asked.id, { idempotency_key: "k1", words: "", actions: [{ key: sent.action.key }] });
+    expect(actionOf(sent.store, sent.asked.id)).toMatchObject({ state: "sent", sent_reply_id: reply.id });
+    const sentRef = `${sent.asked.id}/${sent.action.key}`;
+    const after = sent.store.sendMessage({ project_id: sent.project.id, author: AGENT, body: "Deployed it myself after all.", reply_to: reply.id, done: [sentRef] });
+    expect(after.done).toEqual([sentRef]);
+    expect(actionOf(sent.store, sent.asked.id)).toMatchObject({ state: "closed", action_result: { outcome: "done", by: "agent", person: { outcome: "skip", note: null } } });
+    // Still sent with the person's reply: their reply keeps its "You skipped 1 action item" list, and a mark is refused.
+    const messages = splitThreadActions(sent.store.thread(sent.asked.thread_id)!).messages;
+    expect(sentActionsOf(messages).get(reply.id)?.map((row) => row.outcome)).toEqual(["skip"]);
+    expect(() => sent.store.markAction(sent.asked.id, sent.action.key, { outcome: null, staged: true })).toThrow(expect.objectContaining({ code: "action_already_sent" }));
+    expect(() => sent.store.markAction(sent.asked.id, sent.action.key, { outcome: "done", staged: true })).toThrow(expect.objectContaining({ code: "action_already_sent" }));
+    // Nothing of it waits on the person or goes to the agent again.
+    expect(rowOf(sent.store, sent.asked.thread_id).unsent?.skipped ?? 0).toBe(0);
+    expect(() => sent.store.sendReply(sent.asked.id, { idempotency_key: "k2", words: "", actions: [{ key: sent.action.key }] })).toThrow(expect.objectContaining({ code: "nothing_to_send" }));
+  });
+
+  test("a skip and its time survive a reload from disk, still in the draft", () => {
+    const first = setup();
+    first.store.markAction(first.asked.id, first.action.key, { outcome: "skip", staged: true });
+    const at = actionOf(first.store, first.asked.id).action_result!.at;
+    const again = open(first.dir);
+    expect(actionOf(again.store, first.asked.id)).toMatchObject({ state: "picked", action_result: { outcome: "skip", at, staged: true } });
+    expect(rowOf(again.store, first.asked.thread_id).unsent).toMatchObject({ skipped: 1 });
+  });
+});
+
 describe("review fixes", () => {
   test("the report is not a look: an agent message landing inside the Undo window stays new (unseen, bold), the row shows the news", () => {
     const { store, clock, project, asked, action } = setup();
@@ -480,14 +555,12 @@ describe("review fixes", () => {
     expect(second.store.questionsOf(second.asked.id).find((q) => q.kind === "action")!.superseded_by).toEqual({ message_id: by.id, key: expect.stringMatching(/^a-/) });
   });
 
-  test("supersedes never takes an action item the person marked inside its Undo window: refused by its id, left out of a message-wide id; their answer still goes", () => {
+  test("supersedes never takes an action item the person marked inside its Undo window: skipped by its id, left out of a message-wide id; their answer still goes", () => {
     const { store, clock, project, asked, action, question } = setup();
     store.markAction(asked.id, action.key, { outcome: "done", note: "Approved." });
-    const before = store.cursor();
-    expect(() =>
-      store.sendMessage({ project_id: project.id, author: AGENT, reply_to: asked.id, body: "Never mind the deploy.", supersedes: [`${asked.id}/${action.key}`] }),
-    ).toThrow(/the person already marked it; their answer reaches you in a few seconds/);
-    expect(store.cursor()).toBe(before);
+    const skipped = store.sendMessage({ project_id: project.id, author: AGENT, reply_to: asked.id, body: "Never mind the deploy.", supersedes: [`${asked.id}/${action.key}`] }).skipped;
+    expect(skipped?.map((s) => s.was)).toEqual(["marked"]);
+    expect(actionOf(store, asked.id)).toMatchObject({ state: "picked", superseded_by: null });
     // A message-wide id supersedes the open question and leaves the marked action item alone.
     store.sendMessage({ project_id: project.id, author: AGENT, reply_to: asked.id, body: "Dropping the announcement question.", supersedes: [asked.id] });
     expect(store.questionsOf(asked.id).find((q) => q.key === question.key)!.state).toBe("superseded");

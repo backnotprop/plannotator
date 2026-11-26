@@ -47,7 +47,8 @@ export class TagConnection {
     readonly session: string,
     readonly host: string,
     private readonly projectPath: string,
-    private readonly state: { busy: boolean; tags: boolean; sendNow: boolean; startedAt: number },
+    /** `label`: the session's own name, sent on each poll as the mod sends its session title. */
+    private readonly state: { busy: boolean; tags: boolean; sendNow: boolean; startedAt: number; label?: string },
   ) {
     this.loop = this.run();
   }
@@ -70,6 +71,7 @@ export class TagConnection {
         idle_since: this.state.startedAt + 60_000,
         ...(this.state.sendNow ? { send_now: true } : {}),
         ...(this.state.tags ? { tags: true } : {}),
+        ...(this.state.label ? { label: this.state.label } : {}),
       }).catch(() => null);
       if (!response) {
         await new Promise((r) => setTimeout(r, 200));

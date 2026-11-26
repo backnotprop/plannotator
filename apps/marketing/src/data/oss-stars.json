@@ -1,0 +1,124 @@
+{
+  "total": 20436,
+  "repoCount": 27,
+  "fetchedAt": "2026-11-22",
+  "set": {
+    "repos": [
+      "backnotprop/plannotator"
+    ],
+    "orgs": [
+      "plannotator"
+    ],
+    "rule": "listed repos plus every public non-fork repo of each org"
+  },
+  "repos": [
+    {
+      "repo": "backnotprop/plannotator",
+      "stars": 14366
+    },
+    {
+      "repo": "plannotator/effective-html",
+      "stars": 4299
+    },
+    {
+      "repo": "plannotator/herdr-annotate",
+      "stars": 784
+    },
+    {
+      "repo": "plannotator/artifact-server",
+      "stars": 296
+    },
+    {
+      "repo": "plannotator/plannotator-tui",
+      "stars": 268
+    },
+    {
+      "repo": "plannotator/tot",
+      "stars": 87
+    },
+    {
+      "repo": "plannotator/talkto",
+      "stars": 65
+    },
+    {
+      "repo": "plannotator/write-better",
+      "stars": 38
+    },
+    {
+      "repo": "plannotator/guides",
+      "stars": 36
+    },
+    {
+      "repo": "plannotator/effective-svg",
+      "stars": 32
+    },
+    {
+      "repo": "plannotator/herdr-plannotator",
+      "stars": 29
+    },
+    {
+      "repo": "plannotator/sem-jiff",
+      "stars": 25
+    },
+    {
+      "repo": "plannotator/webtui",
+      "stars": 23
+    },
+    {
+      "repo": "plannotator/app-notes",
+      "stars": 19
+    },
+    {
+      "repo": "plannotator/design-artifact",
+      "stars": 13
+    },
+    {
+      "repo": "plannotator/2n",
+      "stars": 11
+    },
+    {
+      "repo": "plannotator/spec-planning-frameworks",
+      "stars": 9
+    },
+    {
+      "repo": "plannotator/envit",
+      "stars": 7
+    },
+    {
+      "repo": "plannotator/dev-skills",
+      "stars": 7
+    },
+    {
+      "repo": "plannotator/markdown-editor",
+      "stars": 6
+    },
+    {
+      "repo": "plannotator/coding-agent-field-guide",
+      "stars": 4
+    },
+    {
+      "repo": "plannotator/byoa",
+      "stars": 4
+    },
+    {
+      "repo": "plannotator/agent-bridge",
+      "stars": 4
+    },
+    {
+      "repo": "plannotator/diffs-rs",
+      "stars": 2
+    },
+    {
+      "repo": "plannotator/show",
+      "stars": 1
+    },
+    {
+      "repo": "plannotator/homebrew-tap",
+      "stars": 1
+    },
+    {
+      "repo": "plannotator/performance-audit",
+      "stars": 0
+    }
+  ]
+}

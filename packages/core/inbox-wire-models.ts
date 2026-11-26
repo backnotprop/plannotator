@@ -18,6 +18,7 @@ import type {
   InboxTagLook,
   InboxThread,
 } from "./inbox-types";
+import type { LinkThroughView } from "./inbox-link-through";
 
 /** The list model's tags (ListModel extends this). */
 export interface ListTagsFields {
@@ -91,6 +92,16 @@ export interface MachineView {
   marks?: string[];
   /** Update on that machine, from its own state. Null: nothing to say (level, ahead, this machine, or no newer release known). */
   update?: MachineUpdateView | null;
+  /**
+   * How far its clock runs ahead of this Inbox's (ms, whole minutes; absent within two minutes, for this machine, and
+   * from an older Inbox). Grid (approval "inbox-agent-grid") reads its rows' times on its own clock.
+   */
+  clock_ms?: number;
+  /**
+   * This machine only: two of its links not linked to each other, and computers it reaches only through a link
+   * ("Link two computers through a third", inbox-machines.md). Absent from an older Inbox.
+   */
+  link_through?: LinkThroughView;
 }
 
 /** A linked machine's update, as `machineUpdateView` (inbox-machines.ts) reads what it hears from there. */

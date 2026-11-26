@@ -1,9 +1,10 @@
 /**
  * The overview diagram, drawn with Plannotator's diagram engine
- * (`@plannotator/ui`'s `renderDiagram`: Mermaid under `securityLevel:
- * 'strict'`, its output sanitized into a node). Click bindings never reach
- * Mermaid: they are taken out of the source first and attached to the drawn
- * nodes as `data-link`, which the webview's delegated handlers act on.
+ * (`@plannotator/ui`'s `renderDiagram`: Pele where it can, Mermaid under
+ * `securityLevel: 'strict'` for the rest, either output sanitized into a
+ * node; `packages/ui/PELE.md`). Click bindings never reach the engine: they
+ * are taken out of the source first and attached to the drawn nodes as
+ * `data-link`, which the webview's delegated handlers act on.
  */
 
 import { renderDiagram } from "../../../../../packages/ui/utils/diagram-render";

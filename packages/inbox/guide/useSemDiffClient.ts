@@ -4,10 +4,13 @@ import { parseSemDiffAdvert } from '@plannotator/review-editor/semDiff/protocol'
 import { createSemDiffClient, type SemDiffClient } from '@plannotator/review-editor/semDiff/semDiffClient';
 import { loadSemDiffWorker } from '@plannotator/review-editor/semDiff/loadSemDiffWorker';
 import { semDiffAdvertNow, useSemDiffAdvert } from '../semDiffAdvert';
+import { useReviewAnalysisRead } from '../reviewAnalysis';
 
 export function useSemDiffClient(): SemDiffClient | null {
   useSemDiffAdvert();
-  const enabled = useConfigValue('semanticDiffEnabled');
+  // Code review's "Semantic changes" switch, once config.json's value is in (reviewAnalysis.ts): off, no client.
+  const switchOn = useConfigValue('semanticDiffEnabled');
+  const enabled = useReviewAnalysisRead() && switchOn;
   const on = useConfigValue('diffSemantic');
   const wanted = useRef(false);
   const latched = useRef<{ value: unknown } | null>(null);

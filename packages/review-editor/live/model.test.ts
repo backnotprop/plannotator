@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { InboxMessage } from '@plannotator/core/inbox-types';
-import { anchorOfComment, deliveryWord, openThreadIds, placeThreads, stepThread, unsentComments } from './model';
+import { anchorOfComment, commentOfMessage, deliveryWord, openThreadIds, placeThreads, stepThread, unsentComments } from './model';
 
 const patch = ['@@ -1,6 +1,7 @@', ' export const RETRIES = 3;', ' ', ' export function charge(amount) {', '-  if (amount < 0) throw new Error("bad");', '+  if (amount < 0) throw new RangeError("amount");', '+  if (!Number.isInteger(amount)) throw new Error("cents");', '   return stripe.charge(amount);', ' }'].join('\n');
 const files = [{ path: 'src/billing.ts', patch }];
@@ -95,6 +95,21 @@ describe('a thread posted to the forge', () => {
       fileLevelComments: [{ path: 'src/billing.ts', body: 'Split this file.' }],
     });
   });
+
+  test("a reply to an agent's open question is posted as the person's words, never the Inbox's sentence for the agent", async () => {
+    const { forgeCommentsOf } = await import('./model');
+    const stillOpen = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+    const anchor = anchorOfComment({ filePath: 'src/billing.ts', lineStart: 4, lineEnd: 5, side: 'new' }, files);
+    const placed = placeThreads(
+      [
+        msg({ id: 'c', body: 'Two checks here?', review_anchor: anchor }),
+        msg({ id: 'a', reply_to: 'c', body: 'Keep both?', author: { kind: 'agent', host: 'pi', session: 's', name: null } as never, created_at: at(1) }),
+        msg({ id: 'p', reply_to: 'a', body: `Keep both.\n\n${stillOpen}`, created_at: at(2) }),
+      ],
+      files,
+    );
+    expect(forgeCommentsOf(placed).fileComments[0]?.body).toBe('Two checks here?\n\n**Pi:** Keep both?\n\n**You:** Keep both.');
+  });
 });
 
 describe('a review with many threads', () => {
@@ -122,3 +137,10 @@ describe('a review with many threads', () => {
   });
 });
 
+describe('a comment taken back', () => {
+  test('comes back as the words the person wrote, never the still-open sentence the Inbox wrote after them for the agent', () => {
+    const stillOpen = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+    const anchor = { file: 'src/billing.ts', side: 'new', line_start: 4, line_end: 5 } as InboxMessage['review_anchor'];
+    expect(commentOfMessage(msg({ body: `Use a RangeError here.\n\n${stillOpen}`, review_anchor: anchor }))?.text).toBe('Use a RangeError here.');
+  });
+});

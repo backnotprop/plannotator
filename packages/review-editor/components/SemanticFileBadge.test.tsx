@@ -78,4 +78,10 @@ describe('SemanticFileBadge', () => {
     expect(chip.textContent).toBe('sem7');
     expect([chip.title.includes('1 moved'), chip.getAttribute('aria-label')!.includes('1 moved')]).toEqual([true, true]);
   });
+
+  test.skipIf(!hasDom)('a file with fewer listed changes than noted kinds names both, so the count on the chip is explained', async () => {
+    const chip = await draw({ status: 'semantic', summary: { counts: { moved: 3 } } as never }, [change('b', 'moved')]);
+    expect(chip.textContent).toBe('sem1');
+    expect(chip.getAttribute('aria-label')).toContain('1 semantic change; 3 moved');
+  });
 });

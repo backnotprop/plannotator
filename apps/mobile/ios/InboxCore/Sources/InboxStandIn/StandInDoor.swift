@@ -17,6 +17,8 @@ public actor StandInDoor {
     public var minAppContract = 1
     /// False: an Inbox from before the handshake, whose `health` has no `door`.
     public var answersDoor = true
+    /// The thread's files are listed without the comments that wait, as an Inbox from before that field does.
+    public var omitsComments = false
     /// Route names left out of `health.door.routes`, as an older Inbox would.
     public var withoutRoutes: Set<String> = []
     public var version = "0.29.3"
@@ -24,8 +26,15 @@ public actor StandInDoor {
     public var racesPicks = 0
     /// A status something between the phone and the computer answers every reply with, as a web page: not the Inbox's JSON.
     public var proxyRefusesReplies: Int?
+    /// Threads whose archive something between the phone and the computer refuses with a web page (a 403): one
+    /// row of an act on several rows that is not taken.
+    public var proxyRefusesArchive: Set<String> = []
     /// True: the Authorization header never reaches the door, as when something in between strips it.
     public var stripsToken = false
+    /// A code every drawing is refused with (`413 markup_too_large`, or the relay's `413 relay_upload_unavailable`).
+    public var refusesMarkups: String?
+    /// True: every upload is swept as soon as it is made (a Send naming one meets `404 upload_not_found`).
+    public var sweepsUploads = false
     public init() {}
   }
 
@@ -79,7 +88,11 @@ public actor StandInDoor {
     unread.insert(thread.threadId)
   }
   public func setOptions(_ change: @Sendable (inout Options) -> Void) { change(&options) }
+  /// The door forgets the keys it answered (its log of them ends): a write sent again is applied again.
+  public func forgetKeys() { replays = [:] }
   public func clearCalls() { calls = [] }
+  /// The thread is gone from the computer (deleted there): every read of it is `404 thread_not_found`.
+  public func removeThread(_ id: ThreadID) { threads.removeAll { $0.threadId == id } }
   public func thread(_ id: ThreadID) -> InboxThread? { threads.first { $0.threadId == id } }
   /// Change a thread as the computer's own side would (an archive, a Mark read that set a question aside).
   public func change(_ id: ThreadID, _ edit: @Sendable (inout InboxThread) -> Void) {
@@ -131,13 +144,22 @@ public actor StandInDoor {
       revoked.insert(device)
       return json(200, ["device": .object(["id": .string(device.rawValue), "revoked_at": .string(StandInData.iso(Date()))])])
     }
-    return post(call, route: route)
+    if route == "POST markups" { return keepDrawing(call) }
+    if route == "POST uploads" { return keepUpload(call) }
+    let answer = post(call, route: route)
+    if call.path.hasSuffix("/take-back"), state.lostTakeBacks > 0 {
+      state.lostTakeBacks -= 1
+      throw URLError(.networkConnectionLost)
+    }
+    return answer
   }
 
   private func get(_ call: DoorCall) -> DoorAnswerBytes {
+    settleAcks()
     let parts = call.path.split(separator: "/").map(String.init)
     switch parts.count {
     case 1 where parts[0] == "health": return health()
+    case 1 where parts[0] == "sessions": return sessionsAnswer()
     case 1 where parts[0] == "threads": return encode(200, dressed(StandInData.list(threads: threads, unread: unread, session: session, cursor: seq, version: options.version)))
     case 2 where parts[0] == "threads" && parts[1] != "archived":
       let id = ThreadID(parts[1].removingPercentEncoding ?? parts[1])
@@ -207,8 +229,11 @@ public actor StandInDoor {
     let answer: DoorAnswerBytes
     switch (parts.first, parts.count, parts.last) {
     case ("threads", 3, "seen"): answer = seen(ThreadID(parts[1]), fields)
+    case ("messages", 1, _): answer = startThread(fields)
     case ("messages", 3, "picks"): answer = picks(MessageID(parts[1]), fields)
     case ("messages", 4, _) where parts[2] == "actions": answer = markAction(MessageID(parts[1]), parts[3], fields)
+    case ("messages", 3, "resolve") where options.proxyRefusesArchive.contains(parts[1]):
+      return DoorAnswerBytes(status: 403, headers: ["content-type": "text/html"], body: Data("<html><body>Request refused</body></html>".utf8))
     case ("messages", 3, "reply"):
       if let status = options.proxyRefusesReplies { return DoorAnswerBytes(status: status, headers: ["content-type": "text/html"], body: Data("<html><body>Request refused</body></html>".utf8)) }
       answer = reply(MessageID(parts[1]), fields)
@@ -340,7 +365,7 @@ public actor StandInDoor {
     }
   }
 
-  /// `markAction`: Done (with an optional note), Can't do it (with a reason), or null to take it back.
+  /// `markAction`: Done (with an optional note), Can't do it (with a reason), Skip (no note: one sent is dropped), or null to take it back.
   private func markAction(_ message: MessageID, _ key: String, _ fields: [String: JSONValue]) -> DoorAnswerBytes {
     do {
       let at = try target(message)
@@ -353,13 +378,15 @@ public actor StandInDoor {
       case .null?: outcome = nil
       case .string("done")?: outcome = .done
       case .string("cant")?: outcome = .cant
-      default: return refuse(422, "validation_error", "outcome: \"done\", \"cant\", or null to undo.", field: "outcome")
+      case .string("skip")?: outcome = .skip
+      default: return refuse(422, "validation_error", "outcome: \"done\", \"cant\", \"skip\", or null to undo.", field: "outcome")
       }
       var note = ""
       if let raw = fields["note"], raw != .null {
         guard case .string(let text) = raw else { return refuse(422, "validation_error", "note: text.", field: "note") }
         note = text.trimmingCharacters(in: .whitespacesAndNewlines)
       }
+      if outcome == .skip { note = "" }
       if outcome == .cant, note.isEmpty { return refuse(422, "validation_error", "note: say why you can't do it; the agent gets it word for word.", field: "note") }
       let state = questions[q].state
       if state == .sent { return refuse(409, "action_already_sent", "Action item \(key) was already sent to the agent.", key: key) }
@@ -438,10 +465,32 @@ public actor StandInDoor {
           marks.append((m, q))
         }
       }
-      if planned.isEmpty, marks.isEmpty, words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      var feedback = ""
+      if case .string(let text)? = fields["feedback"] { feedback = text.trimmingCharacters(in: .whitespacesAndNewlines) }
+      // `planSentAnnotations`: each comment named is in this thread and still waits.
+      var carried: [String] = []
+      if let listed = fields["annotation_ids"], listed != .null {
+        guard case .array(let ids) = listed else { return refuse(422, "validation_error", "annotation_ids: must be a list.", field: "annotation_ids") }
+        for (index, value) in ids.enumerated() {
+          let field = "annotation_ids[\(index)]"
+          guard case .string(let id) = value, let record = state.annotations[id], record.threadId == asked.threadId else { return refuse(404, "annotation_not_found", "\(field): no such annotation in this thread.", field: field) }
+          if carried.contains(id) { return refuse(422, "validation_error", "\(field): listed twice.", field: field) }
+          if record.removedAt != nil || record.sentReplyId != nil { return refuse(409, "annotation_closed", "\(field): already sent or removed.", field: field) }
+          carried.append(id)
+        }
+      }
+      // `uploads`: each a pending upload (the files of the reply).
+      let taken = takeUploads(fields)
+      if let refusal = taken.refusal { return refusal }
+      if planned.isEmpty, marks.isEmpty, feedback.isEmpty, taken.uploads.isEmpty, words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         if case .object(let first)? = entries.first, case .string(let key)? = first["key"] { return refuse(409, "question_already_sent", "The answer to \(key) was already sent.", key: key) }
         return refuse(422, "validation_error", "words: write a reply or send at least one answer.", field: "words")
       }
+      let quotePlan = quoteLead(fields["quote"], thread: at.thread, to: asked, words: words)
+      if case .refused(let answer) = quotePlan { return answer }
+      // The agents it tags (`tagTargets`): checked before anything is written.
+      let tagged = replyTags(fields, thread: asked.threadId, owner: asked.author.session)
+      if let refusal = tagged.refusal { return refusal }
       seq += 1
       counter += 1
       let replyID = MessageID("msg_STANDINREPLY\(counter)")
@@ -469,11 +518,21 @@ public actor StandInDoor {
       let now = StandInData.iso(Date())
       let written = InboxMessageWire(
         seq: seq, id: replyID, projectId: asked.projectId, threadId: asked.threadId, replyTo: message.rawValue, author: InboxAuthor(kind: .person),
-        body: words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, createdAt: now,
-        delivery: InboxDelivery(state: "queued", host: asked.author.host ?? "", session: asked.author.session ?? "", at: now))
-      threads[at.thread].messages.append(written)
+        // No `delivery`: the Inbox writes one only once the agent has the reply.
+        body: [words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, feedback].filter { !$0.isEmpty }.joined(separator: "\n\n"), createdAt: now)
+      var quoted = written
+      if !tagged.tags.isEmpty { quoted.tags = tagged.tags }
+      // The quote, as the Inbox keeps it on the reply, and the lead it writes in front of the words for the agent
+      // (store.ts `planQuote`): checked before anything is written, and none on a reply without the person's words.
+      if case .lead(let quote, let lead) = quotePlan {
+        quoted.quote = quote
+        quoted.body = "\(lead)\n\n\(quoted.body)"
+      }
+      threads[at.thread].messages.append(quoted)
+      attach(taken.uploads, thread: asked.threadId, message: replyID)
+      for id in carried { state.annotations[id]?.sentReplyId = replyID.rawValue }
       unread.remove(asked.threadId)
-      let wire = (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(written))) ?? .null
+      let wire = (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(quoted))) ?? .null
       let result = ReplyResult(
         reply: wire, questions: threads[at.thread].messages[at.message].questions ?? [], replayed: false,
         threadRead: fields["with_thread"] == .bool(true) ? model(threads[at.thread]) : nil)

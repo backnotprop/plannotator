@@ -53,6 +53,14 @@ export interface DiagramFinder {
  * gitGraph, pie) are `other`: a comment there is diagram-level. */
 export function diagramFamilyOf(svg: Element): DiagramFamily {
   const role = svg.getAttribute('aria-roledescription') ?? '';
+  // Pele keeps Mermaid's accessible role, but its root class is the reliable
+  // discriminator: its SVG ids and group structure are not Mermaid's.
+  if (svg.classList.contains('pele')) {
+    const peleRole = Array.from(svg.classList).find((name) => name.startsWith('pele-'))?.slice(5);
+    // The families `diagram-anchor-pele.ts` addresses.
+    const families: readonly DiagramFamily[] = ['flowchart', 'sequence', 'state', 'class', 'er', 'requirement'];
+    return families.find((family) => family === peleRole) ?? 'other';
+  }
   if (role.startsWith('flowchart')) return 'flowchart';
   if (role === 'stateDiagram') return 'state';
   if (role === 'classDiagram') return 'class';
@@ -123,6 +131,24 @@ function partLabel(el: Element): string {
   return text.replace(/\s+/gu, ' ').trim();
 }
 
+/** A `<<Requirement>>` or `«interface»` line: a stereotype, not a name. */
+function isStereotype(text: string): boolean {
+  return /^(?:<<.*>>|«.*»)$/u.test(text);
+}
+
+/** A class's or a requirement's label: its NAME. Mermaid draws an
+ * annotation (`«interface»`) or the requirement's type (`<<Element>>`)
+ * above the name, in the same kind of label group. */
+function namedPartLabel(el: Element): string {
+  const title = el.querySelector('.label-group .nodeLabel');
+  if (title !== null) return cleanText(title.textContent);
+  for (const label of Array.from(el.querySelectorAll('.label'))) {
+    const text = cleanText(label.textContent);
+    if (text !== '' && !isStereotype(text)) return text;
+  }
+  return partLabel(el);
+}
+
 /** The edge label Mermaid renders in a sibling group keyed by the edge's
  * element id (`g.edgeLabels > g.edgeLabel > g.label[data-id]`; the
  * `data-id` sits on the inner `g.label`), empty when the edge has none. */
@@ -140,15 +166,17 @@ function cssEscape(value: string): string {
  * is its text plus its line, a note its rect plus its text, a loop / alt /
  * opt frame the group that holds its `loopLine`s and its label. */
 const SEQUENCE_TARGET_SELECTOR =
-  'rect.actor, text.actor, line.actor-line, text.messageText, line.messageLine0, line.messageLine1, path.messageLine0, path.messageLine1, rect.note, text.noteText, line.loopLine, polygon.labelBox, text.labelText, text.loopText';
+  'rect.actor, text.actor, g.actor-man, line.actor-line, text.messageText, line.messageLine0, line.messageLine1, path.messageLine0, path.messageLine1, rect.note, text.noteText, line.loopLine, polygon.labelBox, text.labelText, text.loopText';
 
 /** The selector of every element the pointer can address. An edge LABEL is
  * one too: it is painted over its edge and is where a person clicks an edge,
  * so it resolves to that edge. */
 export const DIAGRAM_TARGET_SELECTOR = `g.node, g.cluster, g.statediagram-cluster, path.flowchart-link, path.transition, path.relation, path.relationshipLine, g.edgeLabel, ${SEQUENCE_TARGET_SELECTOR}`;
 
+/** Text as one line. Mermaid writes a zero-width space for a frame with no
+ * label (`loop` alone); it is no part of the label. */
 function cleanText(value: string | null | undefined): string {
-  return (value ?? '').replace(/\s+/gu, ' ').trim();
+  return (value ?? '').replace(/\u200b/gu, '').replace(/\s+/gu, ' ').trim();
 }
 
 function sequenceMessageLines(svg: Element): Element[] {
@@ -166,10 +194,14 @@ function sequenceFrames(svg: Element): Element[] {
   return frames;
 }
 
+/** An actor's boxes: `rect.actor` for a participant, the `g.actor-man`
+ * group for an `actor` (the stick figure), each top and bottom. */
+const SEQUENCE_ACTOR_SELECTOR = 'rect.actor[name], g.actor-man[name]';
+
 function sequenceActorLabel(svg: Element, name: string): string {
-  for (const rect of Array.from(svg.querySelectorAll('rect.actor'))) {
-    if (rect.getAttribute('name') !== name) continue;
-    const text = rect.parentElement?.querySelector('text.actor');
+  for (const box of Array.from(svg.querySelectorAll(SEQUENCE_ACTOR_SELECTOR))) {
+    if (box.getAttribute('name') !== name) continue;
+    const text = box.matches('g') ? box.querySelector('text.actor') : box.parentElement?.querySelector('text.actor');
     if (text) return cleanText(text.textContent);
   }
   return name;
@@ -197,8 +229,12 @@ function sequenceMessageTarget(svg: Element, index: number): DiagramTarget | nul
 
 function sequenceTargetFromElement(svg: Element, el: Element): DiagramTarget | null {
   const cl = el.classList;
-  if (cl.contains('actor') || cl.contains('actor-line')) {
-    const name = el.getAttribute('name') ?? el.parentElement?.querySelector('rect.actor[name]')?.getAttribute('name') ?? null;
+  if (cl.contains('actor') || cl.contains('actor-line') || cl.contains('actor-man')) {
+    const name =
+      el.getAttribute('name') ??
+      el.closest('g.actor-man[name]')?.getAttribute('name') ??
+      el.parentElement?.querySelector('rect.actor[name]')?.getAttribute('name') ??
+      null;
     if (name === null || name === '') return null;
     return { family: 'sequence', kind: 'node', id: name, label: sequenceActorLabel(svg, name) };
   }
@@ -233,8 +269,8 @@ function sequenceElementById(svg: Element, target: DiagramTarget): Element | nul
   const ordinal = /^(msg|note|frame)-(\d+)$/u.exec(target.id);
   if (ordinal === null) {
     if (target.kind !== 'node') return null;
-    const rects = Array.from(svg.querySelectorAll('rect.actor')).filter((rect) => rect.getAttribute('name') === target.id);
-    return rects.find((rect) => rect.classList.contains('actor-top')) ?? rects[0] ?? null;
+    const boxes = Array.from(svg.querySelectorAll(SEQUENCE_ACTOR_SELECTOR)).filter((box) => box.getAttribute('name') === target.id);
+    return boxes.find((box) => box.classList.contains('actor-top')) ?? boxes[0] ?? null;
   }
   const index = Number(ordinal[2]) - 1;
   if (ordinal[1] === 'msg') return target.kind === 'edge' ? (sequenceMessageLines(svg)[index] ?? null) : null;
@@ -255,11 +291,11 @@ function findSequenceTarget(svg: Element, target: DiagramTarget): Element | null
   if (!isOrdinal) {
     if (byId !== null) return byId;
     if (target.kind !== 'node' || target.label === '') return null;
-    const named = Array.from(svg.querySelectorAll('rect.actor.actor-top, rect.actor')).filter(
-      (rect) => sequenceActorLabel(svg, rect.getAttribute('name') ?? '') === target.label,
+    const named = Array.from(svg.querySelectorAll(SEQUENCE_ACTOR_SELECTOR)).filter(
+      (box) => sequenceActorLabel(svg, box.getAttribute('name') ?? '') === target.label,
     );
-    const names = new Set(named.map((rect) => rect.getAttribute('name')));
-    return names.size === 1 ? (named.find((rect) => rect.classList.contains('actor-top')) ?? named[0] ?? null) : null;
+    const names = new Set(named.map((box) => box.getAttribute('name')));
+    return names.size === 1 ? (named.find((box) => box.classList.contains('actor-top')) ?? named[0] ?? null) : null;
   }
   const labelOf = (el: Element): string => sequenceTargetFromElement(svg, el.matches('g') ? (el.querySelector('line.loopLine') ?? el) : el)?.label ?? '';
   if (byId !== null && (target.label === '' || labelOf(byId) === target.label)) return byId;
@@ -335,7 +371,7 @@ export function targetFromElement(
       }
       const name = /^classId-(.+)-\d+$/u.exec(suffix)?.[1];
       if (name === undefined) return null;
-      return { family, kind: 'node', id: name, label: partLabel(el) };
+      return { family, kind: 'node', id: name, label: namedPartLabel(el) };
     }
     case 'er': {
       if (isPath) {
@@ -354,7 +390,7 @@ export function targetFromElement(
         return { family, kind: 'edge', id: stem, label: edgeLabel(svg, suffix) };
       }
       if (!el.classList.contains('node')) return null;
-      return { family, kind: 'node', id: suffix, label: partLabel(el) };
+      return { family, kind: 'node', id: suffix, label: namedPartLabel(el) };
     }
     // (`sequence` returned above: its parts carry classes, not ids.)
     case 'other':
@@ -376,18 +412,28 @@ export function findDiagramTarget(svg: Element, target: DiagramTarget, renderId:
   const family = diagramFamilyOf(svg);
   if (family === 'sequence') return findSequenceTarget(svg, target);
   const nodeIds = nodeIdsOf(svg, family, renderId);
+  const matches: Array<{ readonly el: Element; readonly label: string }> = [];
   for (const el of Array.from(svg.querySelectorAll(DIAGRAM_TARGET_SELECTOR))) {
     // A label resolves to its edge; the edge itself is the element.
     if (el.classList.contains('edgeLabel')) continue;
     const candidate = targetFromElement(svg, el, renderId, nodeIds);
-    if (candidate !== null && sameTarget(candidate, target)) return el;
+    if (candidate !== null && sameTarget(candidate, target)) matches.push({ el, label: candidate.label });
+  }
+  if (matches.length > 0) {
+    // Two relationships with the same ends (`User --> Order` twice, an ER
+    // pair, a requirement pair) share one identity: the stored label picks
+    // the one it names, else the first, as before.
+    const labelled = matches.filter((match) => match.label === target.label);
+    return (labelled.length === 1 ? labelled[0] : matches[0])?.el ?? null;
   }
   if (target.kind === 'node' && target.label !== '') {
     // Step (2) holds only while the label names ONE node: with two nodes
     // carrying it, the first match is a coin toss onto the wrong node, so
     // the restore falls through to the source line instead.
-    const matches = Array.from(svg.querySelectorAll('g.node')).filter((el) => partLabel(el) === target.label);
-    if (matches.length === 1) return matches[0] ?? null;
+    // The label each node's own target carries (a class's name, not its annotation).
+    const labelOf = (el: Element): string => targetFromElement(svg, el, renderId, nodeIds)?.label ?? partLabel(el);
+    const byLabel = Array.from(svg.querySelectorAll('g.node')).filter((el) => labelOf(el) === target.label);
+    if (byLabel.length === 1) return byLabel[0] ?? null;
   }
   return null;
 }
