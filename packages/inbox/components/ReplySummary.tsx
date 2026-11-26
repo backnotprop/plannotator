@@ -94,7 +94,7 @@ function FootSheet({ title, onClose, back, children }: { title: string; onClose:
 
 /**
  * Stays mounted while the box is open, drawing nothing when nothing goes with the Send: when the questions go while
- * its sheet has focus, it puts focus on the box's paperclip.
+ * its sheet has focus, it puts focus on the box's + (its paperclip's place).
  */
 export function ReplySummary({ skip, dropped, comments }: { skip: FootSkip; dropped: number; comments: FootComments | null }) {
   const [sheetOpen, setSheet] = useState(false);
@@ -115,14 +115,14 @@ export function ReplySummary({ skip, dropped, comments }: { skip: FootSkip; drop
     setRefocus(true);
   }
   const sheet = sheetOpen && !direct;
-  // Focus was in the sheet that went: back on the line, or with no line left, the box's paperclip (not the field,
-  // which would raise a phone's keyboard nobody asked for).
+  // Focus was in the sheet that went: back on the line, or with no line left, the box's + (the paperclip's place; not
+  // the field, which would raise a phone's keyboard nobody asked for).
   useLayoutEffect(() => {
     if (!refocus) return;
     setRefocus(false);
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
-    (lineRef.current ?? rowRef.current?.closest('.ib-rbox')?.querySelector<HTMLElement>('input[type="file"]'))?.focus({ preventScroll: true });
+    (lineRef.current ?? rowRef.current?.closest('.ib-rbox')?.querySelector<HTMLElement>('[data-reply-plus], input[type="file"]'))?.focus({ preventScroll: true });
   }, [refocus]);
 
   // Short of room, "4 open" for "4 questions open": tried long first, again on every change of the words, the row's

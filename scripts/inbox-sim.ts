@@ -103,6 +103,11 @@ export class SimAgent {
     return this.call('card', { ...input, agent_name: this.name, agent_host: this.host });
   }
 
+  /** The tools this session was listed at its start (`tools/list`). */
+  async listTools(): Promise<{ name: string }[]> {
+    return (await this.client.listTools()).tools;
+  }
+
   /** get_guide_brief: the method, the guide's shape, the diff steps, the rules and a worked example call. */
   guideBrief(): Promise<Structured> {
     return this.call('get_guide_brief', {});

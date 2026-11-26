@@ -464,8 +464,10 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
   // Code review shows to everyone, off (the owner, 2026-11-17). Decision mode is an ordinary capability now, under
-  // the Checklist. The window has no Shape row.
+  // the Checklist. The window has no Shape row, and no Canvas row: the canvas has no switch in Settings
+  // (inbox-canvas.md "The switch"; config.json `inboxCanvas` and `plannotator inbox capability` turn it on and off).
   expect(rows).toEqual(['Board', 'Checklist', 'Decision mode', ...SCHEDULED_ROW, 'Code review']);
+  expect(switchNamed(el, 'Canvas')).toBeNull();
   // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
   expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
   expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);

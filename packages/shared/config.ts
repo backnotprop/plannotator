@@ -654,6 +654,12 @@ export interface PlannotatorConfig {
    */
   inboxChapterDiagrams?: boolean;
   /**
+   * The canvas in every thread (docs/agent-guides/inbox-canvas.md): on unless `false`; Settings has no row for it.
+   * On: Canvas in the reply box's + menu, and `plannotator inbox canvas` for agents. Off: none of it, and every stored
+   * canvas is kept. Written by `POST /api/inbox/settings` `{ canvas: { on } }` (`plannotator inbox capability canvas`).
+   */
+  inboxCanvas?: boolean;
+  /**
    * Plans in the Inbox (packages/shared/plans/switch.ts): the plan library of every plan plan review handled. Off
    * unless the person turns it on (`plannotator plans`, or `POST /api/inbox/settings` `{ plans: { on } }` from the
    * window); `plannotator plans off` turns it off and keeps the library. Off: no `/api/plans` route, no import and
@@ -2191,6 +2197,9 @@ export function resolveAutoUpdate(
  * Env `0` / `false` / `off` / `disabled` turn it off and `1` / `true` / `on`
  * turn it on; an empty or unrecognized value counts as unset.
  */
+/** Whether config.json has the canvas on: on unless `inboxCanvas` is false (the Inbox and the agent's `--help` both ask this). */
+export const inboxCanvasOn = (config: { inboxCanvas?: boolean }): boolean => config.inboxCanvas !== false;
+
 export function resolveUpdateCheck(
   config: PlannotatorConfig,
   env: NodeJS.ProcessEnv = process.env,

@@ -142,6 +142,20 @@ export function ReviewKeysHere(props: { diff: string; viewed: boolean }) {
   }, [ready]);
   return ready ? <ReviewKeysPart.Part {...props} /> : null;
 }
+/**
+ * A thread's canvas (Excalidraw, packages/inbox/canvas): several MB, so never warmed with PARTS; it arrives when a
+ * person opens a canvas, or when the Inbox asks this window to draw one for an agent (`canvasWork`).
+ */
+export const canvasWork = () => {
+  // Excalidraw fetches its drawing fonts from here: the Inbox's own pack (build/excalidraw-local.ts), never a CDN.
+  (window as unknown as { EXCALIDRAW_ASSET_PATH?: string }).EXCALIDRAW_ASSET_PATH = '/assets/excalidraw/';
+  return import('#canvas-board');
+};
+export const CanvasBoardPart = lazyPart(canvasWork);
+/** The thread header's canvas button and the canvas's layer (canvas/CanvasParts.tsx): a page loads them only while its Inbox has the canvas. */
+const canvasParts = () => import('./canvas/CanvasParts');
+export const SketchButtonPart = lazyPart(() => canvasParts().then((mod) => ({ default: mod.SketchButton })));
+export const CanvasLayerPart = lazyPart(() => canvasParts().then((mod) => ({ default: mod.CanvasLayer })));
 export const SearchPalettePart = lazyPart(() => import('#search-palette'));
 export const PlatformPostPart = lazyPart(() => import('#platform-post'));
 /** Settings → Reviews (reviewSettings/ReviewsSettings.tsx): asked for when Settings opens, so it is in by the time the section is. */

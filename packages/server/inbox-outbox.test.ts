@@ -10,7 +10,7 @@ import { join } from "node:path";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { doorRouteNames, doorRouteOf, doorWriteRoutes } from "./inbox-devices";
 import { outboxView, startsAgentThere } from "./inbox-machines";
-import { classifyAnswer, DOOR_WRITES, doorRefusesBare, doorWriteKind, forwardsNow, InboxOutbox, OUTBOX_KEEP_SETTLED_MS, OUTBOX_MAX_SERVER_ERRORS, replyIsStale, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
+import { classifyAnswer, DOOR_WRITE_POLICY, DOOR_WRITES, doorRefusesBare, doorWriteKind, forwardsNow, InboxOutbox, OUTBOX_KEEP_SETTLED_MS, OUTBOX_MAX_SERVER_ERRORS, replyIsStale, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 
 const B = "ibx_01K00000000000000000000000";
 const C = "ibx_01K00000000000000000000001";
@@ -128,6 +128,22 @@ describe("an unlink keeps what was not sent", () => {
     expect(reopened.notices().map((entry) => entry.key)).toEqual(["k1"]);
     reopened.dismiss("k1");
     expect(InboxOutbox.open(dir, () => clock).list(B)).toEqual([]);
+  });
+});
+
+describe("amend: a write folded into one that waits (a canvas save)", () => {
+  test("only a set write is amended: an append (a reply) throws and keeps its words, a canvas save takes the new body", () => {
+    const outbox = InboxOutbox.open(dataDir());
+    outbox.submit(B, "messages/m1/reply", reply("k1"));
+    expect(() => outbox.amend("k1", reply("k1", "other words"))).toThrow(/only a set write/);
+    expect(outbox.get("k1")!.body.words).toBe("yes");
+    outbox.submit(B, "threads/t1/canvas", { idempotency_key: "c1", partial: true, scene: { elements: [] } });
+    expect(outbox.amend("c1", { partial: true, scene: { elements: [{ id: "a" }] } })!.body).toEqual({ partial: true, scene: { elements: [{ id: "a" }] }, idempotency_key: "c1" });
+  });
+
+  test("the forward's route policy names only door writes, and folds only a set", () => {
+    expect(Object.keys(DOOR_WRITE_POLICY).filter((name) => !(name in DOOR_WRITES))).toEqual([]);
+    expect(Object.entries(DOOR_WRITE_POLICY).filter(([name, policy]) => policy.fold && DOOR_WRITES[name] !== "set")).toEqual([]);
   });
 });
 
@@ -438,9 +454,10 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     const files = Object.entries(DOOR_WRITES)
       .filter(([, kind]) => kind === "file")
       .map(([name]) => name);
+    // A route's pattern in the table's words: `threads\/([^/]+)\/canvas\/files` is `threads/:id/canvas/files`.
     const raw = doorWriteRoutes()
       .filter((route) => route.raw)
-      .map((route) => `POST ${route.route.replace(/^\^|\$$/g, "")}`);
+      .map((route) => `POST ${route.route.replace(/^\^|\$$/g, "").replaceAll("([^/]+)", ":id").replaceAll("\\/", "/")}`);
     expect(files.sort()).toEqual(raw.sort());
   });
 

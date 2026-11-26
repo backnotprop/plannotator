@@ -493,6 +493,8 @@ packages/review-editor/components/FileHeader.fileKind.test.tsx
 packages/review-editor/components/FileHeader.narrow.test.tsx
 packages/review-editor/components/FileHeader.mount.test.tsx
 packages/review-editor/components/PackageChangesCard.test.tsx
+packages/inbox/canvas/canvasSwitch.test.tsx
+packages/inbox/compose/replyPlusMenu.test.tsx
 packages/ui/components/Settings.analysis.test.tsx
 packages/ui/components/AnnotationPanel.props.test.tsx
 packages/ui/components/AnnotationPanel.cardHeader.test.tsx

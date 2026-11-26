@@ -11,7 +11,8 @@
  */
 import type { ClipboardEvent, ComponentProps, ReactNode, RefObject } from 'react';
 import type { InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
-import { AttachFilesButton, ComposeFileTiles, type ComposeFile, type useFileDrop } from '../../compose/ComposeFiles';
+import { ComposeFileTiles, type ComposeFile, type useFileDrop } from '../../compose/ComposeFiles';
+import { ReplyPlusMenu } from '../../compose/ReplyPlusMenu';
 import { plural } from '../../format';
 import { Icon } from '../../icons';
 import { ReplyTextField } from '../../parts/ReplyTextField';
@@ -80,6 +81,8 @@ export interface ReplyBoxProps {
   onRemoveFile: (key: string) => void;
   onPutBackFile: (key: string, field: HTMLTextAreaElement | null) => void;
   onAttachFiles: (list: FileList) => void;
+  /** The + menu's Canvas (canvas/useThreadCanvas.tsx); null where the thread can have none (Attach a file alone). */
+  onCanvas?: (() => void) | null;
   onShowFiles: () => void;
   // What goes with the reply.
   draftAnswers: readonly DraftAnswer[];
@@ -144,6 +147,7 @@ export function ReplyBox({
   onRemoveFile,
   onPutBackFile,
   onAttachFiles,
+  onCanvas = null,
   onShowFiles,
   draftAnswers,
   draftActions,
@@ -271,7 +275,7 @@ export function ReplyBox({
               </button>
             )
           }
-          clip={<AttachFilesButton className="ib-rclip" iconSize={phone ? 20 : 16} phone={phone} inputData="data-reply-attach" onFiles={onAttachFiles} />}
+          clip={<ReplyPlusMenu iconSize={phone ? 20 : 16} phone={phone} onCanvas={onCanvas} onFiles={onAttachFiles} />}
           skills={
             <Tip content="Skills (or type / in the reply)">
               <button type="button" className="ib-ricon" aria-label="Skills" data-reply-skills="" onClick={onOpenSkills}>

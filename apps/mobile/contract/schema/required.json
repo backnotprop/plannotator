@@ -763,6 +763,12 @@
     "InboxReplyQuote": [
       "of"
     ],
+    "InboxReplySketch": [
+      "kind",
+      "reading",
+      "rev",
+      "things"
+    ],
     "InboxReplyViewing": [
       "message_id",
       "name"

@@ -589,6 +589,7 @@ describe('review entry assets', () => {
     // above); on, it is a lazy part like Mermaid.
     ...(DIAGRAM_ENGINE_MODE === 'mermaid' ? {} : { Pele: 'pele-shape-' }),
   };
+  const CANVAS_FONT = /^\/assets\/excalidraw\/fonts\/[A-Za-z]+\/[A-Za-z0-9._-]+\.woff2$/;
   test.skipIf(!existsSync(resolve(root, inboxWindow)))(`${inboxWindow} loads its entry script up front and the review, diagrams and grammars on first use`, async () => {
     const bundle = readFileSync(resolve(root, inboxWindow), 'utf8');
     const app = openPackedApp(bundle);
@@ -619,12 +620,16 @@ describe('review entry assets', () => {
     const facts = {
       // The stylesheet stays in the page, so it paints as the single-file page did; only scripts are packed.
       stylesheetInline: app.html.includes('<style') && !/<link rel="stylesheet"/.test(app.html),
-      onlyScriptsPacked: packed.every((asset) => asset.endsWith('.js')),
+      // Beside the scripts, only the canvas's drawing fonts (build/excalidraw-local.ts), which Excalidraw fetches by name when a canvas opens.
+      onlyScriptsPacked: packed.every((asset) => asset.endsWith('.js') || CANVAS_FONT.test(asset)),
       entryScripts: [...app.html.matchAll(/<script type="module"[^>]*\ssrc="\/assets\//g)].length,
       preloadPlaceholder: bundle.includes('__VITE_PRELOAD__'),
       lazyPartsPacked: Object.entries(INBOX_LAZY_MARKERS).filter(([, marker]) => !has(all.values(), marker)).map(([part]) => part),
       lazyPartsUpFront: Object.entries(INBOX_LAZY_MARKERS).filter(([, marker]) => has(upFront.values(), marker)).map(([part]) => part),
-      nonAsciiScripts: [...all].filter(([, code]) => /[^\x00-\x7f]/.test(code)).map(([asset]) => asset),
+      nonAsciiScripts: [...all].filter(([asset, code]) => !CANVAS_FONT.test(asset) && /[^\x00-\x7f]/.test(code)).map(([asset]) => asset),
+      // The canvas (Excalidraw) arrives only when a canvas is opened: none of it up front.
+      canvasUpFront: has(upFront.values(), 'excalidraw-host'),
+      canvasPacked: has(all.values(), 'excalidraw-host'),
       upFrontUnderAThird: upFrontBytes / bundle.length < 1 / 3,
     };
     expect(facts).toEqual({
@@ -635,6 +640,8 @@ describe('review entry assets', () => {
       lazyPartsPacked: [],
       lazyPartsUpFront: [],
       nonAsciiScripts: [],
+      canvasUpFront: false,
+      canvasPacked: true,
       upFrontUnderAThird: true,
     });
   });

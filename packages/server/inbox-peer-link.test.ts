@@ -439,6 +439,22 @@ describe("the list (rule 5)", () => {
     expect(states.slice(from)).not.toContain("offline");
   });
 
+  test("the canvas off here asks that machine for no canvas frames or drawing jobs; turned on, the stream asks again with them, and the line stays online", async () => {
+    let canvasOn = false;
+    const d = door({ cursor: 3 });
+    const states: string[] = [];
+    const { peer } = link(d.url, { canvasOn: () => canvasOn, onChange: () => void states.push(peer.state) });
+    peer.start();
+    await until("its list", () => peer.list !== null && d.stats.eventAsks.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).has("canvas")).toBe(false);
+    canvasOn = true;
+    const from = states.length;
+    peer.canvasChanged();
+    await until("asked again", () => d.stats.eventAsks.length === 2);
+    expect(new URLSearchParams(d.stats.eventAsks[1]).get("canvas")).toBe("1");
+    expect(states.slice(from)).not.toContain("offline");
+  });
+
   test("its archived threads are read only when asked; asleep, it answers with the last page for that ask, away; an older door, nothing", async () => {
     let awake = true;
     const d = door({ cursor: 3, archived: () => (awake ? Response.json({ total: 1, threads: [{ thread_id: "msg_old", resolved_at: "2026-11-14T10:00:00Z" }], projects: [] }) : new Response("", { status: 503 })) });

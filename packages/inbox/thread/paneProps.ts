@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { InboxDraft, InboxListGroupId, InboxListRow, InboxQuestion, InboxReaction, InboxRun, InboxSentRecipient, InboxThread } from '@plannotator/core/inbox-types';
 import type { MachineView, OutboxView, ThreadModel } from '../api';
+import type { CanvasReplyPart } from '../canvas/replyPart';
 import type { MachinesModel } from '../machines';
 import type { FrameMove } from '../fullScreenOrigin';
 import type { InboxToastModel } from '../components/Toast';
@@ -76,6 +77,14 @@ export interface ThreadPaneProps {
   onSideWords?: (words: string, taken?: () => void) => void;
   replyWords?: string | null;
   onReplyWordsTaken?: () => void;
+  /** What the thread's canvas puts in the reply box (canvas/replyPart.ts), and that the box took it. */
+  replyPart?: CanvasReplyPart | null;
+  onReplyPartTaken?: () => void;
+  /** How the canvas's own Send ended: it went, or it stays in the box for the person (a refused file, a choice at Send). */
+  onReplyPartOutcome?: (outcome: 'sent' | 'held') => void;
+  /** The reply box's + → Canvas (null: no canvas here), and the thread header's canvas button (canvas/useThreadCanvas.tsx). */
+  onOpenCanvas?: (() => void) | null;
+  sketchHeader?: ReactNode;
   backLabel?: string;
   cardChip?: ReactNode;
   threadSteps?: { on: boolean; subscribe: StepsSubscribe; boardCard?: { title: string; onOpen: () => void } | null } | null;

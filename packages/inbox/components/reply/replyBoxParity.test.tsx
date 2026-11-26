@@ -10,6 +10,9 @@
  * things are normalized first: React's useId numbers (a page-wide counter) and a clock time ("Saved 4:51 PM"), which
  * follows the machine's time zone.
  *
+ * One change since, on purpose: the row's paperclip is the + menu (compose/ReplyPlusMenu.tsx, the thread's canvas), so
+ * every open box's file holds the + and its file input where the clip's label and input were.
+ *
  * A change to the reply box made on purpose writes them again: REPLYBOX_PARITY_WRITE=1 with DOM_TESTS=1.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.

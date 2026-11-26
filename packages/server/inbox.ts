@@ -125,6 +125,7 @@ import {
   inboxChapterDiagramsOn,
   inboxDecisionModeEnvOff,
   inboxDecisionModeOn,
+  inboxCanvasOn,
   loadConfig,
   saveCookieHost,
   parseAutoUpdateEnv,
@@ -228,6 +229,9 @@ import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-g
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
+import { createInboxCanvas } from "./inbox-canvas";
+import { canvasAgentRoute } from "./inbox-canvas-agent";
+import { canvasSwitch, INBOX_CANVAS_OFF_ANSWER } from "./inbox-canvas-switch";
 import { capabilityNoteOf, postCapabilityNotes } from "./inbox-capability-note";
 import { capabilityRoute, type InboxCapabilityContext } from "./inbox-capability-agent";
 import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
@@ -674,6 +678,8 @@ export interface InboxServerOptions {
   scheduled?: boolean;
   /** Code review, decided here instead of config.json `inboxCodeReview` (tests). Absent: config.json decides on every request. */
   codeReview?: boolean;
+  /** The canvas, decided here instead of config.json `inboxCanvas` (tests). Absent: config.json decides on every request. */
+  canvas?: boolean;
   /** Branch reviews, decided here instead of config.json `inboxBranchReviews` (tests). Absent: config.json decides on every request. Only with Code review on. */
   branchReviews?: boolean;
   /** System, decided here instead of config.json `inboxSystem` (tests). Absent: config.json decides on every request. Shown only while Code review is on. */
@@ -3703,6 +3709,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (was !== chapterDiagramsOn()) for (const listener of capabilityListeners) listener();
     return { on: chapterDiagramsOn() };
   };
+  /** The canvas in every thread (inbox-canvas-switch.ts): on, with no row in Settings; only config.json `inboxCanvas: false` (or `plannotator inbox capability canvas off`) turns it off. */
+  const canvasCap = canvasSwitch({
+    saved: () => inboxCanvasOn(loadConfig()),
+    fixed: options.canvas,
+    save: (on) => saveConfig({ inboxCanvas: on }),
+    // Every window follows, and each linked machine's stream asks again with or without its canvas frames and jobs.
+    changed: () => {
+      capabilityListeners.forEach((listener) => listener());
+      machines?.canvasChanged();
+    },
+  });
   const saveCodeReview = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "code_review: { on: boolean }.", { field: "code_review" });
@@ -4266,6 +4283,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     show_archived: { on: showArchived.state().on, rev: showArchived.state().rev },
     /** Code review (config.json `inboxCodeReview`): off unless the person turned it on. */
     code_review: { on: codeReviewOn() },
+    /** The canvas (config.json `inboxCanvas`): on unless false. */
+    canvas: { on: canvasCap.on() },
     /** Capabilities on the seam (inbox-capability.ts): Plans' `plans: { on: true }`, only while on and only to a window on this computer (its routes answer nowhere else). */
     ...capabilitiesWire(capabilities, capable),
     /** System (config.json `inboxSystem`): its switch, present only while Code review is on (Settings shows the row only then). */
@@ -4465,6 +4484,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // again, so a window polls only while a command it shows is running. Windows only (additive).
         const onRunState = (messageIds: readonly string[] | null) => send(`event: runs\ndata: ${JSON.stringify(messageIds ? { message_ids: messageIds } : { all: true })}\n\n`);
         if (windowId) runStateListeners.add(onRunState);
+        // A thread's canvas changed, or the server asks a window to draw (inbox-canvas.ts). Windows, and a linked machine
+        // that asks (`canvas=1`, mark `canvas`): its windows show this computer's threads' canvases and draw for its agents.
+        const stopCanvas = windowId || url.searchParams.get("canvas") === "1" ? canvas.listen((event, data) => canvasCap.on() && send(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)) : null;
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
@@ -4495,7 +4517,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           // read), a linked computer's flip taken here too (saveDecisionMode says "decision_mode"). Grid (`experimental`,
           // which still carries decision_mode for an older window): only when it was the change.
           const deciding = decisionModeOn();
-          const frame = { board: { on: boardOn() }, ...(!deciding || changed === "decision_mode" ? { decision_mode: { on: deciding } } : {}), steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          const frame = { board: { on: boardOn() }, ...(!deciding || changed === "decision_mode" ? { decision_mode: { on: deciding } } : {}), steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, canvas: { on: canvasCap.on() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -4547,6 +4569,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           threadPullLiveListeners.delete(onThreadPullsLive);
           shipListeners.delete(onShips);
           runStateListeners.delete(onRunState);
+          stopCanvas?.();
           rowsListeners.delete(onRows);
           soundListeners.delete(onSound);
           stopShowArchived();
@@ -5511,6 +5534,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       float_drafts: { on: floatDraftsOn, chosen: chosen((c) => c.inboxFloatDrafts), shared: () => true, apply: (on) => saveFloatDrafts({ on }) },
       decision_mode: { on: decisionModeOn, chosen: chosen((c) => (typeof c.inboxDecisionMode === "boolean" ? c.inboxDecisionMode : (c.experimental as Record<string, unknown> | undefined)?.decisionMode)), shared: () => !inboxDecisionModeEnvOff(), apply: (on) => saveDecisionMode({ on }) },
       grid: { on: gridOn, chosen: chosen((c) => savedExperimental(c, "grid")), shared: () => experimentalFree("grid"), apply: (on) => saveExperimental({ grid: on }) },
+      canvas: { on: canvasCap.on, chosen: chosen((c) => c.inboxCanvas), shared: () => options.canvas === undefined, apply: (on) => canvasCap.answer({ canvas: { on } }) },
     },
     times: () => loadConfig().inboxCapabilityFlips,
     // Key by key under the config lock (saveConfig merges it), so a stamp saved meanwhile is never lost.
@@ -5923,6 +5947,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const localOnly = () =>
     json({ error: "This answers only on this computer, not over the tailnet.", code: "local_only" }, 403);
 
+  /** A thread's canvas (inbox-canvas.ts): its routes, the agent's `plannotator inbox canvas` and its frames, all only while the canvas is on. */
+  const canvas = createInboxCanvas({
+    store,
+    serverSession,
+    json,
+    readBody,
+    sessionMismatch: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null),
+    on: () => canvasCap.on(),
+  });
   /**
    * A thread's PRs in the window (approval "inbox-pr-binding", inbox-thread-pulls.ts): the read, and the person's
    * add and remove from the popover.
@@ -7548,6 +7581,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const answer = await capabilityRoute(req, url, capabilityAgent, readBody, fromDeviceDoor.has(req));
         if (answer) return answer;
       }
+      // An agent's `plannotator inbox canvas` (inbox-canvas-agent.ts): this computer's own, only while the canvas is on.
+      if (path === "/api/inbox/canvas/agent") {
+        const answer = await canvasAgentRoute(req, url, { canvas, on: () => canvasCap.on(), readBody, fromDeviceDoor: fromDeviceDoor.has(req) });
+        if (answer) return answer;
+      }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") {
           // The page's load id (api.ts): kept with a claim's stamp as a record (`inboxReveals.shownLoad`).
@@ -7590,16 +7628,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.system === undefined &&
           body.scheduled_threads === undefined &&
           body.chapter_diagrams === undefined &&
+          body.canvas === undefined &&
           !namesInboxCapability(capabilities, body) &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, review_analysis, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, review_analysis, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, plans, system, scheduled_threads, chapter_diagrams, canvas, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
+        canvasCap.check(body);
         scheduledCap.check(body);
         checkInboxCapabilities(capabilities, body);
         const promptsChange = body.prompts === undefined ? undefined : parseInboxPromptsChange(body.prompts);
@@ -7684,7 +7724,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const markReadWarning = body.mark_read_warning === undefined ? { on: markReadWarningOn() } : saveMarkReadWarning(body.mark_read_warning);
         const splitView = body.split_view === undefined ? { on: splitViewOn() } : saveSplitView(body.split_view);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
-        const systemAnswer = { ...system.answer(body), ...answerInboxCapabilities(capabilities, body) };
+        const systemAnswer = { ...system.answer(body), ...answerInboxCapabilities(capabilities, body), ...canvasCap.answer(body) };
         // Present while Code review is on, and always to the save that set it.
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
         // The person's flips, stamped now, before Routines' wait for the login item: every linked computer takes them,
@@ -8605,6 +8645,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 annotation_ids: body.annotation_ids as never,
                 viewing: body.viewing,
                 sent_from: sentFromOf(req, via, body),
+                // Sent from the thread's canvas: what they drew or picked, read from the stored scene, or from the reply's
+                // own scene file when the save of it never landed (inbox-canvas.ts).
+                ...(body.sketch && canvasCap.on() ? (() => { const thread = store.message(messageId)?.thread_id; const sketch = thread ? canvas.replySketch(thread, body.sketch, attachments) : undefined; return sketch ? { sketch } : {}; })() : {}),
                 // A verdict on a review (Approve / Send feedback in the review's header): only while Code review is on.
                 ...(body.review_verdict !== undefined && body.review_verdict !== null
                   ? codeReviewOn()
@@ -8647,6 +8690,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               const words = typeof body.words === "string" ? body.words : undefined;
               const sentUploads = uploads.filter((id): id is string => typeof id === "string");
               if (threadId && store.clearSentReplyDraft(threadId, body.clear_draft, words, sentUploads)) for (const listener of draftListeners) listener(threadId);
+            }
+            // Sent from the thread's canvas, and stored: the things the reply lists are now shown, as they were when it was
+            // written, to the session the reply went to (its addressee, else the session that wrote the message
+            // answered). Never before the store took the reply, never on a replay, never to anyone else.
+            if (!result.replayed && result.reply.sketch) {
+              const answered = store.message(messageId);
+              const session = result.reply.to?.session ?? (answered?.author.kind === "agent" ? answered.author.session : null);
+              if (session) canvas.replyShown(result.reply.thread_id, result.reply.sketch, session);
             }
             // A hand-off waits out its Undo window, then goes to both sessions.
             if (!result.replayed && result.reply.handoff) scheduleHandoffSettle();
@@ -8752,6 +8803,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Thread steps (approval "inbox-thread-steps"): a thread's lists with each session's presence (packages/server/inbox-steps.ts).
       const steps = stepsRoute.route(req, path);
       if (steps) return steps;
+      // A thread's canvas (inbox-canvas.ts): the window's read and save, and its answers to the server's drawing jobs.
+      // Only while the canvas is on (Settings → Capabilities); off, every one is refused and nothing stored is touched.
+      if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas(\/picture|\/undo|\/files)?$/.test(path) || /^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas\/files\/[A-Za-z0-9_-]+$/.test(path) || path === "/api/inbox/canvases" || path.startsWith("/api/inbox/canvas/jobs/")) {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!canvasCap.on()) return json(INBOX_CANVAS_OFF_ANSWER, 409);
+        const canvasAnswer = await canvas.route(req, path);
+        if (canvasAnswer) return canvasAnswer;
+      }
       // A thread's PRs (approval "inbox-pr-binding"): the window's read and the person's add and remove (inbox-thread-pulls.ts).
       // Never another site. On the device door for a linked machine (mark `pulls`), never a phone.
       if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/pulls$/.test(path)) {
@@ -8993,6 +9054,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : kind === "cards" ? store.card(id) !== null : store.message(id) !== null,
       ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
       gridOn,
+      canvasOn: () => canvasCap.on(),
       showArchivedSaid: (value) => {
         try {
           showArchived.adopt(value);

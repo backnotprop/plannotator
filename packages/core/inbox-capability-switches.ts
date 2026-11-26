@@ -14,6 +14,7 @@ export const INBOX_CAPABILITY_SWITCHES = [
   { key: "system", name: "System", agent: "system" },
   { key: "bro", name: "Bro mode", agent: "bro_mode" },
   { key: "float_drafts", name: "Float reply drafts", agent: "float_drafts" },
+  { key: "canvas", name: "Canvas", agent: "canvas" },
 ] as const;
 
 export type InboxCapabilitySwitchKey = (typeof INBOX_CAPABILITY_SWITCHES)[number]["key"];
@@ -59,6 +60,7 @@ export const INBOX_CAPABILITY_SET_KEYS = [
   "float_drafts",
   "decision_mode",
   "grid",
+  "canvas",
 ] as const;
 
 export type InboxCapabilitySetKey = (typeof INBOX_CAPABILITY_SET_KEYS)[number];

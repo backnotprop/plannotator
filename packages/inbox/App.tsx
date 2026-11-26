@@ -4183,8 +4183,8 @@ function Inbox() {
   // A thread covering the list (a phone, a stacked window, full screen) or a hidden page: the list is out of sight.
   const bandTipHost = useBandTipHost(bandTipDue(settings) && !tourOn && !firstRun && lineLatch !== null, () => revealBlocked || lineBusy || !listIntroClear || revealHeldBack() || modalOpen() || (route.thread !== null && (phone || stack.thread || full)) || document.visibilityState === 'hidden');
   // Ask AI, on in every Inbox but the tour's (off, this reads nothing and draws nothing), and
-  // only once the settings say which this page is. A linked machine's thread has no chat here.
-  const [askReply, setAskReply] = useState<{ threadId: string; words: string } | null>(null);
+  // only once the settings say which this page is. A linked machine's thread has no chat here. Beside it, the canvas's reply.
+  const [askReply, setAskReply] = useState<{ threadId: string; words: string } | null>(null), [canvasReply, setCanvasReply] = useState<import('./canvas/replyPart').CanvasReplyFor | null>(null);
   const ask = useInboxAsk({
     on: inboxAskOn(settings, tourOn),
     codeReview: settings?.code_review?.on === true,
@@ -5523,7 +5523,7 @@ function Inbox() {
             boardEnabled, cards, backToCard, openThreadRow, rowOf: (id) => latestRows.get(id) ?? null, snoozeBack, refreshThread, refreshList, shown,
             markRead, markUnread, acknowledge, markAction, archive, pinnedIds, pinsOn, machines, setPin, setPriority, snoozeOn, snooze, unsnooze,
             setMachineUpdateOpen, threadAgentContext, replyFor, setReplyFor, draftSignals, filesSignals, ask, askReply, setAskReply,
-            patchQuestions, onPickSaves, afterWrite, rowPatches, decideInThread, searchLanding, decideLanding, landed,
+            patchQuestions, onPickSaves, afterWrite, rowPatches, decideInThread, searchLanding, decideLanding, landed, canvasReply, setCanvasReply,
             seenOnSight, panesOnScreen, setOpenThreadCovered, listTitle, setThreadFull, leaveFull, showToast,
             covered: !!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || feedbackOpen || compose !== null,
             fullSidebar: sidebarOpen && !sidebarHeld, inboxLink, holdSidebarIfTight, backFromFile,

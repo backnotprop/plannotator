@@ -1,0 +1,24 @@
+Fonts shipped with the canvas
+
+A thread's canvas is the Excalidraw editor (@excalidraw/excalidraw 0.18.1, MIT). The Inbox window packs the drawing
+fonts that package carries (build/excalidraw-local.ts copies them from the package's dist/prod/fonts at build time; none
+is in this repository's source tree) and serves them from /assets/excalidraw/fonts/. They are not covered by this
+repository's MIT or Apache license; each family's own terms follow. Xiaolai is not shipped.
+
+Excalifont, Virgil
+  Copyright (c) Excalidraw (https://github.com/excalidraw/excalidraw). SIL Open Font License 1.1.
+Cascadia Code
+  Copyright (c) Microsoft Corporation (https://github.com/microsoft/cascadia-code). SIL Open Font License 1.1.
+Liberation Sans
+  Copyright (c) Red Hat, Inc. and others (https://github.com/liberationfonts/liberation-fonts). SIL Open Font License 1.1.
+Lilita One
+  Copyright (c) Juan Montoreano (https://fonts.google.com/specimen/Lilita+One). SIL Open Font License 1.1.
+Nunito
+  Copyright (c) The Nunito Project Authors (https://github.com/googlefonts/nunito). SIL Open Font License 1.1.
+Assistant
+  Copyright (c) The Assistant Project Authors (https://github.com/hafontia/Assistant). SIL Open Font License 1.1.
+Comic Shanns
+  Copyright (c) Shannon Miwa (https://github.com/shannpersand/comic-shanns). MIT License.
+
+The SIL Open Font License 1.1 is at https://openfontlicense.org. Under it the fonts may be bundled and redistributed
+with software, with this notice; they are not sold by themselves and are shipped unmodified, under their own names.

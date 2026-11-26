@@ -183,7 +183,7 @@ function hostFor(threadId: string, seen: (threadId: string, through: number) => 
     markAction: none, archive: none, pinnedIds: new Set(), pinsOn: false, machines: machinesModel([]), setPin: none, setPriority: noop,
     snoozeOn: false, snooze: noop, unsnooze: noop, setMachineUpdateOpen: noop, threadAgentContext: null, replyFor: null, setReplyFor: noop,
     draftSignals: createKeyedSignal(), filesSignals: createKeyedSignal(),
-    ask: { side: undefined, sideWords: undefined }, askReply: null, setAskReply: noop,
+    ask: { side: undefined, sideWords: undefined }, askReply: null, setAskReply: noop, canvasReply: null, setCanvasReply: noop,
     patchQuestions: noop, onPickSaves: (_ids, paneClosed, threadId) => void pickSaves.push([threadId, paneClosed]), afterWrite: async () => {}, rowPatches: new Map(), decideInThread: () => null,
     searchLanding: { current: null }, decideLanding: { current: null }, landed: noop,
     seenOnSight: seen, covered: false, panesOnScreen: createPanesOnScreen(), setOpenThreadCovered: noop, listTitle: 'Inbox', fullSidebar: true,

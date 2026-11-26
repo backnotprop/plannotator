@@ -529,6 +529,149 @@
       "relay": true
     },
     {
+      "name": "GET threads/:id/canvas",
+      "method": "GET",
+      "path": "threads/{thread}/canvas",
+      "params": [
+        "thread"
+      ],
+      "call": "getThreadCanvas",
+      "window": "/api/inbox/threads/{thread}/canvas",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET threads/:id/canvas/files/:id",
+      "method": "GET",
+      "path": "threads/{thread}/canvas/files/{file}",
+      "params": [
+        "thread",
+        "file"
+      ],
+      "call": "getThreadCanvasFile",
+      "window": "/api/inbox/threads/{thread}/canvas/files/{file}",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET canvases",
+      "method": "GET",
+      "path": "canvases",
+      "params": [],
+      "call": "getCanvases",
+      "window": "/api/inbox/canvases",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/canvas",
+      "method": "POST",
+      "path": "threads/{thread}/canvas",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadCanvas",
+      "window": "/api/inbox/threads/{thread}/canvas",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/canvas/undo",
+      "method": "POST",
+      "path": "threads/{thread}/canvas/undo",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadCanvasUndo",
+      "window": "/api/inbox/threads/{thread}/canvas/undo",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/canvas/files",
+      "method": "POST",
+      "path": "threads/{thread}/canvas/files",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadCanvasFiles",
+      "window": "/api/inbox/threads/{thread}/canvas/files",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "bytes",
+      "write": "file",
+      "key": "query",
+      "answer": "json",
+      "range": false,
+      "relay": false
+    },
+    {
+      "name": "POST threads/:id/canvas/picture",
+      "method": "POST",
+      "path": "threads/{thread}/canvas/picture",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadCanvasPicture",
+      "window": "/api/inbox/threads/{thread}/canvas/picture",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "bytes",
+      "write": "file",
+      "key": "query",
+      "answer": "json",
+      "range": false,
+      "relay": false
+    },
+    {
+      "name": "POST canvas/jobs/:id",
+      "method": "POST",
+      "path": "canvas/jobs/{job}",
+      "params": [
+        "job"
+      ],
+      "call": "postCanvasJob",
+      "window": "/api/inbox/canvas/jobs/{job}",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "bytes",
+      "write": "file",
+      "key": "query",
+      "answer": "json",
+      "range": false,
+      "relay": false
+    },
+    {
       "name": "GET pulls/risk",
       "method": "GET",
       "path": "pulls/risk",

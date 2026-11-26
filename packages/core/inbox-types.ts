@@ -553,6 +553,18 @@ export function inboxAgentName(author: { kind: string; host?: string | null; nam
  * What was on screen when the person sent a reply from full screen's floating box. Context for the agent, not a
  * choice: it never touches the words, and only the agent's read gets it (`inboxViewingLine`), never the thread.
  */
+/**
+ * What a reply sent from a thread's canvas carries for the agent: the canvas revision, whether the person sent a
+ * drawing or picked part of the canvas to be worked on, and the text reading of those things (one line each).
+ */
+export interface InboxReplySketch {
+  kind: 'sketch' | 'selection';
+  rev: number;
+  /** The things' ids in the reading. */
+  things: string[];
+  reading: string;
+}
+
 export interface InboxReplyViewing {
   /** The open file's name. */
   name: string;
@@ -946,6 +958,8 @@ export interface InboxMessage {
   rows_ask?: true;
   /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
   viewing?: InboxReplyViewing;
+  /** On a person's reply sent from the thread's canvas (prototype): what they drew or selected, as the agent reads it. The body never holds it. */
+  sketch?: InboxReplySketch;
   /**
    * On a person's message written away from this computer (another device, the phone app, a linked computer), as the
    * server told it from the request (inbox-sent-from.ts). Rendered for the agent at read time; absent from this computer.
@@ -3828,8 +3842,10 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * `ships/stop`), so a linked machine's Reviews draws them and offers its agents in Ship's list.
  * `link-through`: its list names the computers it is linked to (`link_through`), and its door brokers, makes the
  * link code for, and takes, a link between two computers linked to one (core inbox-link-through.ts).
+ * `canvas`: its door answers a linked machine's reads of its threads' canvases (`threads/:id/canvas`, its files,
+ * `canvases`; inbox-canvas.ts in the server). Not yet its writes: a window offers no pen on its threads until then.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through", "canvas"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

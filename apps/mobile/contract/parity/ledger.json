@@ -20028,7 +20028,8 @@
         "setting:code_review",
         "setting:scheduled_threads",
         "setting:steps",
-        "setting:system"
+        "setting:system",
+        "setting:canvas"
       ],
       "flows": [],
       "mobile": "later",
@@ -23487,6 +23488,43 @@
       "mobile": "undecided",
       "why": "",
       "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "canvas",
+      "title": "A thread's canvas: the Excalidraw drawing the person and agents share, its pens, its mark and a reply sent from it (a capability, off by default)",
+      "surface": [
+        "door:GET canvases",
+        "door:GET threads/:id/canvas",
+        "door:GET threads/:id/canvas/files/:id",
+        "door:POST canvas/jobs/:id",
+        "door:POST threads/:id/canvas",
+        "door:POST threads/:id/canvas/files",
+        "door:POST threads/:id/canvas/picture",
+        "door:POST threads/:id/canvas/undo",
+        "frame:canvas",
+        "window:/api/inbox/threads/:id/canvas/files",
+        "window:/api/inbox/canvas/agent",
+        "window:/api/inbox/canvas/jobs/:id",
+        "window:/api/inbox/canvases",
+        "window:/api/inbox/threads/:id/canvas",
+        "window:/api/inbox/threads/:id/canvas/files/:id",
+        "window:/api/inbox/threads/:id/canvas/picture",
+        "window:/api/inbox/threads/:id/canvas/undo",
+        "enum:InboxReplySketch.kind.selection",
+        "enum:InboxReplySketch.kind.sketch",
+        "field:InboxMessageWire.sketch",
+        "field:InboxReplySketch.kind",
+        "field:InboxReplySketch.reading",
+        "field:InboxReplySketch.rev",
+        "field:InboxReplySketch.things"
+      ],
+      "flows": [],
+      "mobile": "later",
+      "why": "L-off: off by default and the computer's window only for now; the phone relay for the canvas is not built. A reply sent from it reaches the phone as its words and its picture file.",
+      "reason": "L-off",
       "ios": {
         "state": "not-started"
       }

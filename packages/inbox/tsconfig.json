@@ -21,13 +21,17 @@
       "@plannotator/core": ["../core/index.ts"],
       "@plannotator/core/*": ["../core/*"],
       "@plannotator/ui/*": ["../ui/*"],
+      // The canvas's pure reading and change code (no node: imports), shared with the Inbox server.
+      "@plannotator/shared/inbox/canvas/*": ["../shared/inbox/canvas/*"],
       // The guide reader's shape; the reader itself is checked by tsconfig.guide.json.
       "#guide-reader": ["./guide/reader-module.d.ts"],
       "#surface-guide-reader": ["./guide/surface-reader-module.d.ts"],
       "#search-palette": ["./search/SearchPalette.tsx"],
       "#reviews-settings": ["./reviewSettings/ReviewsSettings.tsx"],
       // Post to GitHub/GitLab (the review app's dialog); PlatformPost.tsx is checked by tsconfig.guide.json.
-      "#platform-post": ["./guide/platform-post-module.d.ts"]
+      "#platform-post": ["./guide/platform-post-module.d.ts"],
+      // A thread's canvas (Excalidraw); its lazy chunk.
+      "#canvas-board": ["./canvas/CanvasBoard.tsx"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],

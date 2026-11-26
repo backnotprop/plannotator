@@ -95,7 +95,8 @@ describe('the window\'s sheets, rewritten', () => {
       'ib-imgcompose': ['packages/inbox/components/ImageAttachmentView.tsx', 'packages/inbox/components/VideoAttachmentView.tsx'],
       'ib-fcomp': ['packages/inbox/components/FullScreenComposer.tsx'],
       'ib-rpick': ['packages/inbox/components/ReplyRecipient.tsx'],
-      'pn-inbox': ['packages/inbox/App.tsx', 'packages/inbox/tour/Tour.tsx'],
+      // The canvas's layer is a portal on document.body, so it carries the window's mark itself.
+      'pn-inbox': ['packages/inbox/App.tsx', 'packages/inbox/canvas/CanvasParts.tsx', 'packages/inbox/tour/Tour.tsx'],
     };
     const files = Bun.spawnSync(['git', 'ls-files', 'packages/inbox/*.tsx', 'packages/ui/*.tsx', 'packages/review-editor/*.tsx', 'apps/inbox/*.tsx'], { cwd: repoRoot })
       .stdout.toString()

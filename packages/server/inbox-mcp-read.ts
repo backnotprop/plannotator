@@ -49,7 +49,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSearchBodyText, inboxSearchReplyText } from "@plannotator/shared/inbox/search";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_TIDY_WITHDRAWN_HOST } from "@plannotator/shared/inbox/tidy";
-import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
+import { inboxSketchBlock, inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 import { reviewAnchorBlock, reviewAnchorPlace } from "@plannotator/core/review-threads";
 import type { AgentFile } from "./inbox-agent-files";
 import { inboxMessageForReader, type InboxSentFromReader } from "./inbox-sent-from-reader";
@@ -167,6 +167,8 @@ export interface AgentMessage {
   viewing?: string;
   /** `inboxSentFromLine`, on a message the person wrote away from this computer. `body` stays the person's words. */
   sent_from?: string;
+  /** `inboxSketchBlock`, on a reply sent from the thread's canvas. */
+  sketch?: string;
   review_comment?: string;
 }
 
@@ -218,6 +220,8 @@ export interface AgentMessageLine {
   board_request?: true;
   viewing?: string;
   sent_from?: string;
+  /** `inboxSketchBlock`, on a reply sent from the thread's canvas. */
+  sketch?: string;
   review_comment?: string;
   /** The sections a reply carries after its words (action items, feedback), named so the reader knows to expand it. */
   carries?: string[];
@@ -520,6 +524,7 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(message.rows_ask === true ? { rows_ask: true as const } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
     ...(inboxSentFromLine(message) ? { sent_from: inboxSentFromLine(message) } : {}),
+    ...(inboxSketchBlock(message) ? { sketch: inboxSketchBlock(message) } : {}),
     ...(message.review_anchor ? { review_comment: reviewCommentText(message) } : {}),
   };
 }
@@ -572,6 +577,7 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.board_request === true ? { board_request: true as const } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
     ...(inboxSentFromLine(message) ? { sent_from: inboxSentFromLine(message) } : {}),
+    ...(inboxSketchBlock(message) ? { sketch: inboxSketchBlock(message) } : {}),
     ...(message.review_anchor ? { review_comment: reviewCommentLine(message) } : {}),
     ...(carriesOf(message).length > 0 ? { carries: carriesOf(message) } : {}),
   };
@@ -832,6 +838,7 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   if (carries?.length) mid.push(`with ${carries.join(", ")} (expand shows them)`);
   if (line.viewing) mid.push(line.viewing);
   if (line.sent_from) mid.push(line.sent_from);
+  if (line.sketch) mid.push(line.sketch);
   if (line.review_comment) mid.push(line.review_comment);
   const tail: string[] = [];
   if (line.attachments?.length) tail.push(`files: ${line.attachments.join(", ")}`);
@@ -883,6 +890,7 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
   const lines = [`[${head.join(" · ")}]`, message.body.trimEnd()];
   if (message.viewing) lines.push(message.viewing);
   if (message.sent_from) lines.push(message.sent_from);
+  if (message.sketch) lines.push(message.sketch);
   if (message.review_comment) lines.push(message.review_comment);
   if (message.questions?.length) lines.push(`Questions: ${message.questions.map((q) => questionWords(q)).join("; ")}`);
   if (message.files?.length) lines.push(`Files: ${message.files.map((f) => `${f.name} (${f.kind}, ${sizeText(f.size)}): ${f.path} (to your machine: ${f.fetch})`).join("; ")}`);

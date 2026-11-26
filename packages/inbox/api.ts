@@ -7,7 +7,7 @@
 
 import type { InboxCloudAgentView, InboxCloudPreset, InboxCloudSetup } from '@plannotator/core/inbox-cloud';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
-import type { DecisionDataSummary, InboxActionOutcome, InboxAgentFaceChange, InboxPriorityBefore, InboxPullAsk, InboxPullRiskAuto } from '@plannotator/core/inbox-types';
+import { inboxCommentPicture, type DecisionDataSummary, type InboxActionOutcome, type InboxAgentFaceChange, type InboxPriorityBefore, type InboxPullAsk, type InboxPullRiskAuto, type InboxFileContents, type InboxPullDetailsAnswer, type InboxPullDiffAnswer, type InboxPullDiffScope, type InboxPullRiskAnswer, type InboxPullRiskModels, type InboxPullsAnswer, type InboxReviewChanges, type InboxReviewChangesAnswer, type InboxReviewLinkAnswer, type InboxReviewsAnswer, type InboxTidyPlan, type InboxTidyRun, type InboxActivityModel } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -64,7 +64,6 @@ import type {
   InboxVoiceSettings,
   InboxVoiceStatus,
 } from '@plannotator/core/inbox-types';
-import { inboxCommentPicture } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxPickBody } from '@plannotator/core/inbox-answers';
 import { inboxSectionsAsOf } from '@plannotator/core/inbox-snooze';
@@ -75,7 +74,6 @@ import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 export { dispatchInboxFrame, INBOX_EVENT_FRAMES, openInboxEventFrames, subscribeInboxEvents, type InboxEventFrame, type InboxEventFrameName, type InboxEventHandlers, type InboxEventWindow, type MachineRecordFrame } from './eventFrames';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
-import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
 import { InboxApiError, readJson } from './apiError';
 import { cardUrl, learnCards, type CardsModel } from './cardsWire';
 export type { CardsModel } from './cardsWire';
@@ -419,6 +417,7 @@ export interface SettingsModel {
    * draws folded. Absent: on.
    */
   chapter_diagrams?: { on: boolean };
+  /** The canvas in every thread (config.json `inboxCanvas`; no Settings row): on unless false. Absent: an Inbox without it. */ canvas?: { on: boolean };
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
@@ -904,7 +903,7 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Plannotator-Load': pageLoad, ...(machine ? threadHeader(path) : {}), ...(zipped ? { 'Content-Encoding': 'gzip' } : {}) },
     body: zipped ?? text,
-    ...(init.keepalive && (zipped ? zipped.byteLength : new TextEncoder().encode(text).length) <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
+    ...(init.keepalive && (zipped ? zipped.byteLength : new TextEncoder().encode(text).length) <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}), // the bytes sent count (compressed, when it is)
   });
   if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
   if (machine && response.status === 202) {
@@ -1442,6 +1441,7 @@ export const inboxApi = {
       annotation_ids?: string[];
       /** The file on screen, on the reply a Send from full screen's floating box writes its words on. */
       viewing?: ReplyViewing;
+      /** Sent from the thread's canvas (canvas/canvasApi.ts): the Inbox writes what the agent reads of the drawing. */ sketch?: { kind: 'sketch' | 'selection'; elements: string[]; pictures: Record<string, string> };
       /** Another live session takes the reply, or a new one starts for it (`launch`): the session that asked has ended. */
       to?: { host?: string; session: string } | { launch: { agent: string; project_id: string; model?: string; effort?: string } };
       /**

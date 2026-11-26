@@ -1,6 +1,6 @@
 /**
  * The window routes a paired cloud agent's commands reach through the agent door (`route`, inbox-agent-door.ts), so
- * `plannotator inbox rows`, `inbox projects`, `inbox icon` and `inbox export-decisions` work over a pairing exactly as
+ * `plannotator inbox rows`, `inbox projects`, `inbox icon`, `inbox capability`, `inbox canvas` and `inbox export-decisions` work over a pairing exactly as
  * they do on the person's computer: each command is a thin client over these same routes on the local listener, and
  * through the door its request is answered by the Inbox's own handler, in this process. Only the routes those commands
  * use are carried; a rows change is said to be the pairing's agent's, as a local agent's names its own session.
@@ -8,6 +8,7 @@
 
 import { INBOX_AGENT_ROUTE } from "@plannotator/shared/inbox/agent-pairing";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { CANVAS_AGENT_FIELDS, INBOX_CANVAS_AGENT_ROUTE } from "./inbox-canvas-agent";
 import { ok, type ToolResult } from "./inbox-mcp-result";
 
 const FIELDS = ["method", "path", "body"];
@@ -26,6 +27,8 @@ const ROUTES: readonly { method: "GET" | "POST"; path: RegExp }[] = [
   // `plannotator inbox capability` (inbox-capability-agent.ts): a list, and a turn.
   { method: "GET", path: /^\/api\/inbox\/capability$/ },
   { method: "POST", path: /^\/api\/inbox\/capability$/ },
+  // `plannotator inbox canvas` (inbox-canvas-agent.ts): a read, a picture or a change.
+  { method: "POST", path: /^\/api\/inbox\/canvas\/agent$/ },
 ];
 
 /** The settings a rows command sends: the look, and its undo. Who made it is the door's to say. */
@@ -52,7 +55,7 @@ export async function inboxAgentRouteAction(
   if (extra) throw refuse(`${extra}: not taken. ${tool} takes: ${FIELDS.join(", ")}.`);
   const { method, path } = args;
   if (typeof method !== "string" || typeof path !== "string" || !ROUTES.some((route) => route.method === method && route.path.test(path))) {
-    throw refuse("method, path: one of the requests plannotator inbox rows, projects, icon, capability and export-decisions make.");
+    throw refuse("method, path: one of the requests plannotator inbox rows, projects, icon, capability, canvas and export-decisions make.");
   }
   if (!handle) throw new InboxError("internal_error", "This Inbox cannot answer that here.");
   let body: Record<string, unknown> | undefined;
@@ -70,6 +73,12 @@ export async function inboxAgentRouteAction(
       body.by = { host: by.host, session: by.session, ...(by.name ? { name: by.name } : {}) };
       const project = by.project?.() ?? null;
       if (project) body.project_id = project;
+    }
+    if (path === INBOX_CANVAS_AGENT_ROUTE) {
+      const other = Object.keys(body).find((field) => !(CANVAS_AGENT_FIELDS as readonly string[]).includes(field));
+      if (other) throw refuse(`body: ${other}: not taken here; only ${CANVAS_AGENT_FIELDS.join(", ")}.`);
+      // `away`: this agent runs on another computer, so a picture's path on this one is no use to it (inbox-canvas.ts).
+      body.by = { host: by.host, session: by.session, ...(by.name ? { name: by.name } : {}), away: true };
     }
   }
   // As the command's own request on this computer: loopback, no browser origin.

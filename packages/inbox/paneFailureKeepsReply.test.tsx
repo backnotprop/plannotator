@@ -130,7 +130,7 @@ function hostFor(phone: boolean): ThreadSlotHost {
     markAction: none, archive: none, pinnedIds: new Set(), pinsOn: false, machines: machinesModel([]), setPin: none, setPriority: noop,
     snoozeOn: false, snooze: noop, unsnooze: noop, setMachineUpdateOpen: noop, threadAgentContext: null, replyFor: null, setReplyFor: noop,
     draftSignals: createKeyedSignal(), filesSignals: createKeyedSignal(),
-    ask: { side: undefined, sideWords: undefined }, askReply: null, setAskReply: noop,
+    ask: { side: undefined, sideWords: undefined }, askReply: null, setAskReply: noop, canvasReply: null, setCanvasReply: noop,
     patchQuestions: noop, onPickSaves: noop, afterWrite: async () => {}, rowPatches: new Map(), decideInThread: () => null,
     searchLanding: { current: null }, decideLanding: { current: null }, landed: noop,
     seenOnSight: noop, covered: false, panesOnScreen: createPanesOnScreen(), setOpenThreadCovered: noop, listTitle: 'Inbox', fullSidebar: true,

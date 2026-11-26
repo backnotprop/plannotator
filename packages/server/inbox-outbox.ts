@@ -291,6 +291,16 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST threads/:id/pulls": "set",
   // A pinned artifact lives on its thread's machine (mark `artifact-pins`): a pin or an unpin puts a state there.
   "POST artifact-pins": "set",
+  // A thread's canvas lives on the thread's machine (mark `canvas`). A save names only what the person changed
+  // (`partial`), each element under its version, and the higher version wins there: a copy puts the same state again.
+  // An Undo names the revision it takes back; a second one is answered `already` and changes nothing. A window holds
+  // one save at a time for that machine (packages/inbox/canvas/farSave.ts). Pictures' files (sent ahead of the save
+  // that names them), the board's picture and an answer to a drawing job are bytes or useful only now: never held.
+  "POST threads/:id/canvas": "set",
+  "POST threads/:id/canvas/undo": "set",
+  "POST threads/:id/canvas/files": "file",
+  "POST threads/:id/canvas/picture": "file",
+  "POST canvas/jobs/:id": "file",
   "POST messages/:id/picks": "set",
   "POST messages/:id/reply": "append",
   "POST messages/:id/resolve": "set",
@@ -375,9 +385,39 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST update": "set",
 };
 
+/** How the forward treats a door write beyond its kind, read by the forward for any route that has it. */
+export interface DoorWritePolicy {
+  /**
+   * A write made while one of the same route waits and never left is folded into that one (`InboxOutbox.amend`), unless
+   * a write of the same thread is queued behind it. Only a `set` route whose body says a state (a canvas save names
+   * each element under its version, inbox-canvas-fold.ts): the folded write's own key is never stored, so a retried
+   * copy of it is queued again, and only a state makes that copy change nothing.
+   */
+  fold?: true;
+  /** A landed write changes nothing in that machine's list: the forward reads its list again after none of them. */
+  refreshList?: false;
+  /**
+   * One past OUTBOX_MAX_BODY_BYTES goes now, while that machine is online and nothing of its thread is queued for it;
+   * otherwise 503, and the window sends it later (a canvas save of one large element: a long stroke, a page of words).
+   */
+  oversizeDirect?: true;
+}
+
+/** DOOR_WRITES' routes the forward treats in more than their kind (inbox-outbox.test.ts: each is on that table). */
+export const DOOR_WRITE_POLICY: Readonly<Record<string, DoorWritePolicy>> = {
+  "POST threads/:id/canvas": { fold: true, refreshList: false, oversizeDirect: true },
+  "POST threads/:id/canvas/undo": { refreshList: false },
+};
+
 const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
-  kind === "local" ? [] : [{ kind, route: new RegExp(`^${name.slice("POST ".length).replaceAll(":id", "[^/]+")}$`) }],
+  kind === "local" ? [] : [{ kind, policy: DOOR_WRITE_POLICY[name] ?? {}, route: new RegExp(`^${name.slice("POST ".length).replaceAll(":id", "[^/]+")}$`) }],
 );
+
+/** A forwarded door write's kind and policy by its route; null when no forwarded door write has that route. */
+export function doorWrite(route: string): { kind: "append" | "set" | "file" | "forge" | "now"; policy: DoorWritePolicy } | null {
+  const found = DOOR_WRITE_ROUTES.find((entry) => entry.route.test(route));
+  return found ? { kind: found.kind, policy: found.policy } : null;
+}
 
 /**
  * The forward's one decision, by route and never by Content-Type: a `file`,
@@ -387,7 +427,17 @@ const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
  * reach another machine).
  */
 export function doorWriteKind(route: string): "append" | "set" | "file" | "forge" | "now" | null {
-  return DOOR_WRITE_ROUTES.find((entry) => entry.route.test(route))?.kind ?? null;
+  return doorWrite(route)?.kind ?? null;
+}
+
+/** The thread a write's route names (`threads/<id>/…`), or null. */
+export function routeThread(route: string): string | null {
+  return /^threads\/([^/]+)\//.exec(route)?.[1] ?? null;
+}
+
+/** A write of `thread` (by its route, or the thread the window named for it): nothing of that thread goes past it. */
+export function writeOfThread(entry: Pick<OutboxEntry, "route" | "thread">, thread: string): boolean {
+  return routeThread(entry.route) === thread || entry.thread === thread;
 }
 
 /**
@@ -602,6 +652,23 @@ export class InboxOutbox {
       ...(auto && own.files && own.files.length > 0 ? { files: own.files.map((file) => ({ ...file })) } : {}),
     });
     return { entry, fresh: true };
+  }
+
+  /**
+   * A write that waits and never left, given a new body (a canvas save folded into it, inbox-canvas-fold.ts), so the
+   * two go as one under its key. Null when it left, settled or is gone, or the body is past the bound: the caller then
+   * queues its own.
+   *
+   * Only a `set` write may be amended (it throws for any other). The later write's own key is stored nowhere, so a
+   * retry of it (a page that lost the answer) is folded or queued again: safe only because a set says a state, and
+   * the same state again changes nothing there. An `append` amended this way would run twice.
+   */
+  amend(key: string, body: Record<string, unknown>): OutboxEntry | null {
+    const entry = this.entries.get(key);
+    if (entry && doorWriteKind(entry.route) !== "set") throw new Error(`outbox: only a set write is amended, not ${entry.route}`);
+    if (!entry || entry.state !== "queued" || entry.left || this.inFlight.has(key)) return null;
+    if (JSON.stringify(body).length > OUTBOX_MAX_BODY_BYTES) return null;
+    return this.save({ ...entry, body: { ...body, idempotency_key: key } });
   }
 
   /**

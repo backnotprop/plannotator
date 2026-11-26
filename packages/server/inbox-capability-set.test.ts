@@ -362,6 +362,15 @@ describe("one set of switches across linked computers", () => {
     expect(capabilitySetKeysIn({ show_archived: { on: true } })).toEqual([]);
   });
 
+  test("the canvas is one of the set: a Canvas save is stamped, and a far Canvas flip is taken", async () => {
+    expect(capabilitySetKeysIn({ canvas: { on: true } })).toEqual(["canvas"]);
+    const laptop = computer(LAPTOP);
+    const studio = computer(STUDIO);
+    laptop.flip("canvas", true, 1_000);
+    await meet(laptop, studio);
+    expect([studio.on.canvas, studio.applied]).toEqual([true, ["canvas true"]]);
+  });
+
   test("Decision mode turned from its own Capabilities row is stamped, and a linked computer takes it", async () => {
     // Its row saves `{ decision_mode: { on } }`; an older window's switch still saves `{ experimental: { decision_mode } }`.
     expect(capabilitySetKeysIn({ decision_mode: { on: false } })).toEqual(["decision_mode"]);

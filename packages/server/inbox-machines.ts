@@ -17,8 +17,9 @@
  *  - the generic forward `/api/inbox/m/<machine>/<door route>`: reads pass
  *    through with the far door's own safety headers (and `sandbox` when it
  *    sent none); a write is held or passed by its route in rule 8's table
- *    (`doorWriteKind`), never by its Content-Type: files go straight through
- *    while the machine is online, every other write through the outbox;
+ *    (`doorWrite`: its kind, and its policy for what more the forward does),
+ *    never by its Content-Type: files go straight through while the machine
+ *    is online, every other write through the outbox;
  *  - the window's routes (`/api/inbox/machines…`, `/api/inbox/outbox…`), the
  *    CLI's control routes, and the two door routes only a machine may call
  *    (`link-back`, `unlink`).
@@ -43,8 +44,9 @@ import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent
 import { inboxFarReaderName, inboxMachineRecordName } from "./inbox-sent-from-reader";
 import { createMachineAgentFind } from "./inbox-machine-agent-find";
 import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
-import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
+import { doorWrite, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, OUTBOX_MAX_BODY_BYTES, routeThread, writeOfThread, type OutboxEntry } from "./inbox-outbox";
 import type { OutboxFile } from "./inbox-outbox-files";
+import { foldCanvasSave } from "./inbox-canvas-fold";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
 import { createMachineShips } from "./inbox-machine-ships";
@@ -165,6 +167,8 @@ export interface InboxMachinesContext {
   capabilitySetSaid?: (value: CapabilitySet) => void;
   /** Grid is on here (experimental): only then are linked machines asked for Grid's fields and looks, and `clock_ms` shown. */
   gridOn?: () => boolean;
+  /** The canvas is on here (Settings → Capabilities): only then do a linked machine's canvas frames reach the windows. */
+  canvasOn?: () => boolean;
   /** Where the person wrote a write this Inbox forwards, told from the request (inbox-sent-from.ts). */
   sentFrom?: (req: Request, via: "local" | "tailnet") => InboxSentFrom | null;
   /** Tests: the links' clocks. */
@@ -178,7 +182,7 @@ export interface InboxMachinesContext {
 export type MachineLinkTimings = Partial<PeerLinkTimings> & { updatedShownMs?: number; restartBackMs?: number; accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: PeerRereadEvent | "cards"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: PeerRereadEvent | "cards"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } } | { event: "canvas" | "canvas-job"; data: Record<string, unknown> & { machine: string } };
 
 /** How the window draws a machine's version (approval "inbox-machine-update"). */
 export interface MachineUpdateView {
@@ -399,6 +403,26 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
 const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
+/** A drawing job's id, as that machine's canvas makes it (inbox-canvas.ts). */
+const CANVAS_JOB = /^job_[a-f0-9]{32}$/;
+
+/**
+ * A linked machine's drawing job that no window here can draw: answered `none` at once, so that machine stops waiting
+ * on this Inbox's stream (its own window, if one is open, still draws it; inbox-canvas.ts `Job.left`).
+ */
+async function noDrawing(peer: PeerLink, job: string, mermaid: boolean): Promise<void> {
+  const key = `canvas-job-${crypto.randomUUID()}`;
+  try {
+    const answer = await peer.request(`canvas/jobs/${job}`, `?none=1&idempotency_key=${key}`, {
+      method: "POST",
+      headers: { "Content-Type": mermaid ? "application/json" : "image/png" },
+      body: mermaid ? "{}" : new Uint8Array(0),
+    });
+    await answer.body?.cancel().catch(() => {});
+  } catch {
+    // Away again: its job runs out on its own.
+  }
+}
 /** Another machine's folder names, for "Another folder on <machine>…" (remote launch), and where it would clone a URL. */
 const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
 /** A file a message names, read on another machine (approval "inbox-file-refs-open-viewer"): its view, its bytes. */
@@ -677,10 +701,19 @@ export function createInboxMachines(context: InboxMachinesContext) {
       },
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onReread: (event) => emit({ event, data: {} }),
+      // Its canvas frames and drawing jobs, said to be its: the window reads its canvas and answers its job through the forward.
+      // A job no window here can draw (the canvas off, or no window open) is answered at once, so its agent is not
+      // kept waiting: that machine falls back to the last picture a window stored, or says no window is open.
+      onCanvas: (event, data) => {
+        const drawable = context.canvasOn?.() === true && listeners.size > 0;
+        if (drawable) return emit({ event, data: { ...data, machine: link.id } });
+        if (event === "canvas-job" && typeof data.id === "string" && CANVAS_JOB.test(data.id)) void noDrawing(peer, data.id, data.kind === "mermaid");
+      },
       onCards: () => emit({ event: "cards", data: {} }),
       onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
       gridOn: context.gridOn,
+      canvasOn: context.canvasOn,
     });
     peers.set(link.id, peer);
     peer.start();
@@ -1037,8 +1070,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
     // Rule 8's table decides, by route: a write it has not classified, or calls `local`, never reaches another machine.
-    const kind = doorWriteKind(route);
-    if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
+    const write = doorWrite(route);
+    if (!write) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
+    const { kind, policy } = write;
     if (kind === "file") {
       // A file (an upload, a drawing): never held. It goes now, or not at all.
       if (peer.state !== "online") return offline();
@@ -1116,6 +1150,23 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // This Inbox's page session means nothing to the other machine's Inbox, and its drafts stay on this computer.
     delete body.serverSession;
     if (route === "messages") delete body.draft_id;
+    // A write too large for the outbox to hold that may go now (`oversizeDirect`: a canvas save of one thing past its
+    // bound, a long stroke, a page of pasted words; the window sends a larger save in parts) goes while that machine is
+    // online, as a file does, once nothing of its thread is queued for it: it never passes an Undo or a save still on its
+    // way. Otherwise it waits in the window (503) and goes later.
+    const raw = policy.oversizeDirect ? JSON.stringify(body) : "";
+    if (raw.length > OUTBOX_MAX_BODY_BYTES) {
+      if (peer.state !== "online") return offline();
+      const thread = routeThread(route);
+      if (thread && outbox.list(machine, "pending").some((e) => writeOfThread(e, thread))) {
+        return json({ error: `Earlier changes to this thread are still on their way to ${links.get(machine)?.name ?? "that machine"}.`, code: "thread_queued" }, 503);
+      }
+      try {
+        return passAnswer(await peer.request(route, "", { method: "POST", headers: { "Content-Type": "application/json", ...(window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}) }, body: raw, signal: req.signal, timeoutMs: UPLOAD_MS }));
+      } catch {
+        return offline();
+      }
+    }
     // Rule 11: a reply held for another machine says what the person saw, so a late one is refused there.
     if (REPLY_ROUTE.test(route) && (typeof body.seen_through_seq !== "number" || !Number.isSafeInteger(body.seen_through_seq))) {
       throw new InboxError("validation_error", "seen_through_seq: a reply to another machine carries the newest seq of the thread the person saw.", { field: "seen_through_seq" });
@@ -1126,14 +1177,34 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const named = req.headers.get("X-Plannotator-Thread")?.trim() ?? "";
     // Where the person was, when not at this window, said on so that machine's agent reads where they wrote it.
     const place = inboxForwardedPlace(context.sentFrom?.(req, via) ?? null);
-    const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window, place);
+    // A write that folds (`fold`: a canvas save) while one of its route waits and never left: folded into that one
+    // (inbox-canvas-fold.ts), so what the person draws while that machine is away is one entry, from any window.
+    const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
+    const folded = policy.fold && key !== "" && !outbox.get(key) ? foldIntoWaiting(machine, route, body) : null;
+    const { entry, fresh } = folded ? { entry: folded, fresh: true } : outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window, place);
     if (peer.state === "online") peer.flush();
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;
     // A state that landed is in that machine's list now: read it before answering, so the window's next read shows it.
     // A card's write reads its Board and its list both: a tag named there may be new, and the merged tags come from the list.
-    if (settled.state === "delivered" && kind === "set") await (segments[0] === "cards" ? Promise.all([peer.refreshList(), peer.refreshCards()]) : peer.refreshList());
+    // A write that changes no list there (`refreshList: false`, a canvas save or Undo): nothing to read again (it would cost a list read for each save).
+    if (settled.state === "delivered" && kind === "set" && policy.refreshList !== false) await (segments[0] === "cards" ? Promise.all([peer.refreshList(), peer.refreshCards()]) : peer.refreshList());
     return outboxAnswer(settled, fresh);
+  };
+
+  /**
+   * The newest write of `route` (a canvas save) waiting for `machine` that never left, with nothing of its thread
+   * queued behind it (an Undo, a delete, a reply sent from the canvas: by route, or the thread the window named), given
+   * `body` too. Null when there is none, or the two together are past the bound.
+   */
+  const foldIntoWaiting = (machine: string, route: string, body: Record<string, unknown>): OutboxEntry | null => {
+    const thread = routeThread(route);
+    const waiting = outbox.list(machine, "pending");
+    const at = waiting.map((e) => e.route).lastIndexOf(route);
+    const held = waiting[at];
+    if (!thread || !held || held.state !== "queued" || held.left || waiting.slice(at + 1).some((e) => writeOfThread(e, thread))) return null;
+    const merged = foldCanvasSave(held.body, body);
+    return merged ? outbox.amend(held.key, merged) : null;
   };
 
   /** The owner's own answer when there is one (status and body as its door gave them); otherwise 202 and the entry ("Sending…"). */
@@ -1517,6 +1588,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
     /** Every linked machine's id (a Ship tells each of them, inbox-ship-watch.ts `onStart`). */
     linkedIds: (): string[] => links.list().map((link) => link.id),
     machinesView,
+    /** The canvas was turned on or off here: every link asks its machine again, with or without its canvas frames. */
+    canvasChanged: () => {
+      for (const peer of peers.values()) peer.canvasChanged();
+    },
     /** Grid was turned on or off here: every link asks its machine again (inbox-peer-link.ts `gridChanged`). */
     gridChanged: () => {
       for (const peer of peers.values()) peer.gridChanged();

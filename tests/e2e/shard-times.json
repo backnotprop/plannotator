@@ -47,6 +47,8 @@
   "inbox-board-reveal.spec.ts": 68,
   "inbox-board.spec.ts": 43,
   "inbox-branch-reviews.spec.ts": 7,
+  "inbox-canvas-machines.spec.ts": 90,
+  "inbox-canvas.spec.ts": 60,
   "inbox-checklist-reveal.spec.ts": 73,
   "inbox-choice-labels.spec.ts": 8,
   "inbox-choice-pill.spec.ts": 2,

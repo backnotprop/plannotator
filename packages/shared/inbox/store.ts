@@ -67,6 +67,7 @@ import {
   type InboxLaunchClone,
   type InboxLaunchError,
   type InboxLaunchRecord,
+  type InboxReplySketch,
   type InboxReplyViewing,
   type InboxSentFrom,
   type InboxAuthor,
@@ -398,6 +399,8 @@ export interface InboxReplyInput {
   viewing?: unknown;
   /** Where the person wrote it, as the server told it from the request (`InboxMessage.sent_from`); absent from this computer. */
   sent_from?: InboxSentFrom | null;
+  /** From the thread's canvas (the server checks and words it: inbox-canvas.ts `replySketch`). */
+  sketch?: InboxReplySketch;
   /**
    * The person chose another live session to take this reply, because the
    * session that asked has ended (the window's choice at Send). Absent: the
@@ -5658,6 +5661,7 @@ export class InboxStore {
       ...(verdict ? { review_verdict: verdict } : {}),
       ...(viewing ? { viewing } : {}),
       ...(input.sent_from ? { sent_from: input.sent_from } : {}),
+      ...(input.sketch ? { sketch: input.sketch } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
       ...(quoted ? { quote: quoted.quote } : {}),
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),

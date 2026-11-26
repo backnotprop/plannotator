@@ -278,6 +278,19 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^pulls$/, window: () => "/api/inbox/pulls", machineOnly: true },
   // Branch reviews (mark `branches`): a linked machine's Reviews lists the branches agents reported here.
   { method: "GET", route: /^reviews\/branches$/, window: () => "/api/inbox/reviews/branches", machineOnly: true },
+  // A thread's canvas (inbox-canvas.ts; mark `canvas`): a linked machine's window reads and draws on the canvas of a
+  // thread that lives here, as this computer's window does. Only while the canvas is on (one set of switches; off,
+  // `409 canvas_off`). A save names only what changed (`partial`) and an Undo one revision, so either may wait in that
+  // machine's outbox; pictures' files go first, now (`files`), as do the board's picture and its answers to this
+  // computer's drawing jobs (`canvas/jobs/:id`, a picture or mermaid's shapes for an agent here).
+  { method: "GET", route: /^threads\/([^/]+)\/canvas$/, window: (m) => `/api/inbox/threads/${m[1]}/canvas`, machineOnly: true },
+  { method: "GET", route: /^threads\/([^/]+)\/canvas\/files\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}/canvas/files/${m[2]}`, machineOnly: true },
+  { method: "GET", route: /^canvases$/, window: () => "/api/inbox/canvases", machineOnly: true },
+  { method: "POST", route: /^threads\/([^/]+)\/canvas$/, window: (m) => `/api/inbox/threads/${m[1]}/canvas`, machineOnly: true },
+  { method: "POST", route: /^threads\/([^/]+)\/canvas\/undo$/, window: (m) => `/api/inbox/threads/${m[1]}/canvas/undo`, machineOnly: true },
+  { method: "POST", route: /^threads\/([^/]+)\/canvas\/files$/, window: (m) => `/api/inbox/threads/${m[1]}/canvas/files`, machineOnly: true, raw: { max: 64 * 1024 * 1024, code: "canvas_files_too_large", what: "A canvas's pictures" } },
+  { method: "POST", route: /^threads\/([^/]+)\/canvas\/picture$/, window: (m) => `/api/inbox/threads/${m[1]}/canvas/picture`, machineOnly: true, raw: { max: 32 * 1024 * 1024, code: "canvas_picture_too_large", what: "A canvas's picture" } },
+  { method: "POST", route: /^canvas\/jobs\/([^/]+)$/, window: (m) => `/api/inbox/canvas/jobs/${m[1]}`, machineOnly: true, raw: { max: 32 * 1024 * 1024, code: "canvas_picture_too_large", what: "A canvas's picture" } },
   // `pull`: one PR for a page open on it after it left that window's board (merged or closed here): this Inbox's kept copy or the forge's answer.
   { method: "GET", route: /^pulls\/(risk|pull|details|diff|file|repo-files|repo-file|avatar|media|media\/sizes)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   { method: "POST", route: /^pulls\/(close|reopen|merge|owner)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },

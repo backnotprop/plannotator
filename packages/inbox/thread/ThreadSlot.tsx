@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
+import { useThreadCanvas } from '../canvas/useThreadCanvas';
 import { closeTo } from '../app/focus';
 import { writeRoute } from '../app/writeRoute';
 import { CardChip } from '../board/CardChip';
@@ -22,6 +23,7 @@ import { threadBoardCard } from '../steps/model';
 import { openTakenBack } from '../takenBackCompose';
 import { pageOffersUpdates } from '../updateNotice';
 import { fileOpener } from './openFile';
+import { useFocusSubject } from './focusSubject';
 import type { ThreadSlotHost } from './slotHost';
 
 export interface ThreadSlotProps {
@@ -61,17 +63,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   const scope = useMemo(() => ({ paneId, active }), [paneId, active]);
   const activeRef = useRef(active);
   activeRef.current = active;
-  /** Focus was in the thread's place when it gave way to the thread: it goes to the thread's subject. */
-  const focusSubject = useRef(false);
-  useEffect(() => {
-    focusSubject.current = false;
-  }, [threadId]);
-  // The thread landed while focus was in its place: focus goes to its subject, never to the page.
-  useLayoutEffect(() => {
-    if (!focusSubject.current || !thread || thread.thread_id !== threadId) return;
-    focusSubject.current = false;
-    document.querySelector<HTMLElement>(`section.ib-pane[data-thread-id="${CSS.escape(thread.thread_id)}"] .ib-subject`)?.focus();
-  }, [thread, threadId]);
+  const focusSubject = useFocusSubject(thread, threadId);
   // What the thread says of itself on screen, held back while the pane waits off the page.
   const screen = useRef<PaneOnScreen | null>(null);
   const reportScreen = () => {
@@ -87,6 +79,8 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
   const backLabel = fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle;
+  // The thread's canvas (canvas/useThreadCanvas.tsx): over the whole window while open; its pens only while it is on.
+  const canvas = useThreadCanvas(thread, host);
   // A thread that throws while it draws says so in the pane; the sidebar and the list stay (ui's RegionBoundary). Try
   // again mounts the pane afresh, which reads its reply draft back from the server (replyDraft.ts flushes on unmount).
   // The notice takes the header's Back too, and the address names the thread (a reload opens it again): its own Back,
@@ -94,6 +88,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   return (
     <PaneScopeContext.Provider value={scope}>
       <RegionBoundary name="Thread pane" className="ib-pane ib-pempty" resetKey={threadId} onClose={onClose} closeLabel={`Back to ${backLabel}`}>
+      {canvas.layer}
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
           and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
       {threadId && !ready && ((!phone && !stack.thread) || awayWait) && (
@@ -209,6 +204,9 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           draftSignal={host.draftSignals.of(thread.thread_id)}
           filesSignal={host.filesSignals.of(thread.thread_id)}
           onReplyOpened={() => host.setReplyFor(null)}
+          onOpenCanvas={canvas.openFromReply} sketchHeader={canvas.header} onReplyPartOutcome={canvas.outcome}
+          replyPart={host.canvasReply?.threadId === thread.thread_id ? host.canvasReply : null}
+          onReplyPartTaken={() => host.setCanvasReply(null)}
           onSide={host.ask.side}
           onSideWords={host.ask.sideWords}
           replyWords={host.askReply?.threadId === thread.thread_id ? host.askReply.words : null}

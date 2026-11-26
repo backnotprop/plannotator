@@ -112,7 +112,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, saveConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { inboxCanvasOn, loadConfig, saveConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -270,6 +270,7 @@ import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runInboxCapabilityCommand } from "./inbox-capability-command";
+import { runInboxCanvasCommand } from "./inbox-canvas-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -487,6 +488,20 @@ const rawArgs = process.argv.slice(2);
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(capabilityDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox canvas <thread> …`: a thread's canvas, a thin client over the Inbox's `/api/inbox/canvas/agent` (inbox-canvas-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "canvas") {
+    const canvasDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxCanvasCommand(args.slice(2), {
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(canvasDataDir),
       }),
     );
   }
@@ -918,6 +933,8 @@ const stepsOnForHelp = () => loadConfig().inboxSteps === true;
 const scheduledOnForHelp = () => process.platform !== "win32" && loadConfig({ quiet: true }).inboxScheduledThreads === true;
 /** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
 const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
+/** The canvas is on (config.json `inboxCanvas`, on unless false): only then does the guide name `plannotator inbox canvas`. */
+const canvasOnForHelp = () => inboxCanvasOn(loadConfig());
 
 if (isTopLevelHelpInvocation(args)) {
   console.log(formatTopLevelHelp({ board: boardOnForHelp(), scheduled: scheduledOnForHelp() }));
@@ -939,7 +956,7 @@ if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
   const help =
     helpSubcommand === "inbox"
-      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), scheduled: scheduledOnForHelp(), codeReview: codeReviewOnForHelp(), branchReviews: codeReviewOnForHelp() && loadConfig().inboxBranchReviews === true })
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), scheduled: scheduledOnForHelp(), canvas: canvasOnForHelp(), codeReview: codeReviewOnForHelp(), branchReviews: codeReviewOnForHelp() && loadConfig().inboxBranchReviews === true })
       : formatSubcommandHelp(helpSubcommand);
   await writeWholeToStdout(`${help}\n`);
   process.exit(0);

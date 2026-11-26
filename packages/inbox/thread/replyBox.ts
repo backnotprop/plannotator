@@ -46,3 +46,10 @@ export function focusReplyFromBox(event: ReactMouseEvent<HTMLElement>, field: HT
 }
 
 export const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
+
+/**
+ * The reply box's side of the thread's canvas, passed on from here so Thread.tsx holds no import line of its own for
+ * it (Thread.tsx is at its size ceiling, tests/inbox-size-ceilings.json). It stays a hook of ThreadPane, not of
+ * ReplyBox.tsx: `send()` reads it, and a part from the canvas opens the box while the box is closed.
+ */
+export { useCanvasReply } from '../canvas/useCanvasReply';

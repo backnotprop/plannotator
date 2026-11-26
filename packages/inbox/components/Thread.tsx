@@ -124,7 +124,6 @@ import { ReaskNote } from './ReaskNote';
 import { CombineLeftNote, ShipNote, TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
-import type { ComposerCommand } from './ComposerField';
 import { ReplyBox } from './reply/ReplyBox';
 import { sendFailure } from '../sendFailure';
 import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
@@ -160,7 +159,7 @@ import {
   type TagOption,
 } from '../tags';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
-import { TAG_TOKEN_CLASS, ThreadSkillFilter } from './ComposerField';
+import { TAG_TOKEN_CLASS, ThreadSkillFilter, type ComposerCommand } from './ComposerField';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { type ActionMark } from './ActionChecklist';
@@ -200,7 +199,7 @@ import { sentActionsOf } from '../thread/sentActions';
 import { leftoverWords } from '../thread/leftover';
 import { answersItself, replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, isScriptPost, messageAuthorName, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, SCRIPT_AUTHOR_NAME, spanWords, stillHidden, threadAskerName, type FoldState } from '../thread/helpers';
-import { NO_SKILLS_HINT_MS, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT } from '../thread/replyBox';
+import { NO_SKILLS_HINT_MS, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, useCanvasReply } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
 import { ThreadBarTitle } from '../thread/ThreadBarTitle';
 import { SkipChip } from '../parts/SkipChip';
@@ -214,10 +213,9 @@ import { replyWordsWithMentions, useMentionBoxOpener } from '../threadMentions';
 import { labelledAuthorName } from '../parts/AuthorName';
 import { MessageBody } from '../parts/MessageBody/MessageBody';
 
-export { AckPill, MessageBody };
-export { routeSendAnnotations, sendTargetsOf, type SendTarget };
+export { AckPill, MessageBody, routeSendAnnotations, sendTargetsOf, type SendTarget };
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, onSide, onSideWords, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, onSide, onSideWords, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter, replyPart = null, onReplyPartTaken, onReplyPartOutcome, onOpenCanvas = null, sketchHeader = null }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -3248,7 +3246,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           ...(feedback ? { feedback } : {}),
           ...(own.length > 0 ? { annotation_ids: own.map((r) => r.id) } : {}),
           // From the floating box, the file on screen rides the reply that carries the words (the server drops it when a comment on that file already names it).
-          ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}),
+          ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}), ...(last ? canvasReply.sketch() : {}), // and from the thread's canvas, what the agent reads of it
           // The pasted files ride the reply that carries the words, as attachments.
           ...(files.length > 0 ? { uploads: files } : {}),
           // The message the words answer (approval "inbox-reply-quote") rides the reply that carries them.
@@ -4275,6 +4273,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         : undefined,
     [onSideWords, replyText],
   );
+  const canvasReply = useCanvasReply(replyFiles, sending, () => send(), onReplyPartOutcome, replyPart, onReplyPartTaken, (words) => (boxRef.current.open || openBox(), changeReply(words), setError(null), [...replyFiles.files.map((f) => f.name), ...draftFilesWithMine(replyDraft.draft?.files ?? []).map((f) => f.name)])); // the canvas's part: its words in place of the box's, then its files, sketch and own Send
 
   // Mark read: pressed while the thread is marked read, offered while something here waits on the person.
   const readAt = row?.read_at ?? null;
@@ -4430,7 +4429,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // tighter padding, the Artifacts count, then the way back's label; the subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, linkList.count, linksOn, one, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, linkList.count, linksOn, one, !!sketchHeader, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -4624,7 +4623,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 review={pullReview}
               />
             )}
-            {artifactsButton && (
+            {sketchHeader}{artifactsButton && (
               <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : linksOnly ? 'Links' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
                 <button
                   ref={artifactsButtonRef}
@@ -5421,6 +5420,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               else replyFiles.add(list);
               setError(null);
             }}
+            onCanvas={onOpenCanvas}
             onShowFiles={showReplyFiles}
             draftAnswers={draftAnswers}
             draftActions={draftActions}

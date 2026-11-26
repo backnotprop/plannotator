@@ -24,7 +24,7 @@ export interface InboxEventWindow {
   origin: string;
 }
 
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'runs', 'ships', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'machine', 'machines', 'cards', 'outbox', 'grid-seen', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'runs', 'ships', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'machine', 'machines', 'cards', 'outbox', 'grid-seen', 'canvas', 'canvas-job', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -59,8 +59,10 @@ export interface InboxEventHandlers {
   onShowArchived?: (value: unknown) => void;
   onAgentFaces?: (data: unknown) => void;
   onReactions?: (reactions: unknown, rev: unknown) => void;
-  onCapabilities?: (capabilities: { board?: { on: boolean }; decision_mode?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean }; experimental?: InboxExperimentalSettings }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; decision_mode?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean }; experimental?: InboxExperimentalSettings; canvas?: { on: boolean } }) => void;
   onTailscale?: (tailscale: TailscaleSettings) => void;
+  /** A thread's canvas changed (`canvas`), or the Inbox asks this window to draw for an agent (`canvas-job`): canvas/canvasApi.ts. */
+  onCanvas?: (name: 'canvas' | 'canvas-job', data: string) => void;
   onMachine?: (frame: MachineRecordFrame) => void;
   onMachines?: (machines: MachineView[]) => void;
   onOutbox?: (entry: OutboxView) => void;
@@ -207,7 +209,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; decision_mode?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown }; experimental?: unknown };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; decision_mode?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown }; experimental?: unknown; canvas?: { on?: unknown } };
         const experimental = experimentalOfFrame(data.experimental);
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
@@ -223,6 +225,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.scheduled_threads?.on === 'boolean' ? { scheduled_threads: { on: data.scheduled_threads.on } } : {}),
           ...(typeof data.plans?.on === 'boolean' ? { plans: { on: data.plans.on } } : {}),
           ...(experimental ? { experimental } : {}),
+          ...(typeof data.canvas?.on === 'boolean' ? { canvas: { on: data.canvas.on } } : {}),
         });
       } catch {
       }
@@ -234,6 +237,13 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
         if (tailscale && typeof tailscale === 'object' && typeof tailscale.on === 'boolean') handlers.onTailscale?.(tailscale);
       } catch {
       }
+      return;
+    case 'canvas':
+    case 'canvas-job':
+      // A thread's canvas changed, or the Inbox asks this window for a drawing (sent only while the canvas is on):
+      // the canvas's own module takes it, loaded on the first such frame (canvas/canvasApi.ts).
+      if (handlers.onCanvas) handlers.onCanvas(frame.name, frame.data);
+      else void import('./canvas/canvasApi').then((mod) => (frame.name === 'canvas' ? mod.onCanvasFrame(frame.data) : mod.onCanvasJob(frame.data))).catch(() => {});
       return;
     case 'machine':
       try {

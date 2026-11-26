@@ -2,6 +2,7 @@ import type { ReactNode, RefObject } from 'react';
 import type { InboxListRow, InboxListSection, InboxReaction, InboxThread, InboxTourChange } from '@plannotator/core/inbox-types';
 import type { CardsModel, OutboxView, SettingsModel, ThreadModel } from '../api';
 import type { Route } from '../app/route';
+import type { CanvasReplyFor } from '../canvas/replyPart';
 import type { SearchLanding } from '../components/SearchHost';
 import type { InboxToastModel } from '../components/Toast';
 import type { ComposeRequest } from '../compose/ComposeDialog';
@@ -79,6 +80,9 @@ export interface ThreadSlotHost {
   ask: { side: ThreadPaneProps['onSide']; sideWords: ThreadPaneProps['onSideWords'] };
   askReply: { threadId: string; words: string } | null;
   setAskReply: (next: null) => void;
+  /** What the thread's canvas puts in a thread's reply box (canvas/useThreadCanvas.tsx), until that pane takes it. */
+  canvasReply: CanvasReplyFor | null;
+  setCanvasReply: (next: CanvasReplyFor | null) => void;
   patchQuestions: ThreadPaneProps['onQuestions'];
   /** A run of pick saves on `threadId` (this pane's) changed or ended (App's `onPickSaves`). */
   onPickSaves: (ids: ReadonlySet<string>, paneClosed: boolean | undefined, threadId: string | null) => void;

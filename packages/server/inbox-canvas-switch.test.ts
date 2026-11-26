@@ -1,0 +1,113 @@
+/**
+ * The canvas as a capability (config.json `inboxCanvas`, on unless false; no Settings row; `plannotator inbox
+ * capability canvas on|off` turns it; the default itself: inbox-canvas-capability.test.ts):
+ * the switch's save, no canvas action in the agent tool whatever is on (agents have `plannotator inbox canvas`,
+ * inbox-canvas-agent.test.ts), and an off Inbox that touches no stored canvas. The routes' refusal on a running Inbox:
+ * inbox-canvas-capability.test.ts.
+ */
+import { describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CANVAS_GONE_KEEP_MS } from "@plannotator/shared/inbox/canvas/store";
+import { createInboxCanvas } from "./inbox-canvas";
+import { canvasSwitch } from "./inbox-canvas-switch";
+import { createInboxMcpServer, INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_TOOLS, INBOX_SERVED_TOOLS, inboxServedTools, type InboxMcpContext } from "./inbox-mcp";
+
+function canvasIn(dir: string, on: () => boolean) {
+  let deleted: () => void = () => {};
+  const store = { dir, message: () => null, onDeletion: (listener: () => void) => ((deleted = listener), () => {}) } as never;
+  const canvas = createInboxCanvas({
+    store,
+    serverSession: "srv",
+    json: (data, status) => new Response(JSON.stringify(data), { status: status ?? 200 }),
+    readBody: async (req) => (await req.json()) as Record<string, unknown>,
+    sessionMismatch: () => null,
+    on,
+  });
+  return { canvas, deleted: () => deleted() };
+}
+
+describe("the canvas switch", () => {
+  const harness = (start: boolean | undefined, fixed?: boolean) => {
+    let saved = start === true;
+    let changes = 0;
+    const sw = canvasSwitch({ saved: () => saved, fixed, save: (on) => (saved = on), changed: () => changes++ });
+    return { sw, changes: () => changes, saved: () => saved };
+  };
+
+  test("off while config.json says so until turned on; a save answers the switch and tells every window only when it changed", () => {
+    const h = harness(false);
+    expect(h.sw.on()).toBe(false);
+    expect(h.sw.answer({})).toEqual({ canvas: { on: false } });
+    expect(h.sw.answer({ canvas: { on: true } })).toEqual({ canvas: { on: true } });
+    expect(h.saved()).toBe(true);
+    expect(h.changes()).toBe(1);
+    h.sw.answer({ canvas: { on: true } });
+    expect(h.changes()).toBe(1);
+    expect(h.sw.answer({ canvas: { on: false } })).toEqual({ canvas: { on: false } });
+    expect(h.changes()).toBe(2);
+  });
+
+  test("anything but { on: boolean } is refused before anything is saved, naming the field", () => {
+    const h = harness(false);
+    for (const bad of [true, { on: "yes" }, { on: true, extra: 1 }, [], null]) {
+      expect(() => h.sw.check({ canvas: bad })).toThrow(expect.objectContaining({ code: "validation_error", details: { field: "canvas" } }));
+    }
+    expect(h.saved()).toBe(false);
+  });
+
+  test("a save config.json did not keep is refused as not saved", () => {
+    const sw = canvasSwitch({ saved: () => false, save: () => {}, changed: () => {} });
+    expect(() => sw.answer({ canvas: { on: true } })).toThrow(expect.objectContaining({ code: "config_not_saved" }));
+  });
+
+  test("a test's fixed value decides over config.json", () => {
+    expect(harness(false, true).sw.on()).toBe(true);
+    expect(harness(true, false).sw.on()).toBe(false);
+  });
+});
+
+describe("the canvas is a command, never an action of the agent tool (the owner, 2026-11-24)", () => {
+  test("no tool list names it, with every switch on or off", () => {
+    expect(INBOX_MCP_TOOLS as readonly string[]).not.toContain("canvas");
+    expect(INBOX_SERVED_TOOLS as readonly string[]).not.toContain("canvas");
+    expect(INBOX_DEFAULT_SERVED_TOOLS as readonly string[]).not.toContain("canvas");
+    for (const board of [false, true]) for (const steps of [false, true]) for (const scheduled of [false, true]) expect(inboxServedTools({ board, steps, scheduled }) as string[]).not.toContain("canvas");
+  });
+
+  test("a session made with the canvas on registers no canvas tool", () => {
+    const tools = Object.keys((createInboxMcpServer({} as unknown as InboxMcpContext) as unknown as { _registeredTools: Record<string, unknown> })._registeredTools);
+    expect(tools).toContain("thread_pulls");
+    expect(tools).not.toContain("canvas");
+  });
+});
+
+describe("an Inbox with the canvas off touches no stored canvas", () => {
+  const seed = (dir: string) => {
+    const root = join(dir, "canvas");
+    mkdirSync(join(root, "msg_DELETED"), { recursive: true });
+    const old = join(root, ".gone", `msg_OLD-${Date.now() - CANVAS_GONE_KEEP_MS - 1000}`);
+    mkdirSync(old, { recursive: true });
+    return { root, old };
+  };
+
+  test("off: a deleted thread's canvas stays where it is and an old deleted one is not swept, at start or on a deletion", () => {
+    const dir = mkdtempSync(join(tmpdir(), "canvas-switch-off-"));
+    const { root, old } = seed(dir);
+    const { deleted } = canvasIn(dir, () => false);
+    deleted();
+    expect(existsSync(join(root, "msg_DELETED"))).toBe(true);
+    expect(existsSync(old)).toBe(true);
+  });
+
+  test("on: the same start sweeps the old one, and a deletion moves the deleted thread's canvas aside", () => {
+    const dir = mkdtempSync(join(tmpdir(), "canvas-switch-on-"));
+    const { root, old } = seed(dir);
+    const { deleted } = canvasIn(dir, () => true);
+    expect(existsSync(old)).toBe(false);
+    deleted();
+    expect(existsSync(join(root, "msg_DELETED"))).toBe(false);
+    expect(readdirSync(join(root, ".gone")).some((name) => name.startsWith("msg_DELETED-"))).toBe(true);
+  });
+});
