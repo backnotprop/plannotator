@@ -39,7 +39,7 @@ afterEach(() => {
 
 /** MacBook's door: its canvas routes answer as its window's would; `say` sends a frame on its stream; `away()` drops it. */
 function macbookDoor() {
-  const state = { down: false, lists: 0, asks: [] as string[], writes: [] as { route: string; search: string; type: string | null; bytes: number }[] };
+  const state = { down: false, lists: 0, asks: [] as string[], writes: [] as { route: string; search: string; type: string | null; bytes: number; body: any }[] };
   const streams = new Set<ReadableStreamDefaultController<Uint8Array>>();
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -66,8 +66,10 @@ function macbookDoor() {
         return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
       }
       if (req.method === "POST") {
-        const bytes = (await req.arrayBuffer()).byteLength;
-        state.writes.push({ route, search: url.search, type: req.headers.get("content-type"), bytes });
+        const raw = new Uint8Array(await req.arrayBuffer());
+        const type = req.headers.get("content-type");
+        const body = type?.startsWith("application/json") && raw.length > 0 ? JSON.parse(new TextDecoder().decode(raw)) : null;
+        state.writes.push({ route, search: url.search, type, bytes: raw.byteLength, body });
         if (route.startsWith("canvas/jobs/")) return Response.json({ ok: true });
         return Response.json({ serverSession: "far", rev: state.writes.length });
       }
@@ -80,6 +82,9 @@ function macbookDoor() {
     state,
     say(event: string, data: unknown) {
       for (const c of streams) c.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+    },
+    back() {
+      state.down = false;
     },
     away() {
       state.down = true;
@@ -185,7 +190,7 @@ test("a drawing job from MacBook that no window here can draw is answered at onc
   door.say("canvas-job", { id: JOB, kind: "picture", thread_id: THREAD });
   await until(() => door.state.writes.length === 1, "the job answered");
   expect(door.state.writes[0]!.route).toBe(`canvas/jobs/${JOB}`);
-  expect(new URLSearchParams(door.state.writes[0]!.search).get("failed")).toBe("1");
+  expect(new URLSearchParams(door.state.writes[0]!.search).get("none")).toBe("1");
   door.say("canvas-job", { id: JOB.replace("ab", "cd"), kind: "mermaid", texts: ["graph TD; A-->B"] });
   await until(() => door.state.writes.length === 2, "the mermaid job answered");
   expect(door.state.writes[1]!.type).toBe("application/json");
@@ -210,4 +215,36 @@ test("the canvas off here: MacBook's stream asks for no canvas frames, and a job
   await until(() => door.state.writes.length === 1, "the job answered");
   expect(heard.some((f) => f.event === "canvas-job")).toBe(false);
   stop();
+});
+
+test("canvas saves while MacBook is away wait as one entry, from any window; an Undo keeps its place; back, each goes once", async () => {
+  const door = macbookDoor();
+  const { call, macbook, waiting } = inbox(door.url);
+  await until(() => macbook()?.state === "online" && macbook()?.list_cursor === 1, "MacBook online");
+  door.away();
+  await until(() => macbook()?.state !== "online", "MacBook away");
+  const canvas = `/api/inbox/m/${FAR}/threads/${THREAD}/canvas`;
+  const box = (id: string, version: number) => ({ id, type: "rectangle", version, versionNonce: version, isDeleted: false });
+  const first = await call(canvas, { idempotency_key: "canvas-a", scene: scene([box("a", 1), box("b", 3)]), have: 3, partial: true, window: "cw_1" });
+  expect(first.status).toBe(202);
+  // Another window, or this one after a reload: b moved again (and an older copy of a), c drawn, one removed.
+  const second = await call(canvas, { idempotency_key: "canvas-b", scene: scene([box("b", 4), box("c", 1)]), have: 4, partial: true, gone: ["old_1"], window: "cw_2" });
+  const third = await call(canvas, { idempotency_key: "canvas-c", scene: scene([box("a", 0)]), have: 4, partial: true, window: "cw_2" });
+  expect([second.status, third.status]).toEqual([202, 202]);
+  expect([second.body.outbox.key, third.body.outbox.key]).toEqual(["canvas-a", "canvas-a"]);
+  expect(await waiting()).toBe(1);
+  // An Undo behind it: a later save is its own entry, after the Undo, so it lands after it there.
+  expect((await call(`${canvas}/undo`, { idempotency_key: "undo-a", rev: 3 })).status).toBe(202);
+  const later = await call(canvas, { idempotency_key: "canvas-d", scene: scene([box("d", 1)]), have: 4, partial: true });
+  expect(later.body.outbox.key).toBe("canvas-d");
+  expect(await waiting()).toBe(3);
+
+  door.back();
+  await until(() => door.state.writes.length === 3, "all three delivered");
+  expect(door.state.writes.map((w) => w.route)).toEqual([`threads/${THREAD}/canvas`, `threads/${THREAD}/canvas/undo`, `threads/${THREAD}/canvas`]);
+  const folded = door.state.writes[0]!.body;
+  expect(folded.scene.elements.map((e: { id: string; version: number }) => `${e.id}@${e.version}`)).toEqual(["a@1", "b@4", "c@1"]);
+  expect([folded.gone, folded.have, folded.partial, folded.idempotency_key]).toEqual([["old_1"], 3, true, "canvas-a"]);
+  expect(door.state.writes[2]!.body.scene.elements.map((e: { id: string }) => e.id)).toEqual(["d"]);
+  expect(await waiting()).toBe(0);
 });

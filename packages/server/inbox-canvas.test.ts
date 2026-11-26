@@ -542,3 +542,40 @@ describe("a file's route says what is wrong with it", () => {
     expect((await post(canvas, job, "?failed=1", new Uint8Array(0), "image/png"))!.status).toBe(200);
   });
 });
+
+describe("a drawing job and a linked computer with no window that can draw it", () => {
+  const answer = (t: ReturnType<typeof setup>, id: string, query: string, body: BodyInit = new Uint8Array(0)) =>
+    t.canvas.route(new Request(`http://localhost/api/inbox/canvas/jobs/${id}${query}`, { method: "POST", headers: { "content-type": "image/png" }, body }), `/api/inbox/canvas/jobs/${id}`);
+
+  test("its `none` leaves the job to this computer's own window, which still draws it", async () => {
+    const t = setup();
+    await board(t, ["Alpha"]);
+    const linked: string[] = [];
+    const window: string[] = [];
+    t.canvas.listen((event, data) => event === "canvas-job" && linked.push((data as { id: string }).id));
+    t.canvas.listen((event, data) => event === "canvas-job" && window.push((data as { id: string }).id));
+    const asked = t.canvas.agent({ thread_id: THREAD, picture: true, by: { name: "Agent" } });
+    await Bun.sleep(10);
+    expect(linked.length).toBe(1);
+    await answer(t, linked[0]!, "?none=1");
+    // This computer's window answers a moment later, with its drawing.
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
+    await answer(t, window[0]!, "?x=0&y=0&w=100&h=100&scale=1", png);
+    const done = await asked;
+    expect(done.ok).toBe(true);
+    expect(done.structured?.picture).toEqual(expect.any(String));
+  });
+
+  test("when every stream it went to says `none`, the agent hears at once that no window drew it", async () => {
+    const t = setup();
+    await board(t, ["Alpha"]);
+    const linked: string[] = [];
+    t.canvas.listen((event, data) => event === "canvas-job" && linked.push((data as { id: string }).id));
+    const started = Date.now();
+    const asked = t.canvas.agent({ thread_id: THREAD, picture: true, by: { name: "Agent" } });
+    await Bun.sleep(10);
+    await answer(t, linked[0]!, "?none=1");
+    await expect(asked).rejects.toThrow(/no Inbox window is open/);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});

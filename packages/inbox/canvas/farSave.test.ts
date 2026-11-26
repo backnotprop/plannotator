@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { OutboxView } from '../api';
-import { FAR_PART_CHARS, farChanges, farParts, heldEnd, type HeldSave } from './farSave';
+import { FAR_PART_CHARS, farChanges, farParts, heldEnd, joinHeld, type HeldSave } from './farSave';
 
 type El = { id: string; type?: string; version: number; isDeleted?: boolean; fileId?: string; points?: number[][] };
 const sig = (el: El) => `${el.version}:${el.isDeleted ? 1 : 0}`;
@@ -66,5 +66,20 @@ describe('how a held save ended', () => {
     // The link went: the window no longer knows the machine, the entry keeps its name.
     expect(heldEnd(entry({ state: 'dropped', notice: { kind: 'not_delivered', at }, machine_name: 'MacBook' }), null)).toEqual({ landed: false, words: 'Not delivered: MacBook was unlinked before it went.' });
     expect(heldEnd(entry({ state: 'parked', notice: { kind: 'may_have_been_delivered', at } }), macbook)).toEqual({ landed: false, words: 'May have been delivered. Check on MacBook.' });
+  });
+});
+
+describe('a save folded into the one that waits', () => {
+  test('the entry carries both: the newer of each element, and what either removes that neither names again', () => {
+    const first: HeldSave = { sent: new Map([['a', '1:0'], ['b', '1:0']]), gone: ['old_1', 'c'] };
+    const joined = joinHeld(first, { sent: new Map([['b', '2:0'], ['c', '1:0']]), gone: ['old_2'] });
+    expect([...joined.sent]).toEqual([['a', '1:0'], ['b', '2:0'], ['c', '1:0']]);
+    expect(joined.gone).toEqual(['old_1', 'old_2']);
+    expect(joinHeld(undefined, first)).toBe(first);
+  });
+
+  test('one the window\'s outbox listed and lists no more (read again after a reconnect) has ended; one not listed yet still waits', () => {
+    expect(heldEnd(undefined, { name: 'MacBook', state: 'online' }, true)).toEqual({ landed: false, unknown: true });
+    expect(heldEnd(undefined, { name: 'MacBook', state: 'online' }, false)).toBeNull();
   });
 });

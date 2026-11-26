@@ -81,6 +81,11 @@ type Json = (data: unknown, status?: number) => Response;
 interface Job {
   kind: "picture" | "mermaid";
   resolve: (value: unknown) => void;
+  /**
+   * The streams it went to that may still draw it. A linked computer with no window that can draw answers `none` at
+   * once (inbox-machines.ts `noDrawing`): one fewer. None left: "no drawing" now, while a window here still draws it.
+   */
+  left: number;
 }
 
 interface PictureAnswer {
@@ -149,6 +154,7 @@ export function createInboxCanvas(options: {
       }, waitMs);
       jobs.set(id, {
         kind,
+        left: windows.size,
         resolve: (value) => {
           clearTimeout(timer);
           jobs.delete(id);
@@ -587,6 +593,11 @@ export function createInboxCanvas(options: {
         const job = jobs.get(jobMatch[1]!);
         // Another window answered first, or the wait ran out: nothing to do.
         if (!job) return json({ ok: true, late: true });
+        if (url.searchParams.get("none") === "1") {
+          await req.body?.cancel().catch(() => {});
+          if (--job.left <= 0) job.resolve(null);
+          return json({ ok: true });
+        }
         if (job.kind === "picture") {
           const place = placeOf(url);
           const png = await rawBody(req, PICTURE_MAX_BYTES);

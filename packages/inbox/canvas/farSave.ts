@@ -2,10 +2,10 @@
  * A linked computer's canvas saves (CanvasBoard.tsx), the parts that need no editor: what a save names, and the
  * pieces it goes in.
  *
- * A save of a linked computer's thread goes through this Inbox's outbox, which holds each write as one entry. While
- * one save waits there (that computer is away, or has not answered yet), the window sends no other: later changes stay
- * in the editor and go together once that one has ended. So minutes of drawing while it is away are one command, not
- * one per pause.
+ * A save of a linked computer's thread goes through this Inbox's outbox. Each save goes there at once, naming only
+ * what no save waiting for that computer carries, and the outbox folds it into the one that waits and has not left
+ * (packages/server/inbox-canvas-fold.ts). So minutes of drawing while that computer is away are one entry, not one
+ * per pause, and nothing of it waits only in the editor.
  */
 
 import type { MachineView, OutboxView } from '../api';
@@ -87,12 +87,22 @@ export function farParts<E>(elements: readonly E[], gone: readonly string[], max
   return parts;
 }
 
+/** Two saves the outbox holds as one (a save made while one waits is folded into it there): what both carry. */
+export function joinHeld(held: HeldSave | undefined, next: HeldSave): HeldSave {
+  if (!held) return next;
+  const sent = new Map([...held.sent, ...next.sent]);
+  return { sent, gone: [...new Set([...held.gone, ...next.gone])].filter((id) => !sent.has(id)) };
+}
+
 /**
  * How a save or an Undo held for a linked computer ended, by its outbox entry: null while it waits; landed; or why it
  * did not, in the outbox's words (said as an error: refused there, the link removed, given up after its errors).
+ * `seen`: the window's outbox listed it before. One it no longer lists (read again whole after a reconnect: only what
+ * waits and what did not land) has ended, how is not known here: not landed, and nothing to say.
  */
-export function heldEnd(entry: OutboxView | undefined, machine: Pick<MachineView, 'name' | 'state'> | null): null | { landed: true } | { landed: false; words: string } {
-  if (!entry || outboxPending(entry)) return null;
+export function heldEnd(entry: OutboxView | undefined, machine: Pick<MachineView, 'name' | 'state'> | null, seen = false): null | { landed: true } | { landed: false; words: string } | { landed: false; unknown: true } {
+  if (!entry) return seen ? { landed: false, unknown: true } : null;
+  if (outboxPending(entry)) return null;
   if (entry.state === 'delivered') return { landed: true };
   // A link removed takes the machine with it: the entry keeps its name.
   const named = machine ?? (entry.machine_name ? { name: entry.machine_name, state: 'offline' as const } : null);

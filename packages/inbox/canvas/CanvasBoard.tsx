@@ -25,7 +25,7 @@ import boardCss from './canvas.css?inline';
 import { heldWords, InboxHeldError, type MachineView, type OutboxView } from '../api';
 import { machineOf, rememberMachine } from '../inboxUrl';
 import { CANVAS_WINDOW, canvasApi, canvasLooked, subscribeCanvasFrames, type CanvasFrame, type CanvasJob, type CanvasReply } from './canvasApi';
-import { farChanges, farParts, heldEnd, type HeldSave } from './farSave';
+import { farChanges, farParts, heldEnd, joinHeld, type HeldSave } from './farSave';
 
 export interface CanvasBoardProps {
   threadId: string;
@@ -393,6 +393,8 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   const placing = useRef(new Map<string, { w: number; h: number } | null>());
   /** A linked computer's thread: the saves waiting in this Inbox's outbox for it, by key, until each has ended there. */
   const heldSaves = useRef(new Map<string, HeldSave>());
+  /** The held keys the window's outbox has listed: one it lists no more has ended (`heldEnd`). */
+  const outboxSeen = useRef(new Set<string>());
   /** An Undo waiting in the outbox for that computer, by key. */
   const heldUndo = useRef<string | null>(null);
   /** The outbox's words for the last save held. */
@@ -531,7 +533,9 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   /**
    * How the saves and the Undo held for the thread's linked computer ended (the outbox's entries): a delivered save is
    * what that computer has; one that did not land leaves what it carried to be saved again, and the bar says why in the
-   * outbox's words, as an error. Once none waits, what the person did meanwhile goes, as one save.
+   * outbox's words, as an error. One the window's outbox no longer lists (read again whole after a reconnect, which
+   * lists only what waits and what did not land) has ended too: what it carried goes again with the next save, which
+   * changes nothing there for what landed (elements merge by version).
    */
   const settleHeld = useRef<(entries: ReadonlyMap<string, OutboxView>) => void>(() => {});
 
@@ -556,8 +560,9 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
         landed(sent, part.gone, await canvasApi.save(threadId, { ...scene, elements: part.elements, files: {} }, rev.current, { gone: part.gone, partial: true, keepalive }));
       } catch (error) {
         if (!(error instanceof InboxHeldError)) throw error;
-        // Saved in this Inbox's outbox: sent when that computer is back. Its entry says how it ends.
-        heldSaves.current.set(error.outbox.key, { sent, gone: part.gone });
+        // Saved in this Inbox's outbox: sent when that computer is back. Its entry says how it ends. A save made while
+        // one waits is folded into that one there (its key comes back): it carries both.
+        heldSaves.current.set(error.outbox.key, joinHeld(heldSaves.current.get(error.outbox.key), { sent, gone: part.gone }));
         heldText.current = error.message;
       }
     }
@@ -581,10 +586,10 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   };
 
   /**
-   * `force`: a linked computer's save goes even while one waits for it (the tab put away, the canvas closed), naming
-   * only what no waiting save carries. Otherwise what the person does while one waits joins the next save.
+   * A linked computer's thread: each save goes to this Inbox's outbox at once, naming only what no waiting save
+   * carries, and the outbox folds it into the one that waits for that computer (inbox-canvas-fold.ts): one entry.
    */
-  const save = useCallback((how: { force?: boolean; keepalive?: boolean } = {}): Promise<void> => {
+  const save = useCallback((how: { keepalive?: boolean } = {}): Promise<void> => {
     if (saving.current) {
       again.current = true;
       return saving.current;
@@ -592,10 +597,6 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
     const scene = sceneNow();
     if (!scene) return Promise.resolve();
     const far = !!machineOf(threadId);
-    if (far && heldSaves.current.size > 0 && !how.force) {
-      unsaved.current = true;
-      return Promise.resolve();
-    }
     const run = (far ? saveFar(scene, how.keepalive) : saveHere(scene))
       .then((picturesWait) => {
         unsaved.current = again.current || picturesWait;
@@ -656,23 +657,31 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
     let ended: string | null = null;
     for (const [key, held] of [...heldSaves.current]) {
       const entry = entries.get(key);
-      const end = heldEnd(entry, machineNow.current);
+      const end = heldEnd(entry, machineNow.current, outboxSeen.current.has(key));
+      if (entry) outboxSeen.current.add(key);
       if (!end) continue;
+      outboxSeen.current.delete(key);
       heldSaves.current.delete(key);
       changed = true;
       if (end.landed) landed(held.sent, held.gone, entry!.answer as { rev?: unknown; scene?: CanvasScene } | null);
+      else if (!('words' in end)) unsaved.current = true;
       else {
         // It never landed there: what it carried is still the person's to save, sent with their next change.
         unsaved.current = true;
         ended = end.words;
       }
     }
-    const undoEntry = heldUndo.current ? entries.get(heldUndo.current) : undefined;
-    const undoEnd = heldEnd(undoEntry, machineNow.current);
+    const undoKey = heldUndo.current;
+    const undoEntry = undoKey ? entries.get(undoKey) : undefined;
+    const undoEnd = undoKey ? heldEnd(undoEntry, machineNow.current, outboxSeen.current.has(undoKey)) : null;
+    if (undoKey && undoEntry) outboxSeen.current.add(undoKey);
     if (undoEnd) {
       heldUndo.current = null;
+      outboxSeen.current.delete(undoKey!);
       if (undoEnd.landed) undone(undoEntry!.answer as UndoAnswer | null);
-      else setNotice({ text: undoEnd.words, bad: true, ended: true });
+      else if ('words' in undoEnd) setNotice({ text: undoEnd.words, bad: true, ended: true });
+      // How it ended is not known here any more: the held words go.
+      else setNotice(null);
     }
     if (!changed || !live.current) return;
     if (ended) setSaveState({ ended });
@@ -779,8 +788,8 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
       if (document.visibilityState === 'hidden' && unsaved.current && !threadGone.current) {
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = null;
-        // A linked computer's thread: also while a save waits for it, what that one does not carry.
-        if (machineOf(threadId)) return void save({ force: true, keepalive: true });
+        // A linked computer's thread: what no save waiting for it carries, folded into that one in the outbox.
+        if (machineOf(threadId)) return void save({ keepalive: true });
         const whole = sceneNow();
         if (whole) void canvasApi.save(threadId, whole, rev.current, { keepalive: true }).then((answer) => (rev.current = Math.max(rev.current, answer.rev))).catch(() => {});
       }
@@ -799,9 +808,8 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
       if (retry.current) clearTimeout(retry.current);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = null;
-      // Closing the canvas saves whatever is not saved, a save that failed earlier included (and, on a linked
-      // computer's thread, what no save waiting for it carries).
-      if (unsaved.current && !threadGone.current) void save({ force: true });
+      // Closing the canvas saves whatever is not saved, a save that failed earlier included.
+      if (unsaved.current && !threadGone.current) void save();
       if (pictureTimer.current) clearTimeout(pictureTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

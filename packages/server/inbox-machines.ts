@@ -45,6 +45,7 @@ import { createMachineAgentFind } from "./inbox-machine-agent-find";
 import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, OUTBOX_MAX_BODY_BYTES, type OutboxEntry } from "./inbox-outbox";
 import type { OutboxFile } from "./inbox-outbox-files";
+import { foldCanvasSave } from "./inbox-canvas-fold";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
 import { createMachineShips } from "./inbox-machine-ships";
@@ -407,14 +408,17 @@ const CANVAS_WRITE_ROUTE = /^threads\/[^/]+\/canvas(?:\/undo)?$/;
 /** A drawing job's id, as that machine's canvas makes it (inbox-canvas.ts). */
 const CANVAS_JOB = /^job_[a-f0-9]{32}$/;
 
-/** A linked machine's drawing job that no window here can draw: answered "no drawing" at once, as a window that failed answers. */
+/**
+ * A linked machine's drawing job that no window here can draw: answered `none` at once, so that machine stops waiting
+ * on this Inbox's stream (its own window, if one is open, still draws it; inbox-canvas.ts `Job.left`).
+ */
 async function noDrawing(peer: PeerLink, job: string, mermaid: boolean): Promise<void> {
   const key = `canvas-job-${crypto.randomUUID()}`;
   try {
-    const answer = await peer.request(`canvas/jobs/${job}`, mermaid ? `?idempotency_key=${key}` : `?failed=1&idempotency_key=${key}`, {
+    const answer = await peer.request(`canvas/jobs/${job}`, `?none=1&idempotency_key=${key}`, {
       method: "POST",
       headers: { "Content-Type": mermaid ? "application/json" : "image/png" },
-      body: mermaid ? JSON.stringify({ drawn: null }) : new Uint8Array(0),
+      body: mermaid ? "{}" : new Uint8Array(0),
     });
     await answer.body?.cancel().catch(() => {});
   } catch {
@@ -1168,7 +1172,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const named = req.headers.get("X-Plannotator-Thread")?.trim() ?? "";
     // Where the person was, when not at this window, said on so that machine's agent reads where they wrote it.
     const place = inboxForwardedPlace(context.sentFrom?.(req, via) ?? null);
-    const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window, place);
+    // A canvas save while one for the same thread waits and never left: folded into that one (inbox-canvas-fold.ts),
+    // so what the person draws while that machine is away is one entry, from any window.
+    const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
+    const folded = CANVAS_SAVE_ROUTE.test(route) && key !== "" && !outbox.get(key) ? foldIntoWaiting(machine, route, body) : null;
+    const { entry, fresh } = folded ? { entry: folded, fresh: true } : outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window, place);
     if (peer.state === "online") peer.flush();
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;
@@ -1177,6 +1185,20 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // A canvas write changes no list there: nothing to read again (it would cost a list read for each save).
     if (settled.state === "delivered" && kind === "set" && !CANVAS_WRITE_ROUTE.test(route)) await (segments[0] === "cards" ? Promise.all([peer.refreshList(), peer.refreshCards()]) : peer.refreshList());
     return outboxAnswer(settled, fresh);
+  };
+
+  /**
+   * The newest canvas save of this thread waiting for `machine` that never left, with nothing of the thread queued
+   * behind it (an Undo, a delete), given `body` too. Null when there is none, or the two together are past the bound.
+   */
+  const foldIntoWaiting = (machine: string, route: string, body: Record<string, unknown>): OutboxEntry | null => {
+    const thread = route.slice(0, -"canvas".length);
+    const waiting = outbox.list(machine, "pending");
+    const at = waiting.map((e) => e.route).lastIndexOf(route);
+    const held = waiting[at];
+    if (!held || held.state !== "queued" || held.left || waiting.slice(at + 1).some((e) => e.route.startsWith(thread))) return null;
+    const merged = foldCanvasSave(held.body, body);
+    return merged ? outbox.amend(held.key, merged) : null;
   };
 
   /** The owner's own answer when there is one (status and body as its door gave them); otherwise 202 and the entry ("Sending…"). */

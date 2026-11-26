@@ -615,6 +615,18 @@ export class InboxOutbox {
   }
 
   /**
+   * A write that waits and never left, given a new body (a canvas save folded into it, inbox-canvas-fold.ts), so the
+   * two go as one under its key. Null when it left, settled or is gone, or the body is past the bound: the caller then
+   * queues its own.
+   */
+  amend(key: string, body: Record<string, unknown>): OutboxEntry | null {
+    const entry = this.entries.get(key);
+    if (!entry || entry.state !== "queued" || entry.left || this.inFlight.has(key)) return null;
+    if (JSON.stringify(body).length > OUTBOX_MAX_BODY_BYTES) return null;
+    return this.save({ ...entry, body: { ...body, idempotency_key: key } });
+  }
+
+  /**
    * The person cancels a write that waits and never left (rule 10: one that left may have landed, so it stays). The
    * sender loop sends nothing it finds cancelled. Answers the entry as it is now; null when there is no such key.
    */
