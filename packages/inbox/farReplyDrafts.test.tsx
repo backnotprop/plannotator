@@ -81,7 +81,8 @@ const stamp = () => new Date(Date.UTC(2026, 10, 2, 11, 0, (mini.clock += 1))).to
 /**
  * The Mini's door for a thread's draft, as its store answers (inbox-reply-drafts.ts): the compare-and-set on `base`, or
  * on the words (`base_body`); a Discard naming `base` only while the draft is still that version. As its door does
- * (inbox-devices.ts), a key it answered once is answered the same again, never applied twice.
+ * (inbox-devices.ts `DRAFT_SAVE_KEPT`), a Discard's plain answer under a key it saw is answered the same again; a save,
+ * or a conflict, is never kept: it is the compare-and-set again.
  */
 function miniDoor(route: string, method: string, body: Record<string, unknown> = {}): Response {
   const match = /^threads\/([^/]+)\/draft(\/delete)?$/.exec(route);
@@ -117,7 +118,7 @@ function miniDoor(route: string, method: string, body: Record<string, unknown> =
   }
   mini.writes.push({ route, body: String(body.body ?? ''), status: out.status });
   const text = JSON.stringify(out.json);
-  if (key) mini.answered.set(key, { status: out.status, text });
+  if (key && match[2] && out.status === 200) mini.answered.set(key, { status: out.status, text });
   return new Response(text, { status: out.status, headers: { 'Content-Type': 'application/json' } });
 }
 
