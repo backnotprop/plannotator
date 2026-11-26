@@ -243,8 +243,16 @@ function watch(on: Page): void {
  * 404, then the read on its machine: panes/paneReads.ts, proved in inbox-machines.spec.ts 2d), and Ask reads it too.
  */
 async function openFromList(on: Page, thread: string, hash: string): Promise<void> {
-  if (!on.url().startsWith(studio.url)) await on.goto(studio.url);
-  await expect(on.locator(`[data-thread-id="${thread}"]`).first()).toBeAttached({ timeout: 20_000 });
+  if (on.url().startsWith(studio.url)) {
+    // Loaded: its list names the thread once it draws its row.
+    await expect(on.locator(`[data-thread-id="${thread}"]`).first()).toBeAttached({ timeout: 20_000 });
+  } else {
+    // Loaded now: its own list read names the thread (a read thread is in a closed Quiet band: no row is drawn).
+    const listed = on.waitForResponse(async (r) => r.request().method() === 'GET' && new URL(r.url()).pathname === '/api/inbox/threads' && (await r.text().catch(() => '')).includes(thread), { timeout: 20_000 });
+    await on.goto(studio.url);
+    await listed;
+    await expect(on.locator('.ib-band, [data-thread-id]').first()).toBeAttached({ timeout: 20_000 });
+  }
   await on.goto(`${studio.url}#${hash}`);
 }
 
