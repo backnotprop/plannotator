@@ -13,8 +13,13 @@ import {
   inboxSidebarPreset,
   inboxSidebarRead,
   inboxSidebarSetShown,
+  inboxSidebarMovePin,
+  inboxSidebarPin,
+  inboxSidebarSame,
+  inboxSidebarSetRail,
   inboxSidebarStep,
   inboxSidebarToStack,
+  inboxSidebarWithItems,
   type InboxSidebarItem,
   type InboxSidebarLayout,
 } from './inbox-sidebar';
@@ -220,5 +225,56 @@ describe('presets', () => {
     const minimal = INBOX_SIDEBAR_PRESETS.minimal.layout;
     expect(minimal.hidden).toEqual(['new-message', 'copy-prompt', 'feedback', 'usage', 'shortcuts']);
     expect(inboxSidebarRead(minimal)).toEqual(minimal);
+  });
+});
+
+describe('the project rail (take R1): the choice and the pins ride on the layout', () => {
+  const harbor = 'project:prj_harbor';
+  const fern = 'project:prj_fern';
+  const release = 'tag:ini_release';
+  test('off and unpinned by default: a layout that never turned it on is today\'s, field for field', () => {
+    expect(D.rail).toBeUndefined();
+    expect(D.pins).toBeUndefined();
+    expect(inboxSidebarRead({ top: [...D.top], bottom: [...D.bottom], hidden: [] })).toEqual(D);
+    // Turned on and off again with nothing pinned: the default again.
+    expect(inboxSidebarSame(inboxSidebarSetRail(inboxSidebarSetRail(D, true), false), D)).toBe(true);
+  });
+  test('a saved rail and its pins read back in order; junk pins, repeats and a non-boolean rail are dropped', () => {
+    const read = inboxSidebarRead({ top: [...D.top], bottom: [...D.bottom], hidden: [], rail: true, pins: [fern, 'nope', harbor, fern, 7, release, 'tag:'] });
+    expect(read?.rail).toBe(true);
+    expect(read?.pins).toEqual([fern, harbor, release]);
+    expect(inboxSidebarRead({ rail: 'yes' })?.rail).toBeUndefined();
+  });
+  test('a save is checked strictly: a rail that is not a boolean, or a pin that is not a place, is refused', () => {
+    const base = { top: [...D.top], bottom: [...D.bottom], hidden: [] };
+    expect(inboxSidebarCheck({ ...base, rail: true, pins: [harbor, release] })).toEqual({ ...D, rail: true, pins: [harbor, release] });
+    expect(inboxSidebarCheck({ ...base, rail: 1 })).toBeNull();
+    expect(inboxSidebarCheck({ ...base, pins: ['harbor'] })).toBeNull();
+    expect(inboxSidebarCheck({ ...base, pins: harbor })).toBeNull();
+    expect(inboxSidebarCheck({ ...base, other: true })).toBeNull();
+  });
+  test('pin, reorder and unpin: the rail\'s order is the person\'s, and the choice stays', () => {
+    const on = inboxSidebarSetRail(D, true);
+    const pinned = inboxSidebarPin(inboxSidebarPin(inboxSidebarPin(on, harbor, true), fern, true), release, true);
+    expect(pinned.pins).toEqual([harbor, fern, release]);
+    expect(inboxSidebarPin(pinned, harbor, true).pins).toEqual([fern, release, harbor]);
+    expect(inboxSidebarMovePin(pinned, release, 0).pins).toEqual([release, harbor, fern]);
+    expect(inboxSidebarMovePin(pinned, harbor, 99).pins).toEqual([fern, release, harbor]);
+    const unpinned = inboxSidebarPin(pinned, fern, false);
+    expect(unpinned.pins).toEqual([harbor, release]);
+    expect(unpinned.rail).toBe(true);
+    expect(inboxSidebarSame(unpinned, pinned)).toBe(false);
+  });
+  test('turning it off keeps the pins for next time', () => {
+    const off = inboxSidebarSetRail(inboxSidebarPin(inboxSidebarSetRail(D, true), harbor, true), false);
+    expect(off.rail).toBeUndefined();
+    expect(off.pins).toEqual([harbor]);
+  });
+  test('a preset or Reset to default changes the items only: the rail and its pins stay, and the preset still reads as itself', () => {
+    const mine = inboxSidebarPin(inboxSidebarSetRail(inboxSidebarSetShown(D, 'feedback', false), true), harbor, true);
+    const reset = inboxSidebarWithItems(mine, D);
+    expect(reset).toEqual({ ...D, rail: true, pins: [harbor] });
+    expect(inboxSidebarPreset(reset)).toBe('default');
+    expect(inboxSidebarPreset(inboxSidebarWithItems(mine, INBOX_SIDEBAR_PRESETS.minimal.layout))).toBe('minimal');
   });
 });

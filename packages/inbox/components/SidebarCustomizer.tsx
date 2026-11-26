@@ -23,11 +23,12 @@ import {
   inboxSidebarHideable,
   inboxSidebarMove,
   inboxSidebarPreset,
-  inboxSidebarSame,
+  inboxSidebarSameItems,
   inboxSidebarSetShown,
   inboxSidebarShown,
   inboxSidebarSpec,
   inboxSidebarStackOf,
+  inboxSidebarWithItems,
   inboxSidebarStep,
   inboxSidebarToStack,
   type InboxSidebarItem,
@@ -206,7 +207,7 @@ export function SidebarCustomizer({
                 aria-pressed={preset === choice}
                 data-on={preset === choice ? '' : undefined}
                 data-preset={choice}
-                onClick={() => void writeSidebarLayout(INBOX_SIDEBAR_PRESETS[choice].layout)}
+                onClick={() => void writeSidebarLayout(inboxSidebarWithItems(readSidebarLayout(), INBOX_SIDEBAR_PRESETS[choice].layout))}
               >
                 {INBOX_SIDEBAR_PRESETS[choice].label}
               </button>
@@ -227,7 +228,7 @@ export function SidebarCustomizer({
           {group('bottom')}
         </div>
         <div className="ib-sbc-foot">
-          <button type="button" className="ib-btn ib-ghost ib-sm" disabled={inboxSidebarSame(layout, INBOX_SIDEBAR_DEFAULT)} onClick={() => void writeSidebarLayout(INBOX_SIDEBAR_DEFAULT)} data-sidebar-reset="">
+          <button type="button" className="ib-btn ib-ghost ib-sm" disabled={inboxSidebarSameItems(layout, INBOX_SIDEBAR_DEFAULT)} onClick={() => void writeSidebarLayout(inboxSidebarWithItems(readSidebarLayout(), INBOX_SIDEBAR_DEFAULT))} data-sidebar-reset="">
             Reset to default
           </button>
           <button type="button" className="ib-btn ib-sm ib-pri" onClick={close} data-sidebar-done="">

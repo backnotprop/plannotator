@@ -484,7 +484,7 @@ export interface PlannotatorConfig {
    * `{ sidebar }`. Read leniently (core `inboxSidebarRead`): a name this build does not know is dropped, and an item
    * the layout does not name takes its default place.
    */
-  inboxSidebar?: { top?: string[]; bottom?: string[]; hidden?: string[] };
+  inboxSidebar?: { top?: string[]; bottom?: string[]; hidden?: string[]; rail?: boolean; pins?: string[] };
   /** How many times `inboxSidebar` was saved: windows take a layout only when it is newer than the last they took. */
   inboxSidebarRev?: number;
   /**

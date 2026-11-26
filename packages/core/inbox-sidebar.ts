@@ -67,6 +67,13 @@ export interface InboxSidebarLayout {
   bottom: InboxSidebarItem[];
   /** The hidden items, in registry order (never Inbox or Settings). */
   hidden: InboxSidebarItem[];
+  /**
+   * When the sidebar is closed (project rail, take R1, 2026-11-26): absent, it hides, as always; true, a rail of places
+   * stays at the left edge (packages/inbox/rail/). Present only when true, so a layout that never turned it on is today's.
+   */
+  rail?: true;
+  /** The places pinned to the rail, in its order (`tag:<id>`, `project:<id>`). Present only when there is one. */
+  pins?: string[];
 }
 
 const SPECS: ReadonlyMap<string, InboxSidebarItemSpec> = new Map(INBOX_SIDEBAR_ITEMS.map((spec) => [spec.id, spec]));
@@ -117,7 +124,24 @@ export function inboxSidebarRead(value: unknown): InboxSidebarLayout | null {
   }
   const named = new Set(strings(raw.hidden));
   const hidden = IDS.filter((id) => named.has(id) && inboxSidebarHideable(id));
-  return { top, bottom, hidden };
+  return withRail({ top, bottom, hidden }, raw.rail === true, railPinsRead(raw.pins));
+}
+
+/** At most this many places pinned to the rail, and this long a pin's name (`project:<id>`). */
+const MAX_PINS = 64;
+const MAX_PIN_LENGTH = 512;
+/** A pin's name: `tag:<id>` or `project:<id>`, printable characters only. */
+export const isRailPin = (value: unknown): value is string => typeof value === 'string' && value.length <= MAX_PIN_LENGTH && /^(tag|project):[^\u0000-\u001f\u007f]+$/.test(value);
+/** Saved pins, read leniently: a name that is not a pin is dropped, a repeated one counts once, at most MAX_PINS. */
+function railPinsRead(value: unknown): string[] {
+  return [...new Set(strings(value).filter(isRailPin))].slice(0, MAX_PINS);
+}
+/** The layout with the rail's two fields, each present only when it says something (see InboxSidebarLayout). */
+function withRail(items: { top: InboxSidebarItem[]; bottom: InboxSidebarItem[]; hidden: InboxSidebarItem[] }, rail: boolean, pins: readonly string[]): InboxSidebarLayout {
+  const layout: InboxSidebarLayout = { top: items.top, bottom: items.bottom, hidden: items.hidden };
+  if (rail) layout.rail = true;
+  if (pins.length > 0) layout.pins = [...pins];
+  return layout;
 }
 
 /** At most this many names in a saved list: a stack holds every item at most once. */
@@ -130,17 +154,55 @@ const MAX_NAMES = 64;
 export function inboxSidebarCheck(value: unknown): InboxSidebarLayout | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
-  if (Object.keys(raw).some((key) => key !== 'top' && key !== 'bottom' && key !== 'hidden')) return null;
+  if (Object.keys(raw).some((key) => !['top', 'bottom', 'hidden', 'rail', 'pins'].includes(key))) return null;
   for (const key of ['top', 'bottom', 'hidden'] as const) {
     const list = raw[key];
     if (!Array.isArray(list) || list.length > MAX_NAMES || !list.every(isInboxSidebarItem)) return null;
   }
+  // The rail (optional): a boolean, and a list of pins.
+  if (raw.rail !== undefined && typeof raw.rail !== 'boolean') return null;
+  if (raw.pins !== undefined && (!Array.isArray(raw.pins) || raw.pins.length > MAX_PINS || !raw.pins.every(isRailPin))) return null;
   return inboxSidebarRead(raw);
 }
 
+const sameList = (x: readonly string[], y: readonly string[]) => x.length === y.length && x.every((v, i) => v === y[i]);
+
+/** The same items in the same places (the presets and Reset to default compare these; the rail is not an item). */
+export function inboxSidebarSameItems(a: InboxSidebarLayout, b: InboxSidebarLayout): boolean {
+  return sameList(a.top, b.top) && sameList(a.bottom, b.bottom) && sameList(a.hidden, b.hidden);
+}
+
 export function inboxSidebarSame(a: InboxSidebarLayout, b: InboxSidebarLayout): boolean {
-  const same = (x: readonly string[], y: readonly string[]) => x.length === y.length && x.every((v, i) => v === y[i]);
-  return same(a.top, b.top) && same(a.bottom, b.bottom) && same(a.hidden, b.hidden);
+  return inboxSidebarSameItems(a, b) && a.rail === b.rail && sameList(a.pins ?? [], b.pins ?? []);
+}
+
+/**
+ * `items`' items with `layout`'s rail and pins: a preset or Reset to default changes what the sidebar shows, never the
+ * rail's choice or what is pinned to it.
+ */
+export function inboxSidebarWithItems(layout: InboxSidebarLayout, items: InboxSidebarLayout): InboxSidebarLayout {
+  return withRail(items, layout.rail === true, layout.pins ?? []);
+}
+
+/** The rail on (Keep a rail of places) or off (Hide it). The pins stay either way. */
+export function inboxSidebarSetRail(layout: InboxSidebarLayout, on: boolean): InboxSidebarLayout {
+  return withRail(layout, on, layout.pins ?? []);
+}
+
+/** A place pinned (at the rail's end) or unpinned. */
+export function inboxSidebarPin(layout: InboxSidebarLayout, pin: string, pinned: boolean): InboxSidebarLayout {
+  const pins = (layout.pins ?? []).filter((other) => other !== pin);
+  if (pinned && isRailPin(pin)) pins.push(pin);
+  return withRail(layout, layout.rail === true, pins.slice(0, MAX_PINS));
+}
+
+/** A pinned place moved to `index` among the pins (the end when past it), counted without itself. */
+export function inboxSidebarMovePin(layout: InboxSidebarLayout, pin: string, index: number): InboxSidebarLayout {
+  const pins = layout.pins ?? [];
+  if (!pins.includes(pin)) return layout;
+  const without = pins.filter((other) => other !== pin);
+  without.splice(Math.max(0, Math.min(Math.trunc(index), without.length)), 0, pin);
+  return withRail(layout, layout.rail === true, without);
 }
 
 export const inboxSidebarShown = (layout: InboxSidebarLayout, id: InboxSidebarItem): boolean => !layout.hidden.includes(id);
@@ -207,5 +269,5 @@ export const INBOX_SIDEBAR_PRESET_ORDER: readonly InboxSidebarPreset[] = ['defau
 
 /** The preset a layout is, or null ("Custom"). */
 export function inboxSidebarPreset(layout: InboxSidebarLayout): InboxSidebarPreset | null {
-  return INBOX_SIDEBAR_PRESET_ORDER.find((preset) => inboxSidebarSame(layout, INBOX_SIDEBAR_PRESETS[preset].layout)) ?? null;
+  return INBOX_SIDEBAR_PRESET_ORDER.find((preset) => inboxSidebarSameItems(layout, INBOX_SIDEBAR_PRESETS[preset].layout)) ?? null;
 }

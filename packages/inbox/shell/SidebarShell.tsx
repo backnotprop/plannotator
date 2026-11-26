@@ -9,13 +9,16 @@
 // Workspaces runs 275 in 240 to 520); the page frame, search, assistant and
 // the rest of AppShell stay in Workspaces.
 
-import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useMotionValue, type MotionValue } from "motion/react";
 
 import { CollapsibleEdge, ResizeHandle } from "./CollapsibleEdge";
 import { MotionStyleDiv } from "./motion-style-div";
 import { Sidebar, SidebarProvider, useSidebar, type SidebarToggleNotice } from "./sidebar";
-import { SidebarPeek } from "./SidebarPeek";
+import { SidebarPeek, type PeekAsk } from "./SidebarPeek";
+import { usePhone } from "../phone";
+import { useSidebarLayout } from "../sidebarLayout";
+import { PlaceRail, type RailHost } from "../rail/PlaceRail";
 import { useResizablePanel } from "./useResizablePanel";
 
 // The record draws the sidebar at 232 px. The viable range keeps the record's
@@ -31,9 +34,15 @@ export function SidebarShell({
 	navigation,
 	className,
 	toggleNotice = null,
+	rail = null,
 	children,
 }: {
 	open: boolean;
+	/**
+	 * The project rail's places (rail/PlaceRail.tsx): with "Keep a rail of places" on, the closed sidebar leaves this
+	 * rail at the left edge, and its ⋯ opens the peek. Null (the tour, a file or a thread full screen): no rail.
+	 */
+	rail?: RailHost | null;
 	/** A dot on the sidebar toggle while the sidebar is closed (an update waiting). */
 	toggleNotice?: SidebarToggleNotice | null;
 	onOpenChange: (open: boolean) => void;
@@ -68,6 +77,10 @@ export function SidebarShell({
 	useEffect(() => {
 		widthApplyRef.current = (w) => sidebarWidth.set(w);
 	});
+	// The project rail: on (the person's choice, saved with the layout), never on a phone (its sheet has the pins).
+	const phone = usePhone();
+	const railOn = useSidebarLayout().rail === true && rail !== null && !phone;
+	const [peekAsk, setPeekAsk] = useState<PeekAsk | null>(null);
 	// Committed-width sync (release commits, keyboard resizeTo, restores).
 	useEffect(() => {
 		sidebarWidth.set(sidebarResize.width);
@@ -81,9 +94,18 @@ export function SidebarShell({
 			toggleNotice={toggleNotice}
 			className={className}
 			style={{ "--sidebar-width": `${sidebarResize.width}px` } as CSSProperties}
+			data-rail={railOn && !open ? "" : undefined}
 		>
 			<Sidebar id={panelId}>{navigation}</Sidebar>
-			<SidebarPeek>{navigation}</SidebarPeek>
+			{railOn && rail && (
+				<PlaceRail
+					host={rail}
+					shown={!open}
+					// The peek is a wide window's (SidebarPeek.tsx, 1024 px and up); narrower, ⋯ opens the sidebar itself.
+					onMore={(opener) => (window.matchMedia("(min-width: 1024px)").matches ? setPeekAsk((was) => ({ n: (was?.n ?? 0) + 1, opener })) : onOpenChange(true))}
+				/>
+			)}
+			<SidebarPeek ask={peekAsk}>{navigation}</SidebarPeek>
 			<SidebarEdge sidebarResize={sidebarResize} sidebarWidth={sidebarWidth} panelId={panelId} />
 			{children}
 		</SidebarProvider>

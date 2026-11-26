@@ -33,7 +33,8 @@ export function inboxSidebarOff(capabilities: readonly { key: string; on(): bool
 export function inboxSidebarStored(sidebar: InboxSidebarLayout, off: readonly string[]): InboxSidebarLayout {
   if (off.length === 0) return sidebar;
   const keep = <T extends string>(list: readonly T[]) => list.filter((id) => !off.includes(id));
-  return { top: keep(sidebar.top), bottom: keep(sidebar.bottom), hidden: keep(sidebar.hidden) };
+  // The rail's choice and its pins (`rail`, `pins`) are kept as sent.
+  return { ...sidebar, top: keep(sidebar.top), bottom: keep(sidebar.bottom), hidden: keep(sidebar.hidden) };
 }
 
 /** Validates and saves a layout; answers it as every window reads it back (`inboxSidebarRead` of what was stored). */

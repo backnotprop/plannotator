@@ -137,7 +137,11 @@ test.skipIf(!hasDom)('the right-click menu: a checkbox per item that hides and i
   expect(boxes.every((box) => box.getAttribute('role') === 'menuitemcheckbox' && box.getAttribute('aria-checked') === 'true')).toBe(true);
   expect(menu()!.textContent).toContain('Customize sidebar…');
   expect(menu()!.textContent).not.toContain('Reset to default');
-  expect(menu()!.textContent).not.toMatch(/Move|Hide /);
+  // The project rail's choice ("When the sidebar is closed: Hide it / Keep a rail of places", rail/RailChoice.tsx) is
+  // the rail's, not a sidebar item's: left out here.
+  const itemWords = [...menu()!.querySelectorAll('[role^="menuitem"]:not([data-rail-choice])')].map((el) => el.textContent).join(' ');
+  expect(itemWords).not.toMatch(/Move|Hide /);
+  expect(menu()!.querySelectorAll('[data-rail-choice]')).toHaveLength(2);
 });
 
 test.skipIf(!hasDom)('a tick hides the row at once, leaves the menu open, saves the layout, and offers Reset; Reset puts it back', async () => {

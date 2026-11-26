@@ -27,6 +27,7 @@ import { MachinesSection } from './Machines';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxPalettes, useInboxTheme } from '../theme';
 import { openSidebarCustomizer } from '../sidebarLayout';
+import { SidebarClosedRow } from '../rail/RailChoice';
 import { PaletteRow } from './Palettes';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
@@ -374,9 +375,7 @@ function GeneralSection({
           {/* The sidebar's layout (approval "inbox-sidebar-customize"): the keyboard's way to the Customize panel, and the phone's. */}
           <div className="ib-prow" data-settings-sidebar="">
             <span className="ib-txt">
-              <span className="ib-l" id="ib-sidebar-label">
-                Sidebar
-              </span>
+              <span className="ib-l" id="ib-sidebar-label">Sidebar</span>
               <span className="ib-desc">What shows, and where. Also from a right-click on the sidebar.</span>
             </span>
             <span className="ib-ctl">
@@ -392,6 +391,7 @@ function GeneralSection({
               </button>
             </span>
           </div>
+          <SidebarClosedRow />
           {splitView && !phone && <SplitViewRow saved={splitView.on} />}
           {/* Agent status (agents/agentStatus.ts, owner 2026-11-18): every agent's mark; the ⋮ menu has the same switch. */}
           <AgentStatusRow />
