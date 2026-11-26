@@ -27,6 +27,7 @@ import { findDirectiveBlocks, findQuestionBlocks } from '@plannotator/core/quest
 import { INBOX_REPLY_SENTENCE_LINE, parseInboxQuestionBlocks, splitInboxReplyBody } from '@plannotator/core/inbox-questions';
 import { parseInboxActionBlocks, withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
+import { skillReactionText } from '@plannotator/core/inbox-folding';
 import { isInboxActionReport, isInboxNote, type InboxMessageWire, type InboxQuestion, type InboxThread } from '@plannotator/core/inbox-types';
 import { chatMarkdownToHtml } from '@plannotator/ui/utils/aiChatFormat';
 import { copyRichTextToClipboard, plainTextClipboardHtml, sanitizeRichHtml } from '@plannotator/ui/utils/richClipboard';
@@ -167,6 +168,9 @@ function agentMarkdown(message: InboxMessageWire): string {
  */
 function personMarkdown(message: InboxMessageWire): string {
   if (isInboxNote(message) || isInboxActionReport(message) || (message.reask?.length ?? 0) > 0) return message.body.trim();
+  // A skill emoji's reply: its words as the thread draws them, "🦃 /bro" (core inbox-skill-reaction.ts).
+  const reaction = skillReactionText(message);
+  if (reaction) return reaction;
   const text = withoutInboxActionsSection(splitInboxSkillsBlock(message.body)?.before ?? message.body);
   const parts = splitInboxReplyBody(text);
   if (!parts.changed) return text.trim();

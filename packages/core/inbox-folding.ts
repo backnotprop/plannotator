@@ -14,6 +14,7 @@ import { INLINE_DESTINATION, stripInlineMarkup } from './inline-markdown';
 import { withoutInboxReplyQuoteLead } from './inbox-reply-quote';
 import { withoutInboxThreadMentions } from './inbox-thread-mention';
 import { parseInboxRunBlocks, parseInboxSecretBlocks } from './inbox-run-blocks';
+import { skillReactionText } from './inbox-skill-reaction';
 
 /**
  * Where "new since you looked" starts: the seq of the person's last look at
@@ -263,7 +264,8 @@ export function foldSnippet(
       }
       return { kind: 'words', text: reasked === 1 ? 'Asked to re-ask the open question' : `Asked to re-ask ${reasked} open questions in one message` };
     }
-    const said = words(replyWords(message.body));
+    // A skill emoji's reply reads as the words "🦃 /bro" (inbox-skill-reaction.ts).
+    const said = skillReactionText(message) ?? words(replyWords(message.body));
     if (said) return { kind: 'words', text: said };
     const sent = messages.flatMap((m) => (m.questions ?? []).filter((q) => q.sent_reply_id === message.id && q.answer !== null));
     if (sent.length > 0) return { kind: 'answers', parts: answeredParts(sent) };
@@ -454,3 +456,5 @@ export function isDelivered(message: InboxMessageWire, root: InboxMessageWire): 
 // A list row's grey line (inbox-row-preview.ts), through this subpath: core 0.25.22 is published, and a new subpath
 // would need a core release (packages/ui smoke:package), as inbox-rows-words goes through inbox-types.
 export { INBOX_ROW_PREVIEW_MAX, inboxRowPreview, inboxRowPreviewWords, type InboxRowPreviewInput, type InboxRowPreviewQuestion } from './inbox-row-preview';
+// A skill emoji's reply as the person reads it (inbox-skill-reaction.ts), through this subpath for the same reason.
+export { skillReactionShownBody, skillReactionText } from './inbox-skill-reaction';

@@ -1469,7 +1469,7 @@ export const inboxApi = {
        */
       quote?: { of: string; words?: string; time?: string };
       /** The answer carries the thread as a read of it would (`thread_read`): the Send's last reply asks, and reads nothing after. */
-      with_thread?: boolean; /** New thread from this message: no #tag read, no still-open line, no length noted. */ author_only?: boolean; /** A skill emoji pressed: drawn as one line (thread/skillReaction.ts). */ skill_reaction?: { emoji: string; skill: string };
+      with_thread?: boolean; /** New thread from this message: no #tag read, no still-open line, no length noted. */ author_only?: boolean; /** A skill emoji pressed: drawn as a reply whose words are "🦃 /bro" (thread/skillReaction.ts). */ skill_reaction?: { emoji: string; skill: string };
     },
   ) =>
     // To another machine: the newest seq the person saw there rides along (rule 11), and a reply its Inbox has not

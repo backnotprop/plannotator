@@ -463,7 +463,7 @@ export interface InboxReplyInput {
   author_only?: boolean;
   /**
    * A skill emoji pressed in the reaction tray (approval "inbox-reactions-every-message"): `{ emoji, skill }`, kept on
-   * the reply (`InboxMessage.skill_reaction`) so the window draws it as one line. The words are the window's, exactly
+   * the reply (`InboxMessage.skill_reaction`) so the window reads its words as "🦃 /bro". The words are the window's, exactly
    * a typed `/<skill>` reply's; nothing here changes them. Anything but one emoji and a skill name is a `422`.
    */
   skill_reaction?: unknown;
