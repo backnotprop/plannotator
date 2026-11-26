@@ -105,6 +105,7 @@ import { inboxSectionWhileRoutineRuns } from "@plannotator/shared/inbox/list";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
+import { createOhMyPiLaunchHost } from "./inbox-launch-omp";
 import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
@@ -548,6 +549,7 @@ export function createInboxLaunch(options: {
   const ownHosts: LaunchHost[] = [
     claude,
     createPiLaunchHost(context),
+    createOhMyPiLaunchHost(context),
     createCodexLaunchHost(context),
     createOpenCodeLaunchHost(context),
   ];
@@ -1013,7 +1015,7 @@ export function createInboxLaunch(options: {
         rmSync(launchDir(launch.id), { recursive: true, force: true });
         return;
       }
-      if (result.ok) store.settleLaunch(root.id, { to: { host: launch.agent, session: result.session }, session_ref: result.ref, ...(rex ? { rex } : {}) });
+      if (result.ok) store.settleLaunch(root.id, { to: { host: host.sessionHost ?? launch.agent, session: result.session }, session_ref: result.ref, ...(rex ? { rex } : {}) });
       else store.settleLaunch(root.id, { error: { code: result.code, text: result.text, at: new Date(now()).toISOString() }, ...(rex ? { rex } : {}) });
       log(`Inbox launch ${launch.id}: ${result.ok ? `started ${result.ref}` : `did not start (${result.code})`}`);
     } catch (error) {

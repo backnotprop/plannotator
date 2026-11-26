@@ -147,11 +147,12 @@ export function inboxLaunchedSession(root: { to?: { session: string } | null; la
 export function inboxLaunchedWakeOf(message: {
   to?: { session: string } | null;
   launch?: Pick<InboxLaunchRecord, "agent" | "session" | "session_ref" | "scratch" | "made_folder" | "clone" | "deleted_at"> | null;
-}): { agent: InboxLaunchRecord["agent"]; project: boolean } | null {
+}): { agent: Exclude<InboxLaunchRecord["agent"], "oh-my-pi">; project: boolean } | null {
   const launch = message.launch;
   if (!launch || launch.deleted_at || !message.to) return null;
   if (inboxLaunchedSession(message) !== message.to.session) return null;
-  return { agent: launch.agent, project: !launch.scratch && !launch.made_folder && !launch.clone };
+  // Oh My Pi runs Plannotator's Pi extension: its session is told what a Pi session is, word for word.
+  return { agent: launch.agent === "oh-my-pi" ? "pi" : launch.agent, project: !launch.scratch && !launch.made_folder && !launch.clone };
 }
 
 export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {

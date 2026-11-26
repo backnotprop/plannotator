@@ -29,6 +29,15 @@
  *    tool on or off, only where `inbox/inbox.json` exists) and removes the
  *    claim as it ends.
  *
+ * With FAKE_PI_AS=omp it is a fake `omp` (Oh My Pi, tests/helpers/fake-omp) instead, as Oh My Pi 19.2.1's
+ * source has it: titled `omp`; `omp --version` prints `omp/<version>`; `omp --mode rpc` prints its `ready`
+ * frame first and makes its own session id (no `--session-id`), named over RPC (`set_session_name`);
+ * `--resume <id>` reopens that session's file (any cwd's folder) and exits 1 with `Session "<id>" not found.`
+ * when there is none; the file is written only from the first answer on; sessions live under
+ * `$PI_CODING_AGENT_DIR` else `~/.omp/agent`, in Oh My Pi's folder names (`-tmp-<relative>` under the temp
+ * root, `-<relative>` under home, else `--<absolute>--`); `omp --resume <id>` alone is the terminal's. Its
+ * extension polls as host `pi` and says `plugin.host: "oh-my-pi"`, as Plannotator's Pi extension does there.
+ *
  * State in $FAKE_PI_STATE: config.json (read on each use), calls.jsonl (argv,
  * cwd, env names, the data dir and Inbox-tool values it got), pids.log,
  * delivered.log, dialogs.jsonl (each dialog and the answer it got), exits.jsonl.
@@ -37,8 +46,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
-// As Pi does (cli/setup.js, bundle/cli-runtime.js): `ps` then shows this process as `pi` alone, never its argv.
-process.title = "pi";
+const OMP = process.env.FAKE_PI_AS === "omp";
+// As Pi does (cli/setup.js, bundle/cli-runtime.js), and Oh My Pi (cli.ts): `ps` then shows this process by that name alone, never its argv.
+process.title = OMP ? "omp" : "pi";
 
 const STATE = process.env.FAKE_PI_STATE;
 const args = process.argv.slice(2);
@@ -69,19 +79,20 @@ append("calls.jsonl", {
 });
 
 if (args[0] === "--version") {
-  process.stdout.write(`${config().version || "0.85.1"}\n`);
+  process.stdout.write(OMP ? `omp/${config().version || "19.2.1"}\n` : `${config().version || "0.85.1"}\n`);
   process.exit(0);
 }
 
 // Without `--mode rpc`: Pi in a terminal on `--session-id` (Open in Terminal, Copy attach command). No RPC;
 // the extension's bridge poll only (with the Inbox tool on, as there); it runs until SIGTERM or SIGINT.
 const terminal = flag("--mode") !== "rpc";
-if (terminal && !flag("--session-id")) {
+const ID_FLAG = OMP ? "--resume" : "--session-id";
+if (terminal && !flag(ID_FLAG)) {
   process.stderr.write("fake pi: only --version, --mode rpc and a terminal on --session-id\n");
   process.exit(2);
 }
 
-const sessionId = flag("--session-id");
+const sessionId = flag(ID_FLAG) || (OMP ? crypto.randomUUID() : undefined);
 if (!terminal && config().startFail) {
   process.stderr.write(`${config().startFail}\n`);
   process.exit(1);
@@ -90,19 +101,61 @@ fs.appendFileSync(path.join(STATE, "pids.log"), `${process.pid}\n`);
 
 // ── The session file ──
 const home = process.env.HOME || "";
-const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(home, ".pi", "agent");
+const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(home, OMP ? ".omp" : ".pi", "agent");
 const cwd = path.resolve(process.cwd());
-const sessionDir = path.join(agentDir, "sessions", `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`);
+/** Oh My Pi's folder name for a cwd: the temp root first, then home, else the absolute path. */
+const ompDirName = (at) => {
+  const real = fs.realpathSync(at);
+  const within = (root) => {
+    const rel = path.relative(fs.realpathSync(root), real);
+    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel)) ? rel : null;
+  };
+  const encode = (prefix, rel) => (rel ? (prefix.endsWith("-") ? `${prefix}${rel.replace(/[/\\:]/g, "-")}` : `${prefix}-${rel.replace(/[/\\:]/g, "-")}`) : prefix);
+  const tmp = within(require("node:os").tmpdir());
+  if (tmp !== null) return encode("-tmp", tmp);
+  const inHome = home ? within(home) : null;
+  if (inHome !== null) return encode("-", inHome);
+  return `--${real.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+};
+const sessionDir = path.join(agentDir, "sessions", OMP ? ompDirName(cwd) : `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`);
 fs.mkdirSync(sessionDir, { recursive: true });
 let sessionFile = fs.readdirSync(sessionDir).find((name) => name.endsWith(`_${sessionId}.jsonl`));
-if (sessionFile) sessionFile = path.join(sessionDir, sessionFile);
-else {
+if (OMP && !sessionFile && flag("--resume")) {
+  // `--resume <id>` finds the session in any cwd's folder; none: Oh My Pi's error, exit 1.
+  const root = path.join(agentDir, "sessions");
+  for (const dir of fs.readdirSync(root)) {
+    const found = fs.readdirSync(path.join(root, dir)).find((name) => name.endsWith(`_${sessionId}.jsonl`));
+    if (found) sessionFile = path.join("..", dir, found);
+  }
+  if (!sessionFile) {
+    process.stderr.write(`Session "${sessionId}" not found.\n`);
+    process.exit(1);
+  }
+}
+/** Oh My Pi writes a new session's file only from its first answer on: the lines wait until then. */
+let unwritten = null;
+if (sessionFile) sessionFile = path.resolve(sessionDir, sessionFile);
+else if (OMP) {
+  sessionFile = path.join(sessionDir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
+  unwritten = [`${JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd })}\n`];
+} else {
   // As Pi 0.85.1 (main.js): no file for the id, so a new session with that id, and this warning.
   process.stderr.write(`Warning: No project session found with id '${sessionId}'; creating a new session with that id.\n`);
   sessionFile = path.join(sessionDir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
   fs.writeFileSync(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd })}\n`);
 }
-const messageCount = () => fs.readFileSync(sessionFile, "utf8").split("\n").filter(Boolean).length - 1;
+const messageCount = () => (unwritten ? unwritten.join("") : fs.readFileSync(sessionFile, "utf8")).split("\n").filter(Boolean).length - 1;
+/** One line of the session file (Oh My Pi's: held until an answer is written). */
+const writeLine = (entry, answer = false) => {
+  const line = `${JSON.stringify(entry)}\n`;
+  if (unwritten && !answer) return void unwritten.push(line);
+  if (unwritten) {
+    fs.writeFileSync(sessionFile, unwritten.join(""));
+    unwritten = null;
+  }
+  fs.appendFileSync(sessionFile, line);
+};
+let sessionName = flag("--name");
 
 // ── The extension: the session claim (packages/shared/inbox/pi-session-claim.ts) ──
 // The default data dir only inside a scratch HOME: never the account's real ~/.plannotator.
@@ -137,6 +190,8 @@ if (claimFile) {
 
 // ── RPC ──
 const out = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
+// Oh My Pi's first frame (rpc-mode.ts): before any answer.
+if (OMP && !terminal) out({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1, 2] });
 const dialogs = new Map();
 let stopped = false;
 let aborted = false;
@@ -177,7 +232,7 @@ if (!terminal) process.stdin.on("data", (chunk) => {
       continue;
     }
     if (command.type === "get_state") {
-      const answer = () => out({ id: command.id, type: "response", command: "get_state", success: true, data: { sessionId, sessionFile, messageCount: messageCount(), isStreaming: busy, sessionName: flag("--name") } });
+      const answer = () => out({ id: command.id, type: "response", command: "get_state", success: true, data: { sessionId, sessionFile, messageCount: messageCount(), isStreaming: busy, sessionName } });
       // A Pi slow to come up (config `readyDelayMs`): its first answer waits.
       const delay = config().readyDelayMs ?? 0;
       if (delay > 0) setTimeout(answer, delay);
@@ -185,6 +240,10 @@ if (!terminal) process.stdin.on("data", (chunk) => {
       continue;
     }
     if (command.type === "abort") aborted = true;
+    if (OMP && command.type === "set_session_name") {
+      sessionName = command.name;
+      append("names.jsonl", { sessionId, name: command.name });
+    }
     out({ id: command.id, type: "response", command: command.type, success: true });
   }
 });
@@ -238,7 +297,7 @@ async function errorEnd() {
     await sleep(50);
     out({ type: "agent_start" });
   }
-  fs.appendFileSync(sessionFile, `${JSON.stringify({ type: "message", message: failed })}\n`);
+  writeLine({ type: "message", message: failed }, true);
   busy = false;
   out({ type: "agent_end", messages: [{ role: "user", content: "the prompt", timestamp: Date.now() }, failed], willRetry: false });
   if (retries > 0) out({ type: "auto_retry_end", success: false, attempt: retries, finalError: turnError });
@@ -275,7 +334,7 @@ async function extension() {
     fetch(`http://127.0.0.1:${registry.port}${p}`, {
       method: "POST",
       headers: { authorization: `Bearer ${registry.token}`, "content-type": "application/json" },
-      body: JSON.stringify({ session: sessionId, host: "pi", ...body }),
+      body: JSON.stringify({ session: sessionId, host: "pi", ...(OMP ? { plugin: { version: "0.28.70", on_disk: "0.28.70", host: "oh-my-pi" } } : {}), ...body }),
     });
   const taken = new Set();
   const work = async (command) => {
@@ -285,7 +344,7 @@ async function extension() {
     busy = true;
     out({ type: "agent_start" });
     await post("/api/inbox/bridge/event", { type: "state", busy: true }).catch(() => {});
-    fs.appendFileSync(sessionFile, `${JSON.stringify({ type: "message", role: "user", text: command.body.split("\n")[0] })}\n`);
+    writeLine({ type: "message", role: "user", text: command.body.split("\n")[0] });
     const asked = terminal ? null : await askDialog();
     const until = Date.now() + (config().workMs ?? 600);
     while (!stopped && (Date.now() < until || config().hold)) await sleep(100);
@@ -305,7 +364,7 @@ async function extension() {
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "send_message", arguments: { body, reply_to: command.id, project_path: cwd, agent_session: sessionId, agent_host: "pi", agent_name: "Pi" } } }),
     }).catch(() => {});
-    fs.appendFileSync(sessionFile, `${JSON.stringify({ type: "message", role: "assistant", text: body })}\n`);
+    writeLine({ type: "message", role: "assistant", text: body }, true);
     busy = false;
     idleSince = new Date().toISOString();
     await post("/api/inbox/bridge/event", { type: "state", busy: false }).catch(() => {});

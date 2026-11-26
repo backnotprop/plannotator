@@ -3520,6 +3520,7 @@
       "enum": [
         "claude-code",
         "codex",
+        "oh-my-pi",
         "opencode",
         "pi"
       ],

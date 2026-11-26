@@ -253,6 +253,8 @@ export interface LaunchHost {
   readonly agent: InboxLaunchAgent;
   /** "Claude Code": To's row, a refusal, the questions' author. */
   readonly name: string;
+  /** The host its sessions poll as, when not `agent` (Oh My Pi's are `pi`): the launched root's `to.host`. */
+  readonly sessionHost?: string;
   /** What of Plannotator's connects a session, in the line's words: "plugin" (the default), Pi's "extension". */
   readonly connector?: string;
   /** The login-shell names it keeps from each read (the rest of the env is held only by a host with `loginRead`). */
