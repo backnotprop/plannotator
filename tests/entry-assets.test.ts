@@ -257,6 +257,23 @@ describe('review entry assets', () => {
     expect(read('packages/inbox/package.json')).toContain('"#search-palette": "./search/SearchPalette.tsx"');
   });
 
+  // Settings → Reviews (packages/inbox/reviewSettings/) is code review's own page, hosted through its seams. It
+  // reaches the window only through lazyParts.tsx's dynamic import of `#reviews-settings`, so neither it nor the shared
+  // page it draws rides the window's first chunk. A type-only import is erased.
+  test('the Inbox window mounts Settings → Reviews only through its dynamic import', () => {
+    const page = /^import\s+(?!type\b)[^;]*from\s+['"](?:#reviews-settings|[^'"]*reviewSettings\/ReviewsSettings(?:\.tsx)?|@plannotator\/ui\/components\/settings\/ReviewSettingsPage(?:\.tsx)?)['"]/m;
+    const walk = (dir: string): string[] =>
+      readdirSync(resolve(root, dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? entry.name === 'node_modules' ? [] : walk(`${dir}/${entry.name}`)
+          : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
+      );
+    const eager = [...walk('packages/inbox'), ...walk('apps/inbox')].filter((path) => path !== 'packages/inbox/reviewSettings/ReviewsSettings.tsx' && page.test(read(path)));
+    expect(eager).toEqual([]);
+    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#reviews-settings'))");
+    expect(read('packages/inbox/package.json')).toContain('"#reviews-settings": "./reviewSettings/ReviewsSettings.tsx"');
+  });
+
   // Built-artifact check: a lost eager import would still type-check and pass
   // every unit test, so the built single-file bundles are read directly.
   // Two different kinds of marker, deliberately:
@@ -566,6 +583,8 @@ describe('review entry assets', () => {
     // KaTeX's own error text: its class names are also in Plannotator's
     // label code (`utils/pele-labels.ts` reads `katex-display`).
     KaTeX: 'KaTeX parse error',
+    // Settings → Reviews (#reviews-settings): the shared page's section mark.
+    'Settings → Reviews (#reviews-settings)': 'data-review-settings-section',
     // Pele is in no build while the engine switch is 'mermaid' (checked
     // above); on, it is a lazy part like Mermaid.
     ...(DIAGRAM_ENGINE_MODE === 'mermaid' ? {} : { Pele: 'pele-shape-' }),

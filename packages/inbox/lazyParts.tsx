@@ -1,6 +1,6 @@
 /**
  * The window's parts loaded on first use (#2593): the guided/code review
- * reader, the search palette and the post dialog.
+ * reader, the search palette, the post dialog and Settings → Reviews.
  *
  * Each is a chunk the Inbox serves (build/pack-inbox.ts). Through a bare
  * React.lazy, the first open suspends while its chunk arrives, and React holds
@@ -158,6 +158,8 @@ export const SketchButtonPart = lazyPart(() => canvasParts().then((mod) => ({ de
 export const CanvasLayerPart = lazyPart(() => canvasParts().then((mod) => ({ default: mod.CanvasLayer })));
 export const SearchPalettePart = lazyPart(() => import('#search-palette'));
 export const PlatformPostPart = lazyPart(() => import('#platform-post'));
+/** Settings → Reviews (reviewSettings/ReviewsSettings.tsx): asked for when Settings opens, so it is in by the time the section is. */
+export const ReviewsSettingsPart = lazyPart(() => import('#reviews-settings'));
 
 const PARTS = [GuideReaderPart, SearchPalettePart, PlatformPostPart];
 
