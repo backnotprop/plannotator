@@ -12,10 +12,13 @@ import type { InboxScheduledPreview, InboxScheduledRow, InboxScheduledRunSummary
 import { Icon } from '../icons';
 import { Switch } from '../components/SoundRow';
 import { Tip } from '../components/Tip';
-import { scheduledApi } from './client';
+import { runShown, scheduledApi } from './client';
 import { InboxApiError } from '../apiError';
 import { putScheduled, readScheduled } from './store';
-import { FilesRow, FolderPick, RunsAs, type LaunchBlock } from './EditorParts';
+import { FilesRow, FolderPick, RunsAs, useLaunchBlock } from './EditorParts';
+import { readKeptRoutine } from './routineDraft';
+import { machineOf } from '../inboxUrl';
+import { RunsOn, type RoutineHome } from './RunsOn';
 import { EditorFoot, routineOn } from './EditorFoot';
 import { SaveStatus } from './SaveStatus';
 import { localZone, ScheduleRow } from './ScheduleRow';
@@ -26,8 +29,12 @@ export interface EditorProps {
   id: string;
   row: InboxScheduledRow | null;
   version: number;
-  block: LaunchBlock | null;
-  defaults: { agent: string | null; projectId: string | null };
+  /** The computer a saved one lives on (its row's, or the one its id was learned from); a new one's first pick. */
+  home: RoutineHome;
+  /** The computers a new one can be made on (RunsOn.tsx); one or none: no pick. */
+  homes: readonly RoutineHome[];
+  /** A new one's agent and folder on a computer: the ones New message last started there. */
+  defaultsFor: (machine: string | null) => { agent: string | null; projectId: string | null };
   phone: boolean;
   narrow: boolean;
   onClose: () => void;
@@ -79,30 +86,41 @@ function MoreMenu({ on, onTurn, onRun, onDelete }: { on: boolean | null; onTurn:
 }
 
 export function ScheduledEditor(props: EditorProps) {
-  const { id, row, version, block } = props;
+  const { id, row, version } = props;
   const isNew = id === 'new';
+  // Its computer: a new one's pick (kept with its draft), else the one it lives on. Its agents and folders are that computer's.
+  const [picked, setPicked] = useState<RoutineHome | null>(() => {
+    const kept = isNew ? readKeptRoutine()?.machine : undefined;
+    return (kept && props.homes.find((h) => h.id === kept)) || null;
+  });
+  const home = (isNew ? picked : null) ?? props.home;
+  const block = useLaunchBlock(home.id);
+  const defaults = props.defaultsFor(home.id);
   const [detail, setDetail] = useState<{ scheduled: InboxScheduledRow; runs: InboxScheduledRunSummary[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const rowSeen = useRef(row !== null);
+  rowSeen.current = row !== null;
   useEffect(() => {
     if (isNew) return;
     let live = true;
     scheduledApi.read(id).then(
       (answer) => live && setDetail(answer),
-      (cause: Error) => live && setError(cause.message),
+      // A linked computer that is away: its row as it last said stays, with nothing to add.
+      (cause: Error) => live && !(rowSeen.current && machineOf(id)) && setError(cause.message),
     );
     return () => {
       live = false;
     };
   }, [id, version]);
   const record = detail?.scheduled.id === id && (!row || detail.scheduled.updated_at >= row.updated_at) ? detail.scheduled : row;
-  const firstAgent = props.defaults.agent ?? block?.launch?.agents[0]?.agent ?? 'claude-code';
+  const firstAgent = defaults.agent ?? block?.launch?.agents[0]?.agent ?? 'claude-code';
   // The preview's word on each schedule: one it refused, or has not answered, is not saved yet.
   const verdicts = useRef(new Map<string, boolean>());
   const firstSchedule = useRef<string | null>(null);
   const autosave = useAutosave({
     id,
     record,
-    fresh: () => ({ name: '', prompt: '', schedule: { cron: '0 9 * * *', tz: localZone() }, if_missed: 'run_once', folder: props.defaults.projectId ? { project_id: props.defaults.projectId } : { scratch: true }, agent: firstAgent, attachments: [] }),
+    fresh: () => ({ name: '', prompt: '', schedule: { cron: '0 9 * * *', tz: localZone() }, if_missed: 'run_once', folder: defaults.projectId ? { project_id: defaults.projectId } : { scratch: true }, agent: firstAgent, attachments: [] }),
     held: (key, fields) => {
       if (key !== 'schedule') return false;
       const shown = JSON.stringify(fields.schedule);
@@ -110,9 +128,19 @@ export function ScheduledEditor(props: EditorProps) {
     },
     holdTyping: routineOn(record),
     onCreated: props.onCreated,
+    machine: home.id,
   });
   const { draft } = autosave;
   firstSchedule.current ??= JSON.stringify(draft.schedule);
+  // Another computer picked for a new one: a folder is a computer's own, so it starts at that computer's last one (or a
+  // new scratch folder), with the agent last started there. After the render, so its create goes to that computer.
+  const movedHome = useRef(false);
+  useEffect(() => {
+    if (!movedHome.current) return;
+    movedHome.current = false;
+    const there = props.defaultsFor(home.id);
+    autosave.pick({ folder: there.projectId ? { project_id: there.projectId } : { scratch: true }, ...(there.agent ? { agent: there.agent } : {}) });
+  }, [home.id]);
 
   const [preview, setPreview] = useState<InboxScheduledPreview | null>(null);
   const asked = useRef(0);
@@ -120,7 +148,7 @@ export function ScheduledEditor(props: EditorProps) {
   const checkSchedule = async (schedule: InboxScheduledSchedule): Promise<boolean> => {
     const n = ++asked.current;
     const shown = (previewed.current = JSON.stringify(schedule));
-    const answer = await scheduledApi.preview(schedule).catch(() => null);
+    const answer = await scheduledApi.preview(schedule, home.id).catch(() => null);
     // No answer: the server says on save.
     verdicts.current.set(shown, answer?.ok !== false);
     if (n !== asked.current) return false;
@@ -238,7 +266,18 @@ export function ScheduledEditor(props: EditorProps) {
             </>
           )}
           <span className="ib-tdot" aria-hidden="true" />
-          <span className="st-wrap">Runs on this computer while the Inbox is running</span>
+          <RunsOn
+            home={home}
+            homes={props.homes}
+            onPick={
+              isNew && !record
+                ? (next) => {
+                    setPicked(next);
+                    movedHome.current = true;
+                  }
+                : null
+            }
+          />
         </div>
         {/* What went wrong, by the save status rather than under a long prompt: a refused save, a run, a turn. */}
         {(error ?? refused) && (
@@ -272,7 +311,7 @@ export function ScheduledEditor(props: EditorProps) {
           </section>
           <section className="ib-sgroup st-group st-kv" aria-label="What it works with">
             <span className="st-k">Repo or folder</span>
-            <FolderPick block={block} folder={draft.folder} shown={record && JSON.stringify(record.folder) === JSON.stringify(draft.folder) ? record.folder_shown : null} agentName={agentName} phone={props.phone} onChange={(folder) => autosave.pick({ folder })} />
+            <FolderPick block={block} machine={home.id ? { id: home.id, name: home.name } : null} folder={draft.folder} shown={record && JSON.stringify(record.folder) === JSON.stringify(draft.folder) ? record.folder_shown : null} agentName={agentName} phone={props.phone} onChange={(folder) => autosave.pick({ folder })} />
             <span className="st-k">Files</span>
             <FilesRow files={draft.attachments} onChange={(attachments) => autosave.pick({ attachments })} />
           </section>
@@ -301,7 +340,7 @@ export function ScheduledEditor(props: EditorProps) {
         ready={ready}
         onTurnOn={() => void turn(true)}
         onRun={() => void runOnce()}
-        onStop={() => record && void act(() => scheduledApi.stop(record.id))}
+        onStop={() => record && void act(() => scheduledApi.stop(record.id, runShown(record)))}
       />
     </div>
   );

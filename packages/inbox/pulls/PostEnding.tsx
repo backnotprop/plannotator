@@ -93,11 +93,15 @@ export interface PostEndingProps {
   headSha?: string | null;
   /** The server refused the commit posted to (`pull_moved`; on GitHub `pull_commit_gone`, a force-push): the host reads the PR again. */
   onMoved?: () => void;
+  /** The server refused it as no longer open (`pull_closed`: merged or closed elsewhere): the host reads the PR again. */
+  onClosed?: () => void;
+  /** The Post dialog went away open with a summary written and not posted (PlatformPost's `onLeft`): the host keeps it. */
+  onLeft?: (summary: string) => void;
   /** Why this person's review has no agent to go to: said on the forge's mark. */
   note?: string;
 }
 
-export function PostEnding({ pull, agent, comments: all, readComments, anchor, busy, picked, onPick, onPosted, onWent, headSha, onMoved, note }: PostEndingProps) {
+export function PostEnding({ pull, agent, comments: all, readComments, anchor, busy, picked, onPick, onPosted, onWent, headSha, onMoved, onClosed, onLeft, note }: PostEndingProps) {
   const target = useMemo(() => {
     const listed = postablePull(pull);
     if (!listed || headSha === undefined) return listed;
@@ -256,12 +260,14 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
               anchor={anchor}
               post={async (request) => {
                 const response = await inboxApi.pullReviewPost(request);
-                if (response.status === 409 && onMoved) {
+                if (response.status === 409 && (onMoved || onClosed)) {
                   const answer = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
-                  if (answer?.code === 'pull_moved' || answer?.code === 'pull_commit_gone') {
+                  if (onMoved && (answer?.code === 'pull_moved' || answer?.code === 'pull_commit_gone')) {
                     setOpen(null);
                     onMoved();
                   }
+                  // The page then shows it merged or closed, with no Post: the refusal's words stay until it does.
+                  if (answer?.code === 'pull_closed') onClosed?.();
                 }
                 return response;
               }}
@@ -269,6 +275,7 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
               onWent={onWent}
               readComments={readComments && (() => readComments().filter((c) => !sameKey || !done!.ids.has(postedSignature(c))))}
               hostReadsAgain={Boolean(onMoved)}
+              onLeft={onLeft}
               onPosted={(result) => {
                 setOpen(null);
                 // A follow-up comment after an approval still reads as the approval.

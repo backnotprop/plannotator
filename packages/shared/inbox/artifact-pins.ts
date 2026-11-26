@@ -15,14 +15,16 @@ import { chmodSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import type { InboxArtifactPin } from "@plannotator/core/inbox-artifact-pins";
 import { isInboxId } from "@plannotator/core/inbox-types";
+import { INBOX_HTML_ARTIFACT_PREFIX, readInboxHtmlArtifactKey } from "@plannotator/core/inbox-html-blocks";
 import { InboxError } from "./schema";
 
 export const INBOX_ARTIFACT_PINS_FILE = "artifact-pins.json";
 
-/** An artifact's key: an attachment id, or `guide:<message id>`. */
+/** An artifact's key: an attachment id, `guide:<message id>`, or an html block's `html:<message id>:<hash>`. */
 export function isInboxArtifactKey(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value.startsWith("guide:")) return isInboxId("msg", value.slice("guide:".length));
+  if (value.startsWith(INBOX_HTML_ARTIFACT_PREFIX)) return readInboxHtmlArtifactKey(value) !== null;
   return /^att_[A-Za-z0-9]{1,64}$/.test(value);
 }
 

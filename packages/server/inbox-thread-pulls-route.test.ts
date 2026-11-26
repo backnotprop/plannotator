@@ -212,6 +212,36 @@ describe("the state reader", () => {
     expect(gh.calls[1]!.join(" ")).not.toContain("n1: pullRequest");
   });
 
+  test("a closed PR is read again, at most every ten minutes for a week, so a reopened one comes back", async () => {
+    const states: Record<number, { state: string }> = { 1: { state: "CLOSED" } };
+    const gh = fakeGh(states);
+    const w = world({ gh });
+    w.agentAdd(w.thread, "o/r#1");
+    await w.get(w.thread);
+    await settle();
+    expect(w.store.threadPulls(w.thread)[0]!.state).toBe("closed");
+    w.advance(5 * 60_000);
+    await w.get(w.thread);
+    await settle();
+    expect(gh.calls).toHaveLength(1);
+    states[1] = { state: "OPEN" };
+    w.advance(6 * 60_000);
+    await w.get(w.thread);
+    await settle();
+    expect(gh.calls).toHaveLength(2);
+    expect(w.store.threadPulls(w.thread)[0]!.state).toBe("open");
+    // Closed more than a week: never read again.
+    states[1] = { state: "CLOSED" };
+    w.advance(11 * 60_000);
+    await w.get(w.thread);
+    await settle();
+    expect(gh.calls).toHaveLength(3);
+    w.advance(8 * 24 * 60 * 60_000);
+    await w.get(w.thread);
+    await settle();
+    expect(gh.calls).toHaveLength(3);
+  });
+
   test("a Bitbucket Cloud PR's state, checks and review come through its API reader; no CLI runs", async () => {
     const gh = fakeGh({});
     const reads: unknown[] = [];

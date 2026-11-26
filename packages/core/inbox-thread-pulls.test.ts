@@ -191,4 +191,14 @@ describe("stacks, related and the headline", () => {
     expect(inboxThreadPullHeadline([closed, done], inboxThreadPullGroups([closed, done]))?.pull).toBe(done.pull);
     expect(inboxThreadPullsSummary([])).toBeUndefined();
   });
+
+  test("with the live reads, the summary carries every PR's start, end, checks and review (Grid reads nothing of its own)", () => {
+    const merged = { ...pull("o/r#1", "merged", "main", "a"), read_at: "2026-11-24T03:40:00.000Z" };
+    const open = pull("o/r#2", "open", "a", "b");
+    const summary = inboxThreadPullsSummary([merged, open], (key) => (key === open.pull ? { checks: "running", review: "approved" } : undefined))!;
+    expect(summary.items).toEqual([
+      { key: merged.pull, state: "merged", added_at: merged.added_at, read_at: "2026-11-24T03:40:00.000Z", checks: null, review: null },
+      { key: open.pull, state: "open", added_at: open.added_at, read_at: open.read_at, checks: "running", review: "approved" },
+    ]);
+  });
 });

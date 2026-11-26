@@ -304,6 +304,9 @@ export interface ViewerProps {
    *  `parseQuestionAnswer` are ignored. Absent: answers come from the
    *  annotations carrying `questionAnswer` (Plannotator's own path). */
   questionAnswers?: ReadonlyMap<string, QuestionAnswer> | Readonly<Record<string, QuestionAnswer>>;
+  /** Draw only the question card with this key (the Inbox's decision mode): its key and number are still read from
+   *  the whole document, every other block is left out. Absent: the whole document. */
+  onlyQuestionKey?: string;
   /** Explicit save mode for question cards: edits stay a draft in the card,
    *  which shows Save answer and Cancel (and no Skip); Save calls this with
    *  the question's key and the answer, or null when the draft is empty. Return
@@ -946,6 +949,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   checkboxOverrides,
   onAnswerQuestion,
   questionAnswers: hostQuestionAnswers,
+  onlyQuestionKey,
   onSaveQuestionAnswer,
   saveQuestionAnswerLabel,
   renderQuestionFooter,
@@ -2065,7 +2069,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
         {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} markdown={markdown} /></>}
         {!frontmatter && blocks.length > 0 && blocks[0].type !== 'heading' && <div className="mt-4" />}
-        {withBelowTitle(groupBlocks(footnotes ? footnotes.bodyBlocks : blocks).map(group =>
+        {withBelowTitle(groupBlocks(footnotes ? footnotes.bodyBlocks : blocks).filter((group) => onlyQuestionKey === undefined || (group.type !== 'list-group' && questionIndex.byBlock.get(group.block.id)?.question.key === onlyQuestionKey)).map(group =>
           group.type === 'list-group' ? (
             (() => {
               const indices = computeListIndices(group.blocks);

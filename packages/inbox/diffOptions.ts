@@ -10,7 +10,9 @@
  * shared, so config.json is what carries a choice across.
  *
  * Hide whitespace and the minimap are not here: the Inbox does not show them.
- * Whole file is: code review's own switch, which the Inbox's diffs obey.
+ * Whole file is: code review's own switch, which the Inbox's diffs obey. So
+ * are the code font and size and Power Up's switch and motion, which
+ * Settings → Reviews (reviewSettings/) sets as code review's Settings does.
  */
 
 import { configStore } from '@plannotator/ui/config';
@@ -19,7 +21,7 @@ import type { SettingValue } from '@plannotator/ui/config';
 import type { InboxDiffOptions } from './api';
 
 /** The settings the Inbox shows and saves. */
-export type InboxDiffSetting = 'diffStyle' | Exclude<DiffDisplaySetting, 'diffHideWhitespace' | 'diffMinimap'>;
+export type InboxDiffSetting = 'diffStyle' | 'diffPowerUp' | Exclude<DiffDisplaySetting, 'diffHideWhitespace' | 'diffMinimap'> | 'diffFontFamily' | 'diffFontSize' | 'diffPowerUpMotion';
 type WireKey = keyof InboxDiffOptions;
 
 /** Each setting's name on the wire, and its field in config.json `diffOptions` (what the config store's sync payload carries). */
@@ -34,7 +36,17 @@ const FIELDS: Record<InboxDiffSetting, { wire: WireKey; config: string }> = {
   diffTabSize: { wire: 'tab_size', config: 'tabSize' },
   diffSemantic: { wire: 'semantic', config: 'semantic' },
   diffExpandUnchanged: { wire: 'expand_unchanged', config: 'expandUnchanged' },
+  diffFontFamily: { wire: 'font_family', config: 'fontFamily' },
+  diffFontSize: { wire: 'font_size', config: 'fontSize' },
+  // Power Up's switch: Settings → Reviews draws it, and a choice made in code review holds on every address (guide/usePowerUp.ts).
+  diffPowerUp: { wire: 'power_up', config: 'powerUp' },
+  diffPowerUpMotion: { wire: 'power_up_motion', config: 'powerUpMotion' },
 };
+
+/** Whether a setting is one the Inbox saves to config.json `diffOptions`. */
+export function isInboxDiffSetting(setting: string): setting is InboxDiffSetting {
+  return Object.hasOwn(FIELDS, setting);
+}
 const SETTINGS = Object.keys(FIELDS) as InboxDiffSetting[];
 
 let adopted = false;

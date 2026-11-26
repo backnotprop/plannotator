@@ -48,6 +48,7 @@ function Harness({ compact = false }: { compact?: boolean }) {
     onDiffStyleChange: (style: 'split' | 'unified') => configStore.set('diffStyle', style),
     isCompactTouchLayout: compact,
     files: [file('src/a.ts'), file('src/b.ts')],
+    viewedFiles: new Set<string>(),
     allAnnotations: [],
     selectedAnnotationId: null,
     prMetadata: null,
@@ -63,6 +64,7 @@ function Harness({ compact = false }: { compact?: boolean }) {
         launchJob={async () => null}
         killJob={async () => {}}
         onClose={() => {}}
+        viewedReady
         barSlot={bar}
       />
     </ReviewStateProvider>

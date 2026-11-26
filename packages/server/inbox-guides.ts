@@ -514,7 +514,8 @@ export function guidePullKey(store: InboxStore, sha256: string): string | null {
 /**
  * The window's guide routes, null when the path is neither:
  *  - `GET /api/inbox/messages/:id/guide`: the snapshot a message carries, for
- *    the guide viewer. Served only by message, never a blob by hash.
+ *    the guide viewer, with `code_review` (this Inbox's switch). Served only
+ *    by message, never a blob by hash.
  *  - `POST /api/inbox/messages/:id/guide/reviewed` `{ serverSession?, reviewed }`:
  *    the person's reviewed ticks, kept on the message (the record's 4.2). The
  *    server has already run the same-origin check on every POST; the stale-tab
@@ -552,7 +553,7 @@ export async function inboxGuideRoute(
       }
     }
     try {
-      return answer({ message_id: viewedMatch[1], viewed: store.saveGuideViewed(viewedMatch[1]!, body.viewed, files) });
+      return answer({ message_id: viewedMatch[1], viewed: store.saveGuideViewed(viewedMatch[1]!, body.viewed, files, body.path) });
     } catch (error) {
       if (!(error instanceof InboxError)) throw error;
       const status = error.code === "validation_error" ? 422 : 404;
@@ -591,7 +592,9 @@ export async function inboxGuideRoute(
     // Gone from the store (or not a blob hash): answered as missing below.
   }
   if (text === null) return answer({ error: "The guided review is missing from the store.", code: "guide_not_found" }, 404);
-  return new Response(`{"message_id":${JSON.stringify(message.id)},"guide":${JSON.stringify(message.guide)},"snapshot":${text}}`, { headers: JSON_HEADERS });
+  // `code_review`: this Inbox's Code review switch, which decides the review's verdict, Viewed ticks and Post here (a
+  // linked machine's window reads it with the snapshot, so it offers only what this Inbox takes).
+  return new Response(`{"message_id":${JSON.stringify(message.id)},"guide":${JSON.stringify(message.guide)},"code_review":${codeReviewOn() ? "true" : "false"},"snapshot":${text}}`, { headers: JSON_HEADERS });
 }
 
 /**

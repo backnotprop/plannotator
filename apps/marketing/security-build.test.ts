@@ -230,11 +230,74 @@ describe('the Decide together row as built', () => {
     expect(inner).not.toMatch(/<(?:a|button|input|select|textarea)\b|\btabindex=|\bcontenteditable\b/);
   });
 
-  test('the agent marks point at a file the site ships', async () => {
+  function decisions(markup: string) {
+    return [...markup.matchAll(
+      /<div class="dsn-dec( dsn-end)?"><span class="dsn-face" style="--tone: ([^;]+);">[^<]*<\/span><span class="dsn-dq">([^<]*)<\/span><span class="dsn-da">([^<]*)<\/span><span class="dsn-dw">([^<]*)<time>([^<]*)<\/time>/g,
+    )].map(([, end, tone, question, answer, who, time]) => ({ end: Boolean(end), tone, question, answer, who, time }));
+  }
+
+  test('the newest decision is the question just answered, and the rail ends on the oldest row', async () => {
     const { inner } = await decideFigure();
-    const urls = new Set([...inner.matchAll(/mask-image: url\(&quot;([^&]+)&quot;\)/g)].map(([, url]) => url));
-    expect([...urls]).toEqual(['/assets/agents/claude.svg']);
-    expect(await listFiles(outputRoot)).toContain('assets/agents/claude.svg');
+    const [wide] = inner.split('<div class="dsn dsn-phone"');
+    const rows = decisions(wide);
+    expect(rows.length).toBeGreaterThan(4);
+    const asked = /<div class="dsn-q">([^<]*)<\/div><div class="dsn-opt"><span class="dsn-radio"><\/span>([^<]*)<\/div>/.exec(wide);
+    expect(asked).not.toBeNull();
+    // The scene picks the card's first option, so the top row must be that question with that answer.
+    expect([rows[0].question, rows[0].answer]).toEqual([asked![1], asked![2]]);
+    expect(rows.map((row) => row.end)).toEqual(rows.map((_, index) => index === rows.length - 1));
+  });
+
+  test("each rail dot is a decider's face from the page bar", async () => {
+    const { inner } = await decideFigure();
+    const pile = /<span class="dsn-pile">([\s\S]*?)<\/span><\/span>/.exec(inner)?.[1] ?? '';
+    const faces = new Set([...pile.matchAll(/--tone: ([^;]+);/g)].map(([, tone]) => tone));
+    expect(faces.size).toBeGreaterThan(0);
+    for (const row of decisions(inner)) expect(faces, row.question).toContain(row.tone);
+  });
+
+  test('the phone shows the first rows of the same list, in the same order', async () => {
+    const { inner } = await decideFigure();
+    const [wide, phone] = inner.split('<div class="dsn dsn-phone"');
+    const strip = ({ end: _end, ...row }: ReturnType<typeof decisions>[number]) => row;
+    const phoneRows = decisions(phone ?? '');
+    expect(phoneRows.length).toBeGreaterThan(0);
+    expect(phoneRows.map(strip)).toEqual(decisions(wide).slice(0, phoneRows.length).map(strip));
+    expect(phoneRows.at(-1)?.end).toBe(true);
+  });
+
+  test('the pencil note under the frame is decoration, hidden from a screen reader', async () => {
+    const html = await readFile(join(outputRoot, 'workspaces/index.html'), 'utf8');
+    const section = /<section class="sec blk dev row" data-job="decide">([\s\S]*?)<\/section>/.exec(html)?.[1] ?? '';
+    const note = /<div class="ask dsn-ask"([^>]*)>/.exec(section);
+    expect(note).not.toBeNull();
+    expect(note![1]).toContain('aria-hidden="true"');
+  });
+});
+
+describe("the first screen's third card as built", () => {
+  test('the cycling agent name starts on the name a visit without scripts or motion shows', async () => {
+    const html = await readFile(join(outputRoot, 'workspaces/index.html'), 'utf8');
+    const name = /<b class="hn" data-names="([^"]+)"><span>([^<]*)<\/span><\/b>/.exec(html);
+    expect(name).not.toBeNull();
+    const names = name![1].split('|');
+    expect(names.length).toBeGreaterThan(1);
+    expect(names[0]).toBe(name![2]);
+  });
+
+  test('where its last line may wrap, the line always holds two lines, so the card keeps one height while the name cycles', async () => {
+    const html = await readFile(join(outputRoot, 'workspaces/index.html'), 'utf8');
+    const sheets = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+\.css)"/g)].map((m) => m[1]);
+    const css = (await Promise.all(sheets.map((file) => readFile(join(outputRoot, file), 'utf8')))).join('\n');
+    const lineHeight = /\.sheet\{[^}]*\bline-height:(\d+)px/.exec(css);
+    expect(lineHeight).not.toBeNull();
+    const wrapping = [...css.matchAll(/\.sheet\.mock \.q\{([^}]*)\}/g)]
+      .map((m) => m[1])
+      .filter((body) => /white-space:normal/.test(body));
+    expect(wrapping.length).toBeGreaterThan(0);
+    for (const body of wrapping) {
+      expect(body).toContain(`min-height:${2 * Number(lineHeight![1])}px`);
+    }
   });
 });
 

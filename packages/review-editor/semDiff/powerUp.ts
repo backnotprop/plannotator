@@ -1,5 +1,6 @@
 import { storage } from '@plannotator/ui/utils/storage';
 import type { SecondOpinionLink, SecondOpinionState } from '@plannotator/sem-jiff';
+import type { PowerUpProvider } from '@plannotator/ui/components/settings/PowerUpSettings';
 
 export interface PowerUpFileState {
   state: 'asking' | SecondOpinionState;
@@ -16,7 +17,8 @@ export interface PowerUpStatus {
 export interface PowerUpConfig {
   active: boolean;
   rejected: readonly string[];
-  provider: 'jev' | 'clef' | null;
+  provider: PowerUpProvider | null;
+  settingsRevision: number;
   retry: number;
 }
 
@@ -37,5 +39,3 @@ export function writePowerUpRejected(ids: readonly string[]): readonly string[] 
   storage.setItem(REJECTED_KEY, JSON.stringify(kept));
   return kept;
 }
-
-export const PROVIDER_NAME: Record<'jev' | 'clef', string> = { jev: 'Jev', clef: 'Clef' };

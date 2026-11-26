@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_SIDEBAR_DEFAULT } from "@plannotator/core/inbox-sidebar";
-import { inboxSidebarState, saveInboxSidebar } from "./inbox-sidebar-save";
+import { inboxSidebarOff, inboxSidebarState, saveInboxSidebar } from "./inbox-sidebar-save";
 
 let dataDir = "";
 let savedEnv: string | undefined;
@@ -48,4 +48,14 @@ test("on, the layout is stored as sent, Plans included", () => {
   expect(stored().top).toEqual(top);
   expect(stored().hidden).toEqual(["plans"]);
   expect(answer.sidebar.top).toEqual(top);
+});
+
+test("Grid off (its experimental switch): a Customize save never writes `grid` into config.json; on, its place is kept", () => {
+  const plans = { key: "plans", on: () => true };
+  const reordered = { top: [...INBOX_SIDEBAR_DEFAULT.top].reverse(), bottom: [...INBOX_SIDEBAR_DEFAULT.bottom], hidden: [] };
+  saveInboxSidebar(reordered, { off: inboxSidebarOff([plans], false) });
+  expect(names(stored())).not.toContain("grid");
+  expect(names(stored())).toContain("plans");
+  saveInboxSidebar(reordered, { off: inboxSidebarOff([plans], true) });
+  expect(stored().top).toEqual(reordered.top);
 });

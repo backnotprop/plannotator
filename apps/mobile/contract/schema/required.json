@@ -552,6 +552,10 @@
       "at",
       "label"
     ],
+    "InboxListRowGridSeen": [
+      "at",
+      "through"
+    ],
     "InboxListRowLastAgent": [
       "host"
     ],
@@ -562,6 +566,12 @@
     "InboxListRowSent": [
       "at",
       "checked_at"
+    ],
+    "InboxListRowStepsProgress": [
+      "at",
+      "doing",
+      "done",
+      "total"
     ],
     "InboxListSection": [
       "id",
@@ -608,6 +618,10 @@
     ],
     "InboxMessageWireSentFrom": [
       "kind"
+    ],
+    "InboxMessageWireShipNote": [
+      "kind",
+      "ship"
     ],
     "InboxMessageWireThreadNaming": [
       "status"
@@ -880,6 +894,10 @@
       "session",
       "wakes"
     ],
+    "InboxSkillReaction": [
+      "emoji",
+      "skill"
+    ],
     "InboxSupersededBy": [
       "key",
       "message_id"
@@ -926,6 +944,14 @@
       "key",
       "state"
     ],
+    "InboxThreadPullsSummaryItem": [
+      "added_at",
+      "checks",
+      "key",
+      "read_at",
+      "review",
+      "state"
+    ],
     "InboxTidyMark": [
       "id",
       "wake"
@@ -945,6 +971,37 @@
       "sha256",
       "size",
       "upload_id"
+    ],
+    "LinkThroughPairView": [
+      "a",
+      "c",
+      "status",
+      "waiting_for",
+      "why"
+    ],
+    "LinkThroughPairViewA": [
+      "id",
+      "name"
+    ],
+    "LinkThroughPairViewC": [
+      "id",
+      "name"
+    ],
+    "LinkThroughRowView": [
+      "id",
+      "name",
+      "status",
+      "via",
+      "waiting_for",
+      "why"
+    ],
+    "LinkThroughRowViewVia": [
+      "id",
+      "name"
+    ],
+    "LinkThroughView": [
+      "pairs",
+      "through"
     ],
     "ListModel": [
       "cursor",
@@ -1003,6 +1060,10 @@
     "OutboxViewNotice": [
       "at",
       "kind"
+    ],
+    "OutboxViewViewed": [
+      "path",
+      "viewed"
     ],
     "ProjectFolder": [
       "created_at",

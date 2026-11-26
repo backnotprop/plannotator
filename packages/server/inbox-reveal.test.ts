@@ -13,8 +13,10 @@
  * "inbox-checklist-reveal", 2026-11-04): its claim writing `inboxSteps` or touching a Checklist the person set; agent
  * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; its
  * 5 days or 5 threads moving; it needing the Board on. Code review's day-0 offer (approval "code-review-offer-card"):
- * shown or claimed at all (the owner chose the switch without the offer, 2026-11-17: `CODE_REVIEW_OFFER_SHOWN`);
- * asked of someone who switched Code review off or on. The view choice
+ * not next for someone who used an earlier Inbox and never decided Code review (shown again, `CODE_REVIEW_OFFER_SHOWN`,
+ * approval "inbox-code-review-offer"), or offered to a new user (a fresh install); its claim turning anything on, changing a word agents read, being spent twice or letting
+ * another dialog follow inside the gap; Not now turning it on or letting it come back; asked of someone who switched
+ * Code review off or on. The view choice
  * (`view_choice`): closed by List view's retired `list_view` stamp, holding the line, or claimed twice.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -143,6 +145,9 @@ async function world(options: Options = {}) {
     favicon: "glass",
     // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
     inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
+    // Code review's offer (first in the line while `CODE_REVIEW_OFFER_SHOWN`): decided here, so the other dialogs are
+    // what these cases see. Its own cases unset it.
+    inboxCodeReview: false,
     ...(options.priorityUsed === false ? {} : { inboxPriorityIntro: { usedAt: new Date(Date.now() - 3 * DAY).toISOString() } }),
     ...options.config,
   };
@@ -1144,18 +1149,71 @@ describe("the \"themes\" dialog (approval inbox-theme-chooser): after the tab ic
 
 describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
   const KEY = "page-key-aaaa";
-  /** A fresh install on day 0: first use not known yet, no threads in the store. */
-  const freshDay0 = (config: Record<string, unknown> = {}) => world({ days: 0, threads: 0, config: { inboxSnoozeIntro: {}, ...config } });
+  /** A fresh install on day 0 (no Inbox ran here before): first use not known yet, nothing in the store, Code review never decided. */
+  const freshDay0 = (config: Record<string, unknown> = {}) => world({ fresh: true, days: 0, threads: 0, config: { inboxSnoozeIntro: {}, inboxCodeReview: undefined, ...config } });
+  /** Someone who already uses the Inbox (day 4, six threads, Snooze seen 3 days ago), Code review never decided. */
+  const existing = (config: Record<string, unknown> = {}, version?: string) => world({ ...(version ? { version } : {}), config: { inboxCodeReview: undefined, ...config } });
 
-  // The owner chose the switch without the offer (2026-11-17; `CODE_REVIEW_OFFER_SHOWN` in shared/inbox/reveals.ts).
-  test("never shown: on day 0 of a fresh install, Code review undecided, the switch is there and off, the offer is never next and never claimed, nothing written", async () => {
+  // Shown again from the release after 2026-11-23 (`CODE_REVIEW_OFFER_SHOWN`, approval "inbox-code-review-offer").
+  test("someone who already uses the Inbox, Code review never decided: next, ahead of the offers that are due; the claim stamps it once, turns nothing on and starts the gap", async () => {
+    const w = await existing({ inboxBoard: undefined });
+    const before = await w.settings();
+    expect(before.reveal.next).toBe("code_review");
+    expect(before.code_review).toEqual({ on: false });
+    const agentsBefore = await w.agentText();
+    expect((await w.claim("code_review", KEY)).show).toBe(true);
+    const saved = w.saved();
+    expect(saved.inboxReveals.code_review).toMatchObject({ shownAt: saved.inboxReveals.lastShownAt, key: KEY });
+    // Showing it turns nothing on: the switch is still unset and agents read what they read before.
+    expect(saved.inboxCodeReview).toBeUndefined();
+    expect(await w.agentText()).toBe(agentsBefore);
+    // Once: another tab's claim is refused, and the Board (due here) waits out the gap, so no dialog stacks on it.
+    expect((await w.claim("code_review", "another-key-22")).show).toBe(false);
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("board")).show).toBe(false);
+  });
+
+  test("Not now: Code review stays off, agents read what they read before, it is never next again, and the next offer waits three days", async () => {
+    const w = await existing({ inboxBoard: undefined });
+    const agentsBefore = await w.agentText();
+    expect((await w.claim("code_review", KEY)).show).toBe(true);
+    const answered = (await (await w.post("/api/inbox/reveal", { id: "code_review", answer: "not_now" })).json()) as Json;
+    expect(answered.show).toBe(false);
+    const saved = w.saved();
+    expect(saved.inboxCodeReview).toBeUndefined();
+    expect(saved.inboxReveals.notNowAt).toMatch(/^\d{4}-/);
+    expect(await w.agentText()).toBe(agentsBefore);
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("code_review", "another-key-22")).show).toBe(false);
+  });
+
+  test("Turn on code review (Settings' own save after the claim): on, as Settings → Capabilities turns it on, and never offered again", async () => {
+    const w = await existing();
+    expect((await w.claim("code_review", KEY)).show).toBe(true);
+    const saved = (await (await w.post("/api/inbox/settings", { code_review: { on: true } })).json()) as Json;
+    expect(saved.code_review).toEqual({ on: true });
+    expect(w.saved().inboxCodeReview).toBe(true);
+    expect((await w.settings()).code_review).toEqual({ on: true });
+    expect((await w.claim("code_review", "another-key-22")).show).toBe(false);
+  });
+
+  test("someone who used an earlier Inbox is marked due at the release start; a dev build decides nothing", async () => {
+    const w = await existing();
+    expect(typeof w.saved().inboxReveals.code_review.dueAt).toBe("string");
+    expect(w.saved().inboxReveals.code_review.freshAt).toBeUndefined();
+    const dev = await existing({}, "dev");
+    expect(dev.saved().inboxReveals?.code_review).toBeUndefined();
+    expect((await dev.claim("code_review", KEY)).show).toBe(false);
+  });
+
+  // A later start keeping the first start's mark: inbox-code-review-offer.test.ts.
+  test("a new user (a fresh install) on day 0: marked fresh at the release start and never offered", async () => {
     const w = await freshDay0();
-    const read = await w.settings();
-    expect(read.reveal.next).toBeNull();
-    expect(read.code_review).toEqual({ on: false });
-    const config = savedBytes(w.dataDir);
+    expect(w.saved().inboxReveals.code_review).toEqual({ freshAt: expect.any(String) });
+    expect((await w.settings()).reveal.next).not.toBe("code_review");
     expect((await w.claim("code_review", KEY)).show).toBe(false);
-    expect(savedBytes(w.dataDir)).toBe(config);
+    expect(w.saved().inboxReveals.code_review.shownAt).toBeUndefined();
+    expect(w.saved().inboxCodeReview).toBeUndefined();
   });
 
   test("decided by the person (switched off, or on): never asked, and the switch is never touched", async () => {

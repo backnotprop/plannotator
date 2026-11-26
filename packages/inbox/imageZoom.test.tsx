@@ -22,6 +22,7 @@ const hasDom = typeof document !== 'undefined';
 const { PHONE_QUERY, TOUCH_QUERY } = await import('./phone');
 const { ImageAttachmentView } = (hasDom ? await import('./components/ImageAttachmentView') : {}) as typeof import('./components/ImageAttachmentView');
 type ImageSwipeEdges = import('./components/ImageAttachmentView').ImageSwipeEdges;
+const catalog = (hasDom ? await import('@plannotator/ui/utils/skillCatalog') : {}) as typeof import('@plannotator/ui/utils/skillCatalog');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -33,6 +34,8 @@ beforeEach(() => {
   // happy-dom answers a relative src with an error on about:blank: give the page an address.
   was = location.href;
   happy().setURL('http://localhost:4000/');
+  // The comment row's skill list reads the catalog: answered here, so nothing reaches that address.
+  catalog.setSkillCatalogTransport(async () => []);
 });
 
 afterEach(async () => {
@@ -43,6 +46,8 @@ afterEach(async () => {
   host = null;
   document.body.replaceChildren();
   happy().setURL(was);
+  catalog.resetSkillCatalogTransport();
+  catalog.resetSkillCatalogCache();
 });
 
 const shot: InboxAttachmentState = {

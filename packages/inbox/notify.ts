@@ -27,7 +27,8 @@ import type { InboxAuthor, InboxListRow, InboxMessage, InboxNotifyReach, InboxSe
 import { inboxQuestionWaitsForList } from '@plannotator/core/inbox-questions';
 import { INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { inboxApi, type InboxEvent, type ListModel, type NotificationSettings } from './api';
-import { agentName, plural } from './format';
+import { plural } from './format';
+import { authorName, rowWho } from './scriptAuthor';
 import { pageInFront } from './sound';
 import { RANG_FOR_NOTHING, type RangFor, type RingNews } from './soundRing';
 import { inboxEventsServedBy } from './sharedEvents';
@@ -77,6 +78,7 @@ export function threadNotificationText(input: {
   body: string;
 } {
   const asks = input.asks ?? true;
+  // Tagged you has no banner words of its own: a person's tag is not an agent's, and only a Spaces server places it.
   const what =
     input.section === 'stopped'
       ? 'stopped on you'
@@ -155,7 +157,7 @@ export interface NotifyItem {
 export function returnedItems(rows: readonly InboxListRow[], wasSnoozed: ReadonlySet<string>): NotifyItem[] {
   return rows.flatMap((row) =>
     row.snooze_back && wasSnoozed.has(row.thread_id) && row.questions.open > 0
-      ? [{ threadId: row.thread_id, author: row.author, asks: true, fresh: false, keys: [`back:${row.thread_id}:${row.snooze_back}`] }]
+      ? [{ threadId: row.thread_id, author: rowWho(row, row.author), asks: true, fresh: false, keys: [`back:${row.thread_id}:${row.snooze_back}`] }]
       : [],
   );
 }
@@ -553,7 +555,7 @@ export function useInboxNotifications(options: {
       const row = rows.get(item.threadId);
       text = threadNotificationText({
         project: row?.project.name ?? 'Plannotator Inbox',
-        agent: agentName(item.author),
+        agent: authorName(item.author),
         subject: row?.subject ?? '(no subject)',
         section: row?.section ?? null,
         asks: burst.current.get(item.threadId)?.asks ?? item.asks,

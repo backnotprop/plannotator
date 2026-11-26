@@ -1,0 +1,150 @@
+/* Grid (approval "inbox-agent-grid", round 3; packages/inbox/grid/). The Inbox's own tokens: the bars' colours are
+   the primary, the PR state colours (--ib-ref-*) and the warning, mixed into the card as the prototype draws them.
+   One grid template for the clock row and every line, so the bars line up with the clock without measuring. */
+
+.ib-grid {
+  --ib-grid-w: 166px;
+  --ib-grid-b: 240px;
+  --ib-grid-s: 348px;
+  --ib-grid-gap: 14px;
+  --ib-grid-mut: color-mix(in oklch, var(--muted-foreground) 88%, var(--card));
+  --ib-grid-amber: color-mix(in oklab, var(--warning) 80%, var(--foreground));
+  --ib-grid-work: color-mix(in oklab, var(--primary) 36%, var(--card));
+  --ib-grid-pr: color-mix(in oklab, var(--ib-ref-open) 46%, var(--card));
+  --ib-grid-wait: color-mix(in oklab, var(--warning) 62%, var(--card));
+  --ib-grid-idle: color-mix(in oklch, var(--foreground) 15%, var(--card));
+  padding-top: 16px;
+  font-size: var(--ib-fs-13-5, 13.5px);
+  container-type: inline-size;
+}
+/* A narrower page (a 1280 window beside the sidebar) gives the names the room: the agent and the bar columns give way,
+   the bar's words keep theirs, and the clock labels every other hour (its lines stay hourly). */
+@container (max-width: 1080px) {
+  .ib-grid-ax, .ib-grid-ln, .ib-grid-vl { --ib-grid-w: 120px; --ib-grid-b: 204px; }
+  .ib-grid-axis > span[data-odd] { display: none; }
+}
+.ib-grid-h { gap: 16px; align-items: baseline; }
+.ib-grid-h h1 { font-size: var(--ib-fs-17, 17px); }
+.ib-grid-clock { margin-left: auto; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-grid-mut); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-grid-ans { margin: 0; display: inline-flex; flex-wrap: wrap; align-items: baseline; font-weight: 500; }
+.ib-grid-a { white-space: nowrap; }
+.ib-grid-a[data-you] { color: var(--ib-grid-amber); font-weight: 650; }
+.ib-grid-dot { font-style: normal; margin: 0 9px; color: var(--ib-grid-mut); font-weight: 400; }
+
+/* The Since line and the clock. */
+.ib-grid-ax, .ib-grid-ln { display: grid; grid-template-columns: minmax(0, 1fr) var(--ib-grid-w) var(--ib-grid-b) var(--ib-grid-s); column-gap: var(--ib-grid-gap); align-items: center; }
+.ib-grid-ax { height: 30px; margin-top: 8px; }
+.ib-grid-since { grid-column: 1 / 3; display: inline-flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--primary); font-weight: 600; white-space: nowrap; min-width: 0; }
+.ib-grid-since-w { color: var(--foreground); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.ib-grid-new { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); flex: none; }
+.ib-grid-axis { grid-column: 3; position: relative; height: 30px; font-size: var(--ib-fs-12, 12px); color: var(--ib-grid-mut); }
+.ib-grid-axis > span { position: absolute; top: 7px; transform: translateX(-50%); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ib-grid-axis > .ib-grid-now { left: 100%; color: var(--primary); font-weight: 600; }
+.ib-grid-lkd { position: absolute; bottom: -3px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--primary); }
+
+/* The list, with the clock's hour lines under the bars. */
+.ib-grid-list { position: relative; }
+.ib-grid-vl { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--ib-grid-w) var(--ib-grid-b) var(--ib-grid-s); column-gap: var(--ib-grid-gap); pointer-events: none; }
+.ib-grid-vl > span { grid-column: 3; position: relative; }
+.ib-grid-vl i { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in oklch, var(--border) 55%, transparent); }
+.ib-grid-vl .ib-grid-lk { width: 0; background: none; border-left: 1.5px dotted color-mix(in oklab, var(--primary) 55%, transparent); }
+.ib-grid-vl .ib-grid-nowl { left: 100%; width: 1.5px; margin-left: -1px; background: var(--primary); opacity: 0.5; }
+.ib-grid-gh { position: relative; display: flex; align-items: flex-end; height: 34px; margin: 0; padding-bottom: 5px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; color: var(--ib-grid-mut); }
+.ib-grid-gh[data-you] { color: var(--ib-grid-amber); font-weight: 600; }
+.ib-grid-n { margin-left: 7px; font-variant-numeric: tabular-nums; opacity: 0.75; font-weight: 400; }
+
+/* A line: the name, the agent, the bar, the bar in words; what it asks under the name. */
+.ib-grid-ln { position: relative; min-height: 28px; margin: 0 -8px; padding: 0 8px; border-radius: 7px; }
+.ib-grid-ln:hover, .ib-grid-ln:focus-within { background: var(--ib-hover); z-index: 2; }
+.ib-grid-name { display: flex; align-items: baseline; gap: 7px; min-width: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.ib-grid-name::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.ib-grid-name:focus-visible { outline: none; }
+.ib-grid-name:focus-visible .ib-grid-t { text-decoration: underline; text-underline-offset: 3px; }
+.ib-grid-t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ib-grid-ln[data-fresh] .ib-grid-t { font-weight: 680; }
+.ib-grid-ln[data-group="plan"] .ib-grid-t, .ib-grid-ln[data-group="drop"] .ib-grid-t { color: var(--ib-grid-mut); font-weight: 450; }
+.ib-grid-pn { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--ib-grid-mut); font-variant-numeric: tabular-nums; }
+.ib-grid-who { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-grid-mut); }
+.ib-grid-mk { display: inline-flex; flex: none; width: 16px; height: 16px; border-radius: 5px; background: var(--muted); align-items: center; justify-content: center; overflow: hidden; }
+.ib-grid-mk > * { transform: scale(0.62); }
+.ib-grid-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-grid-q { grid-column: 1 / -1; margin: -3px 0 5px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--ib-grid-amber); }
+
+/* The bar: pieces at percentages of the clock; the merge mark, the cross and the plan's ring on it. */
+.ib-grid-bar { position: relative; height: 28px; overflow: hidden; }
+.ib-grid-seg { position: absolute; top: 10px; height: 8px; }
+.ib-grid-seg[data-first] { border-radius: 4px 0 0 4px; }
+.ib-grid-seg[data-last] { border-radius: 0 4px 4px 0; }
+.ib-grid-seg[data-first][data-last] { border-radius: 4px; }
+.ib-grid-seg[data-clip] { border-radius: 0; -webkit-mask-image: linear-gradient(90deg, transparent, #000 22px); mask-image: linear-gradient(90deg, transparent, #000 22px); }
+.ib-grid-seg[data-k="work"], .ib-grid-sw[data-k="work"] { background: var(--ib-grid-work); }
+.ib-grid-seg[data-k="pr"], .ib-grid-sw[data-k="pr"] { background: var(--ib-grid-pr); }
+.ib-grid-seg[data-k="wait"], .ib-grid-sw[data-k="wait"] { background: var(--ib-grid-wait); }
+.ib-grid-seg[data-k="idle"], .ib-grid-sw[data-k="idle"] { background: var(--ib-grid-idle); }
+.ib-grid-pt { position: absolute; top: 7px; margin-left: -7px; line-height: 0; background: var(--card); border-radius: 50%; }
+.ib-grid-x { background: none; color: var(--ib-grid-mut); }
+.ib-grid-x .ib-ic { width: 13px; height: 13px; }
+.ib-grid-plan { width: 11px; height: 11px; top: 8px; margin-left: -5px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--ib-grid-mut); }
+/* Planned before the clock's start: the ring sits whole at the start. */
+.ib-grid-plan[data-clip] { margin-left: 0; }
+.ib-grid-ln[data-group="drop"] .ib-grid-bar { filter: grayscale(1); opacity: 0.7; }
+
+/* The bar in words. The last piece is where the work is: darker, amber when it needs the person. */
+.ib-grid-s { font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-grid-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.ib-grid-pc { white-space: nowrap; }
+.ib-grid-pc b { font-weight: 450; margin-right: 4px; }
+.ib-grid-pc[data-on] { color: var(--foreground); }
+.ib-grid-pc[data-on] b { font-weight: 600; }
+.ib-grid-pc[data-on][data-k="wait"] { color: var(--ib-grid-amber); }
+.ib-grid-pc .ib-refmark, .ib-grid-pc .ib-ic { display: inline-block; vertical-align: -2px; margin-right: 4px; width: 12px; height: 12px; }
+.ib-grid-pc [data-bad] { color: var(--ib-ref-closed); }
+.ib-grid-ar { font-style: normal; margin: 0 6px; opacity: 0.55; color: var(--ib-grid-mut); font-weight: 400; }
+.ib-grid-sw { display: inline-block; width: 8px; height: 8px; border-radius: 2.5px; margin-right: 5px; vertical-align: 0; }
+
+/* The readout: shown on pointing or focus (desktop), opened by a tap under the line (phone). */
+.ib-grid-pop { display: none; position: absolute; z-index: 10; top: calc(100% - 2px); left: calc(100% - var(--ib-grid-s) - var(--ib-grid-gap) - var(--ib-grid-b) - 8px); min-width: 300px; padding: 8px 12px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow); font-size: var(--ib-fs-12-5, 12.5px); pointer-events: none; }
+.ib-grid-ln:hover > .ib-grid-pop, .ib-grid-ln:focus-within > .ib-grid-pop { display: grid; }
+/* Its rows share one set of columns (subgrid), each as wide as its widest words: the time ("10:09 AM", "Tue 10:09 AM"
+   or a longer locale's), the state with its swatch, then the length and what it is about. Nothing overlaps. */
+.ib-grid-pop, .ib-grid-exp { grid-template-columns: max-content max-content minmax(0, auto); column-gap: 10px; }
+.ib-grid-ro { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; min-height: 24px; white-space: nowrap; }
+.ib-grid-ro-at { color: var(--ib-grid-mut); font-variant-numeric: tabular-nums; }
+.ib-grid-ro-w { display: inline-flex; align-items: center; font-weight: 550; }
+.ib-grid-ro-w .ib-refmark, .ib-grid-ro-w .ib-ic { width: 12px; height: 12px; margin-right: 5px; }
+.ib-grid-ro-d { color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; }
+.ib-grid-ro-by { display: flex; margin-top: 2px; color: var(--ib-grid-mut); }
+
+.ib-grid-door { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--ib-grid-mut); cursor: pointer; }
+.ib-grid-door .ib-ic { width: 12px; height: 12px; }
+.ib-grid-door:hover { color: var(--foreground); }
+.ib-grid-earlier { padding: 14px 0 6px; }
+.ib-grid-empty { margin: 24px 0; color: var(--muted-foreground); }
+
+/* Phone: the same groups; a line in rows: name and bar, agent and the words, what it asks; the readout under it. */
+.ib-grid[data-phone] { padding: 0 16px calc(24px + env(safe-area-inset-bottom)); }
+.ib-grid[data-phone] .ib-grid-h { margin: 0 -16px 0 -16px; padding-right: 16px; }
+.ib-grid[data-phone] .ib-grid-h h1 { font-size: var(--ib-fs-20, 20px); }
+.ib-grid[data-phone] .ib-grid-ans { display: flex; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.6; }
+.ib-grid[data-phone] .ib-grid-ans .ib-grid-dot { display: none; }
+.ib-grid[data-phone] .ib-grid-a { margin-right: 14px; }
+.ib-grid[data-phone] .ib-grid-ax { display: flex; height: auto; min-height: 30px; }
+.ib-grid[data-phone] .ib-grid-since { font-size: var(--ib-fs-13, 13px); }
+.ib-grid[data-phone] .ib-grid-gh { font-size: var(--ib-fs-13, 13px); }
+.ib-grid[data-phone] .ib-grid-ln { grid-template-columns: minmax(0, 1fr) 116px; padding: 7px 8px; row-gap: 3px; column-gap: 12px; font-size: var(--ib-fs-15, 15px); }
+.ib-grid[data-phone] .ib-grid-name { grid-column: 1; grid-row: 1; }
+.ib-grid[data-phone] .ib-grid-bar { grid-column: 2; grid-row: 1; height: 20px; }
+.ib-grid[data-phone] .ib-grid-seg { top: 6px; }
+.ib-grid[data-phone] .ib-grid-pt { top: 3px; }
+.ib-grid[data-phone] .ib-grid-plan { top: 4px; }
+.ib-grid[data-phone] .ib-grid-sub { grid-column: 1 / 3; grid-row: 2; display: block; font-size: var(--ib-fs-13, 13px); line-height: 1.55; color: var(--ib-grid-mut); }
+.ib-grid[data-phone] .ib-grid-sub .ib-grid-who { display: inline-flex; vertical-align: -3px; font-size: inherit; }
+.ib-grid[data-phone] .ib-grid-sub .ib-grid-dot { margin: 0 6px; }
+/* Each piece keeps its words together; the words under the name break between pieces (an inline-block allows it). */
+.ib-grid[data-phone] .ib-grid-pc { display: inline-block; }
+.ib-grid[data-phone] .ib-grid-q { grid-row: 3; margin: 1px 0 2px; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-grid-said { display: contents; }
+/* The readout opens in the line itself, on the page's own ground: no panel. */
+.ib-grid[data-phone] .ib-grid-exp { grid-column: 1 / 3; display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); margin: 4px 0 2px; font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-grid[data-phone] .ib-grid-ro { min-height: 26px; }
+.ib-grid[data-phone] .ib-grid-ro-open { display: flex; gap: 4px; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: var(--primary); font-weight: 550; cursor: pointer; position: relative; z-index: 1; }
+.ib-grid[data-phone] .ib-grid-ro-open .ib-ic { width: 12px; height: 12px; }

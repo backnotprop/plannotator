@@ -292,16 +292,16 @@
         {
           "id": "ses_old",
           "host": "gemini",
-          "label": "gemini",
+          "label": "Gemini CLI",
           "full": null,
-          "agent": "gemini",
+          "agent": "Gemini CLI",
           "detail": "storefront · idle · since T(2026-11-23T03:00:00.000Z)",
-          "group": "gemini",
+          "group": "Gemini CLI",
           "owner": false,
           "wakes": true,
           "taggable": false,
           "project": "storefront",
-          "picked": "Tagged gemini. It doesn't own this thread; it gets your reply and a pointer to this thread."
+          "picked": "Tagged Gemini CLI. It doesn't own this thread; it gets your reply and a pointer to this thread."
         }
       ],
       "send": {
@@ -317,7 +317,7 @@
           {
             "host": "gemini",
             "session": "ses_old",
-            "label": "gemini"
+            "label": "Gemini CLI"
           },
           {
             "host": "codex",

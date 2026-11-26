@@ -172,11 +172,13 @@ describe('session-closed event', () => {
       clear: async () => {},
     });
     const closed: Array<{ unsent: number; by: string | undefined }> = [];
+    const agentGone: boolean[] = [];
     const resultRef: { current: HookResult | null } = { current: null };
     function ClosingHarness() {
       resultRef.current = useExternalAnnotations<TestAnnotation>({
         enabled: true,
         onSessionClosed: (event) => closed.push({ unsent: event.unsentAnnotations, by: event.by }),
+        onAgentGone: (gone) => agentGone.push(gone),
       });
       return null;
     }
@@ -194,7 +196,11 @@ describe('session-closed event', () => {
       emit?.({ type: 'session-closed', by: 'session', unsentAnnotations: 1 });
       // An unknown closer reads as the agent, as before the field had variants.
       emit?.({ type: 'session-closed', by: 'later-kind', unsentAnnotations: 0 });
+      // A code review's agent left, then came back: neither closes the review.
+      emit?.({ type: 'agent-gone', gone: true });
+      emit?.({ type: 'agent-gone', gone: false });
     });
+    expect(agentGone).toEqual([true, false]);
     expect(closed).toEqual([
       { unsent: 4, by: 'agent' },
       { unsent: 1, by: 'session' },

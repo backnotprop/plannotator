@@ -7,13 +7,14 @@
  */
 
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
-import { agentName, whenTime } from '../format';
+import { whenTime } from '../format';
+import { messageAuthorName } from '../scriptAuthor';
 import { AuthorMark, Icon } from '../icons';
 import { quoteLineText, REPLY_QUOTE_WORDS } from '../replyQuote';
 import { Tip } from './Tip';
 
 function whoOf(message: InboxMessageWire): string {
-  return message.author.kind === 'agent' ? agentName(message.author) : 'You';
+  return message.author.kind === 'agent' ? messageAuthorName(message) : 'You';
 }
 
 /** An agent's mark at text size. The person's own mark is the reply arrow, which the line already starts with: none. */

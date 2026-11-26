@@ -8,7 +8,7 @@ import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { formatCount } from '../format';
 import { RowTagName, rowTintOf, tintProps, type ListTagColours, type RowTintProps } from '../parts/RowTint';
-import { RowAgents, RowAgentTiles } from './RowAgents';
+import { RowAgents, RowAgentTiles, rowScriptOf } from './RowAgents';
 import { RowPullsMark } from '../threadPulls/ThreadPulls';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
 import { RowTip } from './RowTip';
@@ -31,7 +31,7 @@ import { attachPullToRefresh } from '../pullRefresh';
 import { RowSwipeLayer, useRowSwipe } from './RowSwipeLayer';
 import { leadEmpty, leadParts } from './rowLead';
 import { TidyMenu, type TidyController } from './Tidy';
-import { ListFilterButton, type ListFilterSource } from './ListFilter';
+import { ListFilterButton, RecentViewBar, RecentViewSaid, useTitleFilterList, type ListFilterSource } from './ListFilter';
 import { awayLine, machineTakes, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
 import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
@@ -287,7 +287,7 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
       <RowAvatar row={row} size={24} />
       {!filtered && <RowProjectMark row={row} />}
       {(!filtered || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} />}
-      {scheduledOf(row) ? <ScheduledTile /> : <RowAgents participants={row.participants} agent={rowAgent(row)} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgents participants={row.participants} agent={rowAgent(row)} script={rowScriptOf(row, rowAgent(row), project)} />}
     </span>
   );
 }
@@ -308,7 +308,7 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
     <span className="ib-from ib-lead">
       {withProject && <RowProjectMark row={row} />}
       {(withProject || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} tip={tip} />}
-      {scheduledOf(row) ? <ScheduledTile /> : <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} script={rowScriptOf(row, rowAgent(row), project)} />}
     </span>
   );
 }
@@ -742,7 +742,10 @@ export function InboxList(props: InboxListProps) {
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
   // across a resize past the phone width, its scroll are kept).
   const bodyRef = useRef<HTMLDivElement>(null);
-  const pick = useListPicks({ sections: props.sections, isOpen: (id) => (asList && id !== 'snoozed') || ((!asAgents || id === 'snoozed') && groups.state(id).open), drawn: asAgents ? agentRows : null, body: bodyRef, bulk: props.bulk, phone: props.phone === true, narrow: props.narrow === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => props.sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null, archived: archivedRows });
+  // Filter by typing (TitleFilter.tsx): the rows narrowed by the typed words, the menu's picks already applied (App).
+  // Typing redraws this list, never the window; the field sits under the header, "No threads match" in the body.
+  const { sections, archived, field: titleField, empty: titleEmpty } = useTitleFilterList(props.sections, props.archived, props.listFilter !== undefined, props.listFilter?.place ?? '', showArchived ? archivedRows.length : 0);
+  const pick = useListPicks({ sections: sections, isOpen: (id) => (asList && id !== 'snoozed') || ((!asAgents || id === 'snoozed') && groups.state(id).open), drawn: asAgents ? agentRows : null, body: bodyRef, bulk: props.bulk, phone: props.phone === true, narrow: props.narrow === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null, archived: archivedRows });
   // ↑ ↓ Home End move focus between the rows (listKeys.ts), only while a row or the Quiet band has it.
   const listKey = (move: ListMove) => ({
     when: (event: KeyboardEvent) => {
@@ -832,7 +835,7 @@ export function InboxList(props: InboxListProps) {
     return true;
   }, []);
   const resizable = props.narrow && !isMobile;
-  const visible = props.sections.filter((s) => s.threads.length > 0);
+  const visible = sections.filter((s) => s.threads.length > 0);
   /** Mark all as read (the ⋮'s, a band's menu): these drawn rows, each written as its thread is now (bulkWrites.ts `markAllRead`). */
   const markAllRead = props.bulk ? (rows: readonly InboxListRow[]) => (rows.length > 0 ? props.bulk!.markAllRead(rows) : undefined) : undefined;
   // List's rows (listView.ts): every group's but the Snoozed band's, newest first, each keeping its place until the
@@ -842,8 +845,8 @@ export function InboxList(props: InboxListProps) {
   const sortEpoch = props.sort?.epoch;
   const sortKeep = props.sort?.keep ?? null;
   const flat = useMemo(
-    () => (asList ? flatRows(props.sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep, by: props.sort?.by }) : null),
-    [asList, props.sections, sortEpoch, sortKeep, props.sort?.by],
+    () => (asList ? flatRows(sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep, by: props.sort?.by }) : null),
+    [asList, sections, sortEpoch, sortKeep, props.sort?.by],
   );
   useLayoutEffect(() => {
     places.current = flat?.places ?? null;
@@ -869,11 +872,11 @@ export function InboxList(props: InboxListProps) {
   // and width, whatever the row's state (hovered, its tooltip open or not yet mounted). A change inside `.ib-cq` that
   // breaks it must add what it depends on to `fitKey`, or the column keeps a stale width.
   const settled = besideThread === props.narrow;
-  const closedKey = props.sections.map((section) => (groups.state(section.id).open ? '' : section.id)).join(',');
+  const closedKey = sections.map((section) => (groups.state(section.id).open ? '' : section.id)).join(',');
   const countsKey = useMemo(() => {
     if (!pinColumn || !settled) return '';
     const keys = new Set<string>();
-    for (const section of props.sections) {
+    for (const section of sections) {
       // List draws every row but the Snoozed band's (no groups to close); the band folds in both views.
       if (asList ? section.id === 'snoozed' && !groups.state(section.id).open : !groups.state(section.id).open) continue;
       for (const row of section.threads) {
@@ -883,7 +886,7 @@ export function InboxList(props: InboxListProps) {
     }
     return [...keys].sort().join(' ');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pinColumn, settled, props.sections, closedKey, asList]);
+  }, [pinColumn, settled, sections, closedKey, asList]);
   const textSize = useInboxTextSize();
   // ThemeProvider puts the palette's classes on <html> while it renders, before this list's layout effects run.
   const { colorTheme, resolvedMode } = useTheme();
@@ -920,13 +923,13 @@ export function InboxList(props: InboxListProps) {
   // The row whose right-click menu is open: a muted background, as the project row's.
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const rowOf = (threadId: string) => {
-    for (const section of props.sections) {
+    for (const section of sections) {
       const row = section.threads.find((r) => r.thread_id === threadId);
       if (row) return row;
     }
     return props.archived?.rowOf(threadId) ?? null;
   };
-  const sectionOf = (threadId: string) => props.sections.find((section) => section.threads.some((r) => r.thread_id === threadId))?.id ?? (props.archived?.rowOf(threadId) ? 'archived' : null);
+  const sectionOf = (threadId: string) => sections.find((section) => section.threads.some((r) => r.thread_id === threadId))?.id ?? (props.archived?.rowOf(threadId) ? 'archived' : null);
   const onRowAction = props.onRowAction;
   // H on a row the keyboard is on (approval "inbox-keyboard-keys-2026-11-07", item 3): its menu opens at the Snooze
   // times, as Shift+F10 then Snooze would; nothing is snoozed until a time is picked. The open thread's own H is Thread.tsx's.
@@ -952,7 +955,7 @@ export function InboxList(props: InboxListProps) {
   // Shift+F10 opens a row's menu (the context-menu key too), named on each row for assistive technology.
   const rowKeys = onRowAction ? shortcutAria({ scope: inboxListShortcuts, action: 'rowMenu' }) : undefined;
   // A group band's menu (markAllRead.ts `bandMenuOf`). Not while picking: the band's box is the picks' then.
-  const bands = props.bulk && !pick.on ? bandMenuOf(props.sections, props.bulk, () => bandTip.menuOpened()) : undefined;
+  const bands = props.bulk && !pick.on ? bandMenuOf(sections, props.bulk, () => bandTip.menuOpened()) : undefined;
   // The bands drawn that have a menu now, for the Group tip: none while picking, none while a thread covers the list.
   const menuBands =
     bands && props.covered !== true ? (asList || asAgents ? (listBand ? [listBand] : []) : visible).filter((section) => bands.actionsOf(section.id).length > 0).map((section) => section.id) : [];
@@ -1074,11 +1077,7 @@ export function InboxList(props: InboxListProps) {
           </span>
         )}
         {/* The button's description, outside the h1 so the heading reads only the name. */}
-        {props.onRefresh && (
-          <span id={refreshHintId} hidden>
-            Refresh the list
-          </span>
-        )}
+        {props.onRefresh && <span id={refreshHintId} hidden>Refresh the list</span>}
         {/* The filter: the funnel alone, at every width (listFilter.ts). */}
         {props.listFilter && <ListFilterButton source={props.listFilter} phone={isMobile} />}
         {/* Search shows where New message does: a phone always, a wider window only while the main sidebar (which holds its own Search) is closed. */}
@@ -1130,12 +1129,13 @@ export function InboxList(props: InboxListProps) {
             view={props.rememberLook !== false ? { value: view, onChange: setView } : undefined}
             starredAbove={props.rememberLook !== false && props.starred ? { on: starredAbove, onChange: setStarredAbove } : undefined}
             onSelect={pick.start}
-            markAllRead={markAllRead ? { disabled: listMarkAllRows(props.sections).length === 0, onClick: () => void markAllRead(listMarkAllRows(props.sections)) } : undefined}
+            markAllRead={markAllRead ? { disabled: listMarkAllRows(sections).length === 0, onClick: () => void markAllRead(listMarkAllRows(sections)) } : undefined}
             showArchived={props.archived && props.rememberLook !== false ? { on: showArchived, onChange: props.archived.setOn } : undefined}
             tagColours={props.tagColours?.setShow ? { on: props.tagColours.show, onChange: props.tagColours.setShow } : undefined}
           />
         )}
       </div>
+      {props.listFilter && <RecentViewBar place={props.listFilter.place ?? ''} picking={pick.on} />}{titleField}{props.listFilter && <RecentViewSaid place={props.listFilter.place ?? ''} />}
       {starredAbove && props.starred && (
         <StarredPills
           rows={props.starred.rows}
@@ -1195,7 +1195,7 @@ export function InboxList(props: InboxListProps) {
           </HoldViewOnBar>
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {/* So is a list whose rows are all archived, waiting for the list to settle without them (Archive all). */}
-          {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && props.empty}
+          {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && (titleEmpty === undefined ? props.empty : titleEmpty)}
           {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. Recent activity's times (`sort.by`). */}
           <ListRows timeBy={props.sort?.by}>
           {flat && flat.rows.length > 0 && (
@@ -1204,7 +1204,7 @@ export function InboxList(props: InboxListProps) {
               {flat.rows.map(({ row, drawn }) => renderRow(row, drawn))}
             </div>
           )}
-          {asAgents && <AgentsList sections={props.sections} sort={props.sort} machines={props.machines} selectedThreadId={props.selectedThreadId} phone={props.phone === true} remember={props.rememberLook !== false} renderRow={renderRow} shows={shows} onDrawn={setAgentRows} />}
+          {asAgents && <AgentsList sections={sections} sort={props.sort} machines={props.machines} selectedThreadId={props.selectedThreadId} phone={props.phone === true} remember={props.rememberLook !== false} renderRow={renderRow} shows={shows} onDrawn={setAgentRows} />}
           {/* List and Agents draw only the Snoozed band, folded under the rows as the groups draw it. */}
           {(asList || asAgents ? (listBand ? [listBand] : []) : visible).map((section) => {
             const state = groups.state(section.id);
@@ -1240,7 +1240,7 @@ export function InboxList(props: InboxListProps) {
               </div>
             );
           })}
-          {props.archived && showArchived && <ArchivedGroup host={props.archived} renderRow={renderRow} onRows={setArchivedRows} phone={props.phone === true} onSearch={props.onSearch} />}
+          {archived && showArchived && <ArchivedGroup host={archived} renderRow={renderRow} onRows={setArchivedRows} phone={props.phone === true} onSearch={props.onSearch} />}
           </ListRows>
         </ThreadRowMenu>
       {pick.sheet}

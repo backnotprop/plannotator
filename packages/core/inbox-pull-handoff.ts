@@ -10,6 +10,11 @@ import {
   type InboxPullStack,
 } from "./inbox-types";
 
+// Ship (approval "inbox-ship-mode"), a pull request handed to an agent until it is merged, is imported through this
+// module's subpath, so the published @plannotator/core keeps the exports it has (no new subpath).
+export * from "./inbox-ship";
+export * from "./inbox-ship-words";
+
 /** A stack's layers still to land, bottom first (a merged or closed one is done). */
 export function openLayers(stack: Pick<InboxPullStack, 'layers'>): InboxPull[] {
   return stack.layers.filter(inboxPullIsOpen);

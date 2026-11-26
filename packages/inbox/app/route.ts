@@ -14,7 +14,7 @@ import { reviewAtOf, type ReviewAt } from './reviewAt';
 import { viewScopeOf, type PullViewScope } from '../pulls/viewScope';
 
 export interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans' | 'grid';
   /**
    * Plans (`#plans`, only while config.json `inboxPlans` is on; approval "inbox-plans"): the plan open (`#plans=pln_…`),
    * the version read (`&v=3`; absent: the newest), the two versions compared (`&from=3&to=5`), and `#plans&new` for
@@ -127,8 +127,9 @@ export interface Route {
   /**
    * A file an agent's message names, beside the thread, read only until a comment attaches it (approval
    * "inbox-file-refs-open-viewer"). `ref=` its path as written, `in=` the message, `line=` / `to=` its lines. Never with `file`.
+   * `skill`: `ref=` names a skill the person's message used, whose SKILL.md is shown (SkillFilePane).
    */
-  ref?: { path: string; messageId: string; line?: number; lineEnd?: number } | null;
+  ref?: { path: string; messageId: string; line?: number; lineEnd?: number; skill?: true } | null;
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
   /**
@@ -179,6 +180,8 @@ export function routeOf(fullHash: string): Route {
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
+  // Grid (approval "inbox-agent-grid"): `#grid`; with the switch off the page sends the address to the Inbox.
+  if (params.has('grid') && !params.get('thread')) return { page: 'grid', project: null, thread: null };
   // The Artifacts wall (the sidebar's Artifacts row). `#thread=…&artifacts` is a thread's own grid, below.
   if (params.has('artifacts') && !params.get('thread')) return { page: 'artifacts', project: null, thread: null, pinned: params.get('artifacts') === 'pinned' };
   if (params.has('routine') || params.has('routines')) {
@@ -242,7 +245,7 @@ export function routeOf(fullHash: string): Route {
     profile: fromReviews || thread ? null : params.get('profile') || null,
     tag: fromReviews ? null : params.get('tag'),
     thread,
-    ref: thread && !fileId && params.get('ref') && params.get('in') ? { path: params.get('ref')!, messageId: params.get('in')!, ...(Number(params.get('line')) > 0 ? { line: Number(params.get('line')) } : {}), ...(Number(params.get('to')) > 0 ? { lineEnd: Number(params.get('to')) } : {}) } : null,
+    ref: thread && !fileId && params.get('ref') && params.get('in') ? { path: params.get('ref')!, messageId: params.get('in')!, ...(Number(params.get('line')) > 0 ? { line: Number(params.get('line')) } : {}), ...(Number(params.get('to')) > 0 ? { lineEnd: Number(params.get('to')) } : {}), ...(params.has('skill') ? { skill: true as const } : {}) } : null,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
     guideAt: thread && params.get('guide') ? reviewAtOf(params) : null,

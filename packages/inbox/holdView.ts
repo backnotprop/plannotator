@@ -19,17 +19,42 @@ export interface ViewHold {
 
 const ROWS = '[data-thread-id]';
 
+/**
+ * The box a row is measured by: its wrapper `.ib-rw`, the box inbox.css gives `content-visibility: auto` (a phone's
+ * `.ib-mrow` is its own), else the row. The browser skips the layout of a row out of view; a read of the geometry of
+ * anything inside it lays that row out first. Reading every row's button so laid out the whole list on each Show and
+ * each arrival of the bar (over a second with the soak's 2,200 rows). The wrapper's own box is laid out without its
+ * contents, and it moves with them. The settle's slide measures the same boxes (settle.ts `MOVERS`).
+ */
+function rowBox(el: HTMLElement): HTMLElement {
+  return el.closest<HTMLElement>('.ib-rw') ?? el;
+}
+
 function rowsOnScreen(body: HTMLElement): Map<string, number> {
   const box = body.getBoundingClientRect();
   const tops = new Map<string, number>();
   for (const el of body.querySelectorAll<HTMLElement>(ROWS)) {
-    if (el.getClientRects().length === 0) continue;
-    const rect = el.getBoundingClientRect();
-    if (rect.bottom <= box.top || rect.top >= box.bottom) continue;
     const id = el.getAttribute('data-thread-id');
-    if (id && !tops.has(id)) tops.set(id, rect.top - box.top);
+    if (!id || tops.has(id)) continue;
+    const row = rowBox(el);
+    if (row.getClientRects().length === 0) continue;
+    const rect = row.getBoundingClientRect();
+    if (rect.bottom <= box.top || rect.top >= box.bottom) continue;
+    tops.set(id, rect.top - box.top);
   }
   return tops;
+}
+
+/** The box (`rowBox`) of each thread of `ids`, the first one drawn (a closed group's rows are not): one pass. */
+function drawnRows(body: HTMLElement, ids: ReadonlyMap<string, unknown>): Map<string, HTMLElement> {
+  const out = new Map<string, HTMLElement>();
+  for (const el of body.querySelectorAll<HTMLElement>(ROWS)) {
+    const id = el.getAttribute('data-thread-id');
+    if (!id || out.has(id) || !ids.has(id)) continue;
+    const row = rowBox(el);
+    if (row.getClientRects().length > 0) out.set(id, row);
+  }
+  return out;
 }
 
 export function holdView(body: HTMLElement): ViewHold {
@@ -40,10 +65,12 @@ export function holdView(body: HTMLElement): ViewHold {
 export function viewShift(body: HTMLElement, hold: ViewHold): number {
   const box = body.getBoundingClientRect();
   const counts = new Map<number, number>();
+  // One pass over the list for the rows held, not one per row.
+  const rows = drawnRows(body, hold.tops);
   for (const [id, was] of hold.tops) {
-    const el = [...body.querySelectorAll<HTMLElement>(`[data-thread-id="${CSS.escape(id)}"]`)].find((node) => node.getClientRects().length > 0);
-    if (!el) continue;
-    const shift = Math.round(el.getBoundingClientRect().top - box.top - was);
+    const row = rows.get(id);
+    if (!row) continue;
+    const shift = Math.round(row.getBoundingClientRect().top - box.top - was);
     counts.set(shift, (counts.get(shift) ?? 0) + 1);
   }
   let best = 0;

@@ -106,7 +106,11 @@ interface User {
   moment: (id: RevealId, day: number) => boolean;
   /** The dialogs this person closes with Not now. */
   notNow?: readonly RevealId[];
-  /** Code review was never decided (config.json `inboxCodeReview` unset) and its offer is shown at all (`CODE_REVIEW_OFFER_SHOWN`, false for now): its offer is open. */
+  /**
+   * Code review was never decided (config.json `inboxCodeReview` unset) and its offer is shown at all
+   * (`CODE_REVIEW_OFFER_SHOWN`): its offer is open, for someone who used an earlier Inbox only (`update`; the server's
+   * mark at a release start, packages/server/inbox-code-review-offer.ts). A new user never gets it.
+   */
   codeReviewOff?: boolean;
   /** The day the person's third question card is answered (grill-me-tip.ts `revealGrillMeGap`): from then the tip is open. Absent: never. */
   grillMeGap?: number;
@@ -154,7 +158,7 @@ function simulate(user: User, days = 30): Shown[] {
         open: Object.fromEntries(
           TABLE.map((entry) => [
             entry.id,
-            !done.has(entry.id) && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.id === AGENT_RULES ? user.noRules === true : entry.id === "personal_agents" ? user.noPersonalAgent === true : entry.id === "priority" ? user.neverPriority === true : entry.id === "routines" ? user.goodDays !== undefined && day >= user.goodDays : entry.kind === "offer" || user.update),
+            !done.has(entry.id) && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true && user.update : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.id === AGENT_RULES ? user.noRules === true : entry.id === "personal_agents" ? user.noPersonalAgent === true : entry.id === "priority" ? user.neverPriority === true : entry.id === "routines" ? user.goodDays !== undefined && day >= user.goodDays : entry.kind === "offer" || user.update),
           ]),
         ),
         waitingSince: saved.waitingSince,
@@ -414,35 +418,24 @@ describe("the grill-me tip (the owner: \"Sooner: after 3 answered questions, wha
   });
 });
 
-// Its slot, kept for the day `CODE_REVIEW_OFFER_SHOWN` is true again: for now the server never opens it (the owner chose
-// the switch without the offer, 2026-11-17; packages/server/inbox-reveal.test.ts proves it is never next).
+// Its slot, shown again from the release after 2026-11-23 (`CODE_REVIEW_OFFER_SHOWN`, approval "inbox-code-review-offer":
+// "for people who already use the Inbox"). packages/server/inbox-reveal.test.ts proves the server opens it only for
+// someone who used an earlier Inbox, while Code review was never decided.
 describe("Code review's offer (approval \"code-review-offer-card\": show up about immediately)", () => {
-  test("a new user with Code review off: the offer on day 0, before the agent note, which follows on the next load the same day; the offers keep their slots", () => {
+  test("a new user with Code review never decided: never offered, and every other dialog keeps its day and hour", () => {
     const shown = simulate({ ...HEAVY, codeReviewOff: true });
-    expect(when(shown)).toEqual([
-      ["code_review", 0, 9],
-      ["agent_note", 0, 11],
-      [VIEW_CHOICE, 0, 13],
-      // The star ask (aside) from the second day, and it moves no one.
-      ["star", 1, 9],
-      ["snooze", 2, 9],
-      [BRO, 2, 11],
-      ["board", 3, 9],
-      ["steps", 5, 9],
-    ]);
-    // The first load of day 0 shows it: about immediately.
-    expect(shown[0]!.at).toEqual(at(0, HEAVY.loads(0)[0]!));
-    expectSpaced(shown);
+    expect(shown.some((s) => s.id === "code_review")).toBe(false);
+    expect(when(shown)).toEqual(when(simulate(HEAVY)));
   });
 
   test("Not now on it is final, and the next offer waits three days", () => {
-    const shown = simulate({ ...HEAVY, codeReviewOff: true, notNow: ["code_review"] });
+    const shown = simulate({ ...UPGRADER, codeReviewOff: true, notNow: ["code_review"] });
     expect(shown.filter((s) => s.id === "code_review")).toHaveLength(1);
-    // The agent note is setup: it does not wait for the Not now. The first offer does.
-    expect(days(shown)).toMatchObject({ code_review: 0, agent_note: 0, snooze: 3 });
+    // The agent note is setup: it does not wait for the Not now. The next dialog of the line (the tab icon) does.
+    expect(days(shown)).toMatchObject({ code_review: 0, agent_note: 0, tab_icon: 3 });
   });
 
-  test("an update day with Code review off: the offer first, then the same-day group in its order, one on each load after it", () => {
+  test("an update day with Code review off: the offer first, on the first load, then the same-day group in its order, one on each load after it", () => {
     const shown = simulate({ ...UPGRADER, codeReviewOff: true });
     expect(when(shown.slice(0, 6))).toEqual([
       ["code_review", 0, 9],
@@ -452,11 +445,14 @@ describe("Code review's offer (approval \"code-review-offer-card\": show up abou
       ["list_intro", 0, 17],
       ["sound", 1, 9],
     ]);
+    // The first load of day 0 shows it: about immediately.
+    expect(shown[0]!.at).toEqual(at(0, UPGRADER.loads(0)[0]!));
     expectSpaced(shown);
   });
 
   test("Code review decided (on, or switched off by the person) or the offer not shown: never offered", () => {
     expect(simulate(HEAVY).some((s) => s.id === "code_review")).toBe(false);
+    expect(simulate(UPGRADER).some((s) => s.id === "code_review")).toBe(false);
   });
 });
 

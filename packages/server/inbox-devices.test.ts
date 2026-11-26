@@ -607,7 +607,9 @@ describe("the device door, on the binary", () => {
     const guide = await door(`messages/${guideMessage}/guide`);
     expect(guide.status).toBe(200);
     const g = (await guide.json()) as Json;
-    expect(Object.keys(g).sort()).toEqual(["guide", "message_id", "snapshot"]);
+    // `code_review`: that Inbox's switch, which a linked machine's window follows for the review.
+    expect(Object.keys(g).sort()).toEqual(["code_review", "guide", "message_id", "snapshot"]);
+    expect(typeof g.code_review).toBe("boolean");
     expect(g.guide.title).toBe("Token refresh");
     const tick = await door(`messages/${guideMessage}/guide/reviewed`, { body: { idempotency_key: keys(), reviewed: [true] } });
     expect(await tick.json()).toEqual({ message_id: guideMessage, reviewed: [true] });
@@ -1434,8 +1436,13 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     const undone = await door(`messages/${news.id}/ack`, { body: { idempotency_key: "ack-2", ack: false } });
     expect(((await undone.json()) as Json).message.ack).toBeNull();
     const asking = inbox.store.sendMessage({ project_id: project.id, author, body: ask("Ship it?"), reply_to: news.id }).message;
+    // A question waits: no reaction, on that message or an earlier one.
     const open = await door(`messages/${asking.id}/ack`, { body: { idempotency_key: "ack-3" } });
     expect([open.status, ((await open.json()) as Json).code]).toEqual([409, "question_open"]);
+    // Another refusal passes through: an archived thread.
+    inbox.store.resolveThread(news.thread_id, true, "person");
+    const archived = await door(`messages/${news.id}/ack`, { body: { idempotency_key: "ack-4" } });
+    expect([archived.status, ((await archived.json()) as Json).code]).toEqual([409, "thread_resolved"]);
   });
 
   test("7.42: search, read only, with its query; a phone's fetch metadata never reaches the window's cross-site check", async () => {

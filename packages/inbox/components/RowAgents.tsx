@@ -1,8 +1,22 @@
-import type { InboxParticipant } from '@plannotator/core/inbox-types';
+import type { InboxListRow, InboxParticipant } from '@plannotator/core/inbox-types';
 import { HostMark } from '../icons';
 import { labelOf, shortLabel, useSessionLabels, type SessionLabels } from '../sessionLabels';
 import { agentName } from '../tags';
 import { RowTip } from './RowTip';
+import { rowIsScript, SCRIPT_AUTHOR_NAME } from '../scriptAuthor';
+
+/** A script's row (scriptAuthor.ts `rowIsScript`): the project it posted in, for the tooltip. */
+export type RowScript = { project: string };
+
+/** A list row's script, when its tiles stand for one (`rowIsScript`). */
+export function rowScriptOf(row: Pick<InboxListRow, 'participants'>, agent: { kind: string; host?: string | null; session?: string | null; name?: string | null }, project: string): RowScript | undefined {
+  return rowIsScript(row, agent) ? { project } : undefined;
+}
+
+/** The tiles' tooltip: the agents in words; a script's says where it posted ("Script in billing-svc"). */
+export function scriptTip(words: string, script: RowScript | undefined): string {
+  return script ? `${words} in ${script.project}` : words;
+}
 
 /**
  * The agents in a list row, before its project, on the same grey tiles in every list row (the owner, 2026-10-31):
@@ -32,6 +46,8 @@ export interface RowAgentGroup {
   session?: string | null;
   /** The labels of its sessions that have one (issue #2450), first to join first; absent or empty: none named. */
   labels?: string[];
+  /** A script's post (scriptAuthor.ts): the terminal mark, named "Script". */
+  script?: true;
 }
 
 /**
@@ -44,7 +60,9 @@ export function rowAgentGroups(
   participants: readonly InboxParticipant[] | undefined,
   agent: { kind: string; host?: string | null; session?: string | null },
   labels: SessionLabels = {},
+  script = false,
 ): RowAgentGroup[] {
+  if (script) return [{ host: null, name: SCRIPT_AUTHOR_NAME, sessions: 1, script: true }];
   const sessions: readonly { host: string | null; session?: string | null }[] =
     participants && participants.length > 0 ? participants : [{ host: agent.kind === 'agent' ? (agent.host ?? null) : null, session: agent.kind === 'agent' ? (agent.session ?? null) : null }];
   const groups: RowAgentGroup[] = [];
@@ -90,8 +108,8 @@ export function rowAgentWords(groups: readonly RowAgentGroup[]): string {
  * A wide row's tiles and "+N", one image named by every agent. `tip`: the words in a tooltip too (not on a phone,
  * where a hover is a first tap).
  */
-export function RowAgents({ participants, agent, tip = true }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null; session?: string | null }; tip?: boolean }) {
-  const groups = rowAgentGroups(participants, agent, useSessionLabels());
+export function RowAgents({ participants, agent, tip = true, script }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null; session?: string | null }; tip?: boolean; script?: RowScript }) {
+  const groups = rowAgentGroups(participants, agent, useSessionLabels(), !!script);
   const { shown, more } = shownAgentGroups(groups);
   const words = rowAgentWords(groups);
   const marks = (
@@ -99,7 +117,7 @@ export function RowAgents({ participants, agent, tip = true }: { participants: r
       <span className="ib-atiles" aria-hidden="true">
         {shown.map((g) => (
           <span className="ib-atile" key={g.name} data-agent-host={g.host ?? ''}>
-            <HostMark host={g.host} agent={g.session} />
+            <HostMark host={g.host} agent={g.session} script={g.script} />
           </span>
         ))}
       </span>
@@ -110,7 +128,7 @@ export function RowAgents({ participants, agent, tip = true }: { participants: r
       )}
     </span>
   );
-  return tip ? <RowTip content={words}>{marks}</RowTip> : marks;
+  return tip ? <RowTip content={scriptTip(words, script)}>{marks}</RowTip> : marks;
 }
 
 /** A three-line or phone row draws at most two tiles; past that, a "+N" tile for the rest. */
@@ -131,15 +149,15 @@ export function rowAgentTiles(groups: readonly RowAgentGroup[]): { shown: readon
  * two tiles, then a "+N" tile; one image named by every agent. `tip`: the words in a tooltip too (not on a phone,
  * where a hover is a first tap).
  */
-export function RowAgentTiles({ participants, agent, tip = true }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null; session?: string | null }; tip?: boolean }) {
-  const groups = rowAgentGroups(participants, agent, useSessionLabels());
+export function RowAgentTiles({ participants, agent, tip = true, script }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null; session?: string | null }; tip?: boolean; script?: RowScript }) {
+  const groups = rowAgentGroups(participants, agent, useSessionLabels(), !!script);
   const words = rowAgentWords(groups);
   const { shown, more } = rowAgentTiles(groups);
   const tiles = (
     <span className="ib-atiles" role="img" aria-label={words} data-row-agents={groups.reduce((n, g) => n + g.sessions, 0)}>
       {shown.map((g) => (
         <span className="ib-atile" key={g.name} aria-hidden="true" data-agent-host={g.host ?? ''}>
-          <HostMark host={g.host} agent={g.session} />
+          <HostMark host={g.host} agent={g.session} script={g.script} />
         </span>
       ))}
       {more > 0 && (
@@ -149,5 +167,5 @@ export function RowAgentTiles({ participants, agent, tip = true }: { participant
       )}
     </span>
   );
-  return tip ? <RowTip content={words}>{tiles}</RowTip> : tiles;
+  return tip ? <RowTip content={scriptTip(words, script)}>{tiles}</RowTip> : tiles;
 }

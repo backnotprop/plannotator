@@ -21,6 +21,14 @@ export function inboxSidebarState(): InboxSidebarState {
   return { sidebar: inboxSidebarRead(config.inboxSidebar), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
 }
 
+/**
+ * The items never written now: each capability's that is off (Plans), and Grid's while its experimental switch is off
+ * (approval "inbox-agent-grid": off, nothing of Grid is written).
+ */
+export function inboxSidebarOff(capabilities: readonly { key: string; on(): boolean }[], gridOn: boolean): string[] {
+  return [...capabilities.filter((capability) => !capability.on()).map((capability) => capability.key), ...(gridOn ? [] : ["grid"])];
+}
+
 /** The layout as stored: without the items named in `off`. */
 export function inboxSidebarStored(sidebar: InboxSidebarLayout, off: readonly string[]): InboxSidebarLayout {
   if (off.length === 0) return sidebar;

@@ -15,6 +15,7 @@ export const SIDEBAR_ITEM_ICON: Record<Exclude<InboxSidebarItem, 'agents' | 'tag
   starred: 'star',
   projects: 'folder',
   inbox: 'inbox',
+  grid: 'grid',
   plans: 'map',
   board: 'board',
   scheduled: 'scheduled',
@@ -33,6 +34,8 @@ export interface SidebarFeatures {
   board: boolean;
   /** Plans (config.json `inboxPlans`): absent or false while off, so nothing of it shows, in the menu and Customize too. */
   plans?: boolean;
+  /** Grid (Settings → Capabilities → Experimental, approval "inbox-agent-grid"): absent or false while off. */
+  grid?: boolean;
   /** Routines (Settings → Capabilities): absent in a sidebar drawn without them. */
   scheduled?: boolean;
   reviews: boolean;
@@ -58,6 +61,7 @@ export function drawnSidebarItems(features: SidebarFeatures): ReadonlySet<InboxS
   const off = new Set<InboxSidebarItem>();
   if (!features.board) off.add('board');
   if (features.plans !== true) off.add('plans');
+  if (features.grid !== true) off.add('grid');
   if (features.scheduled !== true) off.add('scheduled');
   if (!features.reviews) off.add('reviews');
   if (!features.usage) off.add('usage');

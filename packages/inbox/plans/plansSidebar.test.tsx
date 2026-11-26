@@ -200,7 +200,7 @@ test.skipIf(!hasDom)('off, Plans is never kept in the cookie; the save sends the
     // Plans on: its row is part of the layout saved and of the cookie.
     setPlansOn(true);
     await writeSidebarLayout({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['copy-prompt'] });
-    expect(saved.at(-1)!.top.indexOf('plans')).toBe(saved.at(-1)!.top.indexOf('inbox') + 1);
+    expect(saved.at(-1)!.top.indexOf('plans')).toBe(INBOX_SIDEBAR_DEFAULT.top.indexOf('plans'));
     expect(cookie.get(SIDEBAR_LAYOUT_COOKIE)).toContain('plans');
   } finally {
     setPlansOn(false);

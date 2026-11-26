@@ -664,12 +664,33 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
      * `codex` on the plain env's PATH and new enough, the person's Codex has Plannotator's Inbox MCP entry (it is
      * how a Codex session answers in the Inbox), and Codex has a login or a provider that requires no OpenAI account.
      */
-    async available(): Promise<LaunchAvailability> {
+    async available(folders: readonly string[] = []): Promise<LaunchAvailability> {
       const e = await ctx.environment();
       const path = e.which("codex");
       if (!path) return { ok: false, missing: true, reason: "codex is not on the Inbox's PATH", code: "missing" };
       const entry = readCodexEntry(join(codexHomeDir(), "config.toml"));
-      if (entry.kind !== "ours" && entry.kind !== "other") return { ok: false, missing: false, reason: "Plannotator's Inbox is not connected to Codex (Settings → Agents)", code: "tool_off" };
+      let connected = entry.kind === "ours" || entry.kind === "other";
+      if (!connected) {
+        try {
+          const config = Bun.TOML.parse(configText() ?? "") as { projects?: Record<string, { trust_level?: string }> };
+          connected = folders.some((folder) => {
+            const real = realPathOr(folder);
+            const root = codexTrustRoot(real);
+            const trust = [real, folder, ...(root ? [realPathOr(root), root] : [])]
+              .map((path) => config.projects?.[path])
+              .find((project) => project !== undefined);
+            if (trust?.trust_level !== "trusted") return false;
+            const projectPath = join(folder, ".codex", "config.toml");
+            const projectEntry = readCodexEntry(projectPath);
+            if (projectEntry.kind !== "ours" && projectEntry.kind !== "other") return false;
+            const projectConfig = Bun.TOML.parse(readFileSync(projectPath, "utf8")) as { mcp_servers?: Record<string, { enabled?: boolean }> };
+            return projectConfig.mcp_servers?.[INBOX_MCP_SERVER_NAME]?.enabled !== false;
+          });
+        } catch {
+          // Codex cannot read an invalid configuration either.
+        }
+      }
+      if (!connected) return { ok: false, missing: false, reason: "Plannotator's Inbox is not connected to Codex (Settings → Agents)", code: "tool_off" };
       const version = parseCodexCliVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
       const shown = version?.join(".") ?? null;
       if (!shown || !versionAtLeast(shown, CODEX_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Codex ${shown ?? "?"} is older than ${CODEX_LAUNCH_MIN_VERSION}`, code: "too_old" };
