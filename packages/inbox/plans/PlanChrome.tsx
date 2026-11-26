@@ -2,29 +2,32 @@
  * The plan page's header (approval "inbox-plan-page-header-a3", .product/approved/inbox-plan-page-header-a3/):
  * the document's own title is the header.
  *
- * - A phone: a short top bar holds the project, Share and one menu (`PlanMenu`, "Page actions"). The approval and the
- *   version sit on the line above the document's own title (`PlanKicker`), so the plan's name shows once; once that
- *   title scrolls away the bar takes the plan's name and its decision (`PlanBarTitle`), a button that
- *   opens Versions. A document whose first block is not a level-1 heading with the plan's name has the bar's name
- *   from the start. Tools, comments and Send are one bar at the bottom (PlanAnnotate.tsx). The menu holds what the
- *   file-name row and the chips held: Edit, Global comment, Files, Contents, Copy file, Download, Close.
- * - A computer: the bar stays pinned at the card's top (PlanBar.tsx: the approval, the pencil, the clock), with the
- *   menu at its end: Copy file, Download, Full screen. The tools, Global comment, comments and Send are the bottom bar.
+ * - A phone: one slim top bar, nothing stacked under it (the owner, 26 Nov: "It's just stacked, unstacked,
+ *   unstacked"). It holds the project, then at its end (`marks`, filled by the document) Approve while it is offered
+ *   or Done and Cancel while editing, the decision's mark (PlanDecision.tsx) and the history clock, then Share and one
+ *   menu (`PlanMenu`, "Page actions"). The document's own title is the first thing under the bar; once it scrolls
+ *   away the bar takes the plan's name (`PlanBarTitle`), a button that opens Versions. A document whose first block is
+ *   not a level-1 heading with the plan's name has the bar's name from the start. An older version or a comparison
+ *   says so in the bar's place for the name (`line`). Tools, comments and Send are one bar at the bottom
+ *   (PlanAnnotate.tsx). The menu holds what the file-name row and the chips held: Edit, Global comment, Files,
+ *   Contents, Copy file, Download, Close; on an older version, Back to version 4 and Restore v2 first.
+ * - A computer: the bar stays pinned at the card's top (PlanBar.tsx: Approve, the decision's mark, the pencil, the
+ *   clock), with the menu at its end: Copy file, Download, Full screen. The tools, Global comment, comments and Send
+ *   are the bottom bar.
  *
  * DocLoaded (PlanPage.tsx) knows the document's actions; the top bar (PlanLoaded) draws the phone's menu, so the
  * document hands them up through `PlanChromeContext`.
  */
-import { createContext, useContext, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon, type IconName } from '../icons';
 import type { PaneHostHandle } from '../parts/paneHost';
-import { DecisionMark } from './parts';
-import { PlanVersionsMark } from './PlanBar';
-import type { PlanDecisionTone } from './words';
 
 /** What the document on screen offers the page's menu (null: not offered there). */
 export interface PlanDocActs {
+  /** An older version on screen (a phone): back to the newest ("Back to version 4"), and its Restore ("Restore v2"). */
+  older: { head: number; shown: number; back: () => void; restore: (() => void) | null } | null;
   edit: (() => void) | null;
   /** The Markdown file pane's Viewer actions (Global comment, Copy file). */
   pane: MutableRefObject<PaneHostHandle | null> | null;
@@ -34,18 +37,22 @@ export interface PlanDocActs {
 }
 
 /**
- * The phone's bar: the A3 state line is in the document (`a3`), the version on screen, and whether the title is out
- * of view (null until the document is there to measure: the bar shows neither name nor project moving meanwhile).
+ * The phone's bar: the main page's newest version is read (`a3`: the document's title is the header), the version on
+ * screen, whether the title is out of view (null until the document is there to measure: the bar shows neither name
+ * nor project moving meanwhile), and the words for an older version or a comparison (`line`).
  */
 export interface PlanBarState {
   a3: boolean;
   shown: number | null;
   away: boolean | null;
+  line: string | null;
 }
 
 interface PlanChrome {
   acts: MutableRefObject<PlanDocActs | null>;
   setBar: (update: (bar: PlanBarState) => PlanBarState) => void;
+  /** A phone: the top bar's end, where the document draws Approve, the decision's mark and the clock. */
+  marks: HTMLElement | null;
 }
 
 export const PlanChromeContext = createContext<PlanChrome | null>(null);
@@ -82,7 +89,10 @@ export function planMenuItems(o: { phone: boolean; acts: PlanDocActs | null; fil
   const download: PlanMenuItem | null = acts?.download ? { key: 'download', icon: 'download', label: 'Download', href: acts.download } : null;
   const full: PlanMenuItem | null = acts?.full ? { key: 'full', icon: 'frame', label: 'Full screen', act: acts.full } : null;
   const close: PlanMenuItem = { key: 'close', icon: 'x', label: 'Close', act: o.close };
-  const groups: (PlanMenuItem | null)[][] = o.phone ? [[edit, global], [files, contents], [copy, download], [close]] : [[copy, download, full]];
+  const older = acts?.older ?? null;
+  const back: PlanMenuItem | null = older ? { key: 'newest', icon: 'back', label: `Back to version ${older.head}`, act: older.back } : null;
+  const restore: PlanMenuItem | null = older?.restore ? { key: 'restore', icon: 'restart', label: `Restore v${older.shown}`, act: older.restore } : null;
+  const groups: (PlanMenuItem | null)[][] = o.phone ? [[back, restore], [edit, global], [files, contents], [copy, download], [close]] : [[copy, download, full]];
   const out: PlanMenuEntry[] = [];
   for (const group of groups) {
     const rows = group.filter((row): row is PlanMenuItem => row !== null);
@@ -98,12 +108,14 @@ export const PLAN_COPIED_MS = 1000;
 
 /** "Page actions" (the frame's name for the page's group): a phone's bottom sheet, a computer's menu. */
 export function PlanMenu({ phone, items }: { phone: boolean; items: () => PlanMenuEntry[] }) {
+  // A row acts with the page's handlers as they are when it is pressed (a new version may have come while it was open).
+  const now = (row: PlanMenuItem): PlanMenuItem => items().find((r): r is PlanMenuItem => r !== '-' && r.key === row.key) ?? row;
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(copiedTimer.current), []);
   const copy = (row: PlanMenuItem) =>
-    void row.copies?.().then((ok) => {
+    void now(row).copies?.().then((ok) => {
       if (!ok) return setOpen(false);
       setCopied(row.key);
       clearTimeout(copiedTimer.current);
@@ -135,7 +147,7 @@ export function PlanMenu({ phone, items }: { phone: boolean; items: () => PlanMe
                 <span className="flex-1">{row.label}</span>
               </DropdownMenuItem>
             ) : (
-              <DropdownMenuItem key={row.key} className="text-xs" closeOnClick={!row.copies} onClick={() => (row.copies ? copy(row) : row.act?.(button.current))} data-plan-menu-row={row.key} data-copied={copied === row.key ? '' : undefined}>
+              <DropdownMenuItem key={row.key} className="text-xs" closeOnClick={!row.copies} onClick={() => (row.copies ? copy(row) : now(row).act?.(button.current))} data-plan-menu-row={row.key} data-copied={copied === row.key ? '' : undefined}>
                 <Icon name={iconOf(row)} size={15} className="ib-glyph" />
                 <span className="flex-1">{labelOf(row)}</span>
               </DropdownMenuItem>
@@ -148,7 +160,7 @@ export function PlanMenu({ phone, items }: { phone: boolean; items: () => PlanMe
   // A row closes the sheet first (focus goes back to the menu's button), then acts from there.
   const pick = (row: PlanMenuItem) => {
     setOpen(false);
-    requestAnimationFrame(() => row.act?.(button.current));
+    requestAnimationFrame(() => now(row).act?.(button.current));
   };
   return (
     <>
@@ -192,28 +204,12 @@ export function PlanMenu({ phone, items }: { phone: boolean; items: () => PlanMe
 }
 
 /**
- * The phone's line above the document's title: Approve (when it is offered) and the approval, and at its end the
- * history clock that opens Versions (approval A2: no version text while the newest is read).
+ * The phone's bar: the project while the document's title is on screen; once it is not, the plan's name, one button
+ * that opens Versions (the two cross-fade; reduced motion: a cut). The first measurement is a cut too (`data-settled`
+ * comes after it), so the page never opens on a fade. The decision is the bar's own mark, not words here.
  */
-export function PlanKicker({ start, approved, shown, head, versionsOpen, onVersions }: { start: ReactNode; approved: ReactNode; shown: number; head: number; versionsOpen: boolean; onVersions: (open: boolean) => void }) {
-  return (
-    <div className="ib-plan-kicker" data-plan-reading="" data-plan-kicker="">
-      {start && <span className="ib-plan-kicker-start">{start}</span>}
-      {approved}
-      <span className="ib-plan-kicker-end">
-        <PlanVersionsMark shown={shown} head={head} open={versionsOpen} onToggle={onVersions} phone />
-      </span>
-    </div>
-  );
-}
-
-/**
- * The phone's bar: the project while the document's title is on screen; once it is not, the plan's name over its
- * version and decision, one button that opens Versions (the two cross-fade; reduced motion: a cut). The first
- * measurement is a cut too (`data-settled` comes after it), so the page never opens on a fade.
- */
-export function PlanBarTitle({ rest, name, away, shown, decision, versionsOpen, onVersions }: { rest: string; name: string; away: boolean | null; shown: number | null; decision: { words: string; tone: PlanDecisionTone } | null; versionsOpen: boolean; onVersions: (open: boolean) => void }) {
-  const spoken = [name, shown === null ? null : `Version ${shown}`, decision?.words ?? null, 'Versions'].filter(Boolean).join('. ');
+export function PlanBarTitle({ rest, name, away, shown, versionsOpen, onVersions }: { rest: string; name: string; away: boolean | null; shown: number | null; versionsOpen: boolean; onVersions: (open: boolean) => void }) {
+  const spoken = [name, shown === null ? null : `Version ${shown}`, 'Versions'].filter(Boolean).join('. ');
   const known = away !== null;
   const [settled, setSettled] = useState(false);
   useEffect(() => {
@@ -232,15 +228,7 @@ export function PlanBarTitle({ rest, name, away, shown, decision, versionsOpen, 
       </span>
       <button type="button" className="ib-plan-titleblock" inert={away ? undefined : true} aria-expanded={versionsOpen} aria-label={spoken} onClick={() => onVersions(!versionsOpen)} data-plan-titleblock="">
         <span className="ib-plan-title-n">{name}</span>
-        <span className="ib-plan-title-s">
-          {decision && (
-            <span className="ib-plan-title-dec" data-plan-decision={decision.tone}>
-              <DecisionMark tone={decision.tone} />
-              <span>{decision.words}</span>
-            </span>
-          )}
-          <Icon name="chevD" size={11} />
-        </span>
+        <Icon name="chevD" size={11} />
       </button>
     </div>
   );

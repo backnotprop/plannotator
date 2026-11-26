@@ -176,6 +176,8 @@ function draw(on = true) {
 }
 
 const text = (el: Element | null) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+/** The bar's decision mark's name: the decision's words (PlanDecision.tsx). */
+const decisionWords = (host: Element) => host.querySelector('[data-plan-reading] [data-plan-decision-mark]')?.getAttribute('aria-label') ?? null;
 /** A file row's name in the frame's rail (`FileRow`: the name, then our Main mark). */
 const fileNames = (scope: Element, sel = '') => [...scope.querySelectorAll(`${sel} [data-plan-file] span.truncate`)].map(text);
 /**
@@ -219,18 +221,18 @@ test.skipIf(!hasDom)('an approval of an older version never reads as current: th
   window.location.hash = `#plans=${older}`;
   const host = draw();
   await settle();
-  // A computer's panel has no head (approval P2): the reading line holds the approval.
+  // A computer's panel has no head (approval P2): the bar's decision mark holds the approval.
   expect(host.querySelector('[data-pages-rail-head]')).toBeNull();
   expect(host.querySelector('[data-plan-reading] [data-plan-decision]')).toBeNull();
-  // The reading line of the newest version says why, in one line (history imported before the stored fact).
-  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="cleared"]'))).toBe('v4 is new and not approved. You approved v2, and that does not carry over.');
+  // The bar's decision mark on the newest version says why, as its name (history imported before the stored fact).
+  expect(decisionWords(host)).toBe('v4 is new and not approved. You approved v2, and that does not carry over.');
   // The version row keeps its own approval (the frame's), without the note.
   expect(text(host.querySelector('[data-plan-version="2"] [data-version-approval]'))).toBe('Approved by you');
 
   window.location.hash = `#plans=${current}`;
   await settle();
   // On its newest version the decision is current.
-  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="approved"]'))).toBe('Approved by you');
+  expect(decisionWords(host)).toBe('Approved by you');
 });
 
 test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions panel; main page first, other pages and artifacts by name; a row opens its file, the versions and the address follow', async () => {
@@ -275,18 +277,19 @@ test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions pan
   // first, before the crumbs.
   expect(row.querySelector('[data-pages-rail-head]')).toBeNull();
   const back = shell.querySelector<HTMLAnchorElement>('[data-page-header] [data-plan-crumb-back]')!;
-  expect(back.getAttribute('aria-label')).toBe('Back to Rotate refresh tokens');
+  // Named for where it goes (Spaces), as the plan rail's back control elsewhere.
+  expect(back.getAttribute('aria-label')).toBe('Back to Spaces');
   expect(back.getAttribute('href')).toBe('#plans');
   expect(back.compareDocumentPosition(shell.querySelector('[data-page-header] [data-breadcrumb-root]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  // The bar (approval A2): the approval of this newest version on the left (approved already: no Approve); the
-  // pencil, the history clock and the menu at its end; no version text, no project, no decision mark.
+  // The bar (approval A2): nothing on the left (approved already: no Approve); the decision's mark (the approval as
+  // its name), the pencil, the history clock and the menu at its end; no version text, no project, no words.
   const reading = host.querySelector('[data-plan-reading]')!;
   expect([...reading.querySelectorAll('.ib-plan-bar-start button')]).toEqual([]);
-  expect(text(reading.querySelector('[data-plan-approval="approved"]'))).toBe('Approved by you');
+  expect(decisionWords(host)).toBe('Approved by you');
   expect(reading.querySelector('[data-plan-decision]')).toBeNull();
-  expect([...reading.querySelectorAll('.ib-plan-bar-end button')].map((el) => el.getAttribute('aria-label'))).toEqual(['Edit', 'Versions · v1, newest', 'Page actions']);
+  expect([...reading.querySelectorAll('.ib-plan-bar-end button')].map((el) => el.getAttribute('aria-label'))).toEqual(['Approved by you', 'Edit', 'Versions · v1, newest', 'Page actions']);
   expect(readingWords(host)).toBe('Versions · v1, newest');
-  expect(text(reading)).toBe('Approved by you');
+  expect(text(reading)).toBe('');
   const panel = host.querySelector('[data-plan-files]')!;
   const names = (sel: string) => fileNames(panel, sel);
   expect(names('[data-plan-files-pages]')).toEqual(['Rotate refresh tokens', 'Flow', 'Rollout']);
@@ -453,13 +456,13 @@ test.skipIf(!hasDom)('the versions panel is closed until the clock opens it (pre
     expect(host.querySelector('[data-plan-page]')!.getAttribute('data-rail')).toBe('closed');
     expect(host.querySelector('[data-versions-panel]')).toBeNull();
     const clock = () => host.querySelector('[data-plan-reading] [data-reading-versions]') as HTMLButtonElement;
-    expect(clock().getAttribute('aria-pressed')).toBe('false');
+    expect(clock().getAttribute('aria-expanded')).toBe('false');
     expect(kept.has('plannotator-inbox-plan-rail-hidden')).toBe(false);
     await act(async () => clock().click());
     await settle();
     expect(host.querySelector('[data-plan-page]')!.getAttribute('data-rail')).toBe('docked');
     expect(host.querySelector('[data-docked-panel-clip] [data-versions-panel]')).not.toBeNull();
-    expect(clock().getAttribute('aria-pressed')).toBe('true');
+    expect(clock().getAttribute('aria-expanded')).toBe('true');
     expect(kept.get('plannotator-inbox-plan-rail-hidden')).toBe('0');
     // Opened once, it stays open after a remount.
     host = await redraw();
@@ -475,8 +478,8 @@ test.skipIf(!hasDom)('the versions panel is closed until the clock opens it (pre
     expect(host.querySelector('[data-plan-page]')!.getAttribute('data-rail')).toBe('closed');
     expect([...host.querySelector('[data-frame-row]')!.querySelectorAll(':scope > [data-docked-panel-clip]')]).toEqual([]);
     expect(kept.get('plannotator-inbox-plan-rail-hidden')).toBe('1');
-    // With the panel closed the plan's decision is still on screen, in the reading line.
-    expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="approved"]'))).toBe('Approved by you');
+    // With the panel closed the plan's decision is still on screen: the bar's decision mark.
+    expect(decisionWords(host)).toBe('Approved by you');
     // Kept on this computer: a remount draws it closed.
     host = await redraw();
     expect(host.querySelector('[data-versions-panel]')).toBeNull();
@@ -1082,13 +1085,20 @@ test.skipIf(!hasDom)('approving names the version on screen: refused once the pl
   expect(readingWords(host)).toBe('Versions · v2, newest');
   await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-approve]')!.click());
   await settle();
-  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="approved"]'))).toBe('Approved by you');
+  expect(decisionWords(host)).toBe('Approved by you');
   expect(host.querySelector('[data-plan-approve]')).toBeNull();
-  // The person's own edit: the approval moves, and the line says so until its Dismiss.
+  // The person's own edit: the approval moves, and the decision's card says so until its Dismiss.
   await editAndDone(host, '# Rotate refresh tokens\n\nv2, tightened\n');
-  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="moved"]'))).toBe('Your approval moved to v3.');
-  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-approval-dismiss]')!.click());
-  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="approved"]'))).toBe('Approved by you');
+  const mark = () => host.querySelector<HTMLButtonElement>('[data-plan-reading] [data-plan-decision-mark]')!;
+  await act(async () => mark().click());
+  await settle();
+  expect(text(document.querySelector('[data-plan-decision-card] [data-plan-approval="moved"]'))).toBe('Your approval moved to v3.');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-plan-decision-card] [data-plan-approval-dismiss]')!.click());
+  await settle();
+  expect(document.querySelector('[data-plan-decision-card] [data-plan-approval="moved"]')).toBeNull();
+  expect(decisionWords(host)).toBe('Approved by you');
+  await act(async () => mark().click());
+  await settle();
   expect([...kept.values()]).toContain('3');
   // An agent's version clears it, in the stored fact's words.
   store.addVersion(id, store.get(id)!.primary_doc_id, { bytes: bytes('# Rotate refresh tokens\n\nv4\n'), committed_at: at(10), source: 'plan-review', agent_session: 's-1' });
@@ -1096,7 +1106,7 @@ test.skipIf(!hasDom)('approving names the version on screen: refused once the pl
   await settle();
   window.location.hash = `#plans=${id}`;
   await settle();
-  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="cleared"]'))).toBe('v4 is new and not approved. You approved v3, and that does not carry over.');
+  expect(decisionWords(host)).toBe('v4 is new and not approved. You approved v3, and that does not carry over.');
   expect(text(host.querySelector('[data-plan-version="3"] [data-version-approval]'))).toBe('Approved by you');
 });
 

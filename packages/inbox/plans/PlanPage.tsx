@@ -35,7 +35,7 @@ import { Icon } from '../icons';
 import { hashOf, writeRoute } from '../app/writeRoute';
 import { plansApi, type PlanRead } from './client';
 import type { PaneHostHandle } from '../parts/paneHost';
-import { PlanBarTitle, PlanChromeContext, PlanKicker, PlanMenu, planMenuItems, usePlanChrome, type PlanBarState, type PlanDocActs } from './PlanChrome';
+import { PlanBarTitle, PlanChromeContext, PlanMenu, planMenuItems, usePlanChrome, type PlanBarState, type PlanDocActs } from './PlanChrome';
 import { recordPlanLook, useDocVersions, usePlan, usePlanShareOn } from './store';
 import { PlanShare } from './PlanShare';
 import { approvalTone, approvalWords, PLAN_FILES_WORDS } from './words';
@@ -49,7 +49,9 @@ import { PlanAnnotate } from './PlanAnnotate';
 import { PlanDiffView } from './PlanDiffView';
 import { PlanArtifactView } from './PlanArtifactView';
 import { ArtifactLine, PlanVersions } from './PlanRail';
-import { PlanBar } from './PlanBar';
+import { PlanBar, PlanVersionsMark } from './PlanBar';
+import { PlanDecisionMark } from './PlanDecision';
+import { createPortal } from 'react-dom';
 import { PLAN_FILES_OPEN_KEY, PLAN_FILES_WIDTH_KEY, PlanBackLink, PlanFiles, PlanRailHead, planFileRoute, type PlanFileRef, type PlanRailDecision } from './PlanFiles';
 
 const plansRoute = { page: 'plans' as const, project: null, thread: null };
@@ -133,7 +135,6 @@ function useWidth(el: HTMLElement | null): number {
   return width;
 }
 
-/** The "Spaces" crumb: back to the home the plan was opened from, its document shrinking into its card (a plain click). */
 /** A computer's crumbs, the panel's back arrow first (approval P2); a phone's as they were. */
 function PlanCrumbs({ back, children }: { back: ReactNode; children: ReactNode }) {
   return back ? (
@@ -146,6 +147,7 @@ function PlanCrumbs({ back, children }: { back: ReactNode; children: ReactNode }
   );
 }
 
+/** The "Spaces" crumb: back to the home the plan was opened from, its document shrinking into its card (a plain click). */
 function spacesLink(id: string): ReactElement<{ className?: string }> {
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -223,8 +225,9 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
   // name once the document's title is out of view), Share and the page's menu, which holds Files and the document's
   // actions; the document hands those up (`acts`) and says whether its state line is above its title (`bar.a3`).
   const acts = useRef<PlanDocActs | null>(null);
-  const [bar, setBar] = useState<PlanBarState>({ a3: false, shown: null, away: null });
-  const chrome = useMemo(() => ({ acts, setBar }), []);
+  const [bar, setBar] = useState<PlanBarState>({ a3: false, shown: null, away: null, line: null });
+  const [marks, setMarks] = useState<HTMLSpanElement | null>(null);
+  const chrome = useMemo(() => ({ acts, setBar, marks }), [marks]);
   const [filesSheet, setFilesSheet] = useState(false);
   const fileCount = read.documents.filter((d) => !d.archived_at).length + artifacts.length;
   const menu = phone ? <PlanMenu phone items={() => planMenuItems({ phone: true, acts: acts.current, files: { count: fileCount, open: () => setFilesSheet(true) }, close: toList })} /> : null;
@@ -234,6 +237,7 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
       account={
         phone ? (
           <>
+            <span className="ib-plan-topmarks" ref={setMarks} data-plan-topmarks="" />
             {share}
             {menu}
           </>
@@ -251,10 +255,14 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
     >
       <PageHeader
         identity={
-          phone && bar.a3 ? (
-            <PlanBarTitle rest={project ?? 'Spaces'} name={read.plan.name} away={bar.away} shown={bar.shown} decision={railDecision} versionsOpen={place.open} onVersions={place.setOpen} />
+          phone && bar.line ? (
+            <span className="ib-plan-barline" role="status" data-plan-barline="">
+              {bar.line}
+            </span>
+          ) : phone && bar.a3 ? (
+            <PlanBarTitle rest={project ?? 'Spaces'} name={read.plan.name} away={bar.away} shown={bar.shown} versionsOpen={place.open} onVersions={place.setOpen} />
           ) : (
-            <PlanCrumbs back={phone ? null : <PlanBackLink name={read.plan.name} />}>
+            <PlanCrumbs back={phone ? null : <PlanBackLink />}>
               {onMain && project ? (
                 <Breadcrumbs root={{ label: 'Spaces', link: spacesLink(id) }} collectionName={project} collectionLink={<span data-plan-crumb-project="" />} path={read.plan.name} />
               ) : onMain ? (
@@ -456,10 +464,11 @@ function DocLoaded({
   const contentsOpen = useRef<((back: HTMLElement | null) => void) | null>(null);
   const onContents = useCallback((open: ((back: HTMLElement | null) => void) | null) => void (contentsOpen.current = open), []);
   const annotated = document.kind === 'markdown' && !compare && !editing.editing;
-  // A phone on the main page's newest version, read: the state line sits above the document's own title (A3).
+  // A phone on the main page's newest version, read: the document's own title is the header (A3).
   const a3 = phone && isMain && annotated && shown === head;
   const pageActs: PlanDocActs = {
-    edit: a3 ? editing.edit : null,
+    older: phone && older ? { head, shown, back: () => go({ version: null }), restore: editing.restoreNow } : null,
+    edit: phone ? editing.edit : null,
     pane: annotated ? paneHandle : null,
     get contents() {
       return phone && annotated ? contentsOpen.current : null;
@@ -472,28 +481,41 @@ function DocLoaded({
     chrome.acts.current = pageActs;
     return () => void (chrome.acts.current = null);
   });
+  // A phone's one bar says what is on screen when it is not the newest version (the frame's reading line's words).
+  const line = !phone ? null : compare ? `Comparing v${compare.from} with v${compare.to}` : older ? `v${shown} of ${head}, an older version` : null;
   useEffect(() => {
-    chrome?.setBar((b) => (b.a3 === a3 && b.shown === shown ? b : { ...b, a3, shown }));
-  }, [chrome, a3, shown]);
-  useEffect(() => () => chrome?.setBar(() => ({ a3: false, shown: null, away: null })), [chrome]);
+    chrome?.setBar((b) => (b.a3 === a3 && b.shown === shown && b.line === line ? b : { ...b, a3, shown, line }));
+  }, [chrome, a3, shown, line]);
+  useEffect(() => () => chrome?.setBar(() => ({ a3: false, shown: null, away: null, line: null })), [chrome]);
   const onTitleAway = useCallback((away: boolean) => chrome?.setBar((b) => (b.away === away ? b : { ...b, away })), [chrome]);
-  const kicker = a3 ? <PlanKicker start={editing.startNoEdit} approved={editing.approved} shown={shown} head={head} versionsOpen={place.open} onVersions={place.setOpen} /> : null;
+  const decisionMark = <PlanDecisionMark info={editing.decision} phone={phone} />;
+  // A phone: Approve (or Done and Cancel), the decision's mark and the clock are the top bar's, nothing under it.
+  const topMarks =
+    phone && chrome?.marks
+      ? createPortal(
+          <>
+            {editing.start}
+            {decisionMark}
+            <PlanVersionsMark shown={shown} head={head} open={place.open} onToggle={place.setOpen} phone />
+          </>,
+          chrome.marks,
+        )
+      : null;
   const menu = phone ? null : <PlanMenu phone={false} items={() => planMenuItems({ phone: false, acts: pageActs, files: null, close: toList })} />;
-  const annotateChrome = { full, onFull: setFull, handle: paneHandle, kicker, onContents, onTitleAway: a3 ? onTitleAway : null };
+  const annotateChrome = { full, onFull: setFull, handle: paneHandle, a3, onContents, onTitleAway: a3 ? onTitleAway : null };
   return (
     <>
+      {topMarks}
       <PageCard
         top={
-          a3 ? null : (
+          phone ? null : (
           <div data-plan-reading="" className="ib-plan-reading">
             {compare ? (
-              <ReadingLine shownNumber={shown} currentNumber={head} versionsOpen={place.open} onToggleVersions={place.setOpen} older={null} comparing={`Comparing v${compare.from} with v${compare.to}`} count={versions.length} start={editing.start} approved={editing.approved} />
+              <ReadingLine shownNumber={shown} currentNumber={head} versionsOpen={place.open} onToggleVersions={place.setOpen} older={null} comparing={`Comparing v${compare.from} with v${compare.to}`} count={versions.length} start={null} approved={decisionMark} />
             ) : (
-              // The bar (approval A2): the approval on the left; the pencil, the clock and the menu at the end.
-              <PlanBar shown={shown} head={head} start={editing.startNoEdit} approved={editing.approved} edit={editing.edit} older={older} versionsOpen={place.open} onVersions={place.setOpen} menu={phone ? null : menu} phone={phone} />
+              // The bar (approval A2): nothing on the left; Approve, the decision's mark, the pencil, the clock and the menu at the end.
+              <PlanBar shown={shown} head={head} start={editing.start} decision={decisionMark} edit={editing.edit} busy={editing.busy} older={older} versionsOpen={place.open} onVersions={place.setOpen} menu={menu} />
             )}
-            {/* A computer: the menu at the reading line's end (Copy file, Download, Full screen). */}
-            {compare && menu}
           </div>
           )
         }

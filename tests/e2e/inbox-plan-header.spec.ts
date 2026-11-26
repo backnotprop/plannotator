@@ -1,9 +1,9 @@
 /**
  * The plan page's header (approval "inbox-plan-page-header-a3"): the document's own title is the header. On a phone
- * the bar holds the project, Share (off here: its switch is off) and the page's menu; the approval and the version
- * sit above the document's title; the bar takes the plan's name once that title scrolls away; the tools, the
- * comments and Send are one bar at the bottom. On a computer Edit and the version stay on the pinned reading line,
- * with the menu at its end. Real browser, compiled binary, temp PLANNOTATOR_DATA_DIR and HOME; the plan library is
+ * one slim bar holds the project, the decision's mark and the history clock, Share (off here: its switch is off) and
+ * the page's menu, nothing stacked under it; the bar takes the plan's name once the title scrolls away; the tools,
+ * the comments and Send are one bar at the bottom. On a computer the pinned bar has nothing on its left and the
+ * decision's mark (its card on hover, pinned by a press), the pencil, the clock and the menu at its end. Real browser, compiled binary, temp PLANNOTATOR_DATA_DIR and HOME; the plan library is
  * seeded with the store before the Inbox starts (Plans on in config.json).
  *
  * Build the binary first (see inbox.spec.ts), then
@@ -61,6 +61,9 @@ test.afterAll(async () => {
 });
 
 /** Focus off whatever the last step pressed, so a picture shows the page at rest. */
+/** The Inbox list's own phone header (`.ib-lhead`): the plan page's one bar is no taller. */
+const PHONE_BAR = 52;
+
 const blur = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
 /** The phone's bottom bar is one row: its seven controls (five tools, the comments, Send) share a top within 2 px. */
@@ -106,11 +109,14 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
     const { context, page, errors } = await phonePage(browser, planUrl, scheme);
     try {
       const planPage = page.locator(`[data-plan-page="${plan.id}"]`);
-      const kicker = page.locator('.ib-docscroll > [data-plan-kicker]');
-      await expect(kicker.locator('[data-plan-approval="approved"]')).toHaveText('Approved by you, with notes');
-      // No version text (approval A2): the history clock at the line's end carries the version in its name.
-      await expect(kicker.locator('[data-reading-versions]')).toHaveAccessibleName('Versions · v1, newest');
-      expect(await kicker.innerText()).not.toContain('v1');
+      // One bar: the decision is a mark at its end (named with the approval's words), beside the history clock (no
+      // version text, approval A2: the clock carries the version in its name); nothing stacked under the bar.
+      const marks = page.locator('nav [data-plan-topmarks]');
+      await expect(marks.locator('[data-plan-decision-mark="approved"]')).toHaveAccessibleName('Approved by you, with notes');
+      await expect(marks.locator('[data-reading-versions]')).toHaveAccessibleName('Versions · v1, newest');
+      await expect(page.locator('[data-plan-kicker], [data-plan-reading]')).toHaveCount(0);
+      // Slim: the bar is as tall as the Inbox list's own phone header (PHONE_BAR px).
+      expect(Math.round((await page.locator('nav[data-page-header]').boundingBox())!.height)).toBeLessThanOrEqual(PHONE_BAR);
       // At rest: the project in the bar, the plan's name once (the document's own title), no file-name row.
       await expect(planPage).toHaveAttribute('data-plan-header', 'project');
       await expect(page.locator('[data-plan-bartitle-rest]')).toHaveText('trailhead-api');
@@ -124,14 +130,14 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       await expect(dock.locator('[data-plan-send-button]')).toHaveAttribute('aria-label', 'Send');
       expect(await page.locator('[data-plan-send-line="described"]').evaluate((el) => el.getBoundingClientRect().width)).toBeLessThanOrEqual(1);
       // 44 px targets.
-      for (const target of [page.locator('nav [data-plan-more]'), dock.locator('[data-plan-send-button]'), dock.locator('.ib-toolstrip button').first(), page.locator('[data-plan-kicker] [data-reading-versions]')]) {
+      for (const target of [page.locator('nav [data-plan-more]'), dock.locator('[data-plan-send-button]'), dock.locator('.ib-toolstrip button').first(), marks.locator('[data-reading-versions]'), marks.locator('[data-plan-decision-mark]')]) {
         const box = (await target.boundingBox())!;
         expect(box.height, await target.evaluate((el) => el.outerHTML.slice(0, 80))).toBeGreaterThanOrEqual(44);
       }
       await blur(page);
       await page.screenshot({ path: join(proofDir, `phone-${scheme}.png`) });
 
-      // Scrolled: the bar takes the plan's name, its version and its decision.
+      // Scrolled: the bar takes the plan's name; the decision stays its mark.
       await page.locator('[data-plan-annotate] .ib-docscroll').evaluate((el) => el.scrollTo(0, 420));
       await expect(planPage).toHaveAttribute('data-plan-header', 'name');
       await expect(page.locator('[data-plan-titleblock] .ib-plan-title-n')).toBeVisible();
@@ -167,7 +173,7 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
   for (const width of [390, 375] as const) {
     const { context, page, errors } = await phonePage(browser, planUrl, 'light', width);
     try {
-      await expect(page.locator('[data-plan-kicker]')).toBeVisible();
+      await expect(page.locator('nav [data-plan-topmarks] [data-plan-decision-mark]')).toBeVisible();
       await dockOneRow(page);
       await blur(page);
       await page.screenshot({ path: join(proofDir, `phone-${width}-light.png`) });
@@ -180,7 +186,7 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
   {
     const { context, page, errors } = await phonePage(browser, planUrl, 'light', 320);
     try {
-      await expect(page.locator('[data-plan-kicker]')).toBeVisible();
+      await expect(page.locator('nav [data-plan-topmarks] [data-plan-decision-mark]')).toBeVisible();
       // The plan's name is not in the bar at rest (it never fades in and out as the page opens).
       await expect(page.locator('[data-plan-titleblock]')).toHaveCSS('opacity', '0');
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
@@ -195,7 +201,7 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       await blur(page);
       await page.screenshot({ path: join(proofDir, 'phone-320-light.png') });
       await page.goto(`${url}#plans=${long.plan.id}`);
-      await expect(page.locator('[data-plan-kicker]')).toBeVisible();
+      await expect(page.locator('nav [data-plan-topmarks] [data-plan-decision-mark]')).toBeVisible();
       await page.locator('[data-plan-annotate] .ib-docscroll').evaluate((el) => el.scrollTo(0, 600));
       await expect(page.locator(`[data-plan-page="${long.plan.id}"]`)).toHaveAttribute('data-plan-header', 'name');
       expect(await page.locator('[data-plan-titleblock] .ib-plan-title-n').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
@@ -216,11 +222,31 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       page.on('pageerror', (error) => errors.push(error.message));
       await page.goto(planUrl);
       const reading = page.locator('[data-plan-reading]');
-      await expect(reading.locator('[data-plan-approval="approved"]')).toHaveText('Approved by you, with notes');
+      const decision = reading.locator('[data-plan-decision-mark="approved"]');
+      await expect(decision).toHaveAccessibleName('Approved by you, with notes');
       await expect(reading.locator('[data-plan-edit]')).toBeVisible();
       await expect(page.locator('.ib-vhead')).toHaveCount(0);
-      // The bar (approval A2): the approval's words and three marks, no version text; Versions closed until the clock.
-      expect((await reading.innerText()).trim()).toBe('Approved by you, with notes');
+      // The bar (approval A2): no words at all (the approval is its mark), no version text; Versions closed until the clock.
+      expect((await reading.innerText()).trim()).toBe('');
+      // The marks: 28 px buttons, a 16 px glyph.
+      expect((await decision.boundingBox())!.height).toBe(28);
+      expect((await decision.locator('svg').boundingBox())!.width).toBe(16);
+      // The decision's card: shown while the pointer rests on the mark, gone when it leaves; a press pins it; Escape closes it.
+      const card = page.locator('[data-plan-decision-card]');
+      await decision.hover();
+      await expect(card).toBeVisible();
+      await expect(card.locator('.ib-plan-dcard-line')).toHaveText('Approved by you, with notes');
+      await expect(card.locator('[data-plan-decision-when] b')).toHaveText('v1');
+      await page.screenshot({ path: join(proofDir, `desktop-decision-card-${scheme}.png`) });
+      await page.mouse.move(5, 890);
+      await expect(card).toHaveCount(0);
+      await decision.click();
+      await page.mouse.move(5, 890);
+      await page.waitForTimeout(600);
+      await expect(card).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(card).toHaveCount(0);
+      await expect(decision).toHaveAttribute('aria-expanded', 'false');
       await expect(page.locator('[data-versions-panel]')).toHaveCount(0);
       const clock = reading.locator('[data-reading-versions]');
       await clock.hover();
@@ -228,19 +254,19 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       await page.screenshot({ path: join(proofDir, `desktop-clock-tip-${scheme}.png`) });
       await clock.click();
       await expect(page.locator('[data-versions-panel]')).toBeVisible();
-      await expect(clock).toHaveAttribute('aria-pressed', 'true');
+      await expect(clock).toHaveAttribute('aria-expanded', 'true');
       await page.screenshot({ path: join(proofDir, `desktop-versions-${scheme}.png`) });
       await clock.click();
       await expect(page.locator('[data-versions-panel]')).toHaveCount(0);
       await expect(page.locator('[data-plan-dock] [data-plan-global]')).toBeVisible();
       await blur(page);
       await page.screenshot({ path: join(proofDir, `desktop-${scheme}.png`) });
-      // The panel has no head (approval P2): Pages comes first; the head's back arrow, its name kept, is the top
-      // bar's first, before the crumbs.
+      // The panel has no head (approval P2): Pages comes first; the head's back arrow, named for where it goes, is the
+      // top bar's first, before the crumbs.
       await expect(page.locator('[data-pages-rail-head]')).toHaveCount(0);
       const back = page.locator('[data-page-header] [data-plan-crumb-back]');
       await expect(back).toBeVisible();
-      await expect(back).toHaveAccessibleName('Back to Rate limiting for public endpoints');
+      await expect(back).toHaveAccessibleName('Back to Spaces');
       expect((await back.boundingBox())!.x).toBeLessThan((await page.locator('[data-page-header] [data-breadcrumb-root]').boundingBox())!.x);
       await page.screenshot({ path: join(proofDir, `desktop-panel-p2-${scheme}.png`), clip: { x: 0, y: 0, width: 760, height: 320 } });
       await reading.locator('[data-plan-more]').click();
@@ -276,8 +302,11 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
   }
 
   // A narrow computer window: the Send line stays (words above the controls where the bar is short), and Contents
-  // is still on screen. At 820 px the document keeps 480 px and more, so the Contents rail shows beside it (on main
-  // as here); the pane's own Contents button, for a card too narrow for the rail, is guarded by planHeader.test.tsx.
+  // is still on screen. A computer's document never gets narrower than PLAN_DOC_MIN (480 px): the files rail, then
+  // the versions give way first. Measured in the built page: 572 px at 820 (Versions cannot dock there, on main
+  // either), 486 px at 1030 with Versions docked, the narrowest a computer's card gets; the Contents rail fits at
+  // both, so no computer width shows the pane's own Contents button (a phone's Contents is in its menu). That button,
+  // for a card too narrow for the rail, is guarded with a stand-in layout by planHeader.test.tsx.
   {
     const context = await browser.newContext({ viewport: { width: 820, height: 900 }, colorScheme: 'light' });
     try {
@@ -296,6 +325,15 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       await expect(page.locator('.pn-contents-rail').first()).toBeVisible({ timeout: 10_000 });
       await blur(page);
       await page.screenshot({ path: join(proofDir, 'desktop-narrow-light.png') });
+      // The narrowest card: Versions docked beside it at 1030 px. The document keeps 480 px, the rail still shows.
+      await page.setViewportSize({ width: 1030, height: 900 });
+      await page.locator('[data-plan-reading] [data-reading-versions]').click();
+      await expect(page.locator('[data-plan-page]')).toHaveAttribute('data-rail', 'docked');
+      await expect.poll(() => page.locator('[data-plan-annotate] .ib-docscroll').evaluate((el) => Math.round(el.getBoundingClientRect().width))).toBeLessThan(520);
+      expect(await page.locator('[data-plan-annotate] .ib-docscroll').evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(480);
+      await expect(page.locator('.pn-contents-rail').first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('[data-plan-annotate] [data-contents-open]')).toHaveCount(0);
+      await page.locator('[data-plan-reading] [data-reading-versions]').click();
       expect(errors).toEqual([]);
     } finally {
       await context.close();

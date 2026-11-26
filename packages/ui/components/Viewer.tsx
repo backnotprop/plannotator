@@ -579,9 +579,11 @@ export interface ViewerHandle {
    * the host can keep the words some other way. Markdown `Viewer`: a text
    * selection, a global comment, a diagram part. `HtmlViewer`: a pin or a
    * text selection (with `onHostDraft`, the draft is handed to the host,
-   * which keeps the words itself).
+   * which keeps the words itself). `globalAnchor`: where a global comment's
+   * box opens, for a host that hides the Viewer's own Global comment button
+   * and offers its own (absent: that button, as before).
    */
-  reopenComment?: (annotation: Annotation, onMissing?: () => void) => boolean;
+  reopenComment?: (annotation: Annotation, onMissing?: () => void, globalAnchor?: HTMLElement | null) => boolean;
   /**
    * The comment being written in the viewer's own composer, as the comment
    * its submit would add, with empty words (the host reads them from the
@@ -1054,6 +1056,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     console.error('Failed to copy');
     return false;
   };
+  // The handle's Copy reads the text on screen now, so a new text does not make the handle again.
+  const copyPlanRef = useRef(handleCopyPlan);
+  copyPlanRef.current = handleCopyPlan;
   const containerRef = useRef<HTMLDivElement>(null);
   // "Open in" opens the document's file at the picked comment's line, else the
   // selected text's, read at the click (documentOpenInLine). A plan diff view's
@@ -1598,7 +1603,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // that block, a diagram part's in its diagram (once drawn), a text
   // selection's through the highlighter. Kinds with no composer here say no.
   const [diagramReopen, setDiagramReopen] = useState<{ blockId: string; request: DiagramReopenRequest } | null>(null);
-  const reopenComment = useCallback((annotation: Annotation, onMissing?: () => void): boolean => {
+  const reopenComment = useCallback((annotation: Annotation, onMissing?: () => void, globalAnchor?: HTMLElement | null): boolean => {
     const words = annotation.text ?? '';
     if (annotation.imageRegion != null || annotation.questionAnswer || annotation.mathTargets?.length) return false;
     if (annotation.type !== AnnotationType.COMMENT && annotation.type !== AnnotationType.GLOBAL_COMMENT) return false;
@@ -1610,7 +1615,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     };
     if (annotation.type === AnnotationType.GLOBAL_COMMENT) {
       if (readOnlyRef.current) return false;
-      const anchorEl = globalCommentButtonRef.current;
+      const anchorEl = globalAnchor ?? globalCommentButtonRef.current;
       if (!anchorEl) return false;
       setViewerCommentPopover({ anchorEl, contextText: '', isGlobal: true, initialText: words });
       return true;
@@ -1701,8 +1706,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       setViewerCommentPopover({ anchorEl, contextText: '', isGlobal: true });
       return true;
     },
-    copyDocument: handleCopyPlan,
-  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor, reopenComment, peekComment, authoringOff, markdown]);
+    copyDocument: () => copyPlanRef.current(),
+  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor, reopenComment, peekComment, authoringOff]);
 
   // --- Viewer-specific: code block annotation ---
 

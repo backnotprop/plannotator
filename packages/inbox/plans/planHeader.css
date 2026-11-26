@@ -65,22 +65,34 @@
 .ib-plan-menu-end { color: var(--muted-foreground); font-variant-numeric: tabular-nums; padding-right: 4px; }
 /* A copy's row says "Copied!" with the check in the success colour, as the Viewer's own Copy does. */
 [data-plan-menu] [data-copied] svg.ib-ic { color: var(--success, currentColor); }
-/* ── The bar (approval A2, PlanBar.tsx): the approval on the left; the pencil, the clock, the menu at the end ── */
+/* ── The bar (approval A2, PlanBar.tsx): nothing on the left of the newest version; Approve, the decision's mark,
+   the pencil, the clock, the menu at the end ── */
 .ib-plan-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 44px; padding: 6px 8px 6px 16px; font-size: 13px; color: var(--muted-foreground); }
 .ib-plan-bar-start { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; flex: 1 1 auto; min-width: 0; }
+.ib-plan-bar-start:empty { display: none; }
 .ib-plan-bar-end { display: flex; align-items: center; gap: 4px; flex: none; margin-left: auto; }
+.ib-plan-bar-end > [data-plan-approve], .ib-plan-bar-end > [data-plan-edit-done] { margin-right: 4px; }
 .ib-plan-bar-older > b { font-weight: 600; color: var(--foreground); }
+/* The marks: a 16 px glyph with a 1.5 px line in a 28 px button (a phone keeps its 44 px target). */
 .ib-plan-mark { flex: none; }
+.pn-inbox .ib-plan-bar .ib-plan-mark, .pn-inbox .ib-plan-bar .ib-plan-more, .pn-inbox .ib-plan-reading .ib-plan-mark { width: 28px; height: 28px; }
+.ib-plan-mark svg.ib-ic { width: 16px; height: 16px; stroke-width: 1.5; }
+.ib-plan-mark svg.ib-ic path { vector-effect: non-scaling-stroke; }
 .ib-plan-mark:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
-/* The clock reads pressed while Versions is open. */
-.ib-plan-mark[aria-pressed="true"] { background: var(--muted); color: var(--foreground); }
-.ib-plan-bar .ib-plan-more { width: 30px; height: 30px; }
-.ib-plan-page[data-phone] .ib-plan-mark { width: 44px; height: 44px; }
-.ib-plan-page[data-phone] .ib-plan-bar { padding-left: 12px; padding-right: 4px; }
-/* A computer: the menu at the reading line's end. */
-.ib-plan-reading:has(> [data-plan-more]) { display: flex; align-items: center; }
-.ib-plan-reading:has(> [data-plan-more]) > [data-reading-line] { flex: 1 1 auto; min-width: 0; }
-.ib-plan-reading > [data-plan-more] { width: 30px; height: 30px; margin-right: 8px; }
+.ib-plan-mark:disabled { opacity: 0.45; cursor: default; }
+/* The clock reads pressed while Versions is open; the decision's mark while its card is open. */
+.ib-plan-mark[data-reading-versions][aria-expanded="true"], .ib-plan-decision[data-popup-open] { background: var(--muted); color: var(--foreground); }
+.ib-plan-decision[data-tone="approved"], .ib-plan-decision[data-tone="approved"][data-popup-open] { color: var(--success); }
+.ib-plan-decision[data-tone="changes"], .ib-plan-decision[data-tone="changes"][data-popup-open] { color: var(--warning); }
+.pn-inbox .ib-plan-page[data-phone] .ib-plan-mark { width: 44px; height: 44px; }
+/* The decision's card (PlanDecision.tsx). */
+.ib-plan-dcard { display: flex; flex-direction: column; gap: 6px; min-width: 200px; max-width: min(320px, calc(100vw - 24px)); padding: 10px 12px; font-size: 13px; line-height: 18px; color: var(--foreground); }
+.ib-plan-dcard p { display: flex; align-items: center; gap: 6px; margin: 0; }
+.ib-plan-dcard-line > span:last-child { min-width: 0; }
+.ib-plan-dcard-when { padding-left: 21px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-plan-dcard-when > b { font-weight: 600; color: var(--foreground); }
+.ib-plan-dcard-moved { padding-left: 21px; color: var(--muted-foreground); }
+.ib-plan-dcard .ib-plans-dmark svg.ib-ic { flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ── A computer's crumbs: the panel's back arrow first (approval P2) ── */
 .ib-plan-crumbs { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
@@ -96,27 +108,19 @@
 /* The cross-fade once the first measurement is in: the page opens on the right one, cut. */
 .ib-plan-bartitle[data-settled] > * { transition: opacity 160ms ease-out, transform 160ms ease-out; }
 .ib-plan-bartitle-rest { padding: 0 6px; line-height: 44px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 500; color: var(--muted-foreground); }
-.ib-plan-titleblock { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; min-width: 0; padding: 0 6px; border-radius: 10px; text-align: left; cursor: pointer; opacity: 0; transform: translateY(4px); pointer-events: none; }
+.ib-plan-titleblock { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 0 6px; border-radius: 10px; text-align: left; cursor: pointer; opacity: 0; transform: translateY(4px); pointer-events: none; }
 .ib-plan-titleblock:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 .ib-plan-bartitle[data-away] > .ib-plan-bartitle-rest { opacity: 0; transform: translateY(-4px); }
 .ib-plan-bartitle[data-away] > .ib-plan-titleblock { opacity: 1; transform: none; pointer-events: auto; }
 .ib-plan-title-n { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; line-height: 20px; color: var(--foreground); }
-.ib-plan-title-s { display: flex; align-items: center; gap: 5px; max-width: 100%; font-size: 12.5px; line-height: 16px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; }
-.ib-plan-title-s > b { flex: none; font-weight: 600; color: var(--foreground); }
-/* The decision is cut before the version ever is. */
-.ib-plan-title-dec { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
-.ib-plan-title-dec > span { overflow: hidden; text-overflow: ellipsis; }
-.ib-plan-title-dec[data-plan-decision="approved"] { color: var(--success, var(--foreground)); }
-.ib-plan-title-dec svg.ib-ic, .pn-inbox .ib-plan-title-dec svg.ib-ic { width: 12px; height: 12px; flex: none; }
-.ib-plan-title-s > svg.ib-ic:last-child { flex: none; opacity: 0.7; }
+.ib-plan-titleblock > svg.ib-ic { flex: none; opacity: 0.7; color: var(--muted-foreground); }
+/* An older version or a comparison: the bar says so in the name's place. */
+.ib-plan-barline { flex: 1 1 0; min-width: 0; padding: 0 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; color: var(--muted-foreground); }
+/* A phone's marks at the top bar's end: Approve (or Done and Cancel), the decision, the clock. */
+.ib-plan-topmarks { display: flex; align-items: center; gap: 0; }
+.ib-plan-topmarks:empty { display: none; }
+.ib-plan-topmarks > [data-plan-approve], .ib-plan-topmarks > [data-plan-edit-done], .ib-plan-topmarks > [data-plan-edit-cancel] { margin: 0 2px; position: relative; }
+.ib-plan-topmarks > button[data-plan-approve]::after, .ib-plan-topmarks > [data-plan-edit-done]::after, .ib-plan-topmarks > [data-plan-edit-cancel]::after { content: ""; position: absolute; inset: -10px -4px; }
 @media (prefers-reduced-motion: reduce) { .ib-plan-bartitle > *, .ib-plan-bartitle[data-settled] > * { transition: none; transform: none !important; } }
-
-/* ── A phone's line above the document's title: Approve when offered, the approval, the version ── */
-.ib-plan-kicker { align-self: stretch; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; width: 100%; max-width: 640px; min-height: 44px; margin: 8px auto 0; font-size: 14px; color: var(--muted-foreground); }
-.ib-plan-kicker-start { display: flex; align-items: center; gap: 8px; }
-.ib-plan-kicker .ib-plan-approval > svg.ib-ic { width: 15px; height: 15px; }
-.ib-plan-kicker-end { margin-left: auto; display: flex; align-items: center; }
-.ib-plan-kicker + div article { padding-top: 6px; }
-/* A phone's 44 px targets: the line's small buttons (Approve, Dismiss) take a taller hit area than they draw. */
-.ib-plan-kicker-start > button, .ib-plan-kicker .ib-plan-approval-x { position: relative; }
-.ib-plan-kicker-start > button::after, .ib-plan-kicker .ib-plan-approval-x::after { content: ""; position: absolute; inset: -10px -6px; }
+/* A phone's one bar is as slim as the Inbox list's own phone header (`.ib-lhead`, 52 px): its 44 px targets fit it. */
+.ib-plan-page[data-phone] nav[data-page-header] { min-height: 0; height: 52px; padding-top: 1px; padding-bottom: 0; flex-wrap: nowrap; }

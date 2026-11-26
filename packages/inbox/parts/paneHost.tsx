@@ -13,8 +13,6 @@ export interface PaneHostHandle {
   globalComment: (anchor: HTMLElement) => boolean;
   /** Copy the file's text. */
   copy: () => Promise<boolean>;
-  /** Open Contents as a sheet (a phone); null when the file has none. */
-  contents: ((back: HTMLElement | null) => void) | null;
 }
 
 export interface PaneHost {
@@ -24,8 +22,11 @@ export interface PaneHost {
   comments: HTMLElement | null;
   /** The tools as marks only (a phone: their names are their accessible names). */
   marks?: boolean;
-  /** Drawn at the top of the document's scroll, above its title (the page's state line). */
-  aboveTitle?: ReactNode;
+  /**
+   * The page's own Global comment control (the Viewer's is hidden): where a saved global comment's box opens again
+   * when the pane restores it. Absent or null: the Viewer's button, as before.
+   */
+  globalAnchor?: () => HTMLElement | null;
   /** Set while the pane is on screen. */
   handle: MutableRefObject<PaneHostHandle | null>;
   /** The phone's Contents sheet's opener, handed to the page (null when there is none). */

@@ -1,6 +1,6 @@
 /**
  * Editing a plan and approving it, on its page (approval "plans-editing", .product/approved/plans-editing/approval.md):
- * - Only the newest version of a Markdown page can be edited: Edit, in the reading line's start, opens the shared
+ * - Only the newest version of a Markdown page can be edited: Edit (the bar's pencil) opens the shared
  *   Markdown editor (PlanEditor.tsx, loaded then) on its text, with Done and Cancel. Never a diagram or an HTML page.
  * - Done makes a new newest version, the person's (`POST /api/plans/:id/versions`, `source: "person"`), and the agent
  *   is sent what changed, plan review's "# Direct Edits" (deliver.ts: the plan's thread, else New message to the
@@ -13,9 +13,10 @@
  * - An older version cannot be edited: it is read, compared, or Restored (the reading line's restore slot), which
  *   makes a new newest version holding its text, sent to the agent the same way.
  * - Approve names the version on screen and is refused once a newer one came (the newest then shows). An approval
- *   belongs to the current version only: the reading line says "Approved by you" on it, and on a new version that
+ *   belongs to the current version only: the bar's decision mark says "Approved by you" on it, and on a new version that
  *   holds none, "v4 is new and not approved. You approved v3, and that does not carry over."; when the person's own
- *   edit carried their approval, "Your approval moved to v4." until the next version or its Dismiss.
+ *   edit carried their approval, "Your approval moved to v4." until the next version or its Dismiss. These lines are
+ *   the card of the bar's decision mark (PlanDecision.tsx), not words in the bar.
  * No keyboard shortcut (one for Edit needs the owner).
  */
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -28,6 +29,7 @@ import { Icon } from '../icons';
 import { plansApi, type PlanRead } from './client';
 import { deliverToPlanAgent, noAgentWords, planAgentNow } from './deliver';
 import { approvalClearedLine, approvalMovedLine, approverList } from './words';
+import { planDecisionInfo, type PlanDecisionInfo } from './PlanDecision';
 
 const PlanEditor = lazy(() => import('./PlanEditor'));
 
@@ -78,22 +80,23 @@ interface Notice {
 export interface PlanEditing {
   /** The editor is open. */
   editing: boolean;
-  /** The reading line's start: Edit and Approve, or Done and Cancel while editing. */
+  /** Approve (the newest version, not approved), or Done and Cancel while editing; Edit is the bar's pencil. */
   start: ReactNode;
-  /** The reading line's approval slot (the newest version only). */
-  approved: ReactNode;
-  /** The older version's Restore (the reading line's restore slot). */
+  /** The decision on the newest version, for the bar's decision mark and its card (PlanDecision.tsx). */
+  decision: PlanDecisionInfo;
+  /** An edit, a Restore or an Approve is under way: the pencil waits, as Edit did. */
+  busy: boolean;
+  /** The older version's Restore (the bar's restore slot), and the same as an action (a phone's menu row); null otherwise. */
   restore: ReactNode;
+  restoreNow: (() => void) | null;
   /** What the last edit, Restore or Approve did, or the text a newer version kept from being saved. */
   banner: ReactNode;
   /** A newer version kept the person's text from being saved: its banner carries "Show changes", so the page's own does not show. */
   kept: boolean;
   /** The editor, in the page's place, while editing. */
   editor: ReactNode;
-  /** Edit, as an action (a menu's row), while Edit is offered; null otherwise. */
+  /** Edit, as an action (the pencil, a menu's row), while Edit is offered; null otherwise. */
   edit: (() => void) | null;
-  /** The reading line's start without Edit (Approve alone, or Done and Cancel while editing): Edit is in a menu. */
-  startNoEdit: ReactNode;
 }
 
 export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docRef: string | null; versions: readonly PlanVersion[]; head: number; shown: number; comparing: boolean; onChanged: () => void; toNewest: () => void; showChanges: (from: number, to: number) => void }): PlanEditing {
@@ -293,7 +296,7 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
   };
 
   const canEdit = document.kind === 'markdown' && onNewest;
-  const startOf = (withEdit: boolean) => editing ? (
+  const start = editing ? (
     <>
       <FrameButton size="xs" onClick={() => void done()} disabled={busy} data-plan-edit-done="">
         Done
@@ -302,54 +305,32 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
         Cancel
       </FrameButton>
     </>
-  ) : (canEdit && withEdit) || (onNewest && approval.kind !== 'approved') ? (
-    <>
-      {canEdit && withEdit && (
-        <FrameButton variant="outline" size="xs" onClick={() => void edit(null)} disabled={busy} data-plan-edit="">
-          Edit
-        </FrameButton>
-      )}
-      {onNewest && approval.kind !== 'approved' && (
-        <FrameButton variant="outline" size="xs" onClick={() => void approve()} disabled={busy} data-plan-approve="">
-          Approve
-        </FrameButton>
-      )}
-    </>
+  ) : onNewest && approval.kind !== 'approved' ? (
+    <FrameButton variant="outline" size="xs" onClick={() => void approve()} disabled={busy} data-plan-approve="">
+      Approve
+    </FrameButton>
   ) : null;
-  const start = startOf(true);
 
-  let approved: ReactNode = null;
-  if (onNewest && !editing) {
-    if (approval.kind === 'approved') {
-      const moved = approval.moved && dismissed !== String(approval.moved.version_number) ? approval.moved : null;
-      approved = (
-        <span className="ib-plan-approval" data-plan-approval={moved ? 'moved' : 'approved'}>
-          <Icon name="check" />
-          <span>{moved ? approvalMovedLine(moved) : approvedByLine(approval)}</span>
-          {moved && (
-            <button
-              type="button"
-              className="ib-plans-quiet ib-plan-approval-x"
-              aria-label="Dismiss"
-              onClick={() => {
-                storage.setItem(movedKey, String(moved.version_number));
-                setDismissed(String(moved.version_number));
-              }}
-              data-plan-approval-dismiss=""
-            >
-              <Icon name="x" />
-            </button>
-          )}
-        </span>
-      );
-    } else if (approval.kind === 'cleared') {
-      approved = (
-        <span className="ib-plan-approval" data-plan-approval="cleared">
-          <span>{approvalClearedLine(approval)}</span>
-        </span>
-      );
-    }
-  }
+  // The decision, in every state of the page (the bar's mark): the approval's line, "Your approval moved to v4." with
+  // its Dismiss until dismissed, the cleared approval's line, or the plan's few words for the rest.
+  const moved = approval.kind === 'approved' && approval.moved && dismissed !== String(approval.moved.version_number) ? approval.moved : null;
+  const decision = planDecisionInfo({
+    state: approval,
+    head,
+    decisions: read.decisions,
+    docId: document.id,
+    approvedBy: approval.kind === 'approved' ? approvedByLine(approval) : null,
+    cleared: approval.kind === 'cleared' ? approvalClearedLine(approval) : null,
+    moved: moved
+      ? {
+          words: approvalMovedLine(moved),
+          dismiss: () => {
+            storage.setItem(movedKey, String(moved.version_number));
+            setDismissed(String(moved.version_number));
+          },
+        }
+      : null,
+  });
 
   const restoreButton =
     !comparing && shown !== head && !editing ? (
@@ -413,5 +394,5 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
     </Suspense>
   ) : null;
 
-  return { editing: editing !== null, start, approved, restore: restoreButton, banner, kept: kept !== null, editor, edit: canEdit && !editing ? () => void (busy || edit(null)) : null, startNoEdit: startOf(false) };
+  return { editing: editing !== null, start, decision, busy, restore: restoreButton, restoreNow: restoreButton ? () => void restore() : null, banner, kept: kept !== null, editor, edit: canEdit && !editing ? () => void (busy || edit(null)) : null };
 }

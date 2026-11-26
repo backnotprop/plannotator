@@ -2011,7 +2011,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     }
     trackReopen(draft, () => popoverShown() || (annotation.diagramAnchor != null && sectionRef.current?.querySelector('[data-diagram-composer] textarea') != null) || htmlComment.open);
     if (phoneHtml && hasComposer) htmlComment.expect(draft);
-    if (!viewer.reopenComment?.(annotation, missing)) missing();
+    if (!viewer.reopenComment?.(annotation, missing, (full ? null : props.host?.globalAnchor?.()))) missing();
   };
   const reopenInViewerRef = useRef(reopenInViewer);
   reopenInViewerRef.current = reopenInViewer;
@@ -2189,7 +2189,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const hostOr = (slot: HTMLElement | null | undefined, node: React.ReactNode) => (hosted ? inHostSlot(slot ?? null, node) : node);
   useEffect(() => {
     if (!hosted) return;
-    hosted.handle.current = { globalComment: (at) => viewerRef.current?.openGlobalComment?.(at) ?? false, copy: () => viewerRef.current?.copyDocument?.() ?? Promise.resolve(false), contents: null };
+    hosted.handle.current = { globalComment: (at) => viewerRef.current?.openGlobalComment?.(at) ?? false, copy: () => viewerRef.current?.copyDocument?.() ?? Promise.resolve(false) };
     return () => void (hosted.handle.current = null);
   });
   const commentsButton = <PaneCommentsButton buttonRef={sheetButtonRef} open={sheet} count={annotations.length} earlier={earlierCount} controls={sheetId} onToggle={togglePanel} onEscape={closeSheet} />;
@@ -2800,7 +2800,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               data-contents-gutter={railGutter ? '' : undefined}
               ref={setScrollViewport}
             >
-              {hosted?.aboveTitle}
               <ScrollViewportProvider viewport={scrollViewport}>
               <ImageResolverContext.Provider value={resolveImage}>
               <Viewer

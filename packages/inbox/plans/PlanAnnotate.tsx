@@ -17,7 +17,7 @@
  * found again as Send is pressed); once it went, they are sent and the plan has the thread. With neither, Send is
  * disabled and says why in the Inbox's words for a project with no live agent.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { planCommentAnnotationId, planDocumentFileName, type PlanComment, type PlanDocument, type PlanVersion } from '@plannotator/core/plans';
 import { exportAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
@@ -104,13 +104,13 @@ function useCloseNotOnEscape(onClose: () => void): () => void {
  * The page's bars (approval "inbox-plan-page-header-a3", PlanChrome.tsx): out of full screen the pane draws no
  * file-name row; its tools and comments button join Send in one bar at the bottom (a computer adds Global comment as
  * a mark and the Send line where it fits; a phone draws Send as its mark, the line staying its description, and a
- * failed Send's words on a row of their own). `kicker` is the phone's state line above the document's title.
+ * failed Send's words on a row of their own). `a3`: a phone's top bar follows whether the document's title is in view.
  */
 export interface PlanAnnotateChrome {
   full: boolean;
   onFull: (full: boolean) => void;
   handle: MutableRefObject<PaneHostHandle | null>;
-  kicker: ReactNode;
+  a3: boolean;
   onContents: (open: ((back: HTMLElement | null) => void) | null) => void;
   onTitleAway: ((away: boolean) => void) | null;
 }
@@ -140,8 +140,11 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, a
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [tools, setTools] = useState<HTMLSpanElement | null>(null);
   const [commentsSlot, setCommentsSlot] = useState<HTMLSpanElement | null>(null);
-  const host = useMemo<PaneHost>(() => ({ tools, comments: commentsSlot, marks: phone, aboveTitle: chrome.kicker, handle: chrome.handle, onContents: chrome.onContents }), [tools, commentsSlot, phone, chrome.kicker, chrome.handle, chrome.onContents]);
-  useTitleAway(root, read.plan.name, !full && chrome.kicker != null, chrome.onTitleAway);
+  // A saved global comment opens again on the page's own Global comment (the bar's mark; a phone's menu button).
+  const globalMark = useRef<HTMLButtonElement | null>(null);
+  const globalAnchor = useCallback(() => globalMark.current ?? root?.closest('.ib-plan-page')?.querySelector<HTMLElement>('[data-plan-more]') ?? null, [root]);
+  const host = useMemo<PaneHost>(() => ({ tools, comments: commentsSlot, marks: phone, globalAnchor, handle: chrome.handle, onContents: chrome.onContents }), [tools, commentsSlot, phone, globalAnchor, chrome.handle, chrome.onContents]);
+  useTitleAway(root, read.plan.name, !full && chrome.a3, chrome.onTitleAway);
   const source = useMemo<InboxFileSource>(() => {
     const numberOf = (a: InboxAttachmentState) => byAttachment.get(a.id)?.version_number ?? shown;
     return {
@@ -229,7 +232,7 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, a
         {!full && <span className="ib-plan-dock-tools" ref={setTools} />}
         {!full && !phone && (
           <Tip content="Global comment">
-            <button type="button" className="ib-plan-globalmark" aria-label="Global comment" onClick={(event) => chrome.handle.current?.globalComment(event.currentTarget)} data-plan-global="">
+            <button type="button" ref={globalMark} className="ib-plan-globalmark" aria-label="Global comment" onClick={(event) => chrome.handle.current?.globalComment(event.currentTarget)} data-plan-global="">
               <Icon name="globe" size={15} />
             </button>
           </Tip>
