@@ -224,6 +224,8 @@ async function shots(page: Page, name: string, schemes: readonly ('light' | 'dar
 
 /** A sidebar row as the person sees it (Settings draws a second sidebar copy, out of sight). */
 const item = (page: Page, id: string) => page.locator(`[data-sidebar-item="${id}"]`).filter({ visible: true });
+/** The sidebar's Projects section (a section, not a row: it has no `data-sidebar-item`), as the person sees it. */
+const projects = (page: Page) => page.locator('[data-sheet-section="projects"]').filter({ visible: true });
 /** The line's stamp for the welcome: its claim spent (packages/shared/inbox/reveals.ts `review_welcome`). */
 const welcomeStamp = (dataDir: string) => (savedConfig(dataDir).inboxReveals as Record<string, { shownAt?: string } | undefined> | undefined)?.review_welcome?.shownAt ?? null;
 
@@ -272,7 +274,8 @@ test('a first run of --review: code review only, the welcome once over Reviews, 
   await expect(page.locator(WELCOME)).toHaveCount(0);
   expect(new URL(page.url()).hash).toBe('#reviews');
   await expect(item(page, 'reviews')).toBeVisible();
-  for (const id of ['inbox', 'board', 'projects', 'artifacts', 'new-message']) await expect(item(page, id)).toHaveCount(0);
+  for (const id of ['inbox', 'board', 'artifacts', 'new-message']) await expect(item(page, id)).toHaveCount(0);
+  await expect(projects(page)).toHaveCount(0);
   // The person's pull requests are in (the Pull requests board draws them as tiles; the titles are in its Table view).
   await expect(page.locator('[data-prs-page] [data-pr-tile]')).toHaveCount(4, { timeout: 20_000 });
   await page.mouse.move(4, 4);
@@ -323,7 +326,7 @@ test('a first run of --review: code review only, the welcome once over Reviews, 
   await shots(page, 'settings-switched-back-{s}');
   await page.goto(url.replace(/#.*$/, ''));
   await expect(item(page, 'inbox')).toBeVisible();
-  await expect(item(page, 'projects')).toBeVisible();
+  await expect(projects(page)).toBeVisible();
   await page.mouse.move(4, 4);
   await shots(page, 'inbox-switched-back-{s}', ['light', 'dark']);
 });
@@ -363,7 +366,8 @@ test('a 390 px phone: the welcome as a sheet with a 44 px switch target; Escape 
   // The sidebar drawer: Reviews, no Inbox, Board, Projects or Artifacts.
   await page.getByRole('button', { name: /^Toggle Sidebar/ }).first().click();
   await expect(item(page, 'reviews').first()).toBeVisible();
-  for (const id of ['inbox', 'board', 'projects', 'artifacts']) await expect(item(page, id)).toHaveCount(0);
+  for (const id of ['inbox', 'board', 'artifacts']) await expect(item(page, id)).toHaveCount(0);
+  await expect(projects(page)).toHaveCount(0);
   await shots(page, 'reviews-phone-drawer-{s}');
 });
 
