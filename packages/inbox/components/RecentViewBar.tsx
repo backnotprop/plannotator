@@ -14,9 +14,12 @@ const NOTE = '· threads you acted in, newest first';
 /** The view's turn already said: the list drawn anew with the view still on (a full-screen file closed) says nothing. */
 let saidTurn = 0;
 
-export function RecentViewBar({ place, picking }: { place: string; picking: boolean }) {
+/**
+ * The bar's words for a screen reader: a live region always on the page, filled once the view is on (one filled as it
+ * mounts may go unsaid). Drawn after Filter by typing's field, so nothing comes between the header and that field.
+ */
+export function RecentViewSaid({ place }: { place: string }) {
   const on = useRecentView(place);
-  // Said through a live region already on the page, filled once the view is on (one filled as it mounts may go unsaid).
   const [said, setSaid] = useState('');
   useEffect(() => {
     if (!on) return setSaid('');
@@ -25,10 +28,16 @@ export function RecentViewBar({ place, picking }: { place: string; picking: bool
     setSaid(`${TITLE} ${NOTE}`);
   }, [on]);
   return (
+    <span className="ib-sr" role="status" aria-live="polite" data-recent-view-said="">
+      {said}
+    </span>
+  );
+}
+
+export function RecentViewBar({ place, picking }: { place: string; picking: boolean }) {
+  const on = useRecentView(place);
+  return (
     <>
-      <span className="ib-sr" role="status" aria-live="polite" data-recent-view-said="">
-        {said}
-      </span>
       {on && !picking && (
         <div className="ib-rview" data-recent-view="">
           <div className="ib-rview-in">

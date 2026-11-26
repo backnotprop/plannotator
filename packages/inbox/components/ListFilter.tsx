@@ -45,7 +45,7 @@ import { openTitleFilter, useTitleFilterTextWhen } from '../listTitleFilterStore
 import { noteTravelFrom } from './titleFilterMotion';
 import { FilterMenuRows, rowKeyToField, type FilterSection } from './ListFilterSections';
 export { useTitleFilterList } from './TitleFilter';
-export { RecentViewBar } from './RecentViewBar';
+export { RecentViewBar, RecentViewSaid } from './RecentViewBar';
 import {
   NO_LIST_FILTER,
   PULL_OPTIONS,
