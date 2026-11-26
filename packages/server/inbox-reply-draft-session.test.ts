@@ -17,6 +17,8 @@ function routeWith(follows?: readonly string[]) {
   const store = {
     thread: (id: string) => (id === THREAD ? { thread_id: id } : null),
     replyDraft: (id: string) => drafts.get(id) ?? null,
+    // No save here is sent again under its key (a linked machine's replay, inbox-door-draft-log.test.ts).
+    replyDraftSavedBy: () => null,
     saveReplyDraft: (id: string, body: Record<string, unknown>) => {
       const draft: InboxReplyDraft = { v: 1, thread_id: id, body: String(body.body), created_at: "2026-11-24T10:00:00.000Z", updated_at: "2026-11-24T10:00:01.000Z" };
       drafts.set(id, draft);

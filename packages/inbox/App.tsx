@@ -34,7 +34,7 @@ import { applyStreamRecord } from './data/apply/stream';
 import { useRowWrites, type RowDrawing } from './data/actions/rows';
 import { keepSavedQuestions } from './data/actions/picks';
 import { useSettingsSaves } from './data/actions/settings';
-import { useListShown } from './app/useListView';
+import { leaveRecentViewOnEscape, useListShown } from './app/useListView';
 import { useListTags } from './app/useListTags';
 import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
 import { decideAwayToast, tuckDecide } from './app/decideTuck';
@@ -81,7 +81,7 @@ import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { readListView, useListView, type ListSort } from './listView';
 import { useShowLight } from './showLight';
 import { useHeldRead } from './app/useHeldRead';
-import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
+import { ListFilterEmpty, RecentViewEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, drawnSection, listGroups, markHeldRowArchived, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, shownAfter, waitingCount, type OpenThread, priorityChangedRows } from './held';
 import { deliveriesReadList } from './rowDelivery';
 import { inboxAgentsWatched, setInboxAgents, inboxAgentsNow } from './agentsList';
@@ -238,7 +238,7 @@ import { type SheetLayout } from './prs/tableModel';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
 import { reviewsOnYou } from './pulls/reviewsModel';
-import { appReviewView } from './app/reviewView';
+import { useAppReviewView } from './app/reviewView';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { BroIntro } from './components/BroIntro';
@@ -1577,9 +1577,8 @@ function Inbox() {
             cardsTimer = setTimeout(() => void refreshCards(), 60);
             return;
           }
-          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a list or thread
-          // read: only the open thread's checklist reads them again. The checklist lives only in its thread (owner,
-          // 2026-11-09): no list row or Board card shows it.
+          // A thread's steps (approval "inbox-thread-steps"; a linked machine's come by `onSteps`): silent, only the open
+          // thread's checklist reads them again. It lives only in its thread (owner, 2026-11-09): no row or card shows it.
           if (event?.kind === 'steps') {
             stepsBus.emit(event.thread_id);
             return;
@@ -1648,6 +1647,7 @@ function Inbox() {
         },
         // A thread's tags changed (here, in another window): read the list's `tags` again (approval "inbox-thread-tags").
         onTags: () => listAfterEvents(60),
+        onSteps: (threadId) => stepsBus.emit(threadId),
         // A linked machine's cards changed (its Board was read again here): the merged Board is read, as for a card record.
         onCards: () => {
           if (cardsTimer) clearTimeout(cardsTimer);
@@ -2042,8 +2042,8 @@ function Inbox() {
         closeTo(systemBack);
         return;
       }
-      // An open file owns Escape (the HTML viewer's ladder, the composers).
-      if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return;
+      // An open file owns Escape (the HTML viewer's ladder, the composers). With no thread open, the list's last rung: Recent activity's view goes.
+      if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return leaveRecentViewOnEscape(event, routeRef.current);
       // Something inside the thread already used this Escape (the reply's choice at Send goes back to the reply).
       if (event.defaultPrevented) return;
       const target = event.target as HTMLElement | null;
@@ -3652,7 +3652,7 @@ function Inbox() {
   useEffect(() => {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
-  const { listSortShown, latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
+  const { recentEmpty, listSortShown, latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
     latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, listSort, combining: bulk.combines.waiting,
     tags: {
       listTags,
@@ -4944,7 +4944,7 @@ function Inbox() {
     />
   );
 
-  const reviewView = appReviewView({ route, pulls, pullsShown, thread, projectNames, go });
+  const reviewView = useAppReviewView({ route, pulls, pullsShown, thread, projectNames, go });
   // The Reviews list: on its own page, or beside a thread opened from it (the thread pane is the Inbox's own).
   const reviewsList = (project: string | null, view: PullFilter, threadId: string | null) => {
     // A PR opened from a project's drawing closes back to it (its own page only).
@@ -5282,7 +5282,7 @@ function Inbox() {
     const stack = stacks.find((s) => s.id === route.stack || s.layers.some((l) => l.key === route.stack)) ?? null;
     main = (
       <StackPage
-        stack={stack && stack.layers.some(inboxPullIsOpen) ? stack : null}
+        stack={stack && stack.layers.some(inboxPullIsOpen) ? stack : null} id={route.stack}
         loading={!sheetPulls.model} board={sheetPulls.model}
         repoLabel={stack ? (repoLabels(stacks).get(`${stack.host}/${stack.repo}`.toLowerCase()) ?? stack.repo) : null}
         phone={phone}
@@ -5495,7 +5495,7 @@ function Inbox() {
           phone={phone}
           reconnecting={streamDead}
           empty={
-            listHeld ? null : listFilterEmpty ? (
+            listHeld ? null : recentEmpty ? <RecentViewEmpty /> : listFilterEmpty ? (
               <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped, filterTag !== null))} />
             ) : filterTag ? (
               <div className="ib-empty-list" data-tag-empty="">
@@ -6239,9 +6239,9 @@ function Inbox() {
         {said}
       </div>
       {guideMessage && thread && (
-        // Every guide or review an agent sends opens the full-window review (approval "inbox-one-review-screen");
-        // what Code review brings shows only while it is on.
+        // Every guide or review an agent sends opens the full-window review (approval "inbox-one-review-screen").
         <ReviewPane
+          outbox={outbox}
           key={guideMessage.id}
           thread={thread}
           message={guideMessage}

@@ -49,6 +49,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, PanePart, PullChangesTreePart, ReaderPart, ReviewKeysHere } from '../lazyParts';
+import { FieldVoice } from './FieldVoice';
 import { CommentPictures } from '../commentPictures';
 import { inboxPullIsOpen, inboxPullUrlOfKey, type InboxMessageWire, type InboxPull, type InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
@@ -69,6 +70,13 @@ import type { ReviewAt } from '../app/reviewAt';
 import type { GuideSelectionActions } from '../guide/types';
 import { reviewSourceLine } from '../guide/sourceLine';
 import { InboxApiError, inboxApi } from '../api';
+import type { MachineView, OutboxView } from '@plannotator/core/inbox-wire-models';
+import { heldViewed } from '../guide/heldViewed';
+import { useViewedTicks } from '../guide/useViewedTicks';
+import { ownerSwitch, readsServedFor, useLinkedReadsRev } from '../linkedReads';
+import { linkedMachineFacts, machineOf } from '../inboxUrl';
+import { outboxLine } from '../machines';
+import { OutboxStateLine } from './HeldWrites';
 import { guideReviewImages } from '../reviewImages';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
@@ -123,7 +131,7 @@ export interface ReviewPaneProps {
   onPosted?: () => void;
   /** Plain Ask on selected lines: the Inbox's Ask window opens with these words in its box. Absent: no Ask. */
   onAsk?: (words: string) => void;
-  /** Settings → Capabilities → Code review is on. */
+  /** Settings → Capabilities → Code review is on (this computer's: a linked machine's review follows its own). */
   codeReview: boolean;
   /** Settings → Capabilities → Chapter diagrams (on unless turned off). Off: a chapter's diagram draws folded under its Diagram header. */
   chapterDiagrams?: boolean;
@@ -136,6 +144,8 @@ export interface ReviewPaneProps {
    */
   at?: ReviewAt | null;
   onLanded?: () => void;
+  /** The window's outbox: a Viewed tick held for the review's machine (away) shows as ticked until it lands. */
+  outbox?: ReadonlyMap<string, OutboxView>;
 }
 
 /** Below this width the comments panel folds into the header's Comments button: the rail and the diff keep the room. */
@@ -153,8 +163,13 @@ function chapterOf(chapters: readonly { diffs: readonly { file: string }[] }[], 
   return at < 0 ? null : at;
 }
 
-export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted, onAsk, codeReview, chapterDiagrams = true, onWriteReply, at = null, onLanded }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted, onAsk, codeReview: codeReviewHere, chapterDiagrams = true, onWriteReply, at = null, onLanded, outbox }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
+  // Moves when a linked machine's marks arrive: a review opened before the merged list was read gets its reads then.
+  const linkedRev = useLinkedReadsRev();
+  // The Inbox that holds the review decides: a linked machine's, as it answered with the snapshot (an older one says
+  // nothing: this computer's, as before), so nothing shows that its Inbox would refuse.
+  const codeReview = ownerSwitch(message.id, codeReviewHere, state.codeReviewThere ?? codeReviewHere);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, commentsRead, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // Code review's own review: the agent sent it as one (`review: true`) while Code review is on. A guide, or a review
   // while Code review is off, reads with none of it: no verdict, Viewed ticks or Post. With Code review off the server
@@ -166,8 +181,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   const walkthrough = !!message.guide?.walkthrough;
   const verdict = isReview && !thread.pull_theirs && !walkthrough;
   // Nor does a walkthrough take ticks (the owner, on the walkthrough's pictures): no chapter "Reviewed", no file
-  // "Viewed", and so no "N of M" line in the chapter menu. A review keeps all three.
-  const viewedTicks = isReview && !walkthrough;
+  // "Viewed", and so no "N of M" line in the chapter menu. A review keeps all three. Viewed is kept on the message's
+  // own machine: a linked machine too old to take it (no `linked-reads`) shows none, as no write could reach it.
+  const viewedTicks = isReview && !walkthrough && readsServedFor(message.id);
   // Post to GitHub/GitLab (the owner's answer C on #2590): a review of the one PR this thread was handed can go on
   // that PR instead. A teammate's posts with its full verdict; its agent path stays verdict-free (no control here).
   // A stack's review spans several PRs and posts from each layer's own review (Pull requests) instead.
@@ -236,12 +252,12 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   const phone = usePhone();
   // With Code review on, its diff headers offer Open in (the thread's project; nothing when the file is not there).
   // Code review's image previews on changed images, from the patch the agent sent (reviewImages.ts).
-  const images = useMemo(() => guideReviewImages(message.id), [message.id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `linkedRev`: the marks `guideReviewImages` reads.
+  const images = useMemo(() => guideReviewImages(message.id), [message.id, linkedRev]);
   const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
   const [mode, setMode] = useState<RailMode>('walkthrough');
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
   const [current, setCurrent] = useState<number | null>(null);
-  const [viewed, setViewed] = useState<string[]>(() => message.guide_viewed ?? []);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -283,7 +299,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
       },
     [stateComments, setSelectedId, folded],
   );
-  useEffect(() => setViewed(message.guide_viewed ?? []), [message.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const files = useMemo(() => (snapshot ? parseDiffToFiles(snapshot.review.rawPatch) : []), [snapshot]);
   const commentsForPost = useMemo(() => (pullDiff ? onPullDiff(comments, files, pullDiff.files) : comments), [comments, files, pullDiff]);
@@ -501,18 +516,13 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
     [phone, files.length, walkthrough],
   );
 
-  const viewedSet = useMemo(() => new Set(viewed), [viewed]);
-  const toggleViewed = useCallback(
-    (path: string) => {
-      const next = viewed.includes(path) ? viewed.filter((p) => p !== path) : [...viewed, path];
-      setViewed(next);
-      inboxApi.saveGuideViewed(message.id, next).then(
-        (saved) => setViewed(saved.viewed),
-        (cause: unknown) => setSaveError(cause instanceof Error ? cause.message : 'The Viewed tick was not saved.'),
-      );
-    },
-    [viewed, message.id, setSaveError],
-  );
+  // What its Inbox keeps, with each tick still held for it (its machine away) laid over: as the person ticked them.
+  const { shown: shownViewed, toggle: toggleViewed } = useViewedTicks(message.id, message.guide_viewed, outbox, setSaveError);
+  const viewedSet = useMemo(() => new Set(shownViewed), [shownViewed]);
+  // While a tick waits for its machine: the thread's own held line ("Will send when Laptop is back"), never an error.
+  const viewedMachine = linkedMachineFacts(machineOf(message.id) ?? '');
+  const heldTick = heldViewed(outbox, message.id).at(-1);
+  const heldLine = heldTick ? outboxLine(heldTick, viewedMachine as { name: string; state: MachineView['state'] } | null) : null;
   // Viewed ticks are Code review's: the server takes them only on a review, and only while Code review is on.
   const viewedProp = useMemo(() => (readOnly || !viewedTicks ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, viewedTicks, viewedSet, toggleViewed]);
   const railViewed = viewedProp ? viewedSet : NO_VIEWED;
@@ -948,6 +958,11 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
               {sendError ?? saveError}
             </div>
           )}
+          {heldLine && viewedProp && (
+            <div className="ib-rv-held" data-review-held="">
+              <OutboxStateLine line={heldLine} machine={viewedMachine as Pick<MachineView, 'state'> | null} />
+            </div>
+          )}
           {error ? (
             <div className="ib-error ib-gerror" role="alert">
               {error}
@@ -960,6 +975,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview}>
               <ContextNotesProvider api={noteRows.api}>
               <GuideReader
+                lineFeedbackTools={message.guide && !isReview ? FieldVoice : null}
                 snapshot={readerSnapshot!}
                 reviewed={reviewed}
                 onReviewedChange={changeReviewed}

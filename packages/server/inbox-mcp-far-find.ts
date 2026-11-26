@@ -9,7 +9,7 @@
  * `all_projects` is every project on every machine.
  */
 
-import { isInboxId, type InboxProject } from "@plannotator/core/inbox-types";
+import { INBOX_LOCAL_SECTIONS, isInboxId, type InboxProject } from "@plannotator/core/inbox-types";
 import { cleanStrings, oneLine } from "./inbox-far-read";
 import type { FarFound, FarMachine, FarProjectAsk, FarRemote, FarSearchAnswer, FarSearchAsk, FarSearchRow, FarThreadRow, FarThreadsAnswer, FarThreadsAsk, MachineAgentFind } from "./inbox-machine-agent-find";
 import { count, FAR_REMOTE_UNKNOWN, farNotAskedLines, within } from "./inbox-machine-agent-find";
@@ -127,7 +127,8 @@ export async function farSearch(context: InboxMcpContext, ask: FarSearchAsk, by?
   return { rows, total, lines: farNotAskedLines(found.notAsked, "search") };
 }
 
-const SECTIONS = new Set(["stopped", "holding", "waiting", "new", "sent", "quiet"]);
+// A linked machine is an Inbox like this one: it never places a row in Tagged you, so a far row there reads as Quiet.
+const SECTIONS = new Set<string>(INBOX_LOCAL_SECTIONS.map((section) => section.id));
 
 /**
  * The far list rows, cleaned and marked, with every machine's total and the lines for the machines not reached. A

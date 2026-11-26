@@ -72,6 +72,8 @@ export interface MachineView {
   both_ways: boolean;
   /** Writes held for it. */
   waiting: number;
+  /** Its threads' reply drafts held here, not landed there yet (never "waiting"). Absent from an older Inbox. */
+  drafts_held?: number;
   /** The cursor of its list this Inbox holds: it moves when its rows changed. Absent from an older Inbox. */
   list_cursor?: number | null;
   /** Its Inbox keeps snoozes (approval "inbox-snooze"). Absent from an older Inbox, and false for a linked one too old: nothing to snooze with on its rows (`snooze_old`). */
@@ -135,6 +137,8 @@ export interface OutboxView {
   thread?: string | null;
   /** The machine's name, kept once its link went (an Unlink here or on that machine). */
   machine_name?: string | null;
+  /** A held Viewed tick in a review there: its file and whether it is ticked. Absent from an older Inbox. */
+  viewed?: { path: string; viewed: boolean } | null;
 }
 
 /** Checking for updates has failed for hours with no success (packages/shared/update-check.ts releaseCheckFailing). */

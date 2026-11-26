@@ -47,6 +47,8 @@ export interface InboxEventHandlers {
   onArtifactPins?: () => void;
   onTags?: () => void;
   onCards?: () => void;
+  /** A thread's steps changed, on this Inbox or a linked machine: only that thread's checklist reads them again. */
+  onSteps?: (threadId: string) => void;
   /** Show a thread, or (`page`, with no thread) a capability's page: `plannotator plans` shows the Plans page. */
   onShow?: (threadId: string, windowId: string, page?: 'plans') => void;
   onSnoozes?: () => void;
@@ -240,7 +242,14 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
         const data = JSON.parse(frame.data) as Partial<MachineRecordFrame>;
         if (typeof data.machine === 'string' && typeof data.seq === 'number') {
           const machineKind = (data.record as { kind?: unknown } | undefined)?.kind;
-          if (machineKind === 'steps' || machineKind === 'thread_pull') return;
+          // Another machine's steps line names one of its threads: that thread's checklist reads again, as for this
+          // Inbox's own (never the list, a thread or a notification).
+          if (machineKind === 'steps') {
+            const threadId = (data.record as { thread_id?: unknown }).thread_id;
+            if (typeof threadId === 'string') handlers.onSteps?.(threadId);
+            return;
+          }
+          if (machineKind === 'thread_pull') return;
           rememberMachine(idsIn(data.record), data.machine);
           handlers.onMachine?.({ machine: data.machine, seq: data.seq, live: data.live === true, record: (data.record as InboxEvent | undefined) ?? null });
           scheduledMachineFrame((data.record as InboxEvent | undefined) ?? null);

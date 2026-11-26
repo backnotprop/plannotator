@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import { clearLateVoiceMiss, noteLateVoiceMiss } from '../lateVoice';
 import { landWordsInReplyDraft, takeHeldVoiceWords } from '../replyDraft';
+import { keepsReplyDraft } from '../machineDrafts';
+/** Dictated words land in the thread's draft where it is kept (a linked machine's older Plannotator keeps none: they wait). */
+const land = (threadId: string, words: string) => landWordsInReplyDraft(threadId, words, undefined, keepsReplyDraft);
 import { spaced } from '../voiceField';
 import type { VoiceLate } from '../voiceSession';
 
@@ -31,7 +34,7 @@ export function useLateVoice({ thread, threadRef, boxRef, textRef, boxOpen, send
     } else if (paneMounted.current && threadId === threadRef.current.thread_id) {
       lateVoice.current.push(outcome.text);
       setLateVoiceTick((tick) => tick + 1);
-    } else void landWordsInReplyDraft(threadId, outcome.text);
+    } else void land(threadId, outcome.text);
   }, []);
   useEffect(() => {
     // While a Send is on its way the box takes no words: these wait for it to end.
@@ -40,7 +43,7 @@ export function useLateVoice({ thread, threadRef, boxRef, textRef, boxOpen, send
     lateVoice.current = [];
     if (!boxRef.current.open) {
       // What this pane knows of the draft can be behind a save still on its way (Cancel's): the Inbox's copy decides.
-      for (const words of waiting) void landWordsInReplyDraft(thread.thread_id, words);
+      for (const words of waiting) void land(thread.thread_id, words);
       return;
     }
     let text = boxRef.current.text;
@@ -60,7 +63,7 @@ export function useLateVoice({ thread, threadRef, boxRef, textRef, boxOpen, send
     paneMounted.current = true;
     return () => {
       paneMounted.current = false;
-      for (const words of lateVoice.current) void landWordsInReplyDraft(threadRef.current.thread_id, words);
+      for (const words of lateVoice.current) void land(threadRef.current.thread_id, words);
       lateVoice.current = [];
     };
   }, []);

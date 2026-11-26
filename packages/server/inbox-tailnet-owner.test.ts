@@ -969,7 +969,8 @@ describe("a linked machine gains none of it", () => {
     expect(doorWriteKind("pulls/owner")).toBe("forge");
     expect(all.filter((name) => name.includes("pulls") && name !== "POST pulls/looked")).toEqual([
       "GET pulls",
-      "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)",
+      // `pull`: one PR read for a page open on it after it left the board, as its diff is (a read, never a write).
+      "GET pulls/(risk|pull|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)",
       "POST pulls/(close|reopen|merge|owner)",
       "GET threads/:id/pulls",
       "POST threads/:id/pulls",

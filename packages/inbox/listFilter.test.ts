@@ -187,9 +187,9 @@ test('the row summary the server builds is what the picks read: the PR still in 
 });
 
 test('a project\'s page sets its Project picks aside, and the badge counts what applies', () => {
-  const filter: ListFilter = { projects: ['prj_web', 'prj_docs'], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false, recent: false, tags: [], routines: [] };
+  const filter: ListFilter = { projects: ['prj_web', 'prj_docs'], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false, tags: [], routines: [] };
   expect(pickCount(filter)).toBe(4);
-  expect(appliedFilter(filter, true)).toEqual({ projects: [], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false, recent: false, tags: [], routines: [] });
+  expect(appliedFilter(filter, true)).toEqual({ projects: [], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false, tags: [], routines: [] });
   expect(pickCount(appliedFilter(filter, true))).toBe(2);
   expect(appliedFilter(filter, false)).toBe(filter);
 });
@@ -210,7 +210,7 @@ test('Smart groups keep their order and names and count only the matches; nothin
 });
 
 test('a menu row counts with the other groups\' picks, not its own group\'s', () => {
-  const filter: ListFilter = { projects: ['prj_web'], updated: '7d', agents: [], pulls: [], notSeen: false, recent: false, tags: [], routines: [] };
+  const filter: ListFilter = { projects: ['prj_web'], updated: '7d', agents: [], pulls: [], notSeen: false, tags: [], routines: [] };
   // docs is not picked, but its row says what ticking it would add: docs rows in the last 7 days.
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_docs')).toBe(0);
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_billing')).toBe(1);
@@ -231,7 +231,7 @@ describe('remembered per browser', () => {
   });
 
   test('picks are written, read back, and removed when cleared', () => {
-    const filter: ListFilter = { projects: ['prj_web'], updated: { from: '2026-10-20', to: '2026-11-01' }, agents: ['Codex'], pulls: ['merged', 'none'], notSeen: true, recent: true, tags: ['ini_release'], routines: ['other'] };
+    const filter: ListFilter = { projects: ['prj_web'], updated: { from: '2026-10-20', to: '2026-11-01' }, agents: ['Codex'], pulls: ['merged', 'none'], notSeen: true, tags: ['ini_release'], routines: ['other'] };
     writeListFilter(filter);
     expect(parseListFilter(getItem(LIST_FILTER_COOKIE))).toEqual(filter);
     writeListFilter(NO_LIST_FILTER);
@@ -247,13 +247,16 @@ describe('remembered per browser', () => {
   const junk: Array<[string, string | null, ListFilter]> = [
     ['no cookie', null, NO_LIST_FILTER],
     ['not JSON', '{oops', NO_LIST_FILTER],
-    ['wrong shapes are dropped', JSON.stringify({ projects: 'prj_web', updated: 'yesterday', agents: [1, 'Pi', ''] }), { projects: [], updated: null, agents: ['Pi'], pulls: [], notSeen: false, recent: false, tags: [], routines: [] }],
+    ['wrong shapes are dropped', JSON.stringify({ projects: 'prj_web', updated: 'yesterday', agents: [1, 'Pi', ''] }), { projects: [], updated: null, agents: ['Pi'], pulls: [], notSeen: false, tags: [], routines: [] }],
     ['unknown Pull request picks are dropped', JSON.stringify({ pulls: ['open', 'stale', 3] }), { ...NO_LIST_FILTER, pulls: ['open'] }],
     ['Not seen is on only for true', JSON.stringify({ notSeen: 'yes' }), NO_LIST_FILTER],
     ['a cookie from before Not seen loads with it off', JSON.stringify({ projects: ['prj_web'], updated: '7d', agents: [], pulls: ['open'] }), { ...NO_LIST_FILTER, projects: ['prj_web'], updated: '7d', pulls: ['open'] }],
     ['unknown Routine picks are dropped', JSON.stringify({ routines: ['routine', 'cron', 1] }), { ...NO_LIST_FILTER, routines: ['routine'] }],
     ['a cookie from before Routines loads with no Routine pick', JSON.stringify({ pulls: ['open'], tags: ['ini_release'] }), { ...NO_LIST_FILTER, pulls: ['open'], tags: ['ini_release'] }],
     ['a cookie from before tags loads with no Tag pick', JSON.stringify({ agents: ['Pi'], notSeen: true }), { ...NO_LIST_FILTER, agents: ['Pi'], notSeen: true }],
+    // Recent activity was a pick once (0.29's cookie): now a view kept nowhere, so a saved `recent: true` opens no one's Inbox in it.
+    ['a saved Recent activity pick is ignored', JSON.stringify({ recent: true }), NO_LIST_FILTER],
+    ['a saved Recent activity pick beside real picks keeps only those', JSON.stringify({ recent: true, notSeen: true, pulls: ['open'] }), { ...NO_LIST_FILTER, notSeen: true, pulls: ['open'] }],
     ['a range with a bad day is dropped', JSON.stringify({ updated: { from: '2026-13', to: '2026-11-01' } }), NO_LIST_FILTER],
   ];
   for (const [name, raw, want] of junk) test(name, () => expect(parseListFilter(raw)).toEqual(want));

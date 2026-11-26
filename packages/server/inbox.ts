@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxSectionWaitsOnPerson, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { inboxReviewAnalysisOf, parseInboxReviewAnalysisChange } from "./inbox-review-analysis";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
@@ -255,6 +255,7 @@ import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher 
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
+import { withRuntimeAgentName } from "./inbox-runtime-name";
 import { inboxAgentsEndedSince, inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxFirstSeen } from "./inbox-first-seen";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
@@ -363,6 +364,7 @@ import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, linkUnlistedPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { pullMissingAnswer, pullToAct, pullToActNow } from "./inbox-pull-missing";
 import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
@@ -1492,7 +1494,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
   const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
-  const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  // A PR that left the list stays readable for an open page, unless the person hid it (inbox-pull-departed.ts).
+  const pulls = createInboxPulls({ ...(options.refRunner ? { run: options.refRunner } : {}), hidden: (key) => pullHidden.has(key), dir: inboxDir(dataDir) });
   // The attach line's lookups (inbox-pull-lookups.ts): a number an agent named, after its send, through the hover
   // cards' read; only while Code review is on and this computer's gh is signed in to the host.
   const pullLookups = createInboxPullLookups({
@@ -2304,7 +2307,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         archived.add(row.thread_id);
         continue;
       }
-      if ((row.section !== "stopped" && row.section !== "holding" && row.section !== "waiting") || inboxRowSnoozed(row, now)) continue;
+      if (!inboxSectionWaitsOnPerson(row.section) || inboxRowSnoozed(row, now)) continue;
       const owner = store.threadOwner(row.thread_id);
       // A thread left out for its hidden PRs is no wait: no count, no "Waiting on you", no rank, and it lists no agent
       // that is not running (an ended one shows ended, with nothing waiting).
@@ -4427,10 +4430,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Windows only: the phone's door (contract 7.9) gets hello, record, status and the heartbeat.
         const sendReach = () => send(`event: reach\ndata: ${JSON.stringify(windows.reach(notificationsState().enabled))}\n\n`);
         const stopReach = windowId ? windows.subscribe(sendReach) : () => {};
-        // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows only.
+        // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows, and a
+        // linked machine that asks (`drafts=1`, mark `reply-drafts`: its windows show this Inbox's threads' drafts).
         // A compose draft has no thread: `{ compose: true }` (additive; a window that predates it skips the frame).
         const onDraft = (threadId: string | null) => send(`event: drafts\ndata: ${JSON.stringify(threadId === null ? { compose: true } : { thread_id: threadId })}\n\n`);
-        if (windowId) draftListeners.add(onDraft);
+        if (windowId || url.searchParams.get("drafts") === "1") draftListeners.add(onDraft);
         // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
         const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
         if (windowId && ask.allowed(req, via)) askListeners.add(onAsk);
@@ -5755,6 +5759,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onDraftsChange: () => {
       for (const listener of draftListeners) listener(null);
     },
+    farReplies: () => machines.replyDraftRows(),
     onSent: noteSend,
   });
   compose.sweep();
@@ -6344,11 +6349,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         void noteMcpPresence(body);
         const refused = refusedToolCall(body);
         if (refused) return refused;
+        // Oh My Pi's sessions write as "Oh My Pi" (inbox-runtime-name.ts); a call carrying steps while they are off goes without them.
         const stripped = withoutOffSteps(body);
-        if (stripped) {
+        const named = withRuntimeAgentName(stripped ?? body, live.runtimeOfSession);
+        if (stripped || named) {
           const headers = new Headers(req.headers);
           headers.delete("content-length");
-          return mcp.fetch(new Request(req.url, { method: "POST", headers, body: JSON.stringify(stripped) }));
+          return mcp.fetch(new Request(req.url, { method: "POST", headers, body: JSON.stringify(named ?? stripped) }));
         }
         const client = inboxMcpInitializeClient(body);
         if (client !== undefined) return mcpForInitialize(client).fetch(req);
@@ -6717,7 +6724,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullHiddenChanged();
         return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image" || path === "/api/inbox/pulls/package-changes") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/pull" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image" || path === "/api/inbox/pulls/package-changes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -6749,12 +6756,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         // Reviewers, checks, labels and comments beside the diff, from the forge's own answer. The pictures of the people
         // it names join the avatar route's allow-list, and stay while the PR is on the list.
+        // One PR for a page open on it that the list no longer names (merged, closed, a reload since): inbox-pull-forge.ts.
+        if (path === "/api/inbox/pulls/pull") {
+          const key = url.searchParams.get("key") ?? "";
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          const { pull, unreadable, missing } = await pulls.pull(key, (await pullProjects()).wanted);
+          if (pull) pullAvatars.allow(pull.host, pulls.avatarUrls(pull.host));
+          // `unreadable`: the forge did not answer, which says nothing of the PR; the page keeps what it shows.
+          // `missing`: the forge has no such PR now (deleted, or no longer visible): what the page shows is its last read.
+          return json({ serverSession, pull, ...(unreadable ? { unreadable: true } : {}), ...(missing ? { missing: true } : {}) });
+        }
         if (path === "/api/inbox/pulls/details") {
           const key = url.searchParams.get("key") ?? "";
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           try {
             const answer = await pulls.details(key);
-            const host = pulls.find(key)?.host;
+            const host = (pulls.find(key) ?? pulls.held(key))?.host;
             if (host) pullAvatars.allow(host, pulls.avatarUrls(host));
             return json({ serverSession, ...answer });
           } catch (cause) {
@@ -6779,7 +6796,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           try {
-            return json({ serverSession, ...(await pulls.diff(key, scoped.scope, scoped.from)) });
+            // A PR no list names (merged or closed elsewhere, a restart since): the projects' repositories, so a restart
+            // reads its list once first and the PR kept from before is still found (as `pull` does).
+            return json({ serverSession, ...(await pulls.diff(key, scoped.scope, scoped.from, undefined, pulls.find(key) ? undefined : (await pullProjects()).wanted)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_diff_fork" ? 409 : 502);
             throw cause;
@@ -7112,9 +7131,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         await findPulls(keys as string[], wanted);
         let theirs = true;
         for (const key of keys as string[]) {
-          const pull = pulls.find(key);
+          // A kept copy that is still open is acted on as the list's (inbox-pull-missing.ts).
+          const pull = pullToAct(pulls, key);
           if (pull && pull.mine) theirs = false;
-          if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+          if (!pull) return json(...pullMissingAnswer(pulls, key));
           if (!(projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? []).includes(projectId)) {
             const field = validateOnly ? "project_id" : "thread_id";
             throw new InboxError("validation_error", `${field}: ${validateOnly ? "a project" : "a thread in a project"} of that pull request's repository.`, { field });
@@ -7123,7 +7143,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Already given to a thread (another window's Start a thread, a hand-off): which, so that window opens it, not a second.
         // Its own thread as the list links it: a hand-off's, or a thread started from the PR's page and not tied yet.
         if (validateOnly) {
-          const links = linkInboxPulls((keys as string[]).map((key) => pulls.find(key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
+          const links = linkInboxPulls((keys as string[]).map((key) => pullToAct(pulls, key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
           return json({ serverSession, ok: true, owner: Object.values(links).find((link) => link.via === "owner")?.thread_id ?? null });
         }
         if (body.ask !== undefined && !isInboxPullAsk(body.ask)) throw new InboxError("validation_error", `ask: ${INBOX_PULL_ASKS.join(", ")}.`, { field: "ask" });
@@ -7157,10 +7177,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (fileLevelSent !== fileLevelComments.length || fileLevelSent > PULL_REVIEW_COMMENTS_MAX) throw new InboxError("validation_error", `fileLevelComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, body }.`, { field: "fileLevelComments" });
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
         // A PR a thread owns but no list has (reached by its link): its own read says what the list would. Any other stays unknown.
-        const unlisted = !pulls.find(key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
-        const pull = pulls.find(key) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
+        // A kept copy (the list no longer names it) is checked with the forge first: merged elsewhere since, refused.
+        const unlisted = !pullToAct(pulls, key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
+        const pull = (await pullToActNow(pulls, key)) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
         if (!pull && unlisted) return json({ error: "Couldn't check that link. Try again.", code: "pull_unknown" }, 404);
-        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (!pull) return json(...pullMissingAnswer(pulls, key));
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         // Pinned to the commit the person read: the list's head, or the head of the patch they read (the list can be a
         // minute behind the forge). On GitHub also an older commit of this PR, as GitHub takes a review there and marks
@@ -7230,8 +7251,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.confirmed !== true) return json({ error: "Confirm the merge first.", code: "merge_unconfirmed" }, 409);
         // After a restart the list may not have been read yet: read it once, as the review route does.
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-        const pull = pulls.find(key);
-        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        const pull = pullToAct(pulls, key);
+        if (!pull) return json(...pullMissingAnswer(pulls, key));
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         const result = await mergePull(options.refRunner ?? refCliRunner, pull, seen);
         if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_merge_failed" ? 502 : 409);
@@ -7269,8 +7290,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             return [{ error: `Only a pull request closed here in the last ${PULL_REOPEN_WINDOW_MS / 60_000} minutes can be reopened here.`, code: "reopen_not_closed_here" }, 409];
           }
           if (!reopen && !pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-          const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
-          if (!pull) return [{ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404];
+          const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pullToAct(pulls, key);
+          if (!pull) return pullMissingAnswer(pulls, key);
           if (!reopen && !inboxPullIsOpen(pull)) return [{ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409];
           const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
           if (!result.ok) return [{ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409];
@@ -7867,7 +7888,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (capable) return capable;
       // Search: a read route (and the recent searches the window writes on opening a result).
       const searched = await search.handle(req, url, {
-        linked: () => machines.machinesView().filter((machine) => !machine.self && machine.state !== "revoked").map((machine) => ({ id: machine.id, name: machine.name, online: machine.state === "online" })),
+        linked: () => machines.machinesView().filter((machine) => !machine.self && machine.state !== "revoked").map((machine) => ({ id: machine.id, name: machine.name, online: machine.state === "online", marks: machine.marks })),
         projectOwner: (projectId) => machines.projectOwner(projectId),
         forward: (forwarded, target) => machines.route(forwarded, target, via),
       });
@@ -8993,6 +9014,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     machines = createInboxMachines({
       dataDir,
       serverSession,
+      follows,
       computerName: devices.machineDoor.computerName,
       door: devices.machineDoor,
       readBody,

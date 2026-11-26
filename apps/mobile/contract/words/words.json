@@ -16,6 +16,11 @@
       "parts": [],
       "source": "packages/core/inbox-types.ts INBOX_SECTIONS waiting"
     },
+    "section.tagged": {
+      "text": "Tagged you",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_SECTIONS tagged"
+    },
     "section.new": {
       "text": "New since you looked",
       "parts": [],
@@ -237,6 +242,11 @@
       "text": "Pi",
       "parts": [],
       "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES pi"
+    },
+    "host.oh-my-pi": {
+      "text": "Oh My Pi",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES oh-my-pi"
     },
     "host.opencode": {
       "text": "OpenCode",
