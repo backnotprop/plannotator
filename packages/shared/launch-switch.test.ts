@@ -7,7 +7,7 @@
  * dialog showing twice on one computer.
  */
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -446,6 +446,68 @@ describe("once per computer", () => {
     expect(a.shown("product-hunt-2026")).toEqual({ show: true });
     expect(a.claim()).toEqual({ show: false });
     expect(a.shown("product-hunt-2026")).toEqual({ show: false });
+  });
+
+  test("a stamp the machine state refuses (a hand-broken config.json): the data folder's mark keeps it to once per computer", async () => {
+    const dir = dataDir();
+    const broken = () => {
+      const shown = memoryShown();
+      shown.stamp = () => "failed";
+      shown.write = () => false;
+      return shown;
+    };
+    const make = () => createLaunchSwitch({ dataDir: () => dir, endpoint: () => "http://127.0.0.1:9/x", shown: broken(), fetch: fakeFetch().fn, now: () => T_START + 1 });
+    const a = make();
+    await a.refresh();
+    expect(a.shown("product-hunt-2026")).toEqual({ show: true });
+    // Every later plan or review server is a new process: none shows it again.
+    const b = make();
+    expect(b.claim()).toEqual({ show: false });
+    expect(b.shown("product-hunt-2026")).toEqual({ show: false });
+    // A refresh rewrites the kept copy and keeps the mark.
+    await createLaunchSwitch({ dataDir: () => dir, endpoint: () => "http://127.0.0.1:9/x", shown: broken(), fetch: fakeFetch().fn, now: () => T_START + 2 * LAUNCH_SWITCH_REFRESH_MS, refreshMs: 1 }).refresh();
+    expect(make().claim()).toEqual({ show: false });
+  });
+
+  test("a stamp that lands in the machine state also marks the data folder (a config.json broken later still reads as shown)", async () => {
+    const dir = dataDir();
+    const a = createLaunchSwitch({ dataDir: () => dir, endpoint: () => "http://127.0.0.1:9/x", shown: memoryShown(), fetch: fakeFetch().fn, now: () => T_START + 1 });
+    await a.refresh();
+    expect(a.shown("product-hunt-2026")).toEqual({ show: true });
+    const emptied = createLaunchSwitch({ dataDir: () => dir, endpoint: () => "http://127.0.0.1:9/x", shown: memoryShown(), fetch: fakeFetch().fn, now: () => T_START + 2 });
+    expect(emptied.claim()).toEqual({ show: false });
+  });
+
+  // Root writes into a read-only folder anyway, so there the data folder's mark cannot be made to fail.
+  test.skipIf(process.getuid?.() === 0)("neither record can be written (a read-only data folder too): it does not show", async () => {
+    const dir = dataDir();
+    writeFileSync(join(dir, LAUNCH_SWITCH_FILE), JSON.stringify({ checkedAt: new Date(T_START).toISOString(), doc: JSON.parse(on()) }));
+    const shown = memoryShown();
+    shown.stamp = () => "failed";
+    const a = createLaunchSwitch({ dataDir: () => dir, endpoint: () => "http://127.0.0.1:9/x", shown, fetch: fakeFetch().fn, now: () => T_START + 1 });
+    expect(a.claim()).toMatchObject({ show: true });
+    chmodSync(dir, 0o500);
+    try {
+      expect(a.shown("product-hunt-2026")).toEqual({ show: false });
+      // And a new load there is not offered it at all (no dialog drawn and then taken back on every load).
+      const b = createLaunchSwitch({ dataDir: () => dir, endpoint: () => "http://127.0.0.1:9/x", shown: memoryShown(), fetch: fakeFetch().fn, now: () => T_START + 1 });
+      expect(b.claim()).toEqual({ show: false });
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+  });
+
+  test("a campaign this release does not know is off: a renamed or mistyped campaign never shows these words", async () => {
+    expect(parseLaunchDoc(on({ campaign: "product-hunt-2027" }))).toBeNull();
+    expect(parseLaunchDoc(on({ campaign: "product-hunt-2026x" }))).toBeNull();
+    expect(parseLaunchDoc(on())).not.toBeNull();
+    const dir = dataDir();
+    writeFileSync(join(dir, LAUNCH_SWITCH_FILE), JSON.stringify({ checkedAt: new Date(T_START).toISOString(), doc: JSON.parse(on({ campaign: "product-hunt-2027" })) }));
+    const a = createLaunchSwitch({ dataDir: () => dir, endpoint: () => "http://127.0.0.1:9/x", shown: memoryShown(), fetch: fakeFetch({ body: on({ campaign: "product-hunt-2027" }) }).fn, now: () => T_START + 1 });
+    expect(a.claim()).toEqual({ show: false });
+    expect(a.shown("product-hunt-2027")).toEqual({ show: false });
+    await a.refresh();
+    expect(a.claim()).toEqual({ show: false });
   });
 
   test("a shown for another campaign, or an answer before any shown, does nothing", async () => {

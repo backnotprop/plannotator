@@ -7,8 +7,8 @@
  * the other one-time dialogs not yielding while the claim is out or on the load that showed it, or held for good by a
  * claim that never answers; a claim that answers late still drawing it where the first-run window applies (the Inbox
  * takes it); a yes that waited long not asked again; the reader's first move not closing the first-run window (and
- * that miss using it up); the Inbox not waiting while something is open over the page; the VS Code webview claiming at
- * all; an answer not recorded with its campaign, or a dialog that stays after its answer. Once per computer across two
+ * that miss using it up); the Inbox not waiting while something is open over the page; the VS Code panel left out
+ * (the owner wants it there too); an answer not recorded with its campaign, or a dialog that stays after its answer. Once per computer across two
  * surfaces: packages/inbox/launchDialog.test.tsx.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -202,18 +202,23 @@ describe.skipIf(!hasDom)('useLaunchAnnouncement', () => {
     expect(log).toEqual(['claim']);
   });
 
-  test('not before the page is ready or while the host gates fail, and never in the VS Code webview', async () => {
+  test('not before the page is ready or while the host gates fail', async () => {
     const { log, client } = fakeClient(yes);
     const s = await mount('a', { ready: false, eligible: true, firstRunWindow: true, client });
     await s.rerender({ ready: true, eligible: false, firstRunWindow: true, client });
     await settle();
     expect(log).toEqual([]);
-    (window as { __PLANNOTATOR_VSCODE?: unknown }).__PLANNOTATOR_VSCODE = true;
-    await s.rerender({ ready: true, eligible: true, firstRunWindow: true, client });
-    await settle();
-    expect(log).toEqual([]);
     expect(dialogs()).toBe(0);
     expect(s.probe().dataset.holds).toBe('false');
+  });
+
+  test('in the VS Code panel too (the owner, 2026-11-25): claimed, drawn, stamped', async () => {
+    (window as { __PLANNOTATOR_VSCODE?: unknown }).__PLANNOTATOR_VSCODE = true;
+    const { log, client } = fakeClient(yes);
+    await mount('a', { ready: true, eligible: true, firstRunWindow: true, client });
+    await settle();
+    expect(dialogs()).toBe(1);
+    expect(log).toEqual(['claim', `shown:${CAMPAIGN}:painted`]);
   });
 
   test('the reader moved before it could open: missed for this load, and nothing used up', async () => {

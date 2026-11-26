@@ -25,7 +25,6 @@
  */
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { useFirstRunAnnouncementWindow } from '../hooks/useFirstRunAnnouncementWindow';
-import { isVSCodeWebview } from '../utils/inboxAnnouncement';
 import { LAUNCH_ART_WAIT_MS, launchArtUrl } from '../utils/launchDialogWords';
 import { LazyBlockBoundary } from './LazyBlockBoundary';
 import type { LaunchDialogAnswer, LaunchDialogProps } from './LaunchDialog';
@@ -106,7 +105,7 @@ function usable(claim: unknown): claim is Extract<LaunchClaim, { show: true }> {
 export interface LaunchAnnouncementInput {
   /** The page has loaded (the claim, and the first-run window's clock, wait for it). */
   ready: boolean;
-  /** The host's gates hold now (a live session, not shared, archive or read-only, …). The VS Code webview is the hook's own. */
+  /** The host's gates hold now (a live session, not shared, archive or read-only, …). The VS Code panel shows it too. */
   eligible: boolean;
   /** Open only before the reader starts working (plan review, code review, annotate). The Inbox: false. */
   firstRunWindow: boolean;
@@ -156,7 +155,7 @@ function AfterPaint({ run }: { run: () => void }) {
 
 export function useLaunchAnnouncement({
   ready,
-  eligible: hostEligible,
+  eligible,
   firstRunWindow,
   blocked = false,
   onDrawn,
@@ -166,8 +165,8 @@ export function useLaunchAnnouncement({
   loadArt = preloadLaunchArt,
   reclaimAfterMs = LAUNCH_RECLAIM_AFTER_MS,
 }: LaunchAnnouncementInput): LaunchAnnouncement {
-  // Never in the VS Code webview (as the star ask): no claim, nothing held.
-  const eligible = hostEligible && !isVSCodeWebview();
+  // The VS Code panel shows it too (the owner, 2026-11-25): its art loads from the site as anywhere, and the
+  // panel's link bridge (apps/vscode-extension cookie-proxy.ts) opens "See the launch" in the browser.
   const [claim, setClaim] = useState<ClaimState>('idle');
   const [prep, setPrep] = useState<Prep>('none');
   const [stage, setStage] = useState<Stage>('none');

@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { LAUNCH_CAMPAIGNS } from '../../packages/shared/launch-switch';
 
 const doc = JSON.parse(readFileSync(join(import.meta.dir, 'public', 'launch.json'), 'utf8')) as { campaign: string };
 
@@ -29,11 +30,14 @@ function webpSize(b: Buffer): { width: number; height: number } | null {
 }
 
 describe('public/launch/<campaign>.webp', () => {
-  test("the picture for launch.json's campaign: a 16:9 WebP, 1760×990, under 300 KB", () => {
-    const file = join(import.meta.dir, 'public', 'launch', `${doc.campaign}.webp`);
-    expect(existsSync(file), `no art for campaign ${doc.campaign}`).toBe(true);
-    const bytes = readFileSync(file);
-    expect(webpSize(bytes)).toEqual({ width: 1760, height: 990 });
-    expect(bytes.byteLength).toBeLessThan(300 * 1024);
-  });
+  // launch.json's campaign, and every campaign the release knows (launch-switch.ts `LAUNCH_CAMPAIGNS`).
+  for (const campaign of new Set([doc.campaign, ...LAUNCH_CAMPAIGNS])) {
+    test(`the picture for ${campaign}: a 16:9 WebP, 1760×990, under 300 KB`, () => {
+      const file = join(import.meta.dir, 'public', 'launch', `${campaign}.webp`);
+      expect(existsSync(file), `no art for campaign ${campaign}`).toBe(true);
+      const bytes = readFileSync(file);
+      expect(webpSize(bytes)).toEqual({ width: 1760, height: 990 });
+      expect(bytes.byteLength).toBeLessThan(300 * 1024);
+    });
+  }
 });

@@ -3536,7 +3536,7 @@ const ReviewApp: React.FC = () => {
   });
   const handleAutoView = autoViewedNotice.show;
   // The launch dialog (the launch switch; LaunchAnnouncement.tsx): as the page opens, before the reader starts
-  // working; the star ask yields on that load. Never in the VS Code webview or without a live session (as the star ask).
+  // working; the star ask yields on that load. Never without a live session; the VS Code panel shows it too.
   const launch = useLaunchAnnouncement({
     ready: !isLoading,
     eligible: !!origin,

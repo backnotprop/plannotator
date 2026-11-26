@@ -97,6 +97,35 @@ describe.skipIf(!hasDom)('LaunchDialog', () => {
     expect(log).toEqual(['opened']);
   });
 
+  test("See the launch in the VS Code panel: the click reaches the panel's link bridge untaken, and still answers opened", async () => {
+    // The panel's frame has no popups; its bridge (apps/vscode-extension/src/cookie-proxy.ts) listens for clicks on the
+    // document and sends an `a[href][target=_blank]` to another origin to the editor's open-external, unless the page
+    // took the click first (defaultPrevented) or stopped it on the way.
+    (window as { __PLANNOTATOR_VSCODE?: unknown }).__PLANNOTATOR_VSCODE = true;
+    const log: string[] = [];
+    const bridged: string[] = [];
+    const bridge = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+      if (!e.defaultPrevented && e.button === 0 && a?.target === '_blank') {
+        const href = new URL(a.getAttribute('href')!, location.href);
+        if (href.origin !== location.origin && href.protocol === 'https:') bridged.push(href.href);
+      }
+      e.preventDefault();
+    };
+    document.addEventListener('click', bridge, false);
+    try {
+      await mount((a) => log.push(a));
+      // On the arrow inside the link, as a person may click it.
+      await act(async () => open().querySelector('svg')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
+      await wait(5);
+    } finally {
+      document.removeEventListener('click', bridge, false);
+      delete (window as { __PLANNOTATOR_VSCODE?: unknown }).__PLANNOTATOR_VSCODE;
+    }
+    expect(bridged).toEqual([URL_]);
+    expect(log).toEqual(['opened']);
+  });
+
   test('Not now and Escape each answer dismissed', async () => {
     for (const how of ['not-now', 'escape'] as const) {
       const log: string[] = [];

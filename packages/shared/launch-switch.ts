@@ -12,7 +12,7 @@
  * The dialog's words ship in the release: the file carries only the switch, the link and the dates. Keys not listed
  * are ignored (a later version may add fields) and never kept or passed on.
  * `{ "v": 1, "campaign": "…", "on": false }` is a valid off. Anything else is off: not JSON, over 4 KB, another `v`, a
- * campaign not [a-z0-9-]{1,40}, a url that is not exactly https on www.producthunt.com (no port, no
+ * campaign this release does not know (`LAUNCH_CAMPAIGNS`: the words and art ship in the release), a url that is not exactly https on www.producthunt.com (no port, no
  * user info, no hash, path /posts/<slug> or /products/<slug>[/…], query only `launch=<slug>` and `utm_*` keys), dates
  * that are not ISO instants, an end not after the start, a span over 14 days. `launchActive(doc, now)`: on, and
  * startsAt <= now < endsAt, so a kept "on" copy turns itself off at endsAt with no request.
@@ -35,12 +35,16 @@
  * the kept copy with what it parsed to (an invalid answer keeps an off); a failure keeps the last copy. Every timer is
  * unref'd: none keeps a process alive.
  *
- * Kept: `<data dir>/launch-switch.json` `{ checkedAt, doc }` (0600, written whole). The claim reads only this.
+ * Kept: `<data dir>/launch-switch.json` `{ checkedAt, doc, shown? }` (0600, written whole, its shown marks always
+ * kept). The claim reads only this and the machine state.
  * Shown once per computer, on whichever surface comes first: `launch[campaign]` in the machine state
  * (`{ shownAt, answer?: "opened" | "dismissed", answeredAt? }`), stamped by a compare-and-set inside saveConfig's lock
- * (saveConfigIf), so two surfaces stamping at once cannot both win: the first stamp stays, the other gets no.
+ * (saveConfigIf), so two surfaces stamping at once cannot both win: the first stamp stays, the other gets no. The
+ * second record: the campaign in the kept file's `shown`, written after every stamp that was not taken, so a machine
+ * state that cannot be saved (a hand-broken config.json) still shows it once. Neither written: it does not show (and a
+ * data folder that takes no write is never offered it).
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, parseTelemetryEnvOff, resolveUpdateCheck, saveConfig, saveConfigIf, type PlannotatorConfig } from "./config";
 import { isMarkedReleaseBuild } from "./daily-ping";
@@ -78,6 +82,12 @@ export type LaunchClaim = { show: false } | { show: true; campaign: string; url:
 // ── The parser ──
 
 const CAMPAIGN = /^[a-z0-9-]{1,40}$/;
+/**
+ * The campaigns this release has words and art for (packages/ui/utils/launchDialogWords.ts,
+ * apps/marketing/public/launch/<campaign>.webp). The words are fixed in the release, so a launch.json naming any other
+ * campaign (a later launch, a typo) is off here: it never shows this release's words again.
+ */
+export const LAUNCH_CAMPAIGNS: readonly string[] = ["product-hunt-2026"];
 const SLUG = "[a-z0-9-]{1,80}";
 const URL_SHAPE = new RegExp(`^https://www\\.producthunt\\.com/(?:posts/${SLUG}|products/${SLUG}(?:/${SLUG})*)(?:\\?([^#]*))?$`);
 const QUERY_VALUE = /^[A-Za-z0-9._-]{1,80}$/;
@@ -166,6 +176,7 @@ export function launchDocFrom(value: unknown): LaunchDoc | null {
   const r = value as Record<string, unknown>;
   // Keys it does not know are ignored (a later version may add fields); only the ones below are kept.
   if (r.v !== 1 || typeof r.campaign !== "string" || !CAMPAIGN.test(r.campaign) || typeof r.on !== "boolean") return null;
+  if (!LAUNCH_CAMPAIGNS.includes(r.campaign)) return null;
   const doc: Record<string, unknown> = { v: 1, campaign: r.campaign, on: r.on };
   if (r.url !== undefined) {
     if (!launchUrlOk(r.url)) return null;
@@ -249,24 +260,62 @@ export function launchSwitchEndpointNow(release: boolean = launchSwitchRelease()
 export interface LaunchKept {
   checkedAt?: string;
   doc: LaunchDoc | null;
+  /** Campaigns a surface showed on this computer: the second record of the one-time stamp (see the header). */
+  shown?: string[];
 }
 
-export function readLaunchKept(dataDir: string): LaunchKept {
+/** The kept file's shown marks: campaign names only, each once. */
+function shownMarks(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.filter((c): c is string => typeof c === "string" && CAMPAIGN.test(c)))].slice(0, 32);
+}
+
+function readKeptRaw(dataDir: string): Record<string, unknown> | null {
   try {
-    const raw = JSON.parse(readFileSync(join(dataDir, LAUNCH_SWITCH_FILE), "utf-8")) as Record<string, unknown> | null;
-    const checkedAt = typeof raw?.checkedAt === "string" && launchInstant(raw.checkedAt) !== null ? raw.checkedAt : undefined;
-    return { ...(checkedAt ? { checkedAt } : {}), doc: launchDocFrom(raw?.doc) };
+    const raw = JSON.parse(readFileSync(join(dataDir, LAUNCH_SWITCH_FILE), "utf-8")) as unknown;
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
   } catch {
-    return { doc: null };
+    return null;
   }
 }
 
+export function readLaunchKept(dataDir: string): LaunchKept {
+  const raw = readKeptRaw(dataDir);
+  if (!raw) return { doc: null };
+  const checkedAt = typeof raw.checkedAt === "string" && launchInstant(raw.checkedAt) !== null ? raw.checkedAt : undefined;
+  const shown = shownMarks(raw.shown);
+  return { ...(checkedAt ? { checkedAt } : {}), doc: launchDocFrom(raw.doc), ...(shown.length ? { shown } : {}) };
+}
+
+/** Written whole; the shown marks on disk now are always kept (a refresh never drops one another process wrote). */
 function writeLaunchKept(dataDir: string, kept: LaunchKept): void {
   mkdirSync(dataDir, { recursive: true });
   const path = join(dataDir, LAUNCH_SWITCH_FILE);
+  const shown = shownMarks([...shownMarks(readKeptRaw(dataDir)?.shown), ...(kept.shown ?? [])]);
   const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify({ checkedAt: kept.checkedAt, doc: kept.doc })}\n`, { mode: 0o600 });
+  writeFileSync(tmp, `${JSON.stringify({ checkedAt: kept.checkedAt, doc: kept.doc, ...(shown.length ? { shown } : {}) })}\n`, { mode: 0o600 });
   renameSync(tmp, path);
+}
+
+/** Mark `campaign` shown in the kept file; true when the mark reads back. Never throws. */
+function markLaunchShown(dataDir: string, campaign: string): boolean {
+  try {
+    const kept = readLaunchKept(dataDir);
+    writeLaunchKept(dataDir, { ...kept, shown: [...(kept.shown ?? []), campaign] });
+    return readLaunchKept(dataDir).shown?.includes(campaign) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the data folder takes a write now (a read-only folder cannot hold either record). */
+function dataDirWritable(dataDir: string): boolean {
+  try {
+    accessSync(dataDir, fsConstants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -405,7 +454,7 @@ export interface LaunchSwitchService {
   claim(): LaunchClaim;
   /**
    * The surface drew it: a compare-and-set stamping `launch[campaign].shownAt`. `{ show: false }` when another surface
-   * stamped it first (that one keeps it). A stamp that cannot be written counts as shown for this process.
+   * stamped it first (that one keeps it). The kept file's mark is written too; `{ show: false }` when neither lands.
    */
   shown(campaign?: string): { show: boolean };
   /** How it ended: the link opened, or closed. Once. */
@@ -418,18 +467,18 @@ export function createLaunchSwitch(deps: LaunchSwitchDeps): LaunchSwitchService 
   let running: Promise<"asked" | "fresh" | "off" | "busy"> | null = null;
   let started = false;
   const no: LaunchClaim = { show: false };
-  // Campaigns this process showed but could not stamp (a read-only data folder): shown, for this process.
+  // Campaigns this process has stamped (or tried to): never claimed here again, whatever reached the files.
   const shownHere = new Set<string>();
 
-  const current = (): Extract<LaunchDoc, { on: true }> | null => {
+  /** The launch on now, and whether it is still open on this computer (neither record says shown). */
+  const current = (): { doc: Extract<LaunchDoc, { on: true }>; open: boolean } | null => {
     if (!deps.endpoint()) return null;
-    const { doc } = readLaunchKept(deps.dataDir());
-    return launchActive(doc, now()) ? doc : null;
-  };
-  const open = (campaign: string) => {
-    if (shownHere.has(campaign)) return false;
-    const record = deps.shown.read(campaign);
-    return !record?.shownAt && !record?.answer;
+    const kept = readLaunchKept(deps.dataDir());
+    const doc = kept.doc;
+    if (!launchActive(doc, now())) return null;
+    if (shownHere.has(doc.campaign) || kept.shown?.includes(doc.campaign)) return { doc, open: false };
+    const record = deps.shown.read(doc.campaign);
+    return { doc, open: !record?.shownAt && !record?.answer };
   };
   /** When the kept check goes stale (or the kept launch starts or ends), from now. */
   const nextWakeMs = (): number => {
@@ -496,9 +545,10 @@ export function createLaunchSwitch(deps: LaunchSwitchDeps): LaunchSwitchService 
       try {
         const due = setTimeout(() => void service.refresh().catch(() => {}), 0);
         (due as { unref?: () => void }).unref?.();
-        const doc = current();
-        if (!doc || !open(doc.campaign)) return no;
-        return { show: true, campaign: doc.campaign, url: doc.url };
+        const live = current();
+        // A read-only data folder can hold neither record: it would show on every load, so it never shows.
+        if (!live?.open || !dataDirWritable(deps.dataDir())) return no;
+        return { show: true, campaign: live.doc.campaign, url: live.doc.url };
       } catch {
         return no;
       }
@@ -506,13 +556,18 @@ export function createLaunchSwitch(deps: LaunchSwitchDeps): LaunchSwitchService 
 
     shown(campaign) {
       try {
-        const doc = current();
-        if (!doc || (campaign !== undefined && campaign !== doc.campaign) || !open(doc.campaign)) return { show: false };
-        const stamped = deps.shown.stamp(doc.campaign, { shownAt: new Date(now()).toISOString() });
-        // Not written (a read-only data folder): it is on screen, so it counts as shown here, and this process
-        // neither claims it again nor holds anything for it.
-        if (stamped === "failed") shownHere.add(doc.campaign);
-        return { show: stamped !== "taken" };
+        const live = current();
+        if (!live?.open || (campaign !== undefined && campaign !== live.doc.campaign)) return { show: false };
+        const name = live.doc.campaign;
+        const stamped = deps.shown.stamp(name, { shownAt: new Date(now()).toISOString() });
+        if (stamped === "taken") return { show: false };
+        // The second record, in the data folder, written either way: a machine state that cannot be saved (a
+        // hand-broken config.json) or that breaks later still reads as shown on this computer.
+        const marked = markLaunchShown(deps.dataDir(), name);
+        // This process never claims it again, whatever was written.
+        shownHere.add(name);
+        // Neither record written: every later load would show it again, so it does not show at all.
+        return { show: stamped === "stamped" || marked };
       } catch {
         return { show: false };
       }

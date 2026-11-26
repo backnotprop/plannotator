@@ -7192,7 +7192,7 @@ const App: React.FC = () => {
   // The launch dialog (the launch switch; LaunchAnnouncement.tsx): FIRST on the load it is due, as the page opens and
   // before the reader starts working, ahead of every announcement below and the star ask, which yield on that load
   // (`launch.holds`). It waits behind the look-and-feel chooser and the two setup flows, as they do. Never on a
-  // shared, archive or read-only page, the share portal, or the VS Code webview (as the star ask).
+  // shared, archive or read-only page, or the share portal; the VS Code panel shows it too.
   const launch = useLaunchAnnouncement({
     ready: !isLoading,
     eligible:
