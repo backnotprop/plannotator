@@ -39,6 +39,7 @@ import { INBOX_T3_HOST, isT3ThreadId, type InboxT3Status, type InboxT3WaitReason
 // reach the Inbox through this published entry, so core's export map is unchanged.
 export * from "./inbox-attachments";
 export * from "./inbox-open-in";
+export * from "./inbox-file-missing-words";
 export * from "./inbox-delivery";
 export * from "./inbox-codex";
 export * from "./inbox-qwen";

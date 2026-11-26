@@ -70,7 +70,7 @@ import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/sha
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { isLinkedWorktree } from "@plannotator/shared/linked-worktree";
 import { earlierFolderPaths, linkFallbacks, sameNamedAttachment, type LinkFallback } from "./inbox-link-fallback";
-import { fileNotFoundSentence } from "@plannotator/core/inbox-file-missing-words";
+import { fileNotFoundSentence } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
   currentPlatform,
