@@ -485,9 +485,9 @@ export function refErrorOf(cli: RefCli, result: RefCommandResult): ForgeRefCardE
 /**
  * The hosts a CLI is signed in to, lowercased (never a token). gh: `auth
  * status --json hosts` (any account that gh could use), else the text form's
- * "Logged in to <host>" lines. glab: `auth status`'s "Logged in to <host>"
- * lines (it prints them on stderr). A CLI that is missing or refuses answers
- * no hosts.
+ * "Logged in to <host>" lines. glab: `auth status --all`'s (else, for a glab
+ * without `--all`, `auth status`'s) "Logged in to <host>" lines (an older glab
+ * prints them on stderr). A CLI that is missing or refuses answers no hosts.
  */
 export async function readSignedInHosts(run: RefRunner, cli: RefCli): Promise<Set<string>> {
   return (await readCliHosts(run, cli)).signedIn;
@@ -539,6 +539,14 @@ export async function readCliHosts(run: RefRunner, cli: RefCli): Promise<CliHost
     fromText(`${text.stdout}\n${text.stderr}`);
     return out;
   }
+  // `--all`: a newer glab checks only the current context's host without it (the git remote, GITLAB_HOST or its
+  // default). A glab older than the flag refuses it, and checks every host by default: asked again without it, as
+  // is any `--all` that failed naming no host.
+  const all = await run("glab", ["auth", "status", "--all"], { NO_COLOR: "1" });
+  if (notFound(all)) return { ...out, missing: true };
+  const refused = /unknown (?:shorthand )?flag/i.test(`${all.stdout}\n${all.stderr}`);
+  if (!refused) fromText(`${all.stdout}\n${all.stderr}`);
+  if (!refused && (all.exitCode === 0 || out.configured.size > 0)) return out;
   const status = await run("glab", ["auth", "status"], { NO_COLOR: "1" });
   if (notFound(status)) return { ...out, missing: true };
   fromText(`${status.stdout}\n${status.stderr}`);

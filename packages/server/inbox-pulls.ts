@@ -264,24 +264,30 @@ const GL_MR = `iid title webUrl state draft updatedAt mergedAt sourceBranch targ
       project { fullPath repository { rootRef } } sourceProject { fullPath } author { username avatarUrl }
       approvedBy(first: 3) { nodes { username avatarUrl } } reviewers(first: 5) { nodes { username avatarUrl } }`;
 
-/** A GitLab query asks this many projects' open MRs at most: GitLab refuses a query past its complexity limit (250). */
-export const GITLAB_PROJECTS_PER_QUERY = 4;
+/**
+ * A GitLab query asks this many projects' open MRs at most: GitLab refuses a query past its complexity limit (250 for a
+ * signed-in user), and each project's 50 MRs score about 85 (four were about 340).
+ */
+export const GITLAB_PROJECTS_PER_QUERY = 2;
 
 /** A project's full path as a GraphQL string (only the characters a GitLab path may hold; anything else is dropped). */
 function gqlPath(path: string): string {
   return JSON.stringify(path.replace(/[^A-Za-z0-9._/-]/g, ""));
 }
 
-/** One query per GitLab host: the current user's requested, opened, assigned and merged MRs. */
-export const GITLAB_PULLS_QUERY = `query InboxPulls {
-  currentUser {
-    username
-    requested: reviewRequestedMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }
-    authored: authoredMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }
-    assigned: assignedMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }
-    merged: authoredMergeRequests(state: merged, first: 20, sort: MERGED_AT_DESC) { nodes { ${GL_MR} } }
-  }
-}`;
+const GL_OWN_LISTS: [alias: string, list: string][] = [
+  ["requested", `reviewRequestedMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }`],
+  ["authored", `authoredMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }`],
+  ["assigned", `assignedMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }`],
+  ["merged", `authoredMergeRequests(state: merged, first: 20, sort: MERGED_AT_DESC) { nodes { ${GL_MR} } }`],
+];
+
+/**
+ * The current user's requested, opened, assigned and merged MRs, a query each, asked together (their answers merge
+ * into one, `parseGitlabPulls`): the four in one query scored about 300, over GitLab's complexity limit (250 for a
+ * signed-in user), and GitLab answered it with an error only.
+ */
+export const GITLAB_PULLS_QUERIES: readonly string[] = GL_OWN_LISTS.map(([alias, list]) => `query InboxPulls {\n  currentUser {\n    username\n    ${alias}: ${list}\n  }\n}`);
 
 /**
  * The Others queries for one GitLab host: the projects (full paths, the most active first) `GITLAB_PROJECTS_PER_QUERY`
@@ -300,7 +306,7 @@ export function gitlabOthersQueries(projects: readonly string[]): { queries: str
   return { queries, covered };
 }
 
-for (const q of [GITHUB_PULLS_QUERY, GITHUB_PULLS_BOTH_QUERY, GITLAB_PULLS_QUERY, githubOthersQuery(2), ...gitlabOthersQueries(["a/b"]).queries]) {
+for (const q of [GITHUB_PULLS_QUERY, GITHUB_PULLS_BOTH_QUERY, ...GITLAB_PULLS_QUERIES, githubOthersQuery(2), ...gitlabOthersQueries(["a/b"]).queries]) {
   if (!/^query\b/.test(q)) throw new Error("inbox-pulls: every query must be a query");
 }
 
@@ -567,7 +573,9 @@ export function parseGitlabPulls(stdout: string | readonly string[], host: strin
       return null;
     }
     if (hasErrors(parsed) || !obj(parsed).data) return null;
-    Object.assign(data, obj(obj(parsed).data));
+    const part = obj(obj(parsed).data);
+    // Each own-lists query answers its list under `currentUser`: the users merge, the lists with them.
+    Object.assign(data, part, part.currentUser ? { currentUser: { ...obj(data.currentUser), ...obj(part.currentUser) } } : {});
   }
   const user = obj(data.currentUser);
   if (!user.username) return null;
@@ -701,6 +709,8 @@ interface OwnState {
 
 interface HostState extends OwnState {
   cli: RefCli;
+  /** GitLab: each of `GITLAB_PULLS_QUERIES`' last good answer and when it was read, in their order. */
+  gitlabParts?: ({ stdout: string; at: number } | undefined)[];
   others: OthersState;
   /**
    * The person's own lists read everywhere (the Pull requests board, `everywhere`): the same searches with no `repo:`
@@ -1362,6 +1372,29 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
    * searches (`GITHUB_PULLS_BOTH_QUERY`), or one set when the repositories don't fit the scope (the searches are the
    * same then). GitLab: its own lists are never scoped, so one answer serves both.
    */
+  /**
+   * GitLab's own lists: its queries (`GITLAB_PULLS_QUERIES`) at once, merged. A query that fails is answered by its
+   * last good answer when it has one: the read is then `stale` (that failure), as old as its oldest answer. One with
+   * none, or a rate limit, fails the read, as the single query did.
+   */
+  const readGitlabOwn = async (host: string, cli: RefCli, state: HostState): Promise<{ parsed: ParsedPulls; at: number; stale: RefCommandResult | null } | { failed: RefCommandResult }> => {
+    const results = await Promise.all(GITLAB_PULLS_QUERIES.map((query) => run(cli, ["api", "--hostname", host, "graphql", "-f", `query=${query}`])));
+    const kept = (state.gitlabParts ??= []);
+    const at = now();
+    const failed = results.filter((result, i) => {
+      if (result.exitCode !== 0 || !parseGitlabPulls(result.stdout, host)) return true;
+      kept[i] = { stdout: result.stdout, at };
+      return false;
+    });
+    const limited = failed.find((r) => refErrorOf(cli, { ...r, exitCode: r.exitCode || 1 }) === "rate_limited");
+    if (limited) return { failed: limited };
+    const stale = failed[0] ?? null;
+    if (stale && GITLAB_PULLS_QUERIES.some((_, i) => !kept[i])) return { failed: stale };
+    const parts = GITLAB_PULLS_QUERIES.map((_, i) => kept[i]!);
+    const parsed = parseGitlabPulls(parts.map((p) => p.stdout), host);
+    return parsed ? { parsed, at: Math.min(...parts.map((p) => p.at)), stale } : { failed: stale ?? { stdout: "", stderr: "", exitCode: 1 } };
+  };
+
   const read = (host: string, cli: RefCli, state: HostState, repos: readonly string[]): Promise<void> => {
     if (state.pending) return state.pending;
     const wide = state.wide;
@@ -1381,29 +1414,43 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       // GitLab's own lists are the user's, never limited to the projects; GitHub's are while the repositories fit.
       const scoped = !!searches && searches.authored.includes(" repo:");
       const every = scoped ? githubPullSearches(now(), []) : null;
-      const args = searches
-        ? [
-            "api",
-            "graphql",
-            "--hostname",
-            host,
-            "-f",
-            `query=${every ? GITHUB_PULLS_BOTH_QUERY : GITHUB_PULLS_QUERY}`,
-            "-f",
-            `requested=${searches.requested}`,
-            "-f",
-            `authored=${searches.authored}`,
-            "-f",
-            `assigned=${searches.assigned}`,
-            "-f",
-            `merged=${searches.merged}`,
-            ...(every
-              ? ["-f", `everyRequested=${every.requested}`, "-f", `everyAuthored=${every.authored}`, "-f", `everyAssigned=${every.assigned}`, "-f", `everyMerged=${every.merged}`]
-              : []),
-          ]
-        : ["api", "--hostname", host, "graphql", "-f", `query=${GITLAB_PULLS_QUERY}`];
+      if (!searches) {
+        const own = await readGitlabOwn(host, cli, state);
+        if ("failed" in own) {
+          fail(host, state, cli, own.failed);
+          wide.error = state.error;
+          wide.failedAt = state.failedAt;
+          return;
+        }
+        state.answer = { at: own.at, login: own.parsed.login, pulls: own.parsed.pulls, avatars: own.parsed.avatars, scoped: false, repos: reposKey, ...(own.parsed.capped ? { capped: own.parsed.capped } : {}) };
+        wide.answer = { ...state.answer, repos: "" };
+        state.error = null;
+        if (own.stale) fail(host, state, cli, own.stale);
+        wide.error = state.error;
+        wide.failedAt = state.failedAt;
+        return;
+      }
+      const args = [
+        "api",
+        "graphql",
+        "--hostname",
+        host,
+        "-f",
+        `query=${every ? GITHUB_PULLS_BOTH_QUERY : GITHUB_PULLS_QUERY}`,
+        "-f",
+        `requested=${searches.requested}`,
+        "-f",
+        `authored=${searches.authored}`,
+        "-f",
+        `assigned=${searches.assigned}`,
+        "-f",
+        `merged=${searches.merged}`,
+        ...(every
+          ? ["-f", `everyRequested=${every.requested}`, "-f", `everyAuthored=${every.authored}`, "-f", `everyAssigned=${every.assigned}`, "-f", `everyMerged=${every.merged}`]
+          : []),
+      ];
       const result = await run(cli, args);
-      const parsed = result.exitCode === 0 ? (cli === "gh" ? parseGithubPulls(result.stdout, host) : parseGitlabPulls(result.stdout, host)) : null;
+      const parsed = result.exitCode === 0 ? parseGithubPulls(result.stdout, host) : null;
       const parsedWide = parsed && every ? parseGithubPulls(result.stdout, host, "every") : parsed;
       if (!parsed || !parsedWide) {
         fail(host, state, cli, result);
