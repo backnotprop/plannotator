@@ -3,11 +3,12 @@
  * that computer is away queuing one outbox entry per pause (a save names again what a held save already carries); a
  * new picture whose file cannot go yet stopping every later change from being saved; a save past the outbox's bound
  * refused for ever instead of going in parts; a held save that was refused, or whose link went, said in neutral words
- * or not at all.
+ * or not at all; each short pause while a save is held rewriting the whole entry on disk; a held Undo said in fixed
+ * words that do not follow that computer, or cleared by a press on the canvas while it still waits.
  */
-import { describe, expect, test } from 'bun:test';
-import type { OutboxView } from '../api';
-import { FAR_PART_CHARS, farChanges, farParts, heldEnd, joinHeld, type HeldSave } from './farSave';
+import { afterEach, describe, expect, jest, test } from 'bun:test';
+import { heldWords, type OutboxView } from '../api';
+import { boardLine, FAR_PART_CHARS, farChanges, farParts, HELD_SAVE_AFTER_MS, heldEnd, joinHeld, SAVE_AFTER_MS, saveTimer, type HeldSave } from './farSave';
 
 type El = { id: string; type?: string; version: number; isDeleted?: boolean; fileId?: string; points?: number[][] };
 const sig = (el: El) => `${el.version}:${el.isDeleted ? 1 : 0}`;
@@ -81,5 +82,49 @@ describe('a save folded into the one that waits', () => {
   test('one the window\'s outbox listed and lists no more (read again after a reconnect) has ended; one not listed yet still waits', () => {
     expect(heldEnd(undefined, { name: 'MacBook', state: 'online' }, true)).toEqual({ landed: false, unknown: true });
     expect(heldEnd(undefined, { name: 'MacBook', state: 'online' }, false)).toBeNull();
+  });
+});
+
+describe('the pause before a save', () => {
+  afterEach(() => jest.useRealTimers());
+
+  test('while a save waits for that computer each change is saved after a longer pause; stop cancels one that waited', () => {
+    jest.useFakeTimers();
+    let held = false;
+    let saves = 0;
+    const timer = saveTimer(() => saves++, () => held);
+    timer.soon();
+    jest.advanceTimersByTime(SAVE_AFTER_MS);
+    expect(saves).toBe(1);
+    // A save is held: the next pause is longer, and a change within it starts it again.
+    held = true;
+    timer.soon();
+    jest.advanceTimersByTime(SAVE_AFTER_MS);
+    expect(saves).toBe(1);
+    timer.soon();
+    jest.advanceTimersByTime(HELD_SAVE_AFTER_MS - 1);
+    expect(saves).toBe(1);
+    jest.advanceTimersByTime(1);
+    expect(saves).toBe(2);
+    // Put away, Send or Undo: the board stops the pause and saves at once.
+    timer.soon();
+    expect(timer.stop()).toBe(true);
+    jest.advanceTimersByTime(HELD_SAVE_AFTER_MS);
+    expect([saves, timer.stop()]).toEqual([2, false]);
+  });
+});
+
+describe('the board\'s line for what waits for that computer', () => {
+  test('a held Undo says what a held save says, following that computer, and a notice cleared does not take it', () => {
+    const away = { name: 'MacBook', state: 'offline' as const };
+    const back = { name: 'MacBook', state: 'online' as const };
+    expect(boardLine(false, null, null, 'held words', away)).toEqual({ text: heldWords(away), held: true });
+    expect(boardLine(false, null, null, 'held words', back)).toEqual({ text: heldWords(back), held: true });
+    expect(boardLine(false, null, { held: 'save words' }, null, back)).toEqual(boardLine(false, null, null, 'undo words', back));
+    // Without the machine: the outbox's own words.
+    expect(boardLine(false, null, null, 'held words', null)).toEqual({ text: 'held words', held: true });
+    // Something said once shows over it, and once it goes the held Undo shows again.
+    expect(boardLine(false, { text: 'Sending…' }, null, 'held words', away)).toEqual({ text: 'Sending…' });
+    expect(boardLine(false, null, null, null, away)).toBeNull();
   });
 });

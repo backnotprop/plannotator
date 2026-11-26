@@ -4,7 +4,9 @@
  *
  * What regresses: a save too large for the outbox refused (422) even while that computer is online, or held anyway
  * while it is away; each delivered canvas save costing a read of that computer's whole list; a drawing job from that
- * computer that no window here can draw (none open, or the canvas off here) left for its agent to wait out.
+ * computer that no window here can draw (none open, or the canvas off here) left for its agent to wait out; a save
+ * folded, or a large one sent, ahead of a write of the same thread still waiting (a reply sent from the canvas, an Undo),
+ * so it changes the canvas there before that write runs.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -39,8 +41,9 @@ afterEach(() => {
 
 /** MacBook's door: its canvas routes answer as its window's would; `say` sends a frame on its stream; `away()` drops it. */
 function macbookDoor() {
-  const state = { down: false, lists: 0, asks: [] as string[], writes: [] as { route: string; search: string; type: string | null; bytes: number; body: any }[] };
+  const state = { down: false, lists: 0, asks: [] as string[], writes: [] as { route: string; search: string; type: string | null; bytes: number; body: any }[], busy: new Set<string>() };
   const streams = new Set<ReadableStreamDefaultController<Uint8Array>>();
+  const slow: (() => void)[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -69,6 +72,8 @@ function macbookDoor() {
         const raw = new Uint8Array(await req.arrayBuffer());
         const type = req.headers.get("content-type");
         const body = type?.startsWith("application/json") && raw.length > 0 ? JSON.parse(new TextDecoder().decode(raw)) : null;
+        // A route it is slow to answer: the write is on its way (in the outbox, sent) until `release()`.
+        if (state.busy.has(route)) await new Promise<void>((resolve) => slow.push(resolve));
         state.writes.push({ route, search: url.search, type, bytes: raw.byteLength, body });
         if (route.startsWith("canvas/jobs/")) return Response.json({ ok: true });
         return Response.json({ serverSession: "far", rev: state.writes.length });
@@ -85,6 +90,10 @@ function macbookDoor() {
     },
     back() {
       state.down = false;
+    },
+    release() {
+      state.busy.clear();
+      for (const resolve of slow.splice(0)) resolve();
     },
     away() {
       state.down = true;
@@ -125,9 +134,9 @@ function inbox(url: string, canvasOn = true) {
   });
   cleanups.push(() => machines.stop());
   machines.start();
-  const call = async (path: string, body: Record<string, unknown>) => {
+  const call = async (path: string, body: Record<string, unknown>, more: Record<string, string> = {}) => {
     const target = new URL(`http://127.0.0.1:1${path}`);
-    const headers = { Host: "127.0.0.1:1", Origin: "http://127.0.0.1:1", "Content-Type": "application/json" };
+    const headers = { Host: "127.0.0.1:1", Origin: "http://127.0.0.1:1", "Content-Type": "application/json", ...more };
     const answer = (await machines.route(new Request(target, { method: "POST", headers, body: JSON.stringify({ serverSession: SESSION, ...body }) }), target, "local"))!;
     return { status: answer.status, body: (await answer.json().catch(() => null)) as Record<string, any> };
   };
@@ -145,6 +154,7 @@ async function until(check: () => boolean, what: string) {
   if (!check()) throw new Error(`never: ${what}`);
 }
 
+const box = (id: string, version: number) => ({ id, type: "rectangle", version, versionNonce: version, isDeleted: false });
 const scene = (elements: unknown[]) => ({ type: "excalidraw", version: 2, source: "test", elements, appState: {}, files: {} });
 /** One long stroke: a single thing past the outbox's bound. */
 const longStroke = () => ({ id: "stroke_long", type: "freedraw", version: 1, versionNonce: 1, isDeleted: false, x: 0, y: 0, points: Array.from({ length: 12_000 }, (_, i) => [i * 1.123456789, i * 2.987654321]) });
@@ -224,7 +234,6 @@ test("canvas saves while MacBook is away wait as one entry, from any window; an 
   door.away();
   await until(() => macbook()?.state !== "online", "MacBook away");
   const canvas = `/api/inbox/m/${FAR}/threads/${THREAD}/canvas`;
-  const box = (id: string, version: number) => ({ id, type: "rectangle", version, versionNonce: version, isDeleted: false });
   const first = await call(canvas, { idempotency_key: "canvas-a", scene: scene([box("a", 1), box("b", 3)]), have: 3, partial: true, window: "cw_1" });
   expect(first.status).toBe(202);
   // Another window, or this one after a reload: b moved again (and an older copy of a), c drawn, one removed.
@@ -247,4 +256,50 @@ test("canvas saves while MacBook is away wait as one entry, from any window; an 
   expect([folded.gone, folded.have, folded.partial, folded.idempotency_key]).toEqual([["old_1"], 3, true, "canvas-a"]);
   expect(door.state.writes[2]!.body.scene.elements.map((e: { id: string }) => e.id)).toEqual(["d"]);
   expect(await waiting()).toBe(0);
+});
+
+test("a save after a reply sent from the canvas while MacBook is away is not folded past the reply: three entries, in order", async () => {
+  const door = macbookDoor();
+  const { call, macbook, waiting } = inbox(door.url);
+  await until(() => macbook()?.state === "online" && macbook()?.list_cursor === 1, "MacBook online");
+  door.away();
+  await until(() => macbook()?.state !== "online", "MacBook away");
+  const canvas = `/api/inbox/m/${FAR}/threads/${THREAD}/canvas`;
+  expect((await call(canvas, { idempotency_key: "canvas-a", scene: scene([box("a", 1)]), have: 1, partial: true })).status).toBe(202);
+  // Send canvas: a reply to the thread's last message, named to the thread by the window.
+  const sent = await call(`/api/inbox/m/${FAR}/messages/msg_01K00000000000000000000002/reply`, { idempotency_key: "reply-a", words: "see the drawing", seen_through_seq: 4 }, { "X-Plannotator-Thread": THREAD });
+  expect(sent.status).toBe(202);
+  const after = await call(canvas, { idempotency_key: "canvas-b", scene: scene([box("b", 1)]), have: 1, partial: true });
+  expect(after.body.outbox.key).toBe("canvas-b");
+  expect(await waiting()).toBe(3);
+
+  door.back();
+  await until(() => door.state.writes.length === 3, "all three delivered");
+  expect(door.state.writes.map((w) => w.route)).toEqual([`threads/${THREAD}/canvas`, "messages/msg_01K00000000000000000000002/reply", `threads/${THREAD}/canvas`]);
+  expect(door.state.writes.map((w) => w.body.scene?.elements.map((e: { id: string }) => e.id) ?? null)).toEqual([["a"], null, ["b"]]);
+});
+
+test("a save too large for the outbox waits (503) while a write of its thread is still on its way to MacBook, and goes after it", async () => {
+  const door = macbookDoor();
+  const { call, macbook, waiting } = inbox(door.url);
+  await until(() => macbook()?.state === "online" && macbook()?.list_cursor === 1, "MacBook online");
+  const canvas = `/api/inbox/m/${FAR}/threads/${THREAD}/canvas`;
+  // An Undo MacBook is slow to answer: on its way, still in the outbox, while MacBook is online.
+  door.state.busy.add(`threads/${THREAD}/canvas/undo`);
+  const undo = call(`${canvas}/undo`, { idempotency_key: "undo-a", rev: 3 });
+  for (let i = 0; i < 100 && (await waiting()) === 0; i++) await Bun.sleep(10);
+  expect(await waiting()).toBe(1);
+  const big = { idempotency_key: "canvas-big", scene: scene([longStroke()]), have: 3, partial: true };
+  const early = await call(canvas, big);
+  expect(early.status).toBe(503);
+  expect(door.state.writes.map((w) => w.route)).toEqual([]);
+
+  door.release();
+  expect((await undo).status).toBe(200);
+  await until(() => door.state.writes.length === 1, "the Undo delivered");
+  for (let i = 0; i < 100 && (await waiting()) > 0; i++) await Bun.sleep(20);
+  expect(await waiting()).toBe(0);
+  const later = await call(canvas, { ...big, idempotency_key: "canvas-big-2" });
+  expect(later.status).toBe(200);
+  expect(door.state.writes.map((w) => w.route)).toEqual([`threads/${THREAD}/canvas/undo`, `threads/${THREAD}/canvas`]);
 });

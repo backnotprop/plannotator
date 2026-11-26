@@ -17,8 +17,9 @@
  *  - the generic forward `/api/inbox/m/<machine>/<door route>`: reads pass
  *    through with the far door's own safety headers (and `sandbox` when it
  *    sent none); a write is held or passed by its route in rule 8's table
- *    (`doorWriteKind`), never by its Content-Type: files go straight through
- *    while the machine is online, every other write through the outbox;
+ *    (`doorWrite`: its kind, and its policy for what more the forward does),
+ *    never by its Content-Type: files go straight through while the machine
+ *    is online, every other write through the outbox;
  *  - the window's routes (`/api/inbox/machines…`, `/api/inbox/outbox…`), the
  *    CLI's control routes, and the two door routes only a machine may call
  *    (`link-back`, `unlink`).
@@ -43,7 +44,7 @@ import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent
 import { inboxFarReaderName, inboxMachineRecordName } from "./inbox-sent-from-reader";
 import { createMachineAgentFind } from "./inbox-machine-agent-find";
 import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
-import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, OUTBOX_MAX_BODY_BYTES, type OutboxEntry } from "./inbox-outbox";
+import { doorWrite, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, OUTBOX_MAX_BODY_BYTES, routeThread, writeOfThread, type OutboxEntry } from "./inbox-outbox";
 import type { OutboxFile } from "./inbox-outbox-files";
 import { foldCanvasSave } from "./inbox-canvas-fold";
 import { inboxForwardedPlace } from "./inbox-sent-from";
@@ -402,9 +403,6 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
 const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
-/** A thread's canvas: a save, and its Undo (mark `canvas`). Neither changes that machine's list. */
-const CANVAS_SAVE_ROUTE = /^threads\/[^/]+\/canvas$/;
-const CANVAS_WRITE_ROUTE = /^threads\/[^/]+\/canvas(?:\/undo)?$/;
 /** A drawing job's id, as that machine's canvas makes it (inbox-canvas.ts). */
 const CANVAS_JOB = /^job_[a-f0-9]{32}$/;
 
@@ -1072,8 +1070,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
     // Rule 8's table decides, by route: a write it has not classified, or calls `local`, never reaches another machine.
-    const kind = doorWriteKind(route);
-    if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
+    const write = doorWrite(route);
+    if (!write) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
+    const { kind, policy } = write;
     if (kind === "file") {
       // A file (an upload, a drawing): never held. It goes now, or not at all.
       if (peer.state !== "online") return offline();
@@ -1151,13 +1150,19 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // This Inbox's page session means nothing to the other machine's Inbox, and its drafts stay on this computer.
     delete body.serverSession;
     if (route === "messages") delete body.draft_id;
-    // A canvas save too large for the outbox to hold (one thing past its bound: a long stroke, a page of pasted words;
-    // the window sends a larger save in parts) goes now while that machine is online, as a file does. Elements merge
-    // there by version, so it needs no place in the queue; away, it waits in the window (503) and goes when it is back.
-    if (CANVAS_SAVE_ROUTE.test(route) && JSON.stringify(body).length > OUTBOX_MAX_BODY_BYTES) {
+    // A write too large for the outbox to hold that may go now (`oversizeDirect`: a canvas save of one thing past its
+    // bound, a long stroke, a page of pasted words; the window sends a larger save in parts) goes while that machine is
+    // online, as a file does, once nothing of its thread is queued for it: it never passes an Undo or a save still on its
+    // way. Otherwise it waits in the window (503) and goes later.
+    const raw = policy.oversizeDirect ? JSON.stringify(body) : "";
+    if (raw.length > OUTBOX_MAX_BODY_BYTES) {
       if (peer.state !== "online") return offline();
+      const thread = routeThread(route);
+      if (thread && outbox.list(machine, "pending").some((e) => writeOfThread(e, thread))) {
+        return json({ error: `Earlier changes to this thread are still on their way to ${links.get(machine)?.name ?? "that machine"}.`, code: "thread_queued" }, 503);
+      }
       try {
-        return passAnswer(await peer.request(route, "", { method: "POST", headers: { "Content-Type": "application/json", ...(window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}) }, body: JSON.stringify(body), signal: req.signal, timeoutMs: UPLOAD_MS }));
+        return passAnswer(await peer.request(route, "", { method: "POST", headers: { "Content-Type": "application/json", ...(window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}) }, body: raw, signal: req.signal, timeoutMs: UPLOAD_MS }));
       } catch {
         return offline();
       }
@@ -1172,31 +1177,32 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const named = req.headers.get("X-Plannotator-Thread")?.trim() ?? "";
     // Where the person was, when not at this window, said on so that machine's agent reads where they wrote it.
     const place = inboxForwardedPlace(context.sentFrom?.(req, via) ?? null);
-    // A canvas save while one for the same thread waits and never left: folded into that one (inbox-canvas-fold.ts),
-    // so what the person draws while that machine is away is one entry, from any window.
+    // A write that folds (`fold`: a canvas save) while one of its route waits and never left: folded into that one
+    // (inbox-canvas-fold.ts), so what the person draws while that machine is away is one entry, from any window.
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
-    const folded = CANVAS_SAVE_ROUTE.test(route) && key !== "" && !outbox.get(key) ? foldIntoWaiting(machine, route, body) : null;
+    const folded = policy.fold && key !== "" && !outbox.get(key) ? foldIntoWaiting(machine, route, body) : null;
     const { entry, fresh } = folded ? { entry: folded, fresh: true } : outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window, place);
     if (peer.state === "online") peer.flush();
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;
     // A state that landed is in that machine's list now: read it before answering, so the window's next read shows it.
     // A card's write reads its Board and its list both: a tag named there may be new, and the merged tags come from the list.
-    // A canvas write changes no list there: nothing to read again (it would cost a list read for each save).
-    if (settled.state === "delivered" && kind === "set" && !CANVAS_WRITE_ROUTE.test(route)) await (segments[0] === "cards" ? Promise.all([peer.refreshList(), peer.refreshCards()]) : peer.refreshList());
+    // A write that changes no list there (`refreshList: false`, a canvas save or Undo): nothing to read again (it would cost a list read for each save).
+    if (settled.state === "delivered" && kind === "set" && policy.refreshList !== false) await (segments[0] === "cards" ? Promise.all([peer.refreshList(), peer.refreshCards()]) : peer.refreshList());
     return outboxAnswer(settled, fresh);
   };
 
   /**
-   * The newest canvas save of this thread waiting for `machine` that never left, with nothing of the thread queued
-   * behind it (an Undo, a delete), given `body` too. Null when there is none, or the two together are past the bound.
+   * The newest write of `route` (a canvas save) waiting for `machine` that never left, with nothing of its thread
+   * queued behind it (an Undo, a delete, a reply sent from the canvas: by route, or the thread the window named), given
+   * `body` too. Null when there is none, or the two together are past the bound.
    */
   const foldIntoWaiting = (machine: string, route: string, body: Record<string, unknown>): OutboxEntry | null => {
-    const thread = route.slice(0, -"canvas".length);
+    const thread = routeThread(route);
     const waiting = outbox.list(machine, "pending");
     const at = waiting.map((e) => e.route).lastIndexOf(route);
     const held = waiting[at];
-    if (!held || held.state !== "queued" || held.left || waiting.slice(at + 1).some((e) => e.route.startsWith(thread))) return null;
+    if (!thread || !held || held.state !== "queued" || held.left || waiting.slice(at + 1).some((e) => writeOfThread(e, thread))) return null;
     const merged = foldCanvasSave(held.body, body);
     return merged ? outbox.amend(held.key, merged) : null;
   };

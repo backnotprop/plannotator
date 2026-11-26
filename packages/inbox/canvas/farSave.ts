@@ -8,8 +8,56 @@
  * per pause, and nothing of it waits only in the editor.
  */
 
-import type { MachineView, OutboxView } from '../api';
+import { heldWords, type MachineView, type OutboxView } from '../api';
 import { outboxLine, outboxPending } from '../machines';
+
+/** The board's pause after the person's last change before it saves. */
+export const SAVE_AFTER_MS = 450;
+/**
+ * The pause while a save waits in the outbox for that computer: each save then rewrites that entry whole on disk, so
+ * one is made after a longer pause. Putting the tab away, leaving, closing the canvas, Send and Undo save at once.
+ */
+export const HELD_SAVE_AFTER_MS = 2_500;
+
+/** The board's save timer: `soon` after each change (the longer pause while `held()`); `stop` says whether one waited. */
+export function saveTimer(save: () => void, held: () => boolean): { soon: () => void; stop: () => boolean } {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const stop = () => {
+    if (timer === null) return false;
+    clearTimeout(timer);
+    timer = null;
+    return true;
+  };
+  return {
+    soon() {
+      stop();
+      timer = setTimeout(() => {
+        timer = null;
+        save();
+      }, held() ? HELD_SAVE_AFTER_MS : SAVE_AFTER_MS);
+    },
+    stop,
+  };
+}
+
+/** The board's one line of state. `held`: the outbox's words for a change waiting for a linked computer. */
+export type BoardLine = { text: string; bad?: boolean; held?: boolean; ended?: boolean };
+export type SaveState = 'saving' | 'failed' | { held: string } | { ended: string } | null;
+
+/**
+ * The line: the thread is gone, something to say once, or a save that is not through, then a save or an Undo held for
+ * the thread's linked computer. Held words follow that computer's state ("Waiting for …" while it is away, "Sending to
+ * …" once it is back); without it, the outbox's own words (`saveState.held`, `undoHeld`).
+ */
+export function boardLine(gone: boolean, notice: BoardLine | null, saveState: SaveState, undoHeld: string | null, machine: Pick<MachineView, 'name' | 'state'> | null): BoardLine | null {
+  if (gone) return { text: 'Thread deleted', bad: true };
+  if (notice) return notice;
+  if (saveState === 'failed') return { text: 'Not saved', bad: true };
+  if (saveState === 'saving') return { text: 'Saving…' };
+  if (saveState && 'ended' in saveState) return { text: saveState.ended, bad: true, ended: true };
+  const held = saveState?.held ?? undoHeld;
+  return held === null ? null : { text: machine ? heldWords(machine) : held, held: true };
+}
 
 /** An element as the editor and the Inbox both hold it: enough to compare and to measure. */
 export interface FarElement {
