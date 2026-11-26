@@ -278,6 +278,21 @@ test.skipIf(!hasDom)('Show agent status sorts waiting then working and puts the 
   expect(document.querySelector('[data-sidebar-section="agents"]')!.textContent).toContain('2 waiting');
 });
 
+test.skipIf(!hasDom)('with the pointer on the list no row moves when an agent starts waiting; leaving it lets the waiting agent up', () => {
+  const listed = (waits: boolean) => [{ ...group([agent('ses_a'), agent('ses_b'), agent('ses_c', waits ? { status_mark: { state: 'blocked', where: 'inbox' } } : {})]), status_marks: true }];
+  const order = () => [...surface()!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')].map((row) => row.dataset.sidebarAgent);
+  setInboxAgents(listed(false));
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel(null) })} />);
+  expect(order()).toEqual(['ses_a', 'ses_b', 'ses_c']);
+  // React's pointer enter and leave come from pointerover / pointerout with the element left or entered.
+  act(() => void surface()!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, relatedTarget: document.body })));
+  act(() => setInboxAgents(listed(true)));
+  expect(order()).toEqual(['ses_a', 'ses_b', 'ses_c']);
+  expect(document.querySelector('[data-sidebar-section="agents"]')!.textContent).toContain('1 waiting');
+  act(() => void surface()!.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: document.body })));
+  expect(order()).toEqual(['ses_c', 'ses_a', 'ses_b']);
+});
+
 test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an Inbox with no agents field and no link has no section', () => {
   const alone = machinesModel([view(SELF, 'Studio')]);
   mount(<Sidebar {...sidebarProps({ machines: alone })} />);
