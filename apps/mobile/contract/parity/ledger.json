@@ -23548,6 +23548,90 @@
       }
     },
     {
+      "id": "undecided-enum-inboxagent-runtime-oh-my-pi",
+      "title": "enum:InboxAgent.runtime.oh-my-pi",
+      "surface": [
+        "enum:InboxAgent.runtime.oh-my-pi"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxcomposesession-runtime-oh-my-pi",
+      "title": "enum:InboxComposeSession.runtime.oh-my-pi",
+      "surface": [
+        "enum:InboxComposeSession.runtime.oh-my-pi"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-runtime",
+      "title": "field:InboxAgent.runtime",
+      "surface": [
+        "field:InboxAgent.runtime"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxcomposesession-runtime",
+      "title": "field:InboxComposeSession.runtime",
+      "surface": [
+        "field:InboxComposeSession.runtime"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-pulls-pull",
+      "title": "door:GET pulls/pull",
+      "surface": [
+        "door:GET pulls/pull"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-pulls-pull",
+      "title": "window:/api/inbox/pulls/pull",
+      "surface": [
+        "window:/api/inbox/pulls/pull"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-enum-inboxlistgroupid-tagged",
       "title": "enum:InboxListGroupId.tagged",
       "surface": [

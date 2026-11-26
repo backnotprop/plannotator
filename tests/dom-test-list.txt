@@ -241,6 +241,7 @@ packages/inbox/ack.test.tsx
 packages/inbox/reactionLanding.test.ts
 packages/inbox/reactionTray.test.tsx
 packages/inbox/reactionSkillEnter.test.tsx
+packages/inbox/reactionSkillList.test.tsx
 packages/inbox/replyHoldTray.test.tsx
 packages/inbox/reactEveryMessage.test.tsx
 packages/inbox/reactFaceSelect.test.tsx
@@ -762,6 +763,8 @@ packages/inbox/guide/pullChangesTreeRisk.test.tsx
 packages/review-editor/components/hostLineMarks.test.ts
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
+packages/inbox/pulls/openStays.test.tsx
+packages/inbox/app/reviewViewKept.test.tsx
 packages/inbox/pulls/pullReviewCommentsToggle.test.tsx
 packages/review-editor/components/SelectionChooser.test.tsx
 packages/inbox/lazyChunkFailure.test.tsx
@@ -952,3 +955,4 @@ packages/inbox/skillFileOpen.dom.test.tsx
 packages/inbox/reviewAnalysis.test.tsx
 packages/inbox/reviewSettings/reviewsSettings.test.tsx
 packages/inbox/guide/usePowerUp.test.tsx
+packages/inbox/components/reply/replyBoxParity.test.tsx

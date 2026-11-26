@@ -401,6 +401,20 @@ test.skipIf(!hasDom)('a phone, as it ships (`PHONE_HOLD.opensSheet` false): a ho
   expect(press.defaultPrevented).toBe(false);
 });
 
+test.skipIf(!hasDom)('a phone (no face): “All reactions” in an earlier message’s ⋯ opens the tray, and its emoji reacts on that message', async () => {
+  await render(sample(), { phone: true });
+  expect(face(M3)).toBeNull();
+  const more = () => document.querySelector<HTMLButtonElement>(`[data-message-more="${M3}"]`);
+  await act(async () => more()!.click());
+  await until(() => !!document.querySelector(`[data-message-menu="${M3}"] [data-menu-reaction="all"]`), 'the message’s sheet');
+  await act(async () => document.querySelector<HTMLElement>(`[data-message-menu="${M3}"] [data-menu-reaction="all"]`)!.click());
+  await until(() => !!document.querySelector('[data-reaction-tray]'), 'the full tray');
+  // Opened from that message's ⋯, in its place.
+  expect(document.querySelector('[data-reaction-tray]')!.closest('.ib-react-pos') !== null).toBe(true);
+  await act(async () => document.querySelector<HTMLElement>('[data-reaction-tray] [data-reaction="saved-0"]')!.click());
+  expect(acks).toEqual([{ id: M3, on: true, reaction: { emoji: '🎉', label: 'Ship it' } }]);
+});
+
 test.skipIf(!hasDom)('a phone with `PHONE_HOLD.opensSheet` on: a still hold opens the message’s sheet', async () => {
   PHONE_HOLD.opensSheet = true;
   try {

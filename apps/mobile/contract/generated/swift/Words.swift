@@ -95,6 +95,8 @@ public enum Words {
   public static let hostClaude = "Claude Code"
   /// host.pi: packages/core/inbox-types.ts INBOX_HOST_NAMES pi
   public static let hostPi = "Pi"
+  /// host.oh-my-pi: packages/core/inbox-types.ts INBOX_HOST_NAMES oh-my-pi
+  public static let hostOhMyPi = "Oh My Pi"
   /// host.opencode: packages/core/inbox-types.ts INBOX_HOST_NAMES opencode
   public static let hostOpencode = "OpenCode"
   /// host.codex: packages/core/inbox-types.ts INBOX_HOST_NAMES codex
@@ -171,6 +173,7 @@ public enum Words {
     "claude-code": hostClaudeCode,
     "claude": hostClaude,
     "pi": hostPi,
+    "oh-my-pi": hostOhMyPi,
     "opencode": hostOpencode,
     "codex": hostCodex,
     "cursor": hostCursor,
