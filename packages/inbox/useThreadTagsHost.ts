@@ -14,6 +14,7 @@ import type { InboxToastModel } from './components/Toast';
 import { eachRow, tagsToast } from './bulkWrites';
 import { useProjectTags } from './useProjectTags';
 import { tagWrites } from './tagWrites';
+import { tagActivity } from './tagSort';
 import type { ProjectFolder } from './api';
 
 const NO_PROJECTS: readonly ProjectFolder[] = [];
@@ -78,6 +79,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
   const shownTagId = filterTag?.id ?? routeTag;
   const tagCounts = useMemo(() => tagThreadCounts(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
   const tagWaiting = useMemo(() => tagWaitingCounts(latestSections, tagsOfRow), [latestSections, tagsOfRow]);
+  const tagLatest = useMemo(() => tagActivity(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
   const tagsHere = useMemo(() => (listTags ? tagsOnOwnRows(listTags, windowRows, machines.self, tagsOfRow) : []), [listTags, windowRows, machines.self, tagsOfRow]);
   const tagsShown = listTags !== null && tagsSectionShown(listTags, windowRows, tagsOfRow);
   const setThreadTag = async (threadId: string, tag: ListTag, on: boolean, undo = true) => {
@@ -179,6 +181,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
     : {
         tags: listTags,
         waiting: tagWaiting,
+        activity: tagLatest,
         shown: tagsShown,
         tagId: shownTagId,
         onOpen: openTag,

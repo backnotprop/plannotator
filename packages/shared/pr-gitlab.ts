@@ -93,11 +93,13 @@ export function reconstructPatch(diffs: GitLabDiffEntry[]): string {
 
 // --- Auth ---
 
+/**
+ * glab signed in to `host`. Always `--hostname` (gitlab.com too): without it a newer glab checks the current context's
+ * host (the git remote, GITLAB_HOST or its default), which may be another, and an older one fails when any host it
+ * knows is signed out.
+ */
 export async function checkGlAuth(runtime: PRRuntime, host: string): Promise<void> {
-  const args = ["auth", "status"];
-  if (host !== "gitlab.com") {
-    args.push("--hostname", host);
-  }
+  const args = ["auth", "status", "--hostname", host];
   const result = await runtime.runCommand("glab", args);
   if (result.exitCode !== 0) {
     const stderr = result.stderr.trim();

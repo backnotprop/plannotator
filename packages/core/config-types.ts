@@ -49,6 +49,8 @@ export interface DiffOptions {
   semantic?: boolean;
   /** Power Up: ask the chosen model about the engine's unsure calls (code review's Settings › Semantic diffs; on unless false). */
   powerUp?: boolean;
+  /** How Power Up's notes arrive: all at once, or as each answer comes. */
+  powerUpMotion?: 'stream' | 'still';
 }
 
 /**
@@ -74,6 +76,8 @@ export interface DisplayOptions {
   planWidth?: string;
   /** Tater mode. */
   taterMode?: boolean;
+  /** HTML pages and live apps open in Annotate (true, the default) or in Interact. */
+  htmlAnnotateOnStartup?: boolean;
   /** Markdown selection mode: 'drag' (shown as Select) or 'pinpoint'. */
   inputMethod?: string;
 }

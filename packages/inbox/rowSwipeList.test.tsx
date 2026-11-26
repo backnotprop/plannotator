@@ -55,7 +55,8 @@ const READ = { section: 'quiet', unread: false, waiting_on_person: false, questi
 
 function sections(): InboxListSection[] {
   return [
-    { id: 'waiting', label: 'Waiting on you', threads: Array.from({ length: 60 }, (_, i) => row(i)) },
+    // The last one opened (not bold): its question still waits (the owner, 2026-11-25: Mark unread there too).
+    { id: 'waiting', label: 'Waiting on you', threads: [...Array.from({ length: 60 }, (_, i) => row(i)), row(102, { unread: false })] },
     // Read rows (Quiet starts folded, so they are drawn in New here, as the held list can).
     { id: 'new', label: 'New', threads: [row(100, READ), row(101, { ...READ, resolved_at: '2026-10-10T12:00:00.000Z' })] },
   ];
@@ -345,4 +346,18 @@ test.skipIf(!hasDom)('a read row swipes right to Mark unread; an archived row sh
   await swipe(archived, -220, 0, { moves: 12 });
   expect(archived.style.transform).toBe('');
   expect(actions).toEqual([['msg_100', 'mark-unread']]);
+});
+
+test.skipIf(!hasDom)('an opened row whose question waits swipes right to Mark unread; one not opened swipes to Mark read (Quiet)', async () => {
+  draw();
+  const opened = rowEl('msg_102');
+  await swipe(opened, 90);
+  await settled(opened);
+  expect(layer().dataset.lead).toBe('mark-unread');
+  await act(async () => layer().querySelector<HTMLButtonElement>('[data-row-swipe="lead"]')!.click());
+  expect(actions).toEqual([['msg_102', 'mark-unread']]);
+  const unopened = rowEl('msg_59');
+  await swipe(unopened, 90);
+  await settled(unopened);
+  expect(layer().dataset.lead).toBe('read');
 });
