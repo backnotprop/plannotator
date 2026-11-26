@@ -13,6 +13,7 @@ import { LaunchpadLines, type LaunchPicturePage } from './LaunchpadLines';
 import { LaunchpadLiveAsks, type LaunchAsks } from './LaunchpadLiveAsks';
 import { latestPictureItPage } from './usePictureItAsk';
 import { useLaunchpadThread } from './useLaunchpadThread';
+import { shutWord } from './stateWord';
 
 export interface LaunchpadStart {
   onStart: (opener: HTMLElement) => void;
@@ -116,6 +117,7 @@ export function PullLaunchpad({
   startThread = null,
   untiedThread = null,
   risk = null,
+  ship = null,
   onClose,
   onDiff,
   onThread,
@@ -137,6 +139,8 @@ export function PullLaunchpad({
   startThread?: (() => void) | null;
   untiedThread?: string | null;
   risk?: ReactNode;
+  /** The ship log while the PR ships (useShipping.tsx `PageShipLog`). */
+  ship?: ReactNode;
   onClose: () => void;
   onDiff: () => void;
   onThread: (threadId: string) => void;
@@ -214,6 +218,7 @@ export function PullLaunchpad({
           </h2>
           <div className="ib-pr-meta ib-lp-meta" data-launch-facts="">
             {pr.state === 'draft' && <span data-launch-draft="">Draft</span>}
+            {shutWord(pr.state) && <span data-launch-state={pr.state}>{shutWord(pr.state)}</span>}
             {pr.author && <span dir="auto">by {pr.mine ? 'you' : pr.author}</span>}
             <span className="ib-lp-ref">
               <Tip cut content={pr.head}>
@@ -236,6 +241,7 @@ export function PullLaunchpad({
             )}
           </div>
           {risk}
+          {ship}
           {live && read ? (
             <LaunchpadLiveAsks thread={read} stack={stack} pr={pr} link={live} onDiff={onDiff} onAsked={onAsked} onThread={onThread}>
               {draw}

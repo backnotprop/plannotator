@@ -1,15 +1,19 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
 import { closeTo } from '../app/focus';
 import { writeRoute } from '../app/writeRoute';
 import { CardChip } from '../board/CardChip';
 import { NotificationAsk } from '../components/NotificationAsk';
 import { ThreadPane } from '../components/Thread';
 import { ThreadWait } from '../components/ThreadWait';
+import { ThreadGone } from './ThreadGone';
 import { fullExitFile, fullFromSide } from '../fullScreenOrigin';
 import { useHeldThread } from '../data/queries/thread';
 import type { HeldThread } from '../data/apply/record';
 import { drawnSection } from '../held';
 import { machineOf } from '../inboxUrl';
+import { threadStepsRead } from '../linkedReads';
+import { useFarStepsReread } from './useFarStepsReread';
 import { machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from '../machines';
 import { MAIN_PANE, type PaneId } from '../panes/model';
 import type { PaneOnScreen } from '../panes/onScreen';
@@ -84,8 +88,16 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
     reportScreen();
   });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
+  const stepsRead = thread ? threadStepsRead(thread.thread_id, settings?.steps) : null;
+  useFarStepsReread(thread?.thread_id, (id) => host.stepsBus.emit(id));
+  const backLabel = fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle;
+  // A thread that throws while it draws says so in the pane; the sidebar and the list stay (ui's RegionBoundary). Try
+  // again mounts the pane afresh, which reads its reply draft back from the server (replyDraft.ts flushes on unmount).
+  // The notice takes the header's Back too, and the address names the thread (a reload opens it again): its own Back,
+  // in the header's words, closes the pane (on a phone, back to the list).
   return (
     <PaneScopeContext.Provider value={scope}>
+      <RegionBoundary name="Thread pane" className="ib-pane ib-pempty" resetKey={threadId} onClose={onClose} closeLabel={`Back to ${backLabel}`}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
           and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
       {threadId && !ready && ((!phone && !stack.thread) || awayWait) && (
@@ -111,6 +123,8 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
               {/* No list beside the thread (a phone, a stacked window, full screen, a card's thread, beside a file):
                   the stale page notice is here instead. */}
               {(phone || stack.thread || full || fromCard || fileOpen) && host.staleNotice}
+              {/* Deleted elsewhere while on screen: it stays, and says so above it. */}
+              {load?.gone && <ThreadGone />}
               {host.notifyAgainIn === thread.thread_id ? (
               <div className="ib-tour-notify-again" data-tour-notify-again="">
                 <NotificationAsk
@@ -144,9 +158,10 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           reviewView={host.reviewView}
           onInReviews={host.pullsShown && !route.reviews ? () => go({ page: 'inbox', reviews: { project: null, view: 'all' }, project: null, thread: thread.thread_id }) : undefined}
           threadSteps={
-            settings?.steps
+            // The thread's own machine's Steps switch decides (a linked machine's thread: its answer's `on`).
+            stepsRead !== null
               ? {
-                  on: settings.steps.on,
+                  on: stepsRead,
                   subscribe: host.stepsBus.subscribe,
                   // The checklist head's Board icon (part 4): the card that links this thread, while the Board is on.
                   boardCard: (() => {
@@ -253,7 +268,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             screen.current = state;
             reportScreen();
           }}
-          backLabel={fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle}
+          backLabel={backLabel}
           cardChip={fromCard ? <CardChip card={host.cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={host.backToCard} /> : undefined}
           phone={phone}
           stacked={stack.thread || !!fromCard}
@@ -276,6 +291,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           }}
         />
       )}
+      </RegionBoundary>
     </PaneScopeContext.Provider>
   );
 }

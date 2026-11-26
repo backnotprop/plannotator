@@ -285,6 +285,30 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
             "type": "string"
           }
         },
+        "ship": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "step",
+                "stuck",
+                "merged"
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "sha": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "additionalProperties": false
+        },
         "project_path": {
           "type": "string"
         },

@@ -41,6 +41,7 @@ const COLLECTIONS: Record<string, { word: string; param: string }> = {
   cards: { word: 'card', param: 'card' },
   combine: { word: 'combine', param: 'combine' },
   actions: { word: 'action', param: 'action' },
+  scheduled: { word: 'routine', param: 'routine' },
 };
 
 /**
@@ -51,6 +52,7 @@ const BYTES = new Set([
   'GET whats-new/image', 'GET projects/:id/picture', 'GET threads/:id/decisions', 'GET attachments/:id/image', 'GET attachments/:id/video',
   'GET attachments/:id/audio', 'GET attachments/:id/download', 'GET attachments/:id/markdown-image', 'GET attachments/:id/linked-page',
   'GET markups/:id', 'GET messages/:id/image', 'GET html-assets/:id/:path', 'GET uploads/:id/image', 'GET open-in/file/raw',
+  'GET messages/:id/guide/review-image', 'GET messages/:id/guide/review-markdown-image',
 ]);
 const RANGE = new Set(['GET attachments/:id/video', 'GET attachments/:id/audio', 'GET attachments/:id/download', 'GET messages/:id/image', 'GET open-in/file/raw']);
 const STREAM = new Set(['GET events']);
@@ -99,7 +101,7 @@ function writeKind(path: string): string | null {
 }
 
 /** A sample a parameter accepts, from the door's own pattern: asks the door which window route a path reaches. */
-const SAMPLES = ['id_SAMPLE', 'crd_SAMPLE', 'cmb_SAMPLE', 'a-0123abcd', 'path/SAMPLE'];
+const SAMPLES = ['id_SAMPLE', 'crd_SAMPLE', 'cmb_SAMPLE', 'sch_SAMPLE', 'a-0123abcd', 'path/SAMPLE'];
 
 export function doorEntries(): DoorEntry[] {
   const entries = doorRouteTable().map((row): DoorEntry => {

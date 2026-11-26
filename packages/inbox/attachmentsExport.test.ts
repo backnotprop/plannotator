@@ -70,6 +70,31 @@ test('an image in the person\'s own message speaks as the person: "image in my â
   expect(text).not.toContain('image in your');
 });
 
+test('a comment at a moment of a video the text plays is headed "video in your â€¦ message", with its "At m:ss" line', () => {
+  const film: InboxAttachmentState = { ...inline('att_v', 'msg_a', '2026-10-15T15:22:05.000Z', 'media/walkthrough.webm'), kind: 'video', media_type: 'video/webm', duration_ms: 5_000 };
+  const record = comment('c1', film, 'Hold on the berth change.');
+  record.annotation = { ...record.annotation, blockId: 'video', inboxVideo: { time: 2.2 } } as InboxAnnotationRecord['annotation'];
+  const text = attachmentFeedback([record], [film], new Map(), '/work/shop');
+  expect(text).toMatch(/^## media\/walkthrough\.webm \(video in your (?:\w{3} \d+, (?:\d{4}, )?)?\d{1,2}:\d{2} [AP]M message\)$/m);
+  expect(text).toContain('At 0:02 (2.2 s of 0:05)');
+  expect(text).toContain('the files you attached and the videos your messages showed,');
+  expect(text).not.toContain('image in your');
+
+  // A sound: "sound in"; a picture beside them keeps "image in", and the intro names each kind there is.
+  const sound: InboxAttachmentState = { ...inline('att_s', 'msg_a', '2026-10-15T15:22:05.000Z', 'media/standup.wav'), kind: 'audio' };
+  const picture = inline('att_p', 'msg_a', '2026-10-15T15:22:05.000Z');
+  const both = attachmentFeedback([comment('c2', sound, 'Too quiet.'), comment('c3', picture, 'Bigger.')], [sound, picture], new Map(), '/work/shop');
+  expect(both).toMatch(/^## media\/standup\.wav \(sound in your /m);
+  expect(both).toMatch(/^## design\/b\.png \(image in your /m);
+  expect(both).toContain('the images and sounds your messages showed or played');
+});
+
+test('pictures only keep the intro as it was', () => {
+  const picture = inline('att_p', 'msg_a', '2026-10-15T15:22:05.000Z');
+  const text = attachmentFeedback([comment('c1', picture, 'Bigger.')], [picture], new Map(), '/work/shop');
+  expect(text).toContain('The following feedback is on the files you attached and the images your messages showed, one section per file and version.');
+});
+
 test('a comment whose file the caller does not list still rides the Send, under the path it was made on', () => {
   const missing = { id: 'att_gone', path: '/work/shop/design/b.png' };
   const text = attachmentFeedback([comment('c1', missing, 'Make step 1 bold.')], [], new Map(), '/work/shop');

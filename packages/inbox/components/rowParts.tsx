@@ -9,7 +9,8 @@ import { withShortcut } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
 import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
-import { agentName, fullTime, shortTime, whenTime } from '../format';
+import { fullTime, shortTime, whenTime } from '../format';
+import { rowRecipientName, rowWho } from '../scriptAuthor';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
@@ -36,6 +37,14 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
   return row.addressee ? { kind: 'agent', host: row.addressee.host, session: row.addressee.session, name: null } : row.author;
 }
 
+/**
+ * The row's words for whom a reply goes to or who writes next (scriptAuthor.ts `rowRecipientName`): in a thread a
+ * script started and a session took over, that session, never "Script" or the script's "An agent".
+ */
+export function rowRecipient(row: InboxListRow): string {
+  return rowRecipientName(row, rowAgent(row));
+}
+
 export function slotSession(row: InboxListRow): string | null {
   const agent = rowAgent(row);
   return agent.kind === 'agent' ? (agent.session ?? null) : null;
@@ -51,13 +60,13 @@ export function RowMark({ row }: { row: InboxListRow }) {
   const { hideAgents } = useRowMarks();
   if (hideAgents) return null;
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
-  return <AuthorMark author={rowAgent(row)} />;
+  return <AuthorMark author={rowWho(row, rowAgent(row))} />;
 }
 
 /** A blocked row's hover card (wide and three-line rows), or undefined: its filled marks' tooltip. */
 export function cardOf(row: InboxListRow): ReactNode | undefined {
   if (!rowHasBadge(row)) return undefined;
-  return <WaitCard row={row} agent={agentName(rowAgent(row))} mark={<RowMark row={row} />} time={shortTime(rowTimeIso(row))} />;
+  return <WaitCard row={row} agent={rowRecipient(row)} mark={<RowMark row={row} />} time={shortTime(rowTimeIso(row))} />;
 }
 
 /** A snoozed row's return time, with the clock: where the row's words go (approval "inbox-snooze"). */
@@ -141,8 +150,8 @@ export function sentWordsOf(row: InboxListRow): string | null {
   // A reply that tags agents (approval "inbox-tag-agents", Lines): how many have it, and who waits.
   if (!row.addressee && row.sent?.recipients?.length) return sentRecipientsWords(row.sent.recipients);
   // A Re-ask note waits on the agent to ask again (approval "inbox-reask"): its own words, beside the delivery tick.
-  if (row.reask_pending) return reaskRowLine(agentName(rowAgent(row)), row.sent?.checked_at ?? null, row.sent?.wakes);
-  if (!row.addressee && !row.delivery) return sentRowLine(agentName(rowAgent(row)), row.sent?.wakes);
+  if (row.reask_pending) return reaskRowLine(rowRecipient(row), row.sent?.checked_at ?? null, row.sent?.wakes);
+  if (!row.addressee && !row.delivery) return sentRowLine(rowRecipient(row), row.sent?.wakes);
   return null;
 }
 
@@ -212,7 +221,7 @@ export function countWords(row: InboxListRow, now: number, tickAlone = false): {
   // An agent the person started from New message (launch): one muted word while it starts or works.
   if (row.run) return same(row.run === 'starting' ? 'Starting' : row.run === 'cloning' ? 'Cloning' : 'Working');
   if (row.combining) return { short: <span className="ib-combining">Combining…</span>, long: <span className="ib-combining">Combining…</span>, full: 'Combining…' };
-  if (row.section === 'sent' && row.addressee) return same(`To ${agentName(rowAgent(row))}`);
+  if (row.section === 'sent' && row.addressee) return same(`To ${rowRecipient(row)}`);
   return null;
 }
 
@@ -345,7 +354,7 @@ export function ClipText({ className, text }: { className: string; text: string 
 }
 
 /**
- * A row and its quiet hover action: Mark read on a row that waits on the
+ * A row and its quiet hover action: Mark read on a bold row that waits on the
  * person, Mark unread on a read row (markRead.ts `canMarkUnread`), shown on
  * hover or keyboard focus where the count and time are. It
  * never opens the thread. The action is the row's sibling (a button cannot
@@ -374,7 +383,7 @@ export function RowWithAction({
   // The action toggles (owner, 2026-10-31): on a read row (the row menu's rule, `canMarkUnread`) it is Mark unread.
   // That includes a row the person read that the list still holds in New (the thread open, or the one just left;
   // markRead.ts `seenHeldInNew`): the owner, 2026-11-02, "I opened it. I still want the ability to mark it unread."
-  // Its Mark read (move it to Quiet now) stays in the row menu and the header.
+  // And an opened row whose questions still wait (the owner, 2026-11-25). Mark read stays in the row menu and the header.
   const unread = !onUnarchive && onMarkUnread && canMarkUnread(row);
   const offer = !onUnarchive && !unread && onMarkRead && offersRowMarkRead(row, drawn);
   // A reply waiting on a busy agent that can take it now: Send now, on hover and keyboard focus as Mark read.
@@ -415,7 +424,7 @@ export function RowWithAction({
       {children}
       {onUnarchive && <UnarchiveAction row={row} label={`Unarchive: ${rowLabel(row, titleOf(row))}`} onUnarchive={onUnarchive} />}
       {sendNow && (
-        <RowTip armed={actionTip} content={`Send now: put your reply into ${agentName(rowAgent(row))}'s running turn without waiting for it to end`}>
+        <RowTip armed={actionTip} content={`Send now: put your reply into ${rowRecipient(row)}'s running turn without waiting for it to end`}>
           <button
             type="button"
             className="ib-ract"
@@ -432,7 +441,7 @@ export function RowWithAction({
         </RowTip>
       )}
       {offer && (
-        <RowTip armed={actionTip} content={withShortcut(`Mark read / quiet: out of the top until ${agentName(rowAgent(row))} writes again`, { scope: inboxThreadShortcuts, action: 'markRead' })}>
+        <RowTip armed={actionTip} content={withShortcut(`Mark read / quiet: out of the top until ${rowRecipient(row)} writes again`, { scope: inboxThreadShortcuts, action: 'markRead' })}>
           <button
             type="button"
             className="ib-ract"

@@ -127,7 +127,7 @@ test("the person's own message has no item; agent B's message leads with it (lig
     await page.emulateMedia({ colorScheme: scheme });
     await openThread(page);
     await openMenu(page, ids.b);
-    await expect(menuOf(page, ids.b).getByRole('menuitem')).toHaveText([LABEL, 'Copy message', 'Copy link to message', 'Copy thread']);
+    await expect(menuOf(page, ids.b).locator('[role="menuitem"].ib-pmi')).toHaveText(['Reply', LABEL, 'Copy message', 'Copy link to message', 'Copy thread']);
     // Once the menu's entrance has played.
     await page.waitForTimeout(450);
     await page.screenshot({ path: join(proofDir, `new-thread-from-message-menu-${scheme}.png`) });

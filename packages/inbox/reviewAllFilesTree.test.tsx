@@ -84,9 +84,9 @@ beforeEach(() => {
     const path = String(input);
     if (init?.method === 'POST') {
       if (path.endsWith('/guide/viewed')) {
-        const { viewed } = JSON.parse(String(init.body)) as { viewed: string[] };
-        viewedPosts.push(viewed);
-        return Response.json({ message_id: REVIEW, viewed });
+        const { path: file, viewed } = JSON.parse(String(init.body)) as { path: string; viewed: boolean };
+        viewedPosts.push([file, String(viewed)]);
+        return Response.json({ message_id: REVIEW, viewed: viewed ? [file] : [] });
       }
       return Response.json({});
     }
@@ -198,7 +198,8 @@ test.skipIf(!hasDom)("a review's tree dims a file ticked Viewed on its header; a
   expect(treeFile('src/auth/guard.ts')!.dataset.itemMuted).toBeUndefined();
   await act(async () => reader.viewed!.onToggle('src/auth/guard.ts'));
   await settle();
-  expect(viewedPosts).toEqual([['src/auth/guard.ts']]);
+  // One file's change, never the whole list.
+  expect(viewedPosts).toEqual([['src/auth/guard.ts', 'true']]);
   expect(treeFile('src/auth/guard.ts')!.dataset.itemMuted).toBe('true');
   expect(treeFile('src/auth/token.ts')!.dataset.itemMuted).toBeUndefined();
   expect(tree()!.textContent).toContain('1 viewed');

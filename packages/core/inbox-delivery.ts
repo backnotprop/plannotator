@@ -235,8 +235,21 @@ export function inboxDefaultSkip<M>(_messages: readonly M[], _statesOf: (message
  * stdio shim's `ses_…` included), or an agent's shell the CLI names (`inboxShellAgentOf`), is not one.
  */
 export function inboxSessionlessSend(message: { author: { kind: string; host?: string | null; session?: string | null; name?: string | null }; wakes?: boolean }): boolean {
-  return message.author.kind === "agent" && !message.author.session && !message.author.host && !message.author.name && message.wakes !== true;
+  return inboxScriptAuthor(message.author) && message.wakes !== true;
 }
+
+/**
+ * An agent author with no session, no host and no name: the one the window names "Script" and draws a terminal for,
+ * by the author alone, so a list row (which carries no `wakes`) and the thread name it alike. Routing reads
+ * `inboxSessionlessSend`, which also asks that it was not sent through a waking connection (one always names its
+ * session and host, so the two differ only for a record no connection writes).
+ */
+export function inboxScriptAuthor(author: { kind: string; host?: string | null; session?: string | null; name?: string | null } | null | undefined): boolean {
+  return !!author && author.kind === "agent" && !author.session && !author.host && !author.name;
+}
+
+/** What a person reads for a script's post (`inboxScriptAuthor`): the window, and the phone's push. Agents read "An agent". */
+export const INBOX_SCRIPT_AUTHOR_NAME = "Script";
 
 /** The author fields the words rule reads. */
 type WordsAuthorMessage = { author: { kind: string; host?: string | null; session?: string | null; name?: string | null }; wakes?: boolean; scheduled_change?: unknown };
@@ -309,6 +322,11 @@ export interface InboxRowDelivery {
   name: string | null;
   /** It went to another session of the asker's own host ("Claude Code (another session)"). */
   another_session?: boolean;
+  /**
+   * It answers a script's post (`inboxSessionlessSend`): the window names its recipient "Script", as the thread's
+   * line does. Absent otherwise and from an older Inbox. Additive.
+   */
+  script?: true;
   /**
    * `reason: "ended"`: the agent of the session that asked and has ended
    * (`inboxAskingMessage`), which the line names ("Saved for <it>. The

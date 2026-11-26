@@ -86,6 +86,8 @@ enum PhoneWords {
   // MARK: A thread (FLOWS 4, mock 4)
   /// packages/core/inbox-types.ts:490 `inboxAgentName`'s fallback.
   static let anAgent = "An agent"
+  /// packages/inbox/scriptAuthor.ts `SCRIPT_AUTHOR_NAME`: a script's post (no session, host or name).
+  static let script = "Script"
   /// The window's own word for the person in a row's preview (packages/core/inbox-row-preview.ts:61, "You: …").
   static let you = "You"
   /// Brief S1: a block this slice does not draw yet.

@@ -1,6 +1,6 @@
 /**
  * The window's parts loaded on first use (#2593): the guided/code review
- * reader, the search palette and the post dialog.
+ * reader, the search palette, the post dialog and Settings → Reviews.
  *
  * Each is a chunk the Inbox serves (build/pack-inbox.ts). Through a bare
  * React.lazy, the first open suspends while its chunk arrives, and React holds
@@ -16,6 +16,7 @@ import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type 
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { diffDrawReady, diffLanguages, diffReadyNow } from './threadDrawReady';
 import { loadSemDiffAdvert, semDiffAdvertNow } from './semDiffAdvert';
+import { reviewAnalysisRead, reviewAnalysisReadNow } from './reviewAnalysis';
 import { ReviewImagesContext } from './reviewImages';
 import type { GuideReaderImages } from './guide/types';
 
@@ -94,12 +95,12 @@ export function PanePart({ children, loading = null, onFailed }: { children: Rea
 export function ReaderPart({ diff, images, children }: { diff: string; images?: GuideReaderImages | undefined; children: ReactNode }) {
   const langs = useMemo(() => diffLanguages(diff), [diff]);
   const [waited, setWaited] = useState<readonly string[] | null>(null);
-  const show = waited === langs || (GuideReaderPart.isLoaded() && diffReadyNow(langs) && semDiffAdvertNow() !== undefined);
+  const show = waited === langs || (GuideReaderPart.isLoaded() && diffReadyNow(langs) && semDiffAdvertNow() !== undefined && reviewAnalysisReadNow());
   useEffect(() => {
     if (show) return;
     let live = true;
     // A reader that cannot load still draws: its boundary then says so.
-    void Promise.all([diffDrawReady(langs), GuideReaderPart.preload().catch(() => undefined), loadSemDiffAdvert()]).then(() => {
+    void Promise.all([diffDrawReady(langs), GuideReaderPart.preload().catch(() => undefined), loadSemDiffAdvert(), reviewAnalysisRead()]).then(() => {
       if (live) setWaited(langs);
     });
     return () => {
@@ -143,6 +144,8 @@ export function ReviewKeysHere(props: { diff: string; viewed: boolean }) {
 }
 export const SearchPalettePart = lazyPart(() => import('#search-palette'));
 export const PlatformPostPart = lazyPart(() => import('#platform-post'));
+/** Settings → Reviews (reviewSettings/ReviewsSettings.tsx): asked for when Settings opens, so it is in by the time the section is. */
+export const ReviewsSettingsPart = lazyPart(() => import('#reviews-settings'));
 
 const PARTS = [GuideReaderPart, SearchPalettePart, PlatformPostPart];
 

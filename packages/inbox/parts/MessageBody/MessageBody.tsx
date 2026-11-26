@@ -15,10 +15,13 @@ import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown
 import { ImageRowsContext } from '@plannotator/ui/components/imageRow';
 import { useRefRepo } from '../../links';
 import { OpenInCodeSpans } from '../../components/OpenIn';
+import { readsServedFor, useLinkedReadsRev } from '../../linkedReads';
 import { FileRefCodeSpans } from '../../components/FileRefSpan';
 import { InlineReuseLayer } from '../../reuse';
 import { SentAnswers, ReplyActions } from '../../components/ReplyAnswers';
 import { SkillsLine } from '../../components/SkillsLine';
+import { noteSkillOpener } from '../../skillOpener';
+import { SkillChips } from './SkillChips';
 import { PullDetailsLine } from '../../pulls/PullDetailsLine';
 import { HostMark } from '../../icons';
 import type { MessageBodyProps } from './types';
@@ -40,8 +43,10 @@ export function MessageBody({
   repo,
   onOpenAttachment,
   onOpenFileRef,
+  onOpenSkill,
   onOpenInlineImage,
   onOpenOptionSet,
+  onOpenUncapturedImage,
   readOnly,
   movedThread,
   answers,
@@ -62,6 +67,7 @@ export function MessageBody({
   replyFiles,
   contextNotes,
   onTryPrototype,
+  onlyQuestion,
 }: MessageBodyProps) {
   const { skills, pullDetails, actionsSent, replyParts, ownReply, replyFileList, shown, noteBlocks, noteAtLine, notesRef, restShown, feedbackShown, blocks, restBlocks, feedbackBlocks } = useBodyText({ message, sentActions, sentAnswers, replyFiles, projectRoot, contextNotes });
   const refRepo = useRefRepo(repo);
@@ -89,7 +95,11 @@ export function MessageBody({
   // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
   const refCard = useRefHoverCards(bodyRef);
   const { refsOn, openFileRefRef } = useFileRefs({ message, projectRoot, onOpenFileRef, onOpenAttachment });
-  const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf, refOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet, openFileRefRef });
+  const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf, refOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet, onOpenUncapturedImage, openFileRefRef });
+  // A code span's hover reads on the message's own machine, under its Code review switch (one set with this
+  // computer's, `capability-set`; off there, it answers nothing): none for a machine too old to serve it.
+  useLinkedReadsRev();
+  const codeHovers = openInFiles && readsServedFor(message.id);
   const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback, refsOn, openFileRefRef });
   const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, movedThread, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, renderRunBlock, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
   const pictures = useCommentPictures();
@@ -124,6 +134,14 @@ export function MessageBody({
     />
   );
 
+  // A sent message's skill opens its file beside the thread; focus comes back to what opened it (skillOpener.ts).
+  const openSkill = onOpenSkill
+    ? (name: string, from: HTMLElement) => {
+        noteSkillOpener(from, message.thread_id);
+        onOpenSkill(name);
+      }
+    : undefined;
+
   const openHighlight = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as Element;
     const mark = target.closest?.<HTMLElement>('[data-bind-id], [data-highlight-id]');
@@ -147,8 +165,8 @@ export function MessageBody({
     {/* The body fits its pictures itself (images.ts, `.ib-body img[data-ib-fit]`): no image rows from ui. */}
     <ImageRowsContext.Provider value={false}>
     <SoftLineBreaksContext.Provider value={ownReply}>
-    <OpenInCodeSpans scope={{ thread: message.thread_id, message: message.id }} on={openInFiles}>
-    <FileRefCodeSpans on={refsOn} hover={openInFiles} scope={{ thread: message.thread_id, message: message.id }} openRef={openFileRefRef}>
+    <OpenInCodeSpans scope={{ thread: message.thread_id, message: message.id }} on={codeHovers}>
+    <FileRefCodeSpans on={refsOn} hover={codeHovers} scope={{ thread: message.thread_id, message: message.id }} openRef={openFileRefRef}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClickCapture={openHashtag} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {tagPeek.node}
@@ -187,6 +205,7 @@ export function MessageBody({
         // `readOnly` is about the question cards (answerLocked locks them); with comments on, the text still takes them.
         readOnly={readOnly && !comments}
         questionAnswers={answers}
+        onlyQuestionKey={onlyQuestion}
         onAnswerQuestion={answerQuestion}
         renderQuestionFooter={renderFooter}
         // The Inbox records no decisions: a `Decision:` line an older agent wrote is context.
@@ -209,12 +228,14 @@ export function MessageBody({
         renderDirectiveBlock={renderActions || renderRunBlock || noteBlocks.length > 0 ? directiveBlock : undefined}
       />
       )}
+      {/* Right after the words: the chips' buttons come in the words' order, before the names on the skills line. */}
+      {skills && openSkill && <SkillChips bodyRef={bodyRef} messageId={message.id} skills={skills.skills} onOpen={openSkill} />}
       {replyParts && sentAnswers && sentAnswers.length > 0 && <SentAnswers groups={sentAnswers} onJump={onJumpQuestion} />}
       {actionsSent && <ReplyActions actions={sentActions!} sent onJump={onJumpQuestion} />}
       {replyParts && restShown && <div data-sent-rest="">{readOnlyViewer(restBlocks, restShown)}</div>}
       {feedbackShown && <div data-reply-feedback="">{readOnlyViewer(feedbackBlocks, feedbackShown)}</div>}
       {pullDetails && <PullDetailsLine details={pullDetails} />}
-      {skills && <SkillsLine split={skills} />}
+      {skills && <SkillsLine split={skills} onOpen={openSkill} />}
       {tagLabels && (
         <div className="ib-tg-marks" ref={tagLayerRef} aria-hidden="true" data-tag-marks="">
           {tagMarks.map((mark, index) => (

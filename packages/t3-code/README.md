@@ -4,7 +4,7 @@ Claude keeps using ordinary Plannotator commands. An optional installer-managed 
 
 This is a Plannotator-only integration. It uses T3's existing external MCP API as a client. Ask this session requires no T3 code change, provider-side Plannotator MCP server, or change to the Plannotator skill.
 
-The Plannotator Inbox uses the same sign-in: after `plannotator t3 login`, a reply the person sends to an agent in a T3 Claude thread arrives in that thread as a new turn. Its setup is in `plannotator t3 --help`: the login, then `claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3` (that entry lists its tools only inside a T3 thread). See "T3 Code" in `docs/agent-guides/inbox-notifications-and-agents.md`.
+The Plannotator Inbox uses the same sign-in: after `plannotator t3 login`, a reply the person sends to an agent in a T3 Claude thread arrives in that thread as a new turn. A Codex thread T3 runs on the same computer needs no sign-in: the Inbox sends with T3's own `t3` command. Its setup is in `plannotator t3 --help`: the login, then `claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3` (that entry lists its tools only inside a T3 thread). See "T3 Code" in `docs/agent-guides/inbox-notifications-and-agents.md`.
 
 ## Setup
 

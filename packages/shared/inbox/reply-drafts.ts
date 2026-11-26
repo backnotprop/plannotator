@@ -34,7 +34,7 @@
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_MESSAGE_COMMENT_QUOTE_MAX, isInboxId, isInboxRecipientSessionId, type InboxDraftFile, type InboxReplyDraft, type InboxReplyMention, type InboxReplyQuote } from "@plannotator/core/inbox-types";
-import { checkInboxDraftFiles, checkInboxDraftIds, checkInboxDraftPlaces, INBOX_DRAFT_BODY_MAX } from "./drafts";
+import { checkInboxDraftFiles, checkInboxDraftIds, checkInboxDraftPlaces, INBOX_DRAFT_BODY_MAX, type InboxUploadLookup } from "./drafts";
 import type { ReplyDraftFileOps } from "@plannotator/core/inbox-reply-draft";
 import { standingReplyMentions } from "@plannotator/core/inbox-thread-mention";
 import { InboxError } from "./schema";
@@ -49,9 +49,25 @@ function fileOf(inboxDirPath: string, threadId: string): string {
   return join(dirOf(inboxDirPath), `${threadId}.json`);
 }
 
-function parse(text: string): InboxReplyDraft | null {
+/**
+ * A draft as its file keeps it: the draft, and the idempotency key of the save that made it (`last_key` in the file;
+ * null: a save with none, an older Inbox's file). One key, written over by every save and gone with the draft; never
+ * served: a save replayed under it is answered with the draft, nothing written again (store.ts `saveReplyDraft`).
+ */
+export interface InboxReplyDraftFile {
+  draft: InboxReplyDraft;
+  lastKey: string | null;
+}
+
+/** The key a save names (`idempotency_key`: a linked machine's, through the door), or null: none, or not one. */
+export function inboxReplyDraftKey(input: { idempotency_key?: unknown }): string | null {
+  const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
+  return key !== "" && key.length <= 200 ? key : null;
+}
+
+function parse(text: string): InboxReplyDraftFile | null {
   try {
-    const value = JSON.parse(text) as InboxReplyDraft;
+    const value = JSON.parse(text) as InboxReplyDraft & { last_key?: unknown };
     if (!value || value.v !== 1 || !isInboxId("msg", value.thread_id)) return null;
     if (typeof value.body !== "string" || typeof value.updated_at !== "string" || typeof value.created_at !== "string") return null;
     // Every file the box held; a long paste also names its place (an Inbox of 0.28.46 or earlier kept only those).
@@ -64,7 +80,7 @@ function parse(text: string): InboxReplyDraft | null {
     const quote = replyQuote(value.quote);
     // The threads mentioned in the words (approval "inbox-drag-threads"): only those that still stand where they say.
     const mentions = standingReplyMentions(value.body, value.mentions);
-    return {
+    const draft: InboxReplyDraft = {
       v: 1,
       thread_id: value.thread_id,
       body: value.body,
@@ -75,6 +91,7 @@ function parse(text: string): InboxReplyDraft | null {
       ...(quote ? { quote } : {}),
       ...(mentions.length > 0 ? { mentions } : {}),
     };
+    return { draft, lastKey: inboxReplyDraftKey({ idempotency_key: value.last_key }) };
   } catch {
     return null;
   }
@@ -97,9 +114,9 @@ export function replyQuote(value: unknown): InboxReplyQuote | null {
   return { of, ...(typeof words === "string" ? { words } : {}) };
 }
 
-/** Every reply draft on disk, by thread id (a file that does not parse is skipped). */
-export function readInboxReplyDrafts(inboxDirPath: string): Map<string, InboxReplyDraft> {
-  const out = new Map<string, InboxReplyDraft>();
+/** Every reply draft on disk, by thread id, with the key of the save that made it (a file that does not parse is skipped). */
+export function readInboxReplyDrafts(inboxDirPath: string): Map<string, InboxReplyDraftFile> {
+  const out = new Map<string, InboxReplyDraftFile>();
   let names: string[];
   try {
     names = readdirSync(dirOf(inboxDirPath));
@@ -109,8 +126,8 @@ export function readInboxReplyDrafts(inboxDirPath: string): Map<string, InboxRep
   for (const name of names) {
     if (!name.endsWith(".json")) continue;
     try {
-      const draft = parse(readFileSync(join(dirOf(inboxDirPath), name), "utf8"));
-      if (draft && `${draft.thread_id}.json` === name) out.set(draft.thread_id, draft);
+      const kept = parse(readFileSync(join(dirOf(inboxDirPath), name), "utf8"));
+      if (kept && `${kept.draft.thread_id}.json` === name) out.set(kept.draft.thread_id, kept);
     } catch {
       // Unreadable: skipped.
     }
@@ -137,7 +154,8 @@ export function sameInboxUploadIds(a: readonly string[], b: readonly string[]): 
  * match (absent: words only, as an older window sends).
  */
 export function checkInboxReplyDraftInput(
-  inboxDirPath: string,
+  /** This Inbox's folder, or (a linked machine's held draft) where its uploads are known: a whole list's unknown file is not shown. */
+  inboxDirPath: string | InboxUploadLookup,
   input: InboxReplyDraftInput,
 ): {
   body: string;
@@ -169,7 +187,7 @@ export function checkInboxReplyDraftInput(
   if (listedBase !== null && (!Array.isArray(listedBase) || listedBase.some((id) => typeof id !== "string"))) {
     throw new InboxError("validation_error", "base_files: the upload ids this window saved last, or null.", { field: "base_files" });
   }
-  const files = checkInboxDraftFiles(inboxDirPath, input.files, body.length);
+  const files = checkInboxDraftFiles(inboxDirPath, input.files, body.length, { skipGone: typeof inboxDirPath !== "string" });
   const opsGiven = input.files_add !== undefined || input.files_remove !== undefined || input.files_place !== undefined;
   const ops = opsGiven
     ? {
@@ -214,14 +232,16 @@ export interface InboxReplyDraftInput {
   quote?: unknown;
   /** The threads mentioned in the words, `{ thread_id, title, label, at, … }` each; absent, the draft keeps those of its own still standing. */
   mentions?: unknown;
+  /** The save's key (a linked machine's, through the door): kept on the draft it makes, so a replay of it writes nothing. */
+  idempotency_key?: unknown;
 }
 
-/** Write one draft whole (owner-only folder and file). */
-export function writeInboxReplyDraft(inboxDirPath: string, draft: InboxReplyDraft): void {
+/** Write one draft whole (owner-only folder and file), with the key of the save that made it (`last_key`) when it has one. */
+export function writeInboxReplyDraft(inboxDirPath: string, draft: InboxReplyDraft, lastKey: string | null = null): void {
   mkdirSync(dirOf(inboxDirPath), { recursive: true, mode: 0o700 });
   const file = fileOf(inboxDirPath, draft.thread_id);
   const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(draft)}\n`, { mode: 0o600 });
+  writeFileSync(temp, `${JSON.stringify(lastKey ? { ...draft, last_key: lastKey } : draft)}\n`, { mode: 0o600 });
   chmodSync(temp, 0o600); // `mode` applies only on create: a left-over temp file keeps its old mode.
   renameSync(temp, file);
 }

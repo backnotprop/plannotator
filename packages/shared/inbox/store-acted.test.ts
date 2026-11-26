@@ -140,6 +140,23 @@ describe("a 👍 and a review's ticks: later lines of an agent's message", () =>
     expect(store.personActedAt(sent.thread_id)).toBe(at(START + 180_000));
     expect(InboxStore.open(dir, { now: () => new Date(clock.now) }).personActedAt(sent.thread_id)).toBe(at(START + 180_000));
   });
+
+  test("one file's Viewed tick lays over what is kept: ticks held for a while never undo others, made here or there", () => {
+    const { store, project } = setup();
+    const guide = { sha256: "a".repeat(64), input_sha256: "b".repeat(64), bytes: 10, title: "Refund retries", sections: 1, files: 3, additions: 4, deletions: 1, review: true as const };
+    const files = ["src/refunds.ts", "src/retry.ts", "src/ledger.ts"];
+    const sent = store.sendMessage({ project_id: project.id, author: AGENT, body: "Please review.", guide }).message;
+    // On this machine, while the other was away: ledger ticked here.
+    expect(store.saveGuideViewed(sent.id, true, files, "src/ledger.ts")).toEqual(["src/ledger.ts"]);
+    // Then the two ticks the other machine held arrive, in order (refunds, then retry): neither undoes ledger.
+    store.saveGuideViewed(sent.id, true, files, "src/refunds.ts");
+    expect(store.saveGuideViewed(sent.id, true, files, "src/retry.ts")).toEqual(["src/ledger.ts", "src/refunds.ts", "src/retry.ts"]);
+    // A copy of a held tick changes nothing; an untick takes that file alone.
+    expect(store.saveGuideViewed(sent.id, true, files, "src/retry.ts")).toEqual(["src/ledger.ts", "src/refunds.ts", "src/retry.ts"]);
+    expect(store.saveGuideViewed(sent.id, false, files, "src/refunds.ts")).toEqual(["src/ledger.ts", "src/retry.ts"]);
+    expect(() => store.saveGuideViewed(sent.id, true, files, "src/elsewhere.ts")).toThrow();
+    expect(() => store.saveGuideViewed(sent.id, ["src/retry.ts"], files, "src/retry.ts")).toThrow();
+  });
 });
 
 describe("which records are the person's doing", () => {

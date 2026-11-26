@@ -7,6 +7,7 @@
  *
  *   GET /api/inbox/skills                 → { skills: [{ name, root, description?, humanOnly, dir }] }
  *   GET /api/inbox/skills/content?name=…  → { skill: { name, dir, path, content, truncated, humanOnly } }
+ *   GET /api/inbox/skills/file?name=…     → one skill's SKILL.md for the person to read (inbox-skill-file.ts)
  *
  * The same discovery and the same answers as plan review's `/api/skills` and
  * `/api/skills/content` (`handleReferenceSkills`, `handleReferenceSkillContent`):
@@ -30,9 +31,12 @@ import type { SkillCatalogEntry, SkillExportContent } from "@plannotator/core/sk
 import { listReferenceSkills, readReferenceSkillContent, type ReferenceSkillContent } from "./review-skill-loader";
 import { handleReferenceSkillContent } from "./shared-handlers";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
+import { inboxSkillFile } from "./inbox-skill-file";
 
 export const INBOX_SKILLS_PATH = "/api/inbox/skills";
 export const INBOX_SKILL_CONTENT_PATH = "/api/inbox/skills/content";
+/** One skill's SKILL.md for the person to read (inbox-skill-file.ts). */
+export const INBOX_SKILL_FILE_PATH = "/api/inbox/skills/file";
 
 function noStore(res: Response): Response {
   res.headers.set("Cache-Control", "no-store");
@@ -53,7 +57,7 @@ export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnT
   return Response.json({ skills: inboxSkillEntries(codeReview, discovered, routines) });
 }
 
-function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills>, routines: boolean): SkillCatalogEntry[] {
+export function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills>, routines: boolean): SkillCatalogEntry[] {
   let skills: ReturnType<typeof listReferenceSkills>;
   try {
     skills = discovered();
@@ -94,10 +98,19 @@ export function inboxSkillsBlockFor(
   return composeInboxSkillsBlock(refs, contents, INBOX_MESSAGE_SKILL_AUDIENCE);
 }
 
-/** The answer for a skills path, or null for any other path. `codeReview`, `routines`: the person's switches. */
-export function inboxSkillsRoute(req: Request, url: URL, options: { codeReview?: boolean; routines?: boolean } = {}): Response | null {
-  if (url.pathname !== INBOX_SKILLS_PATH && url.pathname !== INBOX_SKILL_CONTENT_PATH) return null;
+/** The answer for a skills path, or null for any other path. `codeReview`, `routines`, `diagrams`: the person's switches. */
+export function inboxSkillsRoute(
+  req: Request,
+  url: URL,
+  options: { codeReview?: boolean; routines?: boolean; diagrams?: boolean; discovered?: () => ReturnType<typeof listReferenceSkills> } = {},
+): Response | null {
+  if (url.pathname !== INBOX_SKILLS_PATH && url.pathname !== INBOX_SKILL_CONTENT_PATH && url.pathname !== INBOX_SKILL_FILE_PATH) return null;
   if (req.method !== "GET") return noStore(Response.json({ error: "Use GET." }, { status: 405 }));
   if (isCrossSiteRequest(req)) return noStore(Response.json(INBOX_CROSS_SITE_BODY, { status: 403 }));
+  if (url.pathname === INBOX_SKILL_FILE_PATH) {
+    // Every built-in, whatever the switches say today: its text ships here, and a reply sent while one was on names it.
+    const catalog = inboxSkillEntries(true, options.discovered ?? listReferenceSkills, true);
+    return noStore(Response.json(inboxSkillFile(url.searchParams.get("name") ?? "", catalog, options.diagrams !== false)));
+  }
   return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true, undefined, options.routines === true) : handleReferenceSkillContent(req));
 }

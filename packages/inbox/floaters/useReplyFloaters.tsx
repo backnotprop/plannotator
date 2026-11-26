@@ -22,13 +22,14 @@ import type { InboxReplyDraftRow } from '@plannotator/core/inbox-types';
 import type { ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { ChatWindowStore } from '@plannotator/ui/components/chat';
 import { AuthorMark } from '../icons';
+import { rowWho } from '../scriptAuthor';
 import { inboxApi } from '../api';
 import { AskSparkle } from '../ask/AskChatMenu';
 import type { AskCorner } from '../ask/useInboxAsk';
 import { SIDE_CORNER, SIDE_CORNER_HIT, SIDE_CORNER_R } from '../ask/scoop';
 import type { InboxToastModel } from '../components/Toast';
 import { Icon } from '../icons';
-import { machineOf } from '../inboxUrl';
+import { keepsReplyDraft } from '../machineDrafts';
 import { FloaterBox } from './FloaterBox';
 import { floatingDrafts, floatsAfterVisit, floatThread, floaterName, onFloaterEvent, onReplyBoxSetAside, staleFloats, unfloatThread, useFloatEntries } from './model';
 
@@ -80,7 +81,7 @@ interface CornerItem {
 function draftMark(row: InboxReplyDraftRow) {
   return (
     <span className="ib-rf-mark">
-      <AuthorMark author={row.author} />
+      <AuthorMark author={rowWho(row, row.author)} />
       {row.unseen > 0 && <span className="ib-rf-markdot" aria-hidden="true" />}
     </span>
   );
@@ -160,7 +161,8 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     }
     const left = visit.current;
     visit.current = null;
-    if (threadId && !machineOf(threadId)) {
+    // A linked machine's thread floats as this Inbox's own does, once that machine keeps its draft (machineDrafts.ts).
+    if (threadId && keepsReplyDraft(threadId)) {
       // Its draft as the drafts list knows it (`reply_at` is the draft's `updated_at`): no read of its own.
       const known = rowsNow.current.read ? (rowsNow.current.rows.find((row) => row.thread_id === threadId)?.unsent?.reply_at ?? null) : undefined;
       visit.current = { id: threadId, updated: known };
@@ -282,11 +284,13 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     [openThread],
   );
   const sent = useCallback(
-    (row: InboxReplyDraftRow, agent: string) => {
+    (row: InboxReplyDraftRow, agent: string, held: string | null) => {
       setOpenId(null);
       unfloatThread(row.thread_id);
       void refresh.current();
-      toast({
+      // Held for a linked machine that is away: the clock toast every held write gives, never "Sent".
+      if (held) toast({ icon: 'clock', lead: held, wrap: true });
+      else toast({
         icon: 'check',
         lead: `Sent to ${agent}`,
         detail: `in ${row.project.name}`,
@@ -427,7 +431,7 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
             onMinimize={() => minimize(openRow.thread_id)}
             onPutAway={() => putAway(openRow.thread_id)}
             onOpenThread={() => toThread(openRow.thread_id)}
-            onSent={(agent) => sent(openRow, agent)}
+            onSent={(agent, held) => sent(openRow, agent, held)}
             onDiscarded={(words, files) => discarded(openRow, words, files)}
             onGone={() => gone(openRow.thread_id)}
           />

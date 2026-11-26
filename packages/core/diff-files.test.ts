@@ -219,6 +219,19 @@ describe("parseDiffToFiles — change-type status", () => {
     expect(file.status).toBe("renamed");
   });
 
+  // #3936: git leaves this header unquoted, and a binary patch has no ---/+++ lines to fall back to.
+  it("keeps a binary path containing ' b/' as one modified file", () => {
+    const [file] = parse(
+      "diff --git a/assets b/icon.png b/assets b/icon.png",
+      "index a4b2576..e98258d 100644",
+      "Binary files a/assets b/icon.png and b/assets b/icon.png differ",
+      "",
+    );
+    expect(file.path).toBe("assets b/icon.png");
+    expect(file.oldPath).toBeUndefined();
+    expect(file.status).toBe("modified");
+  });
+
   it("is not fooled by diff content containing metadata-looking lines", () => {
     const [file] = parse(
       "diff --git a/docs/git.md b/docs/git.md",

@@ -25,14 +25,14 @@ import {
 } from "fs";
 import { execSync } from "child_process";
 
-import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig } from '@plannotator/core/config-types';
+import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, DisplayOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig } from '@plannotator/core/config-types';
 import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
 import { isLocalhostSubdomain } from './loopback-host';
 import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
 import { parseAnnotateView, type AnnotateView } from '@plannotator/core/config-types';
-export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
+export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, DisplayOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
 export interface CCLabelConfig {
@@ -170,6 +170,8 @@ function mergeInboxPromptConfig(current: unknown, partial: unknown): PromptConfi
 export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
+  /** The plan / annotate Display settings and the markdown selection mode. */
+  displayOptions?: DisplayOptions;
   /** Saved review defaults for a VCS other than Git (today: `jj`). Unknown keys are kept. */
   reviewDefaults?: ReviewDefaults;
   /** Optional analysis layers used by code review. */
@@ -428,13 +430,19 @@ export interface PlannotatorConfig {
   /**
    * The Inbox reaction tray's saved emoji (approval "inbox-reaction-tray"):
    * up to 5, each with the person's name for it (optional), in the order
-   * saved. Unset: none saved. Written by the tray's + through POST
+   * saved, each with its skill (optional: a skill name, approval
+   * "inbox-reactions-every-message"). Unset: none saved. Written by the tray's + through POST
    * /api/inbox/settings `{ reactions }`; an entry that is not an emoji is
-   * dropped on read.
+   * dropped on read, and so is a skill that is not a skill name.
    */
-  inboxReactions?: { emoji: string; label?: string }[];
+  inboxReactions?: { emoji: string; label?: string; skill?: string }[];
   /** How many times `inboxReactions` was saved: windows take a list only when it is newer than the last they took. */
   inboxReactionsRev?: number;
+  /**
+   * This Inbox has synced `inboxReactions` with a linked machine before: until then a linked machine's set is merged
+   * with this one instead of the newer replacing the older (server/inbox-reactions-shared.ts).
+   */
+  inboxReactionsSynced?: boolean;
   /**
    * How the Inbox list's rows look: the names of the row options that are on
    * (core `INBOX_ROWS_OPTIONS`), every other one off. Unset: none written yet
@@ -450,6 +458,13 @@ export interface PlannotatorConfig {
    * linked machine: `rev` counts saves across them, `by` is the machine that saved it. Unset: off.
    */
   inboxShowArchived?: { on: boolean; rev: number; by: string | null };
+  /**
+   * When the person last flipped each Settings → Capabilities switch (`board`, `steps`, …, `grid`; ms since 1970) and
+   * on which Inbox (`ibx_…`): the newer flip wins on every linked computer (packages/server/inbox-capability-set.ts).
+   * A switch with no entry was never flipped since this was kept. The switches themselves stay in their own keys. A
+   * save names only the switches it stamps: the others are kept (saveConfig merges it key by key).
+   */
+  inboxCapabilityFlips?: Record<string, { at: number; by: string | null }>;
   /**
    * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
    * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
@@ -485,9 +500,20 @@ export interface PlannotatorConfig {
    * flag the person turns on). Read through `resolveExperimental`;
    * PLANNOTATOR_EXPERIMENTAL wins over this key. Written by the Inbox's
    * Settings → Capabilities → Experimental through POST /api/inbox/settings
-   * `{ experimental: { decision_mode } }`.
+   * `{ experimental: { grid } }`. `grid`: the Inbox's Grid page
+   * (approval "inbox-agent-grid"). `decisionMode`: the old place of Decision
+   * mode's switch, now `inboxDecisionMode`; read only as its fallback
+   * (`inboxDecisionModeOn`), never written.
    */
-  experimental?: { decisionMode?: boolean };
+  experimental?: { decisionMode?: boolean; grid?: boolean };
+  /**
+   * Decision mode (the owner, 2026-11-24: "default on, switch off in capabilities, no longer experimental"): on
+   * unless false. On: a thread's open questions offer "Decide", one question at a time in a focused dialog, answers
+   * saved as drafts and sent only with the person's Send. A window feature only: nothing an agent
+   * reads. Written by Settings → Capabilities (`POST /api/inbox/settings` `{ decision_mode: { on } }`), read on every
+   * request through `inboxDecisionModeOn`.
+   */
+  inboxDecisionMode?: boolean;
   /**
    * The Board's one-time first-visit dialog (approval "inbox-board", intro
    * amendment): `shownAt` once a page on this computer or the owner's phone
@@ -600,6 +626,12 @@ export interface PlannotatorConfig {
     canStar?: boolean;
   };
   /**
+   * The launch switch's one-time dialog (packages/shared/launch-switch.ts reads and writes it, nothing else does),
+   * per campaign: `shownAt` once a surface showed it, so none shows it again on this computer; `answer`: `opened`
+   * (the launch link opened) or `dismissed`.
+   */
+  launch?: Record<string, { shownAt?: string; answer?: "opened" | "dismissed"; answeredAt?: string }>;
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): something the person turns on, off by default. On: the
    * review skills in the reply box's "/" list, the review card and its
@@ -703,8 +735,12 @@ export interface PlannotatorConfig {
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
     waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; view_choice?: string; personal_agents?: string; priority?: string; routines?: string };
-    /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
-    code_review?: { shownAt?: string; key?: string };
+    /**
+     * Code review's one-time offer (approval "inbox-code-review-offer"), decided as the tab icon's: `dueAt` for someone
+     * who used an earlier Inbox, `freshAt` for a fresh install (never due), both written at the first release start that
+     * shows it (packages/server/inbox-code-review-offer.ts); then claimed once, as the Board's.
+     */
+    code_review?: { dueAt?: string; freshAt?: string; shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
     agent_rules?: { shownAt?: string; key?: string };
@@ -1024,6 +1060,39 @@ export function parsePackageChangesConfig(value: unknown): PlannotatorConfig["pa
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+const DISPLAY_OPTION_TYPES = {
+  textSize: "number",
+  fontFamily: "string",
+  showGrid: "boolean",
+  diagramShadow: "number",
+  autoOpenSidebar: "boolean",
+  stickyActions: "boolean",
+  planWidth: "string",
+  taterMode: "boolean",
+  inputMethod: "string",
+  htmlAnnotateOnStartup: "boolean",
+} as const satisfies Record<keyof DisplayOptions, "number" | "string" | "boolean">;
+
+/**
+ * Parse `displayOptions`: a plain object, or undefined (the route answers 400).
+ * Only the known keys with the right primitive type are kept; the UI checks
+ * each value against its own choices (shared cannot import packages/ui).
+ */
+export function parseDisplayOptionsConfig(value: unknown): DisplayOptions | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, type] of Object.entries(DISPLAY_OPTION_TYPES)) {
+    if (typeof input[key] === type) result[key] = input[key];
+  }
+  return result as DisplayOptions;
+}
+
+/** Whether HTML pages and live apps start in Interact ("Start in Annotate mode" turned off). */
+export function resolveHtmlStartsInInteract(config: PlannotatorConfig): boolean {
+  return parseDisplayOptionsConfig(config.displayOptions)?.htmlAnnotateOnStartup === false;
+}
+
 /** PLANNOTATOR_PACKAGE_LOOKUP: `0` / `false` / `off` / `disabled` is a hard off; anything else decides nothing. */
 export function parsePackageLookupEnv(env: NodeJS.ProcessEnv = process.env): false | undefined {
   const v = env.PLANNOTATOR_PACKAGE_LOOKUP?.trim().toLowerCase();
@@ -1060,7 +1129,7 @@ function getStatePath(): string {
  */
 const MACHINE_STATE_KEYS = [
   "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
-  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro",
+  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "launch",
 ] as const;
 type MachineStateKey = (typeof MACHINE_STATE_KEYS)[number];
 /** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */
@@ -1177,6 +1246,7 @@ const starAskTime = (record: Record<string, unknown>) => String(record.answeredA
  * | inboxSnoozeIntro                        | stamps, earliest `firstUseAt`                                           |
  * | inboxBoardIntro, inboxVoiceIntro,       | stamps: shown, skipped, used or not-needed anywhere stays so            |
  * | inboxThemeChooser, inboxPriorityIntro   |                                                                         |
+ * | launch                                  | stamps per campaign: shown anywhere stays shown                         |
  * | inboxSound dialog fields                | newer `dialogShownFor` and `dialogDueFor`; due only while the due       |
  * |                                         | version is newer than the shown one (soundDialog)                       |
  */
@@ -1649,6 +1719,20 @@ function writeConfigFile(configPath: string, contents: string): void {
  * (or read the value back).
  */
 export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
+  return saveConfigLocked(partial) === "saved";
+}
+
+/**
+ * saveConfig as a compare-and-set: `decide` runs inside the lock, with the config as both files hold it now, and
+ * returns what to save, or null to save nothing (`declined`). The check and its write are one critical section, so two
+ * processes sharing the data dir cannot both pass the check (the launch switch's one-time stamp). `failed`: decided,
+ * but the save did not land.
+ */
+export function saveConfigIf(decide: (current: PlannotatorConfig) => Partial<PlannotatorConfig> | null): "saved" | "declined" | "failed" {
+  return saveConfigLocked(decide);
+}
+
+function saveConfigLocked(input: Partial<PlannotatorConfig> | ((current: PlannotatorConfig) => Partial<PlannotatorConfig> | null)): "saved" | "declined" | "failed" {
   let lockPath: string | null = null;
   let locked = false;
   let saved = false;
@@ -1669,10 +1753,17 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
         `[plannotator] Warning: not saving config.json because ${read.reason}; `
         + `the settings in it are kept. Fix or remove ${getConfigPath()} to save settings again.\n`,
       );
-      return false;
+      return "failed";
     }
     const current = read.config;
     configSaveMergeWindowHook?.();
+    const stateRead = readState();
+    let partial: Partial<PlannotatorConfig>;
+    if (typeof input === "function") {
+      const decided = input(withMachineState(current as Record<string, unknown>, stateRead.state));
+      if (decided === null) return "declined";
+      partial = decided;
+    } else partial = input;
     // The nested settings merge key by key (one experimental switch saved keeps the others), but a
     // hand-edited config.json may hold anything there. A key the write does not name is kept verbatim,
     // whatever it holds; one it names merges only when both sides are plain objects, else the write's
@@ -1680,7 +1771,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
     const plain = (value: unknown): value is Record<string, unknown> =>
       !!value && typeof value === "object" && !Array.isArray(value);
     const merged: Record<string, unknown> = { ...current, ...partial };
-    const nested = (key: "experimental" | "diffOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch") => {
+    const nested = (key: "experimental" | "diffOptions" | "displayOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch" | "inboxCapabilityFlips") => {
       const cur = (current as Record<string, unknown>)[key];
       const par = (partial as Record<string, unknown>)[key];
       if (par === undefined) {
@@ -1693,10 +1784,10 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
       }
       merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
     };
-    for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch"] as const) nested(key);
+    // `inboxCapabilityFlips` too: a switch's flip time saved never drops another's saved meanwhile.
+    for (const key of ["experimental", "diffOptions", "displayOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch", "inboxCapabilityFlips"] as const) nested(key);
     // Machine state named by the save goes to state.json only (MACHINE_STATE_KEYS): config.json's copy, if any, is
     // kept as it is, for other machines and older versions that read it.
-    const stateRead = readState();
     const state = { ...stateRead.state };
     let stateNamed = false;
     for (const key of MACHINE_STATE_KEYS) {
@@ -1730,7 +1821,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
   } finally {
     if (locked && lockPath) releaseConfigLock(lockPath);
   }
-  return saved;
+  return saved ? "saved" : "failed";
 }
 
 /**
@@ -1758,6 +1849,7 @@ export function getServerConfig(
 ): {
   displayName?: string;
   diffOptions?: DiffOptions;
+  displayOptions?: DisplayOptions;
   reviewDefaults?: ReviewDefaults;
   theme?: ThemeConfig;
   favicon?: FaviconStyle;
@@ -1791,6 +1883,7 @@ export function getServerConfig(
   return {
     displayName: cfg.displayName,
     diffOptions: cfg.diffOptions,
+    ...displayOptionsAdvert(cfg.displayOptions),
     ...(cfg.reviewDefaults !== undefined && { reviewDefaults: cfg.reviewDefaults }),
     ...(cfg.theme !== undefined && { theme: cfg.theme }),
     ...(isFaviconStyle(cfg.favicon) && { favicon: cfg.favicon }),
@@ -1832,6 +1925,12 @@ export function getServerConfig(
     // Settings' "Open Plannotator at plannotator.localhost" (#2184), only where the server says it is local.
     ...(options.cookieHost === true && { cookieHost: cookieHostState(cfg) }),
   };
+}
+
+/** displayOptions as getServerConfig advertises it: the parsed known keys, left out when none remain. */
+function displayOptionsAdvert(value: unknown): { displayOptions?: DisplayOptions } {
+  const parsed = parseDisplayOptionsConfig(value);
+  return parsed && Object.keys(parsed).length > 0 ? { displayOptions: parsed } : {};
 }
 
 /**
@@ -2456,7 +2555,7 @@ export function resolveInboxPhones(
  * separate piece of work and can grow out of this table.
  */
 export const EXPERIMENTAL_FEATURES = {
-  "decision-mode": "decisionMode",
+  grid: "grid",
 } as const;
 
 export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURES;
@@ -2464,7 +2563,7 @@ export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURES;
 /**
  * What PLANNOTATOR_EXPERIMENTAL says about one feature, or undefined when it
  * says nothing. The variable is a comma list of feature names: a name listed
- * turns that feature on, a name with a leading `-` turns it off (`-decision-mode`);
+ * turns that feature on, a name with a leading `-` turns it off (`-grid`);
  * names are trimmed and compared case-insensitively, and unknown names are ignored.
  */
 export function parseExperimentalEnv(name: ExperimentalFeature, env: NodeJS.ProcessEnv = process.env): boolean | undefined {
@@ -2492,9 +2591,38 @@ export function resolveExperimental(
 ): boolean {
   const fromEnv = parseExperimentalEnv(name, env);
   if (fromEnv !== undefined) return fromEnv;
+  return savedExperimental(config, name) ?? false;
+}
+
+/** The person's saved choice for an experimental feature (config.json `experimental`), or undefined at its default. */
+export function savedExperimental(config: PlannotatorConfig, name: ExperimentalFeature): boolean | undefined {
   const saved = config.experimental;
-  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return false;
-  return parseConfigBoolean((saved as Record<string, unknown>)[EXPERIMENTAL_FEATURES[name]]) ?? false;
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return undefined;
+  return parseConfigBoolean((saved as Record<string, unknown>)[EXPERIMENTAL_FEATURES[name]]);
+}
+
+/**
+ * Whether PLANNOTATOR_EXPERIMENTAL turns Decision mode off: its documented "minus" form (`-decision-mode`, any case,
+ * anywhere in the comma list) still does, now that the feature left Experimental. Any other mention of it (the plain
+ * `decision-mode`) is ignored, without error: it is on by default.
+ */
+export function inboxDecisionModeEnvOff(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.PLANNOTATOR_EXPERIMENTAL;
+  return !!raw && raw.split(",").some((part) => part.trim().toLowerCase() === "-decision-mode");
+}
+
+/**
+ * Whether the Inbox's Decision mode is on: off when PLANNOTATOR_EXPERIMENTAL says `-decision-mode`; else config.json
+ * `inboxDecisionMode` when it is a boolean; else the old experimental switch (`experimental.decisionMode`), so a
+ * choice made there is kept (false stays off, true stays on); else on.
+ */
+export function inboxDecisionModeOn(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (inboxDecisionModeEnvOff(env)) return false;
+  const saved = parseConfigBoolean(config.inboxDecisionMode);
+  if (saved !== undefined) return saved;
+  const old = config.experimental;
+  const legacy = old && typeof old === "object" && !Array.isArray(old) ? parseConfigBoolean((old as Record<string, unknown>).decisionMode) : undefined;
+  return legacy ?? true;
 }
 
 /** The PLANNOTATOR_INBOX_TAILSCALE override, or undefined when it does not decide. */

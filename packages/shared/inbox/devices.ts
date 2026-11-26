@@ -46,13 +46,19 @@ export interface InboxDevice {
    * its next contact hears `device_revoked`. Absent otherwise.
    */
   refusal_owed_until?: string;
+  /**
+   * A linked computer's device made from a link code an introduction opened (packages/server/inbox-link-through.ts):
+   * provisional until the link it was made for is saved. `for`: the only computer whose link-back completes it; `by`:
+   * the computer that introduced it; `until`: revoked then if it is still provisional. Absent otherwise.
+   */
+  introduced?: { for: string; by: string; until: string };
 }
 
-/** A device as the routes answer it: everything but the token's hash. */
-export type InboxDevicePublic = Omit<InboxDevice, "token_sha256">;
+/** A device as the routes answer it: everything but the token's hash and an introduction's binding (this door's own). */
+export type InboxDevicePublic = Omit<InboxDevice, "token_sha256" | "introduced">;
 
 export function publicDevice(device: InboxDevice): InboxDevicePublic {
-  const { token_sha256: _hash, ...rest } = device;
+  const { token_sha256: _hash, introduced: _introduced, ...rest } = device;
   return rest;
 }
 
@@ -172,7 +178,7 @@ export class InboxDevices {
   }
 
   /** A new paired device, with its pairing secret kept beside it (0600 in a 0700 folder). */
-  add(input: { id: string; name: string; platform: string; token: string; secret: string; at: string }): InboxDevice {
+  add(input: { id: string; name: string; platform: string; token: string; secret: string; at: string; introduced?: InboxDevice["introduced"] }): InboxDevice {
     mkdirSync(this.secretsDir, { recursive: true, mode: 0o700 });
     try {
       chmodSync(this.secretsDir, 0o700);
@@ -190,9 +196,18 @@ export class InboxDevices {
         last_seen_at: input.at,
         revoked_at: null,
         carriage: true,
+        ...(input.introduced ? { introduced: { ...input.introduced } } : {}),
       },
       input.at,
     );
+  }
+
+  /** A provisional device's link was saved: it is an ordinary device from now on. Nothing written when it is not provisional. */
+  settleIntroduced(id: string, at: string): InboxDevice | null {
+    const device = this.devices.get(id);
+    if (!device || device.introduced === undefined) return device ?? null;
+    const { introduced: _settled, ...rest } = device;
+    return this.write(rest, at);
   }
 
   /** Revoke a device and delete its secret. Revoking twice changes nothing. */

@@ -42,7 +42,7 @@ function door() {
 }
 
 const WRITES = ["pulls/close", "pulls/reopen", "pulls/merge"];
-const READS = ["pulls", "pulls/risk", "pulls/details", "pulls/diff"];
+const READS = ["pulls", "pulls/risk", "pulls/pull", "pulls/details", "pulls/diff"];
 
 describe("the PR board on the device door", () => {
   test("a paired phone reaches none of it, on the door or through the relay; nothing is handed to the window", async () => {
@@ -57,6 +57,17 @@ describe("the PR board on the device door", () => {
     }
     for (const route of READS) expect([route, (await d.call(phone.token, route, "GET")).status]).toEqual([route, 404]);
     expect(d.handed).toEqual([]);
+  });
+
+  test("a linked machine reads a PR that left its board here (`pulls/pull`), as it reads its diff", async () => {
+    const d = door();
+    const offer = d.devices.machineDoor.openMachineOffer();
+    const machine = await d.pair({ name: "MacBook", platform: "machine", secret: offer.secret });
+    for (const route of ["pulls/pull", "pulls/diff"]) expect([route, (await d.call(machine.token, route, "GET")).status]).toEqual([route, 200]);
+    expect(d.handed.map((h) => [h.path, h.from.platform])).toEqual([
+      ["/api/inbox/pulls/pull", "machine"],
+      ["/api/inbox/pulls/diff", "machine"],
+    ]);
   });
 
   test("a linked machine's write is a window press only with the window's mark; the relay's command never is", async () => {

@@ -2,8 +2,8 @@
  * Artifact pins (approval "inbox-artifact-stars"; the word is Pin): the
  * person's marks on a thread's artifacts, kept outside the event log. What can
  * regress: a pin writing a store line, a pin of something that is not one of
- * the thread's artifacts (another thread's file, the attached twin of an image
- * the text shows), the per-thread order (newest pin first), the file outliving
+ * the thread's artifacts (another thread's file), a pin under the attached twin
+ * of an image the text shows lost or counted twice, the per-thread order (newest pin first), the file outliving
  * its thread, and artifact pins mixing with the sidebar's thread pins.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -127,8 +127,35 @@ describe("artifact pins in the store", () => {
     const shown = { ...file("shot.png", "/work/repo/shot.png", "image"), ref: "shot.png" };
     store.addCapturedImages(root.id, [shown]);
     expect(store.threadArtifactRefs(root.thread_id).map((r) => r.key)).toEqual([shown.id]);
-    expect(code(() => store.setArtifactPinned(root.thread_id, attached.id, true))).toBe("artifact_not_found");
+    // The attached twin's id (a window that read the thread before the capture) pins the one artifact, under its key.
+    expect(code(() => store.setArtifactPinned(root.thread_id, attached.id, true))).toBe("ok");
+    expect(store.artifactPins().map((p) => p.key)).toEqual([shown.id]);
     expect(code(() => store.setArtifactPinned(root.thread_id, shown.id, true))).toBe("ok");
+    expect(store.artifactPins()).toHaveLength(1);
+    // Either id unpins it.
+    store.setArtifactPinned(root.thread_id, attached.id, false);
+    expect(store.artifactPins()).toEqual([]);
+  });
+
+  test("a pin made while only the attached copy was an artifact moves to the shown copy once captured, and outlives a restart", () => {
+    const { dir, now, store, project } = open();
+    const attached = file("shot.png", "/work/repo/shot.png", "image");
+    const root = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "![shot](shot.png)", attachments: [attached] }).message;
+    store.setArtifactPinned(root.thread_id, attached.id, true);
+    const shown = { ...file("shot.png", "/work/repo/shot.png", "image"), ref: "shot.png" };
+    store.addCapturedImages(root.id, [shown]);
+    expect(store.threadArtifactPins(root.thread_id).map((p) => p.key)).toEqual([shown.id]);
+    expect(InboxStore.open(dir, { now }).threadArtifactPins(root.thread_id).map((p) => p.key)).toEqual([shown.id]);
+  });
+
+  test("a pin file still naming the attached twin (written before the capture moved it) is read under the shown copy's key", () => {
+    const { dir, now, store, project } = open();
+    const attached = file("shot.png", "/work/repo/shot.png", "image");
+    const root = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "![shot](shot.png)", attachments: [attached] }).message;
+    const shown = { ...file("shot.png", "/work/repo/shot.png", "image"), ref: "shot.png" };
+    store.addCapturedImages(root.id, [shown]);
+    writeFileSync(join(dir, "inbox", INBOX_ARTIFACT_PINS_FILE), JSON.stringify({ v: 1, pins: [{ key: attached.id, thread_id: root.thread_id, pinned_at: "2026-11-08T09:00:00.000Z" }] }));
+    expect(InboxStore.open(dir, { now }).threadArtifactPins(root.thread_id).map((p) => p.key)).toEqual([shown.id]);
   });
 
   test("pins outlive a restart, and a deleted thread's pins leave the file on the next load", () => {

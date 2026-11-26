@@ -997,8 +997,8 @@ export const AGENTS: Agent[] = [
     slug: 't3-code',
     name: 'T3 Code',
     tier: 'hooks',
-    lede: 'Claude threads in T3 Code get the Inbox tool from the Claude Code plugin with no T3 setup. Your reply arrives in the thread as a new turn.',
-    diff: 'Inbox from the Claude Code plugin · reply wakes Claude threads · reviews and Ask this session with the opt-in hook',
+    lede: 'Claude threads in T3 Code get the Inbox tool from the Claude Code plugin with no T3 setup. Your reply arrives in the thread as a new turn. Codex threads in T3 get it too when T3 runs on the same computer as the Inbox.',
+    diff: 'Inbox from the Claude Code plugin · reply wakes Claude threads, and Codex threads on the same computer · reviews and Ask this session with the opt-in hook',
     inbox: {
       tool: {
         level: 'yes',
@@ -1008,8 +1008,8 @@ export const AGENTS: Agent[] = [
       },
       reply: {
         level: 'part',
-        label: 'Wakes Claude threads',
-        detail: 'While T3 keeps the thread’s Claude running your reply arrives in the thread as a new turn. T3 stops an idle Claude after about 30 minutes. After that a one-time T3 sign-in delivers your reply, and until then the line under it says it is waiting. Codex and other agents in T3 see your reply when they read the thread.',
+        label: 'Wakes Claude and Codex threads',
+        detail: 'While T3 keeps the thread’s Claude running your reply arrives in the thread as a new turn. T3 stops an idle Claude after about 30 minutes. After that a one-time T3 sign-in delivers your reply, and until then the line under it says it is waiting. A Codex thread in T3 gets your reply as a new turn when T3 runs on the same computer as the Inbox, with no sign-in. Other agents in T3, and Codex threads when T3 is on another computer, see your reply when they read the thread.',
         src: 'NA:291,298-300 (the mod delivers while it polls, then the T3 wake under a grant; t3_wait); docs/agent-guides/claude-code-mod.md (30 minutes); PR #3365',
       },
       start: noStart,
@@ -1086,16 +1086,16 @@ export const AGENTS: Agent[] = [
         fix: 'Use the same `PLANNOTATOR_DATA_DIR` for the sign-in and the Inbox and the hook.',
         src: 'packages/t3-code/README.md (data directory)',
       },
-      { symptom: 'A Codex or OpenCode or Pi thread in T3 isn’t woken', fix: 'Only Claude threads wake. The others see your reply when they read the thread.', src: 'NA:291 (only T3’s Claude adapter sets T3CODE_THREAD_ID)' },
+      { symptom: 'A Codex or OpenCode or Pi thread in T3 isn’t woken', fix: 'A Codex thread wakes only when T3 runs on the same computer as the Inbox, and not on Windows. OpenCode and Pi threads aren’t woken. They see your reply when they read the thread.', src: 'packages/server/inbox-codex-wake.ts (sendToT3); packages/server/inbox-t3-local.ts (installed: no t3 command, or Windows)' },
       {
         symptom: 'Your reply says `Waiting for T3 Code`',
-        fix: 'T3 stopped the thread’s Claude and no sign-in can put your reply in. Run the sign-in the line shows. If it says T3 isn’t answering, open T3. The reply goes in by itself after that.',
+        fix: 'In a Claude thread, T3 stopped the thread’s Claude and no sign-in can put your reply in. Run the sign-in the line shows. If it says T3 isn’t answering, open T3. The reply goes in by itself after that.',
         code: 'plannotator t3 login --url <T3 MCP URL>',
         src: 'packages/core/inbox-t3.ts inboxT3WaitLine; NA:299',
       },
     ],
     limits: [
-      { text: 'Only Claude threads get your reply in the thread. Codex threads in T3 don’t yet.', src: 'NA:291 (only T3’s Claude adapter sets T3CODE_THREAD_ID); isT3ThreadId takes every thread id T3 makes (#3261)' },
+      { text: 'Codex threads in T3 get your reply in the thread only when T3 runs on the same computer as the Inbox. Other agents in T3 don’t yet.', src: 'packages/server/inbox-codex-wake.ts (sendToT3, local t3 command only); NA:337 (an OpenCode or Pi thread in T3 has no T3 identity)' },
       {
         text: 'The review hook routes only a plain `plannotator review` or `annotate` or `last` that Claude runs as a Bash command. A slash command you type and compound commands and subagents and a folder below the project aren’t routed.',
         src: 'packages/t3-code/README.md:60,66; packages/t3-code/hook.ts:14-17; packages/t3-code/hook-routing.ts',

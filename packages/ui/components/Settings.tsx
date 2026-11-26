@@ -1,4 +1,3 @@
-import { DiffDisplayOptionsBody } from './DiffDisplayOptions';
 import type { UpdateCheckSetting } from '../hooks/useUpdateCheckSetting';
 import { cookieHostDescription, type CookieHostSetting } from '../hooks/useCookieHostSetting';
 import type { PackageChangesSetting } from '../hooks/usePackageChangesSetting';
@@ -6,18 +5,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { AnnotateAgentTerminalSide } from '@plannotator/core/agent-terminal';
 import type { Origin } from '@plannotator/core/agents';
-import type { TokenHoverDelay } from '@plannotator/core/token-hover';
 import { basenameFromPath } from '@plannotator/core/source-save';
-import {
-  configStore,
-  useConfigValue,
-  setReviewPanelView,
-  setReviewDefaultDiffType,
-  getProviderReviewDefaultDiffType,
-  setProviderReviewDefaultDiffType,
-  setReviewAutoViewed,
-  type VcsReviewSettingsDescriptor,
-} from '../config';
+import { configStore, useConfigValue } from '../config';
 import { setWebMcpToolsEnabled, useWebMcpToolsEnabled } from '../webmcp/preference';
 import { DIAGRAM_SHADOW_OPTIONS } from '../utils/diagramShadow';
 import { markLookAndFeelChoiceResolved } from '../utils/lookAndFeelAnnouncement';
@@ -29,9 +18,6 @@ import {
   agentToolHostName,
   type AgentToolSetting,
 } from '../utils/agentToolSetting';
-import { loadDiffFont } from '../utils/diffFonts';
-import { isFontInstalled } from '../utils/fontDetect';
-import { MAX_FONT_FAMILY_LENGTH, monoFontStack, normalizeCssFontSize, normalizeFontFamilyName } from '../utils/cssFontFamily';
 import { TaterSpritePullup } from './TaterSpritePullup';
 import { getIdentity, regenerateIdentity, setCustomIdentity, isIdentityEditable } from '../utils/identity';
 import { GitUser } from '../icons/GitUser';
@@ -108,10 +94,42 @@ import {
   type FileBrowserSettings,
 } from '../utils/fileBrowser';
 import { requestVimDocumentFocus } from '../hooks/useVimDocumentFocus';
-import { AnalysisLayerToggle } from './AnalysisLayerToggle';
-import { SemanticDiffsTab } from './settings/SemanticDiffsTab';
+import { FontFamilyField } from './settings/FontFamilyField';
+import { ReviewSettingsPage, type ReviewSettingsSectionId } from './settings/ReviewSettingsPage';
+import { CLASSIC_REVIEW_SETTINGS_CONTROLS } from './settings/reviewSettingsControls';
+import { SEM_DIFF_OPINION_SETTINGS_ROUTE } from './settings/PowerUpSettings';
+import { REVIEW_SETTINGS_TAB_LABEL } from './settings/reviewSettingsWords';
 
-type SettingsTab = 'general' | 'theme' | 'review' | 'display' | 'semantic' | 'analysis' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'notion' | 'comments' | 'hooks' | 'experimental';
+// Kept for hosts that imported them from here; Settings → Reviews owns them now.
+export { TOKEN_HOVER_TRIGGER_OPTIONS, TOKEN_HOVER_DELAY_OPTIONS, type TokenHoverDelayOption } from './settings/reviewSettingsWords';
+
+type SettingsTab = 'general' | 'theme' | 'reviews' | 'display' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'notion' | 'comments' | 'hooks' | 'experimental';
+
+/**
+ * Code review's former Review, Editor, Semantic diffs and Analysis tabs, now
+ * one Reviews page. An old id still lands there, on the section it held.
+ */
+export type LegacyReviewSettingsTab = 'review' | 'display' | 'semantic' | 'analysis';
+const LEGACY_REVIEW_TAB_SECTION: Record<LegacyReviewSettingsTab, ReviewSettingsSectionId | undefined> = {
+  review: 'files',
+  display: undefined,
+  semantic: 'semantic',
+  analysis: 'semantic',
+};
+
+/**
+ * Where an outside link to a Settings tab lands: in code review, an old review
+ * tab id opens Reviews at the section it held; `reviews` opens it at `section`.
+ */
+export function resolveSettingsTab(
+  tab: 'reviews' | LegacyReviewSettingsTab,
+  mode: 'plan' | 'annotate' | 'review',
+  section?: ReviewSettingsSectionId,
+): { tab: SettingsTab; section?: ReviewSettingsSectionId } {
+  if (tab === 'reviews') return { tab: 'reviews', section };
+  if (mode !== 'review') return { tab: tab === 'display' ? 'display' : 'general' };
+  return { tab: 'reviews', section: LEGACY_REVIEW_TAB_SECTION[tab] };
+}
 
 interface SettingsProps {
   taterMode: boolean;
@@ -152,6 +170,7 @@ interface SettingsProps {
    * applies the `documentFontFamily` setting (`hooks/useDocumentFont`).
    */
   showDocumentFont?: boolean;
+  showHtmlAnnotateStartup?: boolean;
   onUIPreferencesChange?: (prefs: UIPreferences) => void;
   /** Claude Code's permission mode was changed here (plan review). The host
    *  keeps its own copy in step, since its Approve sends the mode and its
@@ -159,7 +178,10 @@ interface SettingsProps {
   onPermissionModeChange?: (mode: PermissionMode) => void;
   /** Externally controlled open state (for mobile menu integration) */
   externalOpen?: boolean;
-  externalTab?: 'semantic';
+  /** The tab to open on: `reviews`, or an old code-review tab id, which lands on Reviews (resolveSettingsTab). */
+  externalTab?: 'reviews' | LegacyReviewSettingsTab;
+  /** With `externalTab="reviews"`: the Reviews section to open at (the Power Up status link passes `powerUp`). */
+  externalSection?: ReviewSettingsSectionId;
   onExternalClose?: () => void;
   /** Available AI providers (from /api/ai/capabilities). */
   aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>;
@@ -187,7 +209,7 @@ interface SettingsProps {
    *  readable Error, which the row shows. */
   onAgentToolChange?: (enabled: boolean) => Promise<void>;
   /** Current session is a local git review where since-base ISN'T offered
-   *  (base ref unresolvable) — the Review tab's Git section shows a note that
+   *  (base ref unresolvable) — Settings → Reviews' Git group shows a note that
    *  the Git-status preference can't take effect in THIS repo. */
   sinceBaseUnavailable?: boolean;
   /** The host is rendering its compact touch shell (review only). Display
@@ -207,63 +229,6 @@ interface SettingsProps {
   webmcpAvailable?: boolean;
 }
 
-// --- Review-mode Display tab (diff display options) ---
-
-const DIFF_FONT_OPTIONS = [
-  { value: '', label: 'Theme Default' },
-  { value: 'Fira Code', label: 'Fira Code' },
-  { value: 'Hack', label: 'Hack' },
-  { value: 'IBM Plex Mono', label: 'IBM Plex Mono' },
-  { value: 'Inconsolata', label: 'Inconsolata' },
-  { value: 'JetBrains Mono', label: 'JetBrains Mono' },
-  { value: 'Red Hat Mono', label: 'Red Hat Mono' },
-  { value: 'Roboto Mono', label: 'Roboto Mono' },
-  { value: 'Source Code Pro', label: 'Source Code Pro' },
-  { value: 'Atkinson Hyperlegible Mono', label: 'Atkinson Hyperlegible' },
-];
-
-/**
- * The modifier gate is the platform's primary modifier: Cmd on macOS, Ctrl on
- * Windows and Linux. Labeled through modKeyWord so the control names the key
- * the reader actually has.
- */
-export const TOKEN_HOVER_TRIGGER_OPTIONS = [
-  { value: 'hover' as const, label: 'On hover' },
-  { value: 'modifier' as const, label: `Hold ${modKeyWord}` },
-  { value: 'off' as const, label: 'Off' },
-];
-/** SegmentedControl keys on strings, so the ms values ride as their digits. */
-export type TokenHoverDelayOption = '150' | '300' | '700';
-export const TOKEN_HOVER_DELAY_OPTIONS = [
-  { value: '150' as const, label: 'Fast' },
-  { value: '300' as const, label: 'Default' },
-  { value: '700' as const, label: 'Relaxed' },
-];
-const DEFAULT_DIFF_TYPE_OPTIONS = [
-  // "All Changes" belongs to since-base (the flagship composite); uncommitted
-  // reverts to its plain name so the two stay distinguishable side by side.
-  { value: 'since-base' as const, label: 'All Changes (Recommended)', description: "Everything since your branch split from main — committed, uncommitted, and untracked" },
-  { value: 'local-vs-remote' as const, label: 'Local vs Remote Branch', description: "Your local branch and working tree compared with its last-fetched remote-tracking branch" },
-  { value: 'uncommitted' as const, label: 'Uncommitted', description: "Everything you've changed since your last commit" },
-  { value: 'unstaged' as const, label: 'Unstaged', description: "Only changes you haven't staged yet" },
-  { value: 'staged' as const, label: 'Staged', description: "Only changes you've staged for commit" },
-  { value: 'merge-base' as const, label: 'Committed changes (PR view)', description: "Everything you've committed on this branch" },
-  { value: 'all' as const, label: 'All Files (HEAD)', description: "Every tracked file at HEAD, shown as additions" },
-];
-// Labels match the jj diff picker (getJjContext in packages/shared/jj-core.ts).
-const JJ_DEFAULT_DIFF_TYPE_OPTIONS = [
-  { value: 'jj-current', label: 'Current change', description: 'Only the working-copy change (@)' },
-  { value: 'jj-last', label: 'Last change', description: 'The change just before the working copy (@-)' },
-  { value: 'jj-line', label: 'Line of work', description: 'Every change on your line of work since it left trunk' },
-  { value: 'jj-evolog', label: 'Evolution diff', description: 'How the current change has evolved' },
-  { value: 'jj-all', label: 'Every file', description: 'Every file at the working copy, shown as additions' },
-] as const;
-const JJ_REVIEW_DEFAULTS: VcsReviewSettingsDescriptor = {
-  id: 'jj',
-  label: 'Jujutsu',
-  defaultDiffType: 'jj-current',
-  diffOptions: JJ_DEFAULT_DIFF_TYPE_OPTIONS.map(({ value, label, description }) => ({ id: value, label, description })),
-};
 const AGENT_TERMINAL_SIDE_OPTIONS: { value: AnnotateAgentTerminalSide; label: string }[] = [
   { value: 'left', label: 'Left' },
   { value: 'right', label: 'Right' },
@@ -474,372 +439,6 @@ function VimSettingsTab({
   );
 }
 
-function ReviewAnalysisTab({ packageChangesSetting }: { packageChangesSetting?: PackageChangesSetting }) {
-  const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
-  const callFlowEnabled = useConfigValue('callFlowEnabled');
-  return (
-    <div className="space-y-5">
-      <div>
-        <div className="text-sm font-semibold">Analysis layers</div>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          Add structural context to the ordinary code diff. Each layer is independent and does no work while disabled.
-        </p>
-      </div>
-
-      <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
-        <AnalysisLayerToggle
-          checked={semanticDiffEnabled}
-          onChange={(enabled) => configStore.set('semanticDiffEnabled', enabled)}
-          label="Semantic changes"
-          description="Organize added, changed, moved, and removed functions, classes, and other named code. Enabled by default."
-        />
-        <div className="border-t border-border" />
-        <AnalysisLayerToggle
-          checked={callFlowEnabled}
-          onChange={(enabled) => configStore.set('callFlowEnabled', enabled)}
-          label="Call flow"
-          description="Diffs for function call stacks across git commits. 22 languages supported (AST-based, built using Tree-sitter)."
-        />
-        {packageChangesSetting && (
-          <>
-            <div className="border-t border-border" />
-            <AnalysisLayerToggle
-              checked={packageChangesSetting.card}
-              onChange={(on) => packageChangesSetting.setCard(on)}
-              label="Package changes"
-              description="Added, removed and changed dependencies above package.json and lockfile diffs."
-            />
-            <div className="border-t border-border" />
-            <AnalysisLayerToggle
-              checked={packageChangesSetting.lookup}
-              onChange={(on) => void packageChangesSetting.setLookup(on)}
-              disabled={packageChangesSetting.lookupEnv === false}
-              label="Look up packages on npm"
-              description={packageChangesSetting.lookupEnv === false
-                ? 'Off: PLANNOTATOR_PACKAGE_LOOKUP=0.'
-                : 'License, release date and weekly downloads. Sends the names of changed public packages to registry.npmjs.org and api.npmjs.org.'}
-            />
-          </>
-        )}
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-border p-3.5">
-          <div className="flex items-center gap-2 text-xs font-semibold">
-            <span className="grid h-6 w-6 place-items-center rounded-md bg-primary/10 font-mono text-primary">▣</span>
-            Dock
-          </div>
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            Open the complete analysis from the file panel. Rows jump to the relevant code location.
-          </p>
-        </div>
-        <div className="rounded-xl border border-border p-3.5">
-          <div className="flex items-center gap-2 text-xs font-semibold">
-            <span className="grid h-6 w-6 place-items-center rounded-md bg-primary/10 font-mono text-primary">⌁</span>
-            File lens
-          </div>
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            File headers show compact counts and a focused popover for that file.
-          </p>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-warning/25 bg-warning/[0.05] p-4 text-xs leading-relaxed text-muted-foreground">
-        <span className="font-semibold text-foreground">Call flow is syntactic.</span>{' '}
-        It does not use type resolution or runtime traces, so treat it as navigation context—not proof that a path executes.
-      </div>
-    </div>
-  );
-}
-
-/** One radio card list for a saved default diff (Git or Jujutsu). */
-function DefaultDiffChoices<T extends string>({ options, value, onChange }: {
-  options: ReadonlyArray<{ value: T; label: string; description: string }>;
-  value: string;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div className="space-y-2" role="radiogroup">
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          role="radio"
-          aria-checked={value === opt.value}
-          onClick={() => onChange(opt.value)}
-          className={`w-full flex items-start gap-3 p-3 rounded-lg border transition-colors text-left ${
-            value === opt.value
-              ? 'border-primary bg-primary/5'
-              : 'border-border hover:border-muted-foreground/30 hover:bg-muted/50'
-          }`}
-        >
-          <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
-            value === opt.value ? 'border-primary' : 'border-muted-foreground/40'
-          }`}>
-            {value === opt.value && (
-              <div className="w-2 h-2 rounded-full bg-primary" />
-            )}
-          </div>
-          <div>
-            <div className="text-sm font-medium">{opt.label}</div>
-            <div className="text-xs text-muted-foreground">{opt.description}</div>
-          </div>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-const REVIEW_SECTION_HEADING = 'text-xs font-semibold uppercase tracking-wider text-muted-foreground';
-
-const ReviewTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnavailable }) => {
-  const defaultDiffType = useConfigValue('defaultDiffType');
-  useConfigValue('reviewDefaults');
-  const jjDefaultDiffType = getProviderReviewDefaultDiffType(JJ_REVIEW_DEFAULTS);
-  const reviewPanelView = useConfigValue('reviewPanelView');
-  const reviewAutoViewed = useConfigValue('reviewAutoViewed');
-  return (
-    <div className="space-y-5">
-      <div className="space-y-2">
-        <div className={REVIEW_SECTION_HEADING}>Viewed files</div>
-        {/* Never write `reviewAutoViewed` directly — setReviewAutoViewed also
-            consumes the first-time notice, since an explicit toggle is proof
-            the reviewer already found the switch. */}
-        <ToggleSwitch
-          checked={reviewAutoViewed}
-          onChange={(v) => setReviewAutoViewed(v)}
-          label="Auto-mark viewed"
-          description="Mark a file viewed when you scroll past it or move on to another file. Files you un-view stay un-viewed, and files that change on refresh become un-viewed."
-        />
-      </div>
-
-      <div className="border-t border-border" />
-
-      <section className="space-y-4" aria-labelledby="settings-review-git">
-        <div id="settings-review-git" className={REVIEW_SECTION_HEADING}>Git</div>
-        <div className="space-y-2">
-          <div>
-            <div className="text-sm font-medium">Default file grouping</div>
-            <div className="text-xs text-muted-foreground">How the file tree groups a code review's files when it opens</div>
-            {/* This is a GLOBAL preference — never hide the options because the
-                CURRENT repo can't serve them; just say so. Without this note,
-                picking Git status on a repo whose base ref doesn't resolve
-                silently falls back to Tree and the setting looks broken. */}
-            {sinceBaseUnavailable && (
-              <div className="text-xs text-warning mt-1">
-                Grouping by git status isn't available in this repository (its base branch
-                couldn't be resolved), so reviews here open grouped by kind. The preference
-                still applies in repositories where it works.
-              </div>
-            )}
-          </div>
-          {/* No Commits option here: the Commits view is session-only (entered
-              via the panel toggle) and is never the opening view. */}
-          <SegmentedControl
-            options={[
-              { value: 'sections' as const, label: 'By git status' },
-              { value: 'tree' as const, label: 'By kind' },
-            ]}
-            value={reviewPanelView}
-            onChange={setReviewPanelView}
-          />
-        </div>
-        <div className="space-y-2">
-          <div>
-            <div className="text-sm font-medium">Default diff view</div>
-            <div className="text-xs text-muted-foreground">Which changes to show when you open a code review</div>
-          </div>
-          {/* Coupling (sections ⟺ since-base) lives in the shared setter —
-              never write the pair by hand (see config/reviewView). */}
-          <DefaultDiffChoices
-            options={DEFAULT_DIFF_TYPE_OPTIONS}
-            value={defaultDiffType}
-            onChange={(value) => setReviewDefaultDiffType(value)}
-          />
-        </div>
-      </section>
-
-      <div className="border-t border-border" />
-
-      <section className="space-y-4" aria-labelledby="settings-review-jj">
-        <div id="settings-review-jj" className={REVIEW_SECTION_HEADING}>Jujutsu</div>
-        <div className="space-y-2">
-          <div>
-            <div className="text-sm font-medium">Default diff view</div>
-            <div className="text-xs text-muted-foreground">Which changes to show when you open a review in a Jujutsu repository</div>
-          </div>
-          {/* Its own saved value: Git modes mean nothing in a jj repo, and jj has
-              no Git status view, so nothing here is coupled to the Git half. */}
-          <DefaultDiffChoices
-            options={JJ_DEFAULT_DIFF_TYPE_OPTIONS}
-            value={jjDefaultDiffType}
-            onChange={(value) => setProviderReviewDefaultDiffType('jj', value)}
-          />
-        </div>
-      </section>
-    </div>
-  );
-};
-
-/** Sentinel for the "Custom…" select option — never persisted as a font name. */
-const CUSTOM_FONT_SENTINEL = '__custom__';
-
-/** Inline style rendering a control in the chosen font (quoted and escaped: free text). */
-function stackStyle(stack: string): React.CSSProperties | undefined {
-  return stack ? { fontFamily: stack } : undefined;
-}
-
-/**
- * A font row (#851, shared by Code Font and Document font): a select of the
- * built-in choices plus "Custom…", which opens a field for the family name of
- * any font installed on this machine. The typed name is saved after a short
- * pause (configStore.set writes the cookie and may POST /api/config), flushed
- * on unmount, and dropped when a built-in is picked mid-pause.
- */
-const FontFamilyField: React.FC<{
-  label: string;
-  description: string;
-  value: string;
-  onSave: (value: string) => void;
-  options: readonly { value: string; label: string }[];
-  /** The `font-family` the controls preview a value in. */
-  previewStack: (value: string) => string;
-  previewText: string;
-  customAriaLabel: string;
-  customPlaceholder: string;
-  notFoundText: string;
-  /** Load a built-in's web font for the preview, if it has one. */
-  loadFont?: (value: string) => void;
-  previewClassName?: string;
-}> = ({ label, description, value, onSave, options, previewStack, previewText, customAriaLabel, customPlaceholder, notFoundText, loadFont, previewClassName = '' }) => {
-  const isBuiltIn = (v: string) => options.some((opt) => opt.value === v);
-  // Custom font: progressive disclosure. customFontMode keeps the input open
-  // while the user picks "Custom…" or has a non-built-in font saved.
-  const [customFontMode, setCustomFontMode] = useState(() => !!value && !isBuiltIn(value));
-  const [customFontDraft, setCustomFontDraft] = useState(() => (value && !isBuiltIn(value) ? value : ''));
-  const customFontSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  // Pending debounced value. Non-null means "typed but not yet saved" — it is
-  // flushed (not discarded) on unmount, and cancelled when a built-in is
-  // picked so a stale timer can't overwrite the new selection.
-  const pendingFontSave = useRef<string | null>(null);
-  const onSaveRef = useRef(onSave);
-  onSaveRef.current = onSave;
-  const customActive = customFontMode || (!!value && !isBuiltIn(value));
-  // Width-measurement check — deterministic per machine, no permissions.
-  const customFontInstalled = useMemo(
-    () => (normalizeFontFamilyName(customFontDraft) ? isFontInstalled(customFontDraft) : null),
-    [customFontDraft],
-  );
-
-  // Load font for the preview swatch
-  useEffect(() => {
-    if (value) loadFont?.(value);
-  }, [value, loadFont]);
-
-  // Adopt external changes (late server hydration, edits from elsewhere) into
-  // the draft — but never clobber typing that hasn't been saved yet.
-  useEffect(() => {
-    if (pendingFontSave.current !== null) return;
-    if (value && !isBuiltIn(value) && value !== normalizeFontFamilyName(customFontDraft)) {
-      setCustomFontDraft(value);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  const cancelPendingFontSave = () => {
-    clearTimeout(customFontSaveTimer.current);
-    pendingFontSave.current = null;
-  };
-
-  // Flush a pending save on unmount so closing the panel mid-debounce
-  // doesn't lose the typed font.
-  useEffect(() => () => {
-    clearTimeout(customFontSaveTimer.current);
-    if (pendingFontSave.current !== null) {
-      onSaveRef.current(pendingFontSave.current);
-    }
-  }, []);
-
-  const handleCustomFontInput = (next: string) => {
-    setCustomFontDraft(next);
-    // Debounce the save — per-keystroke writes would spam the cookie and
-    // /api/config.
-    clearTimeout(customFontSaveTimer.current);
-    pendingFontSave.current = normalizeFontFamilyName(next);
-    customFontSaveTimer.current = setTimeout(() => {
-      if (pendingFontSave.current !== null) {
-        onSaveRef.current(pendingFontSave.current);
-        pendingFontSave.current = null;
-      }
-    }, 400);
-  };
-
-  return (
-    <div className="space-y-2">
-      <div>
-        <div className="text-sm font-medium">{label}</div>
-        <div className="text-xs text-muted-foreground">{description}</div>
-      </div>
-      <select
-        value={customActive ? CUSTOM_FONT_SENTINEL : value}
-        aria-label={label}
-        onChange={(e) => {
-          if (e.target.value === CUSTOM_FONT_SENTINEL) {
-            setCustomFontMode(true);
-          } else {
-            // Cancel any in-flight debounced custom save so a stale timer
-            // can't overwrite this selection.
-            cancelPendingFontSave();
-            setCustomFontMode(false);
-            setCustomFontDraft('');
-            onSave(e.target.value);
-          }
-        }}
-        className="w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground"
-        style={value && !customActive ? stackStyle(previewStack(value)) : undefined}
-      >
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-        <option value={CUSTOM_FONT_SENTINEL}>Custom…</option>
-      </select>
-      {customActive && (
-        <div className="space-y-1">
-          <input
-            type="text"
-            value={customFontDraft}
-            onChange={(e) => handleCustomFontInput(e.target.value)}
-            placeholder={customPlaceholder}
-            aria-label={customAriaLabel}
-            maxLength={MAX_FONT_FAMILY_LENGTH}
-            autoFocus={!customFontDraft}
-            spellCheck={false}
-            className="w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
-            style={stackStyle(previewStack(customFontDraft))}
-          />
-          <div className="text-[11px]" aria-live="polite">
-            {!normalizeFontFamilyName(customFontDraft) ? (
-              <span className="text-muted-foreground">Any font installed on this machine works — type its family name.</span>
-            ) : customFontInstalled === true ? (
-              <span className="text-success">✓ Found on this machine</span>
-            ) : customFontInstalled === false ? (
-              <span className="text-warning">{notFoundText}</span>
-            ) : null}
-          </div>
-        </div>
-      )}
-      {value && (
-        <div
-          className={`text-xs text-muted-foreground px-1 py-1 rounded bg-muted/30 ${previewClassName}`}
-          style={stackStyle(previewStack(value))}
-        >
-          {previewText}
-        </div>
-      )}
-    </div>
-  );
-};
-
 /**
  * Experimental (the owner, 2026-10-27: "its own page on settings", the last
  * tab): each experimental setting, off by default. Today one, code review's
@@ -860,125 +459,6 @@ const ExperimentalTab: React.FC = () => {
         description="Edit a file in place in the all-files view; your net change becomes a suggestion comment. Files are never written from the browser. Uses an experimental upstream editor."
       />
     </div>
-  );
-};
-
-const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isCompactTouchLayout = false }) => {
-  const diffFontFamily = useConfigValue('diffFontFamily');
-  const diffFontSize = useConfigValue('diffFontSize');
-  const tokenHoverTrigger = useConfigValue('tokenHoverTrigger');
-  const tokenHoverDelay = useConfigValue('tokenHoverDelay');
-
-  return (
-    <>
-      {/* Hover cards (internally tokenHover*; the label is what changed, not
-          the ids). One trigger select rather than a toggle plus a mode: `Off`
-          is a value of the same question, so there is no unreachable
-          enabled-but-off state to reason about. The delay stays a separate
-          axis because "too eager" is a complaint neither the hold-modifier option
-          nor Off answers. */}
-      <div className="space-y-3">
-        <div>
-          <div className="text-sm font-medium">Hover cards</div>
-          <div className="text-xs text-muted-foreground">
-            Rest the pointer on a symbol in a diff to see where it is defined and who
-            references it. Needs ripgrep and a local checkout; nothing appears when the
-            search comes back empty. {modKeyWord}+click still opens the References panel either way.
-          </div>
-        </div>
-        <SegmentedControl
-          options={TOKEN_HOVER_TRIGGER_OPTIONS}
-          value={tokenHoverTrigger}
-          onChange={(v) => configStore.set('tokenHoverTrigger', v)}
-        />
-        <div className="space-y-2">
-          <div className="text-xs text-muted-foreground">
-            How long the pointer rests before a card is requested
-          </div>
-          <SegmentedControl
-            options={TOKEN_HOVER_DELAY_OPTIONS}
-            value={String(tokenHoverDelay) as TokenHoverDelayOption}
-            onChange={(v) => configStore.set('tokenHoverDelay', Number(v) as TokenHoverDelay)}
-            disabled={tokenHoverTrigger === 'off'}
-          />
-        </div>
-      </div>
-
-      <div className="border-t border-border" />
-
-      {/* Font Family */}
-      <FontFamilyField
-        label="Code Font"
-        description="Font family for diff code lines"
-        value={diffFontFamily}
-        onSave={(v) => configStore.set('diffFontFamily', v)}
-        options={DIFF_FONT_OPTIONS}
-        previewStack={monoFontStack}
-        previewText="Preview: const x = fn(42);"
-        customAriaLabel="Custom code font name"
-        customPlaceholder="Font name as installed, e.g. Iosevka"
-        notFoundText="Not found — diffs will fall back to monospace"
-        loadFont={loadDiffFont}
-        previewClassName="font-mono"
-      />
-
-      <div className="border-t border-border" />
-
-      {/* Font Size */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">Code Font Size</div>
-            <div className="text-xs text-muted-foreground">Font size for diff code lines</div>
-          </div>
-          <div className="text-xs tabular-nums text-muted-foreground min-w-[4ch] text-right">
-            {normalizeCssFontSize(diffFontSize) || 'Auto'}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="range"
-            min={8}
-            max={24}
-            step={1}
-            value={diffFontSize ? parseInt(diffFontSize) : 13}
-            onChange={(e) => configStore.set('diffFontSize', `${e.target.value}px`)}
-            className="flex-1 h-1.5 accent-primary cursor-pointer"
-          />
-          {diffFontSize && (
-            <button
-              onClick={() => configStore.set('diffFontSize', '')}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Reset
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="border-t border-border" />
-
-      {isCompactTouchLayout ? (
-        <div className="space-y-2" data-settings-diff-display="">
-          <div>
-            <div className="text-sm font-medium">Diff display</div>
-            <div className="text-xs text-muted-foreground">
-              This layout shows unified diffs for the session; your desktop preference is unchanged.
-            </div>
-          </div>
-          <DiffDisplayOptionsBody />
-        </div>
-      ) : (
-        <div className="space-y-1" data-settings-diff-display="">
-          <div className="text-sm font-medium">Diff display</div>
-          <div className="text-xs text-muted-foreground">
-            Split or Unified is the button next to the gear above the diff. The gear holds the rest: wrap, line numbers,
-            backgrounds, change marks, changed words, tab size, whole file and hide whitespace.
-          </div>
-        </div>
-      )}
-
-    </>
   );
 };
 
@@ -1186,7 +666,19 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, externalTab, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
+function HtmlAnnotateStartupSetting() {
+  const enabled = useConfigValue('htmlAnnotateOnStartup');
+  return (
+    <ToggleSwitch
+      checked={enabled}
+      onChange={(value) => configStore.set('htmlAnnotateOnStartup', value)}
+      label="Start in Annotate mode"
+      description="Turn on pinpoint annotation when opening HTML pages and live apps."
+    />
+  );
+}
+
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, externalTab, externalSection, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false, showHtmlAnnotateStartup = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
   const autoUpdate = useConfigValue('autoUpdate');
   const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
@@ -1217,6 +709,12 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     return () => document.removeEventListener('keydown', handler);
   }, [themePreview]);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  // The Reviews section an outside link asked for (an old tab id); a tab click clears it.
+  const [reviewSection, setReviewSection] = useState<ReviewSettingsSectionId | undefined>(undefined);
+  const openTab = (tab: SettingsTab) => {
+    setActiveTab(tab);
+    setReviewSection(undefined);
+  };
   const gridEnabled = useConfigValue('gridEnabled');
   const diagramShadow = useConfigValue('diagramShadow');
   const documentTextSize = useConfigValue('documentTextSize');
@@ -1274,10 +772,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       t.push({ id: 'labels', label: 'Labels' });
     }
     if (mode === 'review') {
-      t.push({ id: 'review', label: 'Review' });
-      t.push({ id: 'display', label: 'Editor' });
-      t.push({ id: 'semantic', label: 'Semantic diffs' });
-      t.push({ id: 'analysis', label: 'Analysis' });
+      // One page for everything about reading a review (it replaced the
+      // Review, Editor, Semantic diffs and Analysis tabs).
+      t.push({ id: 'reviews', label: REVIEW_SETTINGS_TAB_LABEL });
       t.push({ id: 'comments', label: 'Comments' });
       if (aiProviders.length > 0) {
         t.push({ id: 'ai', label: 'AI' });
@@ -1310,11 +807,22 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   // Sync external open state
   useEffect(() => {
     if (externalOpen) {
-      if (externalTab) setActiveTab(externalTab);
+      if (externalTab) {
+        const landing = resolveSettingsTab(externalTab, mode, externalSection);
+        setActiveTab(landing.tab);
+        setReviewSection(landing.section);
+      }
       setShowDialog(true);
       onExternalClose?.();
     }
-  }, [externalOpen, externalTab, onExternalClose]);
+  }, [externalOpen, externalTab, externalSection, onExternalClose, mode]);
+
+  // A link's section is for that opening only: closing forgets it, so the next opening starts at the top.
+  const wasShowing = useRef(false);
+  useEffect(() => {
+    if (wasShowing.current && !showDialog) setReviewSection(undefined);
+    wasShowing.current = showDialog;
+  }, [showDialog]);
 
   useEffect(() => {
     if (showDialog) {
@@ -1536,7 +1044,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 {[...mainTabs, ...integrationTabs, ...experimentalTabs].map(tab => (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
+                    onClick={() => openTab(tab.id)}
                     className={`px-3 py-1.5 rounded text-xs whitespace-nowrap transition-colors flex items-center gap-1.5 ${
                       activeTab === tab.id
                         ? 'bg-primary/10 text-primary font-medium'
@@ -1554,7 +1062,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                   {mainTabs.map(tab => (
                     <button
                       key={tab.id}
-                      onClick={() => setActiveTab(tab.id)}
+                      onClick={() => openTab(tab.id)}
                       className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors flex items-center justify-between ${
                         activeTab === tab.id
                           ? 'bg-primary/10 text-primary font-medium'
@@ -1575,7 +1083,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       {integrationTabs.map(tab => (
                         <button
                           key={tab.id}
-                          onClick={() => setActiveTab(tab.id)}
+                          onClick={() => openTab(tab.id)}
                           className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${
                             activeTab === tab.id
                               ? 'bg-primary/10 text-primary font-medium'
@@ -1595,7 +1103,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       {experimentalTabs.map(tab => (
                         <button
                           key={tab.id}
-                          onClick={() => setActiveTab(tab.id)}
+                          onClick={() => openTab(tab.id)}
                           className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${
                             activeTab === tab.id
                               ? 'bg-primary/10 text-primary font-medium'
@@ -1985,26 +1493,26 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 {/* === THEME TAB === */}
                 {activeTab === 'theme' && <ThemeTab onPreview={() => { setShowDialog(false); setThemePreview(true); }} />}
 
-                {/* === REVIEW TAB === */}
-                {activeTab === 'review' && mode === 'review' && (
-                  <ReviewTab sinceBaseUnavailable={sinceBaseUnavailable} />
+                {/* === REVIEWS TAB === */}
+                {activeTab === 'reviews' && mode === 'review' && (
+                  <ReviewSettingsPage
+                    controls={CLASSIC_REVIEW_SETTINGS_CONTROLS}
+                    opinionRoute={SEM_DIFF_OPINION_SETTINGS_ROUTE}
+                    packageChangesSetting={packageChangesSetting}
+                    sinceBaseUnavailable={sinceBaseUnavailable}
+                    isCompactTouchLayout={isCompactTouchLayout}
+                    initialSection={reviewSection}
+                  />
                 )}
-
-                {/* === DISPLAY TAB === */}
-                {activeTab === 'display' && mode === 'review' && (
-                  <ReviewDisplayTab isCompactTouchLayout={isCompactTouchLayout} />
-                )}
-
-                {activeTab === 'semantic' && mode === 'review' && <SemanticDiffsTab />}
 
                 {activeTab === 'experimental' && mode === 'review' && <ExperimentalTab />}
 
-                {activeTab === 'analysis' && mode === 'review' && (
-                  <ReviewAnalysisTab packageChangesSetting={packageChangesSetting} />
-                )}
-
                 {activeTab === 'display' && mode !== 'review' && (
                   <>
+                    {annotateDocumentTabs && showHtmlAnnotateStartup && (<>
+                    <HtmlAnnotateStartupSetting />
+                    <div className="border-t border-border" />
+                    </>)}
                     {/* Text size (#2066): the document only, not the app around it */}
                     {showDocumentTextSize && (<>
                     <div className="space-y-3" data-document-text-size-setting>

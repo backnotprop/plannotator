@@ -25,6 +25,7 @@
       "#guide-reader": ["./guide/reader-module.d.ts"],
       "#surface-guide-reader": ["./guide/surface-reader-module.d.ts"],
       "#search-palette": ["./search/SearchPalette.tsx"],
+      "#reviews-settings": ["./reviewSettings/ReviewsSettings.tsx"],
       // Post to GitHub/GitLab (the review app's dialog); PlatformPost.tsx is checked by tsconfig.guide.json.
       "#platform-post": ["./guide/platform-post-module.d.ts"]
     }
@@ -46,6 +47,8 @@
     "guide/useSemDiffClient.ts",
     "guide/renderedFiles.tsx",
     "guide/useSemDiffClient.test.tsx",
+    // Renders guide/useSemDiffClient.ts (excluded above) to prove config.json's "Semantic changes" switch reaches it.
+    "reviewAnalysis.test.tsx",
     "guide/ReviewKeys.tsx",
     "guide/reviewWalk.ts",
     "guide/reviewKeys.test.tsx",

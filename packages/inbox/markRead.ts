@@ -10,7 +10,8 @@
 
 import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
 import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow, type InboxListGroupId, type InboxThread } from '@plannotator/core/inbox-types';
-import { agentName, plural, shortAgentName } from './format';
+import { plural, shortAgentName } from './format';
+import { rowAgentName } from './scriptAuthor';
 
 /** How long the Undo toast stays (the server's set-aside note waits a little longer). */
 export const MARK_READ_UNDO_MS = 7_000;
@@ -74,21 +75,24 @@ export function seenHeldInNew(row: Pick<InboxListRow, 'section' | 'resolved_at'>
 
 /**
  * Mark unread (the owner's ask, 2026-10-31) is offered on the thread: it is
- * read (not bold, nothing waits on the person), not archived, and an agent
- * wrote after the person's last reply (`sent` is null; a reply is a look, so
- * there would be nothing to make new). The store's `markUnread` makes the
- * latest agent message new again: the row goes to New, bold. Never on a row
- * that waits on the person (Mark read's). A seen update the list still holds
- * in New takes it too, on the row's hover action and the header's read button
- * (the owner, 2026-11-02); its Mark read stays in the row menu and on `E`. A
- * phone has neither the row menu nor `E` (nor a read button in its bar), so
- * its thread ⋯ sheet offers Mark read and Mark unread there.
+ * read (not bold: the person has seen its latest agent message, `unseen` 0),
+ * not archived, and an agent wrote after the person's last reply (`sent` is
+ * null; a reply is a look, so there would be nothing to make new). The
+ * store's `markUnread` makes the latest agent message new again, so the row
+ * is bold: a row in New or Quiet goes to New; a row with questions still
+ * waiting (Stopped on you, Holding up work, Waiting on you) stays in its
+ * group with its questions and counts, bold again. That includes a thread
+ * with open questions the person has opened (the owner, 2026-11-25: on an
+ * opened thread with questions the row's button says Mark unread, like every
+ * other opened thread); one not opened yet is bold and keeps Mark read. On a
+ * read row that waits on the person, Mark read stays in the row menu, the
+ * header's ⋯ and on `E`. A seen update the list still holds in New takes it
+ * too (the owner, 2026-11-02); its Mark read stays in the row menu and on
+ * `E`. A phone has neither the row menu nor `E`, so its thread ⋯ sheet
+ * offers Mark read and Mark unread there.
  */
-export function canMarkUnread(
-  row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'unread' | 'sent'> & { read_at?: string | null },
-): boolean {
-  if (row.resolved_at !== null || row.unread) return false;
-  if (waitsOnPerson(row)) return false;
+export function canMarkUnread(row: Pick<InboxListRow, 'unseen' | 'resolved_at' | 'unread' | 'sent'>): boolean {
+  if (row.resolved_at !== null || row.unread || row.unseen > 0) return false;
   return row.sent === null;
 }
 
@@ -219,7 +223,7 @@ export type MarkReadPlace = 'open' | 'held' | 'list';
  * pane. What the agent is told is the thread's Read banner's to say.
  */
 export function markReadToast(
-  before: Pick<InboxListRow, 'subject' | 'author' | 'questions'> & { resolved_at?: string | null; unsent?: InboxListRow['unsent'] },
+  before: Pick<InboxListRow, 'subject' | 'author' | 'questions' | 'participants'> & { resolved_at?: string | null; unsent?: InboxListRow['unsent']; scheduled_running?: true },
   place: MarkReadPlace,
 ): MarkReadToast {
   const subject = `“${before.subject ?? '(no subject)'}”`;
@@ -227,7 +231,8 @@ export function markReadToast(
   // Another thread is open: name the row marked, or the toast reads as if the open thread was.
   if (place === 'held') return { lead: 'Marked read', phoneLead: 'Read', detail: subject, warn };
   if (before.questions.stopped) {
-    const name = agentName(before.author);
+    // The row's agent as its tiles name it: a script's, or the session that took its thread over (scriptAuthor.ts).
+    const name = rowAgentName(before, before.author);
     const short = shortAgentName(name);
     return {
       lead: 'Marked read',
@@ -246,6 +251,9 @@ export function markReadToast(
   // Words typed in the reply box, or comments waiting, keep it out of Quiet (approval "inbox-reply-drafts"; Mark read closes the picks).
   const kept = !archived && before.unsent != null && (before.unsent.reply_at !== null || before.unsent.comments > 0);
   if (kept) return { lead: 'Marked read', phoneLead: 'Read', detail: place === 'open' ? 'Your draft keeps it in New' : `${subject} · your draft keeps it in New`, warn: false };
+  // A routine's run going keeps it in New until the run ends (shared/inbox/list.ts `inboxSectionWhileRoutineRuns`):
+  // no move to promise, so the toast of a row that stays put (`held`, App.tsx `seenStaysPut`).
+  if (place === 'open' && !archived && before.scheduled_running === true) return { lead: 'Marked read', phoneLead: 'Read', detail: subject, warn: false };
   if (place === 'open') return { lead: 'Marked read', phoneLead: 'Read', detail: archived ? 'Goes back to Archived' : 'Moves to Quiet', warn: false };
   return { lead: archived ? 'Back in Archived' : 'Moved to Quiet', detail: subject, warn: false };
 }
