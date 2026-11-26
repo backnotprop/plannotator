@@ -685,6 +685,23 @@ describe("a linked machine's reply draft, from this Inbox", () => {
     expect(there?.files?.map((f) => f.upload_id)).toEqual([left.upload_id]);
   });
 
+  test("a save held after that machine said its draft changed (this Inbox's own write) stands on the draft last heard: its file and quote stay", async () => {
+    const l = linked();
+    l.peer.state = "online";
+    const file = await receiveInboxUpload(l.far.store.dir, "trace.txt", new Response("bytes").body, { at: new Date().toISOString() });
+    l.drafts.noteUpload(Response.json({ upload: file }));
+    await Bun.sleep(5);
+    const start = await answerOf(await l.save({ body: "Start", base: null, files_add: [{ upload_id: file.upload_id }], quote: { of: l.far.thread, words: "the webhook" } }));
+    await Bun.sleep(5);
+    // Its stream says the draft changed (this very save), then it goes to sleep before any window reads it again.
+    l.drafts.farChanged(MACHINE, l.far.thread);
+    l.peer.state = "offline";
+    const held = await answerOf(await l.save({ body: "Longer words typed while it sleeps", base: start.body.draft.updated_at, base_body: "Start" }));
+    expect(held.body.draft).toMatchObject({ body: "Longer words typed while it sleeps", quote: { of: l.far.thread, words: "the webhook" } });
+    expect(held.body.draft.files.map((f: { name: string }) => f.name)).toEqual(["trace.txt"]);
+    expect(l.drafts.forget(MACHINE)).toEqual([{ thread: l.far.thread, words: "Longer words typed while it sleeps", files: ["trace.txt"], quote: { of: l.far.thread, words: "the webhook" } }]);
+  });
+
   test("Unlink: a held draft is counted, and every word of it handed back to keep, its file and quote named; nothing of it stays held", async () => {
     const l = linked();
     const file = await receiveInboxUpload(l.far.store.dir, "trace.txt", new Response("bytes").body, { at: new Date().toISOString() });

@@ -733,10 +733,12 @@ export function createMachineDrafts(options: {
     write,
     /** That machine is online (its line changed): what is held for it lands. */
     drain,
-    /** That machine said its draft changed (another window there, a phone, a Send): heard again on the next read. */
-    farChanged(machine: string, threadId: string): void {
-      known.delete(key(machine, threadId));
-    },
+    /**
+     * That machine said its draft changed (another window there, a phone, a Send, this Inbox's own write): heard again
+     * on the next read. The last one heard stays meanwhile: a save held before that read stands on it (its files, its
+     * quote), never on no draft; that machine judges it against its newer one as it lands.
+     */
+    farChanged(_machine: string, _threadId: string): void {},
     /** A file uploaded to that machine through the forward: a held draft shows its tile by it. */
     noteUpload(answer: Response): void {
       void answer.json().then(
