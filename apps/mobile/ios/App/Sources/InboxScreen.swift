@@ -20,6 +20,8 @@ struct InboxScreen: View {
   @State private var loaded = Date()
   @Environment(\.openURL) private var openURL
   @Environment(\.accessibilityReduceMotion) private var still
+  /// New message is open.
+  @State private var composing = false
 
   init(session: InboxSession) {
     self.session = session
@@ -52,6 +54,15 @@ struct InboxScreen: View {
         }
     }
     .rowActionSheets(actions)
+    .sheet(isPresented: $composing) {
+      ComposeSheet(session: session) { outcome in
+        // The window's toast once the thread is written; a message that waits says so in the list.
+        if case .sent(_, let to) = outcome {
+          let agent = SessionPicker.name(to)
+          actions.tell(ToastWords(mark: .check, lead: PhoneWords.sentTo(agent), detail: PhoneWords.inProject(to.project), speech: PhoneWords.sentToSpeech(agent, to.project)))
+        }
+      }
+    }
     .onChange(of: model.opening, initial: true) { _, id in
       if let id {
         path = [.thread(id)]
@@ -76,6 +87,13 @@ struct InboxScreen: View {
       ToolbarItemGroup(placement: .bottomBar) { PickBar(actions: actions, view: view) }
     } else {
       ToolbarItem(placement: .topBarLeading) { ComputerMenu(session: session) }
+      if session.standing == .ok {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button { composing = true } label: { Image(systemName: "square.and.pencil") }
+            .accessibilityLabel(PhoneWords.newMessage)
+            .accessibilityIdentifier("new-message")
+        }
+      }
     }
   }
 
@@ -132,6 +150,16 @@ struct InboxScreen: View {
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: Space.tight, leading: 0, bottom: Space.tight, trailing: 0))
             .selectionDisabled()
+        }
+        // A new message made while the computer was away: the person's own, waiting, as a held reply is drawn.
+        ForEach(session.heldNewMessages()) { new in
+          // The away banner above says when it goes; the row does not say it again.
+          HeldReply(words: new.words, to: new.to.map(SessionPicker.name), computer: session.computer.name, saysWhen: session.reach != .away)
+            .listRowBackground(Token.background)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: Space.close, leading: Self.edge, bottom: Space.close, trailing: Self.edge))
+            .selectionDisabled()
+            .accessibilityIdentifier("held-new-message")
         }
         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
           let open = folds.isOpen(group.id)
@@ -600,7 +628,7 @@ struct ThreadRow: View {
 
   private var title: String { row.threadName ?? row.subject ?? row.project.name }
   /// At the largest sizes the project alone: the agent's mark already says who.
-  private var lead: String { large ? row.project.name : "\(Names.agent(row.author)) · \(row.project.name)" }
+  private var lead: String { large ? row.project.name : "\(Names.agent(Names.rowAgent(row))) · \(row.project.name)" }
   private var time: String { TimeWords().short(row.lastAt) }
   /// The row's two marks as the window draws them (`rowMarks`): each has its own number and its own step.
   private var marks: RowMarks { RowMarks(row) }
@@ -616,7 +644,7 @@ struct ThreadRow: View {
 
   var body: some View {
     HStack(alignment: .top, spacing: Space.step) {
-      AgentMark(author: row.author, size: 32, ground: picked ? Token.background : Token.muted).padding(.top, Space.hair)
+      AgentMark(author: Names.rowAgent(row), size: 32, ground: picked ? Token.background : Token.muted).padding(.top, Space.hair)
       VStack(alignment: .leading, spacing: Space.hair) {
         if large {
           // At the largest sizes the title keeps the whole line; the time and the count share the next one.
@@ -663,7 +691,7 @@ struct ThreadRow: View {
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
       [
-        row.unread ? PhoneWords.unreadMark : nil, title, "\(Names.agent(row.author)) · \(row.project.name)", starred ? PhoneWords.starred : nil, snoozedWhen.map(PhoneWords.snoozedUntil), spoken, row.latestPreview,
+        row.unread ? PhoneWords.unreadMark : nil, title, "\(Names.agent(Names.rowAgent(row))) · \(row.project.name)", starred ? PhoneWords.starred : nil, snoozedWhen.map(PhoneWords.snoozedUntil), spoken, row.latestPreview,
         row.snoozeBack != nil ? PhoneWords.backFromSnooze : nil, time,
       ].compactMap { $0 }.joined(separator: ", ")
     )

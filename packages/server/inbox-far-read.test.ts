@@ -369,22 +369,22 @@ describe("where the person wrote it, as the reading agent's computer sees it", (
 
   test("MacBook's own agent reads the same thread exactly as before", async () => {
     const { macbook, id, ids, studio, link } = await answered();
-    const before = await macbook.tools().read_thread!.handler({ thread_id: id }, {});
+    const before = await macbook.tools().read_thread!.handler({ thread_id: id, limit: 10 }, {});
     const shown = linesOf(before.structuredContent!.thread.messages);
     expect(shown[ids.studio]).toBe(line({ kind: "machine", name: "Studio" }));
     expect(shown[ids.studioPhone]).toBe(line({ kind: "machine", name: "Studio", via: "phone" }));
     expect(shown[ids.macbook]).toBeNull();
     expect(shown[ids.old]).toBeNull();
     // A far read in between changes nothing in MacBook's own read (its own first read moved the cursor: read it again).
-    const again = (await macbook.tools().read_thread!.handler({ thread_id: id }, {})).content[0]!.text;
-    await readerTools(studio, [link], { [link.id]: "Work MacBook" }).tools.read_thread!.handler({ thread_id: id }, {});
-    expect((await macbook.tools().read_thread!.handler({ thread_id: id }, {})).content[0]!.text).toBe(again);
+    const again = (await macbook.tools().read_thread!.handler({ thread_id: id, limit: 10 }, {})).content[0]!.text;
+    await readerTools(studio, [link], { [link.id]: "Work MacBook" }).tools.read_thread!.handler({ thread_id: id, limit: 10 }, {});
+    expect((await macbook.tools().read_thread!.handler({ thread_id: id, limit: 10 }, {})).content[0]!.text).toBe(again);
   });
 
   test("another computer's token, an older reader, a name two linked computers share, and a name with a backtick", async () => {
     const { macbook, id, ids } = await answered();
     const ask = (reader: string, shownAs?: string) =>
-      agentReadDoorAnswer({ store: macbook.store, stepsOn: () => false }, new URL(`http://door.local/api/inbox/device/agent-read?thread_id=${id}${shownAs === undefined ? "" : `&shown_as=${encodeURIComponent(shownAs)}`}`), reader).json() as Promise<any>;
+      agentReadDoorAnswer({ store: macbook.store, stepsOn: () => false }, new URL(`http://door.local/api/inbox/device/agent-read?thread_id=${id}&limit=10${shownAs === undefined ? "" : `&shown_as=${encodeURIComponent(shownAs)}`}`), reader).json() as Promise<any>;
     // Mini reads: Studio's word is Studio's, Mini's own is none.
     const mini = linesOf((await ask("Mini", "MacBook")).result.thread.messages);
     expect(mini[ids.studio]).toBe(line({ kind: "machine", name: "Studio" }));

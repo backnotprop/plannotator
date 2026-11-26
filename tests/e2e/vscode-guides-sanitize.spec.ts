@@ -47,6 +47,10 @@ const host = () => document.getElementById('host')!;
   writeFileSync(uiEntry, `
 import DOMPurify from 'dompurify';
 import { renderDiagram, sanitizeDiagramSvg } from ${JSON.stringify(join(UI, 'utils/diagram-render.ts'))};
+import { __setDiagramEngineModeForTests } from ${JSON.stringify(join(UI, 'utils/diagram-engine.ts'))};
+// Mermaid's own drawing, which the shipped switch still uses for a fence Pele
+// cannot draw; Pele's labels have their own spec (pele-labels.spec.ts).
+__setDiagramEngineModeForTests('mermaid');
 const host = () => document.getElementById('host')!;
 // The test's handle on the sanitizer's own DOMPurify call (the one asking for a
 // DOM fragment): it records the markup that call parsed, and can turn the
@@ -200,7 +204,8 @@ test("a diagram cannot loosen Mermaid's security level or bind a click to script
   ].join('\n'));
   expect(r.ok).toBe(true);
   await page.evaluate(() => { (window as any).__pwnedCall = () => ((window as any).__pwned = 9); });
-  for (const node of await page.locator('#host g.node').all()) await node.click({ force: true });
+  // The webview draws with the shipped switch: Pele's nodes, or Mermaid's for a fence Pele cannot draw.
+  for (const node of await page.locator('#host :is(g.node, g.pele-node)').all()) await node.click({ force: true });
   await page.waitForTimeout(200);
   expect(await page.evaluate(() => (window as any).__pwned)).toBe(0);
   const attrs = await allAttributes(page);

@@ -135,6 +135,35 @@ describe.if(hasDom)('MarkdownViewMenu', () => {
     expect(chosen).toEqual([]);
   });
 
+  test("a host where selecting does not comment and P is not bound: the menu promises neither; without the prop it still does", async () => {
+    const promises = () => {
+      const popup = document.querySelector('[data-markdown-view-popup]')!;
+      return {
+        title: trigger().getAttribute('title') ?? '',
+        select: /select to comment/i.test(popup.textContent ?? ''),
+        key: popup.querySelector('kbd') !== null,
+      };
+    };
+    await mount({ view: 'changes', withoutCommentAndKeyHints: true });
+    await open();
+    const quiet = promises();
+    expect(quiet.title.startsWith('Showing Changes.')).toBe(true);
+    expect(quiet.title).not.toMatch(/select text|P:/i);
+    expect([quiet.select, quiet.key]).toEqual([false, false]);
+    // The views and their own names stay.
+    expect(names()).toEqual(['source', 'changes', 'read']);
+    expect(items()[1].textContent).toContain('Rendered, changes marked');
+
+    await act(async () => root!.unmount());
+    host?.remove();
+    document.body.innerHTML = '';
+    await mount({ view: 'changes' });
+    await open();
+    const production = promises();
+    expect(production.title).toMatch(/Select text to comment\. P: next view/);
+    expect([production.select, production.key]).toEqual([true, true]);
+  });
+
   test('on a phone the same words open as a sheet titled with the file', async () => {
     await mount({ touch: true, view: 'changes' });
     await open();
