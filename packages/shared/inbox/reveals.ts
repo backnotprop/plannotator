@@ -243,10 +243,10 @@ export interface RevealState {
   /** When an `aside` entry was last shown (config.json `inboxReveals.star.shownAt`, `grill_me_tip.shownAt`): the gap counts from it too, and a `lastResort` entry never goes on its day. */
   asideShownAt?: string | null;
   /**
-   * The launch dialog is due on this computer (the launch switch, packages/shared/launch-switch.ts: a campaign on and
-   * never shown here). It goes ahead of everything, with no gap before it, so the whole line holds while it is due:
-   * no entry is next or claimed, and neither is the agent note or a tip. Its show (`launch[campaign].shownAt`) then
-   * starts the gap as a tip's does (`tipShownAt`).
+   * The launch dialog goes first here (the launch switch, packages/shared/launch-switch.ts: a campaign on and never
+   * shown on this computer), with no gap before it: the whole line holds until the page's claim is answered, either
+   * way (packages/server/inbox-launch-queue.ts): no entry is next or claimed, and neither is the agent note or a tip.
+   * Its show (`launch[campaign].shownAt`) then starts the gap as a tip's does (`tipShownAt`).
    */
   launchDue?: boolean;
 }

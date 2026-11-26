@@ -5,23 +5,30 @@
  *
  *  - Claim: once the page has loaded and the host's gates hold (`ready`, `eligible`), the server answers from its kept
  *    copy only: `{ show: false }` or `{ show: true, campaign, url }`. Nothing is used up. The page never waits on it: a
- *    claim with no answer in LAUNCH_CLAIM_WAIT_MS counts as no for this load.
+ *    claim with no answer in LAUNCH_CLAIM_WAIT_MS counts as no for this load where the first-run window applies (the
+ *    Inbox, which has none, still takes a late yes).
+ *  - Ready: on a yes, the dialog's code and its art load (never before: nothing here delays the page). The art may take
+ *    up to LAUNCH_ART_WAIT_MS; the dialog then opens with the art, or with its words alone, decided before it opens,
+ *    so its layout never changes while it is read. Code that cannot load: nothing shows, nothing is stamped, and the
+ *    page is untouched (the dialog sits in its own LazyBlockBoundary, so no failure of it reaches the page's boundary).
  *  - Open: with `firstRunWindow` (plan review, code review, annotate) only as the page opens, before the reader starts
- *    working (useFirstRunAnnouncementWindow); without it (the Inbox) as soon as the host allows.
- *  - Shown: right before it draws, `shown` stamps it on this computer (a compare-and-set across every surface); it draws
- *    only on `{ show: true }`.
+ *    working (useFirstRunAnnouncementWindow); without it (the Inbox) as soon as the host allows. A claim older than
+ *    LAUNCH_RECLAIM_AFTER_MS is asked again first (another surface may have shown it meanwhile).
+ *  - Shown: once the dialog has painted, `shown` stamps it on this computer (a compare-and-set across every surface).
+ *    `{ show: false }` (another surface stamped it at the same moment) closes it and lets the others go on; an error
+ *    leaves it open.
  *  - Answer: `opened` ("See the launch") or `dismissed` (Not now, Escape, the backdrop). Either way it
  *    never shows again for that campaign.
  *
  * `holds`: the other one-time dialogs of this load yield while it is true, so only one dialog appears: while the claim
  * is out, while it says this load is the launch's, and for the rest of a load that showed it.
- * The dialog's code is loaded only when a claim says it shows.
  */
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { useFirstRunAnnouncementWindow } from '../hooks/useFirstRunAnnouncementWindow';
 import { isVSCodeWebview } from '../utils/inboxAnnouncement';
-import { launchArtUrl } from '../utils/launchDialogWords';
-import type { LaunchDialogAnswer } from './LaunchDialog';
+import { LAUNCH_ART_WAIT_MS, launchArtUrl } from '../utils/launchDialogWords';
+import { LazyBlockBoundary } from './LazyBlockBoundary';
+import type { LaunchDialogAnswer, LaunchDialogProps } from './LaunchDialog';
 
 export type LaunchClaim = { show: false } | { show: true; campaign: string; url: string };
 
@@ -46,9 +53,48 @@ export const launchHttpClient: LaunchClient = {
 
 /** The longest a load waits for the claim before it counts as no (the others then go on as before). */
 export const LAUNCH_CLAIM_WAIT_MS = 1500;
+/** A yes older than this is asked again right before the dialog opens. */
+export const LAUNCH_RECLAIM_AFTER_MS = 10_000;
 
-const loadDialog = () => import('./LaunchDialog');
-const LazyLaunchDialog = lazy(loadDialog);
+type DialogComponent = ComponentType<LaunchDialogProps>;
+
+/** The dialog's own file, loaded once a claim says yes; a failure is forgotten, so the next load asks again. */
+let loadedDialog: DialogComponent | null = null;
+let loadingDialog: Promise<DialogComponent> | null = null;
+export function loadLaunchDialog(): Promise<DialogComponent> {
+  if (loadedDialog) return Promise.resolve(loadedDialog);
+  return (loadingDialog ??= import('./LaunchDialog').then(
+    (mod) => (loadedDialog = mod.LaunchDialog),
+    (cause: unknown) => {
+      loadingDialog = null;
+      throw cause;
+    },
+  ));
+}
+
+/** The art, preloaded: true once it has loaded (and decoded) within `waitMs`, false when it fails or is slower. */
+export function preloadLaunchArt(src: string, waitMs: number = LAUNCH_ART_WAIT_MS): Promise<boolean> {
+  if (typeof Image === 'undefined') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const img = new Image();
+    let done = false;
+    const end = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const timer = setTimeout(() => end(false), waitMs);
+    img.referrerPolicy = 'no-referrer';
+    img.onload = () => {
+      // Decoded before it is used, so the band paints with its picture in the first frame.
+      if (typeof img.decode === 'function') img.decode().then(() => end(true), () => end(true));
+      else end(true);
+    };
+    img.onerror = () => end(false);
+    img.src = src;
+  });
+}
 
 /** A claim the page can act on: a campaign and an https launch link (the server's parser already checked both). */
 function usable(claim: unknown): claim is Extract<LaunchClaim, { show: true }> {
@@ -71,6 +117,10 @@ export interface LaunchAnnouncementInput {
   /** Tests and other hosts: the routes. */
   client?: LaunchClient;
   claimWaitMs?: number;
+  /** Tests: the dialog's file and the art. */
+  loadDialog?: () => Promise<DialogComponent>;
+  loadArt?: (src: string) => Promise<boolean>;
+  reclaimAfterMs?: number;
 }
 
 export interface LaunchAnnouncement {
@@ -84,20 +134,54 @@ export interface LaunchAnnouncement {
   dialog: ReactNode | null;
 }
 
-type ClaimState = 'idle' | 'asking' | 'no' | 'late' | Extract<LaunchClaim, { show: true }>;
+type Yes = Extract<LaunchClaim, { show: true }> & { at: number };
+type ClaimState = 'idle' | 'asking' | 'no' | 'late' | Yes;
+type Prep = 'none' | 'loading' | 'failed' | { Dialog: DialogComponent; art: boolean };
+type Stage = 'none' | 'reclaiming' | 'drawn' | 'refused' | 'failed';
 
-export function useLaunchAnnouncement({ ready, eligible: hostEligible, firstRunWindow, blocked = false, onDrawn, client = launchHttpClient, claimWaitMs = LAUNCH_CLAIM_WAIT_MS }: LaunchAnnouncementInput): LaunchAnnouncement {
+/** Runs `run` once, after the browser painted what was committed with it. */
+function AfterPaint({ run }: { run: () => void }) {
+  const ran = useRef(false);
+  useEffect(() => {
+    if (ran.current) return;
+    ran.current = true;
+    if (typeof requestAnimationFrame !== 'function') {
+      setTimeout(run, 0);
+      return;
+    }
+    requestAnimationFrame(() => setTimeout(run, 0));
+  }, [run]);
+  return null;
+}
+
+export function useLaunchAnnouncement({
+  ready,
+  eligible: hostEligible,
+  firstRunWindow,
+  blocked = false,
+  onDrawn,
+  client = launchHttpClient,
+  claimWaitMs = LAUNCH_CLAIM_WAIT_MS,
+  loadDialog = loadLaunchDialog,
+  loadArt = preloadLaunchArt,
+  reclaimAfterMs = LAUNCH_RECLAIM_AFTER_MS,
+}: LaunchAnnouncementInput): LaunchAnnouncement {
   // Never in the VS Code webview (as the star ask): no claim, nothing held.
   const eligible = hostEligible && !isVSCodeWebview();
   const [claim, setClaim] = useState<ClaimState>('idle');
-  const [stamp, setStamp] = useState<'none' | 'asking' | 'shown' | 'refused'>('none');
+  const [prep, setPrep] = useState<Prep>('none');
+  const [stage, setStage] = useState<Stage>('none');
   const [closed, setClosed] = useState(false);
   const api = useRef(client);
   api.current = client;
   const drawnRef = useRef(onDrawn);
   drawnRef.current = onDrawn;
+  const loaders = useRef({ loadDialog, loadArt });
+  loaders.current = { loadDialog, loadArt };
+  const stamped = useRef(false);
 
-  // The claim: once, when the page is ready and the gates hold. A claim answered after the wait is ignored.
+  // The claim: once, when the page is ready and the gates hold. Past the wait, a yes is ignored where the first-run
+  // window applies; the Inbox takes it whenever it comes.
   useEffect(() => {
     if (!ready || !eligible || claim !== 'idle') return;
     setClaim('asking');
@@ -111,23 +195,14 @@ export function useLaunchAnnouncement({ ready, eligible: hostEligible, firstRunW
       .claim()
       .then((answer) => (usable(answer) ? answer : 'no' as const), () => 'no' as const)
       .then((answer) => {
-        if (settled) return;
+        const wasLate = settled;
         settled = true;
         clearTimeout(late);
-        if (typeof answer === 'object') {
-          // The dialog's code and its art start loading now, so both are in by the time it opens.
-          void loadDialog().catch(() => undefined);
-          const art = launchArtUrl(answer.campaign);
-          if (art && typeof Image !== 'undefined') {
-            const img = new Image();
-            img.referrerPolicy = 'no-referrer';
-            img.src = art;
-          }
-        }
-        setClaim(answer);
+        if (wasLate && (firstRunWindow || answer === 'no')) return;
+        setClaim(answer === 'no' ? 'no' : { show: true, campaign: answer.campaign, url: answer.url, at: Date.now() });
       });
     // No cleanup: the claim is the page's, once; a re-render never asks again.
-  }, [ready, eligible, claim, claimWaitMs]);
+  }, [ready, eligible, claim, claimWaitMs, firstRunWindow]);
 
   // A page that stays open for days (the Inbox): a claim that said no asks again the next time the gates hold.
   useEffect(() => {
@@ -135,46 +210,85 @@ export function useLaunchAnnouncement({ ready, eligible: hostEligible, firstRunW
   }, [firstRunWindow, eligible, claim]);
 
   const due = typeof claim === 'object' ? claim : null;
-  const mayOpen = due !== null && eligible && !blocked && stamp === 'none';
+
+  // On a yes: the dialog's code and its art, both settled before it may open.
+  const campaign = due?.campaign ?? null;
+  useEffect(() => {
+    if (campaign === null || prep !== 'none') return;
+    setPrep('loading');
+    const art = launchArtUrl(campaign);
+    void Promise.all([
+      loaders.current.loadDialog(),
+      art ? loaders.current.loadArt(art).catch(() => false) : Promise.resolve(false),
+    ]).then(
+      ([Dialog, artIn]) => setPrep({ Dialog, art: artIn }),
+      () => setPrep('failed'),
+    );
+  }, [campaign, prep]);
+
+  const prepared = typeof prep === 'object' ? prep : null;
+  const mayOpen = due !== null && prepared !== null && eligible && !blocked && stage === 'none';
   const windowOpen = useFirstRunAnnouncementWindow({
     // Pending from the start, so the reader's first move before the claim answers still closes the window.
-    pending: firstRunWindow && claim !== 'no' && claim !== 'late',
+    pending: firstRunWindow && claim !== 'no' && claim !== 'late' && prep !== 'failed',
     armed: ready,
     eligible: firstRunWindow && mayOpen,
   });
   const opensNow = mayOpen && (firstRunWindow ? windowOpen : true);
 
-  // Stamp it, then draw it on `{ show: true }` (another surface or tab may have shown it first).
+  // Open it; a yes that has waited long is asked again first.
   useEffect(() => {
     if (!opensNow || !due) return;
-    setStamp('asking');
-    api.current
-      .shown(due.campaign)
-      .then((answer) => setStamp(answer?.show === true ? 'shown' : 'refused'), () => setStamp('refused'));
-  }, [opensNow, due]);
+    if (Date.now() - due.at < reclaimAfterMs) {
+      setStage('drawn');
+      return;
+    }
+    setStage('reclaiming');
+    api.current.claim().then(
+      (answer) => setStage(usable(answer) && answer.campaign === due.campaign ? 'drawn' : 'refused'),
+      () => setStage('refused'),
+    );
+  }, [opensNow, due, reclaimAfterMs]);
 
-  const drawn = stamp === 'shown';
+  const drawn = stage === 'drawn';
   useEffect(() => {
     if (drawn) drawnRef.current?.();
   }, [drawn]);
 
+  // Painted: stamp it. Another surface that stamped it at the same moment keeps it, and this one closes.
+  const stampNow = useRef(() => {});
+  stampNow.current = () => {
+    if (stamped.current || !due) return;
+    stamped.current = true;
+    api.current.shown(due.campaign).then(
+      (answer) => {
+        if (answer?.show === false) setStage('refused');
+      },
+      () => undefined,
+    );
+  };
+  const afterPaint = useRef(() => stampNow.current());
+
   const waiting = eligible && (claim === 'idle' || claim === 'asking');
-  const takes = due !== null && eligible && stamp !== 'refused';
+  const takes = due !== null && eligible && prep !== 'failed' && stage !== 'refused' && stage !== 'failed';
   const holds = waiting || takes || drawn;
   const open = drawn && !closed;
 
+  const Dialog = prepared?.Dialog;
   const dialog =
-    open && due ? (
-      <Suspense fallback={null}>
-        <LazyLaunchDialog
+    open && due && Dialog ? (
+      <LazyBlockBoundary fallback={() => <AfterPaint run={() => setStage('failed')} />}>
+        <Dialog
           campaign={due.campaign}
           url={due.url}
+          art={prepared.art}
           onAnswer={(answer) => {
             setClosed(true);
             void api.current.answer(answer, due.campaign);
           }}
         />
-      </Suspense>
+        <AfterPaint run={afterPaint.current} />
+      </LazyBlockBoundary>
     ) : null;
 
   return { holds, shownThisLoad: drawn, open, dialog };

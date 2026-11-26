@@ -32,5 +32,8 @@ export function launchArtUrl(campaign: string): string | null {
  */
 export const LAUNCH_ART_ALT = '';
 
-/** How long the art may take before the dialog drops the band and shows its words alone. */
-export const LAUNCH_ART_WAIT_MS = 2000;
+/**
+ * How long the art may take once a claim says yes (preloaded then, never before, so it never delays the page): in by
+ * then, the dialog opens with its band; not, it opens with its words alone. Decided before it opens.
+ */
+export const LAUNCH_ART_WAIT_MS = 1500;
