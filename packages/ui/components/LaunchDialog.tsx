@@ -41,18 +41,18 @@ type ArtState = 'loading' | 'ready' | 'gone';
 export type LaunchDialogSize = 'large' | 'standard';
 
 /**
- * The two sizes of the one shell. Large: 720 wide (art band 720×405), the title a step above the Inbox announcement's,
- * the line and buttons to match. Under the width it takes the overlay's full width (the app's usual dialog margin).
+ * The two sizes of the one shell. Large: 720 wide (art band 720×405), the words and buttons at the usual sizes (the
+ * r5a mocks). Under the width it takes the overlay's full width (the app's usual dialog margin).
  * The width also follows the viewport's height, so on a short window the art shrinks until art and words fit, never a
- * scroll: 15rem is the words and buttons, 2rem the overlay's padding.
+ * scroll: 13rem (12rem) is the words and buttons, 2rem the overlay's padding.
  */
 const SIZES: Record<LaunchDialogSize, { width: string; title: string; line: string; body: string; button: string }> = {
   large: {
-    width: 'min(720px, 100%, calc((var(--pn-viewport-height, 100dvh) - 2rem - 15rem) * 16 / 9))',
-    title: 'text-2xl sm:text-3xl',
-    line: 'mt-2 text-base sm:text-lg',
-    body: 'gap-5 px-5 pb-5 pt-5 sm:gap-7 sm:px-8 sm:pb-7 sm:pt-7',
-    button: 'min-h-11 text-base',
+    width: 'min(720px, 100%, calc((var(--pn-viewport-height, 100dvh) - 2rem - 13rem) * 16 / 9))',
+    title: 'text-xl',
+    line: 'mt-1.5',
+    body: 'gap-5 px-5 pb-5 pt-5 sm:gap-6 sm:px-7 sm:pb-6 sm:pt-7',
+    button: 'min-h-10 text-sm',
   },
   standard: {
     width: 'min(560px, 100%, calc((var(--pn-viewport-height, 100dvh) - 2rem - 12rem) * 16 / 9))',
