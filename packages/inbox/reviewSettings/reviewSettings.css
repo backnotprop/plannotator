@@ -49,6 +49,8 @@
 .ib-rs .ib-rs-pick .ib-ic { flex: none; color: var(--muted-foreground); }
 .ib-rs-pick-menu { max-height: min(360px, var(--available-height, 360px)); overflow-y: auto; }
 .ib-rs .ib-rs-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* The key field grows along a row (`flex: 1`); in a field's column that would squash it to its text's height. */
+.pn-inbox .ib-rs .ib-rs-field > .ib-rs-text { flex: none; }
 .ib-rs .ib-rs-cap { font-size: var(--ib-fs-12, 12px); font-weight: 500; color: var(--foreground); }
 
 /* A line of small text: in a row's words, or on its own in a card (Power Up's last line). */
