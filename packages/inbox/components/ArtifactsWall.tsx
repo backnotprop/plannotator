@@ -14,7 +14,8 @@ import { Menu } from '@base-ui/react/menu';
 import { INBOX_ARTIFACTS_PAGE, INBOX_ARTIFACTS_PAGE_MAX, type InboxArtifactRow, type InboxArtifactsPage, type InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
 import { inboxApi } from '../api';
 import type { Route } from '../app/route';
-import { originOf, type Artifact } from '../artifacts';
+import { htmlArtifactName, originOf, type Artifact } from '../artifacts';
+import { openHtmlArtifact } from '../htmlArtifactOpen';
 import { useArtifactPins } from '../artifactPins';
 import { dayWords, formatCount, plural } from '../format';
 import { Icon } from '../icons';
@@ -43,22 +44,33 @@ function readSize(): WallSize {
   }
 }
 
-/** Where a tile opens: its file, or its guided review, in its thread (a linked machine's thread opens there). */
+/**
+ * Where a tile opens: its file, or its guided review, in its thread (a linked machine's thread opens there). An html
+ * block: its thread at its message, where the block opens big (`openWallRow`).
+ */
 export function wallRowRoute(row: InboxArtifactRow): Route {
-  return row.attachment
-    ? { page: 'inbox', project: null, thread: row.thread_id, file: { id: row.attachment.id, version: 'current', focus: null } }
-    : { page: 'inbox', project: null, thread: row.thread_id, guide: row.message_id };
+  if (row.attachment) return { page: 'inbox', project: null, thread: row.thread_id, file: { id: row.attachment.id, version: 'current', focus: null } };
+  if (row.html) return { page: 'inbox', project: null, thread: row.thread_id, msg: row.message_id };
+  return { page: 'inbox', project: null, thread: row.thread_id, guide: row.message_id };
 }
 
 /** A row of the Wall as a tile of the thread's grid draws it. */
 export function wallArtifact(row: InboxArtifactRow): Artifact {
   const origin = originOf({ id: row.message_id, author: row.author, created_at: row.at });
   if (row.attachment) return { type: 'file', ...origin, attachment: row.attachment, inline: row.inline, alsoIds: [] };
+  if (row.html) return { type: 'html', ...origin, key: row.key, title: row.html.title, size: row.html.size, source: null };
   return { type: 'guide', ...origin, guide: row.guide! };
 }
 
 function nameOf(row: InboxArtifactRow): string {
+  if (row.html) return htmlArtifactName(row.html);
   return row.attachment ? row.attachment.name : (row.guide?.title ?? 'Guided review');
+}
+
+/** A tile's press: an html block is asked to open big first, so its thread opens on it (closing comes back here). */
+function openWallRow(row: InboxArtifactRow, onOpen: (row: InboxArtifactRow) => void): void {
+  if (row.html && !row.attachment) openHtmlArtifact(row.thread_id, row.key, { fromWall: true });
+  onOpen(row);
 }
 
 /** "Today", "Yesterday", "Nov 5": the day a row's message came. */
@@ -75,7 +87,7 @@ function WallTile({ row, onOpen }: { row: InboxArtifactRow; onOpen: (row: InboxA
   const type = wallTypeLabel(row, pages);
   return (
     <li className="ib-wall-cell" ref={ref} data-wall-artifact={row.key}>
-      <button type="button" className="ib-wall-tile" onClick={() => onOpen(row)} aria-label={`${name}, ${type}, in ${row.thread_title}, ${artifact.sender} at ${artifact.sentAt}`}>
+      <button type="button" className="ib-wall-tile" onClick={() => openWallRow(row, onOpen)} aria-label={`${name}, ${type}, in ${row.thread_title}, ${artifact.sender} at ${artifact.sentAt}`}>
         <span className="ib-wall-stage">
           <WallFace row={row} near={near} guide={artifact.type === 'guide' ? artifact : null} pages={pages} />
         </span>

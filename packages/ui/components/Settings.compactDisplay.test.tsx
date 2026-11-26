@@ -24,7 +24,7 @@ async function openDisplayTab(isCompactTouchLayout: boolean): Promise<void> {
   });
 
   const displayTab = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-    .find((button) => button.textContent?.trim() === 'Editor');
+    .find((button) => button.textContent?.trim() === 'Reviews');
   if (!displayTab) throw new Error('review display tab did not render');
   await act(async () => displayTab.click());
 }
@@ -42,13 +42,18 @@ afterEach(async () => {
   if (hasDom) document.body.replaceChildren();
 });
 
-describe.if(hasDom)('review Editor tab diff display', () => {
-  test('desktop points to the header button and the gear instead of repeating their rows', async () => {
+const displaySection = () => document.querySelector('[data-review-settings-section="display"]');
+
+// Settings → Reviews holds everything about reading a review (owner, 2026-11-25),
+// so desktop offers Split or Unified and the gear's rows too.
+describe.if(hasDom)('review Reviews tab diff display', () => {
+  test('desktop offers Split or Unified and the gear rows, with no session note', async () => {
     await openDisplayTab(false);
 
-    expect(styleControlButtons()).toHaveLength(0);
-    expect(document.querySelector('[data-settings-diff-display]')?.textContent).toContain('the gear above the diff');
-    expect(document.body.textContent).not.toContain('Wrap long lines');
+    expect(styleControlButtons()).toHaveLength(2);
+    expect(displaySection()?.textContent).toContain('the gear above the diff');
+    const wrap = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="switch"]')).find((b) => b.textContent?.includes('Wrap long lines'));
+    expect(wrap).toBeDefined();
     expect(document.body.textContent).not.toContain('unified diffs for the session');
   });
 

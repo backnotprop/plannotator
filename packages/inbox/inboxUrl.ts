@@ -102,6 +102,11 @@ export function linkedMachineFacts(id: string): LinkedMachineFacts | null {
   return linkedFacts.get(id) ?? null;
 }
 
+/** Every linked machine the merged list last named that can be read (not one too old to link, nor revoked), by id. */
+export function linkedMachineIds(): string[] {
+  return [...linkedFacts].filter(([, facts]) => facts.state !== 'needs_update' && facts.state !== 'revoked').map(([id]) => id).sort();
+}
+
 /** The linked machines the merged list last said take `mark`, by id (an older one, or one not listed yet, does not). */
 export function linkedMachinesWith(mark: string): string[] {
   return [...linkedFacts].filter(([, facts]) => facts.marks.includes(mark) && facts.state !== 'needs_update' && facts.state !== 'revoked').map(([id]) => id).sort();
@@ -156,7 +161,7 @@ export function rememberArtifactMachines<T extends { pins?: readonly ArtifactIds
   const list = (value: unknown): readonly ArtifactIds[] => (Array.isArray(value) ? value : []);
   for (const entry of [...list(model?.pins), ...list(model?.artifacts)]) {
     if (!entry || typeof entry.machine !== 'string' || !entry.machine || typeof entry.key !== 'string' || typeof entry.thread_id !== 'string') continue;
-    const file = entry.key.startsWith('guide:') ? '' : entry.key;
+    const file = entry.key.startsWith('guide:') || entry.key.startsWith('html:') ? '' : entry.key;
     rememberMachine([entry.thread_id, entry.message_id ?? '', entry.project?.id ?? '', entry.attachment?.id ?? '', file], entry.machine);
   }
   return model;
