@@ -10,8 +10,10 @@
  *   shown (its words stay Send's description);
  * - an older version, a diff or the editor loses its pinned reading line on a phone, or an approval state loses its
  *   words or Approve;
- * - a computer loses Edit and the version from the pinned reading line, or the menu at its end (Copy file, Download,
- *   Full screen), or the bar's Global comment;
+ * - a computer's bar (approval A2) loses its pencil (Edit), its history clock (Versions, its version in its name and
+ *   tooltip, pressed while Versions is open) or the menu at its end (Copy file, Download, Full screen), shows version
+ *   text while the newest is read, or offers the pencil on an older version (one line, its way back and Restore);
+ *   the pencil stops starting an edit; the bottom bar loses Global comment;
  * - Share shows while its switch is off;
  * - the phone's bar opens on the plan's name and fades to the project (it must open on the project, cut);
  * - the phone's menu is drawn outside the Inbox's root (its icons and lines lose their rules), or Copy file gives no
@@ -188,17 +190,19 @@ test.skipIf(!hasDom)('a phone: the bar holds the project at rest and takes the p
   // The title block is out of reach at rest (inert), so the name is read once: in the document.
   expect(bar.querySelector('[data-plan-titleblock]')!.hasAttribute('inert')).toBe(true);
   expect(host.querySelector('nav [data-breadcrumb-collapse]')).toBeNull();
-  // The state line sits in the document's scroll, above its title: the approval's full words and the version.
+  // The state line sits in the document's scroll, above its title: the approval's full words, and at its end the
+  // history clock (approval A2: no version text; the version is in the clock's name).
   const kicker = host.querySelector('.ib-docscroll > [data-plan-kicker]')!;
   expect(kicker).not.toBeNull();
   expect(text(kicker.querySelector('[data-plan-approval="approved"]'))).toBe('Approved by you');
-  expect(kicker.querySelector('[data-reading-versions]')!.getAttribute('aria-label')).toBe('v1 · newest, version 1, the newest. 1 version');
+  expect(text(kicker)).toBe('Approved by you');
+  expect(kicker.querySelector('[data-reading-versions]')!.getAttribute('aria-label')).toBe('Versions · v1, newest');
   expect(kicker.compareDocumentPosition(host.querySelector('.ib-docscroll h1')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // No reading line pinned over the card on this state, no file-name row.
   expect(host.querySelector('[data-reading-line]')).toBeNull();
   expect(host.querySelector('.ib-vhead')).toBeNull();
 
-  // The title scrolls away: the bar takes the plan's name, its version and its decision, one button that opens Versions.
+  // The title scrolls away: the bar takes the plan's name and its decision (no version text), one button that opens Versions.
   placeTitle(60);
   await act(async () => host.querySelector('.ib-docscroll')!.dispatchEvent(new Event('scroll')));
   await settle();
@@ -206,7 +210,7 @@ test.skipIf(!hasDom)('a phone: the bar holds the project at rest and takes the p
   const block = bar.querySelector<HTMLButtonElement>('[data-plan-titleblock]')!;
   expect(block.hasAttribute('inert')).toBe(false);
   expect(block.getAttribute('aria-label')).toBe('Rate limiting for public endpoints. Version 1. Approved. Versions');
-  expect(text(block.querySelector('.ib-plan-title-s > b'))).toBe('v1');
+  expect(text(block)).not.toContain('v1');
   expect(text(block.querySelector('.ib-plan-title-dec'))).toBe('Approved');
   await act(async () => block.click());
   await settle();
@@ -344,15 +348,41 @@ test.skipIf(!hasDom)('a phone: every approval state keeps its words or its Appro
   expect(host.querySelector('[data-plan-page]')!.hasAttribute('data-plan-header')).toBe(false);
 });
 
-test.skipIf(!hasDom)('a computer: Edit and the version stay on the pinned reading line, with the menu at its end; Global comment is a mark in the bottom bar', async () => {
-  const id = plan('Rate limiting for public endpoints', 'trailhead-api', [DOC], { approvedOn: 1 });
+test.skipIf(!hasDom)('a computer: the pinned bar holds the approval, the pencil, the history clock and the menu; no version text on the newest; an older version is one line with no pencil; Global comment is a mark in the bottom bar', async () => {
+  const id = plan('Rate limiting for public endpoints', 'trailhead-api', [DOC, DOC.replace('A token bucket.', 'A token bucket per key.')], { approvedOn: 2 });
   window.location.hash = `#plans=${id}`;
   const host = draw(false);
   await settle();
   const reading = host.querySelector('[data-plan-reading]')!;
-  expect(reading.querySelector('[data-reading-line] [data-plan-edit]')).not.toBeNull();
-  expect(reading.querySelector('[data-reading-versions]')).not.toBeNull();
-  expect(reading.querySelector(':scope > [data-plan-more]')).not.toBeNull();
+  const bar = reading.querySelector('[data-plan-bar="newest"]')!;
+  expect([...bar.querySelectorAll('.ib-plan-bar-end button')].map((b) => b.getAttribute('aria-label'))).toEqual(['Edit', 'Versions · v2, newest', 'Page actions']);
+  expect(text(bar)).toBe('Approved by you');
+  // Versions is closed until the clock opens it; then the clock reads pressed and the panel marks the version.
+  const clock = () => reading.querySelector<HTMLButtonElement>('[data-reading-versions]')!;
+  expect(clock().getAttribute('aria-pressed')).toBe('false');
+  expect(host.querySelector('[data-versions-panel]')).toBeNull();
+  await act(async () => clock().click());
+  await settle();
+  expect(clock().getAttribute('aria-pressed')).toBe('true');
+  expect(host.querySelector('[data-versions-panel] [data-plan-version="2"]')!.getAttribute('aria-current')).toBe('true');
+  // The pencil starts an edit: Done and Cancel take the bar's left; no pencil while editing.
+  await act(async () => reading.querySelector<HTMLButtonElement>('[data-plan-edit]')!.click());
+  await settle();
+  expect(reading.querySelector('[data-plan-edit-done]')).not.toBeNull();
+  expect(reading.querySelector('[data-plan-edit]')).toBeNull();
+  await act(async () => reading.querySelector<HTMLButtonElement>('[data-plan-edit-cancel]')!.click());
+  await settle();
+  // An older version: one line, its way back and Restore; the clock stays; no pencil.
+  window.location.hash = `#plans=${id}&v=1`;
+  await settle();
+  const older = host.querySelector('[data-plan-reading] [data-plan-bar="older"]')!;
+  expect(text(older.querySelector('[data-plan-older-words]'))).toBe('v1 of 2, an older version');
+  expect(text(older.querySelector('[data-plan-newest]'))).toBe('Back to version 2');
+  expect(text(older.querySelector('[data-plan-restore]'))).toBe('Restore v1');
+  expect(older.querySelector('[data-plan-edit]')).toBeNull();
+  expect(older.querySelector('[data-reading-versions]')!.getAttribute('aria-label')).toBe('Versions');
+  window.location.hash = `#plans=${id}`;
+  await settle();
   expect(host.querySelector('[data-plan-kicker]')).toBeNull();
   expect(host.querySelector('.ib-vhead')).toBeNull();
   const dock = host.querySelector('[data-plan-dock]')!;
