@@ -1,8 +1,8 @@
 /**
  * Where a thread's PR row's "Open review thread" goes (`pullReviewLinks`). What regresses: a link on a merged or
  * closed PR, or on one Reviews does not list (its target would be a blank page); a thread that only named the PR
- * taken for its review thread; a PR with a review thread sent to its launchpad instead; a link on the row whose
- * review thread is the thread the list is in; and a link before Reviews' list was read.
+ * taken for its review thread; a PR with a review thread sent to its launchpad instead; the row whose review thread is
+ * the thread the list is in linking back to itself instead of its page in Reviews; and a link before Reviews' list was read.
  */
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer, type InboxReviewRow, type InboxThreadPullState } from '@plannotator/core/inbox-types';
@@ -104,10 +104,10 @@ describe('pullReviewLinks', () => {
     expect(pullReviewLinks(null, null)(row(9811), HERE)).toBeNull();
   });
 
-  test('the row whose review thread is the thread the list is in has none', () => {
+  test('the row whose review thread is the thread the list is in goes to its page in Reviews, never back to itself', () => {
     const model = answer([pr(9802)], { 'github.com/acme/bundler-web#9802': link(HERE) });
     const linkOf = pullReviewLinks(model, reviewedRows(model, 'github.com/acme/bundler-web#9802'));
-    expect(linkOf(row(9802), HERE)).toBeNull();
+    expect(linkOf(row(9802), HERE)).toEqual({ kind: 'launchpad', stackId: inboxPullStacks(model.pulls)[0]!.id, here: true });
     expect(linkOf(row(9802), REVIEW)?.kind).toBe('thread');
   });
 });
