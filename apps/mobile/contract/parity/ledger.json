@@ -23518,6 +23518,20 @@
       }
     },
     {
+      "id": "undecided-window-api-inbox-skills-file",
+      "title": "window:/api/inbox/skills/file",
+      "surface": [
+        "window:/api/inbox/skills/file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-door-get-messages-id-guide-file",
       "title": "door:GET messages/:id/guide/file",
       "surface": [

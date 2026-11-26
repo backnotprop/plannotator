@@ -384,6 +384,7 @@
       "/api/inbox/ships/stop",
       "/api/inbox/skills",
       "/api/inbox/skills/content",
+      "/api/inbox/skills/file",
       "/api/inbox/snooze-intro",
       "/api/inbox/sound/dialog",
       "/api/inbox/star-ask",
