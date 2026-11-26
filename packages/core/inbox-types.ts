@@ -1984,29 +1984,25 @@ export const INBOX_LOCAL_SECTIONS: readonly { readonly id: Exclude<InboxSectionI
   (section): section is { readonly id: Exclude<InboxSectionId, "tagged">; readonly label: string } => section.id !== "tagged",
 );
 
-/**
- * Whether a row in Tagged you waits on the person, as Stopped, Holding up work and Waiting on you do (counted in the
- * sidebar and the phone's badge, Mark read always offered, ordered with them in the Agents view and on the board), or
- * reads as New since you looked does (only its unseen news counts). The owner's decision, still open: this one line
- * answers it. False until then: no new count.
- */
-export const INBOX_TAGGED_WAITS_ON_PERSON: boolean = false;
-
 /** A section id this code does not know is a type error here; at run time (a newer server's id) it waits on no one. */
 function unknownSection(id: never): false {
   void id;
   return false;
 }
 
-/** The sections whose rows wait on the person: Stopped, Holding up work, Waiting on you, and Tagged you by `INBOX_TAGGED_WAITS_ON_PERSON`. */
+/**
+ * The sections whose rows wait on the person: Stopped, Holding up work, Waiting on you, and Tagged you (the owner's
+ * decision, 2026-11-25: "A · It counts"; a thread where someone tagged you counts like one waiting on you). Every
+ * count and rule of what waits on the person reads this: the sidebar's Inbox, project, machine and tag counts, the
+ * phone's badge, Mark read, the Agents view, the board, a pinned row's calm.
+ */
 export function inboxSectionWaitsOnPerson(id: InboxSectionId): boolean {
   switch (id) {
     case "stopped":
     case "holding":
     case "waiting":
-      return true;
     case "tagged":
-      return INBOX_TAGGED_WAITS_ON_PERSON;
+      return true;
     case "new":
     case "sent":
     case "quiet":
@@ -2020,11 +2016,6 @@ export function inboxSectionWaitsOnPerson(id: InboxSectionId): boolean {
 export function inboxGroupWaitsOnPerson(id: string | null | undefined): boolean {
   const section = INBOX_SECTIONS.find((s) => s.id === id);
   return section ? inboxSectionWaitsOnPerson(section.id) : false;
-}
-
-/** The section holds news for the person and nothing that asks them: New since you looked, and Tagged you while it does not wait on them. */
-export function inboxSectionIsNews(id: InboxSectionId): boolean {
-  return id === "new" || (id === "tagged" && !inboxSectionWaitsOnPerson(id));
 }
 
 /** How far back the list filter's "Recent activity" reaches (`acted_at`), and how long acted.json keeps a time. */
@@ -2368,7 +2359,7 @@ export interface InboxListSection {
 
 /** Something in the thread waits on the person: a question, or news they have not looked at. */
 export function inboxRowWaitsOnPerson(row: Pick<InboxListRow, "section" | "unseen" | "answered_not_sent">): boolean {
-  return inboxSectionWaitsOnPerson(row.section) || (inboxSectionIsNews(row.section) && (row.unseen > 0 || row.answered_not_sent));
+  return inboxSectionWaitsOnPerson(row.section) || (row.section === "new" && (row.unseen > 0 || row.answered_not_sent));
 }
 
 /**

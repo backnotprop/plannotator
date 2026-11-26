@@ -621,6 +621,18 @@ final class ParityTests: XCTestCase {
     XCTAssertEqual([RowMarks.shown(99), RowMarks.shown(100)], ["99", "99+"])
   }
 
+  // The owner's decision (2026-11-25, "A · It counts"): a thread where someone tagged you counts like one waiting on you.
+  func testATaggedYouRowCountsAsWaitingOnThePerson() throws {
+    var row = try XCTUnwrap(StandInData.list(threads: StandInData.threads(now: Date()), unread: [], session: "s", cursor: 1, version: "1").sections.flatMap(\.threads).first)
+    row.section = .tagged
+    row.unseen = 0
+    row.answeredNotSent = false
+    XCTAssertTrue(RowOffers.waitsOnPerson(row))
+    let waiting = InboxListSection(id: .waiting, label: "Waiting on you", threads: [])
+    let before = ListRules.waitingCount([waiting])
+    XCTAssertEqual(ListRules.waitingCount([waiting, InboxListSection(id: .tagged, label: "Tagged you", threads: [row])]), before + 1)
+  }
+
   func testTheButtonAtAThreadsFootCountsOnlyWhatIsNotAnsweredYet() throws {
     var thread = try XCTUnwrap(StandInData.threads(now: Date()).first { $0.threadId == StandInData.onboarding })
     var items = OpenItems(thread)

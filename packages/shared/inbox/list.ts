@@ -136,8 +136,8 @@ export function inboxSectionWhileRoutineRuns(row: Pick<InboxListRow, "section" |
  * bold, except one there only for the person's own unsent words or comments
  * (`draftOnly`): nothing new arrived, and its "Draft" label says what is there.
  * A row in Tagged you (only a Spaces server sends it) is bold until the person
- * has seen the message that tagged them, whether or not it waits on them
- * (`INBOX_TAGGED_WAITS_ON_PERSON`).
+ * has seen the message that tagged them, as in the other sections that wait on
+ * them.
  */
 export function inboxRowUnread(section: InboxSectionId, unseen: number, draftOnly: boolean): boolean {
   switch (section) {

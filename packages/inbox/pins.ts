@@ -8,7 +8,7 @@
  * never see it. No limit on pins; an archived thread stays pinned.
  */
 
-import { INBOX_SECTIONS, inboxRowArchived, inboxSectionWaitsOnPerson, type InboxListRow, type InboxSectionId } from '@plannotator/core/inbox-types';
+import { INBOX_SECTIONS, inboxRowArchived, type InboxListRow, type InboxSectionId } from '@plannotator/core/inbox-types';
 import { waitCount } from './format';
 import { threadChipName } from './threadChip';
 
@@ -43,8 +43,8 @@ export function pinnedState(row: InboxListRow): PinnedState {
       // Agent news the person has not looked at gets the dot; a row in New only for their own draft does not.
       return row.unseen > 0 ? { kind: 'new', words: 'New', n: 0, calm: false } : { kind: 'quiet', words: 'Draft', n: 0, calm: true };
     case 'tagged':
-      // Only a Spaces server places it: the dot while the tag is news, else the group's name; calm unless it waits on the person.
-      return row.unseen > 0 ? { kind: 'new', words: 'New', n: 0, calm: false } : { kind: 'quiet', words: sectionLabel('tagged'), n: 0, calm: !inboxSectionWaitsOnPerson('tagged') };
+      // Only a Spaces server places it: the dot while the tag is news, else the group's name; never calm, it waits on the person.
+      return row.unseen > 0 ? { kind: 'new', words: 'New', n: 0, calm: false } : { kind: 'quiet', words: sectionLabel('tagged'), n: 0, calm: false };
     case 'sent':
       return { kind: 'sent', words: 'Sent', n: 0, calm: true };
     case 'quiet':

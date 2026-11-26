@@ -200,7 +200,7 @@ export function boardLanes(cards: readonly InboxCardWire[], now: number = Date.n
  */
 export function waitingThread(card: Pick<InboxCardWire, 'column' | 'threads'>, rowOf: (threadId: string) => { section?: string } | null | undefined): string | null {
   if (!INBOX_CARD_LIVE_COLUMNS.includes(card.column) || isInboxCardPersonColumn(card.column)) return null;
-  // The sections that say a thread waits on the person (Stopped on you, Holding up work, Waiting on you; Tagged you by core's rule).
+  // The sections that say a thread waits on the person (core's `inboxGroupWaitsOnPerson`: Stopped on you, Holding up work, Waiting on you, Tagged you).
   return card.threads.find((threadId) => inboxGroupWaitsOnPerson(rowOf(threadId)?.section)) ?? null;
 }
 

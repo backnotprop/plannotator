@@ -46,8 +46,8 @@ const rankOf = (group: InboxListGroupId): number => {
   return at < 0 ? AGENT_ROW_ORDER.length : at;
 };
 /**
- * A row in this group waits on the person (Priority, Stopped, Holding up work, Waiting on you, and Tagged you by core's
- * `INBOX_TAGGED_WAITS_ON_PERSON`): it opens a folded agent.
+ * A row in this group waits on the person (Priority, and core's `inboxSectionWaitsOnPerson`: Stopped, Holding up work,
+ * Waiting on you, Tagged you): it opens a folded agent.
  */
 export const rowWaits = (group: InboxListGroupId): boolean => group === INBOX_PRIORITY_GROUP.id || inboxGroupWaitsOnPerson(group);
 

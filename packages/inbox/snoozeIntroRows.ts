@@ -4,7 +4,7 @@
  * at all is the Inbox's (packages/server/inbox-snooze-intro.ts). Inbox-only, so not a core export: the published UI
  * package never needs it.
  */
-import { inboxSectionIsNews, inboxSectionWaitsOnPerson, type InboxListRow } from '@plannotator/core/inbox-types';
+import { inboxSectionWaitsOnPerson, type InboxListRow } from '@plannotator/core/inbox-types';
 
 /** A row "read and left" for this long (the agent's last word is older) counts toward the need. */
 export const SNOOZE_INTRO_LEFT_MS = 24 * 60 * 60 * 1000;
@@ -18,11 +18,11 @@ export function snoozeIntroWaits(row: Pick<InboxListRow, 'section' | 'waiting_on
 }
 
 /**
- * A thread the person read and left: in Stopped, Holding, Waiting or New, nothing unseen (they looked), nothing unsent,
+ * A thread the person read and left: in Stopped, Holding, Waiting, Tagged you or New, nothing unseen (they looked), nothing unsent,
  * not snoozed, and the agent's last word older than `SNOOZE_INTRO_LEFT_MS`.
  */
 export function snoozeIntroReadAndLeft(row: Pick<InboxListRow, 'section' | 'unseen' | 'unsent' | 'snoozed' | 'last_agent_at' | 'last_at'>, now: Date): boolean {
-  if (!inboxSectionIsNews(row.section) && !inboxSectionWaitsOnPerson(row.section)) return false;
+  if (row.section !== 'new' && !inboxSectionWaitsOnPerson(row.section)) return false;
   if (row.unseen !== 0 || row.unsent || row.snoozed) return false;
   const last = Date.parse(row.last_agent_at ?? row.last_at);
   return !Number.isNaN(last) && now.getTime() - last >= SNOOZE_INTRO_LEFT_MS;

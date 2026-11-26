@@ -118,9 +118,9 @@ public enum ListRules {
   /// `tabBadgeLabel`: "" for none, "9+" past nine.
   public static func badgeLabel(_ count: Int) -> String { count <= 0 ? "" : count > 9 ? "9+" : String(count) }
 
-  /// `waitingCount`: the rows that wait on the person (Stopped, Holding, Waiting).
+  /// `waitingCount`: the rows that wait on the person (`inboxGroupWaitsOnPerson`: Stopped, Holding, Waiting, Tagged you).
   public static func waitingCount(_ sections: [InboxListSection]) -> Int {
-    sections.filter { [.stopped, .holding, .waiting].contains($0.id) }.reduce(0) { $0 + $1.threads.count }
+    sections.filter { [.stopped, .holding, .waiting, .tagged].contains($0.id) }.reduce(0) { $0 + $1.threads.count }
   }
 
   /// `inboxArchivedRows`: newest archived first; ties on the thread id.

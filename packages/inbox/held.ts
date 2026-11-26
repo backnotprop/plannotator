@@ -570,7 +570,7 @@ export function filterSections(sections: readonly InboxListSection[], projectId:
   return sections.map((s) => ({ ...s, threads: s.threads.filter((row) => row.project.id === projectId) }));
 }
 
-/** The rows that wait on the person (Stopped, Holding, Waiting; Tagged you by core's `inboxSectionWaitsOnPerson`): the sidebar counts. */
+/** The rows that wait on the person (core's `inboxSectionWaitsOnPerson`: Stopped, Holding, Waiting, Tagged you): the sidebar counts. */
 export function waitingCount(sections: readonly InboxListSection[], projectId?: string): number {
   let n = 0;
   for (const section of sections) {
