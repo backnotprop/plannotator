@@ -110,6 +110,22 @@ export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
 }
 
 /**
+ * A routine's run is going in the thread (the owner, 2026-11-24: while a routine's run is going, its thread sits under
+ * New, with its Running mark, until the run ends). A run starts with the person's divider, which its session takes at
+ * once, so by the rules above the thread is Sent for a moment and then Quiet (folded) for the whole run. New is the
+ * floor while it goes: Sent and Quiet come up to New, whatever the delivery or a Mark read says; Stopped on you,
+ * Holding up work and Waiting on you keep their place (never a demotion), and an archived thread stays archived (the
+ * archive is the person's "done"; the run's reply brings it back as any agent's does). When the run ends the row is
+ * placed by the rules above again: New when the run left agent words not looked at, else Quiet. It is not bold and
+ * counts nowhere (`unread`, `unseen` and the waiting counts are the rules' own): it is shown, not announced. Applied
+ * where the run line is known (packages/server/inbox-launch.ts `decorate`), so every reader of the list agrees.
+ */
+export function inboxSectionWhileRoutineRuns(row: Pick<InboxListRow, "section" | "resolved_at" | "back_from_archive">): InboxSectionId {
+  if (inboxRowArchived(row)) return row.section;
+  return row.section === "sent" || row.section === "quiet" ? "new" : row.section;
+}
+
+/**
  * Bold in the list: something is new to the person. A row in Stopped, Holding
  * up work or Waiting on you is bold until the person has seen its latest agent
  * message (`unseen` 0: they opened the thread), then reads as read where it is:

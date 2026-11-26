@@ -1,232 +1,33 @@
 /**
- * The Reviews list (approval "inbox-reviews-page", round 2): the Inbox's own rows and bands, grouped by whose move it
- * is: On you, With your agents, Ready to land, then the folded Waiting on others and Open, not reviewed. A row is a
- * review thread (the same thread the Inbox lists, never a copy) or a listed PR nobody has reviewed. The fold state
- * is remembered. No new keyboard shortcuts.
+ * The Reviews list (approval "inbox-reviews-page", round 2; compact rows from "inbox-reviews-compact-list"): one line
+ * per review (ReviewRow.tsx) under plain group labels, grouped by whose move it is: On you, With your agents, Ready to
+ * land, then the folded Waiting on others and Open, not reviewed. A row is a review thread (the same thread the Inbox
+ * lists, never a copy) or a listed PR nobody has reviewed. The fold state is remembered. No new keyboard shortcuts.
  */
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
-import { inboxPullIsOpen, inboxPullRepoKey, inboxReviewGroups, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack, type InboxReviewMove, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, inboxPullRepoKey, inboxReviewGroups, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullsAnswer, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import { HostMark, Icon } from '../icons';
-import { RefMarkIcon } from '../board/RefMark';
-import { Tip } from '../components/Tip';
-import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
-import { pullFilterEmptyWords, pullNounWord, stackTitle, type PullFilter } from './model';
-import { initials, repoLabels, repoName } from './labels';
+import { Icon } from '../icons';
+import { useRelativeClock } from '../relativeTime';
+import { pullFilterEmptyWords, stackTitle, type PullFilter } from './model';
+import { repoLabels, repoName } from './labels';
 import { pullsEmptyWords, pullsNotices } from './notices';
-import { chainMarks } from './topology';
-import { readReviewFolds, reviewRowLanding, reviewRowLine, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
-import { riskOrder, rowRisk, rowRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
-import { RiskMark } from './RiskMark';
-import { Named, usePicture } from './Face';
-import { facesOnce } from './words';
-import { pullAvatarUrl } from './pullUrls';
-import { UnreportedBranches } from './UnreportedBranches';
-import type { InboxUnreportedBranch } from '@plannotator/core/inbox-types';
+import { readReviewFolds, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
+import { riskOrder, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
+import { layerItem, ReviewRowItem, ReviewStack } from './ReviewRow';
+import { ReviewGroup, type ReviewGroupFold } from './ReviewGroup';
+import type { InboxPullRiskAutoRun } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
 import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
+import { shipActive, shipLook, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
+import { shipTarget, useShipAgents, type ShipOption, type ShipTarget } from './shipStart';
+import { ShipAgentSheet, ShipMenuItems } from './ShipMenu';
 
 const NO_ROWS: readonly InboxReviewRow[] = [];
 const NO_JUDGMENTS: RiskJudgments = {};
 const NO_FAILURES: RiskFailures = {};
-
-/**
- * A PR row's top-left spot: always the PR author's profile picture (the person's own PRs too; a stack's bottom layer's
- * author), read through the Inbox's own route (`GET /api/inbox/pulls/avatar`): the window's CSP never loads a remote
- * image. The initials show while it loads and stay when it cannot; a deleted account is a grey person.
- */
-function AuthorLead({ stack }: { stack: InboxPullStack }) {
-  const bottom = stack.layers[0]!;
-  const author = bottom.author;
-  const src = author ? pullAvatarUrl(bottom.host, author) : null;
-  // The same picture state as every face (`Face.tsx`), so a picture that failed in one is never asked again here.
-  const { shown, failed, state, onLoad, onError } = usePicture(src);
-  if (!author || !src) {
-    return (
-      <Tip content="A deleted account">
-        <span className="ib-pr-av ib-pr-av-ghost" role="img" aria-label="A deleted account" data-pulls-ghost="">
-          <Icon name="user" size={13} />
-        </span>
-      </Tip>
-    );
-  }
-  return (
-    <Tip content={author}>
-      <span className="ib-pr-av" role="img" aria-label={author} data-pulls-author={author} data-pulls-bot={author.endsWith('[bot]') ? '' : undefined} data-pulls-avatar={state}>
-        {!shown && <span aria-hidden="true">{initials(author)}</span>}
-        {!failed && (
-          <img
-            src={src}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
-            draggable={false}
-            data-shown={shown ? '' : undefined}
-            onLoad={onLoad}
-            onError={onError}
-          />
-        )}
-      </span>
-    </Tip>
-  );
-}
-
-/** The chain of PR marks, bottom (lands first) to top: past five layers, the first two, "+N" and the last two. */
-function Chain({ stack }: { stack: InboxPullStack }) {
-  return (
-    <span className="ib-pr-chain" aria-hidden="true" data-pulls-chain={stack.layers.length}>
-      {chainMarks(stack.layers).map((mark, i) => (
-        <span key={'more' in mark ? 'more' : mark.key} className="ib-pr-link">
-          {i > 0 && <span className="ib-pr-dash" />}
-          {'more' in mark ? (
-            <span className="ib-pr-more" data-pulls-chain-more={mark.more}>
-              +{mark.more}
-            </span>
-          ) : (
-            <span className="ib-bc-mark" data-card-mark={mark.state} data-card-mark-kind="pr">
-              <RefMarkIcon kind="pr" state={mark.state} size={13} />
-            </span>
-          )}
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function ReviewRowItem({
-  row,
-  links,
-  place,
-  selected,
-  phone,
-  now,
-  judgments,
-  riskFailed,
-  menu = false,
-  onOpen,
-}: {
-  row: InboxReviewRow;
-  links: Readonly<Record<string, InboxPullLink>>;
-  place: string;
-  selected: boolean;
-  phone: boolean;
-  now: number;
-  judgments: RiskJudgments;
-  riskFailed: RiskFailures;
-  /** Its right-click menu is open (the muted background the Inbox's rows take then). */
-  menu?: boolean;
-  onOpen: () => void;
-}) {
-  const stack = row.stacks[0] ?? null;
-  // A thread's row is judged by the PRs it owns, a reported branch by its report; a local review has neither, so no mark.
-  const judged = rowRisk(row, judgments);
-  const riskFailure = rowRiskFailure(row, judgments, riskFailed);
-  const line = reviewRowLine(row);
-  const layers = stack?.layers.length ?? 0;
-  const focusPull = stack?.layers.find((pull) => pull.state === 'open' || pull.state === 'draft') ?? stack?.layers[0] ?? null;
-  return (
-    <button
-      type="button"
-      className={`${phone ? 'ib-mrow' : 'ib-nrow'} ib-prrow${row.move === 'on_you' && row.reviewed ? ' ib-u' : ''}${selected ? ' ib-sel' : ''}`}
-      onClick={onOpen}
-      aria-current={selected ? 'true' : undefined}
-      data-reviews-row={row.id}
-      data-reviews-kind={row.reviewed ? 'reviewed' : 'listed'}
-      // The thread's row, for the window's J and K and its way back; a listed PR is no thread.
-      data-row={row.reviewed ? (row.thread_id ?? undefined) : undefined}
-      data-thread-id={row.reviewed ? (row.thread_id ?? undefined) : undefined}
-      data-pulls-row={stack?.id}
-      data-pulls-move={row.move}
-      data-pulls-layers={stack ? layers : undefined}
-      data-menu={menu ? '' : undefined}
-    >
-      <div className="ib-l1">
-        <span className="ib-from ib-lead">
-          {stack ? (
-            <AuthorLead stack={stack} />
-          ) : (
-            <span className="ib-pr-av" aria-hidden="true" data-reviews-project-tile="">
-              <span>{initials(place)}</span>
-            </span>
-          )}
-          <span className="ib-p" dir="auto" data-pulls-repo="">
-            {place}
-          </span>
-        </span>
-        {judged && <RiskMark judgment={judged} />}
-        {riskFailure && <RiskMark failed={riskFailure} />}
-        <span className="ib-t">
-          <span aria-hidden="true">{relativeTime(row.updated_at, now)}</span>
-          <span className="ib-sr">{relativeWords(row.updated_at, now)}</span>
-        </span>
-      </div>
-      <div className="ib-l2">
-        <span className="ib-title" dir="auto">
-          {reviewRowTitle(row, (s) => stackTitle(s, links))}
-        </span>
-      </div>
-      <div className="ib-l3 ib-pr-l3">
-        {line.kind === 'stack' && stack ? (
-          <Chain stack={stack} />
-        ) : line.kind === 'pr' ? (
-          <span className="ib-bc-mark" data-card-mark={focusPull?.state ?? reviewRowLanding(row)?.state ?? 'open'} data-card-mark-kind="pr" aria-hidden="true">
-            <RefMarkIcon kind="pr" state={focusPull?.state ?? reviewRowLanding(row)?.state ?? 'open'} size={13} />
-          </span>
-        ) : (
-          <Icon name={line.mark ?? 'laptop'} size={14} />
-        )}
-        <span className="ib-pv" dir="auto">
-          {layers > 1 && stack && (
-            <span className="ib-sr">
-              A stack of {layers} {pullNounWord(stack.platform)}s:{' '}
-            </span>
-          )}
-          {line.lead}
-          {line.lead && (line.agent || line.status) && ' · '}
-          {line.agent && (
-            <span className="ib-pr-magent" data-pulls-row-agent={line.agent.host ?? ''} title={line.agent.name} aria-label={line.agent.name}>
-              <HostMark host={line.agent.host} />
-            </span>
-          )}
-          {line.status && (
-            <span className="ib-pr-mstatus" data-tone={line.tone ?? undefined} data-reviews-status="">
-              {/* A face by each name, but not twice: the person the row's left circle shows keeps only their name. */}
-              <Named words={facesOnce(line.parts, stack ? [stack.layers[0]!.author] : [])} host={stack?.layers[0]!.host ?? null} />
-            </span>
-          )}
-        </span>
-      </div>
-    </button>
-  );
-}
-
-function FoldedGroup({ label, name, rows, open, onToggle, draw }: { label: string; name: InboxReviewMove; rows: readonly InboxReviewRow[]; open: boolean; onToggle: () => void; draw: (row: InboxReviewRow) => React.ReactNode }) {
-  if (rows.length === 0) return null;
-  return (
-    <div className="ib-group ib-pr-fold" role="group" aria-label={label} data-pulls-group={name}>
-      <button type="button" className="ib-pr-foldbtn" onClick={onToggle} aria-expanded={open} data-reviews-fold={name}>
-        <Icon name={open ? 'chevD' : 'chevR'} size={14} />
-        {label} <span className="ib-n">{formatCount(rows.length)}</span>
-      </button>
-      {open && rows.map(draw)}
-    </div>
-  );
-}
-
-function Band({ label, name, rows, draw }: { label: string; name: InboxReviewMove; rows: readonly InboxReviewRow[]; draw: (row: InboxReviewRow) => React.ReactNode }) {
-  if (rows.length === 0) return null;
-  return (
-    <div className="ib-group" role="group" aria-label={label} data-pulls-group={name}>
-      <div className="ib-band">
-        {label} <span className="ib-n">{formatCount(rows.length)}</span>
-      </div>
-      {rows.map(draw)}
-    </div>
-  );
-}
 
 /** The open PRs a row is about (never a merged or closed layer of its stack): what its menu's Hide hides. */
 export function rowPulls(row: InboxReviewRow): InboxPull[] {
@@ -237,6 +38,27 @@ export function rowPulls(row: InboxReviewRow): InboxPull[] {
 /** The links Reviews' rows name their stacks by: the board's, with each reviewed row's own. */
 export function reviewLinksOf(model: InboxPullsAnswer, answer: InboxReviewsAnswer): InboxPullsAnswer['links'] {
   return { ...model.links, ...Object.fromEntries(answer.rows.flatMap((row) => (row.link ? row.pull_keys.map((key) => [key, row.link!] as const) : []))) };
+}
+
+/** What a right-click finds: a row about open PRs, or an open layer of an unfolded stack; what its title and Hide name. */
+interface MenuTarget {
+  title: string;
+  pulls: InboxPull[];
+  /** The row it is on (a layer's: its stack's): what Ship ships in. */
+  row: InboxReviewRow;
+}
+
+/** The menu's targets by id (`data-reviews-item`): each row about open PRs, and each open layer of a stack (`layerItem`). */
+export function menuTargets(rows: readonly InboxReviewRow[], links: InboxPullsAnswer['links']): Map<string, MenuTarget> {
+  const targets = new Map<string, MenuTarget>();
+  for (const row of rows) {
+    const pulls = rowPulls(row);
+    if (pulls.length > 0) targets.set(row.id, { title: reviewRowTitle(row, (s) => stackTitle(s, links)), pulls, row });
+    const stack = row.stacks[0];
+    if (!stack || stack.layers.length < 2) continue;
+    for (const layer of stack.layers) if (inboxPullIsOpen(layer)) targets.set(layerItem(layer.key), { title: layer.title, pulls: [layer], row });
+  }
+  return targets;
 }
 
 /** "Hide pull request", "Hide merge request", "Hide 3 pull requests". */
@@ -342,7 +164,8 @@ function HiddenFold({
 
 /**
  * Reviews' rows' right-click menu (and the menu key, Shift+F10; a long press on a phone): Hide, on a row about open
- * PRs. The list's body is its trigger (`className`, `.ib-lbody`), so the bands stay its direct children.
+ * PRs or an open layer's row (that one PR). The list's body is its trigger (`className`, `.ib-lbody`), so the bands
+ * stay its direct children.
  */
 export function ReviewsMenu({
   rows,
@@ -352,6 +175,7 @@ export function ReviewsMenu({
   onTarget,
   className,
   busy,
+  ship,
   children,
 }: {
   rows: readonly InboxReviewRow[];
@@ -362,22 +186,24 @@ export function ReviewsMenu({
   onTarget: (id: string | null) => void;
   className: string;
   busy?: boolean;
+  /** Ship (ShipMenu.tsx), first in the menu of a row about one open PR. Absent: no Ship. */
+  ship?: ShipHandlers;
   children: React.ReactNode;
 }) {
   const body = useRef<HTMLDivElement>(null);
-  const hideable = new Map(rows.filter((row) => rowPulls(row).length > 0).map((row) => [row.id, row] as const));
-  const buttonFor = (id: string) => body.current?.querySelector<HTMLElement>(`[data-reviews-row="${CSS.escape(id)}"]`) ?? null;
+  const hideable = menuTargets(rows, links);
+  const buttonFor = (id: string) => body.current?.querySelector<HTMLElement>(`[data-reviews-item="${CSS.escape(id)}"]`) ?? null;
   const menu = useContextMenuTrigger({
     itemOf: (target) => {
-      const button = target instanceof Element ? target.closest<HTMLElement>('[data-reviews-row]') : null;
-      return button && hideable.has(button.getAttribute('data-reviews-row') ?? '') ? button : null;
+      const button = target instanceof Element ? target.closest<HTMLElement>('[data-reviews-item]') : null;
+      return button && hideable.has(button.getAttribute('data-reviews-item') ?? '') ? button : null;
     },
-    idOf: (button) => button.getAttribute('data-reviews-row'),
+    idOf: (button) => button.getAttribute('data-reviews-item'),
     has: (id) => hideable.has(id),
     buttonFor,
     // A hidden row: the row now in its place, else the list's heading.
     slotOf: () => ({
-      order: [...(body.current?.querySelectorAll<HTMLElement>('[data-reviews-row]') ?? [])].map((b) => b.getAttribute('data-reviews-row')!),
+      order: [...(body.current?.querySelectorAll<HTMLElement>('[data-reviews-item]') ?? [])].map((b) => b.getAttribute('data-reviews-item')!),
       fallback: () => body.current?.closest('.ib-listcol')?.querySelector<HTMLElement>('[data-pulls-heading]') ?? null,
     }),
     stateOf: (id) => (hideable.has(id) ? 'shown' : ''),
@@ -388,8 +214,21 @@ export function ReviewsMenu({
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(body.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   const target = menu.targetId ? (hideable.get(menu.targetId) ?? null) : null;
-  const targetPulls = target ? rowPulls(target) : [];
-  const title = target ? reviewRowTitle(target, (s) => stackTitle(s, links)) : 'Review';
+  const targetId = target ? menu.targetId! : null;
+  const targetPulls = target?.pulls ?? [];
+  const title = target?.title ?? 'Review';
+  const shipTo = target && ship ? shipTarget(target.row, target.pulls, ship.repoProjects) : null;
+  const shipNow = shipTo ? (ship?.ships.get(shipTo.pull.key) ?? null) : null;
+  const shipping = !!shipNow && shipActive(shipNow);
+  const agents = useShipAgents(shipping ? null : shipTo, menu.open && !!shipTo && !shipping, ship?.projectsOf ?? noProjects);
+  // A phone's agent sheet, after the menu closes.
+  const [sheet, setSheet] = useState<ShipTarget | null>(null);
+  const sheetAgents = useShipAgents(sheet, sheet !== null, ship?.projectsOf ?? noProjects);
+  const shipWith = (to: ShipTarget, option: ShipOption) => {
+    setSheet(null);
+    menu.close();
+    ship?.onShip(to, option);
+  };
   return (
     <ContextMenu.Root {...menu.root}>
       <ContextMenu.Trigger ref={body} className={className} aria-busy={busy ? true : undefined} {...menu.trigger}>
@@ -398,17 +237,33 @@ export function ReviewsMenu({
       <ContextMenu.Portal container={portal ?? undefined}>
         {phone && <ContextMenu.Backdrop className="ib-pm-scrim" />}
         <ContextMenu.Positioner className="ib-pm-pos" data-phone={phone ? '' : undefined}>
-          <ContextMenu.Popup className="ib-pm" aria-label={title} data-reviews-menu={target?.id} {...menu.popup}>
+          <ContextMenu.Popup className="ib-pm" aria-label={title} data-reviews-menu={targetId ?? undefined} {...menu.popup}>
             {target && onHide && (
               <>
                 <div className="ib-pm-title" dir="auto" aria-hidden="true">
                   {title}
                 </div>
+                {shipTo && ship && (
+                  <ShipMenuItems
+                    shipping={shipping}
+                    options={agents.options}
+                    chosen={agents.chosen}
+                    phone={phone}
+                    portal={portal}
+                    onShip={(option) => shipWith(shipTo, option)}
+                    onChoose={() => setSheet(shipTo)}
+                    onLog={() => {
+                      menu.keepFocus();
+                      ship.onLog(shipNow!, buttonFor(targetId!));
+                    }}
+                    onStop={() => ship.onStop(shipNow!)}
+                  />
+                )}
                 <Menu.Item
                   className="ib-pmi"
                   label={hideWords(targetPulls)}
                   onClick={() => {
-                    menu.follow(target.id);
+                    menu.follow(targetId!);
                     onHide(targetPulls);
                   }}
                   data-reviews-hide=""
@@ -421,8 +276,43 @@ export function ReviewsMenu({
           </ContextMenu.Popup>
         </ContextMenu.Positioner>
       </ContextMenu.Portal>
+      {ship && phone && (
+        <ShipAgentSheet open={sheet !== null} title={sheet?.pull.title ?? 'Ship'} options={sheetAgents.options} chosen={sheetAgents.chosen} host={portal} onShip={(option) => sheet && shipWith(sheet, option)} onClose={() => setSheet(null)} />
+      )}
     </ContextMenu.Root>
   );
+}
+
+/** What Reviews' Ship needs from its page (PullsPage.tsx). */
+export interface ShipHandlers {
+  ships: ReadonlyMap<string, InboxShipView>;
+  /** `host/repo` → the Inbox projects on it (the Reviews answer's). */
+  repoProjects: Readonly<Record<string, string[]>>;
+  /** A computer's projects by repository (null: this one): whose agents Ship's list offers there. Absent: this one's. */
+  projectsOf?: (machine: string | null) => Readonly<Record<string, string[]>>;
+  onShip: (target: ShipTarget, option: ShipOption) => void;
+  /** Open the ship log by its row (`anchor`). */
+  onLog: (ship: InboxShipView, anchor: HTMLElement | null) => void;
+  onStop: (ship: InboxShipView) => void;
+}
+
+const NO_PROJECTS: Readonly<Record<string, string[]>> = {};
+const noProjects = () => NO_PROJECTS;
+
+/**
+ * The ship a row draws: its one PR's; a folded stack's, any layer's (an unfolded one's layers draw their own); a
+ * landed PR's (its Merged words). One that still draws first: a thread's older ship, long over, never hides a fresh one.
+ */
+function rowShip(row: InboxReviewRow, ships: ReadonlyMap<string, InboxShipView> | undefined, unfolded: boolean, now: number): InboxShipView | null {
+  if (!ships || ships.size === 0 || unfolded) return null;
+  let quiet: InboxShipView | null = null;
+  for (const key of [...row.pull_keys, ...row.landed.map((landing) => landing.key)]) {
+    const ship = ships.get(key);
+    if (!ship) continue;
+    if (shipLook(ship, now) !== null) return ship;
+    quiet ??= ship;
+  }
+  return quiet;
 }
 
 export function ReviewsList({
@@ -435,18 +325,24 @@ export function ReviewsList({
   notRanked = NO_ROWS,
   judgments = NO_JUDGMENTS,
   riskFailed = NO_FAILURES,
+  autoRuns,
   projectNames,
   selected,
+  selectedLayer = null,
   phone,
   project = null,
   onOpen,
+  onOpenLayer,
   onNew,
-  onReviewBranch,
+  localGroup = null,
   menuRow = null,
   onShowAgain,
   onShowRepo,
   onOpenThread,
+  ships,
 }: {
+  /** The ships by pull request key (data/ships.ts): their rows in ship mode. */
+  ships?: ReadonlyMap<string, InboxShipView>;
   answer: InboxReviewsAnswer;
   model: InboxPullsAnswer;
   rows: readonly InboxReviewRow[];
@@ -457,16 +353,27 @@ export function ReviewsList({
   notRanked?: readonly InboxReviewRow[];
   judgments?: RiskJudgments;
   riskFailed?: RiskFailures;
+  autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>;
   projectNames: ReadonlyMap<string, string>;
   /** The open thread's id, or the open stack's. */
   selected: string | null;
+  /**
+   * The layer of the open stack whose row shows selected (PullsPage's, from the address): the one whose diff closed
+   * back to the stack, or the stack opened by that layer's own key. Nothing is remembered here.
+   */
+  selectedLayer?: string | null;
   phone: boolean;
-  /** The project the list is filtered to: Branch reviews' "Branches nobody reported" is one project's. */
+  /** The project the list is filtered to. */
   project?: string | null;
   onOpen: (row: InboxReviewRow) => void;
+  /** A layer's row of an unfolded stack: that layer. Absent: the row's own `onOpen`. */
+  onOpenLayer?: (row: InboxReviewRow, layer: InboxPull) => void;
   onNew: () => void;
-  /** Branch reviews' safety net: New review with that branch. Absent: no safety net. */
-  onReviewBranch?: (branch: InboxUnreportedBranch, opener: HTMLElement) => void;
+  /**
+   * "On this computer" (OnThisComputer.tsx), at the list's foot whatever it holds, given its saved fold (`folds.local`).
+   * Not under a risk filter: local work has no risk to match.
+   */
+  localGroup?: ((fold: ReviewGroupFold) => React.ReactNode) | null;
   /** The row whose menu (ReviewsMenu) is open: its muted background. */
   menuRow?: string | null;
   /** The Hidden fold's Show again. Absent: no fold. */
@@ -493,15 +400,27 @@ export function ReviewsList({
     setFolds(next);
     saveReviewFolds(next);
   };
+  const local = localGroup && risk === 'all' ? localGroup({ open: folds.local, onToggle: () => toggle('local') }) : null;
   const isOpenRow = (row: InboxReviewRow) => selected !== null && (row.thread_id === selected || row.id === selected || row.stacks.some((stack) => stack.id === selected || stack.layers.some((l) => l.key === selected)));
   // A row opened from a folded group keeps its group open.
   const waitingOpen = unfolded('waiting') || groups.waiting.some(isOpenRow);
   const listedOpen = unfolded('not_reviewed') || groups.not_reviewed.some(isOpenRow);
+  /** The layer of this row's stack that shows selected on its own row (`selectedLayer`), when this row is the open one. */
+  const openLayerOf = (row: InboxReviewRow): string | null => {
+    const stack = row.stacks[0];
+    if (!stack || stack.layers.length < 2 || !isOpenRow(row) || !selectedLayer) return null;
+    return stack.layers.some((layer) => layer.key === selectedLayer) ? selectedLayer : null;
+  };
+  // A stack's fold, by hand; one whose layer is open starts unfolded, as a folded group keeps an open row shown.
+  const [stackFolds, setStackFolds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const stackUnfolded = (row: InboxReviewRow) => stackFolds.get(row.id) ?? openLayerOf(row) !== null;
+  const toggleStack = (row: InboxReviewRow) => {
+    const open = stackUnfolded(row);
+    setStackFolds((was) => new Map(was).set(row.id, !open));
+  };
   // Those High could not place, behind one quiet line; one opened from there keeps them shown.
   const [notRankedFolded, setNotRankedOpen] = useState(false);
   const notRankedOpen = notRankedFolded || notRanked.some(isOpenRow);
-  // Branch reviews' safety net: one project's, while Branch reviews is on, never read until opened.
-  const unreported = answer.branch_reviews && project && onReviewBranch ? <UnreportedBranches key={project} projectId={project} now={now} onStart={onReviewBranch} /> : null;
   const notices = pullsNotices(model, filter);
   const notice =
     notices.length > 0 ? (
@@ -539,9 +458,30 @@ export function ReviewsList({
     return project ?? row.review?.source?.repo ?? 'A project';
   };
   const links = reviewLinksOf(model, answer);
-  const draw = (row: InboxReviewRow) => (
-    <ReviewRowItem key={row.id} row={row} links={links} place={placeOf(row)} selected={isOpenRow(row)} phone={phone} now={now} judgments={judgments} riskFailed={riskFailed} menu={menuRow === row.id} onOpen={() => onOpen(row)} />
-  );
+  const draw = (row: InboxReviewRow) => {
+    const stack = row.stacks[0];
+    const many = !!stack && stack.layers.length > 1;
+    const unfolded = many && stackUnfolded(row);
+    const props = { row, links, place: placeOf(row), selected: isOpenRow(row), phone, now, judgments, riskFailed, autoRuns, menu: menuRow === row.id, ship: rowShip(row, ships, unfolded, now), ships, onOpen: () => onOpen(row) };
+    // A stack of several PRs unfolds its layers under its row; the choice lasts while the list is shown.
+    if (many) {
+      // An open layer shown on its own row takes the selection from the stack's row.
+      const openLayer = unfolded ? openLayerOf(row) : null;
+      return (
+        <ReviewStack
+          key={row.id}
+          {...props}
+          selected={props.selected && openLayer === null}
+          open={unfolded}
+          onToggle={() => toggleStack(row)}
+          openLayer={openLayer}
+          menuItem={menuRow}
+          onOpenLayer={(layer) => (onOpenLayer ? onOpenLayer(row, layer) : onOpen(row))}
+        />
+      );
+    }
+    return <ReviewRowItem key={row.id} {...props} />;
+  };
   // Under a project filter, that project's hidden PRs and repositories only, as the rest of the page (its count follows).
   const hiddenFold = onShowAgain ? <HiddenFold hidden={hiddenInProject(answer.hidden ?? [], project, answer.projects)} repos={hiddenInProject(answer.hidden_repos ?? [], project, answer.projects)} onShow={onShowAgain} onShowRepo={onShowRepo} onOpenThread={onOpenThread} /> : null;
   // High: what it can't place, behind one quiet line in the fold's own shape.
@@ -604,7 +544,7 @@ export function ReviewsList({
             New review
           </button>
         </div>
-        {unreported}
+        {local}
         {hiddenFold}
       </div>
     );
@@ -612,14 +552,18 @@ export function ReviewsList({
   return (
     <>
       {notice}
-      <Band label="On you" name="on_you" rows={groups.on_you} draw={draw} />
-      <Band label="With your agents" name="agents" rows={groups.agents} draw={draw} />
-      <Band label="Ready to land" name="ready" rows={groups.ready} draw={draw} />
-      <FoldedGroup label="Waiting on others" name="waiting" rows={groups.waiting} open={waitingOpen} onToggle={() => toggle('waiting')} draw={draw} />
-      <FoldedGroup label="Open, not reviewed" name="not_reviewed" rows={groups.not_reviewed} open={listedOpen} onToggle={() => toggle('not_reviewed')} draw={draw} />
+      <ReviewGroup label="On you" name="on_you" count={groups.on_you.length}>{groups.on_you.map(draw)}</ReviewGroup>
+      <ReviewGroup label="With your agents" name="agents" count={groups.agents.length}>{groups.agents.map(draw)}</ReviewGroup>
+      <ReviewGroup label="Ready to land" name="ready" count={groups.ready.length}>{groups.ready.map(draw)}</ReviewGroup>
+      <ReviewGroup label="Waiting on others" name="waiting" count={groups.waiting.length} fold={{ open: waitingOpen, onToggle: () => toggle('waiting') }}>
+        {groups.waiting.map(draw)}
+      </ReviewGroup>
+      <ReviewGroup label="Open, not reviewed" name="not_reviewed" count={groups.not_reviewed.length} fold={{ open: listedOpen, onToggle: () => toggle('not_reviewed') }}>
+        {groups.not_reviewed.map(draw)}
+      </ReviewGroup>
       {notJudgedLine}
       {notRankedLine}
-      {unreported}
+      {local}
       {hiddenFold}
     </>
   );

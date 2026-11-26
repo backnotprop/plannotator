@@ -10,6 +10,8 @@ import type { SentAnswerGroup } from '../../sentReply';
 import type { FileRef } from '../../fileRefs';
 
 export interface MessageBodyProps {
+  /** Draw only this question's card (decision mode, one question at a time); absent: the whole message. */
+  onlyQuestion?: string;
   /** A question with a prototype (an option's, or one for all) was asked to open it (its key). Absent: no "Try prototype" tab. */
   onTryPrototype?: (key: string) => void;
   /**
@@ -50,7 +52,15 @@ export interface MessageBodyProps {
    * like any image of the body.
    */
   onOpenOptionSet?: (key: string, image: InboxInlineImage, choice: number) => void;
+  /**
+   * An image the body shows whose file the store has not captured yet (no `inline_images` record) was opened: the
+   * host shows it (decision mode: its own viewer, inside its modal dialog, so the picture is never behind it).
+   * Absent: the plain lightbox over the page.
+   */
+  onOpenUncapturedImage?: (src: string, alt: string) => void;
   readOnly: boolean;
+  /** The thread's questions moved to another thread (its root's `moved_to`): a card the archive closed reads "Closed". */
+  movedThread?: boolean;
   answers: ReadonlyMap<string, QuestionAnswer>;
   onPick: (key: string, answer: QuestionAnswer | null) => void;
   footerFor: (key: string) => string | null;
@@ -65,6 +75,11 @@ export interface MessageBodyProps {
    * `recordFor` names the record a block draws (null: the block stays text
    * and ends the run); `render` draws a run's records, in body order.
    */
+  /**
+   * `:::run` and `:::secret` blocks (parts/RunBlocks): the host's card for one block, by its opening line; undefined
+   * leaves the block as text (a callout, its command with Copy).
+   */
+  renderRunBlock?: (block: { startLine: number; directiveKind?: string }) => React.ReactNode | undefined;
   renderActions?: {
     recordFor: (block: { startLine: number; content: string }) => InboxQuestion | null;
     render: (records: InboxQuestion[]) => React.ReactNode;

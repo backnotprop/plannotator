@@ -69,7 +69,7 @@ export function actionForBlock(
 }
 
 /** What an action item's card says it is, for its badge. */
-export type ActionCardState = 'open' | 'pending' | 'done' | 'cant' | 'seen' | 'set-aside' | 'archived' | 'replaced';
+export type ActionCardState = 'open' | 'pending' | 'done' | 'cant' | 'skipped' | 'seen' | 'set-aside' | 'archived' | 'replaced';
 
 export function actionCardState(action: InboxQuestion): ActionCardState {
   const result = action.action_result ?? null;
@@ -78,5 +78,5 @@ export function actionCardState(action: InboxQuestion): ActionCardState {
   if (action.state === 'closed') return action.set_aside_at ? 'set-aside' : 'archived';
   if (!result) return 'open';
   if (action.state === 'picked') return 'pending';
-  return result.outcome === 'cant' ? 'cant' : 'done';
+  return result.outcome === 'cant' ? 'cant' : result.outcome === 'skip' ? 'skipped' : 'done';
 }

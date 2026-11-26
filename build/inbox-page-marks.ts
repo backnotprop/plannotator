@@ -31,11 +31,7 @@ export const PAGE_MARKS: readonly PageMark[] = [
   { has: ':root[data-ib-keyboard-pin]:has(.pn-inbox)', mark: ':root[data-ib-keyboard-pin][data-pn-inbox]' },
   { has: '.pn-inbox:has(.ib-dm-pill)', mark: '.pn-inbox[data-ib-dm-pill]' },
   { has: '.pn-inbox:has(.ib-imgcompose)', mark: '.pn-inbox[data-ib-imgcompose]' },
-  { has: '.pn-inbox:has(.ib-fcomp)', mark: '.pn-inbox[data-ib-fcomp]' },
   { has: '.pn-inbox:has(.ib-rpick)', mark: '.pn-inbox[data-ib-rpick]' },
-  // The argument weighs two classes: the mark twice.
-  { has: 'body:has([data-shape-layer] .shp-dock)', mark: 'body[data-ib-shape-dock][data-ib-shape-dock]' },
-  { has: 'body:has([data-shape-layer] .shp-pill)', mark: 'body[data-ib-shape-pill][data-ib-shape-pill]' },
   // ui's theme.css and review-editor's comments.css. Holders: ui's `pageMarks` option (utils/pageMarks.ts).
   { has: 'body:has([data-popout=true])', mark: 'body[data-pn-popout]' },
   { has: 'html:has([data-selection-chooser])', mark: 'html[data-pn-selection-chooser]' },

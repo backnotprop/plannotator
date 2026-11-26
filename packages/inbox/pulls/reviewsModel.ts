@@ -8,6 +8,9 @@ import {
   type InboxMessageWire,
   type InboxPull,
   type InboxPullLink,
+  INBOX_PULL_RISK_AUTO_TRIES,
+  type InboxPullRiskAutoMake,
+  type InboxPullRiskAutoRun,
   type InboxPullStack,
   type InboxReviewRow,
   type InboxReviewsAnswer,
@@ -19,7 +22,7 @@ import { checksWords, inboxPullLabel, isPullThread, linkAgentName, openLayers, p
 import { person, wordsText, type Words } from './words';
 import { startLayer } from './topology';
 import { hostLabel } from '../compose/model';
-import { branchContextWords, branchNoteOf, branchReportOf, branchRowLead, type BranchNote } from './branchReviews';
+import { branchAskedAlready, branchContextWords, branchNoteOf, branchReportOf, branchRowLead, type BranchNote } from './branchReviews';
 
 /** The rows a project and a view keep: a local review is the person's own, and belongs to its thread's project. */
 export function reviewRowsIn(answer: InboxReviewsAnswer, project: string | null, filter: PullFilter): InboxReviewRow[] {
@@ -65,11 +68,13 @@ export function reviewRowProject(row: InboxReviewRow): string | null {
   return row.review?.project_id ?? row.started?.project_id ?? null;
 }
 
-export function reviewRowTitle(row: InboxReviewRow, pullTitle: (stack: InboxPullStack) => string): string {
+/** `shown`: the PR whose ship the row draws (`reviewRowLanding`). */
+export function reviewRowTitle(row: InboxReviewRow, pullTitle: (stack: InboxPullStack) => string, shown?: string | null): string {
   const stack = row.stacks[0];
   if (stack) return pullTitle(stack);
   if (row.review) return inboxReviewTitleLine(row.review.title);
-  return row.started?.name ?? row.link?.thread_id ?? '';
+  // A shipped PR's thread, its PR merged: the PR's title, as its row had while open.
+  return row.started?.name ?? reviewRowLanding(row, shown)?.title ?? row.link?.thread_id ?? '';
 }
 
 /** A row's third line: what it is, whose agent, and why it is where it is. */
@@ -113,7 +118,7 @@ function statusOf(row: InboxReviewRow): { status: Words; tone: ReviewRowLine['to
     case 'branch_ready':
       return { status: ['Ready for review'], tone: null };
     case 'curating':
-      return { status: ['Curating…'], tone: null };
+      return { status: [row.started?.ask === 'picture_it' ? 'Making a Picture page…' : 'Curating…'], tone: null };
     case 'feedback_sent': {
       const verdict = row.review?.verdict;
       if (verdict?.verdict !== 'changes_requested') return { status: ['You answered'], tone: null };
@@ -145,13 +150,46 @@ function statusOf(row: InboxReviewRow): { status: Words; tone: ReviewRowLine['to
 
 const reviewIsWalkthrough = (row: InboxReviewRow) => !!row.review?.walkthrough || row.started?.kind === 'walkthrough';
 
-/** The landing a row speaks for: a link's own PR only, since an agent's guide may name another that merged. */
-export function reviewRowLanding(row: InboxReviewRow): InboxReviewRow['landed'][number] | null {
+/**
+ * The landing a row speaks for: a link's own PR only, since an agent's guide may name another that merged. `shown`: the
+ * PR whose ship the row draws (its Merged words): its landing, so the title is of the PR that merged.
+ */
+export function reviewRowLanding(row: InboxReviewRow, shown?: string | null): InboxReviewRow['landed'][number] | null {
+  const ship = shown ? row.landed.find((landing) => landing.key === shown) : undefined;
+  if (ship) return ship;
   const handed = row.started?.pull;
   return (handed ? row.landed.find((landing) => landing.key === handed.key) : row.landed[0]) ?? null;
 }
 
-export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
+const LEVEL_WORD = { high: 'High', medium: 'Medium', low: 'Low' } as const;
+
+export const REVIEW_ROW_AUTO_STOPPED: Record<InboxPullRiskAutoMake, string> = {
+  picture_it: 'The agent stopped before sending a Picture page.',
+  guide: 'The agent stopped before sending a guided review.',
+};
+
+export function reviewRowAutoRun(row: Pick<InboxReviewRow, 'stacks'>, runs: Readonly<Record<string, InboxPullRiskAutoRun>> | undefined): InboxPullRiskAutoRun | null {
+  const layer = runs ? row.stacks[0]?.layers.find((pull) => runs[pull.key]) : undefined;
+  return layer ? runs![layer.key]! : null;
+}
+
+export function reviewRowAutoWords(run: InboxPullRiskAutoRun | null, row: Pick<InboxReviewRow, 'link' | 'review' | 'thread_id' | 'stacks'>): string | null {
+  if (!run) return null;
+  const link = row.link;
+  if (run.state === 'failed') {
+    const open = row.stacks[0] ? openLayers(row.stacks[0]).length > 0 : false;
+    const again = (run.tries ?? 1) < INBOX_PULL_RISK_AUTO_TRIES ? ' It will try again.' : '';
+    return open && !link && !row.thread_id ? `Couldn't start: ${run.reason ?? 'the agent did not start.'}${again}` : null;
+  }
+  if (run.state !== 'started' || !link || link.thread_id !== run.thread_id) return null;
+  const page = run.made !== 'guide' && link.picture_it_page && link.picture_it_page.at >= run.at ? link.picture_it_page : null;
+  if (page) return !page.seen && !row.review ? `Picture page ready, made when it ranked ${LEVEL_WORD[run.level]}` : null;
+  if (row.review) return null;
+  if (link.agent?.ended) return REVIEW_ROW_AUTO_STOPPED[run.made];
+  return run.made === 'picture_it' ? 'Making a Picture page…' : 'Making a guided review…';
+}
+
+export function reviewRowLine(row: InboxReviewRow, autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>, shown?: string | null): ReviewRowLine {
   const stack = row.stacks[0];
   const name = row.review?.agent?.name ?? linkAgentName(row.link) ?? (row.started ? hostLabel(row.started.host) : null);
   const host = row.review?.agent?.host ?? row.link?.agent?.host ?? row.started?.host ?? null;
@@ -159,7 +197,8 @@ export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   const said = statusOf(row);
   const { tone } = said;
   // A walkthrough has nothing to review: Ready once it's in, Writing… while the agent writes it.
-  const parts: Words = reviewIsWalkthrough(row) && (row.reason === 'review_ready' || row.reason === 'curating') ? [row.reason === 'review_ready' ? 'Ready' : 'Writing…'] : said.status;
+  const auto = reviewRowAutoWords(reviewRowAutoRun(row, autoRuns), row);
+  const parts: Words = auto ? [auto] : reviewIsWalkthrough(row) && (row.reason === 'review_ready' || row.reason === 'curating') ? [row.reason === 'review_ready' ? 'Ready' : 'Writing…'] : said.status;
   const status = wordsText(parts);
   if (reviewIsWalkthrough(row)) return { kind: 'local', lead: 'Walkthrough', agent, status, parts, tone };
   if (stack) {
@@ -171,7 +210,7 @@ export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
     }
     return { kind: 'pr', lead: inboxPullLabel(focusOf(stack)), agent, status, parts, tone };
   }
-  const landing = reviewRowLanding(row);
+  const landing = reviewRowLanding(row, shown);
   if (landing) return { kind: 'pr', lead: `${landing.platform === 'gitlab' ? '!' : '#'}${landing.number} ${landing.state}`, agent, status, parts, tone };
   // The PR the person handed it: an agent's words about another PR don't change where a Post goes.
   const linked = row.started?.pull;
@@ -244,9 +283,10 @@ export interface ReviewView {
   pullLine?: { pull: InboxPull; stack: InboxPullStack; link: InboxPullLink; onDiff: () => void; onAsked: () => void } | null;
   /**
    * A reported branch with no review yet (Branch reviews): what the agent reported, and the message a review request
-   * replies to, so the review stays in this thread. Null for every other thread, and once a review is in.
+   * replies to, so the review stays in this thread, and whether the person already asked for it (`asked`). Null for
+   * every other thread, and once a review is in.
    */
-  branch: (BranchNote & { projectName: string | null; replyTo: string | null }) | null;
+  branch: (BranchNote & { projectName: string | null; replyTo: string | null; asked?: boolean }) | null;
 }
 
 /**
@@ -307,7 +347,7 @@ export function reviewOpenPlan(input: {
  */
 export function reviewViewOf(
   row: InboxReviewRow,
-  thread: { messages: readonly { id: string }[]; subject: string | null; thread_name?: string | null },
+  thread: { messages: readonly { id: string; author?: { kind: string }; body?: string; created_at?: string }[]; subject: string | null; thread_name?: string | null },
   options: { projectName: string | null; onWholeThread: () => void; onOpenStack: (stackId: string) => void; onOpenDiff?: (stackId: string, layerKey: string) => void; onAsked?: () => void },
 ): ReviewView {
   const line = reviewRowLine(row);
@@ -321,15 +361,17 @@ export function reviewViewOf(
   const stack = row.stacks[0];
   const report = row.review ? null : branchReportOf(row);
   return {
-    branch: report ? { ...branchNoteOf(report), projectName: options.projectName, replyTo: thread.messages[thread.messages.length - 1]?.id ?? null } : null,
+    branch: report
+      ? { ...branchNoteOf(report), projectName: options.projectName, replyTo: thread.messages[thread.messages.length - 1]?.id ?? null, asked: branchAskedAlready(thread.messages, report, options.projectName) }
+      : null,
     context: reviewContextLine(row, options.projectName),
     kind: line.kind === 'local' ? 'local' : 'pr',
     title: row.review ? inboxReviewTitleLine(row.review.title) : null,
     name: row.review && !stack ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
-    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : 'Curating the review…',
-    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
+    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : row.started?.ask === 'picture_it' ? 'Making a Picture page…' : 'Curating the review…',
+    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : ask === 'picture_it' ? 'Picture it' : 'Guided review'}` : null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,
@@ -345,14 +387,15 @@ export { ReviewViewNote } from './ReviewViewNote';
 
 /** The groups that start folded, and the person's own choice for each, kept in this browser. */
 export const REVIEW_FOLDS_KEY = 'plannotator-inbox-reviews-folds';
-export type ReviewFolds = { waiting: boolean; not_reviewed: boolean };
+/** Which folded groups are open, kept: "On this computer" (`local`, OnThisComputer.tsx) is one. */
+export type ReviewFolds = { waiting: boolean; not_reviewed: boolean; local: boolean };
 
 export function readReviewFolds(): ReviewFolds {
   try {
     const kept = JSON.parse(localStorage.getItem(REVIEW_FOLDS_KEY) ?? '{}') as Partial<ReviewFolds>;
-    return { waiting: kept.waiting === true, not_reviewed: kept.not_reviewed === true };
+    return { waiting: kept.waiting === true, not_reviewed: kept.not_reviewed === true, local: kept.local === true };
   } catch {
-    return { waiting: false, not_reviewed: false };
+    return { waiting: false, not_reviewed: false, local: false };
   }
 }
 

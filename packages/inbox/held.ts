@@ -91,6 +91,15 @@ function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, o
 }
 
 /**
+ * The thread's row now (`current`) carries agent activity the row drawn on screen (`drawn`) does not show: that news
+ * waits behind "N new · Show". Mark all as read (markAllRead.ts) leaves such a thread out, so it stays new. `drawn`
+ * undefined: the list on screen has no row for the thread (one an agent wrote in is news).
+ */
+export function waitsBehindShow(drawn: InboxListRow | undefined, current: InboxListRow): boolean {
+  return hasNewAgentActivity(drawn, current);
+}
+
+/**
  * The thread the held list treats as open (design record
  * "inbox-new-in-open-thread", approved 2026-10-12): the thread the person
  * has open, or the one they just closed until the list settles. While it is
@@ -385,13 +394,17 @@ export function priorityChangedRows(shown: readonly InboxListSection[], latest: 
  * seen or not) and is drawn in another group, so it is never left folded in
  * Quiet with questions open. A thread only read stays where it was left. A
  * thread snoozed or unsnoozed, or added to or removed from Priority, while it
- * was open goes to its place: that is what the person just asked for.
+ * was open goes to its place: that is what the person just asked for. A
+ * routine's run that started while it was open (`scheduled_running`) and is
+ * drawn in Quiet or Sent comes up under New, as `routineRunsEnter` brings it in
+ * for a closed thread; else a phone's Back left it folded for the whole run.
  */
 export function settlesOnBack(shown: readonly InboxListSection[], row: InboxListRow): boolean {
   const drawn = shown.find((section) => section.threads.some((other) => other.thread_id === row.thread_id));
   if (drawn && (drawn.id === INBOX_SNOOZED_BAND.id) !== !!row.snoozed) return true;
   if (row.snoozed) return false;
   if (drawn && (drawn.id === INBOX_PRIORITY_GROUP.id) !== inboxRowInPriority(row)) return true;
+  if (row.scheduled_running === true && (drawn?.id === 'quiet' || drawn?.id === 'sent')) return true;
   if (row.unseen > 0) return true;
   if (drawn?.id === INBOX_PRIORITY_GROUP.id) return false;
   const onYou = (section: string | undefined) => section === 'stopped' || section === 'holding' || section === 'waiting';
@@ -575,5 +588,35 @@ export function waitingCount(sections: readonly InboxListSection[], projectId?: 
 export function shownAfter(shown: InboxListSection[] | null, latest: InboxListSection[], how: { adopt: boolean; keep: string | null; open: OpenThread | null; gone: ReadonlySet<string> }): InboxListSection[] {
   if (shown === null || !hasRows(shown)) return latest;
   if (how.adopt) return how.keep ? adoptKeepingOpen(shown, latest, how.keep) : latest;
-  return withoutRows(refreshHeldRows(shown, latest, how.open), how.gone);
+  return routineRunsEnter(withoutRows(refreshHeldRows(shown, latest, how.open), how.gone), latest, how.open);
+}
+
+/**
+ * A routine's run that starts comes into the held list at once, under New with its Running mark (the owner,
+ * 2026-11-24: while a routine's run is going, its thread sits under New until the run ends). Its divider is the
+ * person's message, not agent activity, so the held rules would leave it out (a thread not on screen) or folded where
+ * it was (Quiet, Sent) until a reload; a run going is shown, not news held back. Only a row the read places in New
+ * for its run (`scheduled_running`, shared/inbox/list.ts) moves, and only from Quiet or Sent or from off screen: a row
+ * the person put in Priority or snoozed, or one drawn in New or above, stays; the open thread's row never moves under
+ * the reader (it settles when it closes); and a row with agent words the list on screen does not show still waits
+ * behind "N new", so nothing else comes out of hold this way. When the run ends the row stays where it is on screen
+ * until the list settles, as every row does.
+ */
+export function routineRunsEnter(shown: readonly InboxListSection[], latest: readonly InboxListSection[], open?: OpenThread | null): InboxListSection[] {
+  const newRows = latest.find((section) => section.id === 'new')?.threads ?? [];
+  if (!newRows.some((row) => row.scheduled_running === true)) return shown as InboxListSection[];
+  const drawn = rowsById(shown);
+  const entering = new Set<string>();
+  for (const section of latest) {
+    if (section.id !== 'new') continue;
+    for (const row of section.threads) {
+      if (row.scheduled_running !== true || row.thread_id === open?.threadId) continue;
+      const at = drawnSection(shown, row.thread_id);
+      if (at !== null && at !== 'quiet' && at !== 'sent') continue;
+      if (waitsBehindShow(drawn.get(row.thread_id), row)) continue;
+      entering.add(row.thread_id);
+    }
+  }
+  if (entering.size === 0) return shown as InboxListSection[];
+  return addOwnThreads(withoutRows(shown, entering), latest, [...entering]);
 }

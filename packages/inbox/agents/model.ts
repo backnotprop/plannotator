@@ -61,7 +61,7 @@ export function agentThread(agent: InboxAgent, machine: string | null, self: str
 }
 
 /** An agent's sessions: the one it runs as and those its conversation had before, but for the ones in `others` (listed as agents of their own). */
-function agentSessions(agent: InboxAgent, others?: ReadonlySet<string>): string[] {
+export function agentSessions(agent: InboxAgent, others?: ReadonlySet<string>): string[] {
   return [agent.session, ...(agent.continues ?? []).filter((old) => !others?.has(old))];
 }
 
@@ -110,6 +110,14 @@ function sectionGroups(groups: readonly InboxAgentsGroup[] | null, machines: Mac
   const self = machines.self;
   if (machines.all.length === 0) return [{ group: groups?.find((g) => !g.machine || g.machine === self), machine: null, view: null }];
   return machines.all.map((view) => ({ group: groups?.find((g) => (g.machine ?? self) === view.id), machine: view.id, view }));
+}
+
+/**
+ * Every agent the list names, the ended ones too, per group the section draws (`sectionGroups`): the list's Agents
+ * view (agentsView/model.ts) groups threads under them. `machine` null: no machine linked.
+ */
+export function namedAgents(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel): { machine: string | null; view: MachineView | null; known: boolean; agents: readonly InboxAgent[] }[] {
+  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({ machine, view, known: group !== undefined, agents: group?.agents ?? [] }));
 }
 
 /** `entry` is the older session of `later`'s conversation and opens the same thread: one row, `later`'s. */
@@ -211,6 +219,13 @@ export interface AgentFacts {
   rows: [string, string][];
 }
 
+export function modelName(id: string): string {
+  const parts = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(id);
+  if (!parts) return id;
+  const family = parts[1]!.charAt(0).toUpperCase() + parts[1]!.slice(1);
+  return `${family} ${parts[2]}${parts[3] ? `.${parts[3]}` : ''}`;
+}
+
 export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: Date = new Date()): AgentFacts {
   const { agent } = entry;
   // An agent the Inbox started in T3 Code: the agent and model T3 runs its thread on ("T3 Code (Claude Code · opus)").
@@ -237,6 +252,8 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   if (agent.started_at) rows.push(['Started', agent.launch ? `From the Inbox, ${whenTime(agent.started_at, now)}` : whenTime(agent.started_at, now)]);
   else if (agent.launch) rows.push(['Started', 'From the Inbox']);
   if (agent.last_seen_at) rows.push(['Last heard', whenTime(agent.last_seen_at, now)]);
+  if (agent.live && agent.model) rows.push(['Model', agent.effort ? `${modelName(agent.model)} · ${agent.effort}` : modelName(agent.model)]);
+  if (agent.live && typeof agent.context === 'number') rows.push(['Context', `${agent.context}% used`]);
   // Where it lives (a Rex pane, as Rex named it at the last read): a row of its own.
   if (agent.place?.line) rows.push(['Where', agent.place.line]);
   if (entry.thread?.subject && entry.thread.subject !== entry.name) rows.push(['Thread', entry.thread.subject]);

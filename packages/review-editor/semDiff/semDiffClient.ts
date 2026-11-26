@@ -27,6 +27,7 @@ export interface SemDiffResult {
 
 export interface SemDiffOpinionRequest {
   rejected: readonly string[];
+  settingsRevision: number;
 }
 
 export interface SemDiffAttempt {
@@ -218,7 +219,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
 
   const attempt = async (path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest): Promise<SemDiffAttempt> => {
     if (!advert || !supports(path) || signal?.aborted || oldText === newText) return { result: null, failed: false };
-    const key = `${path}\0${hashText(oldText)}\0${hashText(newText)}${opinion ? `\0opinion\0${[...opinion.rejected].sort().join(',')}` : ''}`;
+    const key = `${path}\0${hashText(oldText)}\0${hashText(newText)}${opinion ? `\0opinion\0${opinion.settingsRevision}\0${[...opinion.rejected].sort().join(',')}` : ''}`;
     let found = results.get(key);
     if (!found) {
       found = compute(path, oldText, newText, opinion);

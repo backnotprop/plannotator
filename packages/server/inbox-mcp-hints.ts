@@ -11,8 +11,9 @@
  *     2026-11-15). A number it does not know yet is looked up after the send
  *     (inbox-pull-lookups.ts); a PR found so is named on that agent's next
  *     send in the thread.
- *  2. `question_options`: the body asks a question with two or more choices,
- *     and no question in it has a `Pros:`, `Cons:` or `Prototype:` line. Said
+ *  2. `question_options`: the body asks a question with three or more
+ *     choices, and no question in it has a `Pros:`, `Cons:` or `Prototype:`
+ *     line or a scenario table. Said
  *     once per session (`agent_session`, which every connection fills with
  *     the host's own session id; see inbox-session-reads.ts); a send with no
  *     session never gets it.
@@ -137,6 +138,11 @@ function ownWords(body: string): string {
     .join("\n");
 }
 
+/** The text with pictures (`![alt](path "caption")`) and URLs blanked, so a number inside one is never read as a PR; offsets keep. */
+function withoutPicturesAndUrls(text: string): string {
+  return text.replace(/!\[[^\]\n]*\]\([^)\n]*\)|\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()]+/gi, (match) => " ".repeat(match.length));
+}
+
 /** The most distinct refs of each form one body is read for: a body listing thousands of numbers costs no more. */
 const BODY_REFS_MAX = 50;
 /** GitHub numbers are 32-bit: a larger one is never a PR, so it is never named or looked up. */
@@ -214,7 +220,7 @@ export function pullsNamedInBody(body: string, projectHost?: string | null, know
   for (const match of text.matchAll(BITBUCKET_PULL_URL)) if (seen++ < BODY_REFS_MAX) take(match.index ?? 0, match[0]); else break;
   if (known && text.includes("#")) {
     const considered = new Set<string>();
-    for (const { index, ref } of githubNumbersIn(text, known.repo)) {
+    for (const { index, ref } of githubNumbersIn(withoutPicturesAndUrls(text), known.repo)) {
       const pull = pullRefOf(ref);
       if (!considered.has(pull.key)) {
         if (considered.size >= BODY_REFS_MAX) break;
@@ -289,7 +295,7 @@ export function pullsToLookUp(
   const considered = new Set<string>();
   const out: ForgeRef[] = [];
   // Stops at LOOKUPS_PER_SEND to look up, or after BODY_REFS_MAX distinct numbers: never the whole of a huge body.
-  for (const { ref, own } of githubNumbersIn(ownWords(sent.body), known.repo)) {
+  for (const { ref, own } of githubNumbersIn(withoutPicturesAndUrls(ownWords(sent.body)), known.repo)) {
     if (!own) continue;
     const key = forgeRefKey(ref);
     if (considered.has(key)) continue;
@@ -313,11 +319,12 @@ export function attachPullText(refs: readonly InboxThreadPullRef[]): string {
 }
 
 /**
- * Whether the body asks a pick-one or pick-several question with two or more
- * choices while no question in it has a `Pros:`, `Cons:` or `Prototype:` line
- * (under a choice, or the block's shared `Prototype:`). Read from the format
- * only: a yes/no question counts like any other. A free-text question and a
- * `:::action` block never count. Pure; never throws.
+ * Whether the body asks a pick-one or pick-several question with three or
+ * more choices (approval "question-scenario-table", 2026-11-23; two before)
+ * while no question in it has a `Pros:`, `Cons:` or `Prototype:` line (under
+ * a choice, or the block's shared `Prototype:`) or a scenario table. Read
+ * from the format only. A free-text question and a `:::action` block never
+ * count. Pure; never throws.
  */
 export function questionWithBareOptions(body: string): boolean {
   if (typeof body !== "string" || !body.includes(":::question")) return false;
@@ -328,13 +335,13 @@ export function questionWithBareOptions(body: string): boolean {
     return false;
   }
   const asked = blocks.filter((q) => q.kind === "single" || q.kind === "multi");
-  if (!asked.some((q) => q.parsed.choices.length >= 2)) return false;
-  return !asked.some((q) => q.parsed.prototype || q.parsed.choices.some((c) => (c.pros?.length ?? 0) > 0 || (c.cons?.length ?? 0) > 0 || c.prototype));
+  if (!asked.some((q) => q.parsed.choices.length >= 3)) return false;
+  return !asked.some((q) => q.parsed.prototype || q.parsed.scenarios || q.parsed.choices.some((c) => (c.pros?.length ?? 0) > 0 || (c.cons?.length ?? 0) > 0 || c.prototype));
 }
 
-/** The options line (the approved words). */
+/** The options line (the approved words; replaced by approval "question-scenario-table", 2026-11-23). */
 export const QUESTION_OPTIONS_HINT =
-  "If it helps the person choose, options can carry pros and cons, and a prototype they can try: `Pros:`, `Cons:` and `Prototype:` lines indented under a choice (send_message's body says how).";
+  "If the choice is not obvious, help the person compare: `Pros:` and `Cons:` under each choice; a `Prototype:` line for an option you built or run; and when the best choice depends on the situation, a table after `Why:` (a row per situation, a column per choice, cells `<verdict> — <detail>`).";
 
 /**
  * The quiet hint this send's answer carries, or null; the thread (for each PR

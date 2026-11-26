@@ -7,7 +7,9 @@
  * stream) never draws; a conversation that went on under a new session id, or a launch's session, losing its face;
  * an ended agent's threads losing it; the plain mark painted first on a reload when a face is kept (a flash); a choice
  * redrawing icons of other agents (render counts over 300 rows); this browser's old faces lost on the way to the
- * Inbox, or dropped when the Inbox could not take them; the frame name missing from the shared stream.
+ * Inbox, or dropped when the Inbox could not take them; the frame name missing from the shared stream. Another host's
+ * mark (`mark:<host>`): drawn as anything but that host's own mark (its rig on the sidebar, its brand mark elsewhere),
+ * a host with no mark drawn as anything but the neutral one, or the face's id reaching a class name.
  *
  * The Inbox's route is the real one (packages/server/inbox-agent-faces.ts) on a temp folder, called through a fetch
  * stand-in: no Inbox is started. DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -32,6 +34,7 @@ if (hasDom) {
 
 const { AgentMark } = (hasDom ? await import('./AgentMark') : {}) as typeof import('./AgentMark');
 const icons = (hasDom ? await import('../icons') : {}) as typeof import('../icons');
+const ui = (hasDom ? await import('@plannotator/ui/components/inbox-thread/icons') : {}) as typeof import('@plannotator/ui/components/inbox-thread/icons');
 const { RowAgents, RowAgentTiles } = (hasDom ? await import('../components/RowAgents') : {}) as typeof import('../components/RowAgents');
 const { ReplyRecipient } = (hasDom ? await import('../components/ReplyRecipient') : {}) as typeof import('../components/ReplyRecipient');
 const { TagStack } = (hasDom ? await import('../components/TagPicker') : {}) as typeof import('../components/TagPicker');
@@ -201,6 +204,62 @@ test.if(hasDom)('a conversation that went on under a new id, and a launch’s se
   act(() => setInboxAgents(listed(agent({ id: 'lnc_1', session: 'ses_real', host: 'codex', launch: { id: 'lnc_1', thread_id: 'msg_1' } }))));
   await settle();
   expect(faceOf(at(host, 'launch'))).toBe('totman');
+});
+
+test.if(hasDom)('another host’s mark, set through the route, is that host’s mark on every icon; a host with no mark is the neutral one', async () => {
+  const file = inbox();
+  const orca = agent({ id: 'ses_o', session: 'ses_o', host: 'orca' });
+  setInboxAgents(listed(orca));
+  const host = mount(
+    <>
+      <div data-s="sidebar">
+        <AgentMark id="ses_o" host="orca" name="Billing chat" agent={orca} />
+      </div>
+      <div data-s="author">
+        <icons.AuthorMark author={author('ses_o', 'orca')} />
+      </div>
+      <div data-s="pi">
+        <icons.FaceOfMark host="orca" face="mark:pi" />
+      </div>
+      <div data-s="unknown">
+        <icons.FaceOfMark host="codex" face="mark:no-such-host" />
+      </div>
+      <div data-s="codex-mark">
+        <ui.HostMark host="codex" />
+      </div>
+      <div data-s="pi-mark">
+        <ui.HostMark host="pi" />
+      </div>
+      <div data-s="neutral">
+        <ui.HostMark host={null} />
+      </div>
+    </>,
+  );
+  const html = (s: string) => at(host, s)!.innerHTML;
+  // Before: Orca has no mark here, so its icons are the neutral one and its sidebar mark has no rig.
+  expect(html('author')).toBe(html('neutral'));
+  expect(at(host, 'sidebar')!.querySelector('.am')!.getAttribute('data-rig')).toBe('plain');
+  // Set as an app that runs Codex sessions sets it: the route, read by another window through the shared stream.
+  file.change({ agent: 'ses_o', face: 'mark:codex' });
+  act(() => faces.hearAgentFacesEvent(events.at(-1)));
+  await settle();
+  expect(faces.agentFaceOf('ses_o')).toBe('mark:codex');
+  expect(html('author')).toBe(html('codex-mark'));
+  expect(at(host, 'sidebar')!.querySelector('.am')!.getAttribute('data-rig')).toBe('codex');
+  expect(html('pi')).toBe(html('pi-mark'));
+  expect(html('pi')).not.toBe(html('neutral'));
+  expect(html('unknown')).toBe(html('neutral'));
+  // The face's id is never a class or a face picture's name.
+  expect(host.querySelector('[class*="mark:"], [data-agent-face^="mark:"]')).toBeNull();
+  // The picker checks the own mark's place (no place draws another host's mark).
+  act(() => void host.querySelector<HTMLButtonElement>('[data-agent-icon="ses_o"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })));
+  expect([...document.querySelectorAll('[data-face-choice][aria-checked="true"]')].map((r) => r.getAttribute('data-face-choice'))).toEqual(['agent']);
+  // Its own mark again: the neutral mark, and no rig.
+  file.change({ agent: 'ses_o', face: 'agent' });
+  act(() => faces.hearAgentFacesEvent(events.at(-1)));
+  await settle();
+  expect(html('author')).toBe(html('neutral'));
+  expect(at(host, 'sidebar')!.querySelector('.am')!.getAttribute('data-rig')).toBe('plain');
 });
 
 test.if(hasDom)('an ended agent, gone from the list, keeps its face on its old threads', async () => {

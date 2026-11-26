@@ -22,11 +22,12 @@
  * (contract 7.46, 7.47). Agents never use these: MCP has no skills field.
  */
 import { INBOX_BUILTIN_SKILL_ROOT, INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
-import { SHAPE_SKILL } from "@plannotator/core/shape-skill";
 import { CREATE_ROUTINE_SKILL } from "@plannotator/core/create-routine-skill";
 import { PICTURE_IT_SKILL } from "@plannotator/core/picture-it-skill";
-import type { SkillCatalogEntry } from "@plannotator/core/skill-references-render";
-import { listReferenceSkills } from "./review-skill-loader";
+import { composeInboxSkillsBlock, inboxBuiltinSkillContent } from "@plannotator/core/inbox-skills-compose";
+import { INBOX_MESSAGE_SKILL_AUDIENCE } from "@plannotator/core/skill-reference-block";
+import type { SkillCatalogEntry, SkillExportContent } from "@plannotator/core/skill-references-render";
+import { listReferenceSkills, readReferenceSkillContent, type ReferenceSkillContent } from "./review-skill-loader";
 import { handleReferenceSkillContent } from "./shared-handlers";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 
@@ -46,14 +47,13 @@ function noStore(res: Response): Response {
  * the window pastes their instructions into the reply that names one, and no
  * folder (the window carries their text, `@plannotator/core/inbox-review`).
  * A skill of the person's own with the same name wins: the built-in is left
- * out. Off, the catalog is exactly the discovered skills. `/shape` the same way while Shape is on, and
- * `/create-routine` while Routines are on. `/picture-it` always, first.
+ * out. Off, the catalog is exactly the discovered skills. `/create-routine` the same way while Routines are on. `/picture-it` always, first.
  */
-export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills, shape = false, routines = false): Response {
-  return Response.json({ skills: inboxSkillEntries(codeReview, discovered, shape, routines) });
+export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills, routines = false): Response {
+  return Response.json({ skills: inboxSkillEntries(codeReview, discovered, routines) });
 }
 
-function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills>, shape: boolean, routines: boolean): SkillCatalogEntry[] {
+function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills>, routines: boolean): SkillCatalogEntry[] {
   let skills: ReturnType<typeof listReferenceSkills>;
   try {
     skills = discovered();
@@ -61,9 +61,8 @@ function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typ
     skills = [];
   }
   const own = new Set(skills.map((skill) => skill.name));
-  // Shape's `/shape` (approval "shape-living-board") while Shape is on, beside the review skills while Code review is.
   // `/create-routine` (packages/core/create-routine-skill.ts) while Routines are on.
-  const offered = [PICTURE_IT_SKILL, ...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(shape ? [SHAPE_SKILL] : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
+  const offered = [PICTURE_IT_SKILL, ...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
   const builtins = offered.filter((skill) => !own.has(skill.name)).map((skill) => ({
     name: skill.name,
     root: INBOX_BUILTIN_SKILL_ROOT as SkillCatalogEntry["root"],
@@ -73,10 +72,32 @@ function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typ
   return [...builtins, ...skills];
 }
 
-/** The answer for a skills path, or null for any other path. `codeReview`, `shape`, `routines`: the person's switches. */
-export function inboxSkillsRoute(req: Request, url: URL, options: { codeReview?: boolean; shape?: boolean; routines?: boolean } = {}): Response | null {
+export interface InboxSkillSwitches {
+  codeReview: boolean;
+  routines: boolean;
+  diagrams: boolean;
+}
+
+export function inboxSkillsBlockFor(
+  names: readonly string[],
+  switches: InboxSkillSwitches,
+  sources: { discovered: () => ReturnType<typeof listReferenceSkills>; read: (name: string) => ReferenceSkillContent | null } = { discovered: listReferenceSkills, read: readReferenceSkillContent },
+): string {
+  const catalog = inboxSkillEntries(switches.codeReview, sources.discovered, switches.routines);
+  const refs = names.flatMap((name) => catalog.find((entry) => entry.name === name) ?? []);
+  const contents = new Map<string, SkillExportContent>();
+  for (const ref of refs) {
+    if (!ref.humanOnly) continue;
+    const read = ref.root === INBOX_BUILTIN_SKILL_ROOT ? inboxBuiltinSkillContent(ref, switches.diagrams) : sources.read(ref.name);
+    if (read?.content) contents.set(ref.name, { content: read.content, truncated: read.truncated, dir: read.dir, path: read.path });
+  }
+  return composeInboxSkillsBlock(refs, contents, INBOX_MESSAGE_SKILL_AUDIENCE);
+}
+
+/** The answer for a skills path, or null for any other path. `codeReview`, `routines`: the person's switches. */
+export function inboxSkillsRoute(req: Request, url: URL, options: { codeReview?: boolean; routines?: boolean } = {}): Response | null {
   if (url.pathname !== INBOX_SKILLS_PATH && url.pathname !== INBOX_SKILL_CONTENT_PATH) return null;
   if (req.method !== "GET") return noStore(Response.json({ error: "Use GET." }, { status: 405 }));
   if (isCrossSiteRequest(req)) return noStore(Response.json(INBOX_CROSS_SITE_BODY, { status: 403 }));
-  return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true, undefined, options.shape === true, options.routines === true) : handleReferenceSkillContent(req));
+  return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true, undefined, options.routines === true) : handleReferenceSkillContent(req));
 }

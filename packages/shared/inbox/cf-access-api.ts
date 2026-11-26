@@ -56,6 +56,7 @@ export interface CfSetupInput {
   account?: string;
   zone?: string;
   hostname?: string;
+  sessionHostname?: string;
 }
 
 export interface CfSetupResult {
@@ -79,10 +80,19 @@ interface Named {
   name?: string;
 }
 
+interface AccessApplication extends Named {
+  domain?: string;
+  self_hosted_domains?: string[];
+  destinations?: { type?: string; uri?: string }[];
+}
+
 const enc = encodeURIComponent;
 
-function pickHost(input: CfSetupInput, zoneName: string): string {
-  const host = (input.hostname ?? `plannotator-${randomBytes(3).toString("hex")}.${zoneName}`).trim().toLowerCase().replace(/\.$/, "");
+export function normalizeCfSetupHostname(value: string): string {
+  return value.trim().toLowerCase().replace(/\.$/, "");
+}
+
+function hostnameInZone(host: string, zoneName: string): string {
   if (!isPublicDnsName(host) || !host.endsWith(`.${zoneName}`)) throw new CfApiError(`The hostname must be a name under ${zoneName}.`);
   if (host.split(".").length !== zoneName.split(".").length + 1) {
     throw new CfApiError(`Use a hostname one level under ${zoneName} (like plannotator.${zoneName}): Cloudflare's free certificate covers only that level.`);
@@ -112,15 +122,18 @@ export async function runCfSetup(
 
   const zones = await api.call<Named[]>("GET", `/zones?per_page=50&account.id=${enc(account.id)}`);
   const wanted = input.zone?.trim().toLowerCase();
-  const fromHost = input.hostname?.trim().toLowerCase();
+  const fromHost = input.hostname === undefined ? undefined : normalizeCfSetupHostname(input.hostname);
   const zone =
     (wanted && zones.find((z) => z.name === wanted)) ||
     (!wanted && fromHost && zones.find((z) => fromHost.endsWith(`.${z.name}`))) ||
     (!wanted && !fromHost && zones.length === 1 ? zones[0] : undefined);
   if (!zone || !zone.name) throw new CfApiError(zones.length === 0 ? "The token sees no zone: a domain on Cloudflare is needed." : "Pass --zone <your domain> (the token sees several).");
   created.zone = zone.id;
-  const host = pickHost(input, zone.name);
-  const sessionHost = `${host.split(".")[0]!.slice(0, 61)}-s.${zone.name}`;
+  const host = hostnameInZone(fromHost ?? `plannotator-${randomBytes(3).toString("hex")}.${zone.name}`, zone.name);
+  const sessionHost = input.sessionHostname === undefined
+    ? `${host.split(".")[0]!.slice(0, 61)}-s.${zone.name}`
+    : hostnameInZone(normalizeCfSetupHostname(input.sessionHostname), zone.name);
+  if (sessionHost === host) throw new CfApiError("Use different hostnames for the Inbox and sessions.");
   onStep("zone", zone.name);
 
   const org = await api.call<{ auth_domain?: string }>("GET", `${A}/access/organizations`).catch(() => null);
@@ -128,13 +141,34 @@ export async function runCfSetup(
   if (!isTeamDomain(team)) throw new CfApiError("Zero Trust is not set up on this account: open the Cloudflare dashboard, Zero Trust, pick a team name and the Free plan, then run setup again.");
   onStep("team", team);
 
-  const idps = await api.call<(Named & { type?: string })[]>("GET", `${A}/access/identity_providers`);
-  const otp = idps.find((i) => i.type === "onetimepin") ?? (await api.call<Named>("POST", `${A}/access/identity_providers`, { name: "One-time PIN", type: "onetimepin", config: {} }));
-  onStep("idp");
+  const apps = await api.call<AccessApplication[]>("GET", `${A}/access/apps`);
+  const appNames = (app: AccessApplication) => [
+    ...(app.self_hosted_domains ?? []),
+    ...(app.destinations ?? []).flatMap(({ type, uri }) => (type === undefined || type === "public") && uri ? [uri] : []),
+  ];
+  const existing = apps.find((a) => a.name === CF_APP_NAME && (a.domain || a.self_hosted_domains?.[0]) === host);
+  const other = apps.find((a) => a !== existing && [a.domain, ...appNames(a)].some((name) => name === host || name === sessionHost));
+  if (other) throw new CfApiError(`An Access application named "${other.name}" already covers ${host} or ${sessionHost}; pick another hostname.`);
+  if (existing && appNames(existing).some((name) => name !== host && name !== sessionHost)) {
+    throw new CfApiError(`The Access application for ${host} already uses another sessions hostname.`);
+  }
 
   const tunnelName = `${CF_TUNNEL_PREFIX}${host.split(".")[0]}`;
   const tunnels = await api.call<Named[]>("GET", `${A}/cfd_tunnel?is_deleted=false&name=${enc(tunnelName)}`);
   const reusedTunnel = tunnels.find((t) => t.name === tunnelName);
+  const existingTarget = reusedTunnel ? `${reusedTunnel.id}.cfargotunnel.com` : null;
+  const planned: { name: string; own?: Named }[] = [];
+  for (const name of [host, sessionHost]) {
+    const records = await api.call<(Named & { type?: string; content?: string })[]>("GET", `/zones/${zone.id}/dns_records?name=${enc(name)}`);
+    const own = records.find((r) => r.type === "CNAME" && r.content === existingTarget);
+    if (!own && records.length > 0) throw new CfApiError(`${name} already has a DNS record; pick another hostname.`);
+    planned.push({ name, own });
+  }
+
+  const idps = await api.call<(Named & { type?: string })[]>("GET", `${A}/access/identity_providers`);
+  const otp = idps.find((i) => i.type === "onetimepin") ?? (await api.call<Named>("POST", `${A}/access/identity_providers`, { name: "One-time PIN", type: "onetimepin", config: {} }));
+  onStep("idp");
+
   const tunnel = reusedTunnel ?? (await api.call<Named>("POST", `${A}/cfd_tunnel`, { name: tunnelName, config_src: "cloudflare" }));
   if (!reusedTunnel) created.tunnel = tunnel.id;
   const tokenResult = await api.call<string | { token?: string }>("GET", `${A}/cfd_tunnel/${tunnel.id}/token`);
@@ -153,16 +187,11 @@ export async function runCfSetup(
   });
   onStep("ingress");
 
-  const apps = await api.call<(Named & { domain?: string; aud?: string; self_hosted_domains?: string[] })[]>("GET", `${A}/access/apps`);
-  const covers = (a: { domain?: string; self_hosted_domains?: string[] }) => [a.domain, ...(a.self_hosted_domains ?? [])].some((d) => d === host || d === sessionHost);
-  const others = apps.filter((a) => covers(a) && a.name !== CF_APP_NAME);
-  if (others.length > 0) throw new CfApiError(`An Access application named "${others[0]!.name}" already covers ${host} or ${sessionHost}; pick another hostname.`);
-  const existing = apps.find((a) => covers(a) && a.name === CF_APP_NAME);
   const appBody = {
     name: CF_APP_NAME,
     type: "self_hosted",
     domain: host,
-    self_hosted_domains: [host, sessionHost],
+    destinations: [host, sessionHost].map((uri) => ({ type: "public", uri })),
     session_duration: "24h",
     allowed_idps: [otp.id],
     auto_redirect_to_identity: true,
@@ -180,13 +209,6 @@ export async function runCfSetup(
   onStep("app");
 
   const target = `${tunnel.id}.cfargotunnel.com`;
-  const planned: { name: string; own?: Named }[] = [];
-  for (const name of [host, sessionHost]) {
-    const records = await api.call<(Named & { type?: string; content?: string })[]>("GET", `/zones/${zone.id}/dns_records?name=${enc(name)}`);
-    const own = records.find((r) => r.type === "CNAME" && r.content === target);
-    if (!own && records.length > 0) throw new CfApiError(`${name} already has a DNS record; pick another hostname.`);
-    planned.push({ name, own });
-  }
   const made: string[] = [];
   for (const { name, own } of planned) {
     const record = { type: "CNAME", name, content: target, proxied: true, comment: CF_DNS_COMMENT };

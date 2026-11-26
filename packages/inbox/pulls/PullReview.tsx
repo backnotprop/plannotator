@@ -34,7 +34,7 @@
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
-import { GuideReaderPart, PanePart, PullAllFilesPart, PullChangesTreePart, PullRepoFilePart, ReaderPart } from '../lazyParts';
+import { GuideReaderPart, PanePart, PullAllFilesPart, PullChangesTreePart, PullRepoFilePart, ReaderPart, ReviewKeysHere } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { patchBlobIds, type DiffFile } from '@plannotator/core/diff-files';
 import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
@@ -45,6 +45,7 @@ import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { InboxApiError, inboxApi } from '../api';
+import { pullReviewImages } from '../reviewImages';
 import { guideCommentSections } from '../attachments';
 import { RefMarkIcon } from '../board/RefMark';
 import { Icon } from '../icons';
@@ -78,8 +79,10 @@ import { inOverlay } from '../shortcuts/guards';
 import { reviewFiles } from './reviewFiles';
 import { layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 import { RiskMark } from './RiskMark';
-import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
 import { placesWord, riskNotes, takeRiskPlaces } from '../contextNotes/model';
+import { riskBarsMarkFor, riskBarsOf, riskJudgedAt } from './riskBars';
+import { useRiskBarsCard } from './RiskBarsCard';
+import { riskBarsLineMarks } from './riskBarsMarks';
 import { usePullRisk } from './usePullRisk';
 import { Named } from './Face';
 import { person, wordsText, type Words } from './words';
@@ -469,6 +472,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     },
     [layerKey, on?.scope, on?.from, headMoved, patchHead], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // Code review's image previews on changed images, read at this diff's own head (reviewImages.ts).
+  const images = useMemo(() => pullReviewImages(layerKey, on?.scope ?? 'layer', on?.from, headMoved ? null : patchHead), [layerKey, on?.scope, on?.from, headMoved, patchHead]);
   const [picked, pick] = useReviewDestination();
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [keptId]);
@@ -748,20 +753,26 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     setTreeScope(next);
     if (next === 'changes') setRepoOpen(null);
   };
-  // A high judgment's places (context notes, approval "inbox-context-notes"): on this layer's own diff, at the head it
-  // judged, each a row under its lines. Never comments. The header's "N places" steps through them.
-  const placeNotes = useMemo(
-    () => (scope === 'layer' && judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskNotes(judged, files) : []),
-    [scope, judged, layer?.head_sha, diff?.head_sha, files], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  const places = useContextNotes(placeNotes, {});
+  // The judgment whose places this diff may draw: this layer's own diff, at the head the list shows and the judgment
+  // was made at (an answer held across a failed read can be an earlier head's: riskJudgedAt).
+  const placed = scope === 'layer' && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskJudgedAt(judged, diff.head_sha) : null;
+  // A high judgment's places (approval "inbox-context-notes"). The header's "N places" steps through them, opening
+  // each one's risk bars card (no row under the code: q-070bc2a3).
+  const placeNotes = useMemo(() => (placed ? riskNotes(placed, files) : []), [placed, files]);
+  // The risk bars (approval "review-risk-bars"): a High or Medium judgment's places, marked once on each named file's
+  // tree row and once in the diff at each named range (riskBars.ts).
+  const riskBars = useMemo(() => (placed ? riskBarsOf(placed, files) : null), [placed, files]);
+  const treeRiskKey = riskBars ? `${riskBars.level}\u0000${[...riskBars.files].join('\u0000')}` : '';
+  const treeRisk = useMemo(() => (riskBars ? { level: riskBars.level, files: riskBars.files } : null), [treeRiskKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const riskLineMarks = useMemo(() => riskBarsLineMarks(riskBars), [riskBars]);
+  const riskCard = useRiskBarsCard(riskBars);
   const placeAt = useRef(-1);
   const goToPlace = (index: number) => {
     const note = placeNotes[index];
     if (!note) return;
     placeAt.current = index;
     move(note.file);
-    places.show(note.id);
+    riskCard.show(riskBarsMarkFor(riskBars, note.file, note.side, note.lineStart));
   };
   const nextPlace = () => goToPlace((placeAt.current + 1) % placeNotes.length);
   // The PR page's "See the N places": taken as this layer's diff mounts (the ask is gone after that, whatever it
@@ -783,6 +794,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
       goToPlace(0);
       return;
     }
+    // A judgment held for this diff, whatever its head (an earlier head's draws nothing): the ask is dropped too.
     if (scope !== 'layer' || diffError || (judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha)) placesWanted.current = false;
   }, [placeNotes.length, layerKey, scope, diffError, judged, diff?.head_sha, layer?.head_sha]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -920,6 +932,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             onSelect={pickFile}
             onOpen={openRepoFile}
             handleRef={allFilesTree}
+            risk={treeRisk}
           />
         </PanePart>
       ) : (
@@ -934,6 +947,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             head={filesHead}
             onSelect={pickFile}
             handleRef={changesTree}
+            risk={treeRisk}
           />
         </PanePart>
       )}
@@ -972,7 +986,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
         <span className="ib-sp" />
         {/* Every review header's diff controls (approval diff-controls-headers), in the bar as in a thread's review: one
             Split / Unified button, Collapse all, the Diff display gear. No row over the code holds them: in the Inbox they
-            are always in the header (the owner). A phone has none. */}
+            are always in the header (the owner). A phone has the gear alone, in the row under the bar. */}
         {!phone && snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {(readerComments || comments.length > 0) && (
@@ -1052,6 +1066,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
                 <span>{files.length}</span>
               </button>
             )}
+            {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
           </div>
         )}
         {detailsOpen && (
@@ -1149,28 +1164,28 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             // Keyed on the code: new code brings a new reader, so a composer left open cannot save onto a moved line; the
             // same code keeps it, whatever the head reads said. The reader is a chunk loaded on first use: one that cannot
             // arrive says so here.
-            <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
+            <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch} images={images}>
+              <ReviewKeysHere diff={snapshot.review.rawPatch} viewed />
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
-                <ContextNotesProvider api={places.api}>
-                  <GuideReader
-                    bare
-                    controlsHost={controlsHost}
-                    hostDiffControls
-                    {...(collapseAll ? { collapseAll } : {})}
-                    snapshot={snapshot}
-                    reviewed={[]}
-                    onReviewedChange={() => {}}
-                    comments={readerComments}
-                    mode="files"
-                    reveal={reveal}
-                    viewed={{ files: viewedSet, onToggle: toggleViewed }}
-                    fileOpenIn={fileOpenIn}
-                    fileContents={fileContents}
-                    lineNotes={lineNotes}
-                    wholeFileNotes={wholeFileNotes}
-                    {...(places.anchors.length > 0 ? { contextNotes: places.anchors, renderContextNote: places.renderContextNote } : {})}
-                  />
-                </ContextNotesProvider>
+                <GuideReader
+                  bare
+                  controlsHost={controlsHost}
+                  hostDiffControls
+                  {...(collapseAll ? { collapseAll } : {})}
+                  snapshot={snapshot}
+                  reviewed={[]}
+                  onReviewedChange={() => {}}
+                  comments={readerComments}
+                  mode="files"
+                  reveal={reveal}
+                  viewed={{ files: viewedSet, onToggle: toggleViewed }}
+                  fileOpenIn={fileOpenIn}
+                  fileContents={fileContents}
+                  lineNotes={lineNotes}
+                  {...(riskLineMarks.length > 0 ? { lineMarks: riskLineMarks, onLineMark: riskCard.onMark } : {})}
+                  wholeFileNotes={wholeFileNotes}
+                />
+                {riskCard.node}
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (

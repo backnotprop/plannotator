@@ -156,7 +156,13 @@ for (const screen of SCREENS) {
     }
     expect((await state(page)).highlights).toEqual([]);
     await fire(page, 'touchend', 0);
-    await expect.poll(async () => (await state(page)).highlights.length).toBe(1);
+    // The marks go into the text at once; the toolbar comes a render later
+    // (AnnotationToolbar draws nothing until its effect has placed it). Wait
+    // for both, not the marks alone: read in between, the toolbar is not up yet.
+    await expect.poll(async () => {
+      const { highlights, toolbar } = await state(page);
+      return { highlights: highlights.length, toolbar };
+    }).toEqual({ highlights: 1, toolbar: true });
     const done = await state(page);
     expect(done.highlighted).toBe(FIRST.slice(4, 60));
     expect(done.toolbar).toBe(true);

@@ -6,6 +6,12 @@ export interface InboxLaunchChoice {
   primary_agent?: string;
 }
 
+/**
+ * Why OpenCode's model list could not be read, as a code: the window says it in its own words (never stderr, never a
+ * path). `empty`: the list was read and holds no model.
+ */
+export type InboxLaunchChoicesUnread = "timeout" | "exit" | "unreadable" | "missing" | "not_started" | "empty";
+
 export interface InboxLaunchChoices {
   models: string[];
   efforts: string[];
@@ -13,7 +19,24 @@ export interface InboxLaunchChoices {
   model_efforts?: Record<string, string[]>;
   /** OpenCode's own agents a session may start as (`GET /api/agent`: primary, not hidden). Absent: no Agent column. */
   primary_agents?: string[];
+  /**
+   * The model the agent's CLI most likely starts on when none is picked, provider/model, for the folder picked in To:
+   * the project config's own `model` (read as data), else OpenCode's `GET /api/model/default` read in the home folder.
+   * Absent: unknown, uncertain, or not read yet for that folder.
+   */
+  default_model?: string;
+  /** The folder `default_model` was read for: the project id To named, or the scratch pick. The window names it only for that one. */
+  default_for?: string;
+  /** OpenCode's list could not be read (the lists are empty): the menu has Default and says why. */
+  unread?: InboxLaunchChoicesUnread;
+  /** OpenCode's list is being read (the lists are empty): the menu has Default and says so. */
+  reading?: true;
   last?: InboxLaunchChoice;
+}
+
+/** Lists a model or an effort can be checked against: none while being read or when they could not be read. */
+export function launchChoicesReadable<T extends Pick<InboxLaunchChoices, "unread" | "reading">>(lists: T | null | undefined): T | null {
+  return lists && !lists.unread && !lists.reading ? lists : null;
 }
 
 /** Goes on argv as one entry: never a leading "-", which the CLI would read as a flag. */
@@ -78,6 +101,14 @@ export function parseCodexModels(answer: unknown): Omit<InboxLaunchChoices, "las
   return { models, efforts, effort_word: "Effort", model_efforts: modelEfforts };
 }
 
+/** OpenCode's default model (`GET /api/model/default`: `{ data: { providerID, id } }`) as provider/model, or null. */
+export function parseOpenCodeDefaultModel(answer: unknown): string | null {
+  const data = (answer as { data?: { providerID?: unknown; id?: unknown } | null } | null)?.data;
+  if (typeof data?.providerID !== "string" || typeof data.id !== "string" || !data.providerID || !data.id) return null;
+  const model = `${data.providerID}/${data.id}`;
+  return inboxLaunchTokenOk(model) ? model : null;
+}
+
 export function parseOpenCodeModels(answer: unknown): Omit<InboxLaunchChoices, "last"> | null {
   const data = (answer as { data?: unknown } | null)?.data;
   if (!Array.isArray(data)) return null;
@@ -110,6 +141,16 @@ export function parseOpenCodeAgents(answer: unknown): string[] | null {
 
 export function launchEffortsFor(choices: Pick<InboxLaunchChoices, "efforts" | "model_efforts">, model: string | undefined): string[] {
   return (model && choices.model_efforts?.[model]) || choices.efforts;
+}
+
+export function initialLaunchChoice(choices: InboxLaunchChoices | null | undefined): InboxLaunchChoice {
+  const last = choices?.last;
+  if (!choices || !last) return {};
+  return {
+    ...(last.model ? { model: last.model } : {}),
+    ...(last.effort && launchEffortsFor(choices, last.model).includes(last.effort) ? { effort: last.effort } : {}),
+    ...(last.primary_agent && choices.primary_agents?.includes(last.primary_agent) ? { primary_agent: last.primary_agent } : {}),
+  };
 }
 
 /** `efforts` null: the lists are not read yet, so only the token is checked (a slow CLI never refuses a start). */

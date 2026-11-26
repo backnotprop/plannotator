@@ -9,8 +9,6 @@ import type { MachinesModel } from '../machines';
 import type { useInboxNotifications } from '../notify';
 import type { PanesOnScreen } from '../panes/onScreen';
 import type { PaneReads } from '../panes/paneReads';
-import type { useInboxShapes } from '../shape/useInboxShapes';
-import type { ShapeReplyPart } from '../shape/addToReply';
 import type { KeyedSignal } from '../signal';
 import type { Stack } from '../stack';
 import type { createStepsBus } from '../steps/useThreadSteps';
@@ -52,7 +50,6 @@ export interface ThreadSlotHost {
   pullsShown: boolean;
   stepsBus: ReturnType<typeof createStepsBus>;
   boardEnabled: boolean | null;
-  boardsOn: boolean;
   cards: CardsModel | null;
   backToCard: () => void;
   openThreadRow: InboxListRow | null;
@@ -79,17 +76,9 @@ export interface ThreadSlotHost {
   setReplyFor: (threadId: string | null) => void;
   draftSignals: KeyedSignal;
   filesSignals: KeyedSignal;
-  shapes: ReturnType<typeof useInboxShapes>;
-  /**
-   * The board open in this thread (`#thread=…&shape=…`), drawn in the thread's own pane under its header, or null.
-   * `sidebarToggle`: the board's own sidebar toggle, where the list's (and its toggle) is not beside the thread.
-   */
-  board: ((inThread: boolean, sidebarToggle: boolean) => ReactNode) | null;
   ask: { side: ThreadPaneProps['onSide']; sideWords: ThreadPaneProps['onSideWords'] };
   askReply: { threadId: string; words: string } | null;
   setAskReply: (next: null) => void;
-  shapeReply: (ShapeReplyPart & { threadId: string }) | null;
-  setShapeReply: (next: null) => void;
   patchQuestions: ThreadPaneProps['onQuestions'];
   /** A run of pick saves on `threadId` (this pane's) changed or ended (App's `onPickSaves`). */
   onPickSaves: (ids: ReadonlySet<string>, paneClosed: boolean | undefined, threadId: string | null) => void;
@@ -109,8 +98,6 @@ export interface ThreadSlotHost {
   setThreadFull: (on: boolean) => void;
   leaveFull: () => void;
   showToast: (toast: Omit<InboxToastModel, 'id'>) => void;
-  toastNow: RefObject<InboxToastModel | null>;
-  dismissToast: () => void;
   inboxLink: (href: string) => (() => void) | null;
   /** Fold a docked sidebar on screen when the list and `columns` thread columns (the open ones by default) fit only without it. */
   holdSidebarIfTight: (columns?: number) => void;

@@ -29,7 +29,9 @@
  * - No dots, no "Draft saved" line: the words say what waits.
  * - Files: the Reply tab's toolbar starts with the reply box's paperclip, and a
  *   paste or a drop on the card attaches as in the box. They are the box's
- *   files (one reply), shown here with the box's tiles.
+ *   files (one reply), shown here with the box's tiles. On the Comment tab the
+ *   file's row has the same paperclip and tiles for the comment's own files, and
+ *   a drop on the card goes to them (commentFiles.tsx).
  *
  * - On a phone the toolbar is one row: what yields when it runs short is `cardFootFitCandidates` (footFit.ts).
  * - "N comments" opens the thread's list of comments (AnnotationsChip.tsx). The list is the card's sibling, never
@@ -54,7 +56,7 @@ import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { useComposerState, type ComposerMode } from '../fullScreenComposer';
 import { CORNERS, useComposerDrag } from '../composerDrag';
 import { openItemsLabel } from '../openQuestions';
-import { markFullScreenComposer } from '../pageMarks';
+import { CommentDropContext, useCommentDropSlot } from '../commentFiles';
 import { cardFootFitCandidates, drawOpenQuestionsForm, fitFootRow, footFitCandidates, openQuestionsFormText, type CardFootFit, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
 import { useReplyTextOr, type ReplyText } from '../replyText';
 
@@ -305,15 +307,13 @@ export function FullScreenComposer({
   const cardRef = useRef<HTMLDivElement | null>(null);
   // The card moves out of the way by its tray, for this file only (composerDrag.ts). A phone's card is docked: no move.
   const { attach: attachDrag, handle: dragHandle, resizable, narrow, corner } = useComposerDrag(!phone, value.fileKey);
-  // `.ib-fcomp` in the page: each `.pn-inbox` above it carries `data-ib-fcomp` (pageMarks.ts).
+  // (A phone's toast measures the card to stay above it: Toast.tsx `PHONE_FLOOR`; no page mark.)
   const cardRefMarked = useCallback((el: HTMLDivElement | null) => {
     cardRef.current = el;
     attachDrag(el);
-    const release = markFullScreenComposer(el);
     return () => {
       cardRef.current = null;
       attachDrag(null);
-      release?.();
     };
   }, [attachDrag]);
   const pillRef = useRef<HTMLButtonElement | null>(null);
@@ -363,8 +363,12 @@ export function FullScreenComposer({
       view.removeEventListener('transitionend', check);
     };
   });
-  // Files dropped on the card attach to the reply, as on the reply box (a comment takes no files: Reply only).
-  const drop = useFileDrop((list) => reply.onDropFiles(list), !state.minimized && mode === 'reply' && !value.tucked);
+  // Files dropped on the card attach to the reply, as on the reply box; on the Comment tab, to the comment (its row says where).
+  const commentDrop = useCommentDropSlot();
+  const drop = useFileDrop(
+    (list) => (mode === 'reply' ? reply.onDropFiles(list) : commentDrop.drop(list)),
+    !state.minimized && !value.tucked && (mode === 'reply' || commentDrop.takes),
+  );
   const errorId = `ib-fcomp-err-${threadId}`;
   // Whether the file's comment field holds words: its bin, and the dot on the Comment tab while Reply is picked.
   const [commentWords, setCommentWords] = useState(false);
@@ -412,7 +416,9 @@ export function FullScreenComposer({
   const keptComment = (shown: boolean, bin: ReactNode = null) =>
     takesComments ? (
       <div className="ib-fcomp-slot" hidden={!shown || undefined} data-fcomp-comment-slot="">
-        <CommentBinContext.Provider value={bin}>{comment}</CommentBinContext.Provider>
+        <CommentDropContext.Provider value={commentDrop.slot}>
+          <CommentBinContext.Provider value={bin}>{comment}</CommentBinContext.Provider>
+        </CommentDropContext.Provider>
       </div>
     ) : null;
 

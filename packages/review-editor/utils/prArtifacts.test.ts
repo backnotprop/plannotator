@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type {
+  ForgejoPRMetadata,
   GithubPRMetadata,
   BitbucketPRMetadata,
   GitlabMRMetadata,
@@ -318,5 +319,65 @@ describe('buildPRArtifacts', () => {
         body: `![local image](${SHOT_URL})`,
       }),
     ).toEqual([]);
+  });
+});
+
+describe('buildPRArtifacts on Forgejo', () => {
+  const forgejoMetadata: ForgejoPRMetadata = {
+    platform: 'forgejo',
+    host: 'forgejo.example.com',
+    owner: 'acme',
+    repo: 'widgets',
+    number: 5,
+    title: 'Improve widgets',
+    author: 'reviewer',
+    baseBranch: 'main',
+    headBranch: 'better-widgets',
+    baseSha: 'base',
+    headSha: 'head',
+    url: 'https://forgejo.example.com/acme/widgets/pulls/5',
+  };
+  const uuid = '0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d';
+  const otherUuid = 'ffffffff-4f50-4a6b-8c7d-9e0f1a2b3c4d';
+
+  it('finds the relative upload links Forgejo\'s editor writes, typed by the link text', () => {
+    // The editor writes /attachments/<uuid>: no extension, so the name carries the type.
+    const context: PRContext = {
+      ...emptyContext,
+      body: [
+        `![screenshot.png](/attachments/${uuid})`,
+        `[demo.webm](/acme/widgets/attachments/${otherUuid})`,
+        '[ordinary link](https://example.com/docs)',
+      ].join('\n\n'),
+    };
+    const artifacts = buildPRArtifacts(forgejoMetadata, context);
+    expect(artifacts.map((artifact) => [artifact.kind, artifact.name])).toEqual([
+      ['image', 'screenshot.png'],
+      ['video', 'demo.webm'],
+    ]);
+  });
+
+  it('counts one upload once even when it is also linked absolutely', () => {
+    const context: PRContext = {
+      ...emptyContext,
+      body: [`![a.png](/attachments/${uuid})`, `![b.png](https://forgejo.example.com/attachments/${uuid})`].join('\n\n'),
+    };
+    expect(buildPRArtifacts(forgejoMetadata, context)).toHaveLength(1);
+  });
+
+  it('collects nothing from an upload on another host', () => {
+    const context: PRContext = {
+      ...emptyContext,
+      body: `![a.png](https://elsewhere.example.com/attachments/${uuid})`,
+    };
+    expect(buildPRArtifacts(forgejoMetadata, context)).toEqual([]);
+  });
+
+  it('counts one upload once however its query string differs', () => {
+    const context: PRContext = {
+      ...emptyContext,
+      body: [`![a.png](/attachments/${uuid}?x=1)`, `![a.png](/attachments/${uuid}?x=2)`].join('\n\n'),
+    };
+    expect(buildPRArtifacts(forgejoMetadata, context)).toHaveLength(1);
   });
 });

@@ -26,6 +26,10 @@ import type { CommentAskAIContext } from './CommentPopover';
 import { __setMermaidRuntimeLoaderForTests, setMermaidRuntime } from '../utils/mermaid';
 import { parseMarkdownToBlocks } from '../utils/parser';
 import { MermaidBlock } from './MermaidBlock';
+import { drawMermaidFencesWithMermaid } from '../test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 const hasDom = typeof document !== 'undefined';
 const FIXTURES = join(import.meta.dir, '..', 'test-setup', 'fixtures', 'diagrams');

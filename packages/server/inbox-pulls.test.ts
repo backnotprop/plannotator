@@ -233,7 +233,7 @@ function postForge(): PostForge {
   return f;
 }
 
-async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean; avatars?: Partial<PullAvatarOptions>; pullRisk?: Pick<PullRiskOptions, "run" | "agents" | "listModels">; repoDelayMs?: number } = {}) {
+async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean; avatars?: Partial<PullAvatarOptions>; pullRisk?: Pick<PullRiskOptions, "run" | "agents" | "listModels">; repoDelayMs?: number; config?: Record<string, unknown> } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -242,6 +242,7 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  if (options.config) writeFileSync(join(dataDir, "config.json"), JSON.stringify(options.config));
   const f = options.gitlab ? gitlabForge() : forge(options.answer);
   const post = postForge();
   // The project's origin as git reads it; `setRepo` changes it (read again at the project's next message).
@@ -269,8 +270,8 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   const client = new Client({ name: "inbox-pulls-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
   clients.push(client);
-  const send = async (body: string, thread: string) => {
-    const result = (await client.callTool({ name: "send_message", arguments: { project_path: project, body, thread, agent_session: `ses_${thread}`, agent_name: "Claude Code", agent_host: "claude-code" } })) as { structuredContent: { thread_id: string } };
+  const send = async (body: string, thread: string, extra: Record<string, unknown> = {}) => {
+    const result = (await client.callTool({ name: "send_message", arguments: { project_path: project, body, thread, agent_session: `ses_${thread}`, agent_name: "Claude Code", agent_host: "claude-code", ...extra } })) as { structuredContent: { thread_id: string } };
     return result.structuredContent.thread_id;
   };
   const pulls = async (query = "") => fetch(`${base}/api/inbox/pulls${query}`);
@@ -394,8 +395,73 @@ describe("risk ranking", () => {
       answer = (await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer;
     } while (answer.pending > 0 && Date.now() - started < 5_000);
     expect(answer.rules).toBe("Anything in billing.");
-    expect(answer.judgments["github.com/northwind/billing-svc#412"]).toEqual({ level: "high", why: "It changes the retry schedule." });
+    expect(answer.judgments["github.com/northwind/billing-svc#412"]).toEqual({ level: "high", why: "It changes the retry schedule.", head: "412".padStart(40, "a") });
     expect(runs.length).toBe(3);
+  });
+
+  const member = { author: { login: "tomas" }, authorAssociation: "MEMBER" };
+  const key = (n: number) => `github.com/northwind/billing-svc#${n}`;
+  const memberWorld = async (others: number[], othersDelayMs = 0, issueCount = others.length) => {
+    const w = await world({
+      codeReview: true,
+      answer: { data: { ...GH_ANSWER.data, requested: { nodes: [ghPull(601, member), ghPull(602, member)] }, authored: { nodes: [] } } },
+      config: { inboxPullRisk: { ...settings, auto: { level: "high", make: "guide" } } },
+      pullRisk: { run: async () => (await Bun.sleep(200), { text: '{"risk":"high","why":"It changes the retry schedule."}' }), agents: () => [{ id: "pi-sdk", label: "Pi" }], listModels: async () => [] },
+    });
+    w.forge.othersAnswer = { data: { viewer: { login: "dana" }, others0: { issueCount, nodes: others.map((n) => ghPull(n, member)) } } };
+    w.forge.othersDelayMs = othersDelayMs;
+    await w.send("Looking at the retries.", "retries");
+    return w;
+  };
+  const settledRisk = async (base: string) => {
+    const started = Date.now();
+    let answer: InboxPullRiskAnswer;
+    do {
+      answer = (await (await fetch(`${base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer;
+    } while (answer.pending > 0 && Date.now() - started < 5_000);
+    expect(answer.pending).toBe(0);
+    return answer;
+  };
+
+  test("the Pull requests page's read while ranking runs: the answer in which nothing is left ranking still has every judgment and what waits", async () => {
+    const w = await memberWorld([601, 602]);
+    expect((await fetch(`${w.base}/api/inbox/reviews`)).status).toBe(200);
+    expect((await w.pulls("?everywhere=1&machines=1")).status).toBe(200);
+    const answer = await settledRisk(w.base);
+    expect(Object.keys(answer.judgments).sort()).toEqual([key(601), key(602)]);
+    expect([...(answer.auto_waiting ?? [])].sort()).toEqual([key(601), key(602)]);
+    expect((await save(w.base, { make_now: true })).status).toBe(200);
+    expect((await settledRisk(w.base)).auto_runs).toEqual({});
+  });
+
+  test("a PR the Pull requests page's read no longer finds open (closed elsewhere) leaves the judgments and what waits", async () => {
+    const w = await memberWorld([601], 300);
+    expect((await fetch(`${w.base}/api/inbox/reviews`)).status).toBe(200);
+    expect([...((await settledRisk(w.base)).auto_waiting ?? [])].sort()).toEqual([key(601), key(602)]);
+    await Bun.sleep(400);
+    expect((await w.pulls("?everywhere=1&machines=1")).status).toBe(200);
+    const answer = await settledRisk(w.base);
+    expect(Object.keys(answer.judgments)).toEqual([key(601)]);
+    expect(answer.auto_waiting).toEqual([key(601)]);
+  });
+
+  test("a repository whose Others came back cut: a PR the Pull requests page's read no longer has stops waiting there too", async () => {
+    const w = await memberWorld([601], 300, 150);
+    expect((await fetch(`${w.base}/api/inbox/reviews`)).status).toBe(200);
+    expect([...((await settledRisk(w.base)).auto_waiting ?? [])].sort()).toEqual([key(601), key(602)]);
+    await Bun.sleep(400);
+    expect((await w.pulls("?everywhere=1&machines=1")).status).toBe(200);
+    expect((await settledRisk(w.base)).auto_waiting).toEqual([key(601)]);
+  });
+
+  test("Make them now while starting agents is off: refused with launch_off, and no PR is marked", async () => {
+    const w = await riskWorld(async () => ({ text: '{"risk":"high","why":"It changes the retry schedule."}' }));
+    expect((await fetch(`${w.base}/api/inbox/launch/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: false }) })).status).toBe(200);
+    expect((await save(w.base, { ...settings, auto: { level: "high", make: "guide" } })).status).toBe(200);
+    const refused = await save(w.base, { make_now: true });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { code: string }).code).toBe("launch_off");
+    expect(((await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer).auto_runs).toEqual({});
   });
 
   test("Code review off: refused before anything runs", async () => {
@@ -974,6 +1040,40 @@ describe("on", () => {
     expect(moved?.page).toBeUndefined();
   });
 
+  test("a Picture it asked of a PR's thread keeps its guided review on the way beside it, and its page is served once the agent sends one", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
+    expect((await w.own([key], talk, { ask: "guide" })).status).toBe(200);
+    expect((await w.own([key], talk, { ask: "picture_it" })).status).toBe(200);
+    const asked = await linkOf();
+    expect(asked).toMatchObject({ via: "owner", thread_id: talk, ask: "guide" });
+    expect(typeof asked?.picture_it_asked_at).toBe("string");
+    expect(asked?.picture_it_page).toBeUndefined();
+    const page = join(w.root, "picture-it.html");
+    writeFileSync(page, '<html><head><meta name="plannotator-page" content="picture-it"><title>Retries</title></head><body></body></html>');
+    await w.send("Here it is.", "talk", { attachments: [page] });
+    expect((await linkOf())?.picture_it_page).toMatchObject({ title: "Retries" });
+    expect((await w.own([key], talk, { ask: "picture-it" })).status).toBe(422);
+  });
+
+  test("a Picture page is marked seen once the person has looked at its thread", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
+    expect((await w.own([key], talk, { ask: "picture_it" })).status).toBe(200);
+    const page = join(w.root, "picture-it.html");
+    writeFileSync(page, '<html><head><meta name="plannotator-page" content="picture-it"><title>Retries</title></head><body></body></html>');
+    await w.send("Here it is.", "talk", { attachments: [page] });
+    expect((await linkOf())?.picture_it_page?.seen).toBeUndefined();
+    w.server.store.markSeen(talk);
+    expect((await linkOf())?.picture_it_page).toMatchObject({ title: "Retries", seen: true });
+  });
+
   test("validate_only says which thread a PR is already given to (another window's Start a thread), and none for a free one", async () => {
     const w = await world({ codeReview: true });
     const talk = await w.send("Ready.", "talk");
@@ -1203,7 +1303,7 @@ describe("parsing", () => {
       JSON.stringify({
         data: {
           viewer: { login: "dana" },
-          requested: { nodes: [ghPull(880, { author: { login: "tomas" } })] },
+          requested: { nodes: [ghPull(880, { author: { login: "tomas" } }), ghPull(881, { author: { login: "ines" }, authorAssociation: "COLLABORATOR" }), ghPull(882, { author: { login: "zed" }, authorAssociation: "CONTRIBUTOR" })] },
           authored: {
             nodes: [
               ghPull(872, { reviewDecision: "APPROVED", latestReviews: { nodes: [{ state: "APPROVED", author: { login: "priya" } }] } }),
@@ -1218,6 +1318,7 @@ describe("parsing", () => {
     const by = Object.fromEntries(answer.pulls.map((p) => [p.number, p]));
     expect(answer.login).toBe("dana");
     expect(by[880]).toMatchObject({ requested: true, mine: false, author: "tomas" });
+    expect([by[880]!.author_member, by[881]!.author_member, by[882]!.author_member]).toEqual([undefined, true, undefined]);
     expect(by[872]).toMatchObject({ mine: true, review: "approved", approved_by: "priya", checks: "success" });
     expect(by[414]).toMatchObject({ state: "draft", checks: "pending" });
     expect(by[411]).toMatchObject({ state: "merged", merged_at: "2026-11-02T10:00:00Z" });

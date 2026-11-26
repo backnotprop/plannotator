@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import type { InboxInlineImage } from '@plannotator/core/inbox-types';
+import { inboxInlineMediaKind } from '@plannotator/core/inbox-inline-media';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
 import { agentName } from '../../format';
 import { inboxMessageImageBase, inlineImageRefFromSrc, syncMessageImages, toggleMessageImage, MESSAGE_IMAGE_WIDTH, drawnImageUrl } from '../../images';
@@ -10,6 +11,7 @@ import type { RefObject } from 'react';
 import type { MessageBodyProps } from './types';
 import { inboxEmbedUrl } from '../../data/actions/embed';
 import type { OpenFileRefRef } from './useFileRefs';
+import { mediaOpenTarget, syncMediaOpen } from './mediaOpen';
 
 /** The body's pictures: where they load from, their boxes, and what opens one (the viewer, or the lightbox). */
 export function useBodyImages({
@@ -20,8 +22,9 @@ export function useBodyImages({
   inlineRefOf,
   onImage,
   onOpenOptionSet,
+  onOpenUncapturedImage,
   openFileRefRef,
-}: Pick<MessageBodyProps, 'message' | 'imageBase' | 'onOpenInlineImage' | 'inlineRefOf' | 'onImage' | 'onOpenOptionSet'> & { bodyRef: RefObject<HTMLDivElement | null>; openFileRefRef: OpenFileRefRef }) {
+}: Pick<MessageBodyProps, 'message' | 'imageBase' | 'onOpenInlineImage' | 'inlineRefOf' | 'onImage' | 'onOpenOptionSet' | 'onOpenUncapturedImage'> & { bodyRef: RefObject<HTMLDivElement | null>; openFileRefRef: OpenFileRefRef }) {
   // The body's images go through a host resolver that names the same URL ui's
   // default would (the window's resolver, `inboxImageSrcResolver`), only so ui
   // draws an image the Inbox refuses (403 image_hidden, 404) as its alt text in
@@ -42,6 +45,8 @@ export function useBodyImages({
     (src) => {
       if (/^(https?:|data:|blob:)/i.test(src)) return { kind: 'src', src };
       const url = getImageSrc(src, imageBaseDir);
+      const media = inboxInlineMediaKind(src);
+      if (media) return { kind: 'src', src: url, media };
       const width = widths.get(src);
       const drawn = drawnImageUrl(url, width, MESSAGE_IMAGE_WIDTH);
       return drawn === url ? { kind: 'src', src: url } : { kind: 'src', src: drawn, width };
@@ -57,6 +62,8 @@ export function useBodyImages({
   const openImageRef = useRef(onOpenInlineImage);
   openImageRef.current = onOpenInlineImage;
   const [fallback, setFallback] = useState<{ src: string; alt: string } | null>(null);
+  const uncapturedRef = useRef(onOpenUncapturedImage);
+  uncapturedRef.current = onOpenUncapturedImage;
   const refOfRef = useRef(inlineRefOf);
   refOfRef.current = inlineRefOf;
   const refOf = useCallback((src: string) => (refOfRef.current ? refOfRef.current(src) : inlineImageRefFromSrc(src, message.id)), [message.id]);
@@ -80,6 +87,8 @@ export function useBodyImages({
       }
       const image = imageOf(src);
       if (image && openImageRef.current) openImageRef.current(image);
+      // Not captured: the host's own viewer where it has one (a modal dialog's, which the page's lightbox would sit behind).
+      else if (uncapturedRef.current) uncapturedRef.current(src, alt);
       else setFallback({ src, alt });
       return true;
     },
@@ -91,6 +100,25 @@ export function useBodyImages({
     return image?.width && image.height ? { width: image.width, height: image.height } : null;
     // A new identity when the records change (an older message's pictures are captured on its first open).
   }, [imageOf, message.inline_images]);
+  /** One of the body's pictures as a button that opens it (not a question card's, not one that failed). */
+  const markButton = useCallback(
+    (img: HTMLImageElement) => {
+      // A question card's picture (a picture choice, `Shows:`): the card makes it pick, or opens it with its own button.
+      if (img.hasAttribute('data-question-picture')) return;
+      const src = img.getAttribute('src');
+      const ref = src ? refOf(src) : null;
+      if (ref === null || img.hasAttribute('data-ib-broken')) return;
+      const image = imageOf(src);
+      const name = image?.name ?? ref.split(/[\\/]/).pop() ?? 'image';
+      img.setAttribute('role', 'button');
+      img.tabIndex = 0;
+      img.setAttribute('aria-label', `Open ${name}${img.alt ? `, ${img.alt}` : ''}`);
+      if (image) img.setAttribute('data-inline-image', image.id);
+      else img.removeAttribute('data-inline-image');
+      img.style.cursor = 'zoom-in';
+    },
+    [imageOf, refOf],
+  );
   // Each picture's box, from its recorded size before it loads (no jump as the thread fills in), and the
   // "Show all" of a very long one. Before paint on every render; again when a picture loads, the body's
   // column changes width or the window changes height.
@@ -100,15 +128,34 @@ export function useBodyImages({
     if (body) syncMessageImages(body, (img) => imageOf(img.getAttribute('src')), openPictures.current);
   }, [imageOf]);
   useLayoutEffect(fitImages);
+  // A sound or video the text plays: "Open" under it, into the viewer, once the Inbox keeps its file (mediaOpen.ts).
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (body) syncMediaOpen(body, (src) => (openImageRef.current ? imageOf(src) : null));
+  });
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
     const onLoad = (event: Event) => {
-      if (event.target instanceof HTMLImageElement) fitImages();
+      if (!(event.target instanceof HTMLImageElement)) return;
+      // A picture that failed and loaded since (written after its message: PictureRetry) is a button again.
+      if (event.target.hasAttribute('data-ib-broken')) {
+        event.target.removeAttribute('data-ib-broken');
+        markButton(event.target);
+      }
+      fitImages();
     };
     // Load does not bubble: a capture listener on the body hears every image in it.
     body.addEventListener('load', onLoad, true);
     const onMore = (event: MouseEvent) => {
+      const media = mediaOpenTarget(event.target);
+      if (media) {
+        event.preventDefault();
+        event.stopPropagation();
+        const image = imageOf(media.getAttribute('src'));
+        if (image) openImageRef.current?.(image);
+        return;
+      }
       const img = toggleMessageImage(event.target, openPictures.current);
       if (!img) return;
       event.preventDefault();
@@ -128,7 +175,7 @@ export function useBodyImages({
       window.removeEventListener('resize', fitImages);
       observer?.disconnect();
     };
-  }, [fitImages]);
+  }, [fitImages, markButton, imageOf]);
   const onImageRef = useRef(onImage);
   onImageRef.current = onImage;
   const onImageClick = useCallback((src: string, alt: string) => (onImageRef.current ? onImageRef.current(src, alt) : void openImage(src, alt)), [openImage]);
@@ -144,23 +191,7 @@ export function useBodyImages({
     [imageOf, onImageClick],
   );
   useEffect(() => {
-    const body = bodyRef.current;
-    if (!body) return;
-    for (const img of body.querySelectorAll<HTMLImageElement>('img')) {
-      // A question card's picture (a picture choice, `Shows:`): the card makes it pick, or opens it with its own button.
-      if (img.hasAttribute('data-question-picture')) continue;
-      const src = img.getAttribute('src');
-      const ref = src ? refOf(src) : null;
-      if (ref === null || img.hasAttribute('data-ib-broken')) continue;
-      const image = imageOf(src);
-      const name = image?.name ?? ref.split(/[\\/]/).pop() ?? 'image';
-      img.setAttribute('role', 'button');
-      img.tabIndex = 0;
-      img.setAttribute('aria-label', `Open ${name}${img.alt ? `, ${img.alt}` : ''}`);
-      if (image) img.setAttribute('data-inline-image', image.id);
-      else img.removeAttribute('data-inline-image');
-      img.style.cursor = 'zoom-in';
-    }
+    for (const img of bodyRef.current?.querySelectorAll<HTMLImageElement>('img') ?? []) markButton(img);
   });
   useEffect(() => {
     const body = bodyRef.current;
@@ -196,5 +227,5 @@ export function useBodyImages({
       body.removeEventListener('error', onError, true);
     };
   }, [openImage]);
-  return { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf };
+  return { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf, refOf };
 }

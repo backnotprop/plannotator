@@ -114,7 +114,9 @@ export interface InboxAttachment {
  * realpath, the sent blob) plus `ref`, so every attachment route, comment and
  * export path reaches it by id; the window steps through it with the
  * attachments. Additive: a reader that does not know the field draws nothing
- * extra.
+ * extra. A sound or video the body plays in place is kept the same way once a
+ * read of the thread captured it (kind `video` or `audio`;
+ * shared/inbox/inline-media-capture.ts), so read `kind`, never assume a picture.
  */
 export interface InboxInlineImage extends InboxAttachment {
   /** The src exactly as the body wrote it (`design/checkout-b.png`), what the body's image renders from. */
