@@ -9,7 +9,7 @@ import { LAUNCH_ART_ALT, LAUNCH_ART_WAIT_MS, LAUNCH_DIALOG_WORDS, launchArtUrl }
  * to a page's first paint.
  *
  * The shell of the Inbox announcement (InboxAnnouncementDialog): the shared dialog (Base UI), modal, focus trapped and
- * restored on close, focus starting on "See the launch". 560 wide, the full width on a phone. An art band on top
+ * restored on close, focus starting on "See the launch". 720 wide (`size`, SIZES below), the full width on a phone. An art band on top
  * (16:9) edge to edge under the rounded top corners with a hairline below it, then the title, the line and two
  * buttons side by side, right-aligned (the owner's pick, c2c). No close button: "Not now", Escape and the backdrop
  * close it.
@@ -30,11 +30,38 @@ export interface LaunchDialogProps {
   readonly url: string;
   /** Called once, with how it ended; the host closes it. */
   readonly onAnswer: (answer: LaunchDialogAnswer) => void;
+  /** `large` (the default, the owner's pick for the launch): 720 wide. `standard`: the usual announcement's 560. */
+  readonly size?: LaunchDialogSize;
   /** Tests: how long the art may take. */
   readonly artWaitMs?: number;
 }
 
 type ArtState = 'loading' | 'ready' | 'gone';
+
+export type LaunchDialogSize = 'large' | 'standard';
+
+/**
+ * The two sizes of the one shell. Large: 720 wide (art band 720×405), the title a step above the Inbox announcement's,
+ * the line and buttons to match. Under the width it takes the overlay's full width (the app's usual dialog margin).
+ * The width also follows the viewport's height, so on a short window the art shrinks until art and words fit, never a
+ * scroll: 15rem is the words and buttons, 2rem the overlay's padding.
+ */
+const SIZES: Record<LaunchDialogSize, { width: string; title: string; line: string; body: string; button: string }> = {
+  large: {
+    width: 'min(720px, 100%, calc((var(--pn-viewport-height, 100dvh) - 2rem - 15rem) * 16 / 9))',
+    title: 'text-2xl sm:text-3xl',
+    line: 'mt-2 text-base sm:text-lg',
+    body: 'gap-5 px-5 pb-5 pt-5 sm:gap-7 sm:px-8 sm:pb-7 sm:pt-7',
+    button: 'min-h-11 text-base',
+  },
+  standard: {
+    width: 'min(560px, 100%, calc((var(--pn-viewport-height, 100dvh) - 2rem - 12rem) * 16 / 9))',
+    title: 'text-xl',
+    line: 'mt-1.5',
+    body: 'gap-5 px-5 pb-5 pt-5 sm:gap-6 sm:px-7 sm:pb-6 sm:pt-6',
+    button: 'min-h-10 text-sm',
+  },
+};
 
 function useArt(src: string | null, waitMs: number): [ArtState, () => void, () => void] {
   const [state, setState] = useState<ArtState>(src ? 'loading' : 'gone');
@@ -46,7 +73,8 @@ function useArt(src: string | null, waitMs: number): [ArtState, () => void, () =
   return [state, () => setState((now) => (now === 'loading' ? 'ready' : now)), () => setState('gone')];
 }
 
-export function LaunchDialog({ campaign, url, onAnswer, artWaitMs = LAUNCH_ART_WAIT_MS }: LaunchDialogProps) {
+export function LaunchDialog({ campaign, url, onAnswer, size = 'large', artWaitMs = LAUNCH_ART_WAIT_MS }: LaunchDialogProps) {
+  const look = SIZES[size];
   const openRef = useRef<HTMLAnchorElement>(null);
   const answered = useRef(false);
   const onAnswerRef = useRef(onAnswer);
@@ -92,7 +120,8 @@ export function LaunchDialog({ campaign, url, onAnswer, artWaitMs = LAUNCH_ART_W
         data-launch-dialog
         data-launch-art={art}
         backdropClassName="bg-background/80 backdrop-blur-sm motion-reduce:transition-none"
-        style={{ width: 'min(560px, 100%)' }}
+        data-launch-size={size}
+        style={{ width: look.width }}
         className="max-h-full max-w-none rounded-xl bg-card text-card-foreground shadow-2xl motion-reduce:transition-none"
       >
         {artSrc && art !== 'gone' && (
@@ -111,10 +140,10 @@ export function LaunchDialog({ campaign, url, onAnswer, artWaitMs = LAUNCH_ART_W
           </div>
         )}
 
-        <div className="flex min-h-0 flex-col gap-5 overflow-y-auto px-5 pb-5 pt-5 sm:gap-6 sm:px-7 sm:pb-6 sm:pt-6">
+        <div className={`flex min-h-0 flex-col overflow-y-auto ${look.body}`}>
           <div className="min-w-0">
-            <DialogTitle className="text-balance text-xl font-semibold tracking-tight">{LAUNCH_DIALOG_WORDS.title}</DialogTitle>
-            <DialogDescription className="mt-1.5 text-pretty leading-relaxed">{LAUNCH_DIALOG_WORDS.line}</DialogDescription>
+            <DialogTitle className={`text-balance font-semibold tracking-tight ${look.title}`}>{LAUNCH_DIALOG_WORDS.title}</DialogTitle>
+            <DialogDescription className={`text-pretty leading-relaxed ${look.line}`}>{LAUNCH_DIALOG_WORDS.line}</DialogDescription>
           </div>
 
           <div className="flex items-center justify-end gap-2">
@@ -122,7 +151,7 @@ export function LaunchDialog({ campaign, url, onAnswer, artWaitMs = LAUNCH_ART_W
               type="button"
               data-launch-not-now
               onClick={() => answer('dismissed')}
-              className="min-h-10 flex-1 whitespace-nowrap rounded-lg border border-border px-4 text-sm font-medium text-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:flex-none"
+              className={`flex-1 whitespace-nowrap rounded-lg border border-border px-4 font-medium ${look.button} text-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:flex-none sm:px-5`}
             >
               {LAUNCH_DIALOG_WORDS.notNow}
             </button>
@@ -136,7 +165,7 @@ export function LaunchDialog({ campaign, url, onAnswer, artWaitMs = LAUNCH_ART_W
               onClick={() => {
                 setTimeout(() => answer('opened'), 0);
               }}
-              className="inline-flex min-h-10 flex-1 items-center whitespace-nowrap justify-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground outline-none transition-opacity motion-reduce:transition-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:flex-none"
+              className={`inline-flex flex-1 items-center whitespace-nowrap justify-center gap-1.5 rounded-lg bg-primary px-5 font-medium ${look.button} text-primary-foreground outline-none transition-opacity motion-reduce:transition-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:flex-none sm:px-6`}
             >
               {LAUNCH_DIALOG_WORDS.open}
               <ArrowUpRight className="size-4" aria-hidden="true" />
