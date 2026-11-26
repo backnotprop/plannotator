@@ -140,6 +140,21 @@ test.skipIf(!hasDom)("switching reviews mid-save: the old review's answer, failu
   expect(errors).toEqual([]);
 });
 
+test.skipIf(!hasDom)('a held tick whose entry leaves the outbox unseen (the stream dropped while it delivered) follows the kept list after', async () => {
+  const draw = mount(() => Promise.reject(new InboxHeldError(entry('queued'), null)));
+  act(() => toggle(FILE));
+  draw(new Map([[KEY, entry('queued')]]));
+  await settle();
+  expect(shown).toEqual([FILE]);
+  draw(new Map());
+  draw.with({ kept: [FILE] });
+  await settle();
+  expect(shown).toEqual([FILE]);
+  draw.with({ kept: [] });
+  await settle();
+  expect(shown).toEqual([]);
+});
+
 test.skipIf(!hasDom)('a failed tick goes back to what the Inbox keeps now, with a change from elsewhere made meanwhile', async () => {
   errors.length = 0;
   const { calls, save } = answers();

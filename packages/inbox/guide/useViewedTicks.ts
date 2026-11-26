@@ -94,6 +94,16 @@ export function useViewedTicks(
         said.push(own);
       } else if (!own && entry.viewed) said.push({ path: entry.viewed.path, on: entry.viewed.viewed });
     }
+    // An entry seen waiting that left the outbox unseen settled while the event stream was down (a reread keeps only
+    // what waits and undismissed notices): delivered, or refused with its notice dismissed. Which one, the kept list
+    // says: it is the truth, so this window's tick stops covering it. (A held tick not seen waiting yet stays.)
+    for (const key of mine.waiting) {
+      if (outboxRef.current?.has(key)) continue;
+      mine.waiting.delete(key);
+      const own = mine.held.get(key);
+      mine.held.delete(key);
+      if (own) settled.push(own);
+    }
     if (said.length || settled.length)
       change(mine, (now) => ({
         ...now,
