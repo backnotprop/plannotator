@@ -343,7 +343,7 @@ export interface SettingsModel {
   list_intro?: { due: boolean };
   /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
   snooze_intro?: { due: boolean };
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; band_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; band_tip?: boolean; /** The launch dialog is due here (launchDialog.tsx). */ launch?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */

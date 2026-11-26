@@ -41,6 +41,7 @@ import { registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders'
 import { linearLinkCardProvider } from '@plannotator/ui/utils/linearLinkCards';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
+import { useLaunchAnnouncement } from '@plannotator/ui/components/LaunchAnnouncement';
 import {
   closePendingTab,
   openPendingTab,
@@ -3534,11 +3535,18 @@ const ReviewApp: React.FC = () => {
     fileKey: isAllFilesActive ? 'all' : activeFileIndex,
   });
   const handleAutoView = autoViewedNotice.show;
+  // The launch dialog (the launch switch; LaunchAnnouncement.tsx): as the page opens, before the reader starts
+  // working; the star ask yields on that load. Never in the VS Code webview or without a live session (as the star ask).
+  const launch = useLaunchAnnouncement({
+    ready: !isLoading,
+    eligible: !!origin,
+    firstRunWindow: true,
+  });
   // The update toast waits behind the guide takeover and every first-run
   // dialog of this load (useUpdateToast).
   useUpdateToast({
     advert: updateAdvert,
-    blocked: isLoading || guideOpen,
+    blocked: isLoading || guideOpen || launch.open,
     autoUpdateActive,
     position: 'top-right',
   });
@@ -5527,11 +5535,12 @@ const ReviewApp: React.FC = () => {
 
   // The "Star the repo" ask (approval "star-ask"): claimed once the page loads (the server stops on the decision),
   // shown on the done screen only, once a decision was sent (approved or feedback; never a closed session), never in
-  // the VS Code webview or without a live session. The server decides the rest.
+  // the VS Code webview or without a live session, and never on a load that showed the launch dialog. The server
+  // decides the rest.
   const starAskFooter = useStarAskDoneScreen({
     ready: !isLoading,
     decided: submitted === 'approved' || submitted === 'feedback',
-    eligible: !!origin && !isVSCodeWebview(),
+    eligible: !!origin && !isVSCodeWebview() && !launch.shownThisLoad,
   });
   // Explorer keys (the `review-explorer` scope): never over a dialog, the
   // guide, or while the review is settling; only Go to File works from a text
@@ -6807,6 +6816,9 @@ const ReviewApp: React.FC = () => {
             }))
             : undefined}
         />
+
+        {/* The launch dialog: as the page opens, once per computer. */}
+        {launch.dialog}
 
         {/* GitHub general comment dialog */}
         <ReviewSubmissionDialog

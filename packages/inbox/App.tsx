@@ -252,6 +252,7 @@ import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/Perso
 import { usePriorityReveal } from './components/usePriorityReveal';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
+import { InboxLaunchDialog } from './launchDialog';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
 import { TabIconChoice } from './components/TabIconChoice';
@@ -5917,14 +5918,13 @@ function Inbox() {
         <GrillMeTip phone={phone} onClose={grillMeTipReveal.close} />
       )}
       {starReveal.stage === 'open' && (
-        <StarAskCard
-          shape="corner"
-          canStar={starReveal.canStar}
+        <StarAskCard shape="corner" canStar={starReveal.canStar} onLeave={starReveal.close}
           onStar={() => inboxApi.starAskStar().then((answer) => answer.starred === true)}
           onAnswer={(answer) => void inboxApi.starAskAnswer(answer)}
-          onLeave={starReveal.close}
         />
       )}
+      {/* The launch dialog (launchDialog.tsx): ahead of every other one-time dialog, once per computer. */}
+      <InboxLaunchDialog due={settings?.reveal?.launch === true} ready={latest !== null && !firstRun && !tourOn && soonClear} heldBack={oneTimeHeldBack} />
       {sidebarTip.stage === 'open' && <SidebarTipCard gone={!sidebarDocked || !listIntroClear || sidebarCustomizing} onSay={say} onLeave={sidebarTip.close} />}
       {listViewChoiceOpen && (
         <ListViewIntro

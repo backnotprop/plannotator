@@ -76,6 +76,7 @@ import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
+import { useLaunchAnnouncement } from '@plannotator/ui/components/LaunchAnnouncement';
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { useUpdateToast } from '@plannotator/ui/hooks/useUpdateToast';
 import { useUpdateCheckSetting } from '@plannotator/ui/hooks/useUpdateCheckSetting';
@@ -7188,6 +7189,17 @@ const App: React.FC = () => {
     !isSharedSession &&
     !goalSetupMode &&
     !showPermissionModeSetup;
+  // The launch dialog (the launch switch; LaunchAnnouncement.tsx): FIRST on the load it is due, as the page opens and
+  // before the reader starts working, ahead of every announcement below and the star ask, which yield on that load
+  // (`launch.holds`). It waits behind the look-and-feel chooser and the two setup flows, as they do. Never on a
+  // shared, archive or read-only page, the share portal, or the VS Code webview (as the star ask).
+  const launch = useLaunchAnnouncement({
+    ready: !isLoading,
+    eligible:
+      isApiMode && !isSharedSession && !archive.archiveMode
+      && !goalSetupMode && !showPermissionModeSetup && !shouldShowLookAndFeelAnnouncement,
+    firstRunWindow: true,
+  });
   // LAST in this app's first-run sequence: it asks for no decision, so it waits
   // behind the look-and-feel chooser and the two setup flows. Archive browsing
   // and a read-only shared plan have no one to address, so it is deferred there
@@ -7202,7 +7214,7 @@ const App: React.FC = () => {
     readOnlySession: isSharedSession || archive.archiveMode || !isApiMode,
     compact: isCompactTouchLayout,
     otherFirstRunDialogVisible:
-      shouldShowLookAndFeelAnnouncement || goalSetupMode || showPermissionModeSetup,
+      shouldShowLookAndFeelAnnouncement || goalSetupMode || showPermissionModeSetup || launch.holds,
   });
   const terminalToolsShownThisLoad = useLatchedTrue(shouldShowTerminalToolsAnnouncement);
   // The Plannotator Inbox announcement: after the terminal-tools one (never on
@@ -7219,7 +7231,8 @@ const App: React.FC = () => {
       shouldShowLookAndFeelAnnouncement
       || goalSetupMode
       || showPermissionModeSetup
-      || shouldShowTerminalToolsAnnouncement,
+      || shouldShowTerminalToolsAnnouncement
+      || launch.holds,
     earlierAnnouncementTakesThisLoad:
       terminalToolsShownThisLoad || (terminalToolsIntroPending && !isCompactTouchLayout),
   });
@@ -7248,7 +7261,8 @@ const App: React.FC = () => {
       || goalSetupMode
       || showPermissionModeSetup
       || shouldShowTerminalToolsAnnouncement
-      || inboxTakesThisLoad,
+      || inboxTakesThisLoad
+      || launch.holds,
   });
   const showAskSessionAnnouncement = useFirstRunAnnouncementWindow({
     pending: askSessionIntroPending,
@@ -7277,7 +7291,8 @@ const App: React.FC = () => {
         || showPermissionModeSetup
         || shouldShowTerminalToolsAnnouncement
         || showInboxAnnouncement
-        || showAskSessionAnnouncement,
+        || showAskSessionAnnouncement
+        || launch.holds,
       earlierAnnouncementMayShow:
         inboxTakesThisLoad
         || askSessionShownThisLoad
@@ -7296,18 +7311,19 @@ const App: React.FC = () => {
       || shouldShowTerminalToolsAnnouncement
       || showInboxAnnouncement
       || showAskSessionAnnouncement
-      || showAgentToolAnnouncement,
+      || showAgentToolAnnouncement
+      || launch.open,
     autoUpdateActive,
     suppressed: openedWithHash || isSharedSession || archive.archiveMode || !isApiMode,
   });
   // The "Star the repo" ask (approval "star-ask"): claimed once the page loads (the server stops on the decision),
   // shown on the done screen only, once a decision was sent (approved, feedback, done; never a closed session or goal
   // setup's answers), with the announcements' gates (never a shared, archive or read-only page, the share portal, or
-  // the VS Code webview). The server decides the rest.
+  // the VS Code webview), and never on a load that showed the launch dialog. The server decides the rest.
   const starAskFooter = useStarAskDoneScreen({
     ready: !isLoading,
     decided: (submitted === 'approved' || submitted === 'denied' || submitted === 'done') && !goalSetupMode,
-    eligible: isApiMode && !goalSetupMode && !isSharedSession && !archive.archiveMode && !isVSCodeWebview(),
+    eligible: isApiMode && !goalSetupMode && !isSharedSession && !archive.archiveMode && !isVSCodeWebview() && !launch.shownThisLoad,
   });
   // Read from the host alone, not agentToolOfferApplies: once "Turn it on"
   // succeeds the setting is on, and the open offer must stay to say so.
@@ -8537,6 +8553,9 @@ const App: React.FC = () => {
           onToggleGrid={(v) => configStore.set('gridEnabled', v)}
           onDismiss={dismissLookAndFeelAnnouncement}
         />
+
+        {/* The launch dialog: first on the load it is due; the others yield. */}
+        {launch.dialog}
 
         {/* One-time Plannotator TUI + Herdr Annotate announcement, shared with
             the code review editor. Renders only once the look-and-feel chooser

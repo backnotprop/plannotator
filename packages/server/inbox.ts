@@ -3893,8 +3893,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The star ask's show (aside): the grill-me tip (`lastResort`) never goes on its day.
       // The grill-me tip's too: the gap counts from either (`revealGapFree`).
       asideShownAt: revealLastShown([reveals?.star?.shownAt, reveals?.grill_me_tip?.shownAt]),
-      // The tips outside the line (the Sidebar tip, the Launch tip): they start the gap too.
-      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt]),
+      // The tips outside the line (the Sidebar tip, the Launch tip) and the launch dialog: they start the gap too.
+      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt, ...Object.values(config.launch ?? {}).map((record) => record?.shownAt)]),
+      // The launch dialog (launch-switch.ts), due here: ahead of everything, so the line holds until it is shown.
+      launchDue: launchSwitch.claim().show,
     };
     // The offers, each one's "undecided" while unshown. They read the state above (Routines' walk waits while the line
     // would refuse it anyway), so they come after it.
@@ -4108,6 +4110,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       sidebar_tip: sidebarTipDue(sidebarTipState(), now.toISOString()) && revealLineFree("setup", state, now),
       // The Group tip (outside the line): the page may claim it at the first hover of a band with a menu.
       band_tip: bandTipDue(bandTipState(), now.toISOString()) && revealLineFree("setup", state, now),
+      // The launch dialog (launch-switch.ts): due on this computer, so the page claims it now (`/api/inbox/launch-switch`).
+      launch: state.launchDue === true,
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build. */
