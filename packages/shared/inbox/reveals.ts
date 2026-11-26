@@ -242,6 +242,13 @@ export interface RevealState {
   tipShownAt?: string | null;
   /** When an `aside` entry was last shown (config.json `inboxReveals.star.shownAt`, `grill_me_tip.shownAt`): the gap counts from it too, and a `lastResort` entry never goes on its day. */
   asideShownAt?: string | null;
+  /**
+   * The launch dialog goes first here (the launch switch, packages/shared/launch-switch.ts: a campaign on and never
+   * shown on this computer), with no gap before it: the whole line holds until the page's claim is answered, either
+   * way (packages/server/inbox-launch-queue.ts): no entry is next or claimed, and neither is the agent note or a tip.
+   * Its show (`launch[campaign].shownAt`) then starts the gap as a tip's does (`tipShownAt`).
+   */
+  launchDue?: boolean;
 }
 
 const time = (iso: string | null | undefined): number | null => {
@@ -277,9 +284,11 @@ export function revealGapFree(state: Pick<RevealState, "lastShownAt" | "dayShown
 
 /**
  * The line's own rules, for any dialog in it, on any page load: not within the gap of any other dialog, and (except
- * the agent note, `setup`) not within three days of an offer's Not now. A dev build keeps no line: free.
+ * the agent note, `setup`) not within three days of an offer's Not now. A dev build keeps no line: free. Never while
+ * the launch dialog is due (`launchDue`).
  */
 export function revealLineFree(kind: "setup" | "spaced", state: RevealState, now: Date): boolean {
+  if (state.launchDue) return false;
   if (!state.release) return true;
   if (!revealGapFree(state, now)) return false;
   return kind === "setup" || revealSpaced(state.lastShownAt, now, state.notNowAt);

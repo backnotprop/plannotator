@@ -958,6 +958,10 @@ packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx
 packages/inbox/skillFileOpen.dom.test.tsx
 packages/inbox/reviewAnalysis.test.tsx
+packages/ui/components/LaunchDialog.test.tsx
+packages/ui/components/LaunchAnnouncement.test.tsx
+packages/ui/components/GlowStars.test.tsx
+packages/inbox/launchDialog.test.tsx
 packages/inbox/reviewSettings/reviewsSettings.test.tsx
 packages/inbox/guide/usePowerUp.test.tsx
 packages/inbox/guide/useViewedTicks.test.tsx
