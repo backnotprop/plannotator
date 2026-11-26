@@ -82,6 +82,7 @@ export interface InboxSwarmMemberWire {
   session: string;
   host: string | null;
   name: string;
+  /** The linked computer it runs on; null: a linked computer whose name is not known; absent: the thread's computer. */
   machine_name?: string | null;
   for?: string | null;
   joined: boolean;

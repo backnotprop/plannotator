@@ -11,7 +11,7 @@ import { noteReviews } from '../contextNotes/model';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { ThreadTagLine } from './ThreadTagLine';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, inboxSessionlessSend, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, inboxSessionlessSend, inboxTagsOnly, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
 import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
@@ -3483,11 +3483,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // person started, the thread's (the server hands it to that session), unless it answers another
   // session that wrote in it (that session takes it, as any plain reply).
   const earlierDelivered = (message: InboxMessageWire): string | null => {
-    if (message === last || message.author.kind !== 'person' || isInboxNote(message) || !isDelivered(message, root)) return null;
+    if (message === last || message.author.kind !== 'person' || isInboxNote(message) || !isDelivered(message, root) || inboxTagsOnly(message, askedBy(message))) return null;
     const name = message.delivery ? toName(message, message.delivery) : message.to ? toName(message, message.to) : recipientName(askedBy(message));
     return message.delivery?.at ? `Delivered to ${name}, ${whenTime(message.delivery.at)}` : `Delivered to ${name}`;
   };
-  const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to && !isOtherAgent(askedBy(last), startedTo) && !(last.tags ?? []).some((t) => t.joined) ? startedTo : null)) : null; // Swarm's Add an agent: to the agent added alone.
+  const lastTo = last.author.kind === 'person' && !isInboxNote(last) && !inboxTagsOnly(last, askedBy(last)) ? (last.to ?? (startedTo && last.reply_to && !isOtherAgent(askedBy(last), startedTo) ? startedTo : null)) : null; // only its tags get one (Add an agent)
   // The session the person's last reply goes to, when its connection wakes it: a message addressed to a
   // session (`lastTo`), or a reply to an agent message sent through a waking connection (`wakes`).
   const repliedTo = last.author.kind === 'person' && !lastTo ? askedBy(last) : undefined;
@@ -3535,7 +3535,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     return { tag, name, line };
   });
   const deliveredNow: DeliveryLine | null =
-    last.author.kind !== 'person'
+    last.author.kind !== 'person' || inboxTagsOnly(last, askedBy(last))
       ? null
       : lastTo
         ? deliveryLine({
@@ -5019,9 +5019,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   kind,
                   authorLabel,
                   folder: multiAgent ? headFolder(message, thread, taggable) : thread.project.name,
-                  toLabel: isAgent ? 'you' : message.to ? toName(message, message.to) : recipientName(askedBy(message)),
+                  toLabel: isAgent ? 'you' : inboxTagsOnly(message, askedBy(message)) ? tagNames : message.to ? toName(message, message.to) : recipientName(askedBy(message)),
                   ended: isAgent && askerEnded && message.id === asking?.message.id,
-                  tagNames: sentTags.length > 0 ? tagNames : null,
+                  tagNames: sentTags.length > 0 && !inboxTagsOnly(message, askedBy(message)) ? tagNames : null,
                   fileCount,
                   filesOpen,
                   changed: fileCount > 0 ? changedCount(messageFiles) : 0,
@@ -5135,10 +5135,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   </ul>
                 )}
                 {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} machine={machine?.id ?? null} machineName={machine?.name ?? null} onChanged={() => onRunChanged?.()} onChangeUrl={changeCloneUrl} />}
-                {message === last && !shownRun && delivered && tagLines.length > 0 && (
-                  // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
+                {message === last && !shownRun && (delivered || inboxTagsOnly(last, askedBy(last))) && tagLines.length > 0 && (
+                  // Lines (approval "inbox-tag-agents"): the owner first (none when only its tags get it), then each tagged session.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
-                    <li data-tag-line={replySession ?? ''} data-delivery={delivered.state} data-owner="">
+                    {delivered && (<li data-tag-line={replySession ?? ''} data-delivery={delivered.state} data-owner="">
                       <HostMark host={ownerHost} agent={replySession} />
                       {delivered.wait ? <UndeliveredText wait={delivered.wait} name={ownerLineName} /> : <span className="ib-dl-text">{delivered.text}</span>}
                       {takeBackLast && <TakeBackButton busy={takingBack} onPress={takeBackLast} />}
@@ -5147,7 +5147,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                           Send now
                         </button>
                       )}
-                    </li>
+                    </li>)}
                     {tagLines.map(({ tag, name, line }) => (
                       <li key={tag.session} data-tag-line={tag.session} data-delivery={line.state}>
                         <HostMark host={tag.host} agent={tag.session} />

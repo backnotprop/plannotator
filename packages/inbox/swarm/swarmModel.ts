@@ -25,6 +25,14 @@ export function swarmSummaryWords(swarm: Pick<InboxThreadSwarm, 'members' | 'on'
   };
 }
 
+/**
+ * The computer a member runs on, as the status view and the plan card name it: its linked computer's (`machine_name`);
+ * none when that computer's name is not known (`machine_name: null`), never this computer's; else the thread's computer.
+ */
+export function swarmMemberComputer(member: Pick<InboxSwarmMemberWire, 'machine_name'>, threadComputer: () => string | null): string | null {
+  return member.machine_name !== undefined ? member.machine_name : threadComputer();
+}
+
 /** The members in the status view's order: each top-level member, then the sub-agents that work for it (`for`), indented. */
 export function swarmMemberTree(members: readonly InboxSwarmMemberWire[]): { member: InboxSwarmMemberWire; depth: 0 | 1 }[] {
   const names = new Set(members.map((m) => m.name.toLowerCase()));

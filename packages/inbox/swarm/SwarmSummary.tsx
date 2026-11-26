@@ -8,7 +8,7 @@ import { SwarmBadgeLook } from './SwarmBadge';
 import { GhostGlyph } from './GhostGlyph';
 import { swarmApi } from './swarmApi';
 import { swarmEscapeIsOurs } from './escape';
-import { swarmMemberTree, swarmStateWords, swarmSummaryWords } from './swarmModel';
+import { swarmMemberComputer, swarmMemberTree, swarmStateWords, swarmSummaryWords } from './swarmModel';
 import { SwarmAddList } from './SwarmAddList';
 import { SwipeToRemove } from '../components/SwipeToRemove';
 import { removeSwarmAgent, type SwarmRemoveHost } from './swarmRemove';
@@ -141,7 +141,7 @@ function SwarmStatus({ threadId, swarm, phone, host, onGhost }: { threadId: stri
   /** Where a member runs: its project (as the agents list says it) and its computer. */
   const whereOf = (m: InboxSwarmMemberWire): string => {
     const project = agents.find((a) => a.session === m.session)?.project?.name ?? null;
-    const computer = m.machine_name ?? (threadMachine ? (linkedMachineFacts(threadMachine)?.name ?? null) : selfMachineName());
+    const computer = swarmMemberComputer(m, () => (threadMachine ? (linkedMachineFacts(threadMachine)?.name ?? null) : selfMachineName()));
     return [project, computer].filter(Boolean).join(' · ');
   };
   const turn = (on: boolean) => {

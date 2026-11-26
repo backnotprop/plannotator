@@ -111,6 +111,7 @@ import {
   inboxDefaultSkip,
   inboxScriptAuthor,
   inboxSessionlessSend,
+  inboxTagsOnly,
   inboxWordsDefault,
   inboxRemovedNow,
   inboxCanRemove,
@@ -2793,11 +2794,13 @@ export class InboxStore {
 
   /**
    * Where a person's message is addressed: its own `to`, or in a thread the person started, that thread's. Not when it
-   * answers another session that wrote in it: the reply goes to that one (the thread's rule too).
+   * answers another session that wrote in it: the reply goes to that one (the thread's rule too). None for a message
+   * only its tags get (`inboxTagsOnly`, Swarm's Add an agent): no session owns it.
    */
   private replyAddressee(root: InboxMessage, last: InboxMessage): InboxAddressee | null {
     const startedTo = root.started_by_person && root.to ? root.to : null;
     const askedBy = last.reply_to ? this.messages.get(last.reply_to) : undefined;
+    if (inboxTagsOnly(last, askedBy)) return null;
     return last.to ?? (startedTo && last.reply_to && !otherSessionThan(askedBy, startedTo) ? startedTo : null);
   }
 
@@ -2849,7 +2852,8 @@ export class InboxStore {
     });
 
     if (lastReal.author.kind === "person") {
-      if (isInboxNote(lastReal)) return null;
+      // Only its tags get it (`inboxTagsOnly`): no owner's delivery to show.
+      if (isInboxNote(lastReal) || inboxTagsOnly(lastReal, lastReal.reply_to ? this.messages.get(lastReal.reply_to) : undefined)) return null;
       const last = lastReal;
       const startedTo = root.started_by_person && root.to ? root.to : null;
       const askedBy = last.reply_to ? this.messages.get(last.reply_to) : undefined;

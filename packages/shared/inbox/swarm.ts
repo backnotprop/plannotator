@@ -50,12 +50,8 @@ export const SWARM_WORDS = {
   doing: (line: string) => `Your status: ${line}`,
   left: (thread: string) => `You left the swarm of thread ${thread}.`,
   notIn: (thread: string) => `You were not in the swarm of thread ${thread}. Nothing changed.`,
-  /**
-   * The refusal for an agent the person removed from the swarm's thread, on any swarm command there. The words main's
-   * Remove already tells an agent (inbox-mcp.ts `INBOX_REMOVED_FROM_THREAD_TEXT`, approved), its first sentence; a
-   * swarm's own sentence waits for the owner's words.
-   */
-  removed: "You were removed from this thread.",
+  /** The refusal for an agent the person removed from the swarm's thread, on any swarm command there (approved as a CLI refusal line). */
+  removed: "The person removed you from this swarm, so nothing was written. You are back in it only if the person adds you again.",
   ghostNone: "Ghost thread: no messages yet.",
   ghostLatest: (shown: number, all: number) => (shown === all ? `Ghost thread (${all}):` : `Ghost thread, the latest ${shown} of ${all}:`),
   /** The wake's first line for a ghost message (one line, at most 300 characters). */
@@ -322,7 +318,9 @@ function addressed(store: InboxStore, threadId: string): { session: string; host
 
 /**
  * `InboxThread.swarm`: the members (joined first, then the agents the thread names that have not joined), the count and
- * the plan. `nameOf`: a linked computer's name, so an agent there that has not joined says its own computer.
+ * the plan. `nameOf`: a linked computer's name, so an agent there that has not joined says its own computer. A member on
+ * a linked computer whose name is not known carries `machine_name: null` (absent: the thread's own computer), so the
+ * window never names this computer for it.
  */
 export function swarmWire(store: InboxStore, threadId: string, live: SwarmLiveState, nameOf?: (machine: string) => string | null): InboxThreadSwarm | undefined {
   const swarm = store.swarmOf(threadId);
@@ -333,7 +331,7 @@ export function swarmWire(store: InboxStore, threadId: string, live: SwarmLiveSt
     session: m.session,
     host: m.host,
     name: m.name,
-    ...(m.machine_name || (m.machine && nameOf?.(m.machine)) ? { machine_name: m.machine_name || nameOf!(m.machine!)! } : {}),
+    ...(m.machine_name || m.machine ? { machine_name: m.machine_name || (nameOf?.(m.machine!) ?? null) } : {}),
     ...(m.for ? { for: m.for } : {}),
     joined: true,
     state: live(m, threadId),
@@ -348,8 +346,7 @@ export function swarmWire(store: InboxStore, threadId: string, live: SwarmLiveSt
     members: [
       ...joined,
       ...waiting.map((a) => {
-        const machineName = a.machine ? (nameOf?.(a.machine) ?? null) : null;
-        return { session: a.session, host: a.host, name: a.name, ...(machineName ? { machine_name: machineName } : {}), joined: false, state: live(a, threadId), doing: null };
+        return { session: a.session, host: a.host, name: a.name, ...(a.machine ? { machine_name: nameOf?.(a.machine) ?? null } : {}), joined: false, state: live(a, threadId), doing: null };
       }),
     ],
     ghost_unread: unread,

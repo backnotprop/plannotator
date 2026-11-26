@@ -9,6 +9,7 @@ import { SwarmGlyph } from './SwarmBadge';
 import { GhostGlyph } from './GhostGlyph';
 import { useSharedThreadSwarm } from './swarmThreadShare';
 import { SWARM_PLAN_FOLD_AFTER, SWARM_PLAN_FOLD_SHOWN, swarmPlanCountWords, swarmPlanRows, swarmPlanStatusWords, type SwarmPlanRow } from './swarmPlanModel';
+import { swarmMemberComputer } from './swarmModel';
 
 /**
  * The body of the agent reply `swarm propose` wrote (`InboxMessage.swarm_plan`): the swarm's plan card while Swarm is
@@ -43,7 +44,7 @@ export function SwarmPlanCard({ threadId, plan, swarm, writer, onGhost }: { thre
   const whereOf = (row: SwarmPlanRow): string | null => {
     if (!row.member) return null;
     const project = agents.find((a) => a.session === row.member!.session)?.project?.name ?? null;
-    const computer = row.member.machine_name ?? (threadMachine ? (linkedMachineFacts(threadMachine)?.name ?? null) : selfMachineName());
+    const computer = swarmMemberComputer(row.member, () => (threadMachine ? (linkedMachineFacts(threadMachine)?.name ?? null) : selfMachineName()));
     return [project, computer].filter(Boolean).join(' · ') || null;
   };
   return (

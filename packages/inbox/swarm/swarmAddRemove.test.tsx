@@ -5,7 +5,10 @@
  *   reaches (a linked computer's too) less the members, and a pick must post `swarm/add` with that agent (its computer
  *   for a linked one), after which the agent shows as not joined yet;
  * - Remove missing from a member's row, not posting main's `remove-agent` for that session, its toast not saying
- *   "Removed <name>" with Undo, or the member still listed after the read that follows.
+ *   "Removed <name>" with Undo, or the member still listed after the read that follows;
+ * - Add an agent's message read as going to the thread's first agent ("to Claude Code · tagged Pi", "Saved for Claude
+ *   Code"), when only the agent added gets it;
+ * - an agent on a linked computer whose name is not known shown on this computer.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
  */
@@ -18,6 +21,7 @@ import type { InboxThreadSwarm } from '@plannotator/core/inbox-swarm-types';
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('../components/Thread') : {}) as typeof import('../components/Thread');
 const { adoptSwarmOn } = (hasDom ? await import('./swarmOn') : {}) as typeof import('./swarmOn');
+const { setSelfMachine } = (hasDom ? await import('../inboxUrl') : {}) as typeof import('../inboxUrl');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-11-24T10:00:00.000Z' };
 const ROOT_ID = 'msg_01M4XXVG0ZCPSD10B1KPG7DPMB';
@@ -186,6 +190,41 @@ test.skipIf(!hasDom)('Add an agent lists the agents the thread reaches less the 
   ]);
 });
 
+test.skipIf(!hasDom)("Add an agent's message reads as going to the agent added alone: its head says \"to Pi\", and only Pi's line is drawn", async () => {
+  adoptSwarmOn(true);
+  thread = swarmThread(SWARM);
+  // What `swarm/add` writes: the person's message answering their own first one, no `to`, Pi tagged and added.
+  const added: InboxMessageWire = {
+    id: 'msg_01M4XXVG0ZCPSD10B1KPG7DPMC',
+    project_id: PROJECT.id,
+    thread_id: ROOT_ID,
+    reply_to: ROOT_ID,
+    author: { kind: 'person' },
+    subject: null,
+    subject_question: null,
+    body: '/swarm',
+    created_at: '2026-11-24T15:10:00.000Z',
+    resolved_at: null,
+    idempotency_key: 'add-pi',
+    tags: [{ host: 'pi', session: 'ses_pi', wakes: false, joined: true }],
+  };
+  thread = { ...thread, messages: [...thread.messages, added] };
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+  });
+  draw();
+  await settle();
+  const article = q(`[data-message-article="${added.id}"]`);
+  expect(article?.querySelector('.ib-to')?.textContent).toBe('to Pi');
+  expect(article?.querySelector('[data-tagged-names]')).toBeNull();
+  expect([...document.querySelectorAll<HTMLElement>('[data-tag-line]')].map((li) => li.dataset.tagLine)).toEqual(['ses_pi']);
+  expect(document.querySelector('[data-owner]')).toBeNull();
+  expect(document.body.textContent).not.toContain('Saved for Claude Code');
+  expect(document.body.textContent).toContain('Saved for Pi');
+});
+
 test.skipIf(!hasDom)('Remove on a member posts main\'s remove-agent for it, toasts "Removed <name>" with Undo, and the member is gone', async () => {
   adoptSwarmOn(true);
   await render(SWARM);
@@ -198,4 +237,16 @@ test.skipIf(!hasDom)('Remove on a member posts main\'s remove-agent for it, toas
   expect(toasts.map((t) => t.lead)).toEqual(['Removed Codex']);
   expect(typeof toasts[0]!.onUndo).toBe('function');
   expect(members()).toEqual([['ses_claude', 'working']]);
+});
+
+test.skipIf(!hasDom)("An agent added on a linked computer whose name is not known shows no computer, never this computer's name", async () => {
+  adoptSwarmOn(true);
+  // This window's computer is Studio.
+  setSelfMachine('ibx_01KAZ00000000000000000000A', [{ id: 'ibx_01KAZ00000000000000000000A', self: true, name: 'Studio' }]);
+  await render({ ...SWARM, members: [...SWARM.members, { session: 'ses_qwen', host: 'qwen', name: 'Qwen Code', machine_name: null, joined: false, state: null, doing: null }] });
+  await press(q('[data-swarm-toggle]'));
+  const where = (session: string) => q(`[data-swarm-member="${session}"] .ib-swarm-wh`)?.textContent ?? null;
+  // The thread's own agents are on Studio; the one on the unnamed linked computer is on none.
+  expect(where('ses_claude')).toBe('Studio');
+  expect(where('ses_qwen')).toBeNull();
 });

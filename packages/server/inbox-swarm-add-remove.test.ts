@@ -7,7 +7,9 @@
  * agent added handed nothing it can join from (no `/swarm` text, no join line); the agents already in woken again by
  * it; an agent on a linked computer added here never woken there; a removed agent still in the members, the status
  * or the ghost thread's "everyone", or still able to speak or join; a swarm's sub-agent that never wrote in the thread
- * refused by Remove; a removed agent added again staying out.
+ * refused by Remove; a removed agent added again staying out; Add an agent's message read as going to the thread's
+ * first agent (its row's "Saved for Claude Code"); an agent on a linked computer whose name is not known sent as one on
+ * the thread's computer.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -104,6 +106,10 @@ test("Add an agent hands that agent alone the thread with the /swarm skill and i
   expect(store.isFor(sent, "ses_pi")).toBe(true);
   expect(store.isFor(sent, "ses_claude")).toBe(false);
   expect(store.isFor(sent, "ses_codex")).toBe(false);
+  // No session owns it, so nothing reads it as going to the thread's first agent: its recipients are the agent added
+  // alone, and the row draws no owner's "Saved for Claude Code".
+  expect(store.recipientsOf(sent).map((r) => r.session)).toEqual(["ses_pi"]);
+  expect(store.listRow(thread)!.delivery ?? null).toBeNull();
   // A live agent is added to the thread, so its wake is the added one.
   expect(sent.tags?.[0]).toMatchObject({ session: "ses_pi", joined: true });
   // Its wake ends with the join line for this thread.
@@ -151,6 +157,19 @@ test("Add an agent on a linked computer: its wake, with the join line, goes to i
   expect(String((writes[0]!.body.command as { body: string }).body).endsWith(swarmJoinLine(thread))).toBe(true);
   // From its computer it joins as itself.
   expect(farSwarmAnswer(ctx, MACHINE_B, { ask: { action: "join", thread }, session: "ses_far_qwen", host: "qwen" }).thread_id).toBe(thread);
+});
+
+test("An agent added on a linked computer whose name is not known: the wire says a linked computer (machine_name null), never the thread's", async () => {
+  const { store, thread, ctx } = world();
+  const blind = { ...ctx, far: { ...ctx.far!, nameOf: () => null } };
+  const answer = await add(blind, thread, { session: "ses_far_qwen", host: "qwen", machine: MACHINE_B, idempotency_key: "add-qwen" });
+  const member = (answer.json.swarm as { members: { session: string; machine_name?: string | null }[] }).members.find((m) => m.session === "ses_far_qwen")!;
+  expect(member).toHaveProperty("machine_name", null);
+  // Joined, still not named: the same.
+  farSwarmAnswer(blind, MACHINE_B, { ask: { action: "join", thread }, session: "ses_far_qwen", host: "qwen" });
+  expect(swarmWire(store, thread, () => null, () => null)!.members.find((m) => m.session === "ses_far_qwen")).toHaveProperty("machine_name", null);
+  // This computer's own members carry none.
+  expect(swarmWire(store, thread, () => null, () => null)!.members.find((m) => m.session === "ses_claude")).not.toHaveProperty("machine_name");
 });
 
 test("Remove in a swarm: out of the members, the status and the ghost thread's everyone; its words stay; it can neither speak nor join until it is added again", async () => {
