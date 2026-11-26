@@ -294,7 +294,7 @@ describe("the reader", () => {
       setTimeout(() => {}, 50);
     `);
     const before = Date.now();
-    const run = Bun.spawnSync([process.execPath, script], { env: { PATH: process.env.PATH ?? "", PLANNOTATOR_DATA_DIR: dir, PLANNOTATOR_TEST_SANDBOX: "1" }, timeout: 15_000 });
+    const run = Bun.spawnSync([process.execPath, script], { env: { PATH: process.env.PATH ?? "", PLANNOTATOR_DATA_DIR: dir, PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_TEST_SANDBOX: "1" }, timeout: 15_000 });
     expect(run.exitCode).toBe(0);
     expect(Date.now() - before).toBeLessThan(10_000);
   });
