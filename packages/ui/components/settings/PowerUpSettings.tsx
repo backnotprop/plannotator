@@ -89,6 +89,12 @@ const EMPTY_INPUTS: FormInputs = { apiKey: '', accountId: '', apiToken: '', ...E
 
 const KEY_MESSAGE_ID = 'power-up-key-message';
 
+/** Sends one request to the opinion settings route. */
+export type OpinionFetch = (route: string, init?: RequestInit) => Promise<Response>;
+
+/** The window's fetch, looked up at call time (a test may stub it after this module loads). */
+const windowFetch: OpinionFetch = (route, init) => fetch(route, init);
+
 function hostOf(rawUrl: string): string | null {
   const trimmed = rawUrl.trim();
   if (!trimmed) return null;
@@ -485,6 +491,8 @@ export interface PowerUpSettingsOptions {
   load?: boolean;
   /** Writes `diffPowerUp` on after a key works. Default: the config store. */
   onChange?: ReviewSettingChange;
+  /** Sends the requests to the route. Default: the window's fetch. */
+  fetch?: OpinionFetch;
 }
 
 /**
@@ -492,7 +500,7 @@ export interface PowerUpSettingsOptions {
  * opinion settings route. The route is read once, the first time `load` is
  * true, never on every open of a page that has not shown Power Up yet.
  */
-export function usePowerUpSettings(route: string, { load: shouldLoad = true, onChange = writeReviewSettingToStore }: PowerUpSettingsOptions = {}): PowerUpSettingsState {
+export function usePowerUpSettings(route: string, { load: shouldLoad = true, onChange = writeReviewSettingToStore, fetch: send = windowFetch }: PowerUpSettingsOptions = {}): PowerUpSettingsState {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [configured, setConfigured] = useState(false);
   const [savedProvider, setSavedProvider] = useState<Provider | null>(null);
@@ -523,7 +531,7 @@ export function usePowerUpSettings(route: string, { load: shouldLoad = true, onC
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(route);
+      const res = await send(route);
       if (!res.ok) throw new Error(String(res.status));
       const data = (await res.json()) as SettingsData;
       setAvailable(true);
@@ -538,7 +546,7 @@ export function usePowerUpSettings(route: string, { load: shouldLoad = true, onC
     } catch {
       setAvailable(false);
     }
-  }, [hydrateCustom, route]);
+  }, [hydrateCustom, route, send]);
 
   useEffect(() => {
     if (shouldLoad) void load();
@@ -562,7 +570,7 @@ export function usePowerUpSettings(route: string, { load: shouldLoad = true, onC
     setCheck({ kind: 'checking' });
     const body = buildSaveBody(provider, inputs);
     try {
-      const res = await fetch(route, {
+      const res = await send(route, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -591,7 +599,7 @@ export function usePowerUpSettings(route: string, { load: shouldLoad = true, onC
 
   const remove = async () => {
     try {
-      const res = await fetch(route, { method: 'DELETE' });
+      const res = await send(route, { method: 'DELETE' });
       if (!res.ok || !(await res.json()).ok) throw new Error('Could not remove key');
     } catch {
       setCheck({ kind: 'error', failure: 'noAnswer' });
