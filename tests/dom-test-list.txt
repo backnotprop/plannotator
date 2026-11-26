@@ -501,6 +501,7 @@ packages/ui/components/AnnotationPanel.cardHeader.test.tsx
 packages/ui/components/AnnotationPanel.editMentions.test.tsx
 packages/ui/components/Viewer.consumer.test.tsx
 packages/ui/components/Viewer.documentHeader.test.tsx
+packages/ui/components/Viewer.gitlabMrRefs.test.tsx
 packages/ui/components/Viewer.codeBlockHighlightSwap.test.tsx
 packages/ui/components/ImageAnnotator/ImageAnnotator.escape.test.tsx
 packages/ui/components/ImageAnnotator/ImageAnnotator.layout.test.tsx

@@ -135,3 +135,58 @@ test.skipIf(!hasDom)('in a repoless thread of a mostly-GitLab Inbox, owner/repo#
     resetDefaultRefHost();
   }
 });
+
+test.skipIf(!hasDom)('in a repoless thread of a mostly-GitLab Inbox, !N and group/project!N stay plain: they need a real GitLab project', async () => {
+  await import('./App');
+  const { learnDefaultRefHost, resetDefaultRefHost } = await import('./defaultRefHost');
+  try {
+    learnDefaultRefHost([{ repo_host: 'gitlab.example.com' }, { repo_host: 'gitlab.example.com' }, { repo_host: 'github.com' }]);
+    await render('Merged !12, group/project!45 and group/sub/project!46; issue group/project#7.', null);
+    expect([...host!.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+      ['group/project#7', 'https://gitlab.example.com/group/project/-/issues/7'],
+    ]);
+    expect(host!.textContent).toContain('Merged !12, group/project!45 and group/sub/project!46;');
+  } finally {
+    resetDefaultRefHost();
+  }
+});
+
+const hrefsByText = () => [...host!.querySelectorAll<HTMLAnchorElement>('a')].map((a) => [a.textContent, a.getAttribute('href')]);
+
+test.skipIf(!hasDom)("a GitLab project's !N and group/sub/project!N link to merge requests on its own host; look-alikes stay plain", async () => {
+  await import('./App');
+  const repo = { display: 'harbor-group/harbor', host: 'gitlab.harbor.dev' };
+  const body = [
+    'Merged !123, then harbor-group/harbor!45 and harbor-group/infra/fern-api!6 (and !12). Issue #7, also !13.',
+    '',
+    'Plain: `!9` and `harbor-group/harbor!10`, wow!123abc, x!14, !important, !15abc, \\!16, see https://gitlab.harbor.dev/a/b!17 too, ![!20](shot!21.png) and [label !22](https://example.com/x).',
+    '',
+    '```',
+    'echo !18 harbor-group/harbor!19',
+    '```',
+  ].join('\n');
+  await render(body, repo);
+  const MR = 'https://gitlab.harbor.dev/harbor-group/harbor/-/merge_requests';
+  expect(hrefsByText()).toEqual([
+    ['!123', `${MR}/123`],
+    ['harbor-group/harbor!45', `${MR}/45`],
+    ['harbor-group/infra/fern-api!6', 'https://gitlab.harbor.dev/harbor-group/infra/fern-api/-/merge_requests/6'],
+    ['!12', `${MR}/12`],
+    ['#7', 'https://gitlab.harbor.dev/harbor-group/harbor/-/issues/7'],
+    ['!13', `${MR}/13`],
+    ['https://gitlab.harbor.dev/a/b!17', 'https://gitlab.harbor.dev/a/b!17'],
+    ['label !22', 'https://example.com/x'],
+  ]);
+  expect(host!.textContent).toContain('wow!123abc');
+  expect(host!.textContent).toContain('!important');
+  expect(host!.textContent).toContain('!16');
+  // A click opens the merge request's card, as a #N's does.
+  for (const a of host!.querySelectorAll('a[href*="/-/merge_requests/"]')) expect(a.hasAttribute('data-ref-card-prose')).toBe(true);
+});
+
+test.skipIf(!hasDom)('the same words in a GitHub project link only the #N: !N and group/project!N stay plain text', async () => {
+  await import('./App');
+  await render('Merged !123, then harbor-group/harbor!45 and harbor-group/infra/fern-api!6. Issue #7.', { display: 'fern/fern-api', host: 'github.com' });
+  expect(hrefsByText()).toEqual([['#7', 'https://github.com/fern/fern-api/issues/7']]);
+  expect(host!.textContent).toContain('Merged !123, then harbor-group/harbor!45 and harbor-group/infra/fern-api!6.');
+});
