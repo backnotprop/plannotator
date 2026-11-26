@@ -22,6 +22,7 @@ import type { InboxReplyDraftRow } from '@plannotator/core/inbox-types';
 import type { ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { ChatWindowStore } from '@plannotator/ui/components/chat';
 import { AuthorMark } from '../icons';
+import { rowWho } from '../scriptAuthor';
 import { inboxApi } from '../api';
 import { AskSparkle } from '../ask/AskChatMenu';
 import type { AskCorner } from '../ask/useInboxAsk';
@@ -80,7 +81,7 @@ interface CornerItem {
 function draftMark(row: InboxReplyDraftRow) {
   return (
     <span className="ib-rf-mark">
-      <AuthorMark author={row.author} />
+      <AuthorMark author={rowWho(row, row.author)} />
       {row.unseen > 0 && <span className="ib-rf-markdot" aria-hidden="true" />}
     </span>
   );

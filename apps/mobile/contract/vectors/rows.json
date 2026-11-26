@@ -6,7 +6,9 @@
       "id": "stopped",
       "label": "Stopped on you",
       "threads": [
-        "msg_R0000000000000000000000001"
+        "msg_R0000000000000000000000001",
+        "msg_R0000000000000000000000091",
+        "msg_R0000000000000000000000090"
       ]
     },
     {
@@ -70,7 +72,9 @@
       "id": "stopped",
       "label": "Stopped on you",
       "threads": [
-        "msg_R0000000000000000000000001"
+        "msg_R0000000000000000000000001",
+        "msg_R0000000000000000000000091",
+        "msg_R0000000000000000000000090"
       ]
     },
     {
@@ -123,10 +127,10 @@
     }
   ],
   "badge": {
-    "count": 6,
-    "label": "6"
+    "count": 8,
+    "label": "8"
   },
-  "waiting": 5,
+  "waiting": 7,
   "wake_ms": 3600000,
   "pins": [
     {
@@ -761,6 +765,76 @@
       },
       "priority_back_in": "Back in Waiting on you",
       "unpinned_where": "Still in Waiting on you",
+      "read_patch": {
+        "read_at": "2026-11-18T15:30:00.000Z",
+        "unread": false,
+        "unseen": 0
+      },
+      "archived_patch": {
+        "resolved_at": "2026-11-18T15:30:00.000Z",
+        "section": "quiet",
+        "unread": false
+      }
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000090",
+      "drawn": "stopped",
+      "menu": [
+        "pin",
+        "priority-add",
+        "copy-thread",
+        "copy-link",
+        "copy-id",
+        "snooze",
+        "read",
+        "archive"
+      ],
+      "swipe": {
+        "lead": "read",
+        "trail": "archive"
+      },
+      "set_aside": {
+        "questions": 1,
+        "actions": 0,
+        "threads": 1
+      },
+      "priority_back_in": "Back in Stopped on you",
+      "unpinned_where": "Still in Stopped on you",
+      "read_patch": {
+        "read_at": "2026-11-18T15:30:00.000Z",
+        "unread": false,
+        "unseen": 0
+      },
+      "archived_patch": {
+        "resolved_at": "2026-11-18T15:30:00.000Z",
+        "section": "quiet",
+        "unread": false
+      }
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000091",
+      "drawn": "stopped",
+      "menu": [
+        "pin",
+        "priority-add",
+        "copy-thread",
+        "copy-link",
+        "copy-id",
+        "snooze",
+        "read",
+        "archive"
+      ],
+      "swipe": {
+        "lead": "read",
+        "trail": "archive"
+      },
+      "set_aside": {
+        "questions": 1,
+        "actions": 0,
+        "threads": 1
+      },
+      "priority_back_in": "Back in Stopped on you",
+      "unpinned_where": "Still in Stopped on you",
       "read_patch": {
         "read_at": "2026-11-18T15:30:00.000Z",
         "unread": false,
