@@ -12,7 +12,7 @@
  * Web Animations and IntersectionObserver are stood in for (happy-dom has neither to watch). DOM-gated: runs under
  * DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
  */
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, jest, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAgent, InboxAgentsGroup, InboxComposeLaunch, InboxListRow } from '@plannotator/core/inbox-types';
@@ -291,6 +291,86 @@ test.skipIf(!hasDom)('with the pointer on the list no row moves when an agent st
   expect(document.querySelector('[data-sidebar-section="agents"]')!.textContent).toContain('1 waiting');
   act(() => void surface()!.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: document.body })));
   expect(order()).toEqual(['ses_c', 'ses_a', 'ses_b']);
+});
+
+/** The list held by a resting pointer, and an agent that has just started waiting (held below the others). */
+function heldWithAWaitingAgent() {
+  const listed = (waits: boolean) => [{ ...group([agent('ses_a'), agent('ses_b'), agent('ses_c', waits ? { status_mark: { state: 'blocked', where: 'inbox' } } : {})]), status_marks: true }];
+  const order = () => [...surface()!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')].map((row) => row.dataset.sidebarAgent);
+  setInboxAgents(listed(false));
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel(null) })} />);
+  act(() => void surface()!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, relatedTarget: document.body })));
+  act(() => setInboxAgents(listed(true)));
+  expect(order()).toEqual(['ses_a', 'ses_b', 'ses_c']);
+  return order;
+}
+
+test.skipIf(!hasDom)('the window losing focus lets go of a held order (an app switch with the mouse resting on the list)', () => {
+  const order = heldWithAWaitingAgent();
+  act(() => void window.dispatchEvent(new Event('blur')));
+  expect(order()).toEqual(['ses_c', 'ses_a', 'ses_b']);
+});
+
+test.skipIf(!hasDom)('the tab going hidden lets go of a held order', () => {
+  const order = heldWithAWaitingAgent();
+  const own = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  try {
+    act(() => void document.dispatchEvent(new Event('visibilitychange')));
+  } finally {
+    if (own) Object.defineProperty(document, 'visibilityState', own);
+    else delete (document as unknown as { visibilityState?: unknown }).visibilityState;
+  }
+  expect(order()).toEqual(['ses_c', 'ses_a', 'ses_b']);
+});
+
+test.skipIf(!hasDom)('a pointer resting still holds the order at most 4 seconds; moving on the list holds it again', () => {
+  jest.useFakeTimers();
+  try {
+    const order = heldWithAWaitingAgent();
+    act(() => void jest.advanceTimersByTime(3_000));
+    act(() => void surface()!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })));
+    act(() => void jest.advanceTimersByTime(3_999));
+    expect(order()).toEqual(['ses_a', 'ses_b', 'ses_c']);
+    act(() => void jest.advanceTimersByTime(1));
+    expect(order()).toEqual(['ses_c', 'ses_a', 'ses_b']);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test.skipIf(!hasDom)('unmounting the list leaves no hold timer and no blur or visibility listener behind', () => {
+  const added: Array<[EventTarget, string, unknown]> = [];
+  const removed: Array<[EventTarget, string, unknown]> = [];
+  const undo: Array<() => void> = [];
+  for (const target of [window, document] as EventTarget[]) {
+    const add = target.addEventListener;
+    const remove = target.removeEventListener;
+    target.addEventListener = function (this: EventTarget, type: string, fn: unknown, opts?: unknown) {
+      added.push([target, type, fn]);
+      return add.call(this, type, fn as EventListener, opts as AddEventListenerOptions);
+    } as typeof add;
+    target.removeEventListener = function (this: EventTarget, type: string, fn: unknown, opts?: unknown) {
+      removed.push([target, type, fn]);
+      return remove.call(this, type, fn as EventListener, opts as EventListenerOptions);
+    } as typeof remove;
+    undo.push(() => {
+      target.addEventListener = add;
+      target.removeEventListener = remove;
+    });
+  }
+  jest.useFakeTimers();
+  try {
+    heldWithAWaitingAgent();
+    const watched = added.filter(([target, type]) => (target === window && type === 'blur') || (target === document && type === 'visibilitychange'));
+    expect(watched.length).toBeGreaterThan(0);
+    unmountAll();
+    for (const [target, type, fn] of watched) expect(removed.some(([t, ty, f]) => t === target && ty === type && f === fn)).toBe(true);
+    expect(jest.getTimerCount()).toBe(0);
+  } finally {
+    jest.useRealTimers();
+    for (const step of undo) step();
+  }
 });
 
 test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an Inbox with no agents field and no link has no section', () => {

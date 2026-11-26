@@ -15,7 +15,7 @@ import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry 
 import { showInRex, useRexShowNote } from '../data/actions/rexShow';
 import { rexMarkWords, shownMarkOf } from './rexMark';
 import { useAgentStatusOn } from './agentStatus';
-import { useHeldAgentOrder } from './heldOrder';
+import { useAgentOrderHold, useHeldAgentOrder } from './heldOrder';
 
 /**
  * The sidebar's Agents section (approval "inbox-agents-section", and the owner's rulings of 2026-11-09), in place
@@ -365,9 +365,9 @@ export function AgentsSection(props: AgentsSectionProps) {
   const groupsRead = useInboxAgents();
   const statusOn = useAgentStatusOn();
   // The pointer on the list holds its order (heldOrder.ts): no row moves under a click.
-  const [pointerOn, setPointerOn] = useState(false);
+  const { hold, ...holdHandlers } = useAgentOrderHold();
   const sorted = useMemo(() => agentsGroups(groupsRead, props.machines, props.rows, statusOn), [groupsRead, props.machines, props.rows, statusOn]);
-  const groups = useHeldAgentOrder(sorted, pointerOn);
+  const groups = useHeldAgentOrder(sorted, hold);
   // A machine with no agent shows nothing, and a machine's name shows only while agents show from more than one
   // machine (the owner, 2026-11-09): with one, the agents alone.
   const filled = groups.filter((group) => group.agents.length > 0);
@@ -422,7 +422,7 @@ export function AgentsSection(props: AgentsSectionProps) {
   return (
     // A section like Projects, straight on the sidebar's ground (the owner, 2026-11-09: "I like it without
     // background"). Its heading carries Add machine, then Add agent (under Tags' New tag); closed, nothing under it.
-    <div className="ib-agentsec" data-agents-surface="" data-closed={props.closed ? '' : undefined} onPointerEnter={() => setPointerOn(true)} onPointerLeave={() => setPointerOn(false)}>
+    <div className="ib-agentsec" data-agents-surface="" data-closed={props.closed ? '' : undefined} {...holdHandlers}>
       <div className="ib-secrow" data-agents-head="" data-one-add={props.onAddMachine ? undefined : ""}>
         {props.header(<GogglesMark />, waitingCount)}
         {props.onAddMachine && (
