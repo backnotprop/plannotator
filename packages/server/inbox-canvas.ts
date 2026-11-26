@@ -508,8 +508,10 @@ export function createInboxCanvas(options: {
     const things = thingsOf(scene);
     const ids = new Set(Array.isArray(input.elements) ? input.elements.filter((id): id is string => typeof id === "string").slice(0, 5000) : []);
     const kind = input.kind === "selection" && ids.size > 0 ? "selection" : "sketch";
-    // A selection: the things that hold a picked element, and what a picked frame holds. A sketch: the whole canvas.
-    const picked = kind === "selection" ? things.filter((t) => t.elementIds.some((id) => ids.has(id))) : things;
+    // A selection: the things that hold a picked element, and what a picked frame holds. A sketch: the whole canvas, or,
+    // when it names elements (what the person drew on this visit to a canvas that already held something, the reply
+    // box's + → Canvas), only the things that hold them.
+    const picked = ids.size > 0 ? things.filter((t) => t.elementIds.some((id) => ids.has(id))) : things;
     const only = new Set(picked.map((t) => t.id));
     for (const t of things) if (t.frame && only.has(t.frame)) only.add(t.id);
     if (only.size === 0) return undefined;

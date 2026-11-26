@@ -1,19 +1,19 @@
 /**
- * The thread canvas as a capability (Settings → Capabilities → Canvas, config.json `inboxCanvas`, off by default;
- * docs/agent-guides/inbox-canvas.md), proved in a real browser against the compiled binary. Nothing is mocked: the
- * binary runs `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR, a simulated agent writes through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts) and works the canvas with the binary's own `plannotator inbox canvas`
- * (a command, not an action of the agent tool), and Chromium drives the window. HOME is the scratch folder.
+ * The thread canvas (docs/agent-guides/inbox-canvas.md), with no switch in Settings: reached from the reply box's +,
+ * proved in a real browser against the compiled binary. Nothing is mocked: the binary runs `plannotator inbox
+ * --background` under a temp PLANNOTATOR_DATA_DIR, a simulated agent writes through `plannotator inbox mcp`
+ * (scripts/inbox-sim.ts) and works the canvas with the binary's own `plannotator inbox canvas` (a command, not an
+ * action of the agent tool), and Chromium drives the window. HOME is the scratch folder.
  *
  * What regresses if this fails:
- *  1. Off (the default): a pen in a thread's header or reply box, or any of the canvas's code fetched, for a person
- *     who never turned it on; the agent's canvas command not refused.
- *  2. On: the Settings row not turning the pens on; the canvas not opening over the window, not keeping a shape drawn
- *     on it, or not showing the agent's change as it lands; the agent's tool gaining a canvas action.
- *  3. The reply box's pen: a sketch sent from it not reaching the agent as the person's reply with the picture and
- *     the line that points at `plannotator inbox canvas --help`.
- *  4. A phone: no pen, or a canvas that does not open.
- *  5. Off again: the pens staying.
+ *  1. A Canvas row back in Settings; a header canvas button on a thread with no canvas; the reply box's + not holding
+ *     Attach a file then Canvas; the agent's tool gaining a canvas action.
+ *  2. + → Canvas on a thread with no canvas: the canvas not opening over the window, not keeping a shape drawn on
+ *     it, or not showing the agent's change as it lands; the header button not there once the thread has a canvas.
+ *  3. + → Canvas on a thread with a canvas: not a clear spot, or a Send that carries the whole board instead of only
+ *     what was drawn on this visit; the reply not reaching the agent with its picture and the line that points at
+ *     `plannotator inbox canvas --help`.
+ *  4. A phone: the menu or the header button missing, or a canvas that does not open.
  *
  * Shots (the whole window each time) land in PLANNOTATOR_E2E_PROOF_DIR/canvas, light and dark.
  */
@@ -54,15 +54,6 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** Whether any script the page fetched so far carries this text (each script is read once it has arrived). */
-async function fetchedScriptHas(marker: string): Promise<boolean> {
-  for (const response of world.scripts) {
-    const code = await response.text().catch(() => '');
-    if (code.includes(marker)) return true;
-  }
-  return false;
-}
-
 /** The agent's session, as its shell would name it to `plannotator inbox canvas`. */
 const AGENT_SESSION = 'claude-code:6f1d2c3b-4a5e-4f60-8b7c-9d0e1f2a3b4c';
 
@@ -71,9 +62,6 @@ function canvasCommand(args: string[]): { status: number; out: string; err: stri
   const run = spawnSync(binary, ['inbox', 'canvas', ...args], { env: world.env, encoding: 'utf8', timeout: 60_000 });
   return { status: run.status ?? -1, out: run.stdout, err: run.stderr };
 }
-
-/** The canvas's own code: its pens and layer (canvas/CanvasParts.tsx) and the editor (canvas/CanvasBoard.tsx). */
-const CANVAS_CODE = 'data-canvas-layer';
 
 async function replyBox(page: Page) {
   const box = page.getByRole('textbox', { name: /^Reply to / });
@@ -89,9 +77,14 @@ async function storedShapes(): Promise<{ type: string; text?: string }[]> {
   return (body.scene?.elements ?? []).filter((element) => !element.isDeleted);
 }
 
-/** Opens the thread's canvas from a pen and waits for the editor. */
-async function openCanvas(page: Page, pen: string) {
-  await page.locator(pen).first().click();
+/** Opens the thread's canvas, from the header's button or the reply box's + → Canvas, and waits for the editor. */
+async function openCanvas(page: Page, from: 'header' | 'plus') {
+  if (from === 'header') await page.locator('[data-thread-sketch]').first().click();
+  else {
+    await replyBox(page);
+    await page.locator('[data-reply-plus]').click();
+    await page.locator('[data-reply-plus-item="canvas"]').click();
+  }
   const layer = page.locator(`[data-canvas-layer="${world.threadId}"]`);
   await expect(layer).toBeVisible();
   await expect(layer.locator('.excalidraw-host:not([data-settling])')).toBeVisible({ timeout: 30_000 });
@@ -154,58 +147,41 @@ test.afterAll(async () => {
   }
 });
 
-test('off by default: the switch is off, a thread has no pen, none of the canvas is fetched, and the agent is refused', async () => {
+test("on from the start, with no row in Settings: no header button yet, the reply box's + holds Attach a file then Canvas, the tool has no canvas", async () => {
   const { page } = world;
   await page.goto(`${world.url}#settings/capabilities`);
-  const row = page.locator('[data-settings-canvas]');
-  await expect(row).toBeVisible();
-  await expect(row.locator('.ib-l')).toHaveText('Canvas');
-  await expect(row.locator('.ib-desc')).toHaveText('An Excalidraw board in every thread that you and your agents can both sketch on.');
-  await expect(row.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
-  await shot(page, '01-settings-off');
+  await expect(page.locator('[data-settings-capabilities]')).toBeVisible();
+  await expect(page.locator('[data-settings-canvas]')).toHaveCount(0);
 
   await page.goto(`${world.url}#thread=${world.threadId}`);
   await expect(page.locator('.ib-subject')).toBeVisible();
   await replyBox(page);
+  await expect(page.locator('[data-reply-plus]')).toBeVisible();
   await page.waitForTimeout(1_000);
   await expect(page.locator('[data-thread-sketch]')).toHaveCount(0);
-  await expect(page.locator('[data-reply-sketch]')).toHaveCount(0);
-  expect(await fetchedScriptHas(CANVAS_CODE)).toBe(false);
-  await shot(page, '02-thread-off');
-
-  const refused = canvasCommand([world.threadId, '--session', AGENT_SESSION]);
-  expect(refused.status).toBe(1);
-  expect(refused.out).toBe('');
-  expect(refused.err).toMatch(/^canvas_off: /);
-});
-
-test('on: the Settings row turns it on, and the thread has its pen in the header and in the reply box', async () => {
-  const { page } = world;
-  await page.goto(`${world.url}#settings/capabilities`);
-  const toggle = page.locator('[data-settings-canvas]').getByRole('switch');
-  await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-checked', 'true');
-  await shot(page, '03-settings-on');
-  // A session that starts now still has no canvas action: the canvas is the command.
+  await shot(page, '01-reply-plus');
+  await page.locator('[data-reply-plus]').click();
+  const menu = page.locator('[data-reply-plus-menu]');
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem')).toHaveText(['Attach a file', 'Canvas']);
+  await shot(page, '02-plus-menu');
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(page.locator('[data-reply-plus]')).toBeFocused();
+  // A session that starts now has no canvas action: the canvas is the command.
   const fresh = await SimAgent.connect({ binary, env: world.env, name: 'Claude Code', host: 'claude-code' });
   try {
     expect((await fresh.listTools()).map((tool) => tool.name)).not.toContain('canvas');
   } finally {
     await fresh.close();
   }
-
-  await page.goto(`${world.url}#thread=${world.threadId}`);
-  await expect(page.locator('[data-thread-sketch]')).toBeVisible();
-  await replyBox(page);
-  await expect(page.locator('[data-reply-sketch]')).toBeVisible();
-  // The control: the pens' code arrives now, so the check while off was not empty.
-  expect(await fetchedScriptHas(CANVAS_CODE)).toBe(true);
-  await shot(page, '04-thread-pens');
 });
 
 test("the canvas opens over the window, keeps a shape drawn on it, and shows the agent's sketch as it lands", async () => {
   const { page } = world;
-  const layer = await openCanvas(page, '[data-thread-sketch]');
+  const layer = await openCanvas(page, 'plus');
+  // A thread with no canvas: its canvas opens as it is.
+  await expect(layer.locator('[data-canvas-fresh]')).toHaveCount(0);
   await shot(page, '05-canvas-open');
 
   // Excalidraw's tool is a visually hidden radio inside its label: the person presses the label.
@@ -254,60 +230,71 @@ test("the canvas opens over the window, keeps a shape drawn on it, and shows the
 
   await layer.locator('[data-canvas-close]').click();
   await expect(layer).toHaveCount(0);
+  // The thread has a canvas now: its header button shows.
+  await expect(page.locator('[data-thread-sketch]')).toBeVisible();
 });
 
-test("the reply box's pen: a sketch sent from the canvas reaches the agent as the person's reply, with its picture", async () => {
+test("+ → Canvas on a thread with a canvas: a clear spot, and Send carries only what was drawn on this visit", async () => {
   const { page } = world;
-  await replyBox(page);
-  await expect(page.locator('[data-reply-sketch]')).toBeVisible();
-  await shot(page, '08-reply-pen');
-
-  const layer = await openCanvas(page, '[data-reply-sketch]');
-  await layer.getByRole('textbox', { name: /^(Note to send with the canvas|What should change in the selection)$/ }).fill('Here is where I want it: before the charge.');
-  await shot(page, '09-reply-with-sketch');
+  const layer = await openCanvas(page, 'plus');
+  await expect(layer.locator('[data-canvas-fresh]')).toHaveCount(1);
+  await expect(layer.locator('[data-canvas-what]')).toHaveText('New drawing');
+  // Nothing drawn yet on this visit: nothing to send.
+  await expect(layer.locator('[data-canvas-send]')).toBeDisabled();
+  await shot(page, '08-clear-spot');
+  await layer.locator('label:has([data-testid="toolbar-ellipse"])').click();
+  const area = (await layer.locator('.excalidraw-host').boundingBox())!;
+  const x = area.x + area.width * 0.35;
+  const y = area.y + area.height * 0.35;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 200, y + 120, { steps: 10 });
+  await page.mouse.up();
+  await expect.poll(async () => (await storedShapes()).filter((element) => element.type === 'ellipse').length, { timeout: 15_000 }).toBe(1);
+  // Let go of it, so Send is this visit's drawing rather than a selection.
+  await page.mouse.click(area.x + area.width * 0.8, area.y + area.height * 0.8);
+  await layer.getByRole('textbox', { name: 'Note to send with the canvas' }).fill('Here is where I want it: before the charge.');
+  await shot(page, '09-new-drawing');
   await layer.locator('[data-canvas-send]').click();
 
   const reply = await world.claude.nextReply(world.threadId, 30);
   const said = JSON.stringify(reply);
   expect(said).toContain('Here is where I want it: before the charge.');
-  expect(said).toMatch(/canvas(-selection)?\.png/);
-  // What the agent reads with it (read_thread as an agent reads it, not the stored record) points at the command's
-  // own help, and names no tool action.
+  expect(said).toContain('canvas.png');
+  // What the agent reads with it (read_thread as an agent reads it) is only the new ellipse: not the box drawn
+  // earlier nor the agent's note, which stay on the board.
   const read = JSON.stringify(await world.claude.readThread(world.threadId));
   expect(read).toContain('Sent from this thread\'s canvas');
+  expect(read).toMatch(/ellipse [0-9a-zA-Z_-]+/);
+  expect(read).not.toContain('Fraud check: before the charge');
+  expect(read).not.toMatch(/\\nbox [0-9a-zA-Z_-]+/);
   expect(read).toContain('plannotator inbox canvas --help');
-  expect(read).not.toContain('canvas {');
+  expect((await storedShapes()).some((element) => element.text?.includes('Fraud check'))).toBe(true);
   if (await layer.count()) await layer.locator('[data-canvas-close]').click();
   await expect(page.locator('.ib-pane').getByText('Here is where I want it: before the charge.').first()).toBeVisible();
   await shot(page, '10-reply-sent');
 });
 
-test('a phone at 390 px: the pen opens the canvas over the whole screen', async ({ browser }) => {
+test('a phone at 390 px: the + menu rises from its button, and the header button opens the canvas over the whole screen', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: 'light', hasTouch: true, isMobile: true });
   try {
     const page = await context.newPage();
     await page.goto(`${world.url}#thread=${world.threadId}`);
     await expect(page.locator('[data-thread-sketch]')).toBeVisible();
-    await shot(page, '11-phone-thread');
-    await openCanvas(page, '[data-thread-sketch]');
+    await replyBox(page);
+    await page.locator('[data-reply-plus]').click();
+    const menu = page.locator('[data-reply-plus-menu]');
+    await expect(menu.getByRole('menuitem')).toHaveText(['Attach a file', 'Canvas']);
+    // It rises from the button (not the phone's bottom sheet): its foot sits over the button.
+    const plus = (await page.locator('[data-reply-plus]').boundingBox())!;
+    const box = (await menu.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(plus.y + 1);
+    await shot(page, '11-phone-plus-menu');
+    await page.keyboard.press('Escape');
+    await openCanvas(page, 'header');
     await shot(page, '12-phone-canvas');
   } finally {
     await context.close();
   }
-});
-
-test('off again: the pens are gone', async () => {
-  const { page } = world;
-  await page.goto(`${world.url}#settings/capabilities`);
-  const toggle = page.locator('[data-settings-canvas]').getByRole('switch');
-  await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-checked', 'false');
-  await shot(page, '13-settings-off-again');
-  await page.goto(`${world.url}#thread=${world.threadId}`);
-  await expect(page.locator('.ib-subject')).toBeVisible();
-  await replyBox(page);
-  await expect(page.locator('[data-thread-sketch]')).toHaveCount(0);
-  await expect(page.locator('[data-reply-sketch]')).toHaveCount(0);
-  await shot(page, '14-thread-off-again');
   expect(world.errors).toEqual([]);
 });

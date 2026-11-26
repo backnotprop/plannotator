@@ -933,8 +933,8 @@ const stepsOnForHelp = () => loadConfig().inboxSteps === true;
 const scheduledOnForHelp = () => process.platform !== "win32" && loadConfig({ quiet: true }).inboxScheduledThreads === true;
 /** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
 const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
-/** The person turned the canvas on (config.json `inboxCanvas`): only then does the guide name `plannotator inbox canvas`. */
-const canvasOnForHelp = () => loadConfig().inboxCanvas === true;
+/** The canvas is on (config.json `inboxCanvas`, on unless false): only then does the guide name `plannotator inbox canvas`. */
+const canvasOnForHelp = () => loadConfig().inboxCanvas !== false;
 
 if (isTopLevelHelpInvocation(args)) {
   console.log(formatTopLevelHelp({ board: boardOnForHelp(), scheduled: scheduledOnForHelp() }));

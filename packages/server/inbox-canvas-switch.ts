@@ -1,6 +1,6 @@
 /**
- * Settings → Capabilities → Canvas (config.json `inboxCanvas`): a canvas in every thread (inbox-canvas.ts), off
- * unless the person turned it on. Off: no pen in the window, the canvas routes refuse (`409 canvas_off`, as Code
+ * The canvas (config.json `inboxCanvas`): a canvas in every thread (inbox-canvas.ts), on unless config.json says
+ * false (no row in Settings; `plannotator inbox capability canvas` still turns it). Off: no canvas in the window, the canvas routes refuse (`409 canvas_off`, as Code
  * review's do), `plannotator inbox canvas` included (inbox-canvas-agent.ts), a reply's `sketch` is dropped, no canvas
  * frame reaches a window. Stored canvases stay on disk untouched. Read on every request. Bun only (the Inbox): no Pi twin.
  */

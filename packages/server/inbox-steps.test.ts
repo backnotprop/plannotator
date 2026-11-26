@@ -234,8 +234,8 @@ describe("the event stream", () => {
     // (inbox.ts heldSwitch) and left out, so a window that never drew its row does not start to. The canvas's row shows
     // to everyone, so its switch is always there.
     expect(told.map((frame) => JSON.parse(frame.data))).toEqual([
-      { board: { on: false }, steps: { on: true }, bro: { on: false }, code_review: { on: false }, canvas: { on: false } },
-      { board: { on: false }, steps: { on: false }, bro: { on: false }, code_review: { on: false }, canvas: { on: false } },
+      { board: { on: false }, steps: { on: true }, bro: { on: false }, code_review: { on: false }, canvas: { on: true } },
+      { board: { on: false }, steps: { on: false }, bro: { on: false }, code_review: { on: false }, canvas: { on: true } },
     ]);
     // The agent's stream, open all along, never gets one.
     expect(agentStream.frames.some((frame) => frame.event === "capabilities")).toBe(false);

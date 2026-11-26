@@ -107,7 +107,7 @@ test("off: the settings read and a Checklist save's event carry Code review off 
     expect(saved.code_review).toEqual({ on: false });
     expect("shape" in saved).toBe(false);
     await stream.next(1);
-    expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, bro: { on: false }, code_review: { on: false }, canvas: { on: false } }]);
+    expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, bro: { on: false }, code_review: { on: false }, canvas: { on: true } }]);
     await stream.stop();
   }
 });
@@ -123,7 +123,7 @@ test("on, with an old inboxShape: true: Code review's row is there and turns off
   expect(saved.code_review).toEqual({ on: false });
   expect("shape" in saved).toBe(false);
   await stream.next(1);
-  expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: false }, bro: { on: false }, code_review: { on: false }, canvas: { on: false } }]);
+  expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: false }, bro: { on: false }, code_review: { on: false }, canvas: { on: true } }]);
   await stream.stop();
 
   // `shape` is not a setting: alone it saves nothing, beside a setting it is ignored.

@@ -152,7 +152,7 @@ export const canvasWork = () => {
   return import('#canvas-board');
 };
 export const CanvasBoardPart = lazyPart(canvasWork);
-/** The canvas's pens and its layer (canvas/CanvasParts.tsx): a page loads them only while the canvas is on (Settings → Capabilities). */
+/** The thread header's canvas button and the canvas's layer (canvas/CanvasParts.tsx): a page loads them only while its Inbox has the canvas. */
 const canvasParts = () => import('./canvas/CanvasParts');
 export const SketchButtonPart = lazyPart(() => canvasParts().then((mod) => ({ default: mod.SketchButton })));
 export const CanvasLayerPart = lazyPart(() => canvasParts().then((mod) => ({ default: mod.CanvasLayer })));

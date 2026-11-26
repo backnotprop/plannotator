@@ -3704,9 +3704,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (was !== chapterDiagramsOn()) for (const listener of capabilityListeners) listener();
     return { on: chapterDiagramsOn() };
   };
-  /** The canvas in every thread (Settings → Capabilities → Canvas, config.json `inboxCanvas`; inbox-canvas-switch.ts): off unless turned on. */
+  /** The canvas in every thread (inbox-canvas-switch.ts): on, with no row in Settings; only config.json `inboxCanvas: false` (or `plannotator inbox capability canvas off`) turns it off. */
   const canvasCap = canvasSwitch({
-    saved: () => loadConfig().inboxCanvas === true,
+    saved: () => loadConfig().inboxCanvas !== false,
     fixed: options.canvas,
     save: (on) => saveConfig({ inboxCanvas: on }),
     // Every window follows, and each linked machine's stream asks again with or without its canvas frames and jobs.
@@ -4278,7 +4278,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     show_archived: { on: showArchived.state().on, rev: showArchived.state().rev },
     /** Code review (config.json `inboxCodeReview`): off unless the person turned it on. */
     code_review: { on: codeReviewOn() },
-    /** The canvas (config.json `inboxCanvas`): off unless the person turned it on. */
+    /** The canvas (config.json `inboxCanvas`): on unless false. */
     canvas: { on: canvasCap.on() },
     /** Capabilities on the seam (inbox-capability.ts): Plans' `plans: { on: true }`, only while on and only to a window on this computer (its routes answer nowhere else). */
     ...capabilitiesWire(capabilities, capable),

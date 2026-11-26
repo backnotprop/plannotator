@@ -183,7 +183,7 @@ for (const width of [390, 320] as const) {
     expect(placed).toEqual({ above: true, inside: true, lines: 1 });
     const row = await readRow(page);
     // One agent wrote here: nothing says who gets the reply (as on a computer). Send is the round arrow, still named "Send".
-    expect(row.controls.map((c) => c.name)).toEqual(['Attach files', 'Skills', MIC, 'Send']);
+    expect(row.controls.map((c) => c.name)).toEqual(['Add', 'Skills', MIC, 'Send']);
     oneRow(row);
     const drawn = await pane(page).locator('.ib-rbox [data-reply-row]').evaluate((el) => {
       const size = (selector: string) => {
@@ -192,7 +192,7 @@ for (const width of [390, 320] as const) {
       };
       const word = el.querySelector('[data-reply-send] .ib-rsend-w')!.getBoundingClientRect();
       return {
-        sizes: ['.ib-rclip', '[data-reply-skills]', '[data-voice-mic]', '[data-reply-send]'].map(size),
+        sizes: ['[data-reply-plus]', '[data-reply-skills]', '[data-voice-mic]', '[data-reply-send]'].map(size),
         arrow: el.querySelector('[data-reply-send] svg.ib-rsend-i')!.getClientRects().length > 0,
         word: Math.max(word.width, word.height),
       };
@@ -314,7 +314,7 @@ for (const width of [320, 390] as const) {
     await expect(cancel).toBeVisible();
     expect(await spots(page), 'nothing moved when the take started').toEqual(before);
     // The paperclip and Skills step aside (decision D5); the summary line over the row stays.
-    await expect(pane(page).locator('.ib-rbox [data-reply-row] .ib-rclip')).toBeHidden();
+    await expect(pane(page).locator('.ib-rbox [data-reply-row] [data-reply-plus]')).toBeHidden();
     await expect(pane(page).locator('.ib-rbox [data-reply-skills]')).toBeHidden();
     await expect(line(page)).toBeVisible();
     // The level is drawn: some of its strokes have room to show.
@@ -332,7 +332,7 @@ for (const width of [320, 390] as const) {
     expect(await spots(page), 'nothing moved while it records').toEqual(before);
     await cancel.tap();
     await expect(cancel).toHaveCount(0);
-    await expect(pane(page).locator('.ib-rbox [data-reply-row] .ib-rclip')).toBeVisible();
+    await expect(pane(page).locator('.ib-rbox [data-reply-row] [data-reply-plus]')).toBeVisible();
     expect(await spots(page), 'nothing moved when it ended').toEqual(before);
     await page.context().close();
   });
@@ -386,7 +386,7 @@ test('a computer: Send, the paperclip, Skills and the mic at the left, the bin a
   await openBox(page);
   const row = pane(page).locator('.ib-rbox [data-reply-row]');
   const drawn = await readRow(page);
-  expect(drawn.controls.slice(0, 4).map((c) => c.name)).toEqual(['Send', 'Attach files', 'Skills', MIC]);
+  expect(drawn.controls.slice(0, 4).map((c) => c.name)).toEqual(['Send', 'Add', 'Skills', MIC]);
   expect(drawn.controls.at(-1)!.name).toBe('Discard draft');
   expect(drawn.boxRight - drawn.controls.at(-1)!.right, 'the bin at the far right').toBeLessThanOrEqual(16);
   oneRow(drawn, 32);

@@ -1,11 +1,12 @@
 /**
- * The canvas on a running Inbox (Settings → Capabilities → Canvas, config.json `inboxCanvas`, off by default):
- * off, every canvas route refuses as Code review's do, `plannotator inbox canvas`'s route included; turned on, the
- * routes answer. Either way the agent's tools/list has no `canvas` (it is a command). Pure parts:
- * inbox-canvas-switch.test.ts, inbox-canvas-agent.test.ts.
+ * The canvas on a running Inbox (config.json `inboxCanvas`, on unless false; no row in Settings): on from the start,
+ * the routes answer; config.json `false` (or a settings write of `{ canvas: { on: false } }`, which
+ * `plannotator inbox capability canvas off` sends) turns it off, and every canvas route refuses as Code review's do,
+ * `plannotator inbox canvas`'s route included. Either way the agent's tools/list has no `canvas` (it is a command).
+ * Pure parts: inbox-canvas-switch.test.ts, inbox-canvas-agent.test.ts.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -23,11 +24,12 @@ afterEach(async () => {
   process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
 });
 
-async function world() {
+async function world(config?: Record<string, unknown>) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-canvas-cap-")));
   roots.push(root);
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
+  if (config) writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
   // The Inbox reads config.json through the env: this test's own, so the switch is the person's file.
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   const server = await startInboxServer({ dataDir, phones: false });
@@ -47,8 +49,16 @@ async function world() {
 }
 
 describe("the canvas switch on a running Inbox", () => {
-  test("off by default: the canvas routes refuse, the command's too, and the agent tool has no canvas", async () => {
+  test("on from the start: the routes answer, and the agent tool has no canvas", async () => {
     const w = await world();
+    expect(await w.read()).toEqual({ on: true });
+    expect((await fetch(`${w.base}/api/inbox/canvases`)).status).toBe(200);
+    const names = (await (await w.session()).listTools()).tools.map((tool) => tool.name);
+    expect(names).not.toContain("canvas");
+  });
+
+  test("off in config.json: the canvas routes refuse, the command's too, and the agent tool has no canvas", async () => {
+    const w = await world({ inboxCanvas: false });
     expect(await w.read()).toEqual({ on: false });
     for (const path of ["/api/inbox/canvases", "/api/inbox/threads/msg_A1/canvas"]) {
       const answer = await fetch(`${w.base}${path}`);
@@ -63,8 +73,8 @@ describe("the canvas switch on a running Inbox", () => {
     expect(names).toContain("thread_pulls");
   });
 
-  test("turned on: saved in config.json, the routes and the command's route answer, the tool still has no canvas; a malformed switch is refused", async () => {
-    const w = await world();
+  test("turned on again: saved in config.json, the routes and the command's route answer, the tool still has no canvas; a malformed switch is refused", async () => {
+    const w = await world({ inboxCanvas: false });
     const on = await w.settings({ canvas: { on: true } });
     expect(on.status).toBe(200);
     expect(((await on.json()) as { canvas: unknown }).canvas).toEqual({ on: true });

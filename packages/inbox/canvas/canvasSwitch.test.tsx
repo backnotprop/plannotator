@@ -1,33 +1,35 @@
 /**
- * The canvas as a capability, in the window (Settings → Capabilities → Canvas, the Inbox's `settings.canvas`, off by
- * default; docs/agent-guides/inbox-canvas.md "The switch"). Off: a thread has no pen in its header or reply box, and
- * none of the canvas's code is fetched. On: both pens are there. The row: present only on an Inbox that sends
- * `canvas`, and a click saves `{ canvas: { on } }`. The server's refusals: packages/server/inbox-canvas-capability.test.ts.
+ * The canvas in the window, with no switch in Settings (docs/agent-guides/inbox-canvas.md "The switch"): the thread
+ * header's canvas button only once the thread has a canvas (its mark), the reply box's + → Canvas on every thread
+ * that can have one, and which visit + opens: a thread without a canvas opens it as it is; a thread with one opens a
+ * clear spot whose Send carries only the new drawing (`fresh`), while the header's button opens the whole board.
+ * An Inbox whose `settings.canvas` is not on (config.json `inboxCanvas: false`, or an older Inbox) has none of it.
+ * What the clear spot and its Send pick: canvas/freshVisit.test.ts; the server's reading of it: inbox-canvas.test.ts.
  *
- * What regresses: a pen (or the canvas's chunk) for a person who never turned it on; no pen once they did; the row
- * missing or saving the wrong value.
+ * What regresses: a header button on a thread with no canvas, none once it has one; + → Canvas opening the whole
+ * board (so Send would post everything) on a thread with a canvas; canvas code for an Inbox without the canvas.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { act, useState } from 'react';
+import { act, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import type { SettingsModel } from '../api';
 import type { ThreadSlotHost } from '../thread/slotHost';
+import type { ThreadCanvas } from './useThreadCanvas';
 
 const hasDom = typeof document !== 'undefined';
 const { useThreadCanvas } = (hasDom ? await import('./useThreadCanvas') : {}) as typeof import('./useThreadCanvas');
 const { SketchButtonPart, CanvasLayerPart } = (hasDom ? await import('../lazyParts') : {}) as typeof import('../lazyParts');
+const { onCanvasFrame } = (hasDom ? await import('./canvasApi') : {}) as typeof import('./canvasApi');
 const { ThemeProvider } = (hasDom ? await import('@plannotator/ui/components/ThemeProvider') : {}) as typeof import('@plannotator/ui/components/ThemeProvider');
-const { SettingsPage } = (hasDom ? await import('../components/Settings') : {}) as typeof import('../components/Settings');
-const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
-const { useSettingsSaves } = (hasDom ? await import('../data/actions/settings') : {}) as typeof import('../data/actions/settings');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 const savedFetch = globalThis.fetch;
-const posted: Record<string, unknown>[] = [];
+/** The threads whose canvas holds something, as `GET /api/inbox/canvases` answers. */
+let withCanvas: string[] = [];
 
 afterEach(() => {
   act(() => root?.unmount());
@@ -35,17 +37,12 @@ afterEach(() => {
   root = null;
   host = null;
   globalThis.fetch = savedFetch;
-  posted.length = 0;
   if (hasDom) document.body.innerHTML = '';
 });
 
-function mount(node: React.ReactNode) {
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).endsWith('/api/inbox/settings') && init?.method === 'POST') {
-      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-      posted.push(body);
-      return Response.json(body);
-    }
+function mount(node: ReactNode) {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes('/canvases')) return Response.json({ canvases: withCanvas.map((thread_id) => ({ thread_id, rev: 2, changed: false })) });
     return Response.json({});
   }) as typeof fetch;
   host = document.createElement('div');
@@ -57,33 +54,53 @@ function mount(node: React.ReactNode) {
   });
 }
 
-const thread = { thread_id: 'msg_A1', subject: 'Plan', messages: [] } as unknown as InboxThread;
-
-function Pens({ canvas }: { canvas: { on: boolean } | undefined }) {
-  const slot = { settings: { canvas } as SettingsModel, setCanvasReply: () => {} } as unknown as ThreadSlotHost;
-  const pens = useThreadCanvas(thread, slot, false);
-  return (
-    <>
-      <header>{pens.header}</header>
-      <footer>{pens.reply}</footer>
-    </>
-  );
+async function until(check: () => boolean, what: string) {
+  for (let i = 0; i < 150; i++) {
+    if (check()) return;
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+  }
+  throw new Error(`timed out waiting for ${what}`);
 }
 
-const renderPens = (canvas: { on: boolean } | undefined) =>
+/** The marks are read once and again after a canvas frame (a burst of frames is one read, 400 ms later). */
+async function marksNow(threads: string[]) {
+  withCanvas = threads;
+  act(() => onCanvasFrame(JSON.stringify({ thread_id: threads[0] ?? 'msg_X', rev: 9 })));
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 480)));
+}
+
+const thread = { thread_id: 'msg_A1', subject: 'Berth booking retries', messages: [] } as unknown as InboxThread;
+let canvas: ThreadCanvas | null = null;
+
+/** The layer asked for, read from what the hook hands the pane: whether it is a fresh visit. */
+function layerFresh(layer: ReactNode): boolean | null {
+  if (!isValidElement(layer)) return null;
+  const inner = (layer as ReactElement<{ children: ReactElement<{ fresh?: boolean }> }>).props.children;
+  return inner.props.fresh === true;
+}
+
+function Pane({ settingsCanvas }: { settingsCanvas: { on: boolean } | undefined }) {
+  const slot = { settings: { canvas: settingsCanvas } as SettingsModel, setCanvasReply: () => {}, outbox: new Map(), machines: { linked: [] } } as unknown as ThreadSlotHost;
+  canvas = useThreadCanvas(thread, slot);
+  return <header>{canvas.header}</header>;
+}
+
+const renderPane = (settingsCanvas: { on: boolean } | undefined) =>
   mount(
     <ThemeProvider>
-      <Pens canvas={canvas} />
+      <Pane settingsCanvas={settingsCanvas} />
     </ThemeProvider>,
   );
 
-describe("a thread's pens follow the switch", () => {
-  test.skipIf(!hasDom)('off, or an Inbox that sends no switch: no pen in the header or the reply box, and no canvas code fetched', async () => {
-    for (const canvas of [{ on: false }, undefined]) {
-      renderPens(canvas);
+const headerButton = () => document.querySelector('header [data-thread-sketch]');
+
+describe("a thread's canvas in the window", () => {
+  test.skipIf(!hasDom)('an Inbox without the canvas (off in config.json, or older): no header button, no + → Canvas, and no canvas code fetched', async () => {
+    for (const settingsCanvas of [{ on: false }, undefined]) {
+      renderPane(settingsCanvas);
       await act(async () => {});
-      expect(document.querySelector('[data-thread-sketch]')).toBeNull();
-      expect(document.querySelector('[data-reply-sketch]')).toBeNull();
+      expect(headerButton()).toBeNull();
+      expect(canvas!.openFromReply).toBeNull();
       act(() => root?.unmount());
       root = null;
     }
@@ -91,67 +108,53 @@ describe("a thread's pens follow the switch", () => {
     expect(CanvasLayerPart.isLoaded()).toBe(false);
   });
 
-  test.skipIf(!hasDom)('on: the pen is in the header and in the reply box', async () => {
-    renderPens({ on: true });
+  test.skipIf(!hasDom)('a thread with no canvas: no header button; + → Canvas opens its canvas as it is', async () => {
+    withCanvas = [];
+    renderPane({ on: true });
     await act(async () => {
       await SketchButtonPart.preload();
     });
-    await act(async () => {});
-    expect(document.querySelector('header [data-thread-sketch]')).not.toBeNull();
-    expect(document.querySelector('footer [data-reply-sketch]')).not.toBeNull();
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(headerButton()).toBeNull();
+    expect(canvas!.openFromReply).not.toBeNull();
+    act(() => canvas!.openFromReply!());
+    expect(layerFresh(canvas!.layer)).toBe(false);
   });
 
-  test.skipIf(!hasDom)("a linked computer's thread: the pen when that computer says `canvas`, none from an older one", async () => {
+  test.skipIf(!hasDom)('a thread with a canvas: the header button shows; + → Canvas opens a clear spot (fresh), the header button the whole board', async () => {
+    renderPane({ on: true });
+    await act(async () => {
+      await SketchButtonPart.preload();
+    });
+    await marksNow([thread.thread_id]);
+    await until(() => headerButton() !== null, 'the header button');
+    expect(headerButton()!.getAttribute('aria-label')).toBe('Canvas');
+    act(() => canvas!.openFromReply!());
+    expect(layerFresh(canvas!.layer)).toBe(true);
+    // Closed again with the header's button (it toggles), then opened from it: the whole board.
+    await act(async () => (headerButton() as HTMLButtonElement).click());
+    expect(canvas!.layer).toBeNull();
+    await act(async () => (headerButton() as HTMLButtonElement).click());
+    expect(layerFresh(canvas!.layer)).toBe(false);
+  });
+
+  test.skipIf(!hasDom)("a linked computer's thread: + → Canvas when that computer says `canvas`, none from an older one", async () => {
     const { rememberMachine, resetMachineRoutes, setSelfMachine } = await import('../inboxUrl');
     const self = 'ibx_01M89YNWCSXG5FHZ2AFN0SAG9G';
     const far = 'ibx_01M89YNWCY3TVAFQV2QZH08AMG';
     try {
-      for (const [marks, pen] of [[['star', 'canvas'], true], [['star'], false]] as const) {
+      for (const [marks, offered] of [[['star', 'canvas'], true], [['star'], false]] as const) {
         resetMachineRoutes();
         setSelfMachine(self, [{ id: self, self: true, name: 'Studio' }, { id: far, name: 'MacBook', marks, list_cursor: 3, state: 'online' }]);
         rememberMachine([thread.thread_id], far);
-        renderPens({ on: true });
-        await act(async () => {
-          await SketchButtonPart.preload();
-        });
+        renderPane({ on: true });
         await act(async () => {});
-        expect([marks.join(','), document.querySelector('header [data-thread-sketch]') !== null]).toEqual([marks.join(','), pen]);
+        expect([marks.join(','), canvas!.openFromReply !== null]).toEqual([marks.join(','), offered]);
         act(() => root?.unmount());
         root = null;
       }
     } finally {
       resetMachineRoutes();
     }
-  });
-});
-
-describe('Settings → Capabilities → Canvas', () => {
-  const baseModel = { serverSession: 's', version: '0.29.1', port: 1, home: '/home/u', data_dir: '/home/u/.plannotator', inbox_tool: { hosts: { 'claude-code': true, pi: false, opencode: false }, env: null }, notifications: { enabled: true, dismissed: false, allowed_origin: null }, phones: false } as unknown as SettingsModel;
-  function Window({ canvas }: { canvas: { on: boolean } | undefined }) {
-    const [settings, setSettings] = useState<SettingsModel | null>({ ...baseModel, ...(canvas ? { canvas } : {}) } as SettingsModel);
-    const noop = () => {};
-    const { toggleCanvas } = useSettingsSaves({ setSettings, setError: noop, refresh: async () => {}, adoptStore: noop, readStore: noop, refreshList: async () => {} });
-    return (
-      <SidebarProvider>
-        <SettingsPage section="capabilities" settings={settings} context={null} error={null} onToggleTool={noop} onToggleTailscale={noop} tailscaleBusy={false} permission="granted" onToggleNotifications={noop} onDeleteThread={async () => {}} onDeleteProject={async () => {}} onToggleCanvas={toggleCanvas} />
-      </SidebarProvider>
-    );
-  }
-  const toggle = () => document.querySelector<HTMLButtonElement>('[data-settings-canvas] button[role="switch"]');
-
-  test.skipIf(!hasDom)('off by default: the row is in Capabilities, and a click saves it on', async () => {
-    mount(<Window canvas={{ on: false }} />);
-    const row = document.querySelector('[data-settings-canvas]');
-    expect(row?.closest('[data-settings-capabilities]')).toBeTruthy();
-    expect(row?.querySelector('.ib-l')?.textContent).toBe('Canvas');
-    expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-    await act(async () => toggle()!.click());
-    expect(posted.filter((body) => 'canvas' in body)).toEqual([{ canvas: { on: true } }]);
-    expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-  });
-
-  test.skipIf(!hasDom)('an Inbox that sends no canvas switch has no row', () => {
-    mount(<Window canvas={undefined} />);
-    expect(document.querySelector('[data-settings-canvas]')).toBeNull();
   });
 });

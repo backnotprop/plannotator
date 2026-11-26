@@ -305,7 +305,7 @@ for (const engine of ENGINES) {
       await expect(box.locator('[data-reply-row] [data-voice-mic]'), 'the mic is not on the row').toBeVisible();
       await expect(pane(page).locator('[data-recipient], .ib-sheet'), 'a one-agent thread has a recipient control or a sheet').toHaveCount(0);
       const row = await box.evaluate((el) => {
-        const parts = { paperclip: '.ib-rclip', Skills: '[data-reply-skills]', mic: '[data-voice-mic]', Send: '[data-reply-send]' };
+        const parts = { plus: '[data-reply-plus]', Skills: '[data-reply-skills]', mic: '[data-voice-mic]', Send: '[data-reply-send]' };
         const missed: string[] = [];
         const centres: number[] = [];
         for (const [name, selector] of Object.entries(parts)) {

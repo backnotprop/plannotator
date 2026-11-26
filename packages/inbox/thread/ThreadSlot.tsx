@@ -79,7 +79,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
   const backLabel = fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle;
   // The thread's canvas (canvas/useThreadCanvas.tsx): over the whole window while open; its pens only while it is on.
-  const canvas = useThreadCanvas(thread, host, phone);
+  const canvas = useThreadCanvas(thread, host);
   // A thread that throws while it draws says so in the pane; the sidebar and the list stay (ui's RegionBoundary). Try
   // again mounts the pane afresh, which reads its reply draft back from the server (replyDraft.ts flushes on unmount).
   // The notice takes the header's Back too, and the address names the thread (a reload opens it again): its own Back,
@@ -201,7 +201,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           draftSignal={host.draftSignals.of(thread.thread_id)}
           filesSignal={host.filesSignals.of(thread.thread_id)}
           onReplyOpened={() => host.setReplyFor(null)}
-          sketchButton={canvas.reply} sketchHeader={canvas.header} onReplyPartOutcome={canvas.outcome}
+          onOpenCanvas={canvas.openFromReply} sketchHeader={canvas.header} onReplyPartOutcome={canvas.outcome}
           replyPart={host.canvasReply?.threadId === thread.thread_id ? host.canvasReply : null}
           onReplyPartTaken={() => host.setCanvasReply(null)}
           onSide={host.ask.side}

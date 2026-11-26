@@ -654,9 +654,9 @@ export interface PlannotatorConfig {
    */
   inboxChapterDiagrams?: boolean;
   /**
-   * The canvas in every thread (Settings → Capabilities → Canvas; docs/agent-guides/inbox-canvas.md): off unless
-   * `true`. On: the pen in a thread's header and its reply box, and agents' `canvas` action. Off: none of it, and
-   * every stored canvas is kept. Written by `POST /api/inbox/settings` `{ canvas: { on } }`, read on every request.
+   * The canvas in every thread (docs/agent-guides/inbox-canvas.md): on unless `false`; Settings has no row for it.
+   * On: Canvas in the reply box's + menu, and `plannotator inbox canvas` for agents. Off: none of it, and every stored
+   * canvas is kept. Written by `POST /api/inbox/settings` `{ canvas: { on } }` (`plannotator inbox capability canvas`).
    */
   inboxCanvas?: boolean;
   /**

@@ -26,6 +26,7 @@ import { heldWords, InboxHeldError, type MachineView, type OutboxView } from '..
 import { machineOf, rememberMachine } from '../inboxUrl';
 import { CANVAS_WINDOW, canvasApi, canvasLooked, subscribeCanvasFrames, type CanvasFrame, type CanvasJob, type CanvasReply } from './canvasApi';
 import { boardLine, farChanges, farParts, heldEnd, joinHeld, saveTimer, type BoardLine, type HeldSave, type SaveState } from './farSave';
+import { clearSpotView, drawnThisVisit } from './freshVisit';
 
 export interface CanvasBoardProps {
   threadId: string;
@@ -46,6 +47,11 @@ export interface CanvasBoardProps {
   outbox?: ReadonlyMap<string, OutboxView>;
   /** The linked computer the thread lives on, as the window knows it now (null for this computer's thread). */
   machine?: MachineView | null;
+  /**
+   * Opened from the reply box's + → Canvas on a canvas that already holds something (freshVisit.ts): the view opens
+   * on a clear spot beside the drawing, and Send with nothing selected carries only what was drawn on this visit.
+   */
+  fresh?: boolean;
 }
 
 const PICTURE_AFTER_MS = 1500;
@@ -301,7 +307,7 @@ const NO_OUTBOX: ReadonlyMap<string, OutboxView> = new Map();
 type UndoAnswer = { rev?: number; scene?: CanvasScene; kept?: string[]; kept_count?: number; already?: boolean };
 const statusOf = (error: unknown) => (error as { status?: number } | null)?.status;
 
-export default function CanvasBoard({ threadId, dark, agent, agentMark, received = false, draft = '', onWords, onSend, outbox = NO_OUTBOX, machine = null }: CanvasBoardProps) {
+export default function CanvasBoard({ threadId, dark, agent, agentMark, received = false, draft = '', onWords, onSend, outbox = NO_OUTBOX, machine = null, fresh = false }: CanvasBoardProps) {
   useLayoutEffect(withStyles, []);
   useLayoutEffect(leaveOutUnshippedFaces, []);
   const api = useRef<ExcalidrawImperativeAPI | null>(null);
@@ -313,6 +319,8 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   const [settled, setSettled] = useState(true);
   const [selected, setSelected] = useState(0);
   const [empty, setEmpty] = useState(true);
+  /** A fresh visit (`fresh`): every element id the board held when it opened, took from the Inbox since, or sent on this visit. */
+  const known = useRef(new Set<string>());
   /** Only freehand on the canvas: it is a sketch; with a box, a text or a photo it is a canvas. */
   const [freehand, setFreehand] = useState(true);
   const [words, setWords] = useState('');
@@ -421,6 +429,8 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
     for (const remote of scene.elements) {
       seen.add(remote.id);
       const here = mine.get(remote.id);
+      // Something the Inbox brings that this editor never held (an agent's addition) was not drawn on this visit.
+      if (!here) known.current.add(remote.id);
       const dirty = !!here && synced.current.get(here.id) !== sig(here);
       const theirs = !here || (!dirty && here.id !== editing && sig(here) !== sig(remote) && (remote.version ?? 0) >= here.version) || (remote.version ?? 0) > here.version;
       order.push({ id: remote.id, remote: theirs ? remote : null });
@@ -720,9 +730,10 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
         canvasLooked(threadId);
         rev.current = read.rev;
         for (const el of read.scene.elements) synced.current.set(el.id, sig(el));
+        for (const el of read.scene.elements) known.current.add(el.id);
         for (const id of Object.keys(read.scene.files)) sentFiles.current.add(id);
         const shown = read.scene.elements.filter((e) => !e.isDeleted);
-        setEmpty(shown.length === 0);
+        setEmpty(fresh || shown.length === 0);
         setFreehand(shown.every((e) => e.type === 'freedraw'));
         // Not measured yet: the editor's faces are listed only once it mounts, and text wrapped with a stand-in face
         // is cut off when the real one draws it (Excalidraw also remembers the stand-in's letter widths). `settleText`
@@ -1102,9 +1113,11 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
       }
       // Nothing to send: no element, or only a speck (a stray tap of the pen).
       const shown = asCanvas(elements.filter((e) => !e.isDeleted));
-      const all = unionBox(shown.map(boxOf));
-      setEmpty(shown.length === 0 || (shown.every((e) => e.type === 'freedraw') && all.w < 4 && all.h < 4));
-      setFreehand(shown.every((e) => e.type === 'freedraw'));
+      // A fresh visit: only what was drawn on it counts (Send carries only that).
+      const counted = fresh ? asCanvas(drawnThisVisit(elements, known.current)) : shown;
+      const all = unionBox(counted.map(boxOf));
+      setEmpty(counted.length === 0 || (counted.every((e) => e.type === 'freedraw') && all.w < 4 && all.h < 4));
+      setFreehand(counted.every((e) => e.type === 'freedraw'));
       // How many elements the editor holds and is not deleted, for a browser test to compare with the Inbox's.
       stage.current?.setAttribute('data-held', String(shown.length));
       // Something new came in (a file opened, a paste, a picture): looked over once, when the count changes.
@@ -1118,7 +1131,7 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
       if (elements.length === synced.current.size && elements.every((e) => synced.current.get(e.id) === sig(e)) && Object.keys(files).every((id) => sentFiles.current.has(id))) return;
       saveSoon();
     },
-    [saveSoon, tidy, fitPictures],
+    [saveSoon, tidy, fitPictures, fresh],
   );
 
   /** An Undo that landed: now, or once its outbox entry was delivered to the thread's linked computer. */
@@ -1126,7 +1139,8 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
     if (!live.current) return;
     if (answer?.scene && Array.isArray(answer.scene.elements)) {
       takeWhenFree(answer.scene);
-      setEmpty(!answer.scene.elements.some((e) => !e.isDeleted));
+      // A fresh visit counts only its own drawing: the editor's next change says whether any is left.
+      if (!fresh) setEmpty(!answer.scene.elements.some((e) => !e.isDeleted));
     }
     if (typeof answer?.rev === 'number') rev.current = Math.max(rev.current, answer.rev);
     setNote(null);
@@ -1250,6 +1264,8 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
         const parts = await pieces(elements, files, 6);
         parts.forEach((part, i) => out.push(new File([part], `${stem}-part-${i + 1}-of-${parts.length}.png`, { type: 'image/png' })));
       };
+      // A fresh visit with nothing selected: only what was drawn on it, read and pictured as a sketch of those things.
+      const visit = fresh && picked.size === 0 ? drawnThisVisit(all, known.current) : null;
       if (picked.size > 0) {
         const chosen = all.filter((e) => picked.has(e.id));
         const drawn = await draw(chosen, files);
@@ -1258,11 +1274,12 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
         sceneFile(chosen, 'canvas-selection.excalidraw');
         onSend({ words: words.trim(), files: out, sketch: { kind: 'selection', elements: [...picked], pictures } });
       } else {
-        const whole = await drawPlaced(all, files);
+        const sent = visit ?? all;
+        const whole = await drawPlaced(sent, files);
         if (whole) png(whole, 'canvas.png');
-        await strip(all, 'canvas');
+        await strip(sent, 'canvas');
         // Each freehand drawing as its own picture, so nobody groups a face by hand and no model has to find it in the whole.
-        const things = thingsOf({ type: 'excalidraw', version: 2, source: '', elements: asCanvas(all), appState: {}, files: {} });
+        const things = thingsOf({ type: 'excalidraw', version: 2, source: '', elements: asCanvas(sent), appState: {}, files: {} });
         const sketches = things.filter((t) => t.kind === 'sketch').sort((a, b) => b.box.w * b.box.h - a.box.w * a.box.h).slice(0, 6);
         if (things.length === 1 && sketches.length === 1) pictures[sketches[0]!.id] = 'canvas.png';
         else {
@@ -1274,8 +1291,14 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
             pictures[sketch.id] = name;
           }
         }
-        sceneFile(all, 'canvas.excalidraw');
-        onSend({ words: words.trim(), files: out, sketch: { kind: 'sketch', elements: [], pictures } });
+        sceneFile(sent, 'canvas.excalidraw');
+        onSend({ words: words.trim(), files: out, sketch: { kind: 'sketch', elements: visit ? visit.map((e) => e.id) : [], pictures } });
+        // Sent: the next Send of this visit carries only what is drawn after it.
+        if (visit) {
+          for (const e of visit) known.current.add(e.id);
+          setEmpty(true);
+          setFreehand(true);
+        }
       }
       setWords('');
       setLost(false);
@@ -1315,6 +1338,7 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
     <div
       className="ibc-root"
       data-canvas-board={threadId}
+      data-canvas-fresh={fresh ? '' : undefined}
       ref={root}
     >
       <div
@@ -1349,8 +1373,9 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
             <Excalidraw
               excalidrawAPI={(next) => {
                 api.current = next;
-                // The whole drawing in view, never larger than life.
-                setTimeout(() => next.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.85, maxZoom: 1, animate: false }), 0);
+                // The whole drawing in view, never larger than life; a fresh visit opens on a clear spot beside it.
+                const spot = fresh ? clearSpotView(unionBox(asCanvas(initial.elements.filter((e) => !e.isDeleted)).map(boxOf))) : null;
+                setTimeout(() => (spot ? next.updateScene({ appState: { ...spot, zoom: { value: 1 as AppState['zoom']['value'] } }, captureUpdate: CaptureUpdateAction.NEVER }) : next.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.85, maxZoom: 1, animate: false })), 0);
                 if (initial.elements.some((e) => !e.isDeleted && e.type === 'text')) void settleText();
                 try {
                   if (performance.getEntriesByName('canvas:open').length > 0 && performance.getEntriesByName('canvas:ready').length === 0) performance.measure('canvas:ready', 'canvas:open');
@@ -1358,7 +1383,7 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
                   // No timing: nothing to do.
                 }
               }}
-              initialData={{ elements: initial.elements, files: initial.files, appState: { viewBackgroundColor: initial.background ?? '#ffffff' }, scrollToContent: true }}
+              initialData={{ elements: initial.elements, files: initial.files, appState: { viewBackgroundColor: initial.background ?? '#ffffff' }, scrollToContent: !fresh }}
               onChange={onChange}
               theme={dark ? 'dark' : 'light'}
               name="canvas"
@@ -1430,7 +1455,7 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
       </div>
       <form className="ibc-bar" onSubmit={send} data-canvas-bar="">
         <span className="ibc-what" data-on={selected > 0 ? '' : undefined} data-lost={sendAll ? '' : undefined} data-canvas-what="" aria-live="polite">
-          {selected > 0 ? `${NUMBER.format(selected)} selected` : lost ? 'Selection gone' : 'Whole canvas'}
+          {selected > 0 ? `${NUMBER.format(selected)} selected` : lost ? 'Selection gone' : fresh ? 'New drawing' : 'Whole canvas'}
         </span>
         <textarea
           className="ibc-words"

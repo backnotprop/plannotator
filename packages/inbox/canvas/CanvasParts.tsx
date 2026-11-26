@@ -1,8 +1,8 @@
 /**
- * A thread's canvas in the Inbox window: the Sketch button (the thread's
- * header and the reply box), the quiet mark a thread with a canvas carries
- * (on its header button only; a list row carries none), and the layer the
- * editor is drawn in.
+ * A thread's canvas in the Inbox window: the thread header's canvas button
+ * (only once the thread has a canvas; the reply box reaches it from its +
+ * menu, compose/ReplyPlusMenu.tsx), the quiet mark that button carries (a
+ * list row carries none), and the layer the editor is drawn in.
  *
  * The canvas takes the whole window, as Excalidraw does on its own site: its
  * tools across the top, its style panel at the left edge beside the drawing
@@ -12,7 +12,7 @@
  * letter pressed while drawing is Excalidraw's tool, never the thread's Reply.
  *
  * The editor itself is the lazy `#canvas-board` chunk; a person who never
- * presses Sketch loads none of it. This file's few styles are inline for that
+ * opens a canvas loads none of it. This file's few styles are inline for that
  * reason too: the window's stylesheet does not grow.
  */
 import { useCallback, useEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
@@ -43,27 +43,24 @@ export function useCanvasMark(threadId: string | null): CanvasMark | undefined {
 
 const DOT: CSSProperties = { position: 'absolute', top: 5, right: 5, width: 6, height: 6, borderRadius: 3, pointerEvents: 'none' };
 
-/** Opens and closes the thread's canvas. `where`: the thread's header (an icon, with the canvas's mark) or the reply box's row. */
-export function SketchButton({ threadId, open, onToggle, where, size = 16 }: { threadId: string; open: boolean; onToggle: () => void; where: 'header' | 'reply'; size?: number }) {
-  const mark = useCanvasMark(where === 'header' ? threadId : null);
+/** A press that opens a canvas: its timing starts, and the editor's chunk starts to arrive before the layer mounts. */
+function startCanvasOpen(): void {
+  markOpen();
+  void CanvasBoardPart.preload().catch(() => {});
+}
+
+/**
+ * The thread header's canvas button: opens and closes the thread's canvas. Only once the thread has a canvas (its
+ * mark: something drawn on it, by the person or an agent), and while it is open; a thread without one has none.
+ */
+export function SketchButton({ threadId, open, onToggle, size = 16 }: { threadId: string; open: boolean; onToggle: () => void; size?: number }) {
+  const mark = useCanvasMark(threadId);
   const press = () => {
-    if (!open) {
-      markOpen();
-      // The chunk starts to arrive with the press, before the layer mounts.
-      void CanvasBoardPart.preload().catch(() => {});
-    }
+    if (!open) startCanvasOpen();
     onToggle();
   };
-  if (where === 'reply') {
-    return (
-      <Tip content="Sketch">
-        <button type="button" className="ib-ricon" aria-label="Sketch" data-reply-sketch="" onClick={press}>
-          <Icon name="pen" size={size} />
-        </button>
-      </Tip>
-    );
-  }
-  const tip = mark?.changed ? 'Canvas, changed by an agent' : mark ? 'Canvas' : 'Sketch';
+  if (!mark && !open) return null;
+  const tip = mark?.changed ? 'Canvas, changed by an agent' : 'Canvas';
   return (
     <Tip content={tip}>
       <button
@@ -76,7 +73,7 @@ export function SketchButton({ threadId, open, onToggle, where, size = 16 }: { t
         data-canvas-mark={mark ? (mark.changed ? 'changed' : 'has') : undefined}
         onClick={press}
       >
-        <Icon name="pen" size={size} />
+        <Icon name="diagram" size={size} />
         {mark && <span aria-hidden="true" style={{ ...DOT, background: mark.changed ? 'var(--primary)' : 'color-mix(in oklab, var(--muted-foreground) 55%, transparent)' }} />}
       </button>
     </Tip>
@@ -125,6 +122,7 @@ export function CanvasLayer({
   onClose,
   outbox,
   machine,
+  fresh = false,
 }: {
   threadId: string;
   subject: string;
@@ -142,6 +140,8 @@ export function CanvasLayer({
   /** The window's outbox, and the linked computer the thread lives on (null for this computer's): a save held for it ends there. */
   outbox: ReadonlyMap<string, OutboxView>;
   machine: MachineView | null;
+  /** Opened from the reply box's + on a canvas that already holds something: a clear spot, and Send carries only the new drawing. */
+  fresh?: boolean;
 }) {
   // A chunk that could not arrive says so in the layer; the next open asks for it again.
   const failed = useCallback(() => CanvasBoardPart.retry(), []);
@@ -159,7 +159,7 @@ export function CanvasLayer({
       // Focus goes back to the button that opened the canvas.
       const el = opener.current;
       if (el instanceof HTMLElement && el.isConnected) el.focus({ preventScroll: true });
-      else document.querySelector<HTMLElement>('[data-thread-sketch]')?.focus({ preventScroll: true });
+      else (document.querySelector<HTMLElement>('[data-reply-plus]') ?? document.querySelector<HTMLElement>('[data-thread-sketch]'))?.focus({ preventScroll: true });
     };
   }, []);
   return createPortal(
@@ -179,7 +179,7 @@ export function CanvasLayer({
         </Tip>
       </header>
       <PanePart loading={<div style={{ flex: 1 }} aria-busy="true" />} onFailed={failed}>
-        <CanvasBoard threadId={threadId} dark={dark} agent={agent} agentMark={agentMark} received={received} draft={draft} onWords={onWords} onSend={onSend} outbox={outbox} machine={machine} />
+        <CanvasBoard threadId={threadId} dark={dark} agent={agent} agentMark={agentMark} received={received} draft={draft} onWords={onWords} onSend={onSend} outbox={outbox} machine={machine} fresh={fresh} />
       </PanePart>
       </div>
     </dialog>,

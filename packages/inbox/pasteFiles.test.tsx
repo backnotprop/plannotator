@@ -524,11 +524,11 @@ test.skipIf(!hasDom)('a phone: the reply box has an attach button; a chosen imag
     await until(() => replyBox(el) !== null, 'the reply box');
     const input = el.querySelector<HTMLInputElement>('input[type="file"][data-reply-attach]')!;
     expect(input).not.toBeNull();
-    // The picker offers the photo library and Files; the button is named, with no native title.
+    // The picker (the + menu's Attach a file) offers the photo library and Files; the + is named, with no native title.
     expect(input.accept).toBe('image/*,*/*');
-    const label = input.closest('label')!;
-    expect(label.getAttribute('aria-label')).toBe('Attach files');
-    expect(label.hasAttribute('title')).toBe(false);
+    const plus = replyBox(el)!.querySelector<HTMLElement>('[data-reply-row] [data-reply-plus]')!;
+    expect(plus.getAttribute('aria-label')).toBe('Add');
+    expect(plus.hasAttribute('title')).toBe(false);
     Object.defineProperty(input, 'files', { configurable: true, value: [image('header.png')] });
     act(() => {
       input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -567,12 +567,14 @@ test.skipIf(!hasDom)('a desktop reply box: the paperclip beside its Send and a d
   act(() => button(el, 'Reply').click());
   await until(() => replyBox(el) !== null, 'the reply box');
 
-  // The paperclip comes right after Send in the box's own row (approval "inbox-reply-box", T6), the way to browse for any file.
+  // The + comes right after Send in the box's own row (approval "inbox-reply-box", T6, the paperclip's place); its
+  // Attach a file is the picker, the way to browse for any file.
   const input = replyBox(el)!.querySelector<HTMLInputElement>('[data-reply-row] input[type="file"][data-reply-attach]')!;
   expect(input).not.toBeNull();
-  const beforeClip = input.closest('label')!.previousElementSibling;
-  expect(beforeClip?.matches('[data-reply-send]') || beforeClip?.querySelector('[data-reply-send]') != null).toBe(true);
-  expect(input.closest('label')!.getAttribute('aria-label')).toBe('Attach files');
+  const plus = replyBox(el)!.querySelector<HTMLElement>('[data-reply-row] [data-reply-plus]')!;
+  const lead = [...plus.closest('.ib-rlead')!.querySelectorAll<HTMLElement>('button')];
+  expect(lead.indexOf(plus)).toBe(lead.findIndex((b) => b.matches('[data-reply-send]')) + 1);
+  expect(plus.getAttribute('aria-label')).toBe('Add');
   expect(input.accept).toBe('');
   choose(input, [markdown('currency-notes.md')]);
   await until(() => tiles(replyBox(el)!)[0]?.getAttribute('data-compose-file') === 'done', 'the chosen file');

@@ -82,8 +82,8 @@ export interface ThreadPaneProps {
   onReplyPartTaken?: () => void;
   /** How the canvas's own Send ended: it went, or it stays in the box for the person (a refused file, a choice at Send). */
   onReplyPartOutcome?: (outcome: 'sent' | 'held') => void;
-  /** The Sketch buttons (canvas/CanvasParts.tsx): the reply box's, and the thread header's. */
-  sketchButton?: ReactNode;
+  /** The reply box's + → Canvas (null: no canvas here), and the thread header's canvas button (canvas/useThreadCanvas.tsx). */
+  onOpenCanvas?: (() => void) | null;
   sketchHeader?: ReactNode;
   backLabel?: string;
   cardChip?: ReactNode;

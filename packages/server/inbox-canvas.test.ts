@@ -329,6 +329,26 @@ describe("undo of an agent's change", () => {
   });
 });
 
+describe("a sketch sent from a clear spot on a canvas that already held something", () => {
+  test("a sketch that names elements is read as only the things holding them; one that names none is the whole canvas", async () => {
+    const t = setup();
+    await board(t, ["Orders API", "Fraud check"]);
+    // On this visit one box is added far from the rest (the window sends its element ids with kind "sketch").
+    const made = await t.canvas.apply(THREAD, agent("p"), t.revOf(t.canvas.read(THREAD, agent("p"))), [{ add: "box", text: "Retry twice", at: [2400, 0] }]);
+    expect(made.ok).toBe(true);
+    const scene = readCanvasScene(t.dir, THREAD);
+    const fresh = scene.elements.filter((e) => !e.isDeleted && thingsOf(scene).find((x) => x.words === "Retry twice")?.elementIds.includes(e.id)).map((e) => e.id);
+    expect(fresh.length).toBeGreaterThan(0);
+    const only = t.canvas.replySketch(THREAD, { kind: "sketch", elements: fresh, pictures: {} })!;
+    expect(only.kind).toBe("sketch");
+    expect(only.reading).toContain('"Retry twice"');
+    expect(only.reading).not.toContain("Orders API");
+    expect(only.reading).not.toContain("Fraud check");
+    const whole = t.canvas.replySketch(THREAD, { kind: "sketch", elements: [], pictures: {} })!;
+    for (const words of ["Retry twice", "Orders API", "Fraud check"]) expect(whole.reading).toContain(words);
+  });
+});
+
 describe("pictures and sketches for agents", () => {
   test("a picture path handed out stays good while newer pictures are written", () => {
     const t = setup();

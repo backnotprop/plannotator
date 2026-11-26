@@ -1,24 +1,30 @@
 /**
- * A thread pane's canvas wiring (thread/ThreadSlot.tsx): the pen in the thread's header and the one in its reply
- * box, and the layer the canvas is drawn in. Only while the canvas is on (Settings → Capabilities → Canvas, the
- * Inbox's `settings.canvas`): off, there is no pen and no layer, and nothing of the canvas loads (the pens and the
- * layer are the lazy canvas/CanvasParts.tsx, the editor the lazy `#canvas-board`).
+ * A thread pane's canvas wiring (thread/ThreadSlot.tsx): the canvas button in the thread's header (only once the
+ * thread has a canvas), the reply box's + → Canvas (compose/ReplyPlusMenu.tsx), and the layer the canvas is drawn in.
+ * The canvas is simply there (no row in Settings); only an Inbox whose `settings.canvas` is not on (config.json
+ * `inboxCanvas: false`, or an older Inbox) has none of it, and then nothing of the canvas loads (the header button and
+ * the layer are the lazy canvas/CanvasParts.tsx, the editor the lazy `#canvas-board`).
  */
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { inboxAgentName, type InboxThread } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { HostMark } from '../icons';
 import { linkedMachinesWith, machineOf } from '../inboxUrl';
-import { CanvasLayerPart, SketchButtonPart } from '../lazyParts';
+import { CanvasBoardPart, CanvasLayerPart, SketchButtonPart } from '../lazyParts';
+import { canvasMarkOf } from './canvasApi';
 import { useInboxTheme } from '../theme';
 import type { ThreadSlotHost } from '../thread/slotHost';
 
 export interface ThreadCanvas {
   /** The canvas over the whole window, while open. */
   layer: ReactNode;
-  /** The thread header's pen (with the canvas's mark), and the reply box's. */
+  /** The thread header's canvas button (with the canvas's mark): nothing while the thread has no canvas. */
   header: ReactNode;
-  reply: ReactNode;
+  /**
+   * The reply box's + → Canvas, null where the thread can have no canvas. A thread without one: its canvas opens. A
+   * thread with one: the same board opens on a clear spot, and its Send carries only what is drawn on this visit.
+   */
+  openFromReply: (() => void) | null;
   /** How the canvas's own Send ended: one that stays in the reply box closes the canvas, so the box takes its place. */
   outcome: (outcome: 'sent' | 'held') => void;
 }
@@ -26,7 +32,7 @@ export interface ThreadCanvas {
 const SketchButton = SketchButtonPart.Part;
 const CanvasLayer = CanvasLayerPart.Part;
 
-export function useThreadCanvas(thread: InboxThread | null, host: ThreadSlotHost, phone: boolean): ThreadCanvas {
+export function useThreadCanvas(thread: InboxThread | null, host: ThreadSlotHost): ThreadCanvas {
   // A linked computer's thread too, when that computer has the canvas (mark `canvas`): its scene lives there and every
   // call goes through the forward (canvasApi.ts). An older one has none, and its threads get no pen.
   const machine = thread ? machineOf(thread.thread_id) : null;
@@ -37,13 +43,16 @@ export function useThreadCanvas(thread: InboxThread | null, host: ThreadSlotHost
   }, [canvasFor]);
   const [canvasOpen, setCanvasOpen] = useState<string | null>(null);
   const canvasOn = !!canvasFor && canvasOpen === canvasFor;
+  /** This visit came from the reply box's + to a canvas that already held something (canvas/freshVisit.ts). */
+  const [fresh, setFresh] = useState(false);
   const { shown: themeShown } = useInboxTheme();
   // The reply box's words go to the canvas's bar and come back: what the box held when the canvas opened (its saved
   // draft), and the bar's words as the person leaves them.
   const [canvasDraft, setCanvasDraft] = useState('');
   const canvasWords = useRef('');
-  const openCanvas = () => {
+  const openCanvas = (clearSpot = false) => {
     if (!canvasFor) return;
+    setFresh(clearSpot);
     setCanvasDraft('');
     canvasWords.current = '';
     setCanvasOpen(canvasFor);
@@ -92,19 +101,24 @@ export function useThreadCanvas(thread: InboxThread | null, host: ThreadSlotHost
           onClose={closeCanvas}
           outbox={host.outbox}
           machine={machine ? (host.machines.linked.find((m) => m.id === machine) ?? null) : null}
+          fresh={fresh}
         />
-      </Suspense>
-    ) : null;
-  const pen = (where: 'header' | 'reply', size: number) =>
-    canvasFor ? (
-      <Suspense fallback={null}>
-        <SketchButton threadId={canvasFor} where={where} open={canvasOn} onToggle={toggleCanvas} size={size} />
       </Suspense>
     ) : null;
   return {
     layer,
-    header: pen('header', 17),
-    reply: pen('reply', phone ? 20 : 16),
+    header: canvasFor ? (
+      <Suspense fallback={null}>
+        <SketchButton threadId={canvasFor} open={canvasOn} onToggle={toggleCanvas} size={17} />
+      </Suspense>
+    ) : null,
+    openFromReply: canvasFor
+      ? () => {
+          void CanvasBoardPart.preload().catch(() => {});
+          // The marks say which threads' canvases hold something (an empty canvas has no mark).
+          openCanvas(!!canvasMarkOf(canvasFor));
+        }
+      : null,
     outcome: (outcome) => {
       if (outcome === 'held') setCanvasOpen(null);
     },

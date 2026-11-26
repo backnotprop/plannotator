@@ -507,8 +507,8 @@ test.skipIf(!hasDom)('questions gone while the sheet is open (answered elsewhere
   await settle(2);
   expect(!!sheet()).toBe(false);
   expect(!!line(el)).toBe(false);
-  // Focus did not fall to the page: the paperclip has it (not the field, which would raise the keyboard).
-  expect(document.activeElement?.hasAttribute('data-reply-attach') ?? false).toBe(true);
+  // Focus did not fall to the page: the + (the paperclip's place) has it (not the field, which would raise the keyboard).
+  expect(document.activeElement?.hasAttribute('data-reply-plus') ?? false).toBe(true);
   // The person types again; then the agent asks again.
   const field = el.querySelector<HTMLTextAreaElement>('.ib-rbox textarea')!;
   act(() => field.focus());

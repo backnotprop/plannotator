@@ -297,13 +297,13 @@ for (const phone of PHONES) {
       // the tap area, with nothing over it.
       const attach = box.locator('[data-reply-row] [data-reply-attach]');
       await expect(attach).toHaveCount(1);
-      const clip = box.locator('[data-reply-row] .ib-rclip');
+      const clip = box.locator('[data-reply-row] [data-reply-plus]');
       const target = (await clip.boundingBox())!;
       expect(target.width).toBe(36);
       expect(target.height).toBe(36);
       const leads = await box.locator('[data-reply-row]').evaluate((row) => {
         const controls = [...row.querySelectorAll<HTMLElement>('button, label')].filter((el) => el.getClientRects().length > 0);
-        const lefts = controls.map((el) => ({ clip: el.classList.contains('ib-rclip'), left: el.getBoundingClientRect().left }));
+        const lefts = controls.map((el) => ({ clip: el.hasAttribute('data-reply-plus'), left: el.getBoundingClientRect().left }));
         return lefts.sort((a, b) => a.left - b.left)[0]?.clip ?? false;
       });
       expect(leads).toBe(true);

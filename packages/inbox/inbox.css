@@ -11448,6 +11448,16 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .pn-inbox .ib-ricon { display: inline-flex; align-items: center; justify-content: center; flex: none; position: relative; padding: 0; border: 0; background: transparent; color: var(--muted-foreground); font: inherit; cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out; }
 .pn-inbox .ib-ricon:hover { background: var(--muted); color: var(--foreground); }
 .pn-inbox .ib-ricon:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* The reply box's + (compose/ReplyPlusMenu.tsx): open, it is pressed and its + turns a quarter into ×; its menu rises from it. */
+.pn-inbox .ib-rplus[data-open] { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-rplus .ib-ic { transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.pn-inbox .ib-rplus[data-open] .ib-ic { transform: rotate(45deg); }
+.ib-rplus-pm { min-width: 196px; transform-origin: var(--transform-origin, bottom left); animation: ib-rplus-rise 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+@keyframes ib-rplus-rise { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
+.ib-rplus-pos[data-rplus-phone] .ib-rplus-pm { min-width: 220px; padding: 6px; border-radius: var(--ib-sheet-corner, 12px); }
+.ib-rplus-pos[data-rplus-phone] .ib-pmi { height: 48px; font-size: var(--ib-fs-16-in, 16px); padding: 0 12px; gap: 12px; border-radius: 8px; }
+.ib-rplus-pos[data-rplus-phone] .ib-pmi .ib-ic { width: 18px; height: 18px; }
+@media (prefers-reduced-motion: reduce) { .ib-rplus-pm { animation: none; } .pn-inbox .ib-rplus .ib-ic { transition: none; } }
 .pn-inbox .ib-rdiscard:hover { color: var(--destructive, var(--foreground)); }
 .ib-rrow > .ib-rdiscard { margin-left: 2px; }
 /* The middle cell: what goes with the reply and who gets it, or, while voice runs, its status in exactly that place. */
