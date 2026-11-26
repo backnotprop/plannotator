@@ -121,8 +121,9 @@ export interface Route {
   /**
    * A file an agent's message names, beside the thread, read only until a comment attaches it (approval
    * "inbox-file-refs-open-viewer"). `ref=` its path as written, `in=` the message, `line=` / `to=` its lines. Never with `file`.
+   * `skill`: `ref=` names a skill the person's message used, whose SKILL.md is shown (SkillFilePane).
    */
-  ref?: { path: string; messageId: string; line?: number; lineEnd?: number } | null;
+  ref?: { path: string; messageId: string; line?: number; lineEnd?: number; skill?: true } | null;
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
   /**
@@ -237,7 +238,7 @@ export function routeOf(fullHash: string): Route {
     agent: fromReviews ? null : params.get('agent'),
     tag: fromReviews ? null : params.get('tag'),
     thread,
-    ref: thread && !fileId && params.get('ref') && params.get('in') ? { path: params.get('ref')!, messageId: params.get('in')!, ...(Number(params.get('line')) > 0 ? { line: Number(params.get('line')) } : {}), ...(Number(params.get('to')) > 0 ? { lineEnd: Number(params.get('to')) } : {}) } : null,
+    ref: thread && !fileId && params.get('ref') && params.get('in') ? { path: params.get('ref')!, messageId: params.get('in')!, ...(Number(params.get('line')) > 0 ? { line: Number(params.get('line')) } : {}), ...(Number(params.get('to')) > 0 ? { lineEnd: Number(params.get('to')) } : {}), ...(params.has('skill') ? { skill: true as const } : {}) } : null,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
     guideAt: thread && params.get('guide') ? reviewAtOf(params) : null,

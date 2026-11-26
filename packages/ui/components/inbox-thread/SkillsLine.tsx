@@ -1,16 +1,20 @@
 /**
  * The quiet skills line under a person's message (approval
  * "inbox-skills-line", option B, 2026-10-29): the box icon, then the names of
- * the skills the reply used as a comma list. Nothing to open: no label, no
- * size, no Show. The block the window pasted at the end of the message is
+ * the skills the reply used as a comma list. No label, no size, no Show. The block the window pasted at the end of the message is
  * split off by Thread.tsx's MessageBody; the agent's text is shown whole.
  * The line sits in the message body, above the Delivered line, so it is in
  * the same place whatever the state (sent, queued, answered). A long list
  * wraps between names, never inside one.
+ *
+ * `onOpen` (opt-in): each name is a button that opens that skill's file
+ * (the Inbox's SkillFilePane), `from` the button pressed, named "Open <name>"
+ * as the chips in the words are. Absent, the names
+ * are plain text, as before.
  */
 import type { InboxSkillsSplit } from '@plannotator/core/skill-reference-block';
 
-export function SkillsLine({ split }: { split: InboxSkillsSplit }) {
+export function SkillsLine({ split, onOpen }: { split: InboxSkillsSplit; onOpen?: (name: string, from: HTMLElement) => void }) {
   const names = split.skills.map((s) => s.name).join(', ');
   return (
     <div className="ib-skills" data-skills-line="" title={`Skills you referenced: ${names}`}>
@@ -19,7 +23,13 @@ export function SkillsLine({ split }: { split: InboxSkillsSplit }) {
       <span className="ib-skills-n">
         {split.skills.map((s, i) => (
           <span key={s.name}>
-            <span className="ib-skill-nm" data-skill-name="">{s.name}</span>
+            {onOpen ? (
+              <button type="button" className="ib-skill-nm ib-skill-open" aria-label={`Open ${s.name}`} data-skill-name="" data-skill-open={s.name} data-skill-place="line" onClick={(event) => onOpen(s.name, event.currentTarget)}>
+                {s.name}
+              </button>
+            ) : (
+              <span className="ib-skill-nm" data-skill-name="">{s.name}</span>
+            )}
             {i < split.skills.length - 1 ? ', ' : ''}
           </span>
         ))}
