@@ -1,12 +1,43 @@
-import { createContext, useContext, useId, useLayoutEffect, type RefObject } from 'react';
+import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { QuestionOtherToolsProvider } from '@plannotator/ui/components/QuestionOtherTools';
 import { isTouchScreen, usePhone } from '../phone';
 import { useVoiceSession, useVoiceShown } from '../voice';
 import { textareaField } from '../voiceField';
 import { VoiceMicButton, VoiceNote, VoiceStatusLine } from './VoiceMic';
 
-const QuestionVoiceBusy = createContext<((id: string, busy: boolean) => void) | null>(null);
+/** Where a field's mic says its take started or ended: the Send it sits under (useOtherFieldVoice). */
+export const QuestionVoiceBusy = createContext<((id: string, busy: boolean) => void) | null>(null);
 
 export const QuestionVoiceBusyProvider = QuestionVoiceBusy.Provider;
+
+/** The question cards' Other fields under one Send (a thread, decision mode): whether a take is still running. */
+export interface OtherFieldVoice {
+  /** For drawing: Send is off while one runs. */
+  busy: boolean;
+  /** For a Send already pressed: read now, not at the last render. */
+  busyNow: () => boolean;
+  /** The cards under this Send, each Other field with its mic (none while `off`). */
+  wrap: (cards: ReactNode) => ReactNode;
+}
+
+export function useOtherFieldVoice(off = false): OtherFieldVoice {
+  const fields = useRef(new Set<string>());
+  const [busy, setBusy] = useState(false);
+  const report = useCallback((id: string, running: boolean) => {
+    if (running) fields.current.add(id);
+    else fields.current.delete(id);
+    setBusy(fields.current.size > 0);
+  }, []);
+  return useMemo(() => ({
+    busy,
+    busyNow: () => fields.current.size > 0,
+    wrap: (cards: ReactNode) => (
+      <QuestionVoiceBusyProvider value={report}>
+        <QuestionOtherToolsProvider value={off ? null : FieldVoice}>{cards}</QuestionOtherToolsProvider>
+      </QuestionVoiceBusyProvider>
+    ),
+  }), [busy, off, report]);
+}
 
 type Props = { textareaRef: RefObject<HTMLTextAreaElement | null>; onBusyChange?: (busy: boolean) => void };
 
