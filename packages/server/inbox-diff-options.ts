@@ -33,6 +33,7 @@ export interface InboxDiffOptions {
   expand_unchanged: boolean | null;
   font_family: string | null;
   font_size: string | null;
+  /** Power Up (config.json `diffOptions.powerUp`, on unless set): off, the Inbox never asks a provider either. */
   power_up: boolean | null;
   power_up_motion: "stream" | "still" | null;
 }

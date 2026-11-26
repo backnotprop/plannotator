@@ -47,7 +47,7 @@ export interface DiffOptions {
   defaultDiffType?: DefaultDiffType;
   lineBgIntensity?: DiffLineBgIntensity;
   semantic?: boolean;
-  /** Power Up: a second opinion on the engine's unsure moved and renamed calls (Settings → Reviews). */
+  /** Power Up: ask the chosen model about the engine's unsure calls (code review's Settings › Semantic diffs; on unless false). */
   powerUp?: boolean;
   /** How Power Up's notes arrive: all at once, or as each answer comes. */
   powerUpMotion?: 'stream' | 'still';

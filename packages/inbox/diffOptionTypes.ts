@@ -19,7 +19,8 @@ export interface InboxDiffOptions {
   /** The code font (empty: the theme's) and its size (`13px`; empty: the theme's). Absent from an older Inbox. */
   font_family?: string | null;
   font_size?: string | null;
-  /** Power Up's switch and its motion. Absent from an older Inbox. */
+  /** Power Up (code review's Settings › Semantic diffs): off, the Inbox never asks a provider either. Absent from an older Inbox. */
   power_up?: boolean | null;
+  /** How Power Up's notes arrive. Absent from an older Inbox. */
   power_up_motion?: 'stream' | 'still' | null;
 }

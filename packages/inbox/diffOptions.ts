@@ -21,7 +21,7 @@ import type { SettingValue } from '@plannotator/ui/config';
 import type { InboxDiffOptions } from './api';
 
 /** The settings the Inbox shows and saves. */
-export type InboxDiffSetting = 'diffStyle' | Exclude<DiffDisplaySetting, 'diffHideWhitespace' | 'diffMinimap'> | 'diffFontFamily' | 'diffFontSize' | 'diffPowerUp' | 'diffPowerUpMotion';
+export type InboxDiffSetting = 'diffStyle' | 'diffPowerUp' | Exclude<DiffDisplaySetting, 'diffHideWhitespace' | 'diffMinimap'> | 'diffFontFamily' | 'diffFontSize' | 'diffPowerUpMotion';
 type WireKey = keyof InboxDiffOptions;
 
 /** Each setting's name on the wire, and its field in config.json `diffOptions` (what the config store's sync payload carries). */
@@ -38,6 +38,7 @@ const FIELDS: Record<InboxDiffSetting, { wire: WireKey; config: string }> = {
   diffExpandUnchanged: { wire: 'expand_unchanged', config: 'expandUnchanged' },
   diffFontFamily: { wire: 'font_family', config: 'fontFamily' },
   diffFontSize: { wire: 'font_size', config: 'fontSize' },
+  // Power Up's switch: Settings → Reviews draws it, and a choice made in code review holds on every address (guide/usePowerUp.ts).
   diffPowerUp: { wire: 'power_up', config: 'powerUp' },
   diffPowerUpMotion: { wire: 'power_up_motion', config: 'powerUpMotion' },
 };
