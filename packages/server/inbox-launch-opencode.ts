@@ -540,7 +540,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
   type ResumeResult = LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null };
   const nothing = (text: string): ResumeResult => ({ exitCode: 0, text, failure: null });
 
-  /** OpenCode's session for a launch, on a server made for it: `start` keeps that server, `rexCommand` ends it. */
+  /** OpenCode's session for a launch, on a server made for it: `start` keeps that server, `terminalCommand` ends it. */
   const makeSession = async (launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }): Promise<{ ok: true; session: string; server: OpenCodeServer } | ({ ok: false } & LaunchStartFailure)> => {
     const result = await spawnServer(launch, null, input.login, () => false);
     if (!result.ok) {
@@ -750,7 +750,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
      * connects as that session at its start and takes the root as its first turn. `resume`: the same session again
      * (`fresh` changes nothing: the session exists from `makeSession` whether or not it took a turn).
      */
-    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
+    async terminalCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
       holdLogin(input.login);
       let session = input.resume ? (launch.session_ref ?? "") : "";
       if (!session) {

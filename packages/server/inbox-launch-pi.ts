@@ -795,7 +795,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       return out;
     },
 
-    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
+    async terminalCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
       const session = input.resume && launch.session ? launch.session : randomUUID();
       const dataDir = dataDirArg();
       const choice = launchChoiceArgs(PI, { model: launch.model, effort: launch.effort });

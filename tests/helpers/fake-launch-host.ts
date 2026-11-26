@@ -1,8 +1,8 @@
 /**
  * The launch engine's test fake (`LaunchHost`, packages/server/inbox-launch-host.ts): an in-memory agent whose sessions
  * a test connects, works and idles by hand. `start` makes a session that is not connected; the test works and idles it
- * (`poll`), and asks its permission questions (`ask`). `rexCommand` (Start in Rex) names a session it makes the same
- * way, run by nothing: the test connects it by hand, as a Rex tab's agent would. `faults` says what goes wrong. Registered through
+ * (`poll`), and asks its permission questions (`ask`). `terminalCommand` (Start in Rex; its calls are logged as
+ * `rexCommand …`, as the Rex tests know them) names a session it makes the same way, run by nothing: the test connects it by hand, as a Rex tab's agent would. `faults` says what goes wrong. Registered through
  * `createInboxLaunch`'s `hosts` option, or `startInboxServer`'s `launchHosts`.
  */
 import type { InboxLaunchAgent, InboxMessage } from "@plannotator/core/inbox-types";
@@ -41,7 +41,7 @@ export function fakeLaunchHost() {
       sessions.set(`session-${ref}`, { ref, live: null, state: "running" });
       return { ok: true, session: `session-${ref}`, ref };
     },
-    async rexCommand(launch, input) {
+    async terminalCommand(launch, input) {
       calls.push(`rexCommand ${input.resume ? (input.fresh ? "fresh" : "resume") : "new"}`);
       const session = input.resume && launch.session ? launch.session : `session-r${sessions.size + 1}`;
       if (!sessions.has(session)) sessions.set(session, { ref: session, live: null, state: "running" });
