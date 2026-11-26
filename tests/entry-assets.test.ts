@@ -323,6 +323,12 @@ describe('review entry assets', () => {
   // Each runtime lives in its own file, the engine carries neither, and the
   // engine brings no React of its own: every module it shares with the page
   // is read from the host the page installs (no bare import survives).
+  // The Mermaid marker is a name on Mermaid's public API object, so it survives
+  // minification. It is not `flowchart-v2`: Pele 1.13 names that diagram id in
+  // its own detect table, so the engine carries it without any Mermaid.
+  // `mermaidRuntime` below asserts the same marker in mermaid.js, so it would
+  // find Mermaid if Mermaid were bundled into the engine.
+  const MERMAID_RUNTIME_MARKER = 'registerExternalDiagrams';
   const ENGINE_DIRS = ['apps/review/dist/diagram-engine', 'apps/hook/dist/diagram-engine'];
   for (const dir of ENGINE_DIRS) {
     test.skipIf(!existsSync(resolve(root, dir)))(`${dir} holds the engine and both runtimes, apart`, () => {
@@ -332,13 +338,13 @@ describe('review entry assets', () => {
       const graphviz = file('graphviz');
       const facts = {
         dir,
-        engineHasMermaid: engine.includes('flowchart-v2'),
+        engineHasMermaid: engine.includes(MERMAID_RUNTIME_MARKER),
         engineHasGraphviz: engine.includes('viz_set_y_invert'),
         engineReadsHost: engine.includes('__plannotatorDiagramEngineHost'),
         // Every import the engine names (statements and literal dynamic
         // imports); the runtimes are imported by URL from the host, never by name.
         engineImports: new Bun.Transpiler({ loader: 'js' }).scanImports(engine).map((entry) => entry.path),
-        mermaidRuntime: mermaid.includes('flowchart-v2'),
+        mermaidRuntime: mermaid.includes(MERMAID_RUNTIME_MARKER),
         graphvizRuntime: graphviz.includes('viz_set_y_invert'),
         mermaidCarriesKatex: mermaid.includes('katex-display'),
       };
