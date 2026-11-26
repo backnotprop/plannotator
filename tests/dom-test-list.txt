@@ -241,6 +241,7 @@ packages/inbox/ack.test.tsx
 packages/inbox/reactionLanding.test.ts
 packages/inbox/reactionTray.test.tsx
 packages/inbox/reactionSkillEnter.test.tsx
+packages/inbox/reactionSkillList.test.tsx
 packages/inbox/replyHoldTray.test.tsx
 packages/inbox/reactEveryMessage.test.tsx
 packages/inbox/reactFaceSelect.test.tsx
