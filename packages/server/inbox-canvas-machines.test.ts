@@ -121,7 +121,7 @@ describe("a thread's canvas across linked computers", () => {
     const dataB = scratch("plannotator-canvas-linked-b-");
     const a = await start(dataA);
     let b = await start(dataB, 60_000);
-    const hearA = listen(a.port);
+    let hearA = listen(a.port);
     let hearB = listen(b.port);
     try {
       for (const port of [a.port, b.port]) expect((await post(port, "/api/inbox/settings", { canvas: { on: true } })).status).toBe(200);
@@ -167,6 +167,23 @@ describe("a thread's canvas across linked computers", () => {
       expect(pictured.text).toMatch(/^Picture of the whole canvas: .+\.png/);
       expect(readFileSync(pictured.picture as string)).toEqual(Buffer.from(png));
 
+      // No window open on A: A answers B's next drawing job at once, so B's agent is not kept waiting the job's 8 s.
+      hearA.stop();
+      await Bun.sleep(200);
+      const started = Date.now();
+      const unseen = (await (await agent(b.port, { thread_id: onB, picture: true })).json()) as Json;
+      expect(Date.now() - started).toBeLessThan(4_000);
+      // B falls back to the picture A's window drew a moment ago.
+      expect(unseen.text).toMatch(/^Picture of the whole canvas: .+\.png/);
+      hearA = listen(a.port);
+      await Bun.sleep(200);
+
+      // A save too large for the outbox to hold (one long stroke) goes at once while B is online, not refused.
+      const stroke = { ...box("stroke_long", 900), type: "freedraw", points: Array.from({ length: 12_000 }, (_, i) => [i * 1.123456789, i * 2.987654321]) };
+      const large = await saveThere(a.port, bId, onB, [stroke], 3);
+      expect(large.status).toBe(200);
+      expect((await storedOn(b.port, onB)).some(([id]) => id === "stroke_long")).toBe(true);
+
       // And the other way: B's window saves on A's thread, and B's windows hear A's agent.
       expect((await saveThere(b.port, aId, onA, [box("box_a", 10)], 0)).status).toBe(200);
       expect(await storedOn(a.port, onA)).toEqual([["box_a", 10]]);
@@ -179,9 +196,19 @@ describe("a thread's canvas across linked computers", () => {
       await waitFor("B offline on A", async () => ((await get(a.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === bId)?.state === "offline", 30_000);
       const held = await saveThere(a.port, bId, onB, [box("box_three", 600)], 3);
       expect(held.status).toBe(202);
+      const heldKey = ((await held.json()) as Json).outbox.key as string;
+      // A held Undo of B's agent's change, and a picture's file, which goes only while B is there (503: the window keeps it).
+      const undoHeld = await post(a.port, `/api/inbox/m/${bId}/threads/${onB}/canvas/undo`, { idempotency_key: "window-undo-1", rev: 3 });
+      expect(undoHeld.status).toBe(202);
+      const fileAway = await fetch(`${at(a.port)}/api/inbox/m/${bId}/threads/${onB}/canvas/files?idempotency_key=files-away`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: {} }) });
+      expect([fileAway.status, ((await fileAway.json()) as Json).code]).toEqual([503, "machine_offline"]);
       b = await start(dataB, 60_000);
       hearB = listen(b.port);
       await waitFor("the held save on B", async () => (await storedOn(b.port, onB)).some(([id]) => id === "box_three"), 45_000);
+      // A's windows hear how each held write ended (the window clears its "Waiting for …" by it, also when it changed
+      // nothing there): delivered, the Undo's with the canvas after it.
+      await waitFor("the held save's end on A", () => hearA.frames.some((f) => f.event === "outbox" && f.data.key === heldKey && f.data.state === "delivered"), 20_000);
+      await waitFor("the held Undo's end on A", () => hearA.frames.some((f) => f.event === "outbox" && f.data.key === "window-undo-1" && f.data.state === "delivered" && Array.isArray(f.data.answer?.scene?.elements)), 20_000);
       const after = (await get(b.port, `/api/inbox/threads/${onB}/canvas`)) as Json;
       expect((after.scene.elements as Json[]).filter((e) => e.id === "box_three").length).toBe(1);
       expect((after.scene.elements as Json[]).map((e) => e.id).slice(0, 2)).toEqual(["box_one", "box_two"]);

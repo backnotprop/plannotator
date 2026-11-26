@@ -112,9 +112,9 @@ describe("a thread's canvas on the device door", () => {
     expect(d.handed.length).toBe(5);
   });
 
-  test("each canvas write has its outbox kind: a save and an Undo are held in order, bytes and job answers go now", () => {
-    expect(doorWriteKind("threads/msg_A1/canvas")).toBe("append");
-    expect(doorWriteKind("threads/msg_A1/canvas/undo")).toBe("append");
+  test("each canvas write has its outbox kind: a save and an Undo are held and put a state (a second copy changes nothing more), bytes and job answers go now", () => {
+    expect(doorWriteKind("threads/msg_A1/canvas")).toBe("set");
+    expect(doorWriteKind("threads/msg_A1/canvas/undo")).toBe("set");
     expect(doorWriteKind("threads/msg_A1/canvas/files")).toBe("file");
     expect(doorWriteKind("threads/msg_A1/canvas/picture")).toBe("file");
     expect(doorWriteKind(`canvas/jobs/job_${"a".repeat(32)}`)).toBe("file");

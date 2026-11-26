@@ -479,6 +479,12 @@ export function createInboxCanvas(options: {
     return bytes;
   };
 
+  /** A file's stale-tab guard rides its query (the body is bytes), as an upload's does; through the door it never comes. */
+  const staleTab = (url: URL): Response | null => {
+    const session = url.searchParams.get("serverSession");
+    return session === null ? null : options.sessionMismatch({ serverSession: session });
+  };
+
   const placeOf = (url: URL): { box: Box; scale: number } | null => {
     const n = (key: string) => Number(url.searchParams.get(key));
     const box = { x: n("x"), y: n("y"), w: n("w"), h: n("h") };
@@ -576,6 +582,8 @@ export function createInboxCanvas(options: {
       const jobMatch = /^\/api\/inbox\/canvas\/jobs\/(job_[a-f0-9]{32})$/.exec(path);
       if (jobMatch) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const stale = staleTab(url);
+        if (stale) return stale;
         const job = jobs.get(jobMatch[1]!);
         // Another window answered first, or the wait ran out: nothing to do.
         if (!job) return json({ ok: true, late: true });
@@ -616,11 +624,19 @@ export function createInboxCanvas(options: {
         // Pictures' files ahead of the save that names them: a window on a linked computer sends them now, while this
         // computer answers, so the save itself (small, and perhaps held in that computer's outbox) carries none.
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-        let files: unknown;
+        const stale = staleTab(url);
+        if (stale) return stale;
+        let bytes: Uint8Array;
         try {
-          files = (JSON.parse(new TextDecoder().decode(await rawBody(req, SCENE_MAX_BYTES))) as { files?: unknown }).files;
+          bytes = await rawBody(req, SCENE_MAX_BYTES);
         } catch {
           return json({ error: "body: expected { files } no larger than a canvas may be.", code: "validation_error" }, 413);
+        }
+        let files: unknown;
+        try {
+          files = (JSON.parse(new TextDecoder().decode(bytes)) as { files?: unknown } | null)?.files;
+        } catch {
+          return json({ error: "body: expected { files } as JSON.", code: "validation_error" }, 400);
         }
         if (!files || typeof files !== "object" || Array.isArray(files)) return json({ error: "files: expected an object of pictures by id.", code: "validation_error" }, 422);
         writeCanvasFiles(dir, threadId, files as Record<string, unknown>);
@@ -718,6 +734,8 @@ export function createInboxCanvas(options: {
       if (match[2]) {
         // The window's drawing of the whole canvas, kept for an agent's `picture` when no window is open.
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const stale = staleTab(url);
+        if (stale) return stale;
         const place = placeOf(url);
         const rev = Number(url.searchParams.get("rev"));
         const png = await rawBody(req, PICTURE_MAX_BYTES);

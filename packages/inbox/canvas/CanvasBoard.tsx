@@ -22,9 +22,10 @@ import { authorWords } from '@plannotator/shared/inbox/canvas/changes';
 import { thingsOf } from '@plannotator/shared/inbox/canvas/reading';
 import { boxOf, boxesOverlap, farElements, pictureTiles, tameFar, unionBox, type Box, type CanvasElement, type CanvasScene } from '@plannotator/shared/inbox/canvas/scene';
 import boardCss from './canvas.css?inline';
-import { InboxHeldError } from '../api';
+import { heldWords, InboxHeldError, type MachineView, type OutboxView } from '../api';
 import { machineOf, rememberMachine } from '../inboxUrl';
 import { CANVAS_WINDOW, canvasApi, canvasLooked, subscribeCanvasFrames, type CanvasFrame, type CanvasJob, type CanvasReply } from './canvasApi';
+import { farChanges, farParts, heldEnd, type HeldSave } from './farSave';
 
 export interface CanvasBoardProps {
   threadId: string;
@@ -41,6 +42,10 @@ export interface CanvasBoardProps {
   onWords?: (words: string) => void;
   /** The reply the bar sends: its words, its pictures and scene file, and what the agent reads of the canvas. */
   onSend: (reply: CanvasReply) => void;
+  /** The window's outbox (held writes for linked computers, by key): a save or an Undo held for the thread's computer ends there. */
+  outbox?: ReadonlyMap<string, OutboxView>;
+  /** The linked computer the thread lives on, as the window knows it now (null for this computer's thread). */
+  machine?: MachineView | null;
 }
 
 const SAVE_AFTER_MS = 450;
@@ -59,8 +64,6 @@ function withStyles(): void {
 const asCanvas = (elements: readonly ExcalidrawElement[]) => elements as unknown as CanvasElement[];
 const asExcalidraw = (elements: readonly CanvasElement[]) => elements as unknown as ExcalidrawElement[];
 const sig = (el: { version?: number; versionNonce?: number; isDeleted?: boolean }) => `${el.version ?? 0}:${el.versionNonce ?? 0}:${el.isDeleted ? 1 : 0}`;
-/** A save that names only what changed since what the Inbox holds (`synced`), and no pictures' files: a linked computer's thread. */
-const changedOnly = (scene: CanvasScene, synced: ReadonlyMap<string, string>): CanvasScene => ({ ...scene, elements: scene.elements.filter((e) => synced.get(e.id) !== sig(e)), files: {} });
 
 /**
  * The one drawing face this build does not ship (Xiaolai, 12 MB of Chinese and Japanese handwriting) never enters the
@@ -294,7 +297,12 @@ function naturalSize(dataURL: string): Promise<{ w: number; h: number } | null> 
   });
 }
 
-export default function CanvasBoard({ threadId, dark, agent, agentMark, received = false, draft = '', onWords, onSend }: CanvasBoardProps) {
+const NO_OUTBOX: ReadonlyMap<string, OutboxView> = new Map();
+/** An Undo's answer (canvasApi.undo), also as a held one's outbox entry carries it. */
+type UndoAnswer = { rev?: number; scene?: CanvasScene; kept?: string[]; kept_count?: number; already?: boolean };
+const statusOf = (error: unknown) => (error as { status?: number } | null)?.status;
+
+export default function CanvasBoard({ threadId, dark, agent, agentMark, received = false, draft = '', onWords, onSend, outbox = NO_OUTBOX, machine = null }: CanvasBoardProps) {
   useLayoutEffect(withStyles, []);
   useLayoutEffect(leaveOutUnshippedFaces, []);
   const api = useRef<ExcalidrawImperativeAPI | null>(null);
@@ -311,10 +319,14 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   const [words, setWords] = useState('');
   /** Something to say once (an Undo's outcome, a file that is not a picture): it stays until the person's next press on the canvas. */
   /** `held`: the outbox's words for a change waiting for a linked computer, which wrap rather than cut off. */
-  const [notice, setNoticeNow] = useState<{ text: string; bad?: boolean; held?: boolean; at: number } | null>(null);
-  const setNotice = useCallback((next: { text: string; bad?: boolean; held?: boolean } | null) => setNoticeNow(next ? { ...next, at: Date.now() } : null), []);
-  /** The save: `saving` while a failed one is tried again, `failed` once it has given up for now. */
-  const [saveState, setSaveState] = useState<'saving' | 'failed' | { held: string } | null>(null);
+  /** `ended`: the outbox's words for a change held for that computer that did not land there, which wrap too. */
+  const [notice, setNoticeNow] = useState<{ text: string; bad?: boolean; held?: boolean; ended?: boolean; at: number } | null>(null);
+  const setNotice = useCallback((next: { text: string; bad?: boolean; held?: boolean; ended?: boolean } | null) => setNoticeNow(next ? { ...next, at: Date.now() } : null), []);
+  /**
+   * The save: `saving` while a failed one is tried again, `failed` once it has given up for now; `held` while what the
+   * person did waits for the thread's linked computer; `ended`: a save held for it did not land there (the outbox's words).
+   */
+  const [saveState, setSaveState] = useState<'saving' | 'failed' | { held: string } | { ended: string } | null>(null);
   const [note, setNote] = useState<{ who: string; added: number; changed: number; removed: number; ids: string[]; rev: number } | null>(null);
   /** The selection the person was writing about was removed by someone else. */
   const [lost, setLost] = useState(false);
@@ -379,6 +391,18 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   const sized = useRef(new Set<string>());
   /** Pictures the person just placed, until each has the shape Excalidraw gives it: its file's own size once read (null before it is asked for). */
   const placing = useRef(new Map<string, { w: number; h: number } | null>());
+  /** A linked computer's thread: the saves waiting in this Inbox's outbox for it, by key, until each has ended there. */
+  const heldSaves = useRef(new Map<string, HeldSave>());
+  /** An Undo waiting in the outbox for that computer, by key. */
+  const heldUndo = useRef<string | null>(null);
+  /** The outbox's words for the last save held. */
+  const heldText = useRef('');
+  const outboxNow = useRef(outbox);
+  outboxNow.current = outbox;
+  const machineNow = useRef(machine);
+  machineNow.current = machine;
+  /** What a save says while that computer is away (a picture's file goes only while it is there). */
+  const awayWords = () => heldWords({ name: machineNow.current?.name ?? 'the other machine', state: 'offline' });
 
   /** Take a scene from the Inbox into the editor, keeping what the person changed since the last save. */
   const take = useCallback((scene: CanvasScene): Set<string> => {
@@ -493,61 +517,124 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
     }, PICTURE_AFTER_MS);
   }, [threadId]);
 
-  const save = useCallback((): Promise<void> => {
+  /** A save that landed (now, or once its outbox entry was delivered): what it carried is what the Inbox has. */
+  const landed = useCallback(
+    (sent: ReadonlyMap<string, string>, gone: readonly string[], answer: { rev?: unknown; scene?: CanvasScene } | null) => {
+      for (const id of gone) synced.current.delete(id);
+      for (const [id, value] of sent) synced.current.set(id, value);
+      if (answer?.scene) takeWhenFree(answer.scene);
+      if (typeof answer?.rev === 'number' && Number.isInteger(answer.rev)) rev.current = Math.max(rev.current, answer.rev);
+    },
+    [takeWhenFree],
+  );
+
+  /**
+   * How the saves and the Undo held for the thread's linked computer ended (the outbox's entries): a delivered save is
+   * what that computer has; one that did not land leaves what it carried to be saved again, and the bar says why in the
+   * outbox's words, as an error. Once none waits, what the person did meanwhile goes, as one save.
+   */
+  const settleHeld = useRef<(entries: ReadonlyMap<string, OutboxView>) => void>(() => {});
+
+  /** A linked computer's thread: pictures' files first, then only what changed, in parts the outbox holds. */
+  const saveFar = async (scene: CanvasScene, keepalive?: boolean): Promise<boolean> => {
+    const unsent = Object.keys(scene.files);
+    let waiting = new Set<string>();
+    if (unsent.length > 0) {
+      try {
+        await canvasApi.files(threadId, scene.files);
+        for (const id of unsent) sentFiles.current.add(id);
+      } catch (error) {
+        // That computer is away: its new pictures wait here for it, and everything else is saved (held) as ever.
+        if (statusOf(error) !== 503) throw error;
+        waiting = new Set(unsent);
+      }
+    }
+    const change = farChanges(scene.elements, synced.current, heldSaves.current.values(), waiting, sig);
+    for (const part of farParts(change.elements, change.gone)) {
+      const sent = new Map(part.elements.map((e) => [e.id, sig(e)]));
+      try {
+        landed(sent, part.gone, await canvasApi.save(threadId, { ...scene, elements: part.elements, files: {} }, rev.current, { gone: part.gone, partial: true, keepalive }));
+      } catch (error) {
+        if (!(error instanceof InboxHeldError)) throw error;
+        // Saved in this Inbox's outbox: sent when that computer is back. Its entry says how it ends.
+        heldSaves.current.set(error.outbox.key, { sent, gone: part.gone });
+        heldText.current = error.message;
+      }
+    }
+    // An entry may have ended before its answer got here.
+    settleHeld.current(outboxNow.current);
+    return change.pictures > 0;
+  };
+
+  /** This computer's thread: the whole scene. */
+  const saveHere = async (scene: CanvasScene): Promise<boolean> => {
+    const sent = new Map(scene.elements.map((e) => [e.id, sig(e)]));
+    // What the Inbox holds that this window no longer does (a file loaded over the canvas): gone, not "never seen".
+    const gone = [...synced.current.keys()].filter((id) => !sent.has(id));
+    const answer = await canvasApi.save(threadId, scene, rev.current, { gone });
+    for (const id of Object.keys(scene.files)) sentFiles.current.add(id);
+    for (const id of gone) synced.current.delete(id);
+    for (const [id, value] of sent) synced.current.set(id, value);
+    if (answer.scene) takeWhenFree(answer.scene);
+    rev.current = answer.rev;
+    return false;
+  };
+
+  /**
+   * `force`: a linked computer's save goes even while one waits for it (the tab put away, the canvas closed), naming
+   * only what no waiting save carries. Otherwise what the person does while one waits joins the next save.
+   */
+  const save = useCallback((how: { force?: boolean; keepalive?: boolean } = {}): Promise<void> => {
     if (saving.current) {
       again.current = true;
       return saving.current;
     }
     const scene = sceneNow();
     if (!scene) return Promise.resolve();
-    const sent = new Map(scene.elements.map((e) => [e.id, sig(e)]));
-    // What the Inbox holds that this window no longer does (a file loaded over the canvas): gone, not "never seen".
-    const gone = [...synced.current.keys()].filter((id) => !sent.has(id));
-    // A linked computer's thread: its pictures' files go first, now, and the save names only what changed, so it is
-    // small and, while that computer is away, waits in this Inbox's outbox (held: saved here, sent when it is back).
     const far = !!machineOf(threadId);
-    const run = (far && Object.keys(scene.files).length > 0 ? canvasApi.files(threadId, scene.files) : Promise.resolve())
-      .then(() =>
-        canvasApi
-          .save(threadId, far ? changedOnly(scene, synced.current) : scene, rev.current, { gone, partial: far })
-          .catch((error: unknown) => {
-            if (error instanceof InboxHeldError) return { held: error.message };
-            throw error;
-          }),
-      )
-      .then((answer) => {
-        for (const id of Object.keys(scene.files)) sentFiles.current.add(id);
-        for (const id of gone) synced.current.delete(id);
-        for (const [id, value] of sent) synced.current.set(id, value);
-        unsaved.current = again.current;
+    if (far && heldSaves.current.size > 0 && !how.force) {
+      unsaved.current = true;
+      return Promise.resolve();
+    }
+    const run = (far ? saveFar(scene, how.keepalive) : saveHere(scene))
+      .then((picturesWait) => {
+        unsaved.current = again.current || picturesWait;
         fails.current = 0;
-        if ('held' in answer) {
-          if (live.current) setSaveState({ held: answer.held });
-          return;
+        if (live.current) setSaveState(heldSaves.current.size > 0 ? { held: heldText.current } : picturesWait ? { held: awayWords() } : null);
+        if (heldSaves.current.size === 0 && !picturesWait) storePicture();
+        // Pictures that wait for that computer go once it is back (its state, below), or on this slow retry.
+        if (picturesWait && live.current && !retry.current) {
+          retry.current = setTimeout(() => {
+            retry.current = null;
+            void save();
+          }, 15_000);
         }
-        if (answer.scene) takeWhenFree(answer.scene);
-        rev.current = answer.rev;
-        if (live.current) setSaveState(null);
-        storePicture();
       })
       .catch((error: unknown) => {
+        const status = statusOf(error);
         // The thread is gone (deleted in another window): there is nowhere to save to, and trying again will not help.
-        const gone = (error as { status?: number } | null)?.status === 404;
+        const gone = status === 404;
         threadGone.current = gone;
-        fails.current++;
+        // That computer is away, and this save could not wait in the outbox (one too large to hold): it waits here.
+        const away = far && status === 503;
+        // Refused for what it is (too large, not valid): the same again would be refused too. The next change tries again.
+        const refused = status === 400 || status === 413 || status === 422;
+        unsaved.current = true;
+        if (!away) fails.current++;
         if (live.current) {
           if (gone) setGone(true);
+          else if (away) setSaveState({ held: awayWords() });
           // Tried again by itself, and only said to have failed once that has not helped.
-          else setSaveState(fails.current >= SAVE_TRIES ? 'failed' : 'saving');
+          else setSaveState(refused || fails.current >= SAVE_TRIES ? 'failed' : 'saving');
         }
-        // A few seconds on (longer once it has given up), and at once when the network is back.
-        if (!gone && live.current && !retry.current) {
+        // A few seconds on (longer once it has given up, or while that computer is away), and at once when the network is back.
+        if (!gone && !refused && live.current && !retry.current) {
           retry.current = setTimeout(
             () => {
               retry.current = null;
               void save();
             },
-            fails.current >= SAVE_TRIES ? 15_000 : 4000,
+            away || fails.current >= SAVE_TRIES ? 15_000 : 4000,
           );
         }
       })
@@ -560,9 +647,45 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
       });
     saving.current = run;
     return run;
-    // sceneNow reads refs only.
+    // sceneNow, saveFar and saveHere read refs only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, take, storePicture]);
+  }, [threadId, take, storePicture, landed]);
+
+  settleHeld.current = (entries) => {
+    let changed = false;
+    let ended: string | null = null;
+    for (const [key, held] of [...heldSaves.current]) {
+      const entry = entries.get(key);
+      const end = heldEnd(entry, machineNow.current);
+      if (!end) continue;
+      heldSaves.current.delete(key);
+      changed = true;
+      if (end.landed) landed(held.sent, held.gone, entry!.answer as { rev?: unknown; scene?: CanvasScene } | null);
+      else {
+        // It never landed there: what it carried is still the person's to save, sent with their next change.
+        unsaved.current = true;
+        ended = end.words;
+      }
+    }
+    const undoEntry = heldUndo.current ? entries.get(heldUndo.current) : undefined;
+    const undoEnd = heldEnd(undoEntry, machineNow.current);
+    if (undoEnd) {
+      heldUndo.current = null;
+      if (undoEnd.landed) undone(undoEntry!.answer as UndoAnswer | null);
+      else setNotice({ text: undoEnd.words, bad: true, ended: true });
+    }
+    if (!changed || !live.current) return;
+    if (ended) setSaveState({ ended });
+    else if (heldSaves.current.size === 0) {
+      setSaveState((state) => (state && typeof state === 'object' && 'held' in state ? null : state));
+      if (unsaved.current && !threadGone.current) void save();
+    }
+  };
+  useEffect(() => settleHeld.current(outbox), [outbox]);
+  // That computer is back: what waited for it here (a picture's file, a save too large to hold) goes now.
+  useEffect(() => {
+    if (machine?.state === 'online' && unsaved.current && !threadGone.current) void save();
+  }, [machine?.state, save]);
 
   const saveSoon = useCallback(() => {
     unsaved.current = true;
@@ -641,23 +764,25 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   // Open boards answer drawing jobs from what is on screen; leaving saves what is not saved yet.
   useEffect(() => {
     openBoards.set(threadId, () => ({ elements: api.current?.getSceneElements() ?? [], files: api.current?.getFiles() ?? {} }));
-    // A linked computer's thread: what changed only, and only when no new picture needs its file sent first.
-    const farScene = (scene: CanvasScene): CanvasScene | null => (!machineOf(threadId) ? scene : Object.keys(scene.files).length > 0 ? null : changedOnly(scene, synced.current));
     const leaving = () => {
       const whole = sceneNow();
-      const scene = whole ? farScene(whole) : null;
-      if (scene && unsaved.current && !threadGone.current) // Uncompressed: compressing waits, and a closing page's request must start at once. Only a scene under the
+      if (!whole || !unsaved.current || threadGone.current) return;
+      // Uncompressed: compressing waits, and a closing page's request must start at once. Only a scene under the
       // browser's 64 KB limit for such a request gets out this way; a larger one relies on the save made as the tab was put away.
-      void canvasApi.save(threadId, scene, rev.current, { keepalive: true, plain: true, partial: !!machineOf(threadId) }).catch(() => {});
+      if (!machineOf(threadId)) return void canvasApi.save(threadId, whole, rev.current, { keepalive: true, plain: true }).catch(() => {});
+      // A linked computer's thread: what no save waiting for it carries; a new picture, whose file goes first, waits.
+      const change = farChanges(whole.elements, synced.current, heldSaves.current.values(), new Set(Object.keys(whole.files)), sig);
+      for (const part of farParts(change.elements, change.gone)) void canvasApi.save(threadId, { ...whole, elements: part.elements, files: {} }, rev.current, { gone: part.gone, keepalive: true, plain: true, partial: true }).catch(() => {});
     };
     // A tab put away saves at once (while the page can still wait for the answer); a page going away sends what is left.
     const hidden = () => {
       if (document.visibilityState === 'hidden' && unsaved.current && !threadGone.current) {
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = null;
+        // A linked computer's thread: also while a save waits for it, what that one does not carry.
+        if (machineOf(threadId)) return void save({ force: true, keepalive: true });
         const whole = sceneNow();
-        const scene = whole ? farScene(whole) : null;
-        if (scene) void canvasApi.save(threadId, scene, rev.current, { keepalive: true, partial: !!machineOf(threadId) }).then((answer) => (rev.current = Math.max(rev.current, answer.rev))).catch(() => {});
+        if (whole) void canvasApi.save(threadId, whole, rev.current, { keepalive: true }).then((answer) => (rev.current = Math.max(rev.current, answer.rev))).catch(() => {});
       }
     };
     const online = () => {
@@ -674,8 +799,9 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
       if (retry.current) clearTimeout(retry.current);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = null;
-      // Closing the canvas saves whatever is not saved, a save that failed earlier included.
-      if (unsaved.current && !threadGone.current) void save();
+      // Closing the canvas saves whatever is not saved, a save that failed earlier included (and, on a linked
+      // computer's thread, what no save waiting for it carries).
+      if (unsaved.current && !threadGone.current) void save({ force: true });
       if (pictureTimer.current) clearTimeout(pictureTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -833,11 +959,9 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
     };
     const onFrame = (frame: CanvasFrame) => {
       if (frame.thread_id !== threadId) return;
-      // A save held for a linked computer that was away: its own frame says it landed there.
-      if (frame.window === CANVAS_WINDOW) {
-        setSaveState((state) => (state && typeof state === 'object' ? null : state));
-        return;
-      }
+      // This window's own save. One held for a linked computer ends with its outbox entry (`settleHeld`), also when it
+      // changed nothing there (no frame) or never landed.
+      if (frame.window === CANVAS_WINDOW) return;
       // An agent tried and the Inbox refused it: nothing landed, and the canvas stops saying one is on its way.
       if (frame.refused) {
         setWaiting(null);
@@ -996,22 +1120,31 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
     [saveSoon, tidy, fitPictures],
   );
 
+  /** An Undo that landed: now, or once its outbox entry was delivered to the thread's linked computer. */
+  function undone(answer: UndoAnswer | null): void {
+    if (!live.current) return;
+    if (answer?.scene && Array.isArray(answer.scene.elements)) {
+      takeWhenFree(answer.scene);
+      setEmpty(!answer.scene.elements.some((e) => !e.isDeleted));
+    }
+    if (typeof answer?.rev === 'number') rev.current = Math.max(rev.current, answer.rev);
+    setNote(null);
+    const kept = answer?.kept_count ?? answer?.kept?.length ?? 0;
+    setNotice({ text: answer?.already ? 'Already undone' : kept > 0 ? `Undone. Yours kept: ${NUMBER.format(kept)}` : 'Undone' });
+    storePicture();
+  }
   /** Take back the agent's change: what it changed is as it was, what it added is gone; what the person did since stays. */
   const undo = async (change: number) => {
     try {
       await flush();
-      const answer = await canvasApi.undo(threadId, change);
-      takeWhenFree(answer.scene);
-      rev.current = answer.rev;
-      setEmpty(!answer.scene.elements.some((e) => !e.isDeleted));
-      setNote(null);
-      const kept = answer.kept_count ?? answer.kept?.length ?? 0;
-      setNotice({ text: answer.already ? 'Already undone' : kept > 0 ? `Undone. Yours kept: ${NUMBER.format(kept)}` : 'Undone' });
-      storePicture();
+      undone(await canvasApi.undo(threadId, change));
     } catch (error) {
-      // A linked computer that is away: the Undo waits in the outbox and lands when it is back (its frame brings it here).
-      if (error instanceof InboxHeldError) setNotice({ text: error.message, held: true });
-      else setNotice({ text: "Can't undo", bad: true });
+      // A linked computer that is away: the Undo waits in the outbox and lands when it is back; its entry says how it ended (`settleHeld`).
+      if (error instanceof InboxHeldError) {
+        heldUndo.current = error.outbox.key;
+        setNotice({ text: error.message, held: true });
+        settleHeld.current(outboxNow.current);
+      } else setNotice({ text: "Can't undo", bad: true });
     }
   };
 
@@ -1167,7 +1300,11 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   }
 
   // One line of state: the thread is gone, something to say once, or a save that is not through.
-  const state: { text: string; bad?: boolean; held?: boolean } | null = gone ? { text: 'Thread deleted', bad: true } : (notice ?? (saveState === 'failed' ? { text: 'Not saved', bad: true } : saveState === 'saving' ? { text: 'Saving…' } : saveState ? { text: saveState.held, held: true } : null));
+  // Held words follow that computer's state ("Waiting for …" while it is away, "Sending to …" once it is back).
+  const state: { text: string; bad?: boolean; held?: boolean; ended?: boolean } | null = gone
+    ? { text: 'Thread deleted', bad: true }
+    : (notice ??
+      (saveState === 'failed' ? { text: 'Not saved', bad: true } : saveState === 'saving' ? { text: 'Saving…' } : saveState && 'ended' in saveState ? { text: saveState.ended, bad: true, ended: true } : saveState ? { text: machine ? heldWords(machine) : saveState.held, held: true } : null));
   // A running session has the reply: the agent's icon, working. Before that, "Sent" for a moment and then nothing.
   const working = waiting !== null && received && !receivedAtSend.current;
   const sentChip = waiting !== null && !note && (working || justSent);
@@ -1323,7 +1460,7 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
           aria-label={selected > 0 ? 'What should change in the selection' : 'Note to send with the canvas'}
         />
         {state && (
-          <span className="ibc-state" role="status" data-bad={state.bad ? '' : undefined} data-held={state.held ? '' : undefined} title={state.text}>
+          <span className="ibc-state" role="status" data-bad={state.bad ? '' : undefined} data-held={state.held ? '' : undefined} data-ended={state.ended ? '' : undefined} title={state.text}>
             {state.text}
           </span>
         )}

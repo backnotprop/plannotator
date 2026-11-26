@@ -6,7 +6,7 @@
  */
 import type { CanvasLogEntry } from '@plannotator/shared/inbox/canvas/changes';
 import type { CanvasScene } from '@plannotator/shared/inbox/canvas/scene';
-import { apiGet, apiPost } from '../api';
+import { apiGet, apiPost, pageServerSession } from '../api';
 import { inboxUrl, linkedMachinesWith, machineOf, rememberMachine } from '../inboxUrl';
 import { canvasWork } from '../lazyParts';
 import { newUuid } from '../uuid';
@@ -93,9 +93,18 @@ export function onCanvasJob(data: string): void {
  */
 const path = (threadId: string, tail = '', query = '') => inboxUrl(`/threads/${encodeURIComponent(threadId)}/canvas${tail}`, query, machineOf(threadId));
 
-/** A file's bytes as the body (a picture, pictures' files, a job's answer): to a linked computer, keyed in the query. */
-const sendBytes = (url: string, type: string, body: Blob | string, keyed: boolean) =>
-  fetch(keyed ? `${url}${url.includes('?') ? '&' : '?'}idempotency_key=${newUuid()}` : url, { method: 'POST', headers: { 'Content-Type': type }, body });
+/**
+ * A file's bytes as the body (a picture, pictures' files, a job's answer), with the page session in the query (an
+ * upload's stale-tab guard, api.ts `fileQuery`): to a linked computer, also keyed there.
+ */
+const sendBytes = (url: string, type: string, body: Blob | string, keyed: boolean) => {
+  const query = new URLSearchParams();
+  const session = pageServerSession();
+  if (session) query.set('serverSession', session);
+  if (keyed) query.set('idempotency_key', newUuid());
+  const tail = query.toString();
+  return fetch(tail ? `${url}${url.includes('?') ? '&' : '?'}${tail}` : url, { method: 'POST', headers: { 'Content-Type': type }, body });
+};
 
 export const canvasApi = {
   /** `look`: the canvas is on the person's screen, so an agent's change up to here is no longer news (the thread's mark goes quiet). */

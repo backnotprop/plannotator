@@ -7,7 +7,8 @@
  *  1. MacBook's thread in Studio's window has the pen; the board opens and a box drawn there is saved on MacBook.
  *  2. MacBook's agent changes the canvas with `plannotator inbox canvas`: Studio's open board shows it at once, in view.
  *  3. MacBook's agent asks for a picture: Studio's open board draws it, and the agent gets the file there.
- *  4. MacBook asleep: a box drawn in Studio's board says it waits, and lands on MacBook once it is back.
+ *  4. MacBook asleep: an Undo, a pasted picture and three boxes drawn in Studio's board say they wait (never "Saving…"
+ *     or "Not saved"), the boxes wait as one save, not one per box, and all of it lands on MacBook once it is back.
  *
  * Whole-window pictures in light and dark land in PLANNOTATOR_E2E_PROOF_DIR/canvas-machines (else
  * .local/proof/canvas-machines). Build the binary first (see inbox.spec.ts).
@@ -129,6 +130,31 @@ const canvasThere = (...args: string[]) => {
   return { status: run.status ?? -1, out: run.stdout ?? '', err: run.stderr ?? '' };
 };
 
+/** A picture pasted on the board, as a screenshot arrives (a real ClipboardEvent on the focused editor). */
+async function pastePicture(): Promise<void> {
+  const area = (await layer.locator('.excalidraw-host').boundingBox())!;
+  // The editor takes a paste where the pointer is, and only while it has the focus.
+  await page.mouse.click(area.x + area.width * 0.6, area.y + area.height * 0.4);
+  await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 60;
+    canvas.height = 40;
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = '#3a7bd5';
+    context.fillRect(0, 0, 60, 40);
+    const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'));
+    const data = new DataTransfer();
+    data.items.add(new File([blob], 'image.png', { type: 'image/png' }));
+    (document.activeElement ?? document.body).dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+}
+
+/** Saves of the thread's canvas waiting in Studio's outbox for MacBook. */
+async function savesWaiting(): Promise<number> {
+  const body = await read<{ waiting: { route: string }[] }>(studio, `/api/inbox/outbox?machine=${macbook.id}`);
+  return body.waiting.filter((entry) => entry.route === `threads/${far}/canvas`).length;
+}
+
 async function drawBox(fromX: number, fromY: number): Promise<void> {
   await layer.locator('label:has([data-testid="toolbar-rectangle"])').click();
   const area = (await layer.locator('.excalidraw-host').boundingBox())!;
@@ -222,20 +248,54 @@ test("3. MacBook's agent asks for a picture: Studio's open board draws it, and t
   expect(readFileSync(path!).subarray(1, 4).toString()).toBe('PNG');
 });
 
-test('4. MacBook asleep: a box drawn in Studio says it waits, and lands on MacBook once it is back', async () => {
+test('4. MacBook asleep: an Undo, a picture and boxes drawn in Studio say they wait, wait as one save, and land on MacBook once it is back', async () => {
+  const boxesBefore = (await onMacbook()).filter((element) => element.type === 'rectangle').length;
   await stopScratchInbox(macbook.dataDir);
   await expect.poll(async () => (await read<{ machines: { id: string; state: string }[] }>(studio, '/api/inbox/machines')).machines.find((m) => m.id === macbook.id)?.state, { timeout: 30_000 }).toBe('offline');
-  await drawBox(0.2, 0.62);
-  await expect(layer.getByText('Waiting for MacBook: this applies when MacBook is back.')).toBeVisible({ timeout: 15_000 });
+  const waits = layer.getByText('Waiting for MacBook: this applies when MacBook is back.');
+  // A picture pasted while MacBook is away: its file goes only while MacBook is there, so it waits, and the bar says so;
+  // it never says it is saving or not saved for a computer that is only away.
+  await pastePicture();
+  await expect(waits).toBeVisible({ timeout: 15_000 });
+  await page.waitForTimeout(5_000);
+  await expect(waits).toBeVisible();
+  await expect(layer.getByText('Saving…')).toHaveCount(0);
+  await expect(layer.getByText('Not saved')).toHaveCount(0);
+  await expect(layer.locator('.ibc-state[data-bad]')).toHaveCount(0);
+  // The agent's change from step 2, taken back while MacBook is away: the Undo waits for it too.
+  await layer.locator('[data-canvas-undo]').click();
+  await expect(waits).toBeVisible({ timeout: 15_000 });
+  // Three boxes, each after the save's pause: the picture waiting does not stop them, and they wait as one save.
+  for (const x of [0.2, 0.45, 0.7]) {
+    await drawBox(x, 0.62);
+    await page.waitForTimeout(1_000);
+  }
+  await expect.poll(savesWaiting, { timeout: 10_000 }).toBe(1);
+  await page.waitForTimeout(1_500);
+  expect(await savesWaiting()).toBe(1);
+  await expect(waits).toBeVisible({ timeout: 15_000 });
   // Read whole, not cut off: nothing of the words lies past the slot they sit in.
   const whole = await layer.locator('.ibc-state[data-held]').evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1);
   expect(whole).toBe(true);
   await shot('05-far-save-waits');
 
   await start(macbook);
-  await expect.poll(async () => (await onMacbook()).filter((element) => element.type === 'rectangle').length, { timeout: 45_000 }).toBe(2);
-  // MacBook's own frame for the save that waited reaches Studio: the board stops saying it waits.
-  await expect(layer.getByText('Waiting for MacBook: this applies when MacBook is back.')).toHaveCount(0, { timeout: 20_000 });
+  // The three boxes; the agent's note is gone with its Undo.
+  await expect.poll(async () => (await onMacbook()).filter((element) => element.type === 'rectangle').length, { timeout: 45_000 }).toBe(boxesBefore + 3 - 1);
+  // The picture and its file, sent once MacBook was back.
+  await expect
+    .poll(
+      async () => {
+        const picture = (await onMacbook()).find((element) => element.type === 'image') as { fileId?: string } | undefined;
+        if (!picture?.fileId) return false;
+        return (await fetch(`${base(macbook)}/api/inbox/threads/${far}/canvas/files/${picture.fileId}`)).status === 200;
+      },
+      { timeout: 45_000 },
+    )
+    .toBe(true);
+  // How each held write ended reaches Studio: the board stops saying it waits, and says the Undo landed.
+  await expect(waits).toHaveCount(0, { timeout: 20_000 });
+  await expect(layer.locator('.ibc-state')).toHaveText(/^Undone/, { timeout: 20_000 });
   await shot('06-far-landed');
   await layer.locator('[data-canvas-close]').click();
   await expect(layer).toHaveCount(0);

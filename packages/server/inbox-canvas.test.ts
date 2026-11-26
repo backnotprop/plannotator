@@ -500,3 +500,45 @@ describe("what six fresh agents tripped on (round 5)", () => {
     expect((await t.canvas.apply(THREAD, agent("cold"), next.rev, [{ set: "Beta", color: "red" }])).ok).toBe(false);
   });
 });
+
+describe("a file's route says what is wrong with it", () => {
+  /** The canvas with a stale-tab guard: a page session other than this run's is a stale tab (409). */
+  function guarded() {
+    const dir = mkdtempSync(join(tmpdir(), "canvas-guard-"));
+    const store = { dir, message: (id: string) => (id === THREAD ? { thread_id: THREAD } : null), onDeletion: () => () => {} } as never;
+    const json = (data: unknown, status?: number) => new Response(JSON.stringify(data), { status: status ?? 200 });
+    return createInboxCanvas({
+      store,
+      serverSession: "srv",
+      json,
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      sessionMismatch: (body) => (typeof body.serverSession === "string" && body.serverSession !== "srv" ? json({ code: "server_session_mismatch" }, 409) : null),
+    });
+  }
+  const post = (canvas: ReturnType<typeof guarded>, path: string, query: string, body: BodyInit, type = "application/json") =>
+    canvas.route(new Request(`http://localhost${path}${query}`, { method: "POST", headers: { "content-type": type }, body }), path);
+
+  test("pictures' files: bad JSON is 400, only a body past a canvas's size is 413", async () => {
+    const canvas = guarded();
+    const path = `/api/inbox/threads/${THREAD}/canvas/files`;
+    expect((await post(canvas, path, "", "{not json"))!.status).toBe(400);
+    expect((await post(canvas, path, "", new Uint8Array(64 * 1024 * 1024 + 1)))!.status).toBe(413);
+    expect((await post(canvas, path, "", JSON.stringify({ files: { f1: { id: "f1", mimeType: "image/png", dataURL: "data:image/png;base64,AA==" } } })))!.status).toBe(200);
+  });
+
+  test("a tab left open on an older run is refused on the routes that carry bytes, as an upload is (its session in the query)", async () => {
+    const canvas = guarded();
+    const files = `/api/inbox/threads/${THREAD}/canvas/files`;
+    const picture = `/api/inbox/threads/${THREAD}/canvas/picture`;
+    const job = `/api/inbox/canvas/jobs/job_${"a".repeat(32)}`;
+    const place = "x=0&y=0&w=10&h=10&scale=1&rev=1";
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0]);
+    expect((await post(canvas, files, "?serverSession=old", JSON.stringify({ files: {} })))!.status).toBe(409);
+    expect((await post(canvas, picture, `?${place}&serverSession=old`, png, "image/png"))!.status).toBe(409);
+    expect((await post(canvas, job, "?failed=1&serverSession=old", new Uint8Array(0), "image/png"))!.status).toBe(409);
+    // This run's page, or a linked computer's request (its session stays with its own Inbox): taken.
+    expect((await post(canvas, files, "?serverSession=srv", JSON.stringify({ files: {} })))!.status).toBe(200);
+    expect((await post(canvas, picture, `?${place}`, png, "image/png"))!.status).toBe(200);
+    expect((await post(canvas, job, "?failed=1", new Uint8Array(0), "image/png"))!.status).toBe(200);
+  });
+});

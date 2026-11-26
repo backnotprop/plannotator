@@ -183,6 +183,8 @@ export interface PeerLinkOptions {
   onRevoked: () => void;
   /** Grid is on here (experimental): only then does this Inbox ask that machine for Grid's fields and looks. */
   gridOn?: () => boolean;
+  /** The canvas is on here (Settings → Capabilities): only then does this Inbox ask that machine for its canvas frames and drawing jobs. */
+  canvasOn?: () => boolean;
   timings?: Partial<PeerLinkTimings>;
 }
 
@@ -353,6 +355,13 @@ export class PeerLink {
     this.stream.abort();
   }
 
+  /** The canvas was turned on or off here: the stream asks again with or without `canvas` (a quiet redial). */
+  canvasChanged(): void {
+    if (!this.stream) return;
+    this.redial = true;
+    this.stream.abort();
+  }
+
   // ── The line: health, then the event stream from the cursor; redial with backoff. ──
 
   private async loop() {
@@ -441,8 +450,10 @@ export class PeerLink {
       // `grid-seen` only while Grid is on here: off, nothing of Grid is asked for.
       const gridOn = this.options.gridOn?.() === true;
       // `canvas`: its threads' canvases changing, and its drawing jobs, for the windows here (mark `canvas`; an older
-      // Inbox ignores the ask).
-      const asks = [...PEER_REREAD_EVENTS.filter((event) => event !== "grid-seen" || gridOn), "deliveries", "canvas"].map((event) => `${event}=1`).join("&");
+      // Inbox ignores the ask). Only while the canvas is on here: off, no window here could draw for its agents, and
+      // that machine would wait out each job for an answer that never comes.
+      const canvasOn = this.options.canvasOn?.() === true;
+      const asks = [...PEER_REREAD_EVENTS.filter((event) => event !== "grid-seen" || gridOn), "deliveries", ...(canvasOn ? ["canvas"] : [])].map((event) => `${event}=1`).join("&");
       response = await this.options.transport.events(headers, this.cursor === null ? `?${asks}` : `?cursor=${this.cursor}&${asks}`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;

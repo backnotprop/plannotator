@@ -43,7 +43,7 @@ import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent
 import { inboxFarReaderName, inboxMachineRecordName } from "./inbox-sent-from-reader";
 import { createMachineAgentFind } from "./inbox-machine-agent-find";
 import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
-import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
+import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, OUTBOX_MAX_BODY_BYTES, type OutboxEntry } from "./inbox-outbox";
 import type { OutboxFile } from "./inbox-outbox-files";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
@@ -401,6 +401,26 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
 const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
+/** A thread's canvas: a save, and its Undo (mark `canvas`). Neither changes that machine's list. */
+const CANVAS_SAVE_ROUTE = /^threads\/[^/]+\/canvas$/;
+const CANVAS_WRITE_ROUTE = /^threads\/[^/]+\/canvas(?:\/undo)?$/;
+/** A drawing job's id, as that machine's canvas makes it (inbox-canvas.ts). */
+const CANVAS_JOB = /^job_[a-f0-9]{32}$/;
+
+/** A linked machine's drawing job that no window here can draw: answered "no drawing" at once, as a window that failed answers. */
+async function noDrawing(peer: PeerLink, job: string, mermaid: boolean): Promise<void> {
+  const key = `canvas-job-${crypto.randomUUID()}`;
+  try {
+    const answer = await peer.request(`canvas/jobs/${job}`, mermaid ? `?idempotency_key=${key}` : `?failed=1&idempotency_key=${key}`, {
+      method: "POST",
+      headers: { "Content-Type": mermaid ? "application/json" : "image/png" },
+      body: mermaid ? JSON.stringify({ drawn: null }) : new Uint8Array(0),
+    });
+    await answer.body?.cancel().catch(() => {});
+  } catch {
+    // Away again: its job runs out on its own.
+  }
+}
 /** Another machine's folder names, for "Another folder on <machine>…" (remote launch), and where it would clone a URL. */
 const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
 /** A file a message names, read on another machine (approval "inbox-file-refs-open-viewer"): its view, its bytes. */
@@ -680,13 +700,18 @@ export function createInboxMachines(context: InboxMachinesContext) {
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onReread: (event) => emit({ event, data: {} }),
       // Its canvas frames and drawing jobs, said to be its: the window reads its canvas and answers its job through the forward.
+      // A job no window here can draw (the canvas off, or no window open) is answered at once, so its agent is not
+      // kept waiting: that machine falls back to the last picture a window stored, or says no window is open.
       onCanvas: (event, data) => {
-        if (context.canvasOn?.() === true) emit({ event, data: { ...data, machine: link.id } });
+        const drawable = context.canvasOn?.() === true && listeners.size > 0;
+        if (drawable) return emit({ event, data: { ...data, machine: link.id } });
+        if (event === "canvas-job" && typeof data.id === "string" && CANVAS_JOB.test(data.id)) void noDrawing(peer, data.id, data.kind === "mermaid");
       },
       onCards: () => emit({ event: "cards", data: {} }),
       onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
       gridOn: context.gridOn,
+      canvasOn: context.canvasOn,
     });
     peers.set(link.id, peer);
     peer.start();
@@ -1122,6 +1147,17 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // This Inbox's page session means nothing to the other machine's Inbox, and its drafts stay on this computer.
     delete body.serverSession;
     if (route === "messages") delete body.draft_id;
+    // A canvas save too large for the outbox to hold (one thing past its bound: a long stroke, a page of pasted words;
+    // the window sends a larger save in parts) goes now while that machine is online, as a file does. Elements merge
+    // there by version, so it needs no place in the queue; away, it waits in the window (503) and goes when it is back.
+    if (CANVAS_SAVE_ROUTE.test(route) && JSON.stringify(body).length > OUTBOX_MAX_BODY_BYTES) {
+      if (peer.state !== "online") return offline();
+      try {
+        return passAnswer(await peer.request(route, "", { method: "POST", headers: { "Content-Type": "application/json", ...(window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}) }, body: JSON.stringify(body), signal: req.signal, timeoutMs: UPLOAD_MS }));
+      } catch {
+        return offline();
+      }
+    }
     // Rule 11: a reply held for another machine says what the person saw, so a late one is refused there.
     if (REPLY_ROUTE.test(route) && (typeof body.seen_through_seq !== "number" || !Number.isSafeInteger(body.seen_through_seq))) {
       throw new InboxError("validation_error", "seen_through_seq: a reply to another machine carries the newest seq of the thread the person saw.", { field: "seen_through_seq" });
@@ -1138,7 +1174,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;
     // A state that landed is in that machine's list now: read it before answering, so the window's next read shows it.
     // A card's write reads its Board and its list both: a tag named there may be new, and the merged tags come from the list.
-    if (settled.state === "delivered" && kind === "set") await (segments[0] === "cards" ? Promise.all([peer.refreshList(), peer.refreshCards()]) : peer.refreshList());
+    // A canvas write changes no list there: nothing to read again (it would cost a list read for each save).
+    if (settled.state === "delivered" && kind === "set" && !CANVAS_WRITE_ROUTE.test(route)) await (segments[0] === "cards" ? Promise.all([peer.refreshList(), peer.refreshCards()]) : peer.refreshList());
     return outboxAnswer(settled, fresh);
   };
 
@@ -1523,6 +1560,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
     /** Every linked machine's id (a Ship tells each of them, inbox-ship-watch.ts `onStart`). */
     linkedIds: (): string[] => links.list().map((link) => link.id),
     machinesView,
+    /** The canvas was turned on or off here: every link asks its machine again, with or without its canvas frames. */
+    canvasChanged: () => {
+      for (const peer of peers.values()) peer.canvasChanged();
+    },
     /** Grid was turned on or off here: every link asks its machine again (inbox-peer-link.ts `gridChanged`). */
     gridChanged: () => {
       for (const peer of peers.values()) peer.gridChanged();

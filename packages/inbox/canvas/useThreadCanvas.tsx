@@ -90,6 +90,8 @@ export function useThreadCanvas(thread: InboxThread | null, host: ThreadSlotHost
             host.setCanvasReply({ words: reply.words, files: reply.files, sketch: reply.sketch, send: true, threadId: canvasFor });
           }}
           onClose={closeCanvas}
+          outbox={host.outbox}
+          machine={machine ? (host.machines.linked.find((m) => m.id === machine) ?? null) : null}
         />
       </Suspense>
     ) : null;

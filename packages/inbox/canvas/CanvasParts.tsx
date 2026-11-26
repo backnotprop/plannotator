@@ -20,6 +20,7 @@ import { createPortal } from 'react-dom';
 import { CanvasBoardPart, PanePart } from '../lazyParts';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
+import type { MachineView, OutboxView } from '../api';
 import { canvasMarkOf, subscribeCanvasMarks, type CanvasMark, type CanvasReply } from './canvasApi';
 
 const CanvasBoard = CanvasBoardPart.Part;
@@ -122,6 +123,8 @@ export function CanvasLayer({
   onWords,
   onSend,
   onClose,
+  outbox,
+  machine,
 }: {
   threadId: string;
   subject: string;
@@ -136,6 +139,9 @@ export function CanvasLayer({
   onWords: (words: string) => void;
   onSend: (reply: CanvasReply) => void;
   onClose: () => void;
+  /** The window's outbox, and the linked computer the thread lives on (null for this computer's): a save held for it ends there. */
+  outbox: ReadonlyMap<string, OutboxView>;
+  machine: MachineView | null;
 }) {
   // A chunk that could not arrive says so in the layer; the next open asks for it again.
   const failed = useCallback(() => CanvasBoardPart.retry(), []);
@@ -173,7 +179,7 @@ export function CanvasLayer({
         </Tip>
       </header>
       <PanePart loading={<div style={{ flex: 1 }} aria-busy="true" />} onFailed={failed}>
-        <CanvasBoard threadId={threadId} dark={dark} agent={agent} agentMark={agentMark} received={received} draft={draft} onWords={onWords} onSend={onSend} />
+        <CanvasBoard threadId={threadId} dark={dark} agent={agent} agentMark={agentMark} received={received} draft={draft} onWords={onWords} onSend={onSend} outbox={outbox} machine={machine} />
       </PanePart>
       </div>
     </dialog>,

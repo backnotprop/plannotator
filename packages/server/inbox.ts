@@ -3709,7 +3709,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     saved: () => loadConfig().inboxCanvas === true,
     fixed: options.canvas,
     save: (on) => saveConfig({ inboxCanvas: on }),
-    changed: () => capabilityListeners.forEach((listener) => listener()),
+    // Every window follows, and each linked machine's stream asks again with or without its canvas frames and jobs.
+    changed: () => {
+      capabilityListeners.forEach((listener) => listener());
+      machines?.canvasChanged();
+    },
   });
   const saveCodeReview = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
