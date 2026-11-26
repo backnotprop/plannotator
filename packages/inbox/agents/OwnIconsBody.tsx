@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { keepOwnPicture, removeOwnPicture } from './agentFaces';
 import { isOwnFace, type AgentFace } from './faceChoices';
 import { OWN_LABEL } from './FaceFan';
@@ -11,9 +11,10 @@ import { ownIconSrc, useOwnIcons } from './ownIcons';
  * which this agent can show. A new picture, or one picked, goes to `onPick` (its page, AgentIconDialog.tsx); a new one
  * is kept with the Inbox, shown on no agent yet.
  * × takes a picture away, with no question: the agents that showed it go back to their own mark. The refusals are Set
- * picture…'s own words. Each picture is drawn as its still, as uploaded, scaled to fit its tile.
+ * picture…'s own words. Each picture is drawn as its still, as uploaded, scaled to fit its tile. `draw`: the row under
+ * the drop area that asks an agent to draw one (DrawIt.tsx).
  */
-export function OwnIconsBody({ face, onPick }: { face: AgentFace; onPick: (face: AgentFace) => void }) {
+export function OwnIconsBody({ face, onPick, draw }: { face: AgentFace; onPick: (face: AgentFace) => void; draw?: ReactNode }) {
   const icons = useOwnIcons() ?? [];
   const [refused, setRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,6 +82,7 @@ export function OwnIconsBody({ face, onPick }: { face: AgentFace; onPick: (face:
       <div className="ib-agi-status" role="status">
         {refused}
       </div>
+      {draw}
       {icons.length > 0 && (
         <div className="am-own-g" role="radiogroup" aria-label={OWN_LABEL}>
           {icons.map((icon, i) => (

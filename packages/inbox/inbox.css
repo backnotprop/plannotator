@@ -578,6 +578,10 @@ button.ib-mut { border-radius: 6px; }
    side by side (the Settings row's pattern). ⋯ shows on hover, on keyboard focus and while its menu is open, in
    place of the count; the row whose menu is open keeps a muted background. */
 .ib-projrow { position: relative; }
+/* The project mark's own button (ProjectMarkPicker.tsx): over the mark, which stays in the row's button; it opens the picker. */
+.pn-inbox .ib-pmark { position: absolute; left: 3px; top: calc(50% - 12px); width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--ib-r7-s, 6px); background: none; cursor: pointer; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+.pn-inbox .ib-pmark:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-projrow:is(:has(> .ib-pmark:hover), :has(> .ib-pmark[data-fan-open])) .ib-proj:not(.ib-on) { background: var(--ib-side-hover); }
 .pn-inbox .ib-pmore { position: absolute; right: 3px; top: 3px; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--ib-r7-s, 6px); color: var(--muted-foreground); opacity: 0; }
 .ib-pmore .ib-ic { width: 16px; height: 16px; stroke-width: 2.2; }
 .pn-inbox .ib-pmore:hover { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 90%, transparent)); color: var(--foreground); }

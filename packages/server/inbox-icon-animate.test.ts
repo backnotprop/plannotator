@@ -5,7 +5,11 @@
  * What this catches: a request about a set icon or one of our faces refused, or one about an icon that cannot be shown
  * here (no such set icon, the agent's own mark, Transparent) kept; a hand-back that replaces an agent no longer showing
  * the icon asked about; the way back naming something other than the face it replaced; a set icon's request keeping a
- * made-up upload from the pictures' cap.
+ * made-up upload from the pictures' cap. Drawing (`draw`) and projects: a drawn icon not landing on the agent asked
+ * about, or landing after the person picked another; a project's hand-back not becoming its picture, landing after the
+ * person changed the picture, skipping the picture's checks, or the windows not told; a request about a project this
+ * Inbox does not have kept; a request this Inbox does not keep not asked of the linked machines, or asked again when a
+ * linked machine handed it here.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -15,6 +19,7 @@ import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { createAgentIcons } from "./inbox-agent-icons";
 import { createInboxIconAnimate } from "./inbox-icon-animate";
+import { createProjectPictures } from "./inbox-project-pictures";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -23,6 +28,7 @@ afterEach(() => {
 
 const svg = (fill: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" fill="${fill}"/></svg>`;
 const dataUrl = (text: string) => `data:image/svg+xml;base64,${Buffer.from(text).toString("base64")}`;
+const PROJECT = "prj_01JZ00000000000000000000P1";
 const hash = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
 
 function world() {
@@ -31,6 +37,9 @@ function world() {
   const inboxDir = join(root, "inbox");
   const icons = createAgentIcons({ dir: join(inboxDir, "agent-icons") });
   const faces = createInboxAgentFacesFile(inboxDir, () => {});
+  const pictures = createProjectPictures({ dir: join(root, "project-pictures"), env: {} });
+  const changes: string[] = [];
+  const farAsked: string[] = [];
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const animate = createInboxIconAnimate({
     inboxDir,
@@ -41,6 +50,16 @@ function world() {
     json,
     touch: () => {},
     setIconKept: async (set, icon) => set === "dcss" && icon === "orc",
+    projects: {
+      has: (projectId) => projectId === PROJECT,
+      uploadedAt: (projectId) => pictures.uploadedAt(projectId),
+      setUpload: (projectId, bytes) => pictures.setUpload(projectId, bytes),
+      changed: () => void changes.push("project"),
+    },
+    far: async (handBack) => {
+      farAsked.push(handBack.request);
+      return null;
+    },
   });
   const call = async (method: "GET" | "POST", body?: Record<string, unknown>) => {
     const url = new URL("http://127.0.0.1/api/inbox/icon-animate");
@@ -55,7 +74,7 @@ function world() {
   const ask = (icon: string, agent = "agent-a") => call("POST", { animate: { icon, agent, sessions: [] } });
   const show = (agent: string, face: string) => faces.change({ agent, sessions: [], face } as never);
   const faceOf = (agent: string) => faces.wire().faces[agent]?.face;
-  return { call, ask, show, faceOf, animate, icons };
+  return { call, ask, show, faceOf, animate, icons, pictures, changes, farAsked };
 }
 
 test("a set's icon and one of our faces can be animated; the hand-back replaces only the agent asked about, and the way back names the face", async () => {
@@ -95,4 +114,69 @@ test("a request about an icon that cannot be shown here is refused and kept nowh
   // An uploaded picture still works as before, and its request keeps it from the cap.
   expect((await w.ask(own.icon.id)).status).toBe(200);
   expect([...w.animate.kept()]).toEqual([`own:${own.icon.id}`]);
+});
+
+test("Ask an agent to draw it: the drawing becomes the agent's icon, only the agent asked about and only while it shows what it showed", async () => {
+  const w = world();
+  w.show("agent-a", "glass-red");
+  const asked = await w.call("POST", { draw: { agent: "agent-a", sessions: [] } });
+  expect(asked.status).toBe(200);
+  const drawn = svg("#2563eb");
+  const back = await w.call("POST", { request: asked.body.request, picture: dataUrl(drawn) });
+  expect(back.body).toMatchObject({ applied: true, icon: hash(drawn), target: "agent" });
+  expect(w.faceOf("agent-a")).toBe(`own:${hash(drawn)}`);
+  // A better version in the same thread replaces it; a drawing is no animation, so it offers no way back.
+  const better = svg("#1d4ed8");
+  expect((await w.call("POST", { request: asked.body.request, picture: dataUrl(better) })).body.applied).toBe(true);
+  expect(w.faceOf("agent-a")).toBe(`own:${hash(better)}`);
+  expect((await w.call("GET")).body.results).toEqual([]);
+
+  // An agent with no face picked, which the person then gives one: the drawing joins the pictures and changes nothing.
+  const none = await w.call("POST", { draw: { agent: "agent-b", sessions: [] } });
+  w.show("agent-b", "totman");
+  const late = await w.call("POST", { request: none.body.request, picture: dataUrl(svg("#059669")) });
+  expect(late.body.applied).toBe(false);
+  expect(w.faceOf("agent-b")).toBe("totman");
+});
+
+test("a project's drawing or animation becomes its picture through Set picture's checks, until the person changes the picture", async () => {
+  const w = world();
+  const drawn = svg("#9333ea");
+  const asked = await w.call("POST", { draw: { project: PROJECT } });
+  expect(asked.status).toBe(200);
+  const back = await w.call("POST", { request: asked.body.request, picture: dataUrl(drawn) });
+  expect(back.body).toMatchObject({ applied: true, icon: hash(drawn), target: "project" });
+  const kept = await w.pictures.get({ id: PROJECT, root: "/nowhere" }, { logo: false, github: false, repo: () => null });
+  expect(new TextDecoder().decode(kept!.body)).toBe(drawn);
+  // The windows read the projects again, and the picture joins "Your own…".
+  expect(w.changes).toEqual(["project"]);
+  expect(w.icons.read(hash(drawn), true)).toBeTruthy();
+  // Again in the same thread: still this request's picture showing, so the better one lands.
+  const better = svg("#7e22ce");
+  expect((await w.call("POST", { request: asked.body.request, picture: dataUrl(better) })).body.applied).toBe(true);
+
+  // Animate it on a set icon for the project, then the person sets another picture before the agent is done.
+  const animate = await w.call("POST", { animate: { icon: "set:dcss/orc", project: PROJECT } });
+  expect(animate.status).toBe(200);
+  w.pictures.setUpload(PROJECT, new TextEncoder().encode(svg("#000000")));
+  const late = await w.call("POST", { request: animate.body.request, picture: dataUrl(svg("#facc15")) });
+  expect(late.body).toMatchObject({ applied: false, target: "project" });
+  const after = await w.pictures.get({ id: PROJECT, root: "/nowhere" }, { logo: false, github: false, repo: () => null });
+  expect(new TextDecoder().decode(after!.body)).toBe(svg("#000000"));
+
+  // A page dressed as an SVG changes nothing.
+  const page = await w.call("POST", { request: asked.body.request, picture: `data:image/svg+xml;base64,${Buffer.from("<html><script>1</script></html>").toString("base64")}` });
+  expect(page.status).toBe(400);
+});
+
+test("a request about a project this Inbox does not have is refused; a request it does not keep is asked of the linked machines, once", async () => {
+  const w = world();
+  expect((await w.call("POST", { draw: { project: "prj_01JZ00000000000000000000X9" } })).body.code).toBe("project_not_found");
+  expect((await w.call("POST", { animate: { icon: "set:dcss/orc", project: "prj_01JZ00000000000000000000X9" } })).body.code).toBe("project_not_found");
+  const id = `ia_${"ab".repeat(12)}`;
+  expect((await w.call("POST", { request: id, picture: dataUrl(svg("#111111")) })).body.code).toBe("no_request");
+  expect(w.farAsked).toEqual([id]);
+  // Handed here by a linked machine that does not keep it either: never asked back.
+  expect((await w.call("POST", { request: id, picture: dataUrl(svg("#111111")), relayed: true })).body.code).toBe("no_request");
+  expect(w.farAsked).toEqual([id]);
 });

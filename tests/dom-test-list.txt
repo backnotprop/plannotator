@@ -827,6 +827,7 @@ packages/inbox/composerDrag.test.tsx
 packages/inbox/agents/ownAgentIcons.test.tsx
 packages/inbox/agents/setAgentIcons.test.tsx
 packages/inbox/agents/animateAnyIcon.test.tsx
+packages/inbox/projectIcons.test.tsx
 packages/inbox/agents/agentRename.test.tsx
 packages/inbox/agents/agentMenuLaunch.test.tsx
 packages/inbox/agents/agentRexPlace.test.tsx

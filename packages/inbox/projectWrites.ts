@@ -1,8 +1,10 @@
 import type { InboxAgent } from '@plannotator/core/inbox-types';
-import { InboxHeldError, inboxApi } from './api';
+import { InboxApiError, InboxHeldError, inboxApi } from './api';
 import { keepAgentName } from './agents/agentFaces';
 import { formatCount } from './format';
-import { pictureFromFile } from './projectPictures';
+import { setProjectLook as keepProjectLook } from './data/projectLookApi';
+import { projectRefusal } from './agents/iconTarget';
+import { learnProjects, pictureFromFile } from './projectPictures';
 import { errorToast } from './toastError';
 import type { InboxToastModel } from './components/Toast';
 import type { ListModel } from './api';
@@ -49,7 +51,21 @@ export function projectWrites({ showToast, dismissToast, refreshList, say, lates
       }
       await inboxApi.setProjectPicture(projectId, read.picture);
     } catch (cause) {
-      showToast(errorToast(cause, 'The picture did not change.'));
+      // A linked machine too old to take a picture is named, as the icon dialog names it.
+      showToast(cause instanceof InboxApiError && cause.code === 'device_route_not_found' ? { icon: 'warn', lead: projectRefusal(projectId, cause), wrap: true } : errorToast(cause, 'The picture did not change.'));
+      return false;
+    }
+    await refreshList(false);
+    return true;
+  };
+
+  /** The project mark's picker: a hue or a picture source. A refusal is the toast (an older linked machine named). */
+  const setProjectLook = async (projectId: string, look: string): Promise<boolean> => {
+    try {
+      const answer = await keepProjectLook(projectId, look);
+      if (answer.project) learnProjects([answer.project]);
+    } catch (cause) {
+      showToast(cause instanceof InboxApiError && cause.code === 'device_route_not_found' ? { icon: 'warn', lead: projectRefusal(projectId, cause), wrap: true } : errorToast(cause, 'The picture did not change.'));
       return false;
     }
     await refreshList(false);
@@ -97,5 +113,7 @@ export function projectWrites({ showToast, dismissToast, refreshList, say, lates
     say(`${lead}.`);
     return failure;
   };
-  return { renameProject, renameAgent, setProjectPicture, combineProjects };
+  /** The sidebar's project picture props: Remove picture, and the mark picker's look. */
+  const projectPictureProps = { onProjectPicture: setProjectPicture, onProjectLook: setProjectLook };
+  return { renameProject, renameAgent, projectPictureProps, combineProjects };
 }

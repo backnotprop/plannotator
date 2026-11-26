@@ -45,9 +45,13 @@ export interface ProjectFolder extends InboxProject {
   combined?: { id: string; name: string; root: string }[];
   /** When its letter mark's picture was set (Set picture…, ms). Absent when none, and from an older Inbox. */
   picture?: number;
+  /** The look picked in its mark's picker: `hue:0` to `hue:7` (its letters in that hue) or a picture source, `repo` or `github`. Absent when none, and from an older Inbox. */
+  look?: string;
   /** Its git origin's host (null: none named, links as github.com); absent with no repo and from an older Inbox. */
   repo_host?: string | null;
   repo_forge?: 'gitlab';
+  /** Its git origin as `owner/repo` (Ask an agent to draw it names it); absent with no repo and from an older Inbox. */
+  repo?: string;
   /**
    * The live tags the person put on the project (project-tags.ts; merged: the merged tags' ids), read by the filters
    * only. Absent when none, and from an older Inbox.

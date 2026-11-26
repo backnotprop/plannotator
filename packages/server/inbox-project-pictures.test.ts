@@ -5,7 +5,9 @@
  * What this catches: a picture from the wrong source winning; a repo logo read from outside the project's folder (a
  * `..` link or a symlink) or from the network; GitHub asked for a project on another host, asked twice for one owner,
  * asked on every read, or asked at all from a test; a failed refresh that drops the kept picture; an upload that is
- * not an image, or too big, kept anyway.
+ * not an image, or too big, kept anyway. A look picked for one project (its mark's picker): a hue that still shows a
+ * picture, a picked source not shown when its Rows switch is off, a look and a set picture both kept, a look that
+ * survives Remove picture or outlives a restart's read, and the picker's sources asking GitHub.
  *
  * Never the network: every GitHub answer comes from a scripted fetch, and the sandbox case replaces the global fetch
  * with a tripwire.
@@ -236,5 +238,48 @@ describe("Set picture…", () => {
     expect(pictures.removeUpload("prj_a")).toBe(true);
     expect(pictures.uploadedAt("prj_a")).toBeUndefined();
     expect(createProjectPictures({ dir: join(scratch, "data") }).uploadedAt("prj_a")).toBeUndefined();
+  });
+});
+
+describe("a look picked for one project", () => {
+  const PRJ = "prj_01JZ00000000000000000000L1";
+  const off = (repoInfo = GITHUB) => ({ logo: false, github: false, repo: () => repoInfo });
+
+  test("a hue shows letters, a source shows that source whatever the switches say, and a look and a set picture rule each other out", async () => {
+    const github = fakeGithub(() => picture(PNG_B));
+    const dir = join(scratch, "pictures");
+    const pictures = createProjectPictures({ dir, fetch: github.fetch, env: {} });
+    const project = { id: PRJ, root: repo({ "favicon.svg": SVG }) };
+    expect(pictures.setUpload(PRJ, PNG).ok).toBe(true);
+    expect(pictures.setLook(PRJ, "hue:3")).toBe(true);
+    expect(pictures.uploadedAt(PRJ)).toBeUndefined();
+    expect(await pictures.get(project, { ...off(), logo: true, github: true })).toBeNull();
+
+    // The repo's logo with both switches off; then the GitHub owner's, fetched for this project alone.
+    pictures.setLook(PRJ, "repo");
+    expect((await pictures.get(project, off()))?.from).toBe("repo");
+    pictures.setLook(PRJ, "github");
+    expect((await pictures.get(project, off()))?.from).toBe("github");
+    expect(github.calls.length).toBe(1);
+
+    // A set picture takes the look away; Remove picture takes both; a new read of the folder agrees.
+    expect(pictures.setUpload(PRJ, PNG).ok).toBe(true);
+    expect(pictures.lookOf(PRJ)).toBeUndefined();
+    pictures.setLook(PRJ, "hue:5");
+    expect(createProjectPictures({ dir, env: {} }).lookOf(PRJ)).toBe("hue:5");
+    expect(pictures.removeUpload(PRJ)).toBe(true);
+    expect(createProjectPictures({ dir, env: {} }).lookOf(PRJ)).toBeUndefined();
+    expect(pictures.setLook(PRJ, "hue:9" as never)).toBe(false);
+  });
+
+  test("the picker's sources: the repo's logo when found, GitHub only when kept, switched on or picked, never fetched", async () => {
+    const github = fakeGithub(() => picture(PNG_B));
+    const pictures = createProjectPictures({ dir: join(scratch, "pictures"), fetch: github.fetch, env: {} });
+    const plain = { id: PRJ, root: repo({ "README.md": "# none" }) };
+    expect(await pictures.sources(plain, { github: false, repo: () => GITHUB })).toEqual({ repo: false, github: false });
+    expect(await pictures.source(plain, "github", { github: false, repo: () => GITHUB })).toBeNull();
+    expect(await pictures.sources(plain, { github: true, repo: () => GITHUB })).toEqual({ repo: false, github: true });
+    expect(await pictures.sources({ id: PRJ, root: repo({ "favicon.svg": SVG }) }, { github: false, repo: () => null })).toEqual({ repo: true, github: false });
+    expect(github.calls).toEqual([]);
   });
 });

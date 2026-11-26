@@ -1,10 +1,12 @@
 /**
- * `plannotator inbox icon set <file> --request <id>`: an agent hands an animated icon back, after an Inbox message
- * ("Animate it", packages/inbox/agents/animatePrompt.ts) asked it to animate one of the person's agent icons. A command
+ * `plannotator inbox icon set <file> --request <id>`: an agent hands an icon back, after an Inbox message ("Animate it",
+ * packages/inbox/agents/animatePrompt.ts, or "Ask an agent to draw it", drawPrompt.ts) asked it to animate or draw one of
+ * the person's agent icons or project pictures. A command
  * and not a tool, as `inbox rows` and `inbox projects` are: tool text costs every session tokens, and this runs seldom.
  *
  * A thin client over `POST /api/inbox/icon-animate` on this computer's listener (packages/server/inbox-icon-animate.ts),
- * which keeps the picture through the upload's own checks and changes only the icon the request names.
+ * which keeps the picture through the upload's own checks and changes only the icon the request names. A request kept
+ * by a linked machine's Inbox is handed on there by this one.
  *
  * stdout: one line, or JSON with --json. A refusal goes to stderr as `<code>: <message>` and exits 1; bad usage exits 2.
  */
@@ -19,13 +21,13 @@ import { writeWholeToStdout } from "./write-whole-stdout";
 export const INBOX_ICON_USAGE = [
   "Usage: plannotator inbox icon set <file> --request <id> [--json]",
   "",
-  "Hand an animated icon back to the person's Plannotator Inbox, after an Inbox message asked you to animate one of",
-  "their agent icons. <file> is your picture: SVG, PNG, GIF, WebP or JPEG, at most 512 KB. <id> is the request id",
-  "written in that message (it starts with ia_).",
+  "Hand an icon back to the person's Plannotator Inbox, after an Inbox message asked you to draw or animate one of",
+  "their icons (an agent's icon or a project's picture). <file> is your picture: SVG, PNG, GIF, WebP or JPEG, at most",
+  "512 KB. <id> is the request id written in that message (it starts with ia_).",
   "",
-  "The Inbox shows your picture as that agent's icon in every window at once, and keeps the original, which the",
-  "person can go back to with one click. It changes only the icon that message asked about. You can run it again",
-  "with a better version.",
+  "The Inbox shows your picture as that icon in every window at once. It changes only the icon that message asked",
+  "about. After an animation the person can go back to the original with one click. You can run it again with a",
+  "better version.",
 ].join("\n");
 
 /** One request never waits longer: a wedged Inbox must not hang the agent. */
@@ -110,7 +112,7 @@ export async function runInboxIconCommand(argv: readonly string[], deps: IconCom
     if (response.status === 404 && body?.code === undefined) return refused("not_supported", "This Inbox is older than icon hand-backs. Tell the person where the file is; they can drop it on the icon.");
     if (response.status !== 200 || !body) return refused(typeof body?.code === "string" ? body.code : "error", typeof body?.error === "string" ? body.error : `The Inbox answered ${response.status}. Nothing changed.`);
     const applied = body.applied === true;
-    const line = applied ? "Done: the agent's icon is now your picture, in every Inbox window." : String(body.note ?? "Kept, but not shown.");
+    const line = applied ? (body.target === "project" ? "Done: the project now shows your picture, in every Inbox window." : "Done: the agent's icon is now your picture, in every Inbox window.") : String(body.note ?? "Kept, but not shown.");
     await out(deps.json ? `${JSON.stringify({ applied, icon: body.icon }, null, 2)}\n` : `${line}\n`);
     return 0;
   } catch (error) {

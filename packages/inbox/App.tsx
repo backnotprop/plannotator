@@ -3254,7 +3254,7 @@ function Inbox() {
     });
   };
 
-  const { renameProject, renameAgent, setProjectPicture, combineProjects } = projectWrites({ showToast, dismissToast, refreshList, say, latestRef });
+  const { renameProject, renameAgent, projectPictureProps, combineProjects } = projectWrites({ showToast, dismissToast, refreshList, say, latestRef });
 
   /** The sidebar agent's Delete … session…, asked in place (AgentDeleteDialog): its threads as the list holds them then. */
   const [agentDelete, setAgentDelete] = useState<AgentDeleteAsk | null>(null);
@@ -5682,7 +5682,7 @@ function Inbox() {
             onAgentRename={renameAgent}
             onAgentStop={(agent, machine) => void stopAgent(agent, machine)}
             onAgentDelete={askAgentDelete}
-            onProjectPicture={setProjectPicture}
+            {...projectPictureProps}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             // "+" on a project row (F1-F7): while agents can be started from New message.
             onProjectNewSession={plusOn ? (projectId, machine) => openCompose({ start: { projectId, machine, agent: composeLastAgent } }) : undefined}

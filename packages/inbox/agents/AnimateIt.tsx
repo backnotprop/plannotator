@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { isInboxMarkFace } from '@plannotator/core/inbox-types';
-import { inboxApi } from '../api';
 import { openComposer } from '../compose/openComposer';
-import { keepAgentFace, type AgentFaceRef } from './agentFaces';
+import { iconAnimateResults } from '../data/iconApi';
 import { ANIMATE_THREAD_NAME, animatePrompt } from './animatePrompt';
 import type { FaceSources } from './FaceFan';
 import { useAgentFaceSources } from './faceArtLoad';
 import { isAgentFace, isOwnFace, type AgentFace } from './faceChoices';
 import { isSetFace, setFaceParts, setIconSrc, setLookOf } from './iconSets';
+import { askAnimate, askRefusal, keepIcon, type IconTarget } from './iconTarget';
 import { ownFaceShows, ownIconSrc, useOwnIcons } from './ownIcons';
 
 export const ANIMATE_WORDS = {
@@ -30,8 +30,7 @@ function useAnimatedOriginals(): ReadonlyMap<string, AgentFace> {
   const [originals, setOriginals] = useState<ReadonlyMap<string, AgentFace>>(new Map());
   useEffect(() => {
     let live = true;
-    inboxApi
-      .iconAnimateResults()
+    iconAnimateResults()
       .then((answer) => {
         const list = Array.isArray(answer.results) ? (answer.results as { icon?: unknown; result?: unknown }[]) : [];
         // `icon` is an uploaded picture's hash, or the face itself (a set's icon, one of ours).
@@ -77,21 +76,21 @@ function originalStill(face: AgentFace, ours: FaceSources | null): string | null
 const isOurs = (face: AgentFace) => !isOwnFace(face) && !isSetFace(face) && !isInboxMarkFace(face) && face !== 'agent';
 
 /**
- * "Animate it", on an icon's page in the agent icon dialog (SelectedIcon.tsx): an uploaded picture or a set's icon.
- * `beforeStart` runs as it is pressed (the page keeps a previewed icon then). One press keeps a request with the Inbox
- * (packages/server/inbox-icon-animate.ts) and opens New message filled in (compose/openComposer.ts): the words
- * (animatePrompt.ts), the picture attached, To open on the running agents and "New <agent> session". The person sends
- * it. The agent's hand-back changes this icon in every window by itself; a picture an agent handed back offers "Use the
- * original" in its place.
+ * "Animate it", on an icon's page in the icon dialog (SelectedIcon.tsx), for an agent or a project: an uploaded picture
+ * or a set's icon. `beforeStart` runs as it is pressed (the page keeps a previewed icon then; its words stop the
+ * request). One press keeps a request with the Inbox that has the icon (packages/server/inbox-icon-animate.ts) and
+ * opens New message filled in (compose/openComposer.ts): the words (animatePrompt.ts), the picture attached, To open on
+ * the running agents and "New <agent> session". The person sends it. The agent's hand-back changes this icon in every
+ * window by itself; a picture an agent handed back offers "Use the original" in its place.
  */
-export function AnimateIt({ agent, face, onDone, beforeStart }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void; beforeStart?: () => void }) {
+export function AnimateIt({ target, face, onDone, beforeStart }: { target: IconTarget; face: AgentFace; onDone: () => void; beforeStart?: () => Promise<string | null> }) {
   const originals = useAnimatedOriginals();
   const original = isOwnFace(face) ? originals.get(face.slice(4)) : undefined;
   const back = original && (!isOwnFace(original) || ownFaceShows(original)) ? original : null;
   // Our faces' pictures: for one of ours as the face, or as the original "Use the original" puts back.
   const ours = useAgentFaceSources(isOurs(face) || (!!back && isOurs(back)));
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const source = animateSource(face, ours);
   if (!source && !back) return null;
   const backStill = back ? originalStill(back, ours) : null;
@@ -99,26 +98,28 @@ export function AnimateIt({ agent, face, onDone, beforeStart }: { agent: AgentFa
   const start = async () => {
     if (busy || !source) return;
     setBusy(true);
-    setFailed(false);
-    beforeStart?.();
+    setFailed(null);
     try {
-      const ref = typeof agent === 'string' ? { id: agent, session: agent, continues: [] as string[] } : agent;
-      const sessions = [...new Set([ref.session, ...(ref.continues ?? [])].filter((id): id is string => !!id && id !== ref.id))];
-      const [picture, answer] = await within(
+      const refused = beforeStart ? await within(beforeStart()) : null;
+      if (refused) {
+        setFailed(refused);
+        setBusy(false);
+        return;
+      }
+      const [picture, request] = await within(
         Promise.all([
           fetch(source.src).then((r) => {
             if (!r.ok) throw new Error(String(r.status));
             return r.blob();
           }),
-          inboxApi.askIconAnimate({ icon: source.icon, agent: ref.id, sessions }),
+          askAnimate(target, source.icon),
         ]),
       );
-      if (typeof answer.request !== 'string') throw new Error('no request');
-      const file = new File([picture], `agent-icon.${EXT[picture.type] ?? 'png'}`, { type: picture.type });
+      const file = new File([picture], `${target.kind === 'project' ? 'project' : 'agent'}-icon.${EXT[picture.type] ?? 'png'}`, { type: picture.type });
       onDone();
-      openComposer({ subject: ANIMATE_THREAD_NAME, body: animatePrompt(answer.request), files: [file], to: 'pick' });
-    } catch {
-      setFailed(true);
+      openComposer({ subject: ANIMATE_THREAD_NAME, body: animatePrompt(request, target.kind), files: [file], to: 'pick' });
+    } catch (cause) {
+      setFailed(askRefusal(target, cause) ?? ANIMATE_WORDS.failed);
       setBusy(false);
     }
   };
@@ -129,7 +130,7 @@ export function AnimateIt({ agent, face, onDone, beforeStart }: { agent: AgentFa
         <span className="ib-agi-anim-l">{back ? ANIMATE_WORDS.done : ANIMATE_WORDS.line}</span>
         {failed && (
           <span className="ib-agi-anim-e" role="status">
-            {ANIMATE_WORDS.failed}
+            {failed}
           </span>
         )}
       </div>
@@ -138,9 +139,10 @@ export function AnimateIt({ agent, face, onDone, beforeStart }: { agent: AgentFa
           type="button"
           className="ib-btn ib-sm ib-agi-anim-b"
           data-animate-undo=""
-          onClick={() => {
-            keepAgentFace(agent, back);
-            onDone();
+          onClick={async () => {
+            const refused = await keepIcon(target, back);
+            if (refused) setFailed(refused);
+            else onDone();
           }}
         >
           {backStill && <img src={backStill} alt="" draggable={false} />}

@@ -47,7 +47,7 @@ import { codeReviewOfferAtStart, codeReviewOfferDue } from "./inbox-code-review-
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { type InboxSidebarLayout } from "@plannotator/core/inbox-sidebar";
 import { inboxSidebarOff, inboxSidebarState, saveInboxSidebar } from "./inbox-sidebar-save";
 import { createMcpHandler } from "@modelcontextprotocol/server";
@@ -379,7 +379,7 @@ import { createPullRiskAuto, type PullRiskAuto } from "./inbox-pull-risk-auto";
 import { lastStartedReviewAgent, pullRiskAutoAgent, pullRiskAutoSettled, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
-import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
+import { createProjectPictures, isProjectLook, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullSafeBranch, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
 import { INBOX_PULL_ASKS, inboxPullRiskAutoOf, inboxPullRefOfKey, inboxPullUrlOfKey, isInboxPullAsk, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
@@ -1498,6 +1498,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
   // The projects' letter-mark pictures (inbox-project-pictures.ts; Settings → Rows, all off by default).
   const projectPictures = createProjectPictures({ ...options.projectPictures, dir: options.projectPictures?.dir ?? join(inboxDir(dataDir), "project-pictures") });
+  // A project's picture changed: the same `event: tags` as its tags, so windows and linked machines read the list again.
+  const projectPictureChanged = () => {
+    for (const listener of threadTagListeners) listener();
+  };
   /** Reviews posted to a forge while this Inbox runs (PR key, head, action, body): an identical one is refused. */
   const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
@@ -2036,12 +2040,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const unread = mine.filter((row) => row.unread && !inboxRowSnoozed(row)).length;
       // When its letter mark's picture was set (Set picture…), additive: the window's key for the picture.
       const picture = projectPictures.uploadedAt(project.id);
+      // The look picked for it in its mark's picker (a hue or a picture source), additive.
+      const look = projectPictures.lookOf(project.id);
       // Its git origin's host (null: a remote that names none), additive and only for a project with a repo: the window
       // links an owner/repo#123 in a repoless thread on the host most projects use. `peek` never runs git.
       const repo = repos.peek(project.root);
       // Its tags, additive and only when there are any.
       const tags = tagsOf?.(project.id) ?? [];
-      return { ...project, ...(tags.length > 0 ? { tags } : {}), ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host, ...(gitlabRemote(repo.host) ? { repo_forge: "gitlab" as const } : {}) } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
+      return { ...project, ...(tags.length > 0 ? { tags } : {}), ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(look !== undefined ? { look } : {}), ...(repo ? { repo_host: repo.host, repo: repo.display, ...(gitlabRemote(repo.host) ? { repo_forge: "gitlab" as const } : {}) } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 
@@ -5813,6 +5819,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
     touch: () => void agentFacesFile.touch(),
     setIconKept: async (set, icon) => (builtInIconSets.ids.has(set) ? !!(await builtInIconSets.read(set, icon)) : !!iconSetFetcher.read(set, icon)),
+    projects: {
+      has: (projectId) => !!store.project(projectId),
+      uploadedAt: (projectId) => projectPictures.uploadedAt(projectId),
+      lookOf: (projectId) => projectPictures.lookOf(projectId),
+      setUpload: (projectId, bytes) => projectPictures.setUpload(projectId, bytes),
+      changed: () => projectPictureChanged(),
+    },
+    // A request this Inbox does not keep: a linked machine's (its project's, or one its window made). The first that
+    // knows it answers; one that does not, or an older one without the route, is passed by.
+    far: async ({ request, picture }) => {
+      for (const peer of machines?.peerLinks() ?? []) {
+        if (peer.state !== "online") continue;
+        try {
+          const there = await peer.request("icon-animate", "", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request, picture, relayed: true, idempotency_key: randomUUID() }), timeoutMs: 30_000 });
+          const text = await there.text();
+          if (there.status === 404) continue;
+          return new Response(text, { status: there.status, headers: { "content-type": "application/json; charset=utf-8" } });
+        } catch {
+          // Not reached: the next machine.
+        }
+      }
+      return null;
+    },
   });
   const agentIcons = createInboxAgentIcons({
     icons: agentIconFiles,
@@ -8260,8 +8289,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Rows has them on, read from config.json `inboxRows`; the repo's logo also with `logo=1`, a local file, while
       // GitHub is never turned on by the request: `pictureSources`), or an empty 204 and the window draws the letters
       // (an <img> errors on it the same as on a 404, and the console stays clear; an older window draws its letters too). POST `{ picture: "data:image/…;base64,…" | null }`: Set picture…, or take it away; the same
-      // guards as every window write. Every window, and a linked
-      // machine's window through the door; never an agent's.
+      // guards as every window write. Every window, and a linked machine's window through the door (POST from a press
+      // in its window only: the forward sends it now or not at all); never an agent's.
+      // Which picture sources a project has, for its mark's picker (`{ repo, github }`): never fetches. Every window, and
+      // a linked machine's window through the door.
+      const projectSourcesMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/picture\/sources$/.exec(path);
+      if (projectSourcesMatch) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const project = isInboxId("prj", projectSourcesMatch[1]) ? store.project(projectSourcesMatch[1]!) : null;
+        if (!project) throw new InboxError("project_not_found", `No project ${projectSourcesMatch[1]}.`);
+        const sources = await projectPictures.sources(project, { github: pictureSources(rowsState().rows ?? [], url.searchParams).github, repo: () => repos.get(project.root) ?? repos.refresh(project.root) });
+        return json(sources);
+      }
       const projectPictureMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/picture$/.exec(path);
       if (projectPictureMatch) {
         const projectId = projectPictureMatch[1]!;
@@ -8272,10 +8314,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
             return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
           }
-          const picture = await projectPictures.get(
-            { id: project.id, root: project.root },
-            { ...pictureSources(rowsState().rows ?? [], url.searchParams), repo: () => repos.get(project.root) ?? repos.refresh(project.root) },
-          );
+          // `source=repo|github`: that source alone (the picker's places), whatever the project shows.
+          const use = { ...pictureSources(rowsState().rows ?? [], url.searchParams), repo: () => repos.get(project.root) ?? repos.refresh(project.root) };
+          const only = url.searchParams.get("source");
+          const picture =
+            only === "repo" || only === "github"
+              ? await projectPictures.source({ id: project.id, root: project.root }, only, use)
+              : await projectPictures.get({ id: project.id, root: project.root }, use);
           if (!picture) return new Response(null, { status: 204, headers: { "cache-control": "private, max-age=300" } });
           return new Response(picture.body, {
             headers: {
@@ -8292,8 +8337,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        if (body.picture === null) {
-          projectPictures.removeUpload(projectId);
+        if (body.look !== undefined) {
+          // A look from the mark's picker: a hue or a picture source, in place of any set picture.
+          if (!isProjectLook(body.look)) throw new InboxError("validation_error", "look: hue:0 to hue:7, repo or github.", { field: "look" });
+          if (!projectPictures.setLook(projectId, body.look)) throw new InboxError("config_not_saved", "The picture did not change.");
+          projectPictureChanged();
+        } else if (body.picture === null) {
+          if (projectPictures.removeUpload(projectId)) projectPictureChanged();
         } else {
           // Only the approved words reach the toast: too big (however long the data URL), or not one of the five.
           const given = typeof body.picture === "string" ? body.picture : "";
@@ -8304,6 +8354,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (saved.reason === "not_saved") throw new InboxError("config_not_saved", "The picture did not change.");
             throw new InboxError("validation_error", saved.reason === "too_big" ? "Picture: at most 512 KB." : "Picture: a PNG, JPEG, GIF, WebP or SVG image.", { field: "picture" });
           }
+          projectPictureChanged();
         }
         return json({ project: projectFolders().find((p) => p.id === projectId) ?? null });
       }

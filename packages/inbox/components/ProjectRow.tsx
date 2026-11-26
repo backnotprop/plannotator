@@ -10,6 +10,8 @@ import type { LabeledProject } from '../projectLabels';
 import type { ProjectAction } from '../projectMenu';
 import { ProjectTipText, Tip } from './Tip';
 import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
+import { ProjectIconDialog, type AgentIconPlace } from '../agents/AgentIconDialog';
+import { ProjectMarkPicker } from './ProjectMarkPicker';
 import { hasSetPicture, useKnownProjects } from '../projectPictures';
 import { useProjectTagSwap } from './ProjectTagMenu';
 
@@ -43,10 +45,13 @@ export interface ProjectRowProps {
   /** The warning's Combine: this project goes into `into`. Resolves true once the list shows it. Absent: no warning. */
   onCombine?: (into: LabeledProject) => Promise<boolean>;
   /**
-   * Set picture… (this machine's projects, only while Settings → Rows shows project marks): an image as a data: URL,
-   * or null to take the picture away. Resolves true once the list has it. Absent: not offered.
+   * The project's picture, only while Settings → Rows shows project marks: a click on its mark opens the picker
+   * (ProjectMarkPicker.tsx) and Set picture… the icon dialog (agents/AgentIconDialog.tsx `ProjectIconDialog`), which
+   * keep a picture themselves; this is Remove picture (null). Resolves true once the list has it. Absent: neither.
    */
   onPicture?: (file: File | null) => Promise<boolean>;
+  /** The picker's hue or picture source for the project (`hue:<n>`, `repo`, `github`). Absent: none offered. */
+  onLook?: (look: string) => Promise<boolean>;
   /**
    * "+" beside ⋯ (approval "launch-create-clone", F1-F7): opens New message with a new session in this project. `tip`
    * is its tip and name ("New session in billing-svc", with the machine, and "starts when it's back" while asleep).
@@ -101,6 +106,9 @@ export function ProjectRow(props: ProjectRowProps) {
   const { marks } = useRowMarks();
   const projectMarks = showsProjects(marks.what);
   useKnownProjects();
+  // The icon dialog, from the mark's picker or Set picture….
+  const [iconDialog, setIconDialog] = useState<AgentIconPlace | null>(null);
+  const pictures = projectMarks && props.onPicture ? (hasSetPicture(project.id) ? 'set' : 'none') : null;
   const row = (children: ReactNode, extra: Record<string, unknown> = {}) => (
     <div
       className="ib-projrow"
@@ -121,13 +129,12 @@ export function ProjectRow(props: ProjectRowProps) {
       readable={props.readable}
       rename={onRename !== undefined}
       named={typeof project.display_name === 'string' && project.display_name !== ''}
-      picture={projectMarks && props.onPicture ? (hasSetPicture(project.id) ? 'set' : 'none') : null}
+      picture={pictures}
       onAction={(action) => {
         setMenuOpen(false);
         setContextOpen(false);
         if (action === 'picture') {
-          const onPicture = props.onPicture;
-          if (onPicture) pickPicture((file) => void onPicture(file));
+          setIconDialog('own');
           return;
         }
         if (action === 'unpicture') {
@@ -197,6 +204,17 @@ export function ProjectRow(props: ProjectRowProps) {
           {props.count > 0 && <span className="ib-n">{formatCount(props.count)}</span>}
         </button>
       </ProjectTip>
+      {pictures && (
+        <ProjectMarkPicker
+          projectId={project.id}
+          name={project.name}
+          hasPicture={pictures === 'set'}
+          paused={iconDialog !== null}
+          onDialog={setIconDialog}
+          onRemove={() => void props.onPicture?.(null)}
+          onLook={props.onLook ? (look) => void props.onLook!(look) : undefined}
+        />
+      )}
       {newSession && (
         <Tip content={newSession.tip}>
           <button type="button" className="ib-pplus" aria-label={newSession.tip} onClick={newSession.onPress} data-pplus={project.id}>
@@ -219,19 +237,30 @@ export function ProjectRow(props: ProjectRowProps) {
       </Menu.Root>
     </>
   );
-  if (props.phone) return row(content);
+  // Outside the row and its menu: a press or a long press in the dialog is never the row's.
+  const dialog = iconDialog && <ProjectIconDialog place={iconDialog} project={project.id} name={project.name} folder={project.root || null} onClose={() => setIconDialog(null)} />;
+  if (props.phone)
+    return (
+      <>
+        {row(content)}
+        {dialog}
+      </>
+    );
   return (
-    <ContextMenu.Root onOpenChange={setContextOpen}>
-      <ContextMenu.Trigger render={row(content)} />
-      <ContextMenu.Portal container={portal ?? undefined}>
-        <ContextMenu.Positioner className="ib-pm-pos">
-          {/* Focus goes back to the row's ⋯, never the page (the field takes it after Rename…). */}
-          <ContextMenu.Popup className="ib-pm" aria-label={project.name} data-project-menu={project.id} finalFocus={() => (toField.current ? false : more.current)}>
-            {items}
-          </ContextMenu.Popup>
-        </ContextMenu.Positioner>
-      </ContextMenu.Portal>
-    </ContextMenu.Root>
+    <>
+      <ContextMenu.Root onOpenChange={setContextOpen}>
+        <ContextMenu.Trigger render={row(content)} />
+        <ContextMenu.Portal container={portal ?? undefined}>
+          <ContextMenu.Positioner className="ib-pm-pos">
+            {/* Focus goes back to the row's ⋯, never the page (the field takes it after Rename…). */}
+            <ContextMenu.Popup className="ib-pm" aria-label={project.name} data-project-menu={project.id} finalFocus={() => (toField.current ? false : more.current)}>
+              {items}
+            </ContextMenu.Popup>
+          </ContextMenu.Positioner>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
+      {dialog}
+    </>
   );
 }
 
@@ -514,16 +543,4 @@ export function ProjectTip({ name, root, refresh = false, children }: { name: st
       </span>
     </>
   );
-}
-
-/** Set picture…: the system's file picker, for one image (read by `pictureFromFile`). Nothing picked: nothing happens. */
-function pickPicture(onPicked: (file: File) => void): void {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml';
-  input.onchange = () => {
-    const file = input.files?.[0];
-    if (file) onPicked(file);
-  };
-  input.click();
 }

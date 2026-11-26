@@ -1,24 +1,24 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FaceOfMark, Icon } from '../icons';
-import { keepAgentFace, type AgentFaceRef } from './agentFaces';
 import { AnimateIt } from './AnimateIt';
 import type { AgentFace } from './faceChoices';
 import { OWN_LABEL } from './FaceFan';
 import { isSetFace, setFaceParts, useIconSets, useSetListing } from './iconSets';
 import { setNumber } from './SetsBody';
+import { keepIcon, type IconTarget } from './iconTarget';
 
 export const USE_THIS_ICON = 'Use this icon';
 export const OPTIONAL = 'Optional';
 
 /**
- * The agent icon dialog's page for one icon (AgentIconDialog.tsx), at 128 px and at the sizes the window shows it.
- * `previewing`: just picked and not kept: the agent still shows its old icon everywhere. "Use this icon" keeps it and
- * closes; "Animate it" keeps it and asks for the animation; the back control (to the grid it came from) and Close
- * change nothing. Not previewing: the icon the agent shows now, with "Animate it" (or "Use the original" for an
- * animated one). `shared`: a linked machine's agent: no "Animate it", whose result is an own picture, kept on this
- * computer.
+ * The icon dialog's page for one icon (AgentIconDialog.tsx), at 128 px and at the sizes the window shows it.
+ * `previewing`: just picked and not kept: the agent or project still shows its old icon everywhere. "Use this icon"
+ * keeps it and closes; "Animate it" keeps it and asks for the animation; the back control (to the grid it came from)
+ * and Close change nothing. Not previewing: the icon the agent shows now, with "Animate it" (or "Use the original" for
+ * an animated one). `shared`: a linked machine's agent: no "Animate it", whose result is an own picture, kept on this
+ * computer. A project's picture that did not change says why here, and the page stays.
  */
-export function SelectedIcon({ agent, host, name, face, previewing, shared = false, onBack, onDone }: { agent: AgentFaceRef; host: string | null; name: string; face: AgentFace; previewing: boolean; shared?: boolean; onBack: () => void; onDone: () => void }) {
+export function SelectedIcon({ target, host, name, face, previewing, shared = false, onBack, onDone }: { target: IconTarget; host: string | null; name: string; face: AgentFace; previewing: boolean; shared?: boolean; onBack: () => void; onDone: () => void }) {
   const sets = useIconSets();
   const parts = isSetFace(face) ? setFaceParts(face) : null;
   const listing = useSetListing(parts?.set ?? null);
@@ -26,7 +26,9 @@ export function SelectedIcon({ agent, host, name, face, previewing, shared = fal
   const icon = parts ? listing?.icons.find((i) => i.id === parts.icon) : null;
   const back = parts ? (set?.name ?? '') : OWN_LABEL;
   const caption = icon && set ? `${icon.name} · ${setNumber(icon.n, set.count)}` : null;
-  const keep = () => keepAgentFace(agent, face);
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const keep = () => keepIcon(target, face);
 
   // Focus: "Use this icon" on a preview (Enter keeps it), else "Animate it". After the dialog's own first focus (Modal).
   const root = useRef<HTMLDivElement>(null);
@@ -66,18 +68,29 @@ export function SelectedIcon({ agent, host, name, face, previewing, shared = fal
             type="button"
             className="ib-btn ib-pri ib-agi-use"
             data-use-icon=""
-            onClick={() => {
-              keep();
-              onDone();
+            aria-busy={busy || undefined}
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setRefused(null);
+              const words = await keep();
+              setBusy(false);
+              if (words) setRefused(words);
+              else onDone();
             }}
           >
             {USE_THIS_ICON}
           </button>
         )}
+        {refused && (
+          <span className="ib-agi-anim-e" role="status" data-icon-refused="">
+            {refused}
+          </span>
+        )}
         {!shared && (
           <div className="ib-agi-sel-anim">
             <span className="ib-agi-sel-opt">{OPTIONAL}</span>
-            <AnimateIt agent={agent} face={face} onDone={onDone} beforeStart={previewing ? keep : undefined} />
+            <AnimateIt target={target} face={face} onDone={onDone} beforeStart={previewing ? keep : undefined} />
           </div>
         )}
       </div>

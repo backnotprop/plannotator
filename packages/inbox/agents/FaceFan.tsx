@@ -1,5 +1,5 @@
 import { Popover } from '@base-ui/react/popover';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { isInboxMarkFace } from '@plannotator/core/inbox-types';
 import { tooltipContainerOf } from '@plannotator/ui/components/HostTitle';
 import { HostMark } from '../icons';
@@ -53,27 +53,37 @@ export const SETS_LABEL = 'Sets';
  * The fan's arcs: the kinds inside, the Glass colours outside (one arc, or two short ones when room is short). `own`:
  * "Your own…" among the kinds (not for a linked machine's agent, AgentMark.tsx). `project`: "From the project name"
  * second, after the agent's own mark (approval "inbox-generated-agent-icons"; only for an agent whose project has a
- * name to draw).
+ * name to draw). `places`: a project's picker (ProjectMarkPicker.tsx), its own places on the two arcs instead.
  */
-export function fanArcs(cx: number, cy: number, w: number, h: number, touch = false, own = true, project = false, grow = 0): { faces: FanChoice[][]; spots: FanSpot[][] } {
-  const kinds: FanChoice[] = ['agent', ...(project ? ['project' as const] : []), 'transparent', 'totman', ...(own ? [OWN_CHOICE as FanChoice] : []), SETS_CHOICE];
+export function fanArcs<T extends string = FanChoice>(cx: number, cy: number, w: number, h: number, touch = false, own = true, project = false, grow = 0, places?: { inner: readonly T[]; outer: readonly T[] }): { faces: T[][]; spots: FanSpot[][] } {
   const base = { ...FAN_OPTIONS, ...(touch ? FAN_TOUCH : {}) };
+  const kinds = (places ? [...places.inner] : ['agent', ...(project ? ['project'] : []), 'transparent', 'totman', ...(own ? [OWN_CHOICE] : []), SETS_CHOICE]) as T[];
+  const outer = (places ? places.outer : GLASS_FACES) as readonly T[];
+  if (outer.length === 0) return { faces: [kinds], spots: fanLayout(cx, cy, w, h, [kinds.length], { ...(touch ? FAN_TOUCH : {}), inner: base.inner + grow }) };
   // Near a window's edge the inner arc's five kinds would crowd: it moves out (and the colours with it) until they
   // keep their pitch, a few steps at most.
-  let best: { faces: FanChoice[][]; spots: FanSpot[][] } | null = null;
+  let best: { faces: T[][]; spots: FanSpot[][] } | null = null;
   for (let extra = 0; extra <= 48; extra += 8) {
     const options = { ...(touch ? FAN_TOUCH : {}), inner: base.inner + extra + grow };
-    const one = fanLayout(cx, cy, w, h, [kinds.length, GLASS_FACES.length], options);
+    const one = fanLayout(cx, cy, w, h, [kinds.length, outer.length], options);
     const far = Math.max(...one.flat().map((s) => Math.hypot(s.x, s.y)));
-    const half = Math.ceil(GLASS_FACES.length / 2);
+    const half = Math.ceil(outer.length / 2);
     best =
       far <= (touch ? 165 : 120) + extra + grow
-        ? { faces: [kinds, [...GLASS_FACES]], spots: one }
-        : { faces: [kinds, GLASS_FACES.slice(0, half), GLASS_FACES.slice(half)], spots: fanLayout(cx, cy, w, h, [kinds.length, half, GLASS_FACES.length - half], options) };
+        ? { faces: [kinds, [...outer]], spots: one }
+        : { faces: [kinds, outer.slice(0, half), outer.slice(half)], spots: fanLayout(cx, cy, w, h, [kinds.length, half, outer.length - half], options) };
     const inner = best.spots[0]!;
     if (inner.slice(1).every((s, i) => Math.hypot(s.x - inner[i]!.x, s.y - inner[i]!.y) >= base.pitch - 0.5)) break;
   }
   return best!;
+}
+
+/** A place in a project's picker: its id, its name, what it draws and what a press does. */
+export interface FanPlace {
+  id: string;
+  label: string;
+  node: ReactNode;
+  onPick: () => void;
 }
 
 /** The pictures of our faces (faceArt.ts), once loaded. */
@@ -98,12 +108,17 @@ export interface FaceFanProps {
   /** A click on the fan's plate where the mark is under it: the mark's own click. */
   onMark: () => void;
   onClose: () => void;
+  /**
+   * A project's picker (components/ProjectMarkPicker.tsx): its own places on the two arcs, each drawn and pressed as it
+   * says, and `checked`, the place of the look it shows (null: none).
+   */
+  project?: { inner: readonly FanPlace[]; outer: readonly FanPlace[]; checked: string | null };
 }
 
 const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sources, onChoose, onOwn, onSets, onMark, onClose }: FaceFanProps) {
-  const chosen: FanChoice = isOwnFace(face) ? OWN_CHOICE : isSetFace(face) ? SETS_CHOICE : isInboxMarkFace(face) ? 'agent' : face;
+export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sources, onChoose, onOwn, onSets, onMark, onClose, project: forProject }: FaceFanProps) {
+  const chosen: string | null = forProject ? forProject.checked : isOwnFace(face) ? OWN_CHOICE : isSetFace(face) ? SETS_CHOICE : isInboxMarkFace(face) ? 'agent' : face;
   // Measured once as it opens: the mark's box and the room the choices keep inside, the window, or the list's pane for
   // a mark in the list (the Agents view's faces: no choice over the sidebar). Nothing is read while the pointer moves.
   // Nothing clips the fan or anything above its plate (agents.css: a clip, a filter or a mask there stops the blur).
@@ -124,11 +139,15 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
   // A mark larger than the sidebar's (its button past 28 px: the Agents view's 44): the arcs and the plate's hole move
   // out by half the difference, so the choices keep their room round it.
   const grow = place ? Math.max(0, Math.round((Math.min(place.rect.width, place.rect.height) - 28) / 2)) : 0;
+  // A project's places by id; the ids alone lay out the arcs, so a redraw with the same places moves nothing.
+  const projectKey = forProject ? `${forProject.inner.map((p) => p.id).join()}|${forProject.outer.map((p) => p.id).join()}` : '';
+  const projectIds = useMemo(() => (forProject ? { inner: forProject.inner.map((p) => p.id), outer: forProject.outer.map((p) => p.id) } : undefined), [projectKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const placeById = new Map((forProject ? [...forProject.inner, ...forProject.outer] : []).map((p) => [p.id, p]));
   const arcs = useMemo(
-    () => (place ? fanArcs(place.rect.left + place.rect.width / 2 - place.room.left, place.rect.top + place.rect.height / 2 - place.room.top, place.room.width, place.room.height, touch, own, project, grow) : null),
-    [place, touch, own, project, grow],
+    () => (place ? fanArcs(place.rect.left + place.rect.width / 2 - place.room.left, place.rect.top + place.rect.height / 2 - place.room.top, place.room.width, place.room.height, touch, own, project, grow, projectIds) : null),
+    [place, touch, own, project, grow, projectIds],
   );
-  const order = useMemo<FanChoice[]>(() => arcs?.faces.flat() ?? [], [arcs]);
+  const order = useMemo<string[]>(() => arcs?.faces.flat() ?? [], [arcs]);
   // The dial's plate: a half disc out past the farthest choice, turned the way the fan opens.
   const dial = useMemo(() => {
     const spots = arcs?.spots.flat() ?? [];
@@ -175,7 +194,7 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
     };
   }, [open, arcs, order]);
   useEffect(() => {
-    if (open) setActive(Math.max(0, order.indexOf(chosen)));
+    if (open) setActive(chosen === null ? 0 : Math.max(0, order.indexOf(chosen)));
     // Only as it opens: a choice made while it is open moves nothing.
   }, [open, order]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -289,7 +308,7 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
             data-opening={opening ? '' : undefined}
             data-touch={touch ? '' : undefined}
             aria-label={`Icon for ${name}`}
-            initialFocus={openedBy === 'keyboard' ? () => items.current[Math.max(0, order.indexOf(chosen))] ?? true : false}
+            initialFocus={openedBy === 'keyboard' ? () => items.current[chosen === null ? 0 : Math.max(0, order.indexOf(chosen))] ?? true : false}
             finalFocus={openedBy === 'keyboard' ? focusBackTo(anchor, '.am-fan') : false}
             onPointerDownCapture={() => {
               pressSettled.current = settled.current;
@@ -312,26 +331,28 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
             </span>
             <div role="radiogroup" aria-label={`Icon for ${name}`} className="am-fan-g" onKeyDown={onKeyDown}>
               {arcs?.faces.map((ring, r) =>
-                ring.map((f, i) => {
+                ring.map((id, i) => {
                   index++;
                   const at = index;
                   const spot = arcs.spots[r]![i]!;
-                  const src = f === 'agent' || f === 'mark' || f === 'project' || f === OWN_CHOICE || f === SETS_CHOICE ? null : sources?.[f];
+                  const projectPlace = placeById.get(id);
+                  const f = id as FanChoice;
+                  const src = projectPlace || f === 'agent' || f === 'mark' || f === 'project' || f === OWN_CHOICE || f === SETS_CHOICE ? null : sources?.[f];
                   const style = { '--x': `${spot.x}px`, '--y': `${spot.y}px`, '--d': `${at * 5}ms`, '--dr': `${(order.length - 1 - at) * 3}ms` } as CSSProperties;
                   return (
                     <button
-                      key={f}
+                      key={id}
                       ref={(el) => {
                         items.current[at] = el;
                       }}
                       type="button"
                       role="radio"
-                      aria-checked={f === chosen}
-                      aria-label={label(f)}
-                      title={f === 'project' ? label(f) : undefined}
+                      aria-checked={id === chosen}
+                      aria-label={projectPlace ? projectPlace.label : label(f)}
+                      title={projectPlace ? projectPlace.label : f === 'project' ? label(f) : undefined}
                       tabIndex={at === active ? 0 : -1}
                       className="am-fan-i"
-                      data-face-choice={f}
+                      data-face-choice={id}
                       style={style}
                       onFocus={() => setActive(at)}
                       // A pointer's press keeps focus where it is. Never a finger's: Safari (iPhone, iPad) then sends no click.
@@ -340,13 +361,16 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
                       }}
                       onClick={(event) => {
                         if (event.detail !== 0 && !pressSettled.current) return;
-                        if (f === OWN_CHOICE) onOwn?.();
+                        if (projectPlace) projectPlace.onPick();
+                        else if (f === OWN_CHOICE) onOwn?.();
                         else if (f === SETS_CHOICE) onSets();
                         else onChoose(f);
                       }}
                     >
-                      <span className="am-fan-f" data-kind={f === 'agent' || f === 'project' ? f : f.startsWith('glass') || f === 'yellow' ? 'glass' : f} aria-hidden="true">
-                        {f === 'agent' ? (
+                      <span className="am-fan-f" data-kind={projectPlace ? 'place' : f === 'agent' || f === 'project' ? f : f.startsWith('glass') || f === 'yellow' ? 'glass' : f} aria-hidden="true">
+                        {projectPlace ? (
+                          projectPlace.node
+                        ) : f === 'agent' ? (
                           <HostMark host={host} />
                         ) : f === 'project' ? (
                           <ProjectFaceMark agent={agent} host={host} badge={false} />

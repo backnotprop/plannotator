@@ -233,6 +233,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^whats-new\/image$/, window: () => "/api/inbox/whats-new/image" },
   // A project's picture (a logo, read only): a linked machine's window shows that machine's project rows with it.
   { method: "GET", route: /^projects\/([^/]+)\/picture$/, window: (m) => `/api/inbox/projects/${m[1]}/picture` },
+  // Which picture sources a project has (its mark's picker): a linked machine's window offers them for this Inbox's projects.
+  { method: "GET", route: /^projects\/([^/]+)\/picture\/sources$/, window: (m) => `/api/inbox/projects/${m[1]}/picture/sources`, machineOnly: true },
   // The archived threads (Settings' Archived block), read only; before threads/:id, which would also match it.
   { method: "GET", route: /^threads\/archived$/, window: () => "/api/inbox/threads/archived" },
   { method: "GET", route: /^threads\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}` },
@@ -259,6 +261,12 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A project's tags (project-tags.ts, mark `project-tags`): a linked machine's window tags this Inbox's projects by a
   // tag's name, as it tags its threads. Phones do not take them.
   { method: "POST", route: /^projects\/([^/]+)\/tags$/, window: (m) => `/api/inbox/projects/${m[1]}/tags`, machineOnly: true },
+  // A project's picture (Set picture…, the icon dialog's Use this icon, Remove picture): a linked machine's window sets
+  // it for this Inbox's projects, kept here as a picture set in this Inbox's window is. Phones do not set pictures.
+  { method: "POST", route: /^projects\/([^/]+)\/picture$/, window: (m) => `/api/inbox/projects/${m[1]}/picture`, machineOnly: true },
+  // Animate it and Ask an agent to draw it (inbox-icon-animate.ts): a linked machine's window asks about this Inbox's
+  // project, and that machine's Inbox hands back a picture its agent made for a request kept here.
+  { method: "POST", route: /^icon-animate$/, window: () => "/api/inbox/icon-animate", machineOnly: true },
   // A tag's row colour and "Show tag colors" (mark `tag-colours`): a linked machine's window sets them here too, so
   // every machine shows the same colours, and a phone sets them as the window does (its list ⋮ has the switch).
   { method: "POST", route: /^tag-colours$/, window: () => "/api/inbox/tag-colours" },
