@@ -103,7 +103,8 @@ for (const phone of [false, true]) {
       const mic = micOf(first);
       await expect(mic).not.toHaveAttribute('aria-disabled', 'true');
       const box = (await first.boundingBox())!, at = (await mic.boundingBox())!;
-      expect({ width: box.width, height: box.height }).toEqual({ width: before!.width, height: before!.height });
+      // Within a rounding (a phone's pane reads 285 then 284.99999): the mic's room (34 px, 40 on a phone) is kept at rest.
+      expect(Math.abs(box.width - before!.width)).toBeLessThanOrEqual(0.5); expect(Math.abs(box.height - before!.height)).toBeLessThanOrEqual(0.5);
       expect(at.x).toBeGreaterThanOrEqual(box.x); expect(at.x + at.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
       expect(at.y + at.height / 2).toBeGreaterThan(box.y); expect(at.y + at.height / 2).toBeLessThan(box.y + box.height);
       await (phone ? mic.tap() : mic.click());
