@@ -469,6 +469,7 @@ function DocLoaded({
   const pageActs: PlanDocActs = {
     older: phone && older ? { head, shown, back: () => go({ version: null }), restore: editing.restoreNow } : null,
     edit: phone ? editing.edit : null,
+    versions: phone && editing.editing ? () => place.setOpen(true) : null,
     pane: annotated ? paneHandle : null,
     get contents() {
       return phone && annotated ? contentsOpen.current : null;
@@ -489,14 +490,15 @@ function DocLoaded({
   useEffect(() => () => chrome?.setBar(() => ({ a3: false, shown: null, away: null, line: null })), [chrome]);
   const onTitleAway = useCallback((away: boolean) => chrome?.setBar((b) => (b.away === away ? b : { ...b, away })), [chrome]);
   const decisionMark = <PlanDecisionMark info={editing.decision} phone={phone} />;
-  // A phone: Approve (or Done and Cancel), the decision's mark and the clock are the top bar's, nothing under it.
+  // A phone: Approve, the decision's mark and the clock are the top bar's, nothing under it. While editing, Done and
+  // Cancel take their room (a 320 px bar holds no more): the clock is a row of "…", the mark and Share wait for Done.
   const topMarks =
     phone && chrome?.marks
       ? createPortal(
           <>
             {editing.start}
-            {decisionMark}
-            <PlanVersionsMark shown={shown} head={head} open={place.open} onToggle={place.setOpen} phone />
+            {!editing.editing && decisionMark}
+            {!editing.editing && <PlanVersionsMark shown={shown} head={head} open={place.open} onToggle={place.setOpen} phone />}
           </>,
           chrome.marks,
         )

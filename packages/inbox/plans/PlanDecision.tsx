@@ -47,6 +47,9 @@ export function planDecisionInfo(o: { state: PlanApprovalState; head: number; de
   return { tone: approvalTone(state), words, version: o.head, at: on[on.length - 1]?.at ?? null, moved: state.kind === 'approved' ? o.moved : null };
 }
 
+/** How long after a card closes focus landing on the mark is the card handing it back (Base UI's return focus). */
+const PLAN_DECISION_RETURN_MS = 500;
+
 const fullDate = (iso: string) => {
   const at = new Date(iso);
   return Number.isNaN(at.getTime()) ? iso : at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -59,6 +62,8 @@ export function PlanDecisionMark({ info, phone }: { info: PlanDecisionInfo; phon
   const focusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const card = useRef<HTMLDivElement | null>(null);
   const [button, setButton] = useState<HTMLButtonElement | null>(null);
+  /** When a card closed with focus in it or on the mark: focus coming back to the mark then is not a new arrival. */
+  const closedAt = useRef(Number.NEGATIVE_INFINITY);
   useEffect(() => () => clearTimeout(focusTimer.current), []);
   const change = (next: boolean, details: { reason?: string }) => {
     clearTimeout(focusTimer.current);
@@ -67,8 +72,15 @@ export function PlanDecisionMark({ info, phone }: { info: PlanDecisionInfo; phon
       via.current = 'other';
       return;
     }
+    const active = document.activeElement;
+    if (!next && active && (active === button || card.current?.contains(active))) closedAt.current = performance.now();
     via.current = next ? 'other' : null;
     setOpen(next);
+  };
+  // The notice goes, and its Dismiss with it: focus goes to the mark first, and the card stays with what is left.
+  const dismiss = () => {
+    button?.focus({ preventScroll: true });
+    info.moved?.dismiss();
   };
   return (
     <Popover open={open} onOpenChange={change}>
@@ -86,7 +98,10 @@ export function PlanDecisionMark({ info, phone }: { info: PlanDecisionInfo; phon
             data-plan-decision-mark={info.tone}
             data-phone={phone ? '' : undefined}
             onFocus={(event) => {
-              if (open || !event.currentTarget.matches(':focus-visible')) return;
+              // Escape or a press outside closed it: focus handed back to the mark does not open it again.
+              const back = performance.now() - closedAt.current < PLAN_DECISION_RETURN_MS;
+              closedAt.current = Number.NEGATIVE_INFINITY;
+              if (back || open || !event.currentTarget.matches(':focus-visible')) return;
               clearTimeout(focusTimer.current);
               focusTimer.current = setTimeout(() => {
                 via.current = 'focus';
@@ -95,7 +110,10 @@ export function PlanDecisionMark({ info, phone }: { info: PlanDecisionInfo; phon
             }}
             onBlur={(event) => {
               clearTimeout(focusTimer.current);
-              if (via.current !== 'focus' || (event.relatedTarget instanceof Node && card.current?.contains(event.relatedTarget))) return;
+              // Tab from the mark passes Base UI's focus guard on its way into the card; Shift+Tab, and Tab out of the
+              // card's far end, pass a guard too, and Base UI closes the card and moves focus on itself.
+              const to = event.relatedTarget;
+              if (via.current !== 'focus' || (to instanceof Element && (card.current?.contains(to) || to.hasAttribute('data-base-ui-focus-guard')))) return;
               via.current = null;
               setOpen(false);
             }}
@@ -104,7 +122,7 @@ export function PlanDecisionMark({ info, phone }: { info: PlanDecisionInfo; phon
       >
         <Icon name={PLAN_DECISION_GLYPH[info.tone]} size={16} />
       </PopoverTrigger>
-      <PopoverContent ref={card} side="bottom" align="end" sideOffset={6} collisionPadding={8} container={button?.closest<HTMLElement>('.pn-inbox') ?? undefined} initialFocus={(type) => type === 'keyboard'} className="ib-plan-dcard" data-plan-decision-card="">
+      <PopoverContent ref={card} side="bottom" align="end" sideOffset={6} collisionPadding={8} container={button?.closest<HTMLElement>('.pn-inbox') ?? undefined} initialFocus={(type) => type === 'keyboard'} aria-label={info.words} className="ib-plan-dcard" data-plan-decision-card="" data-phone={phone ? '' : undefined}>
         <p className="ib-plan-dcard-line">
           <DecisionMark tone={info.tone} />
           <span>{info.words}</span>
@@ -120,7 +138,7 @@ export function PlanDecisionMark({ info, phone }: { info: PlanDecisionInfo; phon
         {info.moved && (
           <p className="ib-plan-dcard-moved" data-plan-approval="moved">
             <span>{info.moved.words}</span>
-            <button type="button" className="ib-plans-quiet ib-plan-approval-x" aria-label="Dismiss" onClick={info.moved.dismiss} data-plan-approval-dismiss="">
+            <button type="button" className="ib-plans-quiet ib-plan-approval-x" aria-label="Dismiss" onClick={dismiss} data-plan-approval-dismiss="">
               <Icon name="x" />
             </button>
           </p>

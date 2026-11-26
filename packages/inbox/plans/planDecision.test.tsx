@@ -4,6 +4,8 @@
  * - the decision's card stops opening on a press, loses what the bar's sentence said (the decision, its version and
  *   when, the moved notice and its Dismiss), is drawn outside the Inbox's root, is not announced from its mark, or
  *   stays open after Escape or a second press;
+ * - by keyboard, Tab from the mark cannot reach the card's Dismiss, focus is lost when Dismiss goes, the card has no
+ *   name, or focus handed back to the mark after Escape opens the card again;
  * - a phone's menu row acts with the handlers of the moment the menu opened (a new version may have come since).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -68,6 +70,59 @@ test.skipIf(!hasDom)('the decision’s mark: a press pins its card (the decision
   await act(async () => mark.click());
   await settle();
   expect(card()).toBeNull();
+});
+
+test.skipIf(!hasDom)('the decision’s mark by keyboard: focus opens its card, Tab goes into it to Dismiss, Dismiss hands focus to the mark, Escape keeps it closed', async () => {
+  const { PlanDecisionMark } = await import('./PlanDecision');
+  const host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.appendChild(host);
+  root = createRoot(host);
+  let moved = true;
+  const info = () => ({ tone: 'approved' as const, words: 'Approved by you', version: 4, at: at(5), moved: moved ? { words: 'Your approval moved to v4.', dismiss: () => { moved = false; act(() => root!.render(<PlanDecisionMark info={info()} />)); } } : null });
+  act(() => root!.render(<PlanDecisionMark info={info()} />));
+  const mark = host.querySelector<HTMLButtonElement>('[data-plan-decision-mark]')!;
+  const card = () => document.querySelector<HTMLElement>('[data-plan-decision-card]');
+  const wait = async (ms: number) => act(async () => await new Promise((r) => setTimeout(r, ms)));
+  await act(async () => mark.focus());
+  await wait(500);
+  await settle();
+  expect(card()).not.toBeNull();
+  // The card is named by the decision.
+  expect(card()!.getAttribute('aria-label')).toBe('Approved by you');
+  // Tab: focus leaves the mark for Base UI's guard after it, which hands it into the card; the card stays open.
+  const guard = mark.nextElementSibling as HTMLElement | null;
+  expect(guard?.hasAttribute('data-base-ui-focus-guard')).toBe(true);
+  await act(async () => guard!.focus());
+  await settle();
+  expect(card()).not.toBeNull();
+  const dismiss = card()!.querySelector<HTMLButtonElement>('[data-plan-approval-dismiss]')!;
+  await act(async () => dismiss.focus());
+  await settle();
+  expect(card()).not.toBeNull();
+  // Dismiss goes with its notice: focus is on the mark, not lost, and the card keeps the decision.
+  await act(async () => dismiss.click());
+  await settle();
+  expect(document.activeElement).toBe(mark);
+  expect(card()?.querySelector('[data-plan-approval="moved"]') ?? null).toBeNull();
+  expect(card()).not.toBeNull();
+  // Escape from inside the card: it closes, and focus handed back to the mark does not open it again.
+  await act(async () => card()!.querySelector<HTMLElement>('.ib-plan-dcard-line')!.setAttribute('tabindex', '-1'));
+  await act(async () => card()!.querySelector<HTMLElement>('.ib-plan-dcard-line')!.focus());
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  await settle();
+  expect(card()).toBeNull();
+  await act(async () => mark.focus());
+  await wait(600);
+  await settle();
+  expect(card()).toBeNull();
+  // A fresh arrival later opens it again.
+  await act(async () => mark.blur());
+  await wait(600);
+  await act(async () => mark.focus());
+  await wait(500);
+  await settle();
+  expect(card()).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('a phone’s menu row acts with the page’s handlers as they are when it is pressed', async () => {

@@ -92,6 +92,9 @@
 .ib-plan-dcard-when { padding-left: 21px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-plan-dcard-when > b { font-weight: 600; color: var(--foreground); }
 .ib-plan-dcard-moved { padding-left: 21px; color: var(--muted-foreground); }
+/* A phone: the Dismiss keeps its 24 px look and a 44 px hit area. */
+.ib-plan-dcard[data-phone] .ib-plan-approval-x { position: relative; }
+.ib-plan-dcard[data-phone] .ib-plan-approval-x::after { content: ""; position: absolute; inset: -10px; }
 .ib-plan-dcard .ib-plans-dmark svg.ib-ic { flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ── A computer's crumbs: the panel's back arrow first (approval P2) ── */
@@ -127,3 +130,15 @@
 /* The frame's empty actions group takes a row's full basis on a phone (meant for wrapping): with one row it would
    squeeze the bar, so it is not drawn while it holds nothing. */
 .ib-plan-page[data-phone] nav[data-page-header] > [data-document-actions]:empty { display: none; }
+/* While editing, Done and Cancel take the room of Share too (it shares the newest version, not a draft), and the
+   crumbs give way below the frame's 96 px floor, so a 320 px bar keeps Done, Cancel and "…" on screen. */
+.ib-plan-page[data-phone] nav[data-page-header]:has([data-plan-edit-done]) [data-plan-share] { display: none; }
+.ib-plan-page[data-phone] nav[data-page-header]:has([data-plan-edit-done]) > div:not([data-document-actions]) { min-width: 0; }
+/* Under 400 px a phone's one bar has no room for Share's words beside the marks and "…" (the bar does not wrap, so
+   "…" would be pushed off the screen): Share is its mark alone, its words kept as its name (as Send's are), and the
+   project gives way below the frame's 96 px. */
+@media (max-width: 399px) {
+  .ib-plan-page[data-phone] nav[data-page-header] > div:not([data-document-actions]) { min-width: 0; }
+  .ib-plan-page[data-phone] nav[data-page-header] [data-plan-share] { position: relative; width: 44px; height: 44px; padding: 0; gap: 0; justify-content: center; }
+  .ib-plan-page[data-phone] nav[data-page-header] [data-plan-share] > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}

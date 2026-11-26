@@ -29,6 +29,8 @@ export interface PlanDocActs {
   /** An older version on screen (a phone): back to the newest ("Back to version 4"), and its Restore ("Restore v2"). */
   older: { head: number; shown: number; back: () => void; restore: (() => void) | null } | null;
   edit: (() => void) | null;
+  /** A phone while editing: Versions, whose clock gives way in the bar to Done and Cancel. */
+  versions: (() => void) | null;
   /** The Markdown file pane's Viewer actions (Global comment, Copy file). */
   pane: MutableRefObject<PaneHostHandle | null> | null;
   contents: ((back: HTMLElement | null) => void) | null;
@@ -92,7 +94,8 @@ export function planMenuItems(o: { phone: boolean; acts: PlanDocActs | null; fil
   const older = acts?.older ?? null;
   const back: PlanMenuItem | null = older ? { key: 'newest', icon: 'back', label: `Back to version ${older.head}`, act: older.back } : null;
   const restore: PlanMenuItem | null = older?.restore ? { key: 'restore', icon: 'restart', label: `Restore v${older.shown}`, act: older.restore } : null;
-  const groups: (PlanMenuItem | null)[][] = o.phone ? [[back, restore], [edit, global], [files, contents], [copy, download], [close]] : [[copy, download, full]];
+  const versions: PlanMenuItem | null = acts?.versions ? { key: 'versions', icon: 'clock', label: 'Versions', act: acts.versions } : null;
+  const groups: (PlanMenuItem | null)[][] = o.phone ? [[back, restore, versions], [edit, global], [files, contents], [copy, download], [close]] : [[copy, download, full]];
   const out: PlanMenuEntry[] = [];
   for (const group of groups) {
     const rows = group.filter((row): row is PlanMenuItem => row !== null);

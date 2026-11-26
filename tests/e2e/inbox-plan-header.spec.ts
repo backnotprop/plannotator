@@ -9,7 +9,7 @@
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-plan-header.spec.ts`.
  * PNGs land in .local/proof/plan-header/: phone-<light|dark>, phone-scrolled-<scheme>, phone-menu-<scheme>,
- * phone-<390|375|320>-light, phone-long-name-light, desktop-<scheme>, desktop-menu-<scheme>, desktop-copied-light,
+ * phone-<390|375|320>-light, phone-320-editing-light, phone-long-name-light, desktop-<scheme>, desktop-menu-<scheme>, desktop-copied-light,
  * desktop-scrolled-light, desktop-narrow-light, desktop-clock-tip-<scheme>, desktop-versions-<scheme>, desktop-panel-p2-<scheme> (the panel with no
  * head, Pages first, the back arrow first in the top bar).
  */
@@ -60,10 +60,10 @@ test.afterAll(async () => {
   await removeInboxScratch();
 });
 
-/** Focus off whatever the last step pressed, so a picture shows the page at rest. */
 /** The Inbox list's own phone header (`.ib-lhead`): the plan page's one bar is no taller. */
 const PHONE_BAR = 52;
 
+/** Focus off whatever the last step pressed, so a picture shows the page at rest. */
 const blur = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
 /** The phone's bottom bar is one row: its seven controls (five tools, the comments, Send) share a top within 2 px. */
@@ -200,6 +200,22 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
       expect(await first.evaluate((el, x) => el.contains(document.elementFromPoint(x, el.getBoundingClientRect().top + 22)), box.x + box.width / 2 - 21)).toBe(true);
       await blur(page);
       await page.screenshot({ path: join(proofDir, 'phone-320-light.png') });
+      // Editing: Done and Cancel take the room of the mark and the clock; the bar stays one 52 px row on screen.
+      await page.locator('nav [data-plan-more]').click();
+      await page.locator('[data-plan-menu-row="edit"]').click();
+      await expect(page.locator('.cm-content').first()).toBeVisible();
+      for (const sel of ['[data-plan-edit-done]', '[data-plan-edit-cancel]', '[data-plan-more]']) {
+        const b = (await page.locator(`nav ${sel}`).boundingBox())!;
+        expect(b.x).toBeGreaterThanOrEqual(0);
+        expect(b.x + b.width).toBeLessThanOrEqual(320);
+      }
+      await expect(page.locator('nav [data-plan-decision-mark]')).toHaveCount(0);
+      expect(await page.locator('nav[data-page-header]').evaluate((el) => el.getBoundingClientRect().height)).toBe(PHONE_BAR);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+      await blur(page);
+      await page.screenshot({ path: join(proofDir, 'phone-320-editing-light.png') });
+      await page.locator('nav [data-plan-edit-cancel]').click();
+      await expect(page.locator('nav [data-plan-topmarks] [data-plan-decision-mark]')).toBeVisible();
       await page.goto(`${url}#plans=${long.plan.id}`);
       await expect(page.locator('nav [data-plan-topmarks] [data-plan-decision-mark]')).toBeVisible();
       await page.locator('[data-plan-annotate] .ib-docscroll').evaluate((el) => el.scrollTo(0, 600));

@@ -312,8 +312,15 @@ test.skipIf(!hasDom)('a phone’s menu holds what the file-name row and the chip
     await pick('edit');
     expect(host.querySelector('nav [data-plan-topmarks] [data-plan-edit-done]')).not.toBeNull();
     expect(host.querySelector('[data-reading-line]')).toBeNull();
+    // They take the room of the mark and the clock (a 320 px bar holds no more); the clock is a row of "…".
+    expect(host.querySelector('nav [data-plan-decision-mark]')).toBeNull();
+    expect(host.querySelector('nav [data-reading-versions]')).toBeNull();
+    await openMenu(host);
+    await pick('versions');
+    expect(document.querySelector('[data-versions-panel]')).not.toBeNull();
     await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit-cancel]')!.click());
     await settle();
+    expect(host.querySelector('nav [data-plan-decision-mark]')).not.toBeNull();
 
     await openMenu(host);
     await pick('close');
@@ -433,7 +440,7 @@ test.skipIf(!hasDom)('the title is not known while the document has no block yet
 
 test('the menu’s rows: a phone’s groups in their order, a computer’s three; a row with nothing behind it is left out', () => {
   const pane = { current: null };
-  const acts: PlanDocActs = { older: null, edit: () => {}, pane, contents: null, download: { href: '/v/1', name: 'a.md' }, full: () => {} };
+  const acts: PlanDocActs = { older: null, edit: () => {}, versions: null, pane, contents: null, download: { href: '/v/1', name: 'a.md' }, full: () => {} };
   const keys = (rows: PlanMenuEntry[]) => rows.map((r) => (r === '-' ? '-' : r.key));
   expect(keys(planMenuItems({ phone: true, acts, files: { count: 7, open: () => {} }, close: () => {} }))).toEqual(['edit', 'global', '-', 'files', '-', 'copy', 'download', '-', 'close']);
   expect(keys(planMenuItems({ phone: false, acts, files: null, close: () => {} }))).toEqual(['copy', 'download', 'full']);
@@ -444,6 +451,9 @@ test('the menu’s rows: a phone’s groups in their order, a computer’s three
   const older: PlanDocActs = { ...acts, edit: null, older: { head: 4, shown: 2, back: () => {}, restore: () => {} } };
   expect(keys(planMenuItems({ phone: true, acts: older, files: null, close: () => {} })).slice(0, 3)).toEqual(['newest', 'restore', '-']);
   expect(keys(planMenuItems({ phone: false, acts: older, files: null, close: () => {} }))).toEqual(['copy', 'download', 'full']);
+  // A phone while editing: Done and Cancel take the bar's room, so Versions is the menu's first row.
+  const editing: PlanDocActs = { ...acts, edit: null, versions: () => {} };
+  expect(keys(planMenuItems({ phone: true, acts: editing, files: null, close: () => {} })).slice(0, 3)).toEqual(['versions', '-', 'global']);
 });
 
 test.skipIf(!hasDom)('a computer: the pencil waits while the edit opens, as Edit did', async () => {
