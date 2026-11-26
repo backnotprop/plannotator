@@ -9,7 +9,7 @@
  * word stands otherwise (GitHub's search lags a merge made here, never the other way). Checks are not shown for a PR
  * the list no longer reads: an old answer would read as current.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { inboxPullIsOpen, type InboxPull, type InboxPullDiffAnswer, type InboxPullItem, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import type { InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import { get, InboxApiError } from '../api';
@@ -61,9 +61,12 @@ export interface RoutePull {
    * With no copy to show: what the page says instead of "no longer in the list", in words the Inbox already says for
    * the same cause. The forge did not answer: the list's own line for a host that did not ("GitHub didn't answer; its
    * pull requests aren't shown.", notices.ts); the linked computer that lists it could not be reached: that
-   * computer's own answer ("Mac mini cannot be reached now."). Null: "no longer in the list" is the truth.
+   * computer's own answer ("Mac mini cannot be reached now."), or the server's own words for any other 5xx (a 502
+   * `machine_unreachable`). Null: "no longer in the list" is the truth.
    */
   rest: string | null;
+  /** Ask the server again now (an action it refused because the PR is no longer open). */
+  again: () => void;
 }
 
 /**
@@ -77,6 +80,7 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
   const raw = useMemo(() => (wanted && model ? (model.pulls.find((p) => p.key === key) ?? null) : null), [wanted, model, key]);
   const [got, setGot] = useState<Got | null>(null);
   const [retry, setRetry] = useState(0);
+  const again = useCallback(() => setRetry((n) => n + 1), []);
   // Asked each time the list stops naming it (or the page opens so), and again on each list read while the copy it
   // has is not merged: the server's copy can be a list's older read (a list that never named it here, or the other
   // list), and only a new ask learns that it merged, closed or reopened. Merged is final: no more asks then (a closed
@@ -111,7 +115,10 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
         if (code === 'machine_not_linked' && pullMachine(key)) {
           forgetPullMachine(key);
           setRetry((n) => n + 1);
-        } else if (code === 'machine_offline' && cause instanceof Error) keep(null, 'away', cause.message);
+        }
+        // Asleep, or any other answer that it could not be read there (a 502 `machine_unreachable`, any 5xx): at rest
+        // with the server's own words, asked again on focus, never "reading" for ever.
+        else if (cause instanceof InboxApiError && (code === 'machine_offline' || cause.status >= 500)) keep(null, 'away', cause.message);
         // A linked computer whose Inbox has no such read (an older one), or a refusal: nothing can say more of it.
         else if (cause instanceof InboxApiError && cause.status >= 400 && cause.status < 500) keep(null, 'none');
         else keep(null, 'failed');
@@ -145,6 +152,7 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
     missing: mine?.as === 'missing',
     fresh: !!pull && (!fetched || mine?.as === 'read'),
     rest,
+    again,
   };
 }
 

@@ -50,6 +50,8 @@ if (hasDom) {
       );
     },
   }));
+  // The real Post dialog (its chunk), for Approve.
+  await (await import('./platformPostSeam')).realPlatformPost();
 }
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
@@ -93,6 +95,8 @@ let diffDown = false;
 let ships: InboxShipView[] = [];
 /** What this Inbox answers for a linked computer's read of one PR (asleep, too old, unlinked). */
 let farAnswer: { status: number; body: unknown } | null = null;
+/** What `POST /api/inbox/pulls/review` answers (Post, Approve); null: it went. */
+let reviewAnswer: { status: number; body: unknown } | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -108,9 +112,11 @@ beforeEach(() => {
   diffDown = false;
   ships = [];
   farAnswer = null;
+  reviewAnswer = null;
   resetPullMachines();
   globalThis.fetch =(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
+    if (init?.method === 'POST' && url.pathname.endsWith('/pulls/review') && reviewAnswer) return Response.json(reviewAnswer.body, { status: reviewAnswer.status });
     if (init?.method === 'POST') return Response.json({ ok: true });
     if (url.pathname.endsWith('/api/inbox/ships')) return Response.json({ serverSession: 's', ships, projects: {} });
     if (url.pathname.endsWith('/pulls/details')) return Response.json({ serverSession: 's', key: url.searchParams.get('key'), description: null, labels: [], reviewers: [], checks: [], comments: [] });
@@ -478,6 +484,7 @@ test.skipIf(!hasDom)('the forge saying it has no such PR any more: the page stay
   for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
   await settle();
   expect(!!$('[data-pull-review-missing]')).toBe(false);
+  expect(!!$('[data-review-posts]')).toBe(true);
   // Its repository deleted (or the person lost access): the forge answers 404, and the server kept nothing for it.
   forgeMissing = true;
   delete serverPull[theirs.key];
@@ -488,6 +495,8 @@ test.skipIf(!hasDom)('the forge saying it has no such PR any more: the page stay
   expect(document.body.textContent!.includes('no longer in the list')).toBe(false);
   expect($('[data-pull-review-missing]')?.textContent).toContain('GitHub');
   expect(!!$('[data-pull-review-unread]')).toBe(false);
+  // Only a last read now: no Post, no Approve, though the copy shown still says open.
+  expect(!!$('[data-review-posts]')).toBe(false);
 });
 
 test.skipIf(!hasDom)('closed elsewhere, then reopened: Closed without Post, then open with Post back, though the diff read before still said closed', async () => {
@@ -527,6 +536,26 @@ test.skipIf(!hasDom)('closed elsewhere, then reopened: Closed without Post, then
 /** A teammate's PR no page here has drawn or read before (the pages' held stacks and read patches last the module). */
 const unseen = (n: number) => pull(n, { repo: 'northwind/web-app', mine: false, requested: true, author: 'tomas', head: `branch-${n}`, head_sha: SHA });
 
+const dialogButton = (words: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent?.trim() === words)!;
+
+test.skipIf(!hasDom)('Approve on a held copy merged elsewhere since: refused, and the page says Merged with no Post', async () => {
+  const held = unseen(894);
+  serverPull[held.key] = { ...held, checks: null };
+  mount(<PullReview model={base} modelError={null} stackId={held.key} layerKey={held.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+  for (let i = 0; i < 40 && !$('[data-stub-reader]'); i += 1) await settle(2);
+  await settle();
+  expect(refState()).toBe('open');
+  // Its author merges it now: the server asks the forge before posting, and refuses.
+  serverPull[held.key] = { ...held, state: 'merged', merged_at: '2026-11-03T10:00:00.000Z', checks: null };
+  reviewAnswer = { status: 409, body: { error: 'That pull request is no longer open.', code: 'pull_closed' } };
+  await act(async () => $('[data-review-posts] [data-decision-primary]')!.click());
+  await settle();
+  await act(async () => dialogButton('Approve').click());
+  await settle(20);
+  expect(refState()).toBe('merged');
+  expect(!!$('[data-review-posts]')).toBe(false);
+});
+
 test.skipIf(!hasDom)('the forge not answering and no patch of it ever read here: the diff’s own error, and no line claiming a last read', async () => {
   const fresh = unseen(891);
   forgeQuiet = true;
@@ -541,6 +570,7 @@ test.skipIf(!hasDom)('the forge not answering and no patch of it ever read here:
 
 for (const [what, answer, want] of [
   ['the linked computer that lists it is asleep', { status: 503, body: { error: 'Mac mini cannot be reached now.', code: 'machine_offline' } }, 'Mac mini cannot be reached now.'],
+  ['the linked computer cannot be reached (502)', { status: 502, body: { error: 'Could not reach Mac mini: connection refused. Is its Inbox running?', code: 'machine_unreachable' } }, 'Could not reach Mac mini: connection refused. Is its Inbox running?'],
   ['the linked computer runs an older Inbox without this read', { status: 404, body: { error: 'Not a door route.', code: 'not_found' } }, 'This pull request is no longer in the list.'],
   ['the linked computer was unlinked since: this computer answers', { status: 404, body: { error: 'That machine is not linked.', code: 'machine_not_linked' } }, 'This pull request is no longer in the list.'],
 ] as const) {

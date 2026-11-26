@@ -804,7 +804,7 @@ export interface InboxPulls {
    * if any, now only a last read. `repos` (the projects' repositories): a restart that has not read the list yet reads
    * it once first, so a PR kept from before (its repository still a project's) is not answered none. Never throws.
    */
-  pull(key: string, repos?: InboxPullRepo[]): Promise<ForgePullRead>;
+  pull(key: string, repos?: InboxPullRepo[], ask?: { fresh?: boolean }): Promise<ForgePullRead>;
   /** The copy of a PR kept since it left the list (`pull`'s or a list's), for an action on it: it is no longer open. */
   held(key: string): InboxPull | null;
   /**
@@ -1202,7 +1202,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   /** The forge's answer for one PR (`pull`), for a short while: a page and its reload ask once. */
   const forgeReads = new Map<string, { at: number; pull: Promise<ForgePullRead> }>();
   /** Each PR's last patch, for a page open on one no list names whose forge read fails (inbox-pull-last-diff.ts). */
-  const lastDiffs = createLastDiffs({ now, ...(options.dir ? { file: joinPath(options.dir, "pull-last-diffs.json") } : {}) });
+  const lastDiffs = createLastDiffs({ now, hidden: options.hidden, ...(options.dir ? { file: joinPath(options.dir, "pull-last-diffs.json") } : {}) });
   /**
    * Each PR's state as last learned outside a list (a read of the PR itself, a diff's head read, an action here), and
    * when: a patch read before it (the read cache, a kept last patch) says this state instead (`withNewerState`).
@@ -1862,7 +1862,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     },
     readHead: (key) => readHeads.get(key) ?? null,
     held: (key) => (findKnown(key) ? null : (departedOf(key) ?? null)),
-    async pull(key, repos) {
+    async pull(key, repos, ask) {
       if (options.hidden?.(key)) return { pull: null };
       // Restarted, and the window's page asked before any list read (a focus, back online): until one, no repository
       // is known as a project's, and a PR kept from before the restart read as none. Read the list once first.
@@ -1884,9 +1884,10 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const answer = (read: ForgePullRead): ForgePullRead =>
         read.unreadable ? { pull: was, unreadable: true } : read.missing ? { pull: was, missing: true } : { pull: read.pull ?? was };
       // Every answer is held for the same 20 s, one that did not answer too: during a rate limit each window's ask (each
-      // list read, each focus) would otherwise reach the forge again.
+      // list read, each focus) would otherwise reach the forge again. `fresh` (a write about to go from a kept copy:
+      // inbox-pull-missing.ts) asks the forge now; its answer is held as any.
       const hit = forgeReads.get(key);
-      if (hit && now() - hit.at < INBOX_PULLS_REFRESH_MS) return answer(await hit.pull);
+      if (hit && !ask?.fresh && now() - hit.at < INBOX_PULLS_REFRESH_MS) return answer(await hit.pull);
       // The host asked to slow down (a 429 to any read of it, this one's too): not asked again until its hold ends.
       if (now() < (holdUntil.get(host) ?? 0)) return answer({ pull: null, unreadable: true });
       const platform = was?.platform ?? [...known.values(), ...knownWide.values()].find((p) => p.host === host)?.platform ?? (hosts.get(host)?.cli === "glab" ? "gitlab" : "github");

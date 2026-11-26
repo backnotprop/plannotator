@@ -360,7 +360,7 @@ import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, linkUnlistedPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
-import { pullMissingAnswer, pullToAct } from "./inbox-pull-missing";
+import { pullMissingAnswer, pullToAct, pullToActNow } from "./inbox-pull-missing";
 import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
@@ -7151,8 +7151,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (fileLevelSent !== fileLevelComments.length || fileLevelSent > PULL_REVIEW_COMMENTS_MAX) throw new InboxError("validation_error", `fileLevelComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, body }.`, { field: "fileLevelComments" });
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
         // A PR a thread owns but no list has (reached by its link): its own read says what the list would. Any other stays unknown.
+        // A kept copy (the list no longer names it) is checked with the forge first: merged elsewhere since, refused.
         const unlisted = !pullToAct(pulls, key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
-        const pull = pullToAct(pulls, key) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
+        const pull = (await pullToActNow(pulls, key)) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
         if (!pull && unlisted) return json({ error: "Couldn't check that link. Try again.", code: "pull_unknown" }, 404);
         if (!pull) return json(...pullMissingAnswer(pulls, key));
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);

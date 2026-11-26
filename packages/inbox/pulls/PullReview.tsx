@@ -93,6 +93,7 @@ import { lookedBefore, markLooked, useLooked } from '../prs/looked';
 import { RailScopeRows } from './RailScopeRows';
 import { drawnStackWith, hiddenIn, useKeptStack } from './keptStack';
 import { forgeSaid, loneStack, missingWords, unreadWords, useRoutePull, withForgeState } from './routePull';
+import { pageOffersPost } from './pageState';
 import { shutWord } from './stateWord';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -472,7 +473,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   // a patch whose head the forge did not pin down posts nothing (Open on GitHub instead), and neither does a diff
   // that could not be read (the header then offers Open on GitHub).
   const postHead = diff?.head_sha ?? (scope === 'layer' ? null : (layer?.head_sha ?? null));
-  const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
+  // Not on a PR the forge says it has no such of now (pageState.ts): what shows is its last read.
+  const canPost = !!layer && !!postablePull(layer) && pageOffersPost(layer, listed, route.missing) && !diffError && (!diff || !!postHead);
   // The expand arrows' whole files, at the commits this diff runs between.
   const headMoved = !!diff && !diff.head_sha;
   const patchHead = diff?.head_sha ?? null;
@@ -1064,6 +1066,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             anchor={isCompare(scope) ? 'stack' : 'diff'}
             note={layer.mine && !canDecide ? readOnlyWords : undefined}
             headSha={postHead}
+            onClosed={listed ? undefined : route.again}
             busy={sending || !snapshot}
             picked={picked}
             onPick={pick}

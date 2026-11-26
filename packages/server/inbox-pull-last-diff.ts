@@ -6,11 +6,13 @@
  *
  * In memory: the last `INBOX_PULL_LAST_DIFFS_MAX` patches read, by PR, scope and base (not by head: a PR that left
  * the list keeps the head it was last read at). On disk (`file`, 0600, under the Inbox's own folder): only those of a
- * PR no list names (`save`), newest first, at most `INBOX_PULL_LAST_DIFFS_SAVED_MAX` of them and
- * `INBOX_PULL_LAST_DIFFS_SAVED_BYTES` of patch in all, written only when that set changed. Never a cache hit: only a
- * read that failed answers from here (`InboxPulls.diff`).
+ * PR no list names and the person did not hide (`save`), newest first, at most `INBOX_PULL_LAST_DIFFS_SAVED_MAX` of
+ * them and `INBOX_PULL_LAST_DIFFS_SAVED_BYTES` in the file in all (one larger alone is left out, not the rest),
+ * written only when that set or one of its patches changed. Never a cache hit: only a read that failed answers from
+ * here (`InboxPulls.diff`).
  */
 import type { InboxPullDiffAnswer, InboxPullState } from "@plannotator/core/inbox-types";
+import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -46,11 +48,33 @@ function savedEntry(value: unknown): { id: string; at: number; answer: InboxPull
   return { id, at, answer: answer as InboxPullDiffAnswer };
 }
 
-export function createLastDiffs(options: { now: () => number; file?: string }): LastDiffs {
+/** What a patch is known by on disk: its answer but the patch, and the patch's length and hash (each answer once). */
+const fingerprints = new WeakMap<InboxPullDiffAnswer, { print: string; bytes: number }>();
+function fingerprintOf(answer: InboxPullDiffAnswer): { print: string; bytes: number } {
+  let known = fingerprints.get(answer);
+  if (!known) {
+    const { patch, ...rest } = answer;
+    // The bytes the answer takes in the file (UTF-8, as JSON writes it): the bound counts these, not UTF-16 units.
+    known = { print: `${JSON.stringify(rest)}\u0001${patch.length}\u0001${createHash("sha1").update(patch).digest("hex")}`, bytes: Buffer.byteLength(JSON.stringify(answer)) };
+    fingerprints.set(answer, known);
+  }
+  return known;
+}
+
+export function createLastDiffs(options: { now: () => number; file?: string; hidden?: (key: string) => boolean }): LastDiffs {
   const kept = new Map<string, LastDiff>();
   const file = options.file ?? null;
-  /** The ids and times on disk now: the same set writes nothing. */
+  /**
+   * The set on disk now, by id and fingerprint, in no order: the same patches read again (only their time and order
+   * moved) write nothing. Their time on disk stays the first read's: it only orders them against a state learned
+   * since (`withNewerState`), and none is learned before a restart reads the file.
+   */
   let written = "";
+  const signatureOf = (entries: readonly { id: string; answer: InboxPullDiffAnswer }[]) =>
+    entries
+      .map((entry) => `${entry.id}\u0001${fingerprintOf(entry.answer).print}`)
+      .sort()
+      .join("\u0002");
   if (file) {
     try {
       const saved = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; diffs?: unknown };
@@ -62,7 +86,7 @@ export function createLastDiffs(options: { now: () => number; file?: string }): 
       const order = [...kept.entries()].reverse();
       kept.clear();
       for (const [id, entry] of order) kept.set(id, entry);
-      written = [...kept].reverse().map(([id, entry]) => `${id}\u0001${entry.at}`).join("\u0002");
+      written = signatureOf([...kept].map(([id, entry]) => ({ id, answer: entry.answer })));
     } catch {
       // None yet, or unreadable: nothing kept from before.
     }
@@ -80,12 +104,15 @@ export function createLastDiffs(options: { now: () => number; file?: string }): 
       let bytes = 0;
       for (const [id, entry] of [...kept].reverse()) {
         if (out.length >= INBOX_PULL_LAST_DIFFS_SAVED_MAX) break;
-        if (!unlisted(entry.answer.key)) continue;
-        bytes += entry.answer.patch.length;
-        if (bytes > INBOX_PULL_LAST_DIFFS_SAVED_BYTES) break;
+        // Never one the person hid.
+        if (!unlisted(entry.answer.key) || options.hidden?.(entry.answer.key)) continue;
+        // One that would pass the bound is left out, never the ones after it.
+        const size = fingerprintOf(entry.answer).bytes;
+        if (bytes + size > INBOX_PULL_LAST_DIFFS_SAVED_BYTES) continue;
+        bytes += size;
         out.push({ id, at: entry.at, answer: entry.answer });
       }
-      const signature = out.map((entry) => `${entry.id}\u0001${entry.at}`).join("\u0002");
+      const signature = signatureOf(out);
       if (signature === written) return;
       try {
         mkdirSync(dirname(file), { recursive: true, mode: 0o700 });

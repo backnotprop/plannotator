@@ -13,6 +13,9 @@
  * 4. Else the diff's read, merged or closed.
  * 5. Else the copy the server kept (the forge did not answer, or has no such PR now), when it is not open.
  * 6. Else the copy the page holds.
+ *
+ * Post (Approve with it) only on an open PR the forge still has: once it says it has no such PR (`missing`), the copy
+ * shown is only its last read, and a review would go nowhere. The list naming it again is its word.
  */
 import { inboxPullIsOpen, type InboxPull } from '@plannotator/core/inbox-types';
 
@@ -30,10 +33,15 @@ export interface PageStateInput {
   said: State | null;
   /** The page's read of the PR itself while the list does not name it; `fresh` when that answer is the forge's now (or the list's). */
   read: { pull: State; fresh: boolean } | null;
+  /** The forge answered that it has no such PR now (routePull.ts `missing`). */
+  missing?: boolean;
 }
 
-export function pageState({ layer, listed, said, read }: PageStateInput): State & { source: PageStateSource } {
-  const of = (from: State, source: PageStateSource) => ({ state: from.state, merged_at: from.merged_at ?? null, source });
+/** Whether a page showing `shown` offers Post. */
+export const pageOffersPost = (shown: Pick<InboxPull, 'state'>, listed: boolean, missing: boolean): boolean => inboxPullIsOpen(shown) && (listed || !missing);
+
+export function pageState({ layer, listed, said, read, missing = false }: PageStateInput): State & { source: PageStateSource; post: boolean } {
+  const of = (from: State, source: PageStateSource) => ({ state: from.state, merged_at: from.merged_at ?? null, source, post: pageOffersPost(from, listed, missing) });
   if (said?.state === 'merged') return of(said, 'diff');
   if (read?.pull.state === 'merged') return of(read.pull, read.fresh ? 'forge' : 'kept');
   if (layer.state === 'merged') return of(layer, listed ? 'list' : 'held');

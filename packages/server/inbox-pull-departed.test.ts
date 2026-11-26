@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { createInboxPulls, INBOX_PULLS_FRESH_MS, INBOX_PULLS_REFRESH_MS, InboxPullsError } from "./inbox-pulls";
 import { INBOX_PULLS_DEPARTED_MAX, INBOX_PULLS_DEPARTED_MS } from "./inbox-pull-departed";
 import { saysNotFound } from "./inbox-pull-forge";
-import { pullMissingAnswer, pullToAct } from "./inbox-pull-missing";
+import { pullMissingAnswer, pullToAct, pullToActNow } from "./inbox-pull-missing";
 import { REF_RATE_LIMIT_MS } from "./ref-cards";
 import { INBOX_PULLS_SIGNED_KEEP_MS } from "./inbox-pull-signed-keep";
 import type { RefRunner } from "./ref-cards";
@@ -434,6 +434,39 @@ test("an action on a PR that left the list while still open acts on it; merged s
   expect([unknown.code, unknownStatus]).toEqual(["pull_unknown", 404]);
   // A listed PR is the list's.
   expect(pullToAct(pulls, keyOf(880))).toMatchObject({ number: 880 });
+});
+
+test("a review posted to a kept open copy asks the forge first: merged since, 409 pull_closed and the page reads Merged; the forge down, the kept copy", async () => {
+  let now = 1_000_000;
+  const f = forge();
+  const pulls = createInboxPulls({ run: f.run, now: () => now });
+  await pulls.list(repos);
+  f.listed = [880];
+  now += INBOX_PULLS_FRESH_MS;
+  await pulls.list(repos, { refresh: true });
+  // The page open on #881 reads it: open. Its author merges it seconds later, inside the read's 20 s hold.
+  expect((await pulls.pull(keyOf(881), repos)).pull?.state).toBe("open");
+  f.merged.add(881);
+  now += 1_000;
+  // The kept copy still says open: on its own it would take the review.
+  expect(pullToAct(pulls, keyOf(881))).toMatchObject({ state: "open" });
+  expect(await pullToActNow(pulls, keyOf(881))).toBeNull();
+  const [answer, status] = pullMissingAnswer(pulls, keyOf(881));
+  expect([answer.code, status]).toEqual(["pull_closed", 409]);
+  // The page's next read of it says merged, without asking the forge again.
+  const asked = f.calls.length;
+  expect((await pulls.pull(keyOf(881), repos)).pull?.state).toBe("merged");
+  expect(f.calls.length).toBe(asked);
+  // Another kept open copy with the forge down: the copy is acted on, and the post itself fails as it always did.
+  f.listed = [];
+  now += INBOX_PULLS_FRESH_MS;
+  await pulls.list(repos, { refresh: true });
+  f.down = true;
+  expect(await pullToActNow(pulls, keyOf(880))).toMatchObject({ number: 880, state: "open" });
+  // A listed PR is the list's, the forge not asked.
+  const listed = createInboxPulls({ run: forge().run, now: () => now });
+  await listed.list(repos);
+  expect(await pullToActNow(listed, keyOf(880))).toMatchObject({ number: 880 });
 });
 
 test("a 404 is read in the CLI's own shape only: a PR numbered 404 or a repository named for one is not missing", async () => {
