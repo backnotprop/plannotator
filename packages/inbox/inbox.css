@@ -1093,8 +1093,11 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-lhead-switch:hover, .pn-inbox .ib-lhead-switch[data-popup-open] { background: var(--ib-hb-hover-s, var(--muted)); color: var(--foreground); }
 .pn-inbox .ib-lhead-switch:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  /* A phone: a thumb's height, narrow, and 8 px clear of the title's box (its ↻ room is unseen there but still
-     refreshes), so a tap beside the ⌄ never lands on the title instead. */
+  /* A phone has no hover, so the title is its name alone: the ↻'s room shows only while a refresh turns it (the
+     tap's one sign on the title). The ⌄: a thumb's height, narrow, 8 px clear of the title, so a tap beside it never
+     refreshes instead. */
+  .pn-inbox .ib-lhead-title:not([data-refreshing]) .ib-lhead-ic { display: none; }
+  .pn-inbox .ib-lhead-title .ib-lhead-ic { padding-left: 4px; }
   .pn-inbox .ib-lhead-switch { width: 32px; height: 44px; margin-left: 4px; border-radius: 8px; }
 }
 .ib-lbody { padding: 0 10px 10px; overflow-y: auto; flex: 1; min-height: 0; position: relative; }
