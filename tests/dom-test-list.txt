@@ -948,4 +948,5 @@ packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx
 packages/inbox/skillFileOpen.dom.test.tsx
 packages/inbox/reviewAnalysis.test.tsx
+packages/inbox/reviewSettings/reviewsSettings.test.tsx
 packages/inbox/guide/usePowerUp.test.tsx
