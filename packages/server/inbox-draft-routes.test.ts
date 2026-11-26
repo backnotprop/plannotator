@@ -37,8 +37,8 @@ const expand = (name: string): string[] => {
 };
 /** A door pattern in the outbox table's words. */
 const named = (source: string) => `POST ${source.replace(/^\^|\$$/g, "").replaceAll("([^/]+)", ":id").replaceAll("\\/", "/")}`;
-/** A path with a `draft` or `drafts` word in one of its segments (`draft`, `comment-draft`, `drafts`). */
-const draftWorded = (name: string) => name.slice("POST ".length).split("/").some((segment) => segment.split("-").some((word) => word === "draft" || word === "drafts"));
+/** A path with a `draft` or `drafts` word in one of its segments (`draft`, `comment-draft`, `comment_draft`, `drafts`). */
+const draftWorded = (name: string) => name.slice("POST ".length).split("/").some((segment) => segment.split(/[-_]/).some((word) => word === "draft" || word === "drafts"));
 
 const tableDrafts = () =>
   Object.entries(DOOR_WRITES)
@@ -65,6 +65,8 @@ describe("draft text is never in a durable record of finished commands", () => {
     expect(worded.length).toBeGreaterThan(0);
     expect(worded.filter((name) => DOOR_WRITES[name] !== "draft")).toEqual([]);
     expect(worded.filter((name) => door.includes(name) && !doorDrafts().includes(name))).toEqual([]);
+    // The word is found in a hyphenated or snake_case segment too (made-up names: no such routes exist).
+    expect(["POST threads/:id/comment_draft", "POST threads/:id/comment-draft", "POST drafts/:id", "POST threads/:id/seen", "POST threads/:id/drafty"].map(draftWorded)).toEqual([true, true, true, false, false]);
   });
 
   describe("every `draft` route, run", () => {
