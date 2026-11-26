@@ -727,9 +727,11 @@ describe("Inbox Open in: over the tailnet", () => {
       });
     expect(await answerOf(await through("/api/inbox/open-in/apps"))).toEqual([403, "local_only"]);
     expect(await answerOf(await through("/api/inbox/open-in", { method: "POST", body: JSON.stringify({ attachment_id: ids["plan.md"], app_id: "vscode" }) }))).toEqual([403, "local_only"]);
-    // A file a reference names: the same, before anything else about it is read.
+    // A file a reference names: whether it is here is only a read, answered (a window's Copy path there); its launch is local_only.
     const thread = "msg_any";
-    expect(await answerOf(await through(`/api/inbox/open-in/file?thread=${thread}&path=plan.md`))).toEqual([403, "local_only"]);
+    const checked = await through(`/api/inbox/open-in/file?thread=${thread}&path=plan.md`);
+    expect(checked.status).toBe(200);
+    expect(((await checked.json()) as { found: boolean }).found).toBe(false);
     expect(await answerOf(await through("/api/inbox/open-in/file", { method: "POST", body: JSON.stringify({ thread, path: "plan.md", app_id: "vscode" }) }))).toEqual([403, "local_only"]);
     expect(launches).toEqual([]);
     const page = await through(`/api/inbox/attachments/${ids["page.html"]}/page`);

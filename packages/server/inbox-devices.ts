@@ -191,8 +191,11 @@ function routeNotFound(device: Pick<InboxDevice, "platform"> | null = null): Res
  * door path outside it is `404 device_route_not_found`; the window, `/mcp`,
  * the bridge, control, settings (but Capabilities' switches, for a linked machine), restart, the raw text route
  * (`attachments/<id>`; text reaches the phone through `view`), project
- * deletion, drafts, recent searches, "Open in",
- * pairing and the device list are never on it. An attachment's bytes reach
+ * deletion, drafts, recent searches, launching an app ("Open in"),
+ * pairing and the device list are never on it. A linked computer's window
+ * reads through the same list: its `machineOnly` entries are the reads a
+ * phone does not make (a referenced file, a guided review's whole files, a
+ * thread's steps), never a launch or this computer's settings. An attachment's bytes reach
  * the phone only through the window's own `image` and `download` routes, so
  * the dotenv refusal, the size checks and the headers are the window's. The
  * images a message's body shows come the same way, through the window's
@@ -344,6 +347,13 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^messages\/([^/]+)\/guide\/reviewed$/, window: (m) => `/api/inbox/messages/${m[1]}/guide/reviewed` },
   // A comment on a guided review's diff (7.53), new or edited (same annotation id); removed through annotations/:id/remove.
   { method: "POST", route: /^messages\/([^/]+)\/guide\/annotations$/, window: (m) => `/api/inbox/messages/${m[1]}/guide/annotations` },
+  // A guided review on a linked machine's window (mark `linked-reads`): a changed file's whole text (the expand arrows),
+  // an image's sides, a changed Markdown file's pictures, the package changes card, and the files ticked Viewed. The
+  // window's own routes, so the same rules (the guide's own patch and project) and headers. Not a phone's.
+  { method: "GET", route: /^messages\/([^/]+)\/guide\/(file|review-image|review-markdown-image|package-changes)$/, window: (m) => `/api/inbox/messages/${m[1]}/guide/${m[2]}`, machineOnly: true },
+  { method: "POST", route: /^messages\/([^/]+)\/guide\/viewed$/, window: (m) => `/api/inbox/messages/${m[1]}/guide/viewed`, machineOnly: true },
+  // A thread's steps (approval "inbox-thread-steps"), read only, for a linked machine's window (mark `linked-reads`).
+  { method: "GET", route: /^threads\/([^/]+)\/steps$/, window: (m) => `/api/inbox/threads/${m[1]}/steps`, machineOnly: true },
   // A comment on the text of an agent's message (7.59), new or edited (same annotation id); removed through annotations/:id/remove.
   { method: "POST", route: /^messages\/([^/]+)\/annotations$/, window: (m) => `/api/inbox/messages/${m[1]}/annotations` },
   { method: "GET", route: /^threads\/([^/]+)\/sessions$/, window: (m) => `/api/inbox/threads/${m[1]}/sessions` },
@@ -395,6 +405,11 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // film's bytes (by Range), for a linked machine's window. The window's own routes, so the same refusals and headers.
   // Not a phone's: a phone reads them through the tailnet as the owner.
   { method: "GET", route: /^open-in\/file\/(view|raw)$/, window: (m) => `/api/inbox/open-in/file/${m[1]}`, machineOnly: true },
+  // A code span's hover text (mark `linked-reads`): held to the thread's own folders for a linked machine (inbox-open-in.ts).
+  { method: "GET", route: /^open-in\/file\/code$/, window: () => "/api/inbox/open-in/file/code", machineOnly: true },
+  // Whether that file is there, and its path there (the hover's and a diff header's Copy path), held the same way.
+  // Only the GET: launching an app (its POST) is never on the door.
+  { method: "GET", route: /^open-in\/file$/, window: () => "/api/inbox/open-in/file", machineOnly: true },
   // And attached to its message there when the person comments on it from a linked machine's window.
   { method: "POST", route: /^open-in\/file\/attach$/, window: () => "/api/inbox/open-in/file/attach", machineOnly: true },
   // "Another folder on <machine>…": folder names under that machine's home, for a linked machine's window only.

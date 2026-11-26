@@ -36,7 +36,7 @@ import { INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, is
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { createMachinePulls } from "./inbox-machine-pulls";
-import { MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, machineLinkedPageAnswer, machineMarkdownImageAnswer } from "./inbox-machine-files";
+import { MACHINE_GUIDE_IMAGE_ROUTE, MACHINE_GUIDE_JSON_ROUTE, MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, machineGuideJsonAnswer, machineLinkedPageAnswer, machineMarkdownImageAnswer } from "./inbox-machine-files";
 import { farCsp, MACHINE_ASSET_ROUTE, MACHINE_PAGE_ROUTE, MACHINE_VIEW_ROUTE, machineAssetAnswer, machineAssetCsp, machinePageAnswer, machineViewAnswer } from "./inbox-machine-page";
 import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
 import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent-read";
@@ -366,7 +366,13 @@ export interface OutboxView {
   thread: string | null;
   /** The machine's name once its link is gone (null while linked: the window knows it). */
   machine_name: string | null;
+  /** A held Viewed tick in a review there: its file and whether it is ticked (null for any other write). */
+  viewed: { path: string; viewed: boolean } | null;
 }
+
+const VIEWED_ROUTE = /^messages\/[^/]+\/guide\/viewed$/;
+const viewedOf = (entry: OutboxEntry): OutboxView["viewed"] =>
+  VIEWED_ROUTE.test(entry.route) && typeof entry.body.path === "string" && typeof entry.body.viewed === "boolean" ? { path: entry.body.path, viewed: entry.body.viewed } : null;
 
 /** At most this much of a held write's words rides its view. */
 const OUTBOX_WORDS_SHOWN = 2_000;
@@ -394,6 +400,7 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
   words: wordsOf(entry),
   thread: entry.thread ?? null,
   machine_name: entry.machine_name ?? null,
+  viewed: viewedOf(entry),
 });
 
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
@@ -403,8 +410,13 @@ const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
 /** A file a message names, read on another machine (approval "inbox-file-refs-open-viewer"): its view, its bytes. */
 const FILE_READ_ROUTE = /^open-in\//;
-/** The reads of a far file only this Inbox's window makes: a file a message names, a Markdown file's pictures, a document next to a file. */
-const WINDOW_FILE_READ = /^(?:open-in\/|attachments\/[^/]+\/(?:markdown-image|linked-page)$)/;
+/**
+ * The reads of a far file only this Inbox's window makes: a file a message names, a Markdown file's pictures, a
+ * document next to a file, a guided review's pictures, whole files and package changes.
+ */
+const WINDOW_FILE_READS: readonly RegExp[] = [FILE_READ_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, MACHINE_LINKED_PAGE_ROUTE, MACHINE_GUIDE_IMAGE_ROUTE, MACHINE_GUIDE_JSON_ROUTE];
+/** The reads a linked machine's window makes of this mark (`linked-reads`): steps, a review's files, a hover, a file check. */
+const LINKED_READ_ROUTES: readonly RegExp[] = [/^threads\/[^/]+\/steps$/, MACHINE_GUIDE_IMAGE_ROUTE, MACHINE_GUIDE_JSON_ROUTE, /^open-in\/file(?:\/code)?$/];
 /** A forwarded file read that is not a press in this Inbox's window. */
 export const INBOX_MACHINE_FILE_WINDOW_ONLY_BODY = { error: "A file on another machine opens from the Inbox window only.", code: "window_only" } as const;
 
@@ -416,7 +428,7 @@ export const INBOX_MACHINE_FILE_WINDOW_ONLY_BODY = { error: "A file on another m
  * machine's files through this one (the remote launch rule; a tightening, not a secret).
  */
 export function forwardedFileReadRefusal(route: string, req: Request): { status: 403; body: Record<string, string> } | null {
-  if (!WINDOW_FILE_READ.test(route)) return null;
+  if (!WINDOW_FILE_READS.some((read) => read.test(route))) return null;
   const site = req.headers.get("sec-fetch-site")?.trim().toLowerCase();
   const origin = req.headers.get("origin");
   let originHost: string | null = null;
@@ -994,8 +1006,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
       json({ error: `${links.get(machine)?.name ?? "That machine"} cannot be reached now.`, code: "machine_offline", machine: machinesView().find((m) => m.id === machine) }, 503);
     const fileRead = forwardedFileReadRefusal(route, req);
     if (fileRead) return json(fileRead.body, fileRead.status);
+    // A linked-reads read of a machine known to be away answers at once: never a wait to the request's limit.
+    if (req.method === "GET" && peer.state === "offline" && LINKED_READ_ROUTES.some((read) => read.test(route))) return offline();
     // HEAD as a local page and its folder answer it: the far GET's headers, no body.
-    const head = req.method === "HEAD" && (MACHINE_PAGE_ROUTE.test(route) || MACHINE_ASSET_ROUTE.test(route) || MACHINE_MARKDOWN_IMAGE_ROUTE.test(route));
+    const head = req.method === "HEAD" && (MACHINE_PAGE_ROUTE.test(route) || MACHINE_ASSET_ROUTE.test(route) || MACHINE_MARKDOWN_IMAGE_ROUTE.test(route) || MACHINE_GUIDE_IMAGE_ROUTE.test(route));
     if (req.method === "GET" || head) {
       const search = url.search;
       const headers = pick(req.headers, PASS_REQUEST);
@@ -1022,8 +1036,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
         }
         if (MACHINE_VIEW_ROUTE.test(route)) return passAnswer(await machineViewAnswer(answer, machine));
         // A Markdown file's pictures and a document next to a file (inbox-machine-files.ts): as a local file's.
-        if (MACHINE_MARKDOWN_IMAGE_ROUTE.test(route)) return passAnswer(machineMarkdownImageAnswer(answer), { csp: MACHINE_IMAGE_CSP, head });
+        if (MACHINE_MARKDOWN_IMAGE_ROUTE.test(route) || MACHINE_GUIDE_IMAGE_ROUTE.test(route)) return passAnswer(machineMarkdownImageAnswer(answer), { csp: MACHINE_IMAGE_CSP, head });
         if (MACHINE_LINKED_PAGE_ROUTE.test(route)) return passAnswer(await machineLinkedPageAnswer(answer, machine));
+        if (MACHINE_GUIDE_JSON_ROUTE.test(route)) return passAnswer(await machineGuideJsonAnswer(answer));
         // Its folder, read from an opaque origin as a local page's is: CORS reads (fonts, module scripts) as here,
         // under a local folder's CSP, never the far one.
         if (MACHINE_ASSET_ROUTE.test(route)) {

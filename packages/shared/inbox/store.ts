@@ -6036,20 +6036,31 @@ export class InboxStore {
 
   /**
    * The files the person ticked Viewed in a review (code review in the Inbox):
-   * each a file of the review's patch, once, in the order given. No write
-   * when nothing changed. Only on a message whose guide is a review.
+   * each a file of the review's patch, once. Either one file's tick (`path`
+   * and `viewed` true or false), laid over what is kept, so a tick held for a
+   * while never undoes another one made since; or the whole list (`viewed`, a
+   * list, in its order; an older window's). No write when nothing changed.
+   * Only on a message whose guide is a review.
    */
-  saveGuideViewed(messageId: string, viewed: unknown, files: readonly string[]): string[] {
+  saveGuideViewed(messageId: string, viewed: unknown, files: readonly string[], path?: unknown): string[] {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     if (!message.guide?.review) throw new InboxError("guide_not_found", "This message carries no review.");
-    if (!Array.isArray(viewed) || viewed.some((value) => typeof value !== "string")) {
-      throw new InboxError("validation_error", "viewed: a list of the review's file paths.", { field: "viewed" });
-    }
     const known = new Set(files);
-    const unknown = (viewed as string[]).find((path) => !known.has(path));
-    if (unknown !== undefined) throw new InboxError("validation_error", `viewed: ${JSON.stringify(unknown)} is not a file of this review.`, { field: "viewed" });
-    const next = [...new Set(viewed as string[])];
+    let next: string[];
+    if (path !== undefined) {
+      if (typeof path !== "string" || !known.has(path)) throw new InboxError("validation_error", `path: ${JSON.stringify(path)} is not a file of this review.`, { field: "path" });
+      if (typeof viewed !== "boolean") throw new InboxError("validation_error", "viewed: true or false for that file.", { field: "viewed" });
+      const kept = (message.guide_viewed ?? []).filter((one) => one !== path);
+      next = viewed ? [...kept, path] : kept;
+    } else {
+      if (!Array.isArray(viewed) || viewed.some((value) => typeof value !== "string")) {
+        throw new InboxError("validation_error", "viewed: a list of the review's file paths.", { field: "viewed" });
+      }
+      const unknown = (viewed as string[]).find((one) => !known.has(one));
+      if (unknown !== undefined) throw new InboxError("validation_error", `viewed: ${JSON.stringify(unknown)} is not a file of this review.`, { field: "viewed" });
+      next = [...new Set(viewed as string[])];
+    }
     if (JSON.stringify(next) !== JSON.stringify(message.guide_viewed ?? [])) {
       const at = this.stamp();
       this.appendMessage({ ...message, guide_viewed: next }, at);

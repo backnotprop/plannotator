@@ -31,7 +31,7 @@ import { KeyCaps } from '../shortcuts/hint';
 import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { actionLabel, busyWord, namesActionWord, startedLine, type ComposeAction } from '../compose/model';
 import { useThreadTags } from '../threadTags';
-import { tagChipText, tagPicked, toggledTag } from './searchTags';
+import { searchTagIds, tagChipText, tagPicked, toggledTag } from './searchTags';
 import {
   FROM_OPTIONS,
   GROUP_LABELS,
@@ -567,7 +567,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
       // A picked type asks for its group alone, the first page ("Show all"'s request); with no words, the request is today's.
       const one = nextType && query.trim() ? { group: nextType, limit: SEARCH_PAGE } : {};
       const passes = searchPasses(nextFilters);
-      const request = { q: query, ...nextFilters, current: currentProject, sort: nextSort, ...one };
+      const request = { q: query, ...nextFilters, tags: searchTagIds(tagListRef.current, nextFilters.tags), current: currentProject, sort: nextSort, ...one };
       merged.current = null;
       setPending(true);
       setError(false);
@@ -756,7 +756,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const already = expanded[option.group] ?? (answered.type === option.group ? (answered.model.groups?.[option.group] ?? null) : null);
     const offset = already ? already.length : 0;
     try {
-      const model = await searchInbox({ q: answered.q, ...filters, current: currentProject, sort: answered.sort, group: option.group, offset, limit: SEARCH_PAGE, machines: searchPasses(filters) !== 'local' });
+      const model = await searchInbox({ q: answered.q, ...filters, tags: searchTagIds(tagList, filters.tags), current: currentProject, sort: answered.sort, group: option.group, offset, limit: SEARCH_PAGE, machines: searchPasses(filters) !== 'local' });
       // A message that came in since the last page moves the next one down: a row already shown is not shown twice.
       const shown = new Set((already ?? []).map((row) => `${row.type}-${row.id}`));
       const more = (model.groups?.[option.group] ?? []).filter((row) => !shown.has(`${row.type}-${row.id}`));

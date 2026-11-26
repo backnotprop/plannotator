@@ -134,10 +134,21 @@ test.skipIf(!hasDom)("the pane's header: this computer's page has the whole list
   expect(asked.filter((url) => url.includes('/open-in/apps'))).toEqual([]);
   await unmount();
 
-  // Through the tailnet (or on a phone): the page's new-tab icon, through the forward.
-  await render(<OpenInControl attachment={farPage} version="sent" surface="tab" label />);
+  // On a phone: the page's new-tab icon, through the forward.
+  await render(<OpenInControl attachment={farPage} version="sent" surface="tab" label big />);
   await until(() => host!.querySelector('[data-open-in-tab]') !== null, 'the new-tab icon');
   expect(host!.querySelector<HTMLAnchorElement>('a[data-open-in-tab]')!.getAttribute('href')).toBe(`/api/inbox/m/${OTHER}/attachments/${farPage.id}/page?version=sent`);
+  await unmount();
+
+  // Through the tailnet: the page's new tab and Copy path, as a linked machine's file shows them (no app list read).
+  asked = [];
+  await render(<OpenInControl attachment={farPage} version="sent" surface="tab" label />);
+  await until(() => host!.querySelector('[data-open-in-caret]') !== null, "the tailnet's split button");
+  expect(host!.querySelector<HTMLAnchorElement>('a[data-open-in-primary="browser"]')!.getAttribute('href')).toBe(`/api/inbox/m/${OTHER}/attachments/${farPage.id}/page?version=sent`);
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-open-in-caret]')!.click());
+  await until(() => document.querySelector(`[data-open-in-menu="${farPage.id}"]`) !== null, "the tailnet's list");
+  expect(itemsIn(document.querySelector(`[data-open-in-menu="${farPage.id}"]`)!)).toEqual(['browser', 'copy-path']);
+  expect(asked.filter((url) => url.includes('/open-in/apps'))).toEqual([]);
   await unmount();
 
   // The linked machine's Markdown file: Copy path alone, as a plain button (no list, no link, no app list read).
@@ -194,4 +205,127 @@ test.skipIf(!hasDom)("a tile's ⋯: the linked machine's file keeps Open as, Dow
   const here = await open(plan);
   await until(() => here.querySelector('[data-open-in-item="vscode"]') !== null, 'the apps in the list');
   expect(labelsOf(here)).toEqual(['Open side by side', 'Open full screen', 'Download', 'VS Code', 'Default app', 'Finder', 'Copy path']);
+});
+
+test.skipIf(!hasDom)("over the tailnet this computer's file has Copy path too (no server call), and a phone's full screen ⋯ lists it", async () => {
+  const { FullScreenMore } = await import('./components/OpenIn');
+  const copied: string[] = [];
+  const savedClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+  try {
+    // A Markdown file over the tailnet: no new tab, so Copy path alone, as a plain button; the app list is never read.
+    await render(<OpenInControl attachment={plan} version="current" surface="tab" label />);
+    await until(() => host!.querySelector('[data-open-in-copy-path]') !== null, 'the Copy path button');
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-open-in-copy-path]')!.click());
+    await until(() => copied.length === 1, 'the copy');
+    expect(copied).toEqual([plan.path]);
+    await unmount();
+
+    // Full screen on a phone: its ⋯ has the new tab, then Copy path, then Download.
+    await render(<FullScreenMore attachment={page} version="current" surface="tab" phone open onOpenChange={() => {}} versionAction={null} />);
+    await until(() => document.querySelector(`[data-full-view-menu="${page.id}"] [data-open-in-item="copy-path"]`) !== null, "the ⋯'s Copy path");
+    const menu = document.querySelector<HTMLElement>(`[data-full-view-menu="${page.id}"]`)!;
+    expect(labelsOf(menu)).toEqual(['Open in new tab', 'Copy path', 'Download']);
+    await act(async () => menu.querySelector<HTMLElement>('[data-open-in-item="copy-path"]')!.click());
+    await until(() => copied.length === 2, 'the second copy');
+    expect(copied[1]).toBe(page.path);
+  } finally {
+    if (savedClipboard) Object.defineProperty(navigator, 'clipboard', savedClipboard);
+    else delete (navigator as { clipboard?: unknown }).clipboard;
+  }
+  expect(asked.filter((url) => url.includes('/open-in/'))).toEqual([]);
+});
+
+test.skipIf(!hasDom)("a file a linked machine's thread names: asked on that machine, Copy path alone with its path there; this computer's thread keeps its list", async () => {
+  const { OpenInFile } = await import('./components/OpenIn');
+  const FAR_THREAD = 'msg_01K7FARTHREAD000000000001';
+  const HERE_THREAD = 'msg_01K7HERETHREAD00000000001';
+  setSelfMachine(SELF, [
+    { id: SELF, self: true, name: 'Studio' },
+    { id: OTHER, name: 'MacBook', marks: ['linked-reads'], list_cursor: 1, state: 'online' },
+  ]);
+  rememberMachine([FAR_THREAD], OTHER);
+  const posted: string[] = [];
+  const stubbed = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method === 'POST') posted.push(url);
+    if (url.includes('/open-in/file?')) asked.push(url);
+    if (url.startsWith(`/api/inbox/m/${OTHER}/open-in/file?`)) return Response.json({ found: true, path: '/Users/ada/shop/src/retry.ts', kind: 'code' });
+    if (url.startsWith('/api/inbox/open-in/file?')) return Response.json({ found: true, path: '/work/shop/src/retry.ts', kind: 'code' });
+    return stubbed(input, init);
+  }) as typeof fetch;
+  const copied: string[] = [];
+  const savedClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+  try {
+    await render(<OpenInFile scope={{ thread: FAR_THREAD, message: FAR_THREAD }} path="src/retry.ts" label />);
+    await until(() => host!.querySelector('[data-open-in-copy-path]') !== null, 'the Copy path button');
+    const check = asked.find((url) => url.includes('/open-in/file?'))!;
+    expect(new URL(check, 'http://x').pathname).toBe(`/api/inbox/m/${OTHER}/open-in/file`);
+    // No app here can open a file on that machine's disk: no split button, no list.
+    expect(host!.querySelector('[data-open-in-caret]')).toBeNull();
+    expect(host!.querySelector('[data-open-in-primary]')).toBeNull();
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-open-in-copy-path]')!.click());
+    await until(() => copied.length === 1, 'the copy');
+    expect(copied).toEqual(['/Users/ada/shop/src/retry.ts']);
+    expect(posted).toEqual([]);
+    await unmount();
+
+    // This computer's thread: asked here, and the split button with this computer's apps.
+    asked = [];
+    await render(<OpenInFile scope={{ thread: HERE_THREAD, message: HERE_THREAD }} path="src/retry.ts" label />);
+    await until(() => host!.querySelector('[data-open-in-caret]') !== null, 'the split button');
+    expect(new URL(asked.find((url) => url.includes('/open-in/file?'))!, 'http://x').pathname).toBe('/api/inbox/open-in/file');
+  } finally {
+    if (savedClipboard) Object.defineProperty(navigator, 'clipboard', savedClipboard);
+    else delete (navigator as { clipboard?: unknown }).clipboard;
+  }
+});
+
+/** A file a linked machine's thread names, answered there once `ready()` says so (a 503 before, as while it is away). */
+function farFileCheck(ready: () => boolean) {
+  const stubbed = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.startsWith(`/api/inbox/m/${OTHER}/open-in/file?`)) {
+      return ready() ? Response.json({ found: true, path: '/Users/ada/shop/src/berth.ts', kind: 'code' }) : Response.json({ error: 'MacBook cannot be reached now.', code: 'machine_offline' }, { status: 503 });
+    }
+    if (url.startsWith('/api/inbox/open-in/file?')) return Response.json({ found: false });
+    return stubbed(input, init);
+  }) as typeof fetch;
+}
+
+const macBook = (marks: string[], state: string) => [
+  { id: SELF, self: true, name: 'Studio' },
+  { id: OTHER, name: 'MacBook', marks, list_cursor: 1, state },
+];
+
+test.skipIf(!hasDom)("a linked machine's file drawn before its list says it serves these reads gets its Copy path once it does", async () => {
+  const { OpenInFile } = await import('./components/OpenIn');
+  const FAR_THREAD = 'msg_01K7FARTHREAD000000000002';
+  setSelfMachine(SELF, macBook([], 'online'));
+  rememberMachine([FAR_THREAD], OTHER);
+  farFileCheck(() => true);
+  await render(<OpenInFile scope={{ thread: FAR_THREAD, message: FAR_THREAD }} path="src/berth.ts" />);
+  for (let i = 0; i < 10; i += 1) await settle();
+  expect(host!.querySelector('[data-open-in-copy-path]')).toBeNull();
+  // The merged list now says MacBook serves these reads: asked there, with no redraw from outside.
+  await act(async () => setSelfMachine(SELF, macBook(['linked-reads'], 'online')));
+  await until(() => host!.querySelector('[data-open-in-copy-path]') !== null, 'the Copy path button');
+});
+
+test.skipIf(!hasDom)("a linked machine's file asked while it is away gets its Copy path when it is back", async () => {
+  const { OpenInFile } = await import('./components/OpenIn');
+  const FAR_THREAD = 'msg_01K7FARTHREAD000000000003';
+  let back = false;
+  setSelfMachine(SELF, macBook(['linked-reads'], 'offline'));
+  rememberMachine([FAR_THREAD], OTHER);
+  farFileCheck(() => back);
+  await render(<OpenInFile scope={{ thread: FAR_THREAD, message: FAR_THREAD }} path="src/berth.ts" />);
+  for (let i = 0; i < 10; i += 1) await settle();
+  expect(host!.querySelector('[data-open-in-copy-path]')).toBeNull();
+  back = true;
+  await act(async () => setSelfMachine(SELF, macBook(['linked-reads'], 'online')));
+  await until(() => host!.querySelector('[data-open-in-copy-path]') !== null, 'the Copy path button');
 });

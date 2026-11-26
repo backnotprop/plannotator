@@ -23658,6 +23658,132 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-file",
+      "title": "door:GET messages/:id/guide/file",
+      "surface": [
+        "door:GET messages/:id/guide/file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-package-changes",
+      "title": "door:GET messages/:id/guide/package-changes",
+      "surface": [
+        "door:GET messages/:id/guide/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-review-image",
+      "title": "door:GET messages/:id/guide/review-image",
+      "surface": [
+        "door:GET messages/:id/guide/review-image"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-review-markdown-image",
+      "title": "door:GET messages/:id/guide/review-markdown-image",
+      "surface": [
+        "door:GET messages/:id/guide/review-markdown-image"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-open-in-file",
+      "title": "door:GET open-in/file",
+      "surface": [
+        "door:GET open-in/file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-open-in-file-code",
+      "title": "door:GET open-in/file/code",
+      "surface": [
+        "door:GET open-in/file/code"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-threads-id-steps",
+      "title": "door:GET threads/:id/steps",
+      "surface": [
+        "door:GET threads/:id/steps"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-messages-id-guide-viewed",
+      "title": "door:POST messages/:id/guide/viewed",
+      "surface": [
+        "door:POST messages/:id/guide/viewed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-outboxview-viewed",
+      "title": "field:OutboxView.viewed",
+      "surface": [
+        "field:OutboxView.viewed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

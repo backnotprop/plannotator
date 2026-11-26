@@ -11490,12 +11490,13 @@ public struct OutboxView: Codable, Hashable, Sendable {
   public var words: String?
   public var thread: String?
   public var machineName: String?
+  public var viewed: OutboxViewViewed?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["key", "machine", "route", "state", "queued_at", "settled_at", "status", "answer", "notice", "dismissed", "words", "thread", "machine_name"]
+  static let knownKeys: Set<String> = ["key", "machine", "route", "state", "queued_at", "settled_at", "status", "answer", "notice", "dismissed", "words", "thread", "machine_name", "viewed"]
 
-  public init(key: String, machine: String, route: String, state: OutboxViewState, queuedAt: String, settledAt: String? = nil, status: Double? = nil, answer: JSONValue, notice: OutboxViewNotice? = nil, dismissed: Bool, words: String? = nil, thread: String? = nil, machineName: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(key: String, machine: String, route: String, state: OutboxViewState, queuedAt: String, settledAt: String? = nil, status: Double? = nil, answer: JSONValue, notice: OutboxViewNotice? = nil, dismissed: Bool, words: String? = nil, thread: String? = nil, machineName: String? = nil, viewed: OutboxViewViewed? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.key = key
     self.machine = machine
     self.route = route
@@ -11509,6 +11510,7 @@ public struct OutboxView: Codable, Hashable, Sendable {
     self.words = words
     self.thread = thread
     self.machineName = machineName
+    self.viewed = viewed
     self.unknownFields = unknownFields
   }
 
@@ -11527,6 +11529,7 @@ public struct OutboxView: Codable, Hashable, Sendable {
     self.words = try c.decodeIfPresent(String.self, forKey: WireKey("words"))
     self.thread = try c.decodeIfPresent(String.self, forKey: WireKey("thread"))
     self.machineName = try c.decodeIfPresent(String.self, forKey: WireKey("machine_name"))
+    self.viewed = try c.decodeIfPresent(OutboxViewViewed.self, forKey: WireKey("viewed"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -11545,6 +11548,7 @@ public struct OutboxView: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.words, forKey: WireKey("words"))
     try c.encodeIfPresent(self.thread, forKey: WireKey("thread"))
     try c.encodeIfPresent(self.machineName, forKey: WireKey("machine_name"))
+    try c.encodeIfPresent(self.viewed, forKey: WireKey("viewed"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -11650,6 +11654,35 @@ public enum OutboxViewState: Codable, Hashable, Sendable, RawRepresentable {
 
   public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+public struct OutboxViewViewed: Codable, Hashable, Sendable {
+  public var path: String
+  public var viewed: Bool
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["path", "viewed"]
+
+  public init(path: String, viewed: Bool, unknownFields: [String: JSONValue] = [:]) {
+    self.path = path
+    self.viewed = viewed
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.path = try c.decode(String.self, forKey: WireKey("path"))
+    self.viewed = try c.decode(Bool.self, forKey: WireKey("viewed"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.path, forKey: WireKey("path"))
+    try c.encode(self.viewed, forKey: WireKey("viewed"))
+    try WireKey.write(unknownFields, to: &c)
+  }
 }
 
 /// From `packages/core/inbox-wire-models.ts`.
@@ -12852,6 +12885,18 @@ public enum DoorRoutes {
   public static let postMessageGuideReviewed = DoorRoute(name: "POST messages/:id/guide/reviewed", method: .post, path: "messages/{message}/guide/reviewed", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/guide/annotations`: the window's `/api/inbox/messages/{message}/guide/annotations`.
   public static let postMessageGuideAnnotations = DoorRoute(name: "POST messages/:id/guide/annotations", method: .post, path: "messages/{message}/guide/annotations", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  /// `GET messages/:id/guide/file`: the window's `/api/inbox/messages/{message}/guide/file`.
+  public static let getMessageGuideFile = DoorRoute(name: "GET messages/:id/guide/file", method: .get, path: "messages/{message}/guide/file", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  /// `GET messages/:id/guide/review-image`: the window's `/api/inbox/messages/{message}/guide/review-image`.
+  public static let getMessageGuideReviewImage = DoorRoute(name: "GET messages/:id/guide/review-image", method: .get, path: "messages/{message}/guide/review-image", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  /// `GET messages/:id/guide/review-markdown-image`: the window's `/api/inbox/messages/{message}/guide/review-markdown-image`.
+  public static let getMessageGuideReviewMarkdownImage = DoorRoute(name: "GET messages/:id/guide/review-markdown-image", method: .get, path: "messages/{message}/guide/review-markdown-image", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  /// `GET messages/:id/guide/package-changes`: the window's `/api/inbox/messages/{message}/guide/package-changes`.
+  public static let getMessageGuidePackageChanges = DoorRoute(name: "GET messages/:id/guide/package-changes", method: .get, path: "messages/{message}/guide/package-changes", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  /// `POST messages/:id/guide/viewed`: the window's `/api/inbox/messages/{message}/guide/viewed`.
+  public static let postMessageGuideViewed = DoorRoute(name: "POST messages/:id/guide/viewed", method: .post, path: "messages/{message}/guide/viewed", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  /// `GET threads/:id/steps`: the window's `/api/inbox/threads/{thread}/steps`.
+  public static let getThreadSteps = DoorRoute(name: "GET threads/:id/steps", method: .get, path: "threads/{thread}/steps", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST messages/:id/annotations`: the window's `/api/inbox/messages/{message}/annotations`.
   public static let postMessageAnnotations = DoorRoute(name: "POST messages/:id/annotations", method: .post, path: "messages/{message}/annotations", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET threads/:id/sessions`: the window's `/api/inbox/threads/{thread}/sessions`.
@@ -12914,6 +12959,10 @@ public enum DoorRoutes {
   public static let getOpenInFileView = DoorRoute(name: "GET open-in/file/view", method: .get, path: "open-in/file/view", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET open-in/file/raw`: the window's `/api/inbox/open-in/file/raw`.
   public static let getOpenInFileRaw = DoorRoute(name: "GET open-in/file/raw", method: .get, path: "open-in/file/raw", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .bytes, range: true, relay: true)
+  /// `GET open-in/file/code`: the window's `/api/inbox/open-in/file/code`.
+  public static let getOpenInFileCode = DoorRoute(name: "GET open-in/file/code", method: .get, path: "open-in/file/code", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  /// `GET open-in/file`: the window's `/api/inbox/open-in/file`.
+  public static let getOpenInFile = DoorRoute(name: "GET open-in/file", method: .get, path: "open-in/file", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST open-in/file/attach`: the window's `/api/inbox/open-in/file/attach`.
   public static let postOpenInFileAttach = DoorRoute(name: "POST open-in/file/attach", method: .post, path: "open-in/file/attach", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `GET launch/folders`: the window's `/api/inbox/launch/folders`.
@@ -12984,7 +13033,7 @@ public enum DoorRoutes {
   public static let getUpdate = DoorRoute(name: "GET update", method: .get, path: "update", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST update`.
   public static let postUpdate = DoorRoute(name: "POST update", method: .post, path: "update", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
-  public static let all: [DoorRoute] = [getHealth, getThreads, getProjects, getWhatsNew, getWhatsNewReleases, getWhatsNewImage, getProjectPicture, getThreadsArchived, getThread, postThreadSeen, postGridSeen, postThreadRead, postThreadUnread, postThreadMarkUnread, postThreadSnooze, postThreadPin, postPins, postThreadPriority, postAgentFaces, postThreadTags, postInitiative, postProjectTags, postTagColours, getCards, getCard, getCardRefs, postCard, postCardsSeen, postCardsDroppedSeen, getPulls, getReviewsBranches, getPullsRisk, getPullsPull, getPullsDetails, getPullsDiff, getPullsFile, getPullsRepoFiles, getPullsRepoFile, getPullsAvatar, getPullsMedia, getPullsMediaSizes, postPullsClose, postPullsReopen, postPullsMerge, postPullsOwner, getShips, getShipsLog, postShips, postShipsStop, postShipsNewer, postPullsLooked, getThreadPulls, postThreadPulls, postArtifactPins, getArtifacts, getEvents, postMessagePicks, postMessageReply, postMessageResolve, postMessageTo, postMessageAck, postMessageSendNow, postMessageTakeBack, postMessageReask, postMessageHandoffUndo, postThreadRemoveAgent, postThreadRemoveAgentUndo, postMessageAction, getMessageRun, postMessageRun, postMessageSecret, postThreadDelete, getThreadDraft, getThreadAttachments, getThreadDecisions, getAttachmentView, getAttachmentImage, getAttachmentVideo, getAttachmentAudio, getAttachmentDownload, getAttachmentMarkdownImage, getAttachmentLinkedPage, getMarkup, getMessageImage, getHtmlAsset, postAnnotations, postAnnotationRemove, getMessageGuide, postMessageGuideReviewed, postMessageGuideAnnotations, postMessageAnnotations, getThreadSessions, getThreadTaggable, postThreadMessage, getSessions, postMessages, getSearch, postProjectRead, postProjectUnread, postProjectResolve, getSkills, getSkillsContent, postUploadsReuse, postUploads, postMarkups, getUploadText, getUploadImage, getTidy, postTidy, getCombine, postCombine, postCombineCancel, postCombineUndo, postCombineHold, postLaunchStop, postLaunchRetry, postLaunchTrust, postLaunchDelete, postRexShow, getOpenInFileView, getOpenInFileRaw, postOpenInFileAttach, getLaunchFolders, getLaunchClone, getLaunchCloneCheck, getScheduled, getRoutine, postScheduled, postScheduledPreview, postRoutine, postRoutineOn, postRoutineOff, postRoutineRun, postRoutineStop, postRoutineDelete, postRoutineRestore, getCapabilities, postCapabilities, postPair, postRevoke, getAccounts, getAgentRead, getAgentFile, getAgentSearch, getAgentThreads, getTaggableAgents, postFarWake, postAgentReply, postFarDelivered, postLinkBack, postUnlink, postLinkThroughAsk, postLinkThroughOffer, postLinkThroughIntroduce, getUpdate, postUpdate]
+  public static let all: [DoorRoute] = [getHealth, getThreads, getProjects, getWhatsNew, getWhatsNewReleases, getWhatsNewImage, getProjectPicture, getThreadsArchived, getThread, postThreadSeen, postGridSeen, postThreadRead, postThreadUnread, postThreadMarkUnread, postThreadSnooze, postThreadPin, postPins, postThreadPriority, postAgentFaces, postThreadTags, postInitiative, postProjectTags, postTagColours, getCards, getCard, getCardRefs, postCard, postCardsSeen, postCardsDroppedSeen, getPulls, getReviewsBranches, getPullsRisk, getPullsPull, getPullsDetails, getPullsDiff, getPullsFile, getPullsRepoFiles, getPullsRepoFile, getPullsAvatar, getPullsMedia, getPullsMediaSizes, postPullsClose, postPullsReopen, postPullsMerge, postPullsOwner, getShips, getShipsLog, postShips, postShipsStop, postShipsNewer, postPullsLooked, getThreadPulls, postThreadPulls, postArtifactPins, getArtifacts, getEvents, postMessagePicks, postMessageReply, postMessageResolve, postMessageTo, postMessageAck, postMessageSendNow, postMessageTakeBack, postMessageReask, postMessageHandoffUndo, postThreadRemoveAgent, postThreadRemoveAgentUndo, postMessageAction, getMessageRun, postMessageRun, postMessageSecret, postThreadDelete, getThreadDraft, getThreadAttachments, getThreadDecisions, getAttachmentView, getAttachmentImage, getAttachmentVideo, getAttachmentAudio, getAttachmentDownload, getAttachmentMarkdownImage, getAttachmentLinkedPage, getMarkup, getMessageImage, getHtmlAsset, postAnnotations, postAnnotationRemove, getMessageGuide, postMessageGuideReviewed, postMessageGuideAnnotations, getMessageGuideFile, getMessageGuideReviewImage, getMessageGuideReviewMarkdownImage, getMessageGuidePackageChanges, postMessageGuideViewed, getThreadSteps, postMessageAnnotations, getThreadSessions, getThreadTaggable, postThreadMessage, getSessions, postMessages, getSearch, postProjectRead, postProjectUnread, postProjectResolve, getSkills, getSkillsContent, postUploadsReuse, postUploads, postMarkups, getUploadText, getUploadImage, getTidy, postTidy, getCombine, postCombine, postCombineCancel, postCombineUndo, postCombineHold, postLaunchStop, postLaunchRetry, postLaunchTrust, postLaunchDelete, postRexShow, getOpenInFileView, getOpenInFileRaw, getOpenInFileCode, getOpenInFile, postOpenInFileAttach, getLaunchFolders, getLaunchClone, getLaunchCloneCheck, getScheduled, getRoutine, postScheduled, postScheduledPreview, postRoutine, postRoutineOn, postRoutineOff, postRoutineRun, postRoutineStop, postRoutineDelete, postRoutineRestore, getCapabilities, postCapabilities, postPair, postRevoke, getAccounts, getAgentRead, getAgentFile, getAgentSearch, getAgentThreads, getTaggableAgents, postFarWake, postAgentReply, postFarDelivered, postLinkBack, postUnlink, postLinkThroughAsk, postLinkThroughOffer, postLinkThroughIntroduce, getUpdate, postUpdate]
 }
 
 /// The door's routes as requests: `Door.postThreadSeen(thread: id)`.
@@ -13093,6 +13142,12 @@ public enum Door {
   public static func getMessageGuide(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.getMessageGuide, path: "messages/\(segment(message.rawValue))/guide") }
   public static func postMessageGuideReviewed(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageGuideReviewed, path: "messages/\(segment(message.rawValue))/guide/reviewed") }
   public static func postMessageGuideAnnotations(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageGuideAnnotations, path: "messages/\(segment(message.rawValue))/guide/annotations") }
+  public static func getMessageGuideFile(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.getMessageGuideFile, path: "messages/\(segment(message.rawValue))/guide/file") }
+  public static func getMessageGuideReviewImage(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.getMessageGuideReviewImage, path: "messages/\(segment(message.rawValue))/guide/review-image") }
+  public static func getMessageGuideReviewMarkdownImage(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.getMessageGuideReviewMarkdownImage, path: "messages/\(segment(message.rawValue))/guide/review-markdown-image") }
+  public static func getMessageGuidePackageChanges(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.getMessageGuidePackageChanges, path: "messages/\(segment(message.rawValue))/guide/package-changes") }
+  public static func postMessageGuideViewed(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageGuideViewed, path: "messages/\(segment(message.rawValue))/guide/viewed") }
+  public static func getThreadSteps(thread: ThreadID) -> DoorRequest { DoorRequest(route: DoorRoutes.getThreadSteps, path: "threads/\(segment(thread.rawValue))/steps") }
   public static func postMessageAnnotations(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageAnnotations, path: "messages/\(segment(message.rawValue))/annotations") }
   public static func getThreadSessions(thread: ThreadID) -> DoorRequest { DoorRequest(route: DoorRoutes.getThreadSessions, path: "threads/\(segment(thread.rawValue))/sessions") }
   public static func getThreadTaggable(thread: ThreadID) -> DoorRequest { DoorRequest(route: DoorRoutes.getThreadTaggable, path: "threads/\(segment(thread.rawValue))/taggable") }
@@ -13124,6 +13179,8 @@ public enum Door {
   public static func postRexShow() -> DoorRequest { DoorRequest(route: DoorRoutes.postRexShow, path: "rex/show") }
   public static func getOpenInFileView() -> DoorRequest { DoorRequest(route: DoorRoutes.getOpenInFileView, path: "open-in/file/view") }
   public static func getOpenInFileRaw() -> DoorRequest { DoorRequest(route: DoorRoutes.getOpenInFileRaw, path: "open-in/file/raw") }
+  public static func getOpenInFileCode() -> DoorRequest { DoorRequest(route: DoorRoutes.getOpenInFileCode, path: "open-in/file/code") }
+  public static func getOpenInFile() -> DoorRequest { DoorRequest(route: DoorRoutes.getOpenInFile, path: "open-in/file") }
   public static func postOpenInFileAttach() -> DoorRequest { DoorRequest(route: DoorRoutes.postOpenInFileAttach, path: "open-in/file/attach") }
   public static func getLaunchFolders() -> DoorRequest { DoorRequest(route: DoorRoutes.getLaunchFolders, path: "launch/folders") }
   public static func getLaunchClone() -> DoorRequest { DoorRequest(route: DoorRoutes.getLaunchClone, path: "launch/clone") }

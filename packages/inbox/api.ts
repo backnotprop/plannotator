@@ -18,6 +18,7 @@ import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, listGridAsked, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberArtifactMachines, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
+import { farRead, readsServedFor } from './linkedReads';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -1315,14 +1316,13 @@ export const inboxApi = {
   systemSetup: () => get<SystemSetupAnswer>(inboxUrl('/system/setup')),
   saveSystemSetup: (input: SystemSetupInput) => post<{ setup: SystemSetup }>(inboxUrl('/system/setup'), { ...input }),
   /**
-   * A thread's steps, each session's list with its presence now (approval "inbox-thread-steps"). A linked
-   * machine's thread has none here (its read is not forwarded), and an Inbox older than steps answers 404: both
-   * read as off.
+   * A thread's steps, each session's list with its presence now (approval "inbox-thread-steps"), read on the thread's
+   * own machine. A linked machine without `linked-reads` is not asked, and an Inbox older than steps answers 404: off.
    */
   threadSteps: async (threadId: string): Promise<{ on: boolean; steps: InboxStepsWire[] }> => {
-    if (machineOf(threadId)) return { on: false, steps: [] };
+    if (!readsServedFor(threadId)) return { on: false, steps: [] };
     try {
-      const answer = await get<{ on?: unknown; steps?: unknown }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/steps`));
+      const answer = await farRead(threadId, () => get<{ on?: unknown; steps?: unknown }>(threadUrl(threadId, '/steps')));
       return { on: answer.on === true, steps: Array.isArray(answer.steps) ? (answer.steps as InboxStepsWire[]) : [] };
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.status === 404) return { on: false, steps: [] };
@@ -1501,18 +1501,18 @@ export const inboxApi = {
   health: () => get<InboxHealth>(inboxUrl('/health')),
   /** The health, or InboxReadTimeout past `timeoutMs` (the stale page notice's checks and its Reload). */
   healthWithin: (timeoutMs: number) => getWithin<InboxHealth>(inboxUrl('/health'), timeoutMs),
-  /** The guided review a message carries: its record and the snapshot (validated by the server, parsed again here). */
+  /** A message's guided review: its record, the snapshot (parsed again here), and its Inbox's Code review switch. */
   guide: (messageId: string) =>
-    get<{ message_id: string; guide: InboxGuideRef; snapshot: unknown }>(messageUrl(messageId, `/guide`)),
+    get<{ message_id: string; guide: InboxGuideRef; code_review?: unknown; snapshot: unknown }>(messageUrl(messageId, `/guide`)),
   /** One changed file's whole text as the guide's patch names it, for its expand arrows. */
   guideFile: (messageId: string, path: string, signal?: AbortSignal) =>
-    get<InboxFileContents>(messageUrl(messageId, `/guide/file`, `path=${encodeURIComponent(path)}`), signal),
+    farRead(messageId, () => get<InboxFileContents>(messageUrl(messageId, `/guide/file`, `path=${encodeURIComponent(path)}`), signal)),
   /** The person's reviewed ticks on that guide, kept on the message. */
   saveGuideReviewed: (messageId: string, reviewed: boolean[]) =>
     post<{ message_id: string; reviewed: boolean[] }>(messageUrl(messageId, `/guide/reviewed`), { reviewed }),
   /** The files ticked Viewed in a review (code review in the Inbox), as the patch names them. */
-  saveGuideViewed: (messageId: string, viewed: string[]) =>
-    post<{ message_id: string; viewed: string[] }>(messageUrl(messageId, `/guide/viewed`), { viewed }),
+  saveGuideViewed: (messageId: string, path: string, viewed: boolean) =>
+    post<{ message_id: string; viewed: string[] }>(messageUrl(messageId, `/guide/viewed`), { path, viewed }),
   /** A comment on that guide's diff (the review app's line comment), new or edited; removed through `removeAnnotation`. */
   saveGuideAnnotation: (messageId: string, annotation: object) =>
     trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
@@ -1607,15 +1607,15 @@ export const inboxApi = {
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
   openIn: (attachmentId: string, appId: string) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in'), { attachment_id: attachmentId, app_id: appId }),
-  /** A referenced file in its scope: whether it is on this computer, its real path and kind. 403 through the tailnet. */
-  openInFileCheck: (scope: OpenInFileScope, path: string) =>
-    get<{ found: boolean; path?: string; kind?: string }>(inboxUrl(`/open-in/file?${new URLSearchParams({ ...scope, path })}`)),
+  /** A referenced file in its scope: whether it is on its thread's computer, its real path there and kind (none from a linked machine without `linked-reads`). */
+  openInFileCheck: async (scope: OpenInFileScope, path: string): Promise<{ found: boolean; path?: string; kind?: string }> =>
+    'thread' in scope && !readsServedFor(scope.thread) ? { found: false } : farRead('thread' in scope ? scope.thread : null, () => get<{ found: boolean; path?: string; kind?: string }>(inboxUrl('/open-in/file', new URLSearchParams({ ...scope, path }).toString(), 'thread' in scope ? machineOf(scope.thread) : null))),
   /** A file an agent's message names, for the pane: read only, wherever it is on that computer (never a secret). */
   referencedFile: (scope: ReferencedFileScope, path: string) => get<ReferencedFileView>(referencedFileUrl('view', scope, path)),
   /** The person commented on a file a message names: it becomes one of that message's attachments (once), on its thread's machine. */
   attachReferencedFile: (scope: ReferencedFileScope, path: string) =>
     post<{ attachment: InboxAttachmentState }>(inboxUrl('/open-in/file/attach', undefined, machineOf(scope.thread)), { thread: scope.thread, message: scope.message, path, idempotency_key: crypto.randomUUID() }),
-  openInFileCode: (scope: OpenInFileScope, path: string) => get<OpenInFileCode>(inboxUrl(`/open-in/file/code?${new URLSearchParams({ ...scope, path })}`)),
+  openInFileCode: async (scope: OpenInFileScope, path: string, signal?: AbortSignal): Promise<OpenInFileCode> => 'thread' in scope && !readsServedFor(scope.thread) ? { found: false } : farRead('thread' in scope ? scope.thread : null, () => get<OpenInFileCode>(inboxUrl('/open-in/file/code', new URLSearchParams({ ...scope, path }).toString(), 'thread' in scope ? machineOf(scope.thread) : null), signal)),
   openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),
   /** Keep a marked-up image (a comment drawn on an image attachment): its path rides the comment's `images`. */
