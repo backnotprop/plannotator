@@ -4,7 +4,8 @@
  * (packages/server/inbox.ts `WINDOW_CSP`) allows exactly these for stylesheets and font files, and
  * packages/server/inbox-code-fonts.test.ts fails when a font in the table is not allowed by them.
  *
- * The table stays in ui: the published @plannotator/ui pins a published core, so it cannot import a new core module.
+ * The table stays in ui and this list here (the server's side): the published @plannotator/ui pins a published core,
+ * and a new core module would need a core release first.
  */
 
 /** Hack on jsDelivr: `hack.css` and the files it names (`fonts/hack-*.woff2`, `.woff`, relative to it), all in

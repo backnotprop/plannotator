@@ -8,6 +8,7 @@
     "./annotatable": "./annotatable.ts",
     "./annotate-bundle": "./annotate-bundle.ts",
     "./diff-files": "./diff-files.ts",
+    "./diff-fonts": "./diff-fonts.ts",
     "./direct-edits": "./direct-edits.ts",
     "./stack-layers": "./stack-layers.ts",
     "./file-browser-files": "./file-browser-files.ts",

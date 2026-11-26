@@ -11,7 +11,7 @@
  * exactly, a path ending in `/` as a prefix, any other path exactly.
  */
 import { expect, test } from "bun:test";
-import { DIFF_FONT_SOURCES } from "@plannotator/core/diff-fonts";
+import { DIFF_FONT_SOURCES } from "@plannotator/shared/diff-fonts";
 // The menu's own table (ui; the server package does not depend on ui, so by path, as annotate-agent-instructions.test.ts).
 import { DIFF_FONT_URLS } from "../ui/utils/diffFonts";
 import { WINDOW_CSP } from "./inbox";

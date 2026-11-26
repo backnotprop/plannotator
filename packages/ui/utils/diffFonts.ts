@@ -5,7 +5,7 @@
  * selects a custom diff font. Each font is loaded at most once.
  *
  * The Inbox window's CSP allows these stylesheets and their font files from
- * the places packages/core/diff-fonts.ts lists (`DIFF_FONT_SOURCES`); a font
+ * the places packages/shared/diff-fonts.ts lists (`DIFF_FONT_SOURCES`); a font
  * added here from anywhere else fails packages/server/inbox-code-fonts.test.ts
  * until that list names its place.
  */

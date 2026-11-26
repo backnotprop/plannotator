@@ -9,7 +9,6 @@
     "./diff-paths": "./diff-paths.ts",
     "./pr-attachment-url": "./pr-attachment-url.ts",
     "./diff-files": "./diff-files.ts",
-    "./diff-fonts": "./diff-fonts.ts",
     "./call-tree": "./call-tree.ts",
     "./stack-layers": "./stack-layers.ts",
     "./file-kind": "./file-kind.ts",

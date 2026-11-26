@@ -267,7 +267,7 @@ import { createInboxT3Wake, createT3ModOwner, type InboxT3Wake, type T3Connect }
 import { createInboxAntigravityWake, type InboxAntigravityWake } from "./inbox-antigravity-wake";
 import { CloudAgentError, createInboxCloudAgents, hasCloudWake } from "./inbox-cloud-agents";
 import { PERSONAL_AGENTS_BANNER_BASE } from "@plannotator/core/inbox-personal-agents";
-import { DIFF_FONT_SOURCES } from "@plannotator/core/diff-fonts";
+import { DIFF_FONT_SOURCES } from "@plannotator/shared/diff-fonts";
 import { personalAgentConnectedHere } from "./inbox-personal-agents";
 import { createInboxAgentDoor, INBOX_AGENT_DOOR_PATH } from "./inbox-agent-door";
 import { createInboxCloudWake, type InboxCloudWaker } from "./inbox-cloud-wake";
@@ -1026,7 +1026,7 @@ const ERROR_STATUS: Record<string, number> = {
  * One more place for styles and fonts: Settings → Reviews → Code Font offers
  * web fonts, and picking one loads its stylesheet and font files from Google
  * Fonts (`fonts.googleapis.com`, `fonts.gstatic.com`) or, for Hack, from its
- * one folder on jsDelivr (`DIFF_FONT_SOURCES`, core/diff-fonts.ts; the menu's
+ * one folder on jsDelivr (`DIFF_FONT_SOURCES`, shared/diff-fonts.ts; the menu's
  * table, ui/utils/diffFonts.ts, is checked against it by
  * inbox-code-fonts.test.ts). Only stylesheets and font files: no script, picture, media or
  * request comes from there. A srcdoc frame under this policy (an agent page's
