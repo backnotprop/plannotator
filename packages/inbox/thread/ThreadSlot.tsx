@@ -7,6 +7,7 @@ import { CardChip } from '../board/CardChip';
 import { NotificationAsk } from '../components/NotificationAsk';
 import { ThreadPane } from '../components/Thread';
 import { ThreadWait } from '../components/ThreadWait';
+import { ThreadGone } from './ThreadGone';
 import { fullExitFile, fullFromSide } from '../fullScreenOrigin';
 import { useHeldThread } from '../data/queries/thread';
 import type { HeldThread } from '../data/apply/record';
@@ -113,6 +114,8 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
               {/* No list beside the thread (a phone, a stacked window, full screen, a card's thread, beside a file):
                   the stale page notice is here instead. */}
               {(phone || stack.thread || full || fromCard || fileOpen) && host.staleNotice}
+              {/* Deleted elsewhere while on screen: it stays, and says so above it. */}
+              {load?.gone && <ThreadGone />}
               {host.notifyAgainIn === thread.thread_id ? (
               <div className="ib-tour-notify-again" data-tour-notify-again="">
                 <NotificationAsk

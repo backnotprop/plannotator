@@ -78,6 +78,7 @@ export function threadNotificationText(input: {
   body: string;
 } {
   const asks = input.asks ?? true;
+  // Tagged you has no banner words of its own: a person's tag is not an agent's, and only a Spaces server places it.
   const what =
     input.section === 'stopped'
       ? 'stopped on you'

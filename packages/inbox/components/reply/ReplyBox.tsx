@@ -21,6 +21,7 @@ import { REPLY_FILES_SUMMARY_FROM, focusReplyFromBox } from '../../thread/replyB
 import { caretToEndOnFirstFocus } from '../../thread/replyCaret';
 import type { useReplyQuote } from '../../useReplyQuote';
 import { DraftHead, DraftOffer, type DraftConflict } from '../DraftLabel';
+import type { OtherFieldVoice } from '../FieldVoice';
 import { ChangedNotice, type JumpTarget } from '../ReplacedQuestion';
 import { ReplyActions, ReplyAnswers, type ActionRow, type DraftAnswer } from '../ReplyAnswers';
 import { ReplyQuoteLine } from '../ReplyQuote';
@@ -63,7 +64,8 @@ export interface ReplyBoxProps {
   /** A Send carries the words now: the field shows none. */
   sendingWords: boolean;
   textRef: RefObject<HTMLTextAreaElement | null>;
-  voice: ComponentProps<typeof VoiceMicButton>['voice'];
+  /** The thread's voice; `others`: an Other answer's take on a question card, which Send waits for. */
+  voice: ComponentProps<typeof VoiceMicButton>['voice'] & { others: Pick<OtherFieldVoice, 'busy'> };
   replyToNames: string;
   /** The asker note's id while it shows: the field is described by it. */
   askerNoteId: string | null;
@@ -264,7 +266,7 @@ export function ReplyBox({
             routeChoiceOpen ? null : (
               // No tooltip: a button that says Send needs none, and ⌘↵ is named only to assistive technology
               // (approval "inbox-send-no-shortcut-hint").
-              <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => onSend()} disabled={sending || voice.busy} aria-keyshortcuts={sendAria}>
+              <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => onSend()} disabled={sending || voice.busy || voice.others.busy} aria-keyshortcuts={sendAria}>
                 {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
                 {sending && <span className="ib-spin" aria-hidden="true" />}
                 {/* A phone: the round arrow; the word stays as the button's name. */}

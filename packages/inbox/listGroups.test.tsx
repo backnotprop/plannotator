@@ -84,7 +84,8 @@ function row(id: string, section: InboxSectionId, extra: Partial<InboxListRow> =
   } as InboxListRow;
 }
 
-const LABELS: Record<Exclude<InboxListGroupId, 'priority' | 'archived'>, string> = {
+// This Inbox's own groups: Tagged you comes only from a Spaces server (listTaggedSection.test.tsx).
+const LABELS: Record<Exclude<InboxListGroupId, 'priority' | 'archived' | 'tagged'>, string> = {
   stopped: 'Stopped on you',
   holding: 'Holding up work',
   waiting: 'Waiting on you',

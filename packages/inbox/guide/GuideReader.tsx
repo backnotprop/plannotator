@@ -34,6 +34,7 @@ import type {
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
 import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
+import { LineFeedbackToolsProvider } from '@plannotator/review-editor/components/LineFeedbackTools';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { openedLinesQuote } from '../attachments';
 import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
@@ -337,14 +338,16 @@ function usePackageChangeCards(images: GuideReaderImages | undefined): AllFilesC
  * Highlighting runs off the page's thread, or a long file freezes it. The pool's three workers start with the first
  * reader on screen and end with the last, so a page with no diff does not hold them.
  */
-export default function GuideReader(props: GuideReaderProps) {
+export default function GuideReader({ lineFeedbackTools = null, ...props }: GuideReaderProps) {
   // A reader that throws while it draws says so in its place; the review's bar and comments stay (ui's RegionBoundary,
   // inside the lazy part: a chunk that cannot arrive is still PanePart's "Couldn't load this view").
   return (
     <ReviewWorkerPoolProvider>
-      <RegionBoundary name="Guide reader">
-        <Reader {...props} />
-      </RegionBoundary>
+      <LineFeedbackToolsProvider value={lineFeedbackTools}>
+        <RegionBoundary name="Guide reader">
+          <Reader {...props} />
+        </RegionBoundary>
+      </LineFeedbackToolsProvider>
     </ReviewWorkerPoolProvider>
   );
 }

@@ -75,7 +75,10 @@ async function ask(thread: string): Promise<string> {
 async function measure(field: Locator) {
   return field.evaluate((el) => {
     const box = el.getBoundingClientRect();
-    const mark = el.parentElement!.querySelector<HTMLElement>('[data-question-control]')!.getBoundingClientRect();
+    // The row holds the mark; the field sits in a box of its own there, with the host's tools (the Inbox's mic).
+    let row = el.parentElement!;
+    while (!row.querySelector(':scope > [data-question-control]')) row = row.parentElement!;
+    const mark = row.querySelector<HTMLElement>(':scope > [data-question-control]')!.getBoundingClientRect();
     const style = getComputedStyle(el);
     return {
       height: box.height,

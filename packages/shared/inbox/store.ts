@@ -125,7 +125,7 @@ import {
   type InboxQuestionState,
   type InboxRowDelivery,
 } from "@plannotator/core/inbox-types";
-import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads } from "@plannotator/core/inbox-types";
+import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads, inboxRuntimeNamed } from "@plannotator/core/inbox-types";
 import { inboxListSections, inboxRowDraftOnly, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
 import { sameInboxSend } from "./send-same";
@@ -2686,7 +2686,8 @@ export class InboxStore {
       // One session too when a script's post started the thread (`inboxScriptAuthor`; it has no session of its own):
       // the window draws that session, not the script, once it took the thread over (packages/inbox/scriptAuthor.ts).
       ...(participants.length > 1 || (participants.length === 1 && inboxScriptAuthor(root.author)) ? { participants } : {}),
-      ...(participants.length > 1 && lastAgent?.author.kind === "agent" ? { last_agent: { host: lastAgent.author.host, ...(lastAgent.author.name ? { name: lastAgent.author.name } : {}) } } : {}),
+      // With one agent too when its name is not its host's ("Oh My Pi" on a `pi` session): the held line names it so.
+      ...(lastAgent?.author.kind === "agent" && (participants.length > 1 || inboxRuntimeNamed(lastAgent.author.host, lastAgent.author.name)) ? { last_agent: { host: lastAgent.author.host, ...(lastAgent.author.name ? { name: lastAgent.author.name } : {}) } } : {}),
       // What the Stopped / Holds up badge holds (approval "inbox-row-badges"): the window's hover card.
       ...(waits.length > 0 ? { waits } : {}),
     };

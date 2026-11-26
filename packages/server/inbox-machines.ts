@@ -27,7 +27,7 @@
 
 import { INBOX_LINKED_MARKS, inboxPullUrlOfKey, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead, type InboxSentFrom, type InboxTagColours } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { InboxError } from "@plannotator/shared/inbox/schema";
+import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
 import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
@@ -518,8 +518,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const outbox = InboxOutbox.open(context.dataDir, context.now);
   const peers = new Map<string, PeerLink>();
   const machinePulls = createMachinePulls({ peers: () => peers.values() });
-  // Branch reviews: each linked machine's reported branches, read when Reviews is (inbox-machine-branches.ts).
-  const machineBranches = createMachineBranches({ peers: () => peers.values() });
+  // Branch reviews: each linked machine's reported branches, read when Reviews is, kept past a restart (inbox-machine-branches.ts).
+  const machineBranches = createMachineBranches({ peers: () => peers.values(), dir: inboxDir(context.dataDir), linked: () => links.list().map((link) => link.id) });
   // Ship: each linked machine's merged ships, read when Reviews is (inbox-machine-ships.ts).
   const machineShips = createMachineShips({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */

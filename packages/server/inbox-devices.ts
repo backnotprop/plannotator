@@ -291,7 +291,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^threads\/([^/]+)\/canvas\/files$/, window: (m) => `/api/inbox/threads/${m[1]}/canvas/files`, machineOnly: true, raw: { max: 64 * 1024 * 1024, code: "canvas_files_too_large", what: "A canvas's pictures" } },
   { method: "POST", route: /^threads\/([^/]+)\/canvas\/picture$/, window: (m) => `/api/inbox/threads/${m[1]}/canvas/picture`, machineOnly: true, raw: { max: 32 * 1024 * 1024, code: "canvas_picture_too_large", what: "A canvas's picture" } },
   { method: "POST", route: /^canvas\/jobs\/([^/]+)$/, window: (m) => `/api/inbox/canvas/jobs/${m[1]}`, machineOnly: true, raw: { max: 32 * 1024 * 1024, code: "canvas_picture_too_large", what: "A canvas's picture" } },
-  { method: "GET", route: /^pulls\/(risk|details|diff|file|repo-files|repo-file|avatar|media|media\/sizes)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
+  // `pull`: one PR for a page open on it after it left that window's board (merged or closed here): this Inbox's kept copy or the forge's answer.
+  { method: "GET", route: /^pulls\/(risk|pull|details|diff|file|repo-files|repo-file|avatar|media|media\/sizes)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   { method: "POST", route: /^pulls\/(close|reopen|merge|owner)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   // Ship (approval "inbox-ship-mode"): a ship lives on the machine of its agent's thread; a window on either ships,
   // reads and stops it there.
