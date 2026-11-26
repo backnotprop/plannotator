@@ -98,8 +98,8 @@ export function useRoutePull(key: string, model: Pick<InboxPullsAnswer, 'pulls'>
     if (!ask) return;
     const controller = new AbortController();
     // A read that found nothing new keeps the copy this page has: an unanswered read never says "gone", nor does the
-    // forge saying it has no such PR now (the page says that instead). Only "none" (the PR is not the person's to
-    // read here any more: hidden, its project removed) takes it away.
+    // forge saying it has no such PR now (the page says that instead), nor a refusal (`none`). Only an answer of no PR
+    // (`pull` null, `read`: the PR is not the person's to read here any more, hidden or its project removed) takes it away.
     const keep = (pull: InboxPull | null, as: Exclude<Got['as'], 'read'>, away?: string) => setGot((was) => ({ key, pull: pull ?? (was?.key === key ? was.pull : null), as, ...(away ? { away } : {}) }));
     readRoutePull(key, controller.signal)
       .then((answer) => {

@@ -95,11 +95,13 @@ export interface PostEndingProps {
   onMoved?: () => void;
   /** The server refused it as no longer open (`pull_closed`: merged or closed elsewhere): the host reads the PR again. */
   onClosed?: () => void;
+  /** The Post dialog went away open with a summary written and not posted (PlatformPost's `onLeft`): the host keeps it. */
+  onLeft?: (summary: string) => void;
   /** Why this person's review has no agent to go to: said on the forge's mark. */
   note?: string;
 }
 
-export function PostEnding({ pull, agent, comments: all, readComments, anchor, busy, picked, onPick, onPosted, onWent, headSha, onMoved, onClosed, note }: PostEndingProps) {
+export function PostEnding({ pull, agent, comments: all, readComments, anchor, busy, picked, onPick, onPosted, onWent, headSha, onMoved, onClosed, onLeft, note }: PostEndingProps) {
   const target = useMemo(() => {
     const listed = postablePull(pull);
     if (!listed || headSha === undefined) return listed;
@@ -273,6 +275,7 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
               onWent={onWent}
               readComments={readComments && (() => readComments().filter((c) => !sameKey || !done!.ids.has(postedSignature(c))))}
               hostReadsAgain={Boolean(onMoved)}
+              onLeft={onLeft}
               onPosted={(result) => {
                 setOpen(null);
                 // A follow-up comment after an approval still reads as the approval.

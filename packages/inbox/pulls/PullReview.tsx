@@ -502,6 +502,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
         : {};
     write({ comments: [...comments.filter((c) => c.id !== annotation.id), { ...annotation, ...read }] });
   };
+  // The Post dialog's summary when the PR merged or closed under it (PlatformPost's `onLeft`): kept as a global comment
+  // of this review, readable and copyable on the closed page, never dropped. The latest `save`: it runs as Post goes.
+  const saveNow = useRef(save);
+  saveNow.current = save;
+  const keepSummary = (summary: string) =>
+    saveNow.current({ id: `ann-summary-${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`, type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: summary, createdAt: Date.now() });
   const remove = (id: string) => {
     write({ comments: comments.filter((c) => c.id !== id) });
     // Also where another window's entry still holds it, so it does not come back.
@@ -724,8 +730,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
   // global comments do.
   // A layer that merged or closed keeps its comments, the one being written and a draft kept since (a reload too):
-  // only Post goes.
-  const keepComments = !!layer && !inboxPullIsOpen(layer);
+  // only Post goes. So does one the forge says it has no such of now (`missing`): its comments are still the person's.
+  const keepComments = !!layer && (!inboxPullIsOpen(layer) || route.missing);
   const readerComments = canDecide || canPost || keepComments ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: saveFromReader, onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
   // Open in: what is on disk in a clone of this repository, which may not be the PR's version; nothing when no clone holds the file.
@@ -1067,6 +1073,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             note={layer.mine && !canDecide ? readOnlyWords : undefined}
             headSha={postHead}
             onClosed={listed ? undefined : route.again}
+            onLeft={keepSummary}
             busy={sending || !snapshot}
             picked={picked}
             onPick={pick}

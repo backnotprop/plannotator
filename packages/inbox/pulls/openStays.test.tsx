@@ -485,6 +485,7 @@ test.skipIf(!hasDom)('the forge saying it has no such PR any more: the page stay
   await settle();
   expect(!!$('[data-pull-review-missing]')).toBe(false);
   expect(!!$('[data-review-posts]')).toBe(true);
+  await write('[data-stub-comment]', 'Cap the backoff at');
   // Its repository deleted (or the person lost access): the forge answers 404, and the server kept nothing for it.
   forgeMissing = true;
   delete serverPull[theirs.key];
@@ -497,6 +498,9 @@ test.skipIf(!hasDom)('the forge saying it has no such PR any more: the page stay
   expect(!!$('[data-pull-review-unread]')).toBe(false);
   // Only a last read now: no Post, no Approve, though the copy shown still says open.
   expect(!!$('[data-review-posts]')).toBe(false);
+  // Its comments stay the person's: the reader still takes them, the one being written too.
+  expect($('[data-stub-reader]')!.getAttribute('data-stub-takes-comments')).toBe('yes');
+  expect($<HTMLTextAreaElement>('[data-stub-comment]')!.value).toBe('Cap the backoff at');
 });
 
 test.skipIf(!hasDom)('closed elsewhere, then reopened: Closed without Post, then open with Post back, though the diff read before still said closed', async () => {
@@ -550,10 +554,16 @@ test.skipIf(!hasDom)('Approve on a held copy merged elsewhere since: refused, an
   reviewAnswer = { status: 409, body: { error: 'That pull request is no longer open.', code: 'pull_closed' } };
   await act(async () => $('[data-review-posts] [data-decision-primary]')!.click());
   await settle();
+  // The summary the person wrote for it: kept when the dialog goes with Post, as a comment of the review's own.
+  await write('[role="dialog"] textarea', 'Ship it once the retry cap lands.');
   await act(async () => dialogButton('Approve').click());
   await settle(20);
   expect(refState()).toBe('merged');
   expect(!!$('[data-review-posts]')).toBe(false);
+  expect(!!$('[role="dialog"]')).toBe(false);
+  const kept = JSON.parse(window.localStorage.getItem(`plannotator-inbox-pull-review:${held.key}:layer:${SHA}`) ?? '{"comments":[]}') as { comments: { scope?: string; text: string }[] };
+  expect(kept.comments.map((c) => [c.scope, c.text])).toEqual([['general', 'Ship it once the retry cap lands.']]);
+  expect(!!$('[aria-label="Comments, 1"]')).toBe(true);
 });
 
 test.skipIf(!hasDom)('the forge not answering and no patch of it ever read here: the diff’s own error, and no line claiming a last read', async () => {

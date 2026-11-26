@@ -23,7 +23,8 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInboxPulls, INBOX_PULLS_FRESH_MS, INBOX_PULLS_REFRESH_MS, InboxPullsError } from "./inbox-pulls";
-import { INBOX_PULLS_DEPARTED_MAX, INBOX_PULLS_DEPARTED_MS } from "./inbox-pull-departed";
+import { createDepartedPulls, INBOX_PULLS_DEPARTED_MAX, INBOX_PULLS_DEPARTED_MS } from "./inbox-pull-departed";
+import type { InboxPull } from "@plannotator/core/inbox-types";
 import { saysNotFound } from "./inbox-pull-forge";
 import { pullMissingAnswer, pullToAct, pullToActNow } from "./inbox-pull-missing";
 import { REF_RATE_LIMIT_MS } from "./ref-cards";
@@ -467,6 +468,28 @@ test("a review posted to a kept open copy asks the forge first: merged since, 40
   const listed = createInboxPulls({ run: forge().run, now: () => now });
   await listed.list(repos);
   expect(await pullToActNow(listed, keyOf(880))).toMatchObject({ number: 880 });
+});
+
+test("a PR the person hid is never written to the departed file, nor kept there once hidden", () => {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-pull-departed-hid-"));
+  try {
+    const file = join(dir, "pull-departed.json");
+    const hid = new Set<string>([keyOf(881)]);
+    const kept = createDepartedPulls({ now: () => 1_000, hidden: (key) => hid.has(key), file });
+    const pullOf = (n: number) => ({ key: keyOf(n), host: "github.com", repo: REPO, number: n, state: "open", title: `PR ${n}` }) as unknown as InboxPull;
+    const before = new Map([880, 881, 882].map((n) => [keyOf(n), pullOf(n)]));
+    kept.note(before, new Map());
+    expect(readFileSync(file, "utf8")).not.toContain(keyOf(881));
+    expect(readFileSync(file, "utf8")).toContain(keyOf(880));
+    // Hidden after it was kept: off the file at the next write.
+    hid.add(keyOf(882));
+    kept.note(new Map(), new Map());
+    expect(readFileSync(file, "utf8")).not.toContain(keyOf(882));
+    kept.put(pullOf(881));
+    expect(readFileSync(file, "utf8")).not.toContain(keyOf(881));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a 404 is read in the CLI's own shape only: a PR numbered 404 or a repository named for one is not missing", async () => {
