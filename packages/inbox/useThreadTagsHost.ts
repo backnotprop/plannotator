@@ -15,6 +15,7 @@ import type { InboxToastModel } from './components/Toast';
 import { eachRow, tagsToast } from './bulkWrites';
 import { useProjectTags } from './useProjectTags';
 import { tagWrites } from './tagWrites';
+import { tagActivity } from './tagSort';
 import type { ProjectFolder } from './api';
 
 const NO_PROJECTS: readonly ProjectFolder[] = [];
@@ -79,6 +80,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
   const shownTagId = filterTag?.id ?? routeTag;
   const tagCounts = useMemo(() => tagThreadCounts(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
   const tagWaiting = useMemo(() => tagWaitingCounts(latestSections, tagsOfRow), [latestSections, tagsOfRow]);
+  const tagLatest = useMemo(() => tagActivity(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
   // `linkedRev`: a linked machine's marks, which say whether its search takes a Tag filter, may come after the rows.
   const linkedRev = useLinkedReadsRev();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -183,6 +185,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
     : {
         tags: listTags,
         waiting: tagWaiting,
+        activity: tagLatest,
         shown: tagsShown,
         tagId: shownTagId,
         onOpen: openTag,

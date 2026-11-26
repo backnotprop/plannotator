@@ -1064,6 +1064,7 @@ const DISPLAY_OPTION_TYPES = {
   planWidth: "string",
   taterMode: "boolean",
   inputMethod: "string",
+  htmlAnnotateOnStartup: "boolean",
 } as const satisfies Record<keyof DisplayOptions, "number" | "string" | "boolean">;
 
 /**
@@ -1079,6 +1080,11 @@ export function parseDisplayOptionsConfig(value: unknown): DisplayOptions | unde
     if (typeof input[key] === type) result[key] = input[key];
   }
   return result as DisplayOptions;
+}
+
+/** Whether HTML pages and live apps start in Interact ("Start in Annotate mode" turned off). */
+export function resolveHtmlStartsInInteract(config: PlannotatorConfig): boolean {
+  return parseDisplayOptionsConfig(config.displayOptions)?.htmlAnnotateOnStartup === false;
 }
 
 /** PLANNOTATOR_PACKAGE_LOOKUP: `0` / `false` / `off` / `disabled` is a hard off; anything else decides nothing. */

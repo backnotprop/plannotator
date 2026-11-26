@@ -62,7 +62,7 @@ import {
   type AnnotateClientLeaseStreamSession,
 } from "@plannotator/shared/annotate-client-lease";
 import { createAnnotateDecisionSettler, isNothingToSendFeedbackBody } from "@plannotator/shared/annotate-decision";
-import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, saveConfig, detectGitUser, getServerConfig, parseDisplayOptionsConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveAnnotateHistory, resolveFeedbackHistory } from "./config";
+import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, saveConfig, detectGitUser, getServerConfig, parseDisplayOptionsConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveAnnotateHistory, resolveFeedbackHistory, resolveHtmlStartsInInteract } from "./config";
 import { getAutoUpdateAdvert, getUpdateAdvert, handleUpdateRoute } from "./auto-update";
 import { appendFeedbackRecord, type FeedbackDecision, type FeedbackSurface } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
@@ -1764,6 +1764,8 @@ export async function startAnnotateServer(
           annotationCss: liveApp.annotationCss,
           bridgeBootstrap: liveApp.bridgeBootstrap,
           bridgeScript: liveApp.bridgeScript,
+          // Each page load starts in the mode Settings → Display names.
+          startInteract: resolveHtmlStartsInInteract(loadConfig()),
         }),
       });
     } catch (error) {

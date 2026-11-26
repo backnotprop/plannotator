@@ -258,6 +258,7 @@
   "inbox-tag-across-computers.spec.ts": 120,
   "inbox-tag-colors.spec.ts": 4,
   "inbox-tag-handoff.spec.ts": 42,
+  "inbox-tags-sort.spec.ts": 11,
   "inbox-tags.spec.ts": 30,
   "inbox-tailnet-owner.spec.ts": 65,
   "inbox-tailscale.spec.ts": 8,

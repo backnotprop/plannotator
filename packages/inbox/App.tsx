@@ -2820,12 +2820,10 @@ function Inbox() {
 
   /**
    * Mark unread (the owner's ask, 2026-10-31; markRead.ts `canMarkUnread`):
-   * the thread's latest agent message is new again, so its row is New and
-   * bold, as if the person had not opened it. Nothing is sent to the agent,
-   * and a Mark read stands, so Move back still reopens what it closed. From
-   * the open thread the thread closes, as a mail app's Mark unread does: left
-   * open, its next look would read it again, and the list shows the row back
-   * in New. Undo is a look capped at the message Mark unread took back, so it
+   * the latest agent message is new again: the row is bold in New (or, with questions waiting, in their group, its
+   * questions as they were), as if never opened. Nothing is sent to the agent, and a Mark read stands, so Move back
+   * still reopens what it closed. From the open thread the thread closes, as a mail app's Mark unread does: left
+   * open, its next look would read it again, and the list shows the row where it now goes. Undo is a look capped at the message Mark unread took back, so it
    * puts back exactly what was there and leaves anything that arrived since
    * new. When the server wrote nothing (a stale row: the thread was new
    * already, an agent having written there behind "N new") the row on screen
@@ -2872,14 +2870,14 @@ function Inbox() {
       return;
     }
     await afterWrite([threadId]);
-    // The open thread closes and the list settles with its row in New; any other row is bold where it is (R7).
+    // The open thread closes and the list settles with its row in New (or its questions' group); any other is bold where it is (R7).
     const wasOpen = routeRef.current.thread === threadId;
     if (wasOpen) {
       if (fromCard) backToCard();
       else close({ ...routeRef.current, thread: null, file: null });
     }
     showToast({
-      ...markUnreadToast(before ?? { subject: null }, wasOpen),
+      ...markUnreadToast(before ?? { subject: null }, wasOpen && written.thread.section === 'new'),
       icon: 'unread',
       onUndo: () => {
         dismissToast();
