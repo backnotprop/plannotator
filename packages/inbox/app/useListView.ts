@@ -16,6 +16,8 @@ import { filterTagRows } from '../threadTags';
 import { withLiveTagPicks } from '../listFilterTags';
 import { routineHold, useRoutineThreads } from '../listFilterRoutines';
 import { useRecentActivity } from '../listFilterRecent';
+import { leaveRecentView, recentViewSections, recentViewShown, useRecentView, useRecentViewLeaves } from '../listRecentView';
+import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
 import { useRecentActs } from '../recentActs';
 import { listCovered } from './focus';
 import type { ListSort } from '../listView';
@@ -124,13 +126,16 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const routineTest = routines.state === 'ready' ? routines.test : undefined;
   /** A saved Routine pick while the routines are not read: the list waits, drawing no row and no empty words. */
   const listHeld = routineHold(routines, listFilterApplied);
-  // Recent activity (listFilterRecent.ts): one list, newest first by when the person last acted, its rows and places
-  // as of the last whole sort.
-  // Back to a list the thread covered sorts it whole too (`useCoveredBacks`).
-  const recent = useRecentActivity(listFilterApplied.recent, listSort, route.page === 'inbox' ? (route.thread ?? null) : null, listCovered);
+  // Recent activity, a view of this list (listRecentView.ts; not a filter, kept nowhere): one list, newest first by
+  // when the person last acted (listFilterRecent.ts), within the filter's picks, its rows and places as of the last
+  // whole sort. Leaving this list ends it. Back to a list the thread covered sorts it whole too (`useCoveredBacks`).
+  const viewPlace = listPlaceOf(route);
+  useRecentViewLeaves(viewPlace);
+  const recentView = useRecentView(viewPlace);
+  const recent = useRecentActivity(recentView, listSort, route.page === 'inbox' ? (route.thread ?? null) : null, listCovered);
   const recentHeld = (listed: InboxListSection[]) => {
     const kept = filterListSections(listed, listFilterApplied, Date.now(), heldRead, filterTagsOfRow, routineTest);
-    return recent.held ? recent.held(listed, kept, Date.now()) : kept;
+    return recent.held ? recentViewSections(listed, kept, recent.held, Date.now()) : kept;
   };
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
@@ -152,13 +157,15 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
     const drawn = listShown ?? shown;
     return drawn ? filterShown(drawn) : null;
   }, [listShown, shown, filterShown]);
+  /** The filter's picks alone, before Recent activity's view (null while it is off: `listSections` is that). */
+  const pickedSections = useMemo(() => {
+    const drawn = listShown ?? shown;
+    return recentView && drawn && !listHeld ? filterListSections(filterList(drawn), listFilterApplied, Date.now(), heldRead, filterTagsOfRow, routineTest) : null;
+  }, [recentView, listShown, shown, listHeld, filterList, listFilterApplied, heldRead, filterTagsOfRow, routineTest]);
   /** The filter left no row where the list holds some (the Snoozed band aside): "No threads match". */
-  const listFilterEmpty =
-    !listHeld &&
-    pickCount(listFilterApplied) > 0 &&
-    listSections !== null &&
-    listSections.every((section) => section.id === 'snoozed' || section.threads.length === 0) &&
-    listFilterRows.some((row) => !row.snoozed);
+  const listFilterEmpty = !listHeld && pickCount(listFilterApplied) > 0 && listSections !== null && noRows(pickedSections ?? listSections) && listFilterRows.some((row) => !row.snoozed);
+  /** Recent activity's view left no row (the filter's picks did): its own words. */
+  const recentEmpty = recentView && !listHeld && !listFilterEmpty && listSections !== null && noRows(listSections);
   // The list's name: Inbox, or the project's window name (or the machine's, or the agent's); its back buttons read the same.
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : filterAgent ? filterAgent.name : filterTag ? filterTag.name : 'Inbox';
   const heldNews = shown && latest ? heldNotice(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
@@ -176,5 +183,32 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
           elsewhere: lines?.elsewhere ?? null,
         }
       : null;
-  return { listSortShown, latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags, listColours };
+  return { recentEmpty, listSortShown, latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags, listColours };
+}
+
+/** No row outside the Snoozed band. */
+const noRows = (sections: readonly InboxListSection[]) => sections.every((section) => section.id === 'snoozed' || section.threads.length === 0);
+
+/**
+ * The list on screen, for Recent activity's view (listRecentView.ts): the sidebar's project, machine, agent and tag, as
+ * App names it for the filter (its `place`); null where no Inbox list shows (another page, Reviews, a Board card's thread).
+ */
+export function listPlaceOf(route: Route): string | null {
+  return route.page === 'inbox' && !route.reviews && !route.card ? [route.project, route.machine, route.agent, route.tag].join('\n') : null;
+}
+
+/**
+ * Escape's last rung on the Inbox list (App's ladder, after an open thread closes; no shortcut of its own): Recent
+ * activity's view goes. Not while something else may own the key (a field, a menu, a dialog, a popover) or used it
+ * already. Focus on the bar's Done goes to the filter button.
+ */
+export function leaveRecentViewOnEscape(event: KeyboardEvent, route: Route): void {
+  if (event.key !== 'Escape' || !recentViewShown() || listPlaceOf(route) === null || route.thread || route.file) return;
+  if (event.defaultPrevented || isComposingKey(event) || modalOpen()) return;
+  const from = keyTarget(event);
+  if (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"], [aria-expanded="true"]'))) return;
+  event.preventDefault();
+  const column = from?.closest('[data-recent-view]') ? from.closest('.ib-listcol') : null;
+  leaveRecentView();
+  column?.querySelector<HTMLElement>('[data-list-filter]')?.focus();
 }
