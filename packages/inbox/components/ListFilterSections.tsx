@@ -63,7 +63,7 @@ const NO_PINS: ReadonlySet<string> = new Set();
 const tick = (on: boolean) => <span className="ib-pc-tick">{on && <Icon name="check" />}</span>;
 
 /** A row's label with the match drawn bold, from `labelStart` ("…" for what it drops). */
-function lit(label: string, hit: readonly [number, number] | null) {
+export function lit(label: string, hit: readonly [number, number] | null) {
   if (!hit) return label;
   const from = labelStart(label, hit);
   return (
@@ -122,9 +122,9 @@ const STOPS = '[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradi
 const isRow = (el: Element | null): el is HTMLElement => !!el && /^menuitem/.test(el.getAttribute('role') ?? '');
 const isField = (el: Element | null): el is HTMLInputElement => !!el && el.matches('input[data-list-filter-find]');
 
-/** The stop before or after `from` in the menu, wrapping at its ends as the plain menu does. */
+/** The stop before or after `from` in the menu (this one, or the list title's picker), wrapping at its ends as the plain menu does. */
 export function stepFrom(from: HTMLElement, by: 1 | -1): HTMLElement | null {
-  const menu = from.closest('[data-list-filter-menu]');
+  const menu = from.closest('[data-list-filter-menu], [data-place-menu]');
   if (!menu) return null;
   const stops = [...menu.querySelectorAll<HTMLElement>(STOPS)];
   const at = stops.indexOf(from);
@@ -264,7 +264,8 @@ export function bringUp(input: HTMLInputElement, viewport: ViewportLike | null =
   return stop;
 }
 
-function FindField({
+/** A find field in a menu: the filter's long sections, and the list title's picker (ListPlacePicker.tsx). */
+export function FindField({
   section,
   words,
   value,
