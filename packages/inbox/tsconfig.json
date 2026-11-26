@@ -46,6 +46,8 @@
     "guide/useSemDiffClient.ts",
     "guide/renderedFiles.tsx",
     "guide/useSemDiffClient.test.tsx",
+    // Renders guide/useSemDiffClient.ts (excluded above) to prove config.json's "Semantic changes" switch reaches it.
+    "reviewAnalysis.test.tsx",
     "guide/ReviewKeys.tsx",
     "guide/reviewWalk.ts",
     "guide/reviewKeys.test.tsx",
