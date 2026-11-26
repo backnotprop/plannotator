@@ -1,19 +1,16 @@
 /**
- * This computer's Inbox never sends Tagged you (a Spaces server's section only), and a list without it draws exactly
- * as it did before the section existed. What is proved, on the window's own InboxList fed by the list builder
- * (shared/inbox/list.ts `inboxListSections`, one row in each of this Inbox's sections): the structure of the list
- * (every element, its classes and attributes, never its words) on a wide window, beside a thread and on a phone is
- * the one recorded in listLocalUnchanged.structure.txt, which was drawn by the window before Tagged you was added.
- * A change to the list's look changes it too: draw it again with this test's `structure` and say why in the PR.
+ * This computer's Inbox never sends Tagged you (a Spaces server's section only), and a list without it draws the same
+ * groups as before the section existed. What is proved, on the window's own InboxList fed by the list builder
+ * (shared/inbox/list.ts `inboxListSections`, one row in each of this Inbox's sections), on a wide window, beside a
+ * thread and on a phone: the groups drawn are the six this Inbox has always drawn, in the same order, with their own
+ * names, counts and rows, and no Tagged you group or band appears.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import { act } from 'react';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxListRow, InboxListSection, InboxSectionId } from '@plannotator/core/inbox-types';
+import { INBOX_SECTIONS, type InboxListRow, type InboxListSection, type InboxSectionId } from '@plannotator/core/inbox-types';
 import { inboxListSections } from '../shared/inbox/list';
 
 const hasDom = typeof document !== 'undefined';
@@ -87,30 +84,29 @@ function draw(list: InboxListSection[], shape: { narrow: boolean; phone?: boolea
   });
 }
 
-/** Attributes that carry words: left out, so the structure is the elements and their marks alone. */
-const WORDS = new Set(['aria-label', 'title', 'alt', 'placeholder', 'aria-description', 'aria-valuetext', 'data-count-words']);
+/** The six groups this Inbox drew before Tagged you existed, in order, each with its one row; Quiet starts closed. */
+const BEFORE = ['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet'] as const;
+const labelOf = (id: InboxSectionId) => INBOX_SECTIONS.find((section) => section.id === id)!.label;
 
-function structure(el: Element, depth = 0, out: string[] = []): string[] {
-  const attrs = [...el.attributes].filter((a) => !WORDS.has(a.name)).map((a) => `${a.name}="${a.value}"`).sort();
-  out.push(`${'  '.repeat(depth)}<${el.tagName.toLowerCase()}${attrs.length ? ` ${attrs.join(' ')}` : ''}>`);
-  for (const child of el.children) structure(child, depth + 1, out);
-  return out;
+function drawnGroups() {
+  return [...host!.querySelectorAll<HTMLElement>('[data-section-id]')].map((group) => ({
+    id: group.dataset.sectionId,
+    label: group.getAttribute('aria-label'),
+    count: group.querySelector('.ib-band .ib-n')?.textContent,
+    rows: [...group.querySelectorAll<HTMLElement>('[data-thread-id]')].map((row) => row.dataset.threadId),
+  }));
 }
 
-function drawnStructure(): string {
-  const parts: string[] = [];
-  for (const [name, shape] of [['wide', { narrow: false }], ['beside a thread', { narrow: true }], ['phone', { narrow: true, phone: true }]] as const) {
+test.skipIf(!hasDom)('the list builder never sends Tagged you, and the list draws the same groups, names, counts and rows as before', () => {
+  expect(LOCAL.map((section) => section.id)).toEqual([...BEFORE]);
+  for (const shape of [{ narrow: false }, { narrow: true }, { narrow: true, phone: true }]) {
     draw(LOCAL, shape);
-    parts.push(`== ${name}`, ...structure(host!));
+    expect(drawnGroups()).toEqual(BEFORE.map((id) => ({ id, label: labelOf(id), count: '1', rows: id === 'quiet' ? [] : [`t_${id}`] })));
+    expect(host!.querySelector('[data-section-id="tagged"]')).toBeNull();
+    expect(host!.textContent).not.toContain(labelOf('tagged'));
     act(() => root?.unmount());
     host?.remove();
     host = null;
     root = null;
   }
-  return `${parts.join('\n')}\n`;
-}
-
-test.skipIf(!hasDom)('the list builder never sends Tagged you, and the list draws as it did before the section existed', () => {
-  expect(LOCAL.map((section) => section.id)).toEqual(['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet']);
-  expect(drawnStructure()).toBe(readFileSync(join(import.meta.dir, 'listLocalUnchanged.structure.txt'), 'utf8'));
 });

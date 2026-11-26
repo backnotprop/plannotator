@@ -628,9 +628,25 @@ final class ParityTests: XCTestCase {
     row.unseen = 0
     row.answeredNotSent = false
     XCTAssertTrue(RowOffers.waitsOnPerson(row))
-    let waiting = InboxListSection(id: .waiting, label: "Waiting on you", threads: [])
-    let before = ListRules.waitingCount([waiting])
-    XCTAssertEqual(ListRules.waitingCount([waiting, InboxListSection(id: .tagged, label: "Tagged you", threads: [row])]), before + 1)
+
+    // A Spaces server's answer, drawn as the phone draws any read: the row is shown fourth and counted, never dropped.
+    let local = StandInData.list(threads: StandInData.threads(now: Date()), unread: [], session: "s", cursor: 1, version: "1")
+    let before = ListView.of(local)
+    var spaces = local
+    row.threadId = ThreadID("t_tagged_by_ada")
+    row.resolvedAt = nil
+    row.snoozed = nil
+    row.priority = nil
+    spaces.sections.insert(InboxListSection(id: .tagged, label: try XCTUnwrap(Words.sections["tagged"]), threads: [row]), at: 3)
+    let view = ListView.of(spaces)
+    XCTAssertFalse(before.groups.contains { $0.id == .tagged }, "a computer's Inbox never sends Tagged you")
+    let sections = view.groups.filter { $0.id != .priority && $0.id != .snoozed }
+    XCTAssertEqual(sections.map(\.id), [.stopped, .holding, .waiting, .tagged, .new, .sent, .quiet])
+    XCTAssertEqual(sections[3].label, "Tagged you")
+    XCTAssertEqual(sections[3].threads.map(\.threadId), [row.threadId])
+    XCTAssertEqual(view.group(of: row.threadId), .tagged)
+    XCTAssertEqual(view.waiting, before.waiting + 1)
+    XCTAssertTrue(ListFolds().isOpen(.tagged))
   }
 
   func testTheButtonAtAThreadsFootCountsOnlyWhatIsNotAnsweredYet() throws {
