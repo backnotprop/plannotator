@@ -62,7 +62,7 @@ describe("claude agents --json --all past 64 KiB", () => {
       }).concat([{ id: "f08bbdb5", cwd: "/p", kind: "bg", startedAt: 1, sessionId: "f08bbdb5-0000-4000-8000-000000000000", name: "waits", state: "blocked", status: "waiting", waitingFor: "permission prompt" } as never]),
     );
 
-  test("the real spawn keeps all of it: every entry parses and the last one's permission prompt reads", async () => {
+  test.skipIf(process.platform === "win32")("the real spawn keeps all of it: every entry parses and the last one's permission prompt reads", async () => {
     const root = mkdtempSync(join(tmpdir(), "claude-agents-big-"));
     dirs.push(root);
     const bin = join(root, "bin");
