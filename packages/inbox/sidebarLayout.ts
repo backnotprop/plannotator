@@ -37,11 +37,19 @@ export function parseSidebarLayoutCookie(raw: string | null): InboxSidebarLayout
   return inboxSidebarRead({ top: list(top), bottom: list(bottom), hidden: list(hidden) });
 }
 
-/** Off capabilities' items: never in the cookie. Plans until this page hears it is on (plans/store.ts). */
-const OFF_BY_DEFAULT: readonly InboxSidebarItem[] = ['plans'];
+/**
+ * Off capabilities' items: never in the cookie. Plans until this page hears it is on (plans/store.ts), Grid until it
+ * hears Grid is on (grid/gridOn.ts).
+ */
+const OFF_BY_DEFAULT: readonly InboxSidebarItem[] = ['plans', 'grid'];
 let unsaved: ReadonlySet<InboxSidebarItem> = new Set(OFF_BY_DEFAULT);
-export function setSidebarUnsaved(ids: readonly InboxSidebarItem[]): void {
-  unsaved = new Set(ids);
+/** One capability's item is left out of the cookie (`off`), or kept in it again. */
+export function setSidebarUnsaved(id: InboxSidebarItem, off: boolean): void {
+  if (unsaved.has(id) === off) return;
+  const next = new Set(unsaved);
+  if (off) next.add(id);
+  else next.delete(id);
+  unsaved = next;
 }
 const forSaving = (layout: InboxSidebarLayout): InboxSidebarLayout => {
   if (unsaved.size === 0) return layout;

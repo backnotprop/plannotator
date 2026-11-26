@@ -116,7 +116,7 @@ const PATHS = {
   arrowUpRight: 'm4.5 19.5 15-15m0 0H8.25m11.25 0v11.25',
   // The tour's "Connect agents next →" (Heroicons outline arrow-right).
   arrowRight: 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3',
-  // The question sound (Heroicons outline): play, and cursor-arrow-rays for "click once in this tab".
+  // The Inbox's sound (Heroicons outline): play, and cursor-arrow-rays for "click once in this tab".
   film: 'M6 5.25h12a2.25 2.25 0 0 1 2.25 2.25v9a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25v-9A2.25 2.25 0 0 1 6 5.25ZM7.5 5.25v13.5M16.5 5.25v13.5M3.75 9.75H7.5M3.75 14.25H7.5M16.5 9.75h3.75M16.5 14.25h3.75',
   /** The onboarding tour's tag (Heroicons outline "map"). */
   map: 'M9 6.75V15m6-6v8.25m.503 3.498 4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 0 0-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0Z',
@@ -155,6 +155,8 @@ const PATHS = {
   // The "Sound off" toast (Heroicons outline speaker-x-mark).
   mute: 'M17.25 9.75 19.5 12m0 0 2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6 4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z',
   forward: 'm15 15 6-6m0 0-6-6m6 6H9a6 6 0 0 0 0 12h3',
+  // A message's New thread from this message (Heroicons outline arrow-right-start-on-rectangle): moved out to another place.
+  moveOut: 'M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9',
   // Folded messages (Heroicons outline rectangle-stack): the "N earlier messages" fold.
   stack:
     'M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122',
@@ -187,6 +189,8 @@ const PATHS = {
   terminal: 'm6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z',
   // The Board (Heroicons outline view-columns), New card (plus), a card the person made (user), Icebox (a snowflake, as the mock: Lucide snowflake).
   board: 'M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125Z',
+  /** Grid (approval "inbox-agent-grid"): Heroicons outline squares-2x2. */
+  grid: 'M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z',
   /** A routine: a rounded play mark, in the outline style. */
   scheduled: 'M6 6Q6 4 7.74 4.99L18.26 11.01Q20 12 18.26 12.99L7.74 19.01Q6 20 6 18Z',
   plus: 'M12 4.5v15m7.5-7.5h-15',

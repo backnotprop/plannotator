@@ -26,6 +26,12 @@ describe('markReadToast: the approved words', () => {
     expect(markReadToast(row({ resolved_at: '2026-10-14T00:00:00Z' }), 'open')).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: 'Goes back to Archived', warn: false });
   });
 
+  test("the open thread while its routine's run goes: it stays in New until the run ends, so no move is promised", () => {
+    expect(markReadToast(row({ scheduled_running: true }), 'open')).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: '“Invoice list layout”', warn: false });
+    // An archived thread's run leaves it archived: it still goes back there.
+    expect(markReadToast(row({ scheduled_running: true, resolved_at: '2026-10-14T00:00:00Z' }), 'open').detail).toBe('Goes back to Archived');
+  });
+
   test('a row with no thread open: where it went, and the subject that says which', () => {
     expect(markReadToast(row(), 'list')).toEqual({ lead: 'Moved to Quiet', detail: '“Invoice list layout”', warn: false });
     expect(markReadToast(row({ resolved_at: '2026-10-14T00:00:00Z' }), 'list')).toEqual({ lead: 'Back in Archived', detail: '“Invoice list layout”', warn: false });
@@ -389,28 +395,80 @@ test.skipIf(!hasDom)('a phone toast sits above a full-screen file\'s bar, and mo
   delete (window as { innerHeight?: number }).innerHeight;
 });
 
-test.skipIf(!hasDom)("a phone toast sits above a Shape board's dock in its thread, whose foot is hidden under the board", () => {
+// A file full screen on a phone with its Comment / Reply card open (iPhone 15 and SE widths, as drawn there): "Added to
+// your reply" goes above the card, never over its tabs; minimized, above its pill. A fixed 148 px covered the tabs.
+for (const phone of [
+  { width: 393, height: 852, card: { left: 8, top: 644, width: 377, height: 200 }, tabsTop: 649 },
+  { width: 320, height: 568, card: { left: 8, top: 352, width: 304, height: 208 }, tabsTop: 357 },
+]) {
+  test.skipIf(!hasDom)(`a phone toast at ${phone.width} px sits above a full-screen file's Comment / Reply card and never over its tabs`, () => {
+    phoneWindow(true);
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: phone.height });
+    const page = document.createElement('div');
+    document.body.appendChild(page);
+    host = page;
+    const view = document.createElement('section');
+    view.className = 'ib-view ib-fullview ib-phone';
+    const card = document.createElement('div');
+    card.className = 'ib-fcomp ib-mode-reply ib-phone';
+    boxAt(card, phone.card.left, phone.card.top, phone.card.width, phone.card.height);
+    view.appendChild(card);
+    page.appendChild(view);
+    const toast = show({ icon: 'check', lead: 'Markup added to your reply', phoneLead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
+    const bottom = parseFloat(toast.style.bottom);
+    // The toast's lowest pixel, 44 px tall at the least: above the card's top, so above the tabs inside it.
+    const toastBottomEdge = phone.height - bottom;
+    expect(toastBottomEdge).toBeLessThanOrEqual(phone.card.top);
+    expect(toastBottomEdge).toBeLessThan(phone.tabsTop);
+    expect(toastBottomEdge - 44).toBeGreaterThan(0);
+    delete (window as { innerHeight?: number }).innerHeight;
+  });
+}
+
+test.skipIf(!hasDom)("a phone toast ignores a card gathered into the corner (from the moment the tools tuck, its box kept), and moves when they come back", async () => {
   phoneWindow(true);
-  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 852 });
   const page = document.createElement('div');
   document.body.appendChild(page);
   host = page;
-  // The thread's foot is display:none while the board shows (it measures 0): the board's dock (y 790) is the floor.
-  const pane = document.createElement('section');
-  pane.className = 'ib-pane';
-  const foot = document.createElement('div');
-  foot.className = 'ib-pfoot';
-  boxAt(foot, 0, 0, 0, 0);
-  const board = document.createElement('section');
-  board.setAttribute('data-shape-layer', '');
+  const view = document.createElement('section');
+  view.className = 'ib-view ib-fullview ib-phone';
+  view.setAttribute('data-tools', 'tucked');
   const dock = document.createElement('div');
-  dock.className = 'shp-dock';
-  boxAt(dock, 55, 790, 280, 42);
-  board.appendChild(dock);
-  pane.append(foot, board);
-  page.appendChild(pane);
+  dock.className = 'ib-fvdock-phone';
+  const handle = document.createElement('div');
+  handle.className = 'ib-fvhandle';
+  boxAt(handle, 330, 790, 48, 48);
+  dock.appendChild(handle);
+  const card = document.createElement('div');
+  card.className = 'ib-fcomp ib-mode-reply ib-phone';
+  boxAt(card, 8, 644, 377, 200);
+  view.append(dock, card);
+  page.appendChild(view);
   const toast = show({ icon: 'check', lead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
-  expect(toast.style.bottom).toBe('62px');
+  // Only the corner control is on screen: the toast sits over it, not 200 px up over an invisible card.
+  expect(toast.style.bottom).toBe(`${852 - 790 + 8}px`);
+  // The tools come back (an attribute, no node added): the card is measured again.
+  act(() => view.setAttribute('data-tools', 'shown'));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(toast.style.bottom).toBe(`${852 - 644 + 8}px`);
+  delete (window as { innerHeight?: number }).innerHeight;
+});
+
+test.skipIf(!hasDom)("a phone toast sits above a full-screen file's minimized card (its pill), not over it", () => {
+  phoneWindow(true);
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 852 });
+  const page = document.createElement('div');
+  document.body.appendChild(page);
+  host = page;
+  const wrap = document.createElement('div');
+  wrap.className = 'ib-fcomp-pillwrap ib-phone';
+  boxAt(wrap, 12, 732, 52, 52);
+  page.appendChild(wrap);
+  const toast = show({ icon: 'check', lead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
+  expect(toast.style.bottom).toBe(`${852 - 732 + 8}px`);
   delete (window as { innerHeight?: number }).innerHeight;
 });
 

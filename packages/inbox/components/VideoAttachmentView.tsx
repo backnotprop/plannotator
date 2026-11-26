@@ -13,12 +13,15 @@ import { Tip } from './Tip';
 import { FullScreenCommentBin, FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
 import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
-import { markupWords, noteOnto } from '../markup';
+import { addedToComment, markupOf, markupWords, noteOnto } from '../markup';
+import { useCommentFiles } from '../commentFiles';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
 import { useRowDraft } from '../fileCommentDrafts';
 import { markImageComposer } from '../pageMarks';
 import { AudioScrub, useAudioPeaks } from './AudioPlayer';
 import { PlaybackSpeed, readPlaybackRate, writePlaybackRate } from './PlaybackSpeed';
+import { useTouchPhone } from '../phone';
+import { InboxComposerField } from './ComposerField';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -130,17 +133,36 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const [rate, setRate] = useState(readPlaybackRate);
   // Words, the pinned moment, its frame and a drawing the row held when this file last closed: back in it, and
   // read again as it closes.
-  const waiting = useRowDraft(() => (readOnly || sentWords.current === text ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null }));
+  const waiting = useRowDraft(() => {
+    const kept = files.kept();
+    const late = files.flying();
+    return readOnly || (sentWords.current === text && kept.length === 0 && late.length === 0) ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null, files: kept, late };
+  });
   const [text, setText] = useState(waiting?.text ?? '');
   const [pinned, setPinned] = useState<number | null>(waiting?.time ?? null);
   const [frame, setFrame] = useState<Frame | null>(() => (waiting?.frame ? { blob: waiting.frame, url: URL.createObjectURL(waiting.frame) } : null));
   const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
+  // Pictures and files added to the comment (the reply box's paperclip, paste and drop): they go with its words.
+  const textNow = useRef(text);
+  textNow.current = text;
+  const files = useCommentFiles({
+    initial: waiting?.files,
+    late: waiting?.late,
+    phone,
+    inCard: fullComposer !== null,
+    field: () => textRef.current,
+    text: { get value() { return textNow.current; }, set: setText },
+  });
   /** The row's words as a save took them: the file closing before the save answers (and the row clears) keeps no draft of them. */
   const sentWords = useRef<string | null>(null);
   const sendRow = async (annotation: Annotation) => {
     sentWords.current = text;
+    const back = files.sending(annotation.images);
     const ok = await onSave(annotation);
-    if (!ok) sentWords.current = null;
+    if (!ok) {
+      sentWords.current = null;
+      back();
+    }
     return ok;
   };
   // The drawing the ✓ just added to the reply: its comment, for a note, a redraw or ×.
@@ -155,6 +177,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     if (kept && !keptNow) setKept(null);
   }, [kept, keptNow]);
   const [annotating, setAnnotating] = useState(false);
+  const touchPhone = useTouchPhone();
   useEffect(() => {
     if (annotating) acceptable.current = true;
   }, [annotating]);
@@ -249,17 +272,23 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     return next;
   }, [pinned, current, replaceFrame, audio]);
 
-  const reset = () => {
+  /**
+   * The row starts over; its added files go too unless `keepFiles` (they did not ride the comment just saved): then
+   * a phone's row stays open with them, as the row beside the thread does, so no file waits out of sight.
+   */
+  const reset = (keepFiles = false) => {
     setText('');
     setPinned(null);
     setMarkup(null);
     setKept(null);
     replaceFrame(null);
+    if (keepFiles) return;
     setComposing(false);
+    files.clear();
   };
 
   const shownTime = pinned ?? current;
-  const canSave = !saving && (text.trim() !== '' || markup !== null);
+  const canSave = !saving && !files.uploading && (text.trim() !== '' || markup !== null || files.ready > 0);
 
   /** Take the added drawing out of the reply (its × or the toast's Undo). */
   const removeKept = (id: string) => {
@@ -279,18 +308,18 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     const redraw = kept && keptNow ? keptNow : null;
     const time = redraw && kept ? kept.time : pinned ?? videoTimeOf(videoRef.current?.currentTime ?? current);
     const id = redraw?.id ?? newId();
-    const ok = await sendRow(
-      redraw
-        ? ({ ...redraw, text: noteOnto(redraw, words), images: [image] } as Annotation)
-        : videoCommentAnnotation({ id, name: attachment.name, time, text: markupWords(words, true), frame: image }),
-    );
+    // Pictures and files added in the row go with the words typed (with none, they wait for the note).
+    const added = words && !files.uploading ? files.images() : [];
+    const made = redraw ? ({ ...redraw, text: noteOnto(redraw, words), images: [image, ...addedToComment(redraw)] } as Annotation) : videoCommentAnnotation({ id, name: attachment.name, time, text: markupWords(words, true), frame: image });
+    const ok = await sendRow(added.length > 0 ? { ...made, images: [...(made.images ?? []), ...added] } : made);
     if (!ok) {
       // Not saved (the error shows): the drawing waits in the row for Comment, as before.
       setMarkup(image);
       return;
     }
     setMarkup(null);
-    if (words) reset();
+    // Files still uploading did not go with the words: they stay in the row for the next comment.
+    if (words) reset(added.length === 0 && (files.uploading || files.ready > 0));
     else {
       setText('');
       setKept({ id, image, time });
@@ -306,7 +335,9 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     if (kept && keptNow) {
       setSaving(true);
       // (A redraw whose save failed waits as `markup`: it goes with the note.)
-      const ok = await sendRow({ ...keptNow, text: noteOnto(keptNow, text), ...(markup ? { images: [markup] } : {}) } as Annotation);
+      const added = files.images();
+      const images = [...(markup ? [markup, ...addedToComment(keptNow)] : (keptNow.images ?? [])), ...added];
+      const ok = await sendRow({ ...keptNow, text: noteOnto(keptNow, text), ...(markup || added.length > 0 ? { images } : {}) } as Annotation);
       setSaving(false);
       if (ok) reset();
       return;
@@ -323,7 +354,9 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
         onError(cause instanceof InboxApiError ? `The frame was not kept: ${cause.message}` : 'The frame was not kept; the comment was saved without it.');
       }
     }
-    const ok = await sendRow(videoCommentAnnotation({ id: newId(), name: attachment.name, time, text: markupWords(text, markup !== null), frame: image }));
+    const made = videoCommentAnnotation({ id: newId(), name: attachment.name, time, text: markupWords(text, markup !== null), frame: image });
+    const added = files.images();
+    const ok = await sendRow(added.length > 0 ? { ...made, images: [...(made.images ?? []), ...added] } : made);
     setSaving(false);
     if (ok) reset();
   };
@@ -382,7 +415,9 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   // The comment row: under the film beside the thread (a phone opens it from "Comment at"), inside the
   // full-screen composer's Comment tab in full screen.
   const commentCard = (
-    <div className="ib-ccard">
+    <div className="ib-ccard" onPaste={files.onPaste} {...files.drop?.handlers}>
+      {files.tiles}
+      {files.dropTarget}
       {chip}
       {kept ? (
         <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} wide />
@@ -401,38 +436,42 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           </Tip>
         )
       )}
-      <textarea
-        ref={textRef}
-        className="ib-ta"
-        rows={1}
-        value={text}
-        placeholder={kept ? 'Note (optional)' : `Comment at ${formatInboxVideoTime(shownTime)}…`}
-        aria-label={kept ? `A note with your drawing at ${formatInboxVideoTime(kept.time)}` : `Comment on ${attachment.name} at ${formatInboxVideoTime(shownTime)}`}
-        onChange={(event) => {
-          const value = event.target.value;
-          setText(value);
-          // Typing pauses the film and pins the moment; clearing the words lets the moment follow the film again
-          // (a phone's row opened from "Comment at" keeps its moment until Cancel; full screen's composer has no
-          // Cancel, so there clearing the words lets go of it, and the next moment is pinned as before).
-          if (value.trim() !== '' && pinned === null) void pin();
-          else if (value.trim() === '' && !markup && !kept && (!phone || fullComposer)) {
-            setPinned(null);
-            replaceFrame(null);
-          }
-        }}
-        onFocus={() => {
-          // A phone in full screen's composer: a tap in the comment field is "Comment at" (that button is gone
-          // there), so the film pauses and the moment pins as the field takes focus, not at the first keystroke.
-          if (phone && fullComposer && pinned === null && !kept && !markup) void pin();
-        }}
-        onKeyDown={(event) => {
-          if (isCommentSubmitKey(event, enterSavesComment)) {
-            event.preventDefault();
-            event.stopPropagation();
-            void submit();
-          }
-        }}
-      />
+      {/* The reply's field (`/` and `$` skills), at the row's one-line size (inbox.css `.ib-crowfield`). */}
+      <div className="ib-fcomp-field ib-crowfield">
+        <InboxComposerField
+          textareaRef={textRef}
+          rows={1}
+          value={text}
+          placeholder={kept ? 'Note (optional)' : `Comment at ${formatInboxVideoTime(shownTime)}…`}
+          ariaLabel={kept ? `A note with your drawing at ${formatInboxVideoTime(kept.time)}` : `Comment on ${attachment.name} at ${formatInboxVideoTime(shownTime)}`}
+          destination="your comment"
+          // An open skill list takes Escape first, even before a query is typed; the pane's Escape comes next.
+          escapeClosesMenu
+          onChange={(value) => {
+            setText(value);
+            // Typing pauses the film and pins the moment; clearing the words lets the moment follow the film again
+            // (a phone's row opened from "Comment at" keeps its moment until Cancel; full screen's composer has no
+            // Cancel, so there clearing the words lets go of it, and the next moment is pinned as before).
+            if (value.trim() !== '' && pinned === null) void pin();
+            else if (value.trim() === '' && !markup && !kept && (!phone || fullComposer)) {
+              setPinned(null);
+              replaceFrame(null);
+            }
+          }}
+          onFocus={() => {
+            // A phone in full screen's composer: a tap in the comment field is "Comment at" (that button is gone
+            // there), so the film pauses and the moment pins as the field takes focus, not at the first keystroke.
+            if (phone && fullComposer && pinned === null && !kept && !markup) void pin();
+          }}
+          onKeyDown={(event) => {
+            if (isCommentSubmitKey(event, enterSavesComment)) {
+              event.preventDefault();
+              event.stopPropagation();
+              void submit();
+            }
+          }}
+        />
+      </div>
       {!audio && (
         <Tip content="Draw on this frame (pen, arrow, circle)">
           <button type="button" className="ib-btn ib-cbtn" onClick={() => void openMarkup()} data-markup-open="" aria-label={markup || kept ? 'Redraw' : 'Mark up'}>
@@ -443,8 +482,9 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           </button>
         </Tip>
       )}
+      {files.clip}
       {phone && !fullComposer && (
-        <button type="button" className="ib-btn ib-ccancel" onClick={reset} data-video-cancel="">
+        <button type="button" className="ib-btn ib-ccancel" onClick={() => reset()} data-video-cancel="">
           Cancel
         </button>
       )}
@@ -452,6 +492,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
       <button type="button" className="ib-btn ib-pri ib-csave" onClick={() => void submit()} disabled={!canSave} data-video-comment-save="">
         {kept ? 'Add note' : 'Comment'}
       </button>
+      {files.drop?.cover}
     </div>
   );
   const composer = fullComposer ? (
@@ -499,7 +540,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
       setPlaying(true);
       // Playing on after a drawing went into the reply: the row follows the film again (the comment stays);
       // never while a redraw that failed to save waits in the row.
-      if (kept && text.trim() === '' && !markup) reset();
+      if (kept && text.trim() === '' && !markup && files.ready === 0 && !files.uploading) reset();
     },
     onPause: () => {
       setPlaying(false);
@@ -648,7 +689,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
             <div className="ib-vlbl">Comments</div>
             {sorted.map((annotation) => {
               const time = readInboxVideoTime(annotation)!;
-              const image = annotation.images?.[0];
+              const image = markupOf(annotation);
               return (
                 <button
                   key={annotation.id}
@@ -707,6 +748,8 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           isOpen={annotating && frame !== null}
           escapeCancels={DRAWING_SCREEN.escapeCancels}
           hint={DRAWING_SCREEN.hint}
+          // A touch phone draws on the frame full screen, zoomable, as on an image (ImageAttachmentView).
+          zoomable={touchPhone || undefined}
           onClose={() => {
             setAnnotating(false);
             requestAnimationFrame(() => textRef.current?.focus());

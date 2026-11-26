@@ -1434,8 +1434,13 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     const undone = await door(`messages/${news.id}/ack`, { body: { idempotency_key: "ack-2", ack: false } });
     expect(((await undone.json()) as Json).message.ack).toBeNull();
     const asking = inbox.store.sendMessage({ project_id: project.id, author, body: ask("Ship it?"), reply_to: news.id }).message;
+    // A question waits: no reaction, on that message or an earlier one.
     const open = await door(`messages/${asking.id}/ack`, { body: { idempotency_key: "ack-3" } });
     expect([open.status, ((await open.json()) as Json).code]).toEqual([409, "question_open"]);
+    // Another refusal passes through: an archived thread.
+    inbox.store.resolveThread(news.thread_id, true, "person");
+    const archived = await door(`messages/${news.id}/ack`, { body: { idempotency_key: "ack-4" } });
+    expect([archived.status, ((await archived.json()) as Json).code]).toEqual([409, "thread_resolved"]);
   });
 
   test("7.42: search, read only, with its query; a phone's fetch metadata never reaches the window's cross-site check", async () => {
@@ -1504,7 +1509,7 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "SKILL.md"), "---\nname: readback\ndescription: State the request back.\ndisable-model-invocation: true\n---\n\n# Readback\n");
       const list = (await (await door("skills")).json()) as Json;
-      expect(list.skills.map((s: Json) => [s.name, s.humanOnly])).toEqual([["readback", true]]);
+      expect(list.skills.filter((s: Json) => s.root !== "plannotator").map((s: Json) => [s.name, s.humanOnly])).toEqual([["readback", true]]);
       const content = (await (await door("skills/content?name=readback")).json()) as Json;
       expect(content.skill).toMatchObject({ name: "readback", humanOnly: true, truncated: false });
       expect(content.skill.content).toContain("# Readback");

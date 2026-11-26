@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  buildSearchIndex,
+  findMatchesInIndex,
   findReviewSearchMatches,
   getReviewSearchSideLabel,
   groupReviewSearchMatches,
@@ -85,6 +87,14 @@ describe('reviewSearch', () => {
       ['src/alpha.ts', 0, 4],
       ['src/beta.ts', 1, 1],
     ]);
+  });
+
+  it('searches only the visible paths and can reuse the index after clearing', () => {
+    const index = buildSearchIndex(diffFiles);
+    const filtered = findMatchesInIndex(index, 'searchTerm', new Set(['src/beta.ts']));
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].filePath).toBe('src/beta.ts');
+    expect(findMatchesInIndex(index, 'searchTerm')).toHaveLength(5);
   });
 
   it('returns short labels for diff sides', () => {

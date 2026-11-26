@@ -1,12 +1,14 @@
 import { revealFirstChange } from '../utils/revealFirstChange';
+import { MarkdownPreviewFailed } from './MarkdownPreviewFailed';
 import { EXPAND_COLOUR_WAIT_MS, MAX_LINE_DIFF_LENGTH } from '../utils/diffChromeMetrics';
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
 import { FileDiff, type DiffLineAnnotation } from '@pierre/diffs/react';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { getSingularPatch, processFile } from '@pierre/diffs';
-import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
+import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, ImageAttachment } from '@plannotator/ui/types';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import { usePierreTheme } from '../hooks/usePierreTheme';
+import { usePierreSelectedLines } from '../hooks/usePierreSelectedLines';
 import { useFileContents } from '../hooks/useFileContents';
 import { useWorkerPoolThemeSync } from '../workerPool';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
@@ -121,6 +123,9 @@ const PierreDiffContent = React.memo(({
   onTokenEnter,
   onTokenLeave,
 }: PierreDiffContentProps) => {
+  // Not `pendingSelection || undefined`: that leaves Pierre's last range, and
+  // the gutter "+" with it, in place after Add, Cancel or Escape.
+  const selectedLines = usePierreSelectedLines(pendingSelection);
   return (
     <FileDiff
       key={filePath}
@@ -163,7 +168,7 @@ const PierreDiffContent = React.memo(({
         onTokenLeave,
       }}
       lineAnnotations={mergedAnnotations}
-      selectedLines={pendingSelection || undefined}
+      selectedLines={selectedLines}
       renderAnnotation={renderAnnotation}
     />
   );
@@ -247,7 +252,8 @@ interface DiffViewerProps {
   compactTouchLayout?: boolean;
   onLineSelection: (range: SelectedLineRange | null) => void;
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
-  onAddFileComment: (text: string) => void;
+  /** The file's comment box: its words and what was attached (pictures, files). */
+  onAddFileComment: (text: string, images?: ImageAttachment[]) => void;
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel | null, decorations?: ConventionalDecoration[]) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
@@ -294,8 +300,12 @@ interface DiffViewerProps {
    * the caller decides what a hoverable symbol is. Stitching a fragmented
    * identifier is app-only work, and this component is also compiled into the
    * read-only portable guide viewer, which passes neither handler.
+   *
+   * Return `false` when the token is not a symbol a card can open for (a
+   * comment, punctuation, a keyword): the view then paints no hover underline
+   * or hand cursor on it.
    */
-  onTokenHoverEnter?: (props: DiffTokenEventBaseProps, filePath: string) => void;
+  onTokenHoverEnter?: (props: DiffTokenEventBaseProps, filePath: string) => boolean | void;
   onTokenHoverLeave?: () => void;
   /** The token under the pointer, and the last one clicked: where F12 looks. */
   onTokenTarget?: import('../utils/tokenTarget').TokenTargetHandler;
@@ -328,14 +338,8 @@ const MarkdownPreviewPending: React.FC = () => (
   </div>
 );
 
-/** The preview's chunk could not load (`LazyBlockBoundary`): the same box, saying so. */
-export const MarkdownPreviewFailed: React.FC<{ notice: React.ReactNode }> = ({ notice }) => (
-  <div className="min-h-full px-4 py-4 sm:px-6" data-markdown-preview="" data-markdown-preview-view="failed">
-    <div className="mx-auto max-w-3xl rounded-md border border-border/60 bg-muted/20 p-4 [&>[role=status]]:mb-0">
-      {notice}
-    </div>
-  </div>
-);
+// The preview's chunk could not load: its own file, so a host without this view (the Inbox's reader) draws it too.
+export { MarkdownPreviewFailed };
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
   hostLineNotes = NO_HOST_LINE_NOTES,
@@ -1054,16 +1058,17 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [filePath, onCodeNavRequest, onTokenTarget]);
 
   const handleTokenEnter = useCallback((props: DiffTokenEventBaseProps, event: PointerEvent) => {
-    // Only where a card can actually open. The class carries a pointer cursor
-    // (now !important, so it genuinely wins over Pierre's I-beam), and painting
-    // it unconditionally promised clickability on every token even with hover
-    // cards switched off.
-    if (onTokenHoverEnter) props.tokenElement.classList.add('pn-token-hover');
     if ((event.metaKey || event.ctrlKey) && onCodeNavRequest) {
       props.tokenElement.classList.add('pn-token-nav');
     }
     onTokenTarget?.('enter', props, filePath);
-    onTokenHoverEnter?.(props, filePath);
+    // Only where a card can actually open. The class carries a pointer cursor
+    // (now !important, so it genuinely wins over Pierre's I-beam), and painting
+    // it unconditionally promised clickability on every token even with hover
+    // cards switched off, and on comments and punctuation that never get one.
+    if (onTokenHoverEnter && onTokenHoverEnter(props, filePath) !== false) {
+      props.tokenElement.classList.add('pn-token-hover');
+    }
   }, [filePath, onCodeNavRequest, onTokenHoverEnter, onTokenTarget]);
 
   const handleTokenLeave = useCallback((props: DiffTokenEventBaseProps) => {
@@ -1354,8 +1359,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           contextText={filePath.split('/').pop() || filePath}
           isGlobal={false}
           draftKey={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${filePath}`}
-          onSubmit={(text) => {
-            onAddFileComment(text);
+          onSubmit={(text, images) => {
+            onAddFileComment(text, images);
             setFileCommentAnchor(null);
           }}
           onClose={() => setFileCommentAnchor(null)}

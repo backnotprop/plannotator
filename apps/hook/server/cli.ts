@@ -5,7 +5,6 @@ import { INBOX_CARD_COLUMNS, INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIAT
 import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inbox/connection";
 import { INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
-import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
 import { LOCKFILE_NAMES, SYSTEM_COMMANDS, SYSTEM_TICK_INTERVAL_SECONDS, TEST_FOLDERS } from "@plannotator/system/commands";
 
@@ -227,6 +226,7 @@ export function formatTopLevelHelp(options: { board?: boolean; scheduled?: boole
     ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list|initiative_delete> ..."] : []),
     ...(options.scheduled === true ? ["  plannotator routine <create|list|get|update|on|off|run|delete> ...      (plannotator routine --help)"] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
+    "  plannotator theme add <file> | use <id> [--light | --dark] | list [--json] | remove <id>",
     "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
@@ -254,10 +254,10 @@ export function formatTopLevelHelp(options: { board?: boolean; scheduled?: boole
  *
  * `t3` (the T3 Code connection) was the last one to launch. Today:
  * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
- * runs; `shape`; `system`, System's drawing commands, until the Inbox's
+ * runs; `system`, System's drawing commands, until the Inbox's
  * System surfaces ship; and `plans`, Plans' switch and list, until its screens ship.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape", "system", "plans"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "system", "plans"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -316,7 +316,8 @@ export const ROUTINE_COMMAND_USAGE = [
   "A routine is a saved prompt that an agent on this computer runs on a schedule. The",
   "Plannotator Inbox starts each run and keeps every run in the routine's own thread,",
   "where the person reads it and replies.",
-  "Routines must be on in the Inbox (Settings → Capabilities); only the person turns them on.",
+  "Routines must be on in the Inbox: Settings → Capabilities, or plannotator inbox capability",
+  "routines on when the person asks. While they are off, tell the person; turn them on only if they say yes.",
   "",
   "- Make one only when the person asks for work that runs on its own, on a schedule.",
   "  Use the schedule they asked for; never make one up.",
@@ -495,14 +496,6 @@ export const ROUTINE_OP_USAGE: Record<RoutineOp, string> = {
 
 /** `plannotator plans …` (plans-command.ts): Plans' switch and list. Unreleased (HIDDEN_SUBCOMMANDS): the usage line only. */
 export const PLANS_COMMAND_USAGE = ["Usage:", "  plannotator plans [off | list]"].join("\n");
-
-/**
- * `plannotator shape …` (shape-command.ts): an agent's side of Shape.
- * Unreleased (HIDDEN_SUBCOMMANDS). Built from the one source of Shape's agent
- * text (packages/core/shape-skill.ts): the welcome and the commands, then the
- * drawing guide the Inbox's `/shape` skill ends with too.
- */
-export const SHAPE_COMMAND_USAGE = `${SHAPE_HELP_INTRO}\n\n${SHAPE_GUIDE}`.trimEnd();
 
 /**
  * `plannotator feedback` (feedback-command.ts): sends the person's feedback
@@ -729,7 +722,9 @@ export const INBOX_PROJECTS_USAGE = [
 /** What `plannotator inbox call` runs: the Inbox tool's actions. */
 export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS;
 
-const INBOX_PAIRED_CALL_ACTIONS = INBOX_AGENT_CALL_ACTIONS.filter((action) => action !== "steps" && action !== "routine");
+// Every action the door carries, steps and routine too (the owner, 2026-11-21: routines "same as a local agent"): the
+// switches that serve them are the person's Inbox's, which this machine cannot read, so the help says so instead.
+const INBOX_PAIRED_CALL_ACTIONS = INBOX_AGENT_CALL_ACTIONS;
 
 export const INBOX_PAIRED_CALL_USAGE = [
   "Usage, as a paired cloud agent (PLANNOTATOR_PAIRING is set):",
@@ -739,18 +734,26 @@ export const INBOX_PAIRED_CALL_USAGE = [
   "the Inbox's relay, sealed end to end. You can read, search and write in every thread of every",
   "project; you post under your own name.",
   `Actions: ${INBOX_PAIRED_CALL_ACTIONS.join(", ")}. The JSON holds the action's fields, as in`,
-  "'plannotator inbox --help', except that you name a project by its name (\"project\": \"api\"), never",
-  "by a folder. With no project, read_thread and search cover every project, and a new thread",
-  "goes in the project whoami names.",
+  "'plannotator inbox --help'. Name a project by its name (\"project\": \"api\"), its git address",
+  "(\"project\": \"https://github.com/acme/api\") or its folder on the person's computer (project_path).",
+  "With no project, read_thread, search and card list cover every project, a card call with card_id",
+  "uses that card's project, and a new thread goes in the project whoami names. steps and routine",
+  "answer only while the person has them on in their Inbox.",
   "",
   "  plannotator inbox call whoami        check the setup: who you are, or exactly what is wrong",
   "  plannotator inbox call read_thread '{\"thread_id\":\"thr_1\"}'",
   "  plannotator inbox call send_message '{\"project\":\"api\",\"subject\":\"Release\",\"body\":\"Ready to tag?\"}'",
   "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"Done: the tests pass.\"}'",
   "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"The screenshot is below.\",\"attachments\":[\"shot.png\"]}'",
+  "  plannotator inbox call fetch_file '{\"message_id\":\"msg_3\",\"file\":\"att_1\"}'",
   "",
-  "A path in attachments is read from this machine and sent as bytes, a big file in pieces on its own",
-  "(up to 100 MB a file); the Inbox opens no path for you.",
+  "A path in attachments, or a picture's path in the body (![alt](shot.png)), that is a file on this",
+  "machine is sent from here as bytes, a big file in pieces on its own (up to 100 MB a file); any other",
+  "path is opened on the person's computer, as for an agent there.",
+  "An attachment written as {\"path\":\"docs/plan.md\"} is always opened on the person's computer.",
+  "fetch_file saves a file of a message (read_thread lists each with its path and its command) on this",
+  "machine, in a new temp folder or in \"folder\", and prints its path.",
+  "plannotator inbox rows, projects, icon and export-decisions work through the pairing too.",
   "When the person's computer is asleep, a read fails and says so, and an action that changes",
   "something (send_message, resolve_message and the like) waits at the relay and is applied once",
   "when it is back (stdout then says queued: true; do not send it again).",
@@ -805,6 +808,7 @@ export const INBOX_COMMAND_USAGE = [
   INBOX_ROWS_USAGE_LINE,
   "  plannotator inbox icon set <file> --request <id> [--json]",
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+  "  plannotator inbox capability [<capability> on|off] [--thread <id>]",
   "  plannotator inbox pulls ls|add|rm [--session <id>] <thread> [<ref>... | --all]",
   "  plannotator inbox export-decisions --thread <id> [--format md|html] [--out <file>] [--pr <ref>]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
@@ -815,7 +819,8 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox               Start the Inbox and open it in the browser,",
   "                                  or open the one already running",
   "  plannotator inbox --background  Start it detached without opening a browser,",
-  "                                  print its URL and exit",
+  "                                  print its URL and exit (refused until the Inbox",
+  "                                  is turned on: plannotator inbox --open)",
   "  plannotator inbox --no-open     Run it here without opening a browser",
   "  plannotator inbox --open        Open it in the browser and print its URL, starting it",
   "                                  detached first when it is not running. Never blocks:",
@@ -903,6 +908,104 @@ export const DATA_DIR_COMMAND_USAGE = [
   "on an install that keeps its data elsewhere can hide that data.",
 ].join("\n");
 
+/**
+ * `plannotator theme …`'s usage (theme-command.ts): a person's own theme files.
+ * Agent-facing: an agent asked to "make Plannotator use my editor's theme" reads
+ * only this, so it says what the files may be, where they go, and what each line
+ * of output means.
+ */
+export const THEME_COMMAND_USAGE = [
+  "Usage:",
+  "  plannotator theme add <file> [--id <id>] [--name <name>]",
+  "  plannotator theme use <id> [--light | --dark]",
+  "  plannotator theme list [--json]",
+  "  plannotator theme remove <id>",
+  "",
+  "Add your own colour theme to Plannotator: theme add <file>, then theme use <id>",
+  "with the id add prints. A theme colours every Plannotator page: plan review,",
+  "code review, annotate and the Inbox.",
+  "",
+  "add     Read a theme file and keep it in the data dir (themes/<id>.json). The file",
+  "        can be a VS Code colour theme (.json, with \"colors\"), a base16 scheme",
+  "        (.yaml or .json, base00 to base0F), or a Plannotator theme (below). The format",
+  "        is detected. A VS Code or base16 theme is one half, light or dark; it is",
+  "        converted, and its id comes from its name (--id and --name override both).",
+  "        A VS Code theme's \"include\" (a theme it extends) is not followed: only the",
+  "        file's own colors and tokenColors are read. Adding an id that exists",
+  "        replaces that theme; a converted theme whose id another theme holds takes",
+  "        the next free one (-2, -3), so read the id add prints.",
+  "use     Use a theme (yours or a built-in) for each half it has, or only the --light",
+  "        or --dark half. Plannotator shows the light or dark half by the person's",
+  "        mode, which use does not change. For both halves from two VS Code or base16",
+  "        files: add each, then use <dark id> --dark and use <light id> --light.",
+  "list    Your themes and the halves they are used for, then the built-in ids.",
+  "remove  Remove one of your themes. Its file moves to themes/removed/, and a half",
+  "        that used it goes back to Plannotator.",
+  "",
+  "A Plannotator theme file is JSON. Set every colour of a half for a theme that",
+  "holds together; a colour you leave out takes Plannotator's own.",
+  "  {",
+  "    \"plannotatorTheme\": 1,",
+  "    \"id\": \"harbor\",",
+  "    \"name\": \"Harbor\",",
+  "    \"dark\": {",
+  "      \"background\": \"#0f1419\", \"foreground\": \"#d8dee6\",",
+  "      \"card\": \"#151b22\", \"card-foreground\": \"#d8dee6\",",
+  "      \"popover\": \"#1a212a\", \"popover-foreground\": \"#d8dee6\",",
+  "      \"primary\": \"#5ab0f6\", \"primary-foreground\": \"#0f1419\",",
+  "      \"secondary\": \"#6cc4b8\", \"secondary-foreground\": \"#0f1419\",",
+  "      \"muted\": \"#1f2731\", \"muted-foreground\": \"#8a96a3\",",
+  "      \"accent\": \"#c792ea\", \"accent-foreground\": \"#0f1419\",",
+  "      \"destructive\": \"#f07178\", \"destructive-foreground\": \"#0f1419\",",
+  "      \"success\": \"#9ece6a\", \"success-foreground\": \"#0f1419\",",
+  "      \"warning\": \"#e6b450\", \"warning-foreground\": \"#0f1419\",",
+  "      \"border\": \"#2a3440\", \"input\": \"#1f2731\", \"ring\": \"#5ab0f6\",",
+  "      \"code-bg\": \"#1b232c\", \"focus-highlight\": \"#6cc4b8\",",
+  "      \"syntax\": [",
+  "        { \"scope\": \"comment\", \"foreground\": \"#6b7785\", \"fontStyle\": \"italic\" }",
+  "      ]",
+  "    },",
+  "    \"light\": {",
+  "      \"background\": \"#f7f9fb\", \"foreground\": \"#1b2430\"",
+  "    }",
+  "  }",
+  "  The light half takes the same names as the dark one: set them all, in light",
+  "  colours (two are shown here).",
+  "  id: lowercase letters, digits and dashes, not a built-in id. Either half may be",
+  "  left out. What each colour paints (X-foreground is the text on fill X):",
+  "    background, foreground   the page and its text",
+  "    card                     panels on the page; the plan document is one",
+  "    popover                  menus, dialogs and tooltips",
+  "    primary                  links, selection and the main buttons",
+  "    secondary, accent        second and third highlight colours (tags, badges)",
+  "    muted, muted-foreground  quiet fills (chips, hovered rows) and quiet text",
+  "    destructive, success, warning   errors, done, needs a look",
+  "    border, input, ring      dividing lines, text fields, the keyboard focus ring",
+  "    code-bg                  code blocks",
+  "    focus-highlight          the annotation in focus",
+  "    accent-text              optional: accent used as text on the page; set it",
+  "                             when accent is too light to read as text",
+  "  A colour is #rgb, #rrggbb, #rrggbbaa, rgb(), hsl() with % on saturation and",
+  "  lightness, or oklch(); plain numbers, no colour names.",
+  "  A half may also set code colours, \"syntax\" (as above): rules as in a VS Code",
+  "  theme's tokenColors, flattened. scope: a TextMate scope or a list of them, the",
+  "  names VS Code themes use (comment, string, keyword, entity.name.function,",
+  "  constant.numeric); the most specific match wins. foreground, background:",
+  "  #hex. fontStyle: italic, bold, underline, strikethrough, several with spaces,",
+  "  or \"\". A rule may set only fontStyle. A VS Code theme's tokenColors and a",
+  "  base16 scheme's colours become these. Without them, code keeps Plannotator's",
+  "  colours.",
+  "",
+  "Nothing needs to be running. New pages show a change at once; ask the person to",
+  "reload a window that is already open.",
+  "",
+  "Output: one line per result on stdout, and a Note line when something is worth",
+  "knowing (colours or code colour rules left out, foreground on background under",
+  "4.5:1 contrast: the only pair checked); a Note is information, never a failure.",
+  "A refusal is one line on stderr, <code>: <message>, naming the field that is",
+  "wrong. Exit 0 done, 1 refused, 2 bad usage.",
+].join("\n");
+
 /** `plannotator update`'s usage; the command is update-command.ts. */
 export const UPDATE_COMMAND_USAGE = [
   "Usage:",
@@ -930,11 +1033,12 @@ export const UPDATE_COMMAND_USAGE = [
 // (plannotator-skill-reference.test.ts) can diff the documented surface
 // against the real one.
 export const SUBCOMMAND_HELP: Record<string, string> = {
+  theme: THEME_COMMAND_USAGE,
   review: [
     "Usage:",
     "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [--json] [DIRECTORY | PR_URL]",
     "",
-    "Review local VCS changes or a GitHub, GitLab or Bitbucket Cloud pull request in the browser.",
+    "Review local VCS changes or a GitHub, GitLab, Bitbucket Cloud or Forgejo / Gitea pull request in the browser.",
     "",
     "Options:",
     "  --git         Force git as the VCS (skip auto-detection)",
@@ -964,7 +1068,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "                is printed either way; an agent host that only logs a bare Approve",
     "                (the Claude Code mod) delivers it as a message.",
     "  --json        Emit one decision/message JSON record instead of plaintext",
-    "  PR_URL        GitHub PR, GitLab MR or Bitbucket Cloud PR URL to review",
+    "  PR_URL        GitHub PR, GitLab MR, Bitbucket Cloud PR or Forgejo / Gitea PR URL to review",
     "  DIRECTORY     Review a repo, worktree, or multi-repo workspace at this path",
     "                Relative to the invoking directory; quote paths containing spaces.",
     "",
@@ -1111,7 +1215,6 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
   routine: ROUTINE_COMMAND_USAGE,
-  shape: SHAPE_COMMAND_USAGE,
   plans: PLANS_COMMAND_USAGE,
   feedback: FEEDBACK_COMMAND_USAGE,
   system: SYSTEM_COMMAND_USAGE,

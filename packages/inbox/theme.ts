@@ -24,14 +24,17 @@ import { configStore, type ServerSyncFn } from '@plannotator/ui/config';
 import type { Mode } from '@plannotator/ui/theme-modes';
 import { inboxApi, type InboxThemeConfig } from './api';
 import { diffOptionsToWire } from './diffOptions';
+import { reviewAnalysisToWire, saveReviewAnalysis } from './reviewAnalysis';
 
 /**
  * The config store's server write-back, for the Inbox: it has no /api/config,
  * so only what the Inbox itself changes goes anywhere, through its settings
  * route (which merges per field): the parts of the theme the person changed
  * in this page (config.json `theme`) and the guided review's diff layout
- * (config.json `diffOptions.diffStyle`, diffStyle.ts). Every other
- * server-synced setting stays in the page's cookies. The store hands over the
+ * (config.json `diffOptions.diffStyle`, diffStyle.ts), and code review's
+ * "Semantic changes" switch (config.json `reviewAnalysis.semanticDiff`,
+ * reviewAnalysis.ts). Every other server-synced setting stays in the page's
+ * cookies. The store hands over the
  * whole theme pair, but this tab's copy of the parts the person did not touch
  * can be days old (a palette picked in plan review since this tab loaded) or
  * the defaults (a page with no cookies): sending them would undo the person's
@@ -64,6 +67,9 @@ export const inboxServerSync: ServerSyncFn = (payload) => {
   // Every diff setting the Inbox changed (diffOptions.ts), in one POST.
   const diffOptions = diffOptionsToWire(payload.diffOptions);
   if (diffOptions) void inboxApi.saveDiffOptions(diffOptions).catch(() => {});
+  // Code review's "Semantic changes" switch (reviewAnalysis.ts), so it holds on every address.
+  const reviewAnalysis = reviewAnalysisToWire(payload.reviewAnalysis);
+  if (reviewAnalysis) void saveReviewAnalysis(reviewAnalysis).catch(() => {});
 };
 
 let adopted = false;

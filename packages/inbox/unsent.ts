@@ -27,6 +27,17 @@ export function replyBeingWritten(): boolean {
   return open?.writing === true;
 }
 
+/**
+ * A New message holds words its draft does not hold yet (compose/composeAutosave.ts, which saves them after a pause in
+ * typing and as the page goes): the page's "Leave page?" asks meanwhile. A restart and the stale page's Reload save
+ * the dialog's draft themselves first (its reload flush), so `unsentReply` leaves it out.
+ */
+let composing = false;
+export function reportUnsentCompose(unsaved: boolean): void {
+  composing = unsaved;
+  syncBeforeUnload();
+}
+
 /** What a restart would lose, by the thread's subject, else null. */
 export function unsentReply(): { subject: string } | null {
   if (open?.files) return { subject: open.subject };
@@ -43,13 +54,13 @@ export function unsentReply(): { subject: string } | null {
 let leavingOnPurpose = false;
 let listening = false;
 const onBeforeUnload = (event: BeforeUnloadEvent) => {
-  if (leavingOnPurpose || !unsentReply()) return;
+  if (leavingOnPurpose || (!unsentReply() && !composing)) return;
   event.preventDefault();
   event.returnValue = '';
 };
 function syncBeforeUnload(): void {
   if (typeof window === 'undefined') return;
-  const want = unsentReply() !== null;
+  const want = unsentReply() !== null || composing;
   if (want === listening) return;
   listening = want;
   if (want) window.addEventListener('beforeunload', onBeforeUnload);

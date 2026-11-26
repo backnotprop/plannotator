@@ -1,24 +1,30 @@
 /**
- * The question sound in Settings and around the page: the one row (switch,
- * volume, Play), the "Click once in this tab to allow sound." line before
- * the first click, the notification ask's "Sound is on.",
+ * The Inbox's sound in Settings and around the page: the one row (what rings
+ * it, switch, volume, Play), the "Click once in this tab to allow sound."
+ * line before the first click, the notification ask's "Sound is on.",
  * and the hook itself against a recording AudioContext: nothing rings before
  * the first click or with the tab in front, a burst rings once, Play always
- * plays. Never audible: the AudioContext is a stub that only counts.
+ * plays the Ding-dong; "every agent message" (the default, also with
+ * nothing chosen) rings the Ding-dong for a plain reply, "when an agent asks
+ * you or starts a thread" nothing; off stays off.
+ * Never audible: the AudioContext is a stub that only counts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import type { InboxSoundSettings } from '@plannotator/core/inbox-types';
 import type { InboxSound } from './sound';
 import type { SettingsModel } from './api';
+import { newAudioRecord, recordingAudioContext, timesPlayed, type AudioRecord } from '../../tests/helpers/recording-audio';
 
 const hasDom = typeof document !== 'undefined';
 const { SettingsPage } = (hasDom ? await import('./components/Settings') : {}) as typeof import('./components/Settings');
 const { NotificationAsk } = (hasDom ? await import('./components/NotificationAsk') : {}) as typeof import('./components/NotificationAsk');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
-const { useInboxSound } = (hasDom ? await import('./sound') : {}) as typeof import('./sound');
+const { useInboxSound, endRingHold, DING_DONG } = (hasDom ? await import('./sound') : {}) as typeof import('./sound');
+const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -61,14 +67,16 @@ const settingsModel = {
 function fakeSound(over: Partial<InboxSound> = {}) {
   const seen: string[] = [];
   const sound: InboxSound = {
-    settings: { enabled: true, volume: 60, dialog_shown_for: null },
+    settings: { enabled: true, volume: 60, when: 'messages', dialog_shown_for: null },
     armed: true,
     playing: false,
     preview: (volume) => void seen.push(`preview:${volume ?? 'saved'}`),
-    questionsArrived: () => {},
+    arrived: () => ({ asks: false, plain: false, fresh: false }),
+    hear: () => {},
     otherTabInFront: () => false,
     setEnabled: async (next) => (seen.push(`enabled:${next}`), true),
     setVolume: async (next) => (seen.push(`volume:${next}`), true),
+    setWhen: async (next) => (seen.push(`when:${next}`), true),
     ...over,
   };
   return { sound, seen };
@@ -109,14 +117,23 @@ function drag(slider: HTMLInputElement, value: number) {
 }
 
 describe.if(hasDom)('Settings: the sound row', () => {
-  test('one row under the notifications switch: label, when, volume, Play, switch', () => {
+  test('one row under the notifications switch: label, what rings it, when, volume, Play, switch', () => {
     const { sound } = fakeSound();
     const block = renderSettings(sound);
     const row = block.querySelector('[data-settings-sound]') as HTMLElement;
     expect(row.getAttribute('data-settings-sound')).toBe('on');
-    // The label, then when it rings (Settings in sections: the row's description, .product/approved/inbox-settings-tabs/).
+    // The label, then the owner's two choices in their order, "every agent message" chosen, then what it rings for.
     expect(row.querySelector('#ib-sound-label')?.textContent).toBe('Play a sound');
-    expect(row.textContent).toContain('When an agent asks you');
+    // The section it sits in (the owner, 2026-11-18): named for what reaches the person now, not only questions.
+    expect(document.getElementById('ib-g-attention')?.textContent).toBe('When an agent sends you something');
+    const group = row.querySelector('[role="radiogroup"]') as HTMLElement;
+    expect(group.getAttribute('aria-label')).toBe('When to play a sound');
+    // The description says what the chosen one rings for, and screen readers hear it with the choice.
+    expect(document.getElementById(group.getAttribute('aria-describedby')!)?.textContent).toBe('A reply, a new thread or a question, while no Inbox tab is in front');
+    const radios = [...group.querySelectorAll('input[type="radio"]')] as HTMLInputElement[];
+    expect(radios.map((r) => r.parentElement!.textContent)).toEqual(['questions and new threads', 'every agent message']);
+    expect(radios.map((r) => r.checked)).toEqual([false, true]);
+    expect(row.querySelector('.ib-desc')?.textContent).toBe('A reply, a new thread or a question, while no Inbox tab is in front');
     const slider = row.querySelector('input[type="range"]') as HTMLInputElement;
     expect([slider.min, slider.max, slider.step, slider.value]).toEqual(['10', '100', '10', '60']);
     expect(slider.getAttribute('aria-label')).toBe('Volume');
@@ -127,13 +144,28 @@ describe.if(hasDom)('Settings: the sound row', () => {
     expect(document.getElementById(sw.getAttribute('aria-labelledby')!)?.textContent).toBe('Play a sound');
   });
 
+  test('picking a choice saves it; "questions and new threads" says when it rings', () => {
+    const every = fakeSound();
+    let block = renderSettings(every.sound);
+    act(() => (block.querySelector('[data-sound-when-o="asks"] input') as HTMLInputElement).click());
+    expect(every.seen).toEqual(['when:asks']);
+    act(() => root?.unmount());
+    const asks = fakeSound({ settings: { enabled: true, volume: 60, when: 'asks', dialog_shown_for: null } });
+    block = renderSettings(asks.sound);
+    expect(block.querySelector('[data-sound-when]')?.getAttribute('data-sound-when')).toBe('asks');
+    expect((block.querySelector('[data-sound-when-o="asks"] input') as HTMLInputElement).checked).toBe(true);
+    expect(block.querySelector('[data-settings-sound] .ib-desc')?.textContent).toBe('While no Inbox tab is in front');
+    act(() => (block.querySelector('[data-sound-when-o="messages"] input') as HTMLInputElement).click());
+    expect(asks.seen).toEqual(['when:messages']);
+  });
+
   test('the switch saves; off, the slider is disabled and Play still plays', () => {
     const on = fakeSound();
     let block = renderSettings(on.sound);
     act(() => (block.querySelector('[data-settings-sound] [role="switch"]') as HTMLButtonElement).click());
     expect(on.seen).toEqual(['enabled:false']);
     act(() => root?.unmount());
-    const off = fakeSound({ settings: { enabled: false, volume: 40, dialog_shown_for: null } });
+    const off = fakeSound({ settings: { enabled: false, volume: 40, when: 'messages', dialog_shown_for: null } });
     block = renderSettings(off.sound);
     expect((block.querySelector('input[type="range"]') as HTMLInputElement).disabled).toBe(true);
     act(() => (block.querySelector('[data-sound-play]') as HTMLButtonElement).click());
@@ -164,7 +196,7 @@ describe.if(hasDom)('Settings: the sound row', () => {
     };
     expect(hint({ armed: false })).toBe('Click once in this tab to allow sound.');
     expect(hint({ armed: true })).toBeNull();
-    expect(hint({ armed: false, settings: { enabled: false, volume: 60, dialog_shown_for: null } })).toBeNull();
+    expect(hint({ armed: false, settings: { enabled: false, volume: 60, when: 'messages', dialog_shown_for: null } })).toBeNull();
   });
 });
 
@@ -180,39 +212,13 @@ describe.if(hasDom)('around the page', () => {
 
 // ───────────────────────────── The hook, against a recording AudioContext ─────────────────────────────
 
-interface Recorder {
-  contexts: number;
-  oscillators: number;
-  gains: number[];
-}
-
-let recorder: Recorder;
+let recorder: AudioRecord;
 let front = { visible: true, focused: true };
 const saved: { ctx?: unknown; hasFocus?: () => boolean; visibility?: PropertyDescriptor } = {};
 
 function installStubs() {
-  recorder = { contexts: 0, oscillators: 0, gains: [] };
-  const rec = recorder;
-  const param = () => ({ value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} });
-  class StubContext {
-    state = 'running';
-    currentTime = 0;
-    destination = {};
-    constructor() {
-      rec.contexts++;
-    }
-    resume() {
-      return Promise.resolve();
-    }
-    createGain() {
-      const gain = { gain: param(), connect: (to: unknown) => to };
-      return gain;
-    }
-    createOscillator() {
-      rec.oscillators++;
-      return { type: 'sine', frequency: param(), connect: (to: unknown) => to, start() {}, stop() {} };
-    }
-  }
+  recorder = newAudioRecord();
+  const StubContext = recordingAudioContext(recorder);
   saved.ctx = (window as unknown as { AudioContext?: unknown }).AudioContext;
   (window as unknown as { AudioContext: unknown }).AudioContext = StubContext;
   saved.hasFocus = document.hasFocus;
@@ -222,6 +228,8 @@ function installStubs() {
 }
 
 function restoreStubs() {
+  // The ring lock this file's tabs took (module state): the next test starts with none held.
+  endRingHold();
   (window as unknown as { AudioContext: unknown }).AudioContext = saved.ctx;
   document.hasFocus = saved.hasFocus!;
   if (saved.visibility) Object.defineProperty(document, 'visibilityState', saved.visibility);
@@ -231,18 +239,26 @@ function restoreStubs() {
   } catch {}
 }
 
-/** Rings so far: the sound is four oscillators. */
-const rings = () => recorder.oscillators / 4;
+const rings = () => timesPlayed(recorder, DING_DONG[0]!.freq);
 
 let api: InboxSound;
+/** As the Inbox sends it: no `when` is how an update finds everyone who had the sound and never chose. */
+let probeSettings: InboxSoundSettings = { enabled: true, volume: 60, dialog_shown_for: null };
+/** What the hook last handed the page to keep (a save's answer, or another window's `event: sound`). */
+let kept: InboxSoundSettings | null = null;
 function Probe() {
-  api = useInboxSound({ settings: { enabled: true, volume: 60, dialog_shown_for: null }, onSettings: () => {} });
+  api = useInboxSound({ settings: probeSettings, onSettings: (next) => void (kept = next) });
   return <span data-armed={api.armed ? 'yes' : 'no'} />;
 }
+
+const QUESTION = { asks: true, plain: false };
+const REPLY = { asks: false, plain: true };
 
 describe.if(hasDom)('useInboxSound', () => {
   beforeEach(() => {
     front = { visible: true, focused: true };
+    probeSettings = { enabled: true, volume: 60, dialog_shown_for: null };
+    kept = null;
     installStubs();
   });
   afterEach(() => restoreStubs());
@@ -250,7 +266,7 @@ describe.if(hasDom)('useInboxSound', () => {
   test('before the first click a question rings nothing; the first click arms it; then a hidden tab rings once per burst', () => {
     const el = mount(<Probe />);
     front = { visible: false, focused: false };
-    act(() => api.questionsArrived());
+    act(() => api.arrived(QUESTION));
     expect(rings()).toBe(0);
     expect(el.querySelector('[data-armed]')?.getAttribute('data-armed')).toBe('no');
     act(() => {
@@ -264,9 +280,9 @@ describe.if(hasDom)('useInboxSound', () => {
       window.dispatchEvent(new Event('focus'));
     });
     front = { visible: false, focused: false };
-    act(() => api.questionsArrived());
-    act(() => api.questionsArrived());
-    act(() => api.questionsArrived());
+    act(() => api.arrived(QUESTION));
+    act(() => api.arrived(QUESTION));
+    act(() => api.arrived(QUESTION));
     expect(rings()).toBe(1);
   });
 
@@ -297,10 +313,247 @@ describe.if(hasDom)('useInboxSound', () => {
     act(() => {
       window.dispatchEvent(new Event('pointerdown'));
     });
-    act(() => api.questionsArrived());
+    act(() => api.arrived(QUESTION));
     expect(rings()).toBe(0);
     act(() => api.preview());
     expect(rings()).toBe(1);
     expect(api.playing).toBe(true);
+  });
+
+  /** Armed, then a fresh burst away from the tab. */
+  function armedAndAway() {
+    act(() => {
+      window.dispatchEvent(new Event('pointerdown'));
+    });
+    front = { visible: true, focused: true };
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    front = { visible: false, focused: false };
+  }
+
+  /** Runs `body` with Date.now reading `clock.t` (the ring lock and the bursts count time with it). */
+  function onClock(body: (clock: { t: number }) => void) {
+    const real = Date.now;
+    const clock = { t: 1_000_000 };
+    Date.now = () => clock.t;
+    try {
+      body(clock);
+    } finally {
+      Date.now = real;
+    }
+  }
+
+  test('nothing chosen (an update): "every agent message"; a plain reply away rings the Ding-dong, five agents at once ring once, in front nothing', () => {
+    mount(<Probe />);
+    expect(api.settings.when).toBe('messages');
+    armedAndAway();
+    let rang = api.arrived(REPLY);
+    expect(rings()).toBe(1);
+    expect(rang).toEqual({ asks: false, plain: true, fresh: false });
+    // Five agents posting at once: one burst, one ring, and all of it the bell's (their notices silent: one sound).
+    for (let i = 0; i < 5; i++) act(() => void (rang = api.arrived(REPLY)));
+    expect(rings()).toBe(1);
+    expect(rang).toEqual({ asks: false, plain: true, fresh: false });
+    // The tab in front: nothing rings, and the burst ends.
+    front = { visible: true, focused: true };
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    act(() => api.arrived(REPLY));
+    expect(rings()).toBe(1);
+  });
+
+  test('agent chatter never swallows a question: A replies at 0 s (rings) and 20 s (quiet), B asks at 40 s and it rings', () => {
+    onClock((clock) => {
+      mount(<Probe />);
+      armedAndAway();
+      act(() => api.arrived(REPLY));
+      clock.t += 20_000;
+      act(() => api.arrived(REPLY));
+      expect(rings()).toBe(1);
+      clock.t += 20_000;
+      let rang = api.arrived(QUESTION);
+      expect(rings()).toBe(2);
+      // The bell rang for the question, so its notice is silent; a question in that question burst rings nothing and is
+      // the bell's too (its notice silent: one sound per burst).
+      expect(rang).toEqual({ asks: true, plain: false, fresh: false });
+      clock.t += 5_000;
+      act(() => void (rang = api.arrived(QUESTION)));
+      expect(rings()).toBe(2);
+      expect(rang).toEqual({ asks: true, plain: false, fresh: false });
+    });
+  });
+
+  test('a question two seconds after a reply rang still rings (this tab holds the ring lock, so it rings it itself)', async () => {
+    mount(<Probe />);
+    armedAndAway();
+    act(() => api.arrived(REPLY));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(rings()).toBe(1);
+    const real = Date.now;
+    const at = real();
+    Date.now = () => at + 2_000;
+    try {
+      let rang = api.arrived(QUESTION);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(rings()).toBe(2);
+      expect(rang).toEqual({ asks: true, plain: false, fresh: false });
+    } finally {
+      Date.now = real;
+    }
+  });
+
+  test('"questions and new threads": a plain reply plays nothing and starts no burst; a question then rings', () => {
+    probeSettings = { enabled: true, volume: 60, when: 'asks', dialog_shown_for: null };
+    mount(<Probe />);
+    armedAndAway();
+    let rang = api.arrived(REPLY);
+    expect(rings()).toBe(0);
+    expect(rang).toEqual({ asks: false, plain: false, fresh: false });
+    act(() => void (rang = api.arrived(QUESTION)));
+    expect(rings()).toBe(1);
+    expect(rang).toEqual({ asks: true, plain: false, fresh: false });
+  });
+
+  test("another window's save (event: sound) reaches this one at once: it rings by the new choice; a frame that is not settings is ignored", () => {
+    mount(<Probe />);
+    armedAndAway();
+    act(() => api.hear({ nonsense: true }));
+    expect(kept).toBeNull();
+    act(() => api.hear({ enabled: true, volume: 40, when: 'asks', dialog_shown_for: '0.29.0' }));
+    expect(kept).toEqual({ enabled: true, volume: 40, when: 'asks', dialog_shown_for: '0.29.0' });
+    // The page keeps it (App's setSettings): this window now stays quiet for a plain reply.
+    probeSettings = kept!;
+    act(() => root!.render(<Probe />));
+    act(() => api.arrived(REPLY));
+    expect(rings()).toBe(0);
+    // And the switch turned off elsewhere silences a question here too.
+    act(() => api.hear({ enabled: false, volume: 40, when: 'messages', dialog_shown_for: null }));
+    probeSettings = kept!;
+    act(() => root!.render(<Probe />));
+    act(() => api.arrived(QUESTION));
+    expect(rings()).toBe(0);
+  });
+
+  test("a double-clicked switch never flicks back: an older save's frame, or one landing while this window's save is on its way, is not shown over the newer", async () => {
+    mount(<Probe />);
+    const realSave = inboxApi.saveSound;
+    const answers: ((value: { sound: InboxSoundSettings; sound_rev: number }) => void)[] = [];
+    inboxApi.saveSound = () => new Promise((resolve) => answers.push(resolve));
+    try {
+      const off = { enabled: false, volume: 60, when: 'messages' as const, dialog_shown_for: null };
+      const on = { ...off, enabled: true };
+      let first!: Promise<boolean>;
+      let second!: Promise<boolean>;
+      act(() => {
+        first = api.setEnabled(false);
+      });
+      act(() => {
+        second = api.setEnabled(true);
+      });
+      expect(kept?.enabled).toBe(true);
+      // The first save's frame lands while both are on their way: held, not shown.
+      act(() => api.hear(off, 101));
+      expect(kept?.enabled).toBe(true);
+      await act(async () => {
+        answers[0]!({ sound: off, sound_rev: 101 });
+        await first;
+      });
+      // The first answer is not the last save's: not shown either.
+      expect(kept?.enabled).toBe(true);
+      await act(async () => {
+        answers[1]!({ sound: on, sound_rev: 102 });
+        await second;
+      });
+      expect(kept?.enabled).toBe(true);
+      // The first save's frame again, late: older than what this window knows.
+      act(() => api.hear(off, 101));
+      expect(kept?.enabled).toBe(true);
+      // Another window's later save is shown.
+      act(() => api.hear({ ...off, when: 'asks' }, 103));
+      expect(kept).toMatchObject({ enabled: false, when: 'asks' });
+    } finally {
+      inboxApi.saveSound = realSave;
+    }
+  });
+
+  test('the sound turned off before the choice existed stays off: nothing rings for any news, and no notice is made silent', () => {
+    probeSettings = { enabled: false, volume: 60, dialog_shown_for: null };
+    mount(<Probe />);
+    armedAndAway();
+    const rang = [api.arrived(REPLY), api.arrived(QUESTION)];
+    expect(rings()).toBe(0);
+    expect(api.settings.enabled).toBe(false);
+    expect(rang).toEqual([{ asks: false, plain: false, fresh: false }, { asks: false, plain: false, fresh: false }]);
+  });
+
+  test('after a reload in a browser that still allows sound (no click yet), a question rings and its notice is the bell\'s', () => {
+    recorder.autoplay = true;
+    const activation = { isActive: false, hasBeenActive: false };
+    const before = Object.getOwnPropertyDescriptor(navigator, 'userActivation');
+    Object.defineProperty(navigator, 'userActivation', { configurable: true, get: () => activation });
+    try {
+      mount(<Probe />);
+      front = { visible: false, focused: false };
+      let rang: unknown;
+      act(() => {
+        rang = api.arrived(QUESTION);
+      });
+      expect(rang).toEqual({ asks: true, plain: false, fresh: false });
+      expect(rings()).toBe(1);
+    } finally {
+      if (before) Object.defineProperty(navigator, 'userActivation', before);
+      else delete (navigator as unknown as Record<string, unknown>).userActivation;
+    }
+  });
+
+  test('a question while locked, a click, then another question 10 s later: no ring, so its notice keeps the system sound', () => {
+    const activation = { isActive: false, hasBeenActive: false };
+    const before = Object.getOwnPropertyDescriptor(navigator, 'userActivation');
+    Object.defineProperty(navigator, 'userActivation', { configurable: true, get: () => activation });
+    const realNow = Date.now;
+    let clock = 1_000_000;
+    Date.now = () => clock;
+    try {
+      mount(<Probe />);
+      front = { visible: false, focused: false };
+      act(() => void api.arrived(QUESTION));
+      activation.isActive = true;
+      activation.hasBeenActive = true;
+      act(() => {
+        window.dispatchEvent(new Event('pointerdown'));
+      });
+      clock += 10_000;
+      let rang: unknown;
+      act(() => {
+        rang = api.arrived(QUESTION);
+      });
+      expect(rings()).toBe(0);
+      expect(rang).toEqual({ asks: false, plain: false, fresh: false });
+    } finally {
+      Date.now = realNow;
+      if (before) Object.defineProperty(navigator, 'userActivation', before);
+      else delete (navigator as unknown as Record<string, unknown>).userActivation;
+    }
+  });
+
+  test('before the first click nothing rings, so no notice is made silent', () => {
+    const activation = { isActive: false, hasBeenActive: false };
+    const before = Object.getOwnPropertyDescriptor(navigator, 'userActivation');
+    Object.defineProperty(navigator, 'userActivation', { configurable: true, get: () => activation });
+    try {
+      mount(<Probe />);
+      front = { visible: false, focused: false };
+      expect(api.arrived(QUESTION)).toEqual({ asks: false, plain: false, fresh: false });
+      expect(rings()).toBe(0);
+    } finally {
+      if (before) Object.defineProperty(navigator, 'userActivation', before);
+      else delete (navigator as unknown as Record<string, unknown>).userActivation;
+    }
   });
 });

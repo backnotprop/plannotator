@@ -169,7 +169,7 @@ test.skipIf(!hasDom)('a preview cut by a fraction of a pixel counts as cut: thre
 });
 
 const noop = () => {};
-const folder = (name: string) => ({ id: `prj_${name}`, key: `${name}-abc123`, name, root: `/Users/ramos/src/${name}`, created_at: '2026-10-14T10:00:00.000Z', threads: 1, unread: 1, listed: 1, archived: 0 });
+const folder = (name: string) => ({ id: `prj_${name}`, key: `${name}-abc123`, name, root: `/Users/sam/src/${name}`, created_at: '2026-10-14T10:00:00.000Z', threads: 1, unread: 1, listed: 1, archived: 0 });
 
 for (const withMenu of [true, false]) {
   test.skipIf(!hasDom)(`a sidebar project shows its whole name and its folder in the component tooltip${withMenu ? '' : ' (no project menu)'}, with no native title`, async () => {
@@ -197,11 +197,11 @@ for (const withMenu of [true, false]) {
     // The folder is never on the row, so the tooltip opens whether or not the name is cut.
     const tip = await tooltipOf(project);
     expect(tip).toContain(LONG_PROJECT);
-    expect(tip).toContain(`/Users/ramos/src/${LONG_PROJECT}`);
+    expect(tip).toContain(`/Users/sam/src/${LONG_PROJECT}`);
     expect(openTooltips().length).toBe(1);
     // The row's accessible name is its own text, never the tooltip; a screen reader hears the folder as its description.
     expect(project.textContent).toBe(`${LONG_PROJECT}1`);
     const described = document.getElementById(project.getAttribute('aria-describedby') ?? '');
-    expect(described?.textContent).toBe(`/Users/ramos/src/${LONG_PROJECT}`);
+    expect(described?.textContent).toBe(`/Users/sam/src/${LONG_PROJECT}`);
   });
 }

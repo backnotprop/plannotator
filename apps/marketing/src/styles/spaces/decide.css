@@ -1,0 +1,636 @@
+/*
+  Decide together row, the moving scene (scripts/spaces/decide.js plays it).
+  Copied whole from the Spaces app's decide-scene.css with two hooks changed
+  for this page: rules are scoped under .pg, and dark mode is
+  html:not(.light). The last block (the answered end state without scripts
+  or motion) is this page's own.
+
+  Tokens the scene reads. The scene sets all of these itself on .dsn, so it
+  shows the product's default theme whatever the page around it uses.
+
+  token                light                           dark
+  --background         oklch(1 0 0)                    oklch(0.15 0.02 260)
+  --foreground         oklch(0.18 0.02 260)            oklch(0.90 0.01 260)
+  --card               oklch(1 0 0)                    oklch(0.22 0.02 260)
+  --muted              oklch(0.92 0.01 260)            oklch(0.26 0.02 260)
+  --muted-foreground   oklch(0.40 0.02 260)            oklch(0.72 0.02 260)
+  --primary            oklch(0.50 0.25 280)            oklch(0.72 0.15 280)
+  --primary-foreground oklch(1 0 0)                    oklch(0.15 0.02 260)
+  --selected           oklch(0.50 0.23 280 / 0.08)     oklch(0.72 0.15 280 / 0.13)
+  --success            oklch(0.52 0.15 150)            oklch(0.72 0.17 150)
+  --border-subtle      oklch(0.35 0.02 260 / 0.09)     oklch(0.90 0.02 260 / 0.055)
+  --presence-2 (Ramos) oklch(0.545 0.135 155)          oklch(0.72 0.14 155)
+  --presence-5 (Bob)   oklch(0.58 0.18 345)            oklch(0.72 0.14 345)
+  --presence-6 (CD)    oklch(0.55 0.095 210)           oklch(0.74 0.11 210)
+  --dsn-ground         muted 55% into background       same mix, dark values
+  --dsn-well           muted 40% into card             var(--muted)
+  --dsn-mark           oklch(70% 0.2 60 / 0.15)        oklch(70% 0.18 60 / 0.3)
+  --dsn-ease           cubic-bezier(0.22, 1, 0.36, 1)  same
+  --dsn-q              #414853                         #aeb5bf   (a decision's question)
+  --dsn-who            #63656f                         #939aa4   (who decided, and the time)
+  --dsn-day            #9a9dab                         #646c7a   (the day names)
+  --dsn-rail           #cdcfdd                         #343c4a   (the rail)
+  --tone               set inline on each face to one of the presence tokens
+
+  Read from the page, not set here:
+  --sans               "Spaces Inter", -apple-system, "Helvetica Neue", Arial, sans-serif
+                       (page.css; the same variable Inter file the app ships)
+  --mono               "Geist Mono Variable", ui-monospace, ... (page.css)
+
+  The right panel is the list of decisions made, newest on top, on a rail
+  whose dots are the deciders' faces from the bar. The rail is solid within
+  a day (.dsn-in) and dotted across a gap of days (.dsn-apart, longer for a
+  longer gap). On the phone the first four rows sit in a second block under
+  the question.
+
+  The containers .cap.wide (shown above 1180 px) and .cap.pn (shown at
+  1180 px and below) come from the page's existing front door rules; the
+  scene only adds the .cap.pn.dsn-pn rule below.
+*/
+
+.pg .dsn {
+	--background: oklch(1 0 0);
+	--foreground: oklch(0.18 0.02 260);
+	--card: oklch(1 0 0);
+	--muted: oklch(0.92 0.01 260);
+	--muted-foreground: oklch(0.40 0.02 260);
+	--primary: oklch(0.50 0.25 280);
+	--primary-foreground: oklch(1 0 0);
+	--selected: oklch(0.50 0.23 280 / 0.08);
+	--success: oklch(0.52 0.15 150);
+	--border-subtle: oklch(0.35 0.02 260 / 0.09);
+	--presence-2: oklch(0.545 0.135 155);
+	--presence-5: oklch(0.58 0.18 345);
+	--presence-6: oklch(0.55 0.095 210);
+	--dsn-ground: color-mix(in oklch, var(--muted) 55%, var(--background));
+	--dsn-well: color-mix(in oklch, var(--muted) 40%, var(--card));
+	--dsn-mark: oklch(70% 0.2 60 / 0.15);
+	--dsn-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	--dsn-q: #414853;
+	--dsn-who: #63656f;
+	--dsn-day: #9a9dab;
+	--dsn-rail: #cdcfdd;
+	position: relative;
+	width: 828px;
+	height: 600px;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	background: var(--dsn-ground);
+	color: var(--foreground);
+	font: 400 13px/1.45 var(--sans);
+	letter-spacing: 0;
+	text-align: left;
+	white-space: normal;
+}
+
+html:not(.light) .pg .dsn {
+	--background: oklch(0.15 0.02 260);
+	--foreground: oklch(0.90 0.01 260);
+	--card: oklch(0.22 0.02 260);
+	--muted: oklch(0.26 0.02 260);
+	--muted-foreground: oklch(0.72 0.02 260);
+	--primary: oklch(0.72 0.15 280);
+	--primary-foreground: oklch(0.15 0.02 260);
+	--selected: oklch(0.72 0.15 280 / 0.13);
+	--success: oklch(0.72 0.17 150);
+	--border-subtle: oklch(0.90 0.02 260 / 0.055);
+	--presence-2: oklch(0.72 0.14 155);
+	--presence-5: oklch(0.72 0.14 345);
+	--presence-6: oklch(0.74 0.11 210);
+	--dsn-well: var(--muted);
+	--dsn-mark: oklch(70% 0.18 60 / 0.3);
+	--dsn-q: #aeb5bf;
+	--dsn-who: #939aa4;
+	--dsn-day: #646c7a;
+	--dsn-rail: #343c4a;
+}
+
+.pg .dsn p,
+.pg .dsn h4,
+.pg .dsn h5 {
+	margin: 0;
+}
+
+.pg .dsn-bar {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 4px;
+	height: 36px;
+	padding: 0 10px 0 24px;
+	font-size: 12.5px;
+	font-weight: 500;
+	white-space: nowrap;
+}
+
+.pg .dsn-bar > span:nth-child(3) {
+	margin-right: auto;
+}
+
+.pg .dsn-dim {
+	color: var(--muted-foreground);
+}
+
+.pg .dsn-pile {
+	display: flex;
+	margin-right: 8px;
+}
+
+.pg .dsn-pile .dsn-face + .dsn-face {
+	margin-left: -5px;
+	box-shadow: 0 0 0 1.5px var(--dsn-ground);
+}
+
+.pg .dsn-gap {
+	flex: 1;
+}
+
+.pg .dsn-tool {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: 26px;
+	padding: 0 8px;
+	border-radius: 7px;
+	background: var(--muted);
+}
+
+.pg .dsn-plain {
+	background: none;
+}
+
+.pg .dsn-more {
+	padding: 0 6px;
+}
+
+.pg .dsn-kbd {
+	display: inline-grid;
+	place-items: center;
+	min-width: 15px;
+	height: 15px;
+	border-radius: 4px;
+	background: var(--card);
+	font-size: 10px;
+	color: var(--muted-foreground);
+}
+
+.pg .dsn-count {
+	background: var(--selected);
+	color: var(--primary);
+}
+
+.pg .dsn-face {
+	flex: none;
+	display: inline-grid;
+	place-items: center;
+	border-radius: 50%;
+	background: var(--tone);
+	color: var(--background);
+	font-size: 8.5px;
+	font-weight: 650;
+	line-height: 1;
+}
+
+.pg .dsn-pile .dsn-face,
+.pg .dsn-bar > .dsn-face {
+	font-size: 10px;
+}
+
+.pg .dsn-bar > .dsn-face {
+	margin-left: 4px;
+}
+
+.pg .dsn-split {
+	flex: 1;
+	display: grid;
+	grid-template-columns: 496px minmax(0, 1fr);
+	gap: 8px;
+	min-height: 0;
+	padding: 0 8px 8px;
+}
+
+.pg .dsn-page,
+.pg .dsn-panel {
+	overflow: hidden;
+	border-radius: 10px;
+	background: var(--card);
+}
+
+.pg .dsn-page {
+	position: relative;
+	padding: 162px 32px 0 40px;
+}
+
+.pg .dsn-ver {
+	position: absolute;
+	top: 10px;
+	right: 16px;
+	font-size: 12px;
+	color: var(--muted-foreground);
+}
+
+.pg .dsn-ver b {
+	font-weight: 600;
+	color: var(--foreground);
+}
+
+.pg .dsn-tools {
+	position: absolute;
+	top: 100px;
+	left: 40px;
+	right: 48px;
+	display: flex;
+	gap: 8px;
+	color: var(--muted-foreground);
+}
+
+.pg .dsn-grp {
+	display: flex;
+	gap: 2px;
+	padding: 3px;
+	border-radius: 9px;
+	background: var(--muted);
+}
+
+.pg .dsn-grp > span {
+	display: grid;
+	place-items: center;
+	width: 28px;
+	height: 26px;
+	border-radius: 7px;
+}
+
+.pg .dsn-grp > span[data-on] {
+	background: var(--card);
+	color: var(--foreground);
+}
+
+.pg .dsn-page h4 {
+	font-size: 21px;
+	font-weight: 680;
+	letter-spacing: -0.014em;
+	line-height: 1.3;
+}
+
+.pg .dsn-page > p {
+	margin-top: 12px;
+	font-size: 14px;
+	line-height: 1.68;
+}
+
+.pg .dsn mark {
+	padding: 1px 0;
+	background: var(--dsn-mark);
+	color: inherit;
+	-webkit-box-decoration-break: clone;
+	box-decoration-break: clone;
+}
+
+.pg .dsn > .dsn-card {
+	position: absolute;
+}
+
+.pg .dsn-card {
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	padding: 12px 12px 4px;
+	border-radius: 10px;
+	background: var(--dsn-well);
+}
+
+.pg .dsn-eye {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	height: 20px;
+	padding: 0 4px;
+	font-size: 10.5px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--muted-foreground);
+}
+
+.pg .dsn-q {
+	padding: 4px 4px 6px;
+	font-size: 14px;
+	font-weight: 620;
+}
+
+.pg .dsn-done {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: 20px;
+	padding: 0 7px;
+	border-radius: 6px;
+	background: color-mix(in oklch, var(--success) 15%, transparent);
+	color: var(--success);
+	font-size: 11.5px;
+	font-weight: 600;
+	letter-spacing: 0;
+	text-transform: none;
+	opacity: 0;
+	transition: opacity 0.3s ease;
+}
+
+.pg .dsn-done[data-on] {
+	opacity: 1;
+}
+
+.pg .dsn-done path {
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.pg .dsn-opt {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 10px;
+	height: 32px;
+	padding: 0 10px;
+	border-radius: 7px;
+	font-size: 13.5px;
+	font-weight: 520;
+	transition: background-color 0.2s ease;
+}
+
+.pg .dsn-opt[data-on] {
+	background: var(--selected);
+}
+
+.pg .dsn-other {
+	color: var(--muted-foreground);
+	font-weight: 450;
+}
+
+.pg .dsn-plus {
+	width: 14px;
+	text-align: center;
+}
+
+.pg .dsn-radio {
+	flex: none;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	box-shadow: inset 0 0 0 1.5px var(--muted-foreground);
+	transition: box-shadow 0.2s var(--dsn-ease);
+}
+
+.pg .dsn-opt[data-on] .dsn-radio {
+	box-shadow: inset 0 0 0 4.5px var(--primary);
+}
+
+.pg .dsn-foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	height: 36px;
+	margin-top: auto;
+	padding: 0 4px;
+	box-shadow: 0 -1px 0 var(--border-subtle);
+	font-size: 12.5px;
+	color: var(--muted-foreground);
+}
+
+.pg .dsn-links {
+	display: flex;
+	gap: 14px;
+}
+
+.pg .dsn-by {
+	white-space: nowrap;
+	opacity: 0;
+	transition: opacity 0.3s ease;
+}
+
+.pg .dsn-by[data-on] {
+	opacity: 1;
+}
+
+.pg .dsn-panel {
+	padding: 0 16px;
+}
+
+.pg .dsn-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	height: 42px;
+	color: var(--muted-foreground);
+}
+
+.pg .dsn-head h5,
+.pg .dsn-list h5 {
+	font-size: 14.5px;
+	font-weight: 600;
+	line-height: 18px;
+	color: var(--foreground);
+}
+
+/* The list of decisions: a still. Only the question card moves. */
+.pg .dsn-log {
+	--dsn-line: linear-gradient(var(--dsn-rail), var(--dsn-rail)) 10px 0 / 1.5px 100% no-repeat;
+	margin-top: 8px;
+}
+
+.pg .dsn-dec {
+	position: relative;
+	display: block;
+	box-sizing: border-box;
+	height: 54px;
+	padding-left: 34px;
+	background: var(--dsn-line);
+	white-space: nowrap;
+}
+
+.pg .dsn-dec.dsn-end {
+	background-size: 1.5px 12px;
+}
+
+.pg .dsn-dec > span {
+	display: block;
+}
+
+.pg .dsn-dec .dsn-face {
+	display: grid;
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 22px;
+	height: 22px;
+	font-size: 9px;
+	font-weight: 600;
+	box-shadow: 0 0 0 2px var(--card);
+}
+
+.pg .dsn-dq {
+	font-size: 13px;
+	line-height: 18px;
+	color: var(--dsn-q);
+}
+
+.pg .dsn-da {
+	font-size: 14px;
+	line-height: 21px;
+	font-weight: 600;
+}
+
+.pg .dsn-dw {
+	font-size: 12.5px;
+	line-height: 16px;
+	color: var(--dsn-who);
+}
+
+.pg .dsn-dw time {
+	margin-left: 8px;
+	font-family: var(--mono);
+	font-size: 11px;
+}
+
+.pg .dsn-in {
+	height: 10px;
+	background: var(--dsn-line);
+}
+
+.pg .dsn-apart {
+	background: repeating-linear-gradient(var(--dsn-rail) 0 2px, transparent 2px 6px) 10px 0 / 1.5px 100% no-repeat;
+}
+
+.pg .dsn-day {
+	height: 18px;
+	padding-left: 34px;
+	background: var(--dsn-line);
+	font-family: var(--mono);
+	font-size: 10.5px;
+	line-height: 14px;
+	color: var(--dsn-day);
+}
+
+.pg .dsn-day.dsn-first {
+	background: none;
+}
+
+.pg .cap.pn.dsn-pn {
+	width: auto;
+	max-width: min(520px, calc(100% - 32px));
+	margin: 0 auto;
+	box-shadow: none;
+	background: none;
+}
+
+.pg .dsn-phone {
+	width: auto;
+	height: auto;
+	display: block;
+	background: none;
+}
+
+.pg .dsn-blk {
+	container-type: inline-size;
+	padding: 16px 16px 12px;
+	border-radius: 0 10px 10px;
+	background: var(--card);
+}
+
+.pg .dsn-blk.dsn-list {
+	margin-top: 8px;
+	padding: 16px 16px 21px;
+	border-radius: 10px;
+}
+
+.pg .dsn-list h5 {
+	margin-bottom: 14px;
+}
+
+.pg .dsn-list .dsn-log {
+	margin-top: 0;
+}
+
+.pg .dsn-blk > p {
+	margin: 0 0 14px;
+	font-size: 14px;
+	line-height: 1.68;
+}
+
+.pg .dsn-short {
+	display: none;
+}
+
+@container (max-width: 280px) {
+	.pg .dsn-long {
+		display: none;
+	}
+	.pg .dsn-short {
+		display: inline;
+	}
+}
+
+@media (max-width: 1180px) {
+	.pg .dev[data-job="decide"] .unit {
+		margin-top: 0;
+	}
+}
+
+/* The pencil note under the frame's bottom right corner, its arrow up at
+   the list, in the style of the row "Sticking to the plan" (page.css .ask).
+   On the phone it sits under the list with no arrow, at the inset of the
+   text in the blocks above. */
+.pg .dsn-ask {
+	align-items: flex-start;
+}
+
+.pg .dsn-ask .note {
+	font-size: 38px;
+	margin-top: 22px;
+}
+
+@media (min-width: 1181px) {
+	.pg .dsn-ask {
+		position: absolute;
+		top: 606px;
+		right: 96px;
+	}
+	.pg .dsn-ask .ar-u {
+		display: block;
+	}
+}
+
+@media (max-width: 1180px) {
+	.pg .dsn-ask {
+		margin: 22px 0 0 calc(max(16px, 50% - 260px) + 16px);
+	}
+	.pg .dsn-ask .note {
+		font-size: 32px;
+		margin-top: 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.pg .dsn * {
+		transition: none !important;
+	}
+}
+
+/* The markup is the unanswered start state, which decide.js plays from. With
+   reduced motion, and with scripts off, the row shows the answered end state
+   from the first paint instead: the look the data-on rules above give. */
+@media (prefers-reduced-motion: reduce), (scripting: none) {
+	.pg .dsn-done,
+	.pg .dsn-by {
+		opacity: 1;
+	}
+	.pg .dsn-q + .dsn-opt {
+		background: var(--selected);
+	}
+	.pg .dsn-q + .dsn-opt .dsn-radio {
+		box-shadow: inset 0 0 0 4.5px var(--primary);
+	}
+}

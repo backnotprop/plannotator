@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
 import { closeTo } from '../app/focus';
 import { writeRoute } from '../app/writeRoute';
 import { CardChip } from '../board/CardChip';
@@ -16,8 +17,6 @@ import type { PaneOnScreen } from '../panes/onScreen';
 import { PaneScopeContext } from '../panes/scope';
 import { priorityAction } from '../priority';
 import { threadLink } from '../rowMenu';
-import { focusBoardTitle } from '../shape/boardFocus';
-import { ShapePebbleButton } from '../shape/ShapeParts';
 import { threadBoardCard } from '../steps/model';
 import { openTakenBack } from '../takenBackCompose';
 import { pageOffersUpdates } from '../updateNotice';
@@ -86,11 +85,14 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
     reportScreen();
   });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
-  // The address's board, in this pane while it shows that thread: only one the window draws (none with Shape off, or
-  // while a review draws its own). On a phone it is a screen of its own, as the Artifacts view is: back is the thread.
-  const boardNode = route.shape && host.board && thread && thread.thread_id === route.thread ? host.board(true, stack.thread) || null : null;
+  const backLabel = fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle;
+  // A thread that throws while it draws says so in the pane; the sidebar and the list stay (ui's RegionBoundary). Try
+  // again mounts the pane afresh, which reads its reply draft back from the server (replyDraft.ts flushes on unmount).
+  // The notice takes the header's Back too, and the address names the thread (a reload opens it again): its own Back,
+  // in the header's words, closes the pane (on a phone, back to the list).
   return (
     <PaneScopeContext.Provider value={scope}>
+      <RegionBoundary name="Thread pane" className="ib-pane ib-pempty" resetKey={threadId} onClose={onClose} closeLabel={`Back to ${backLabel}`}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
           and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
       {threadId && !ready && ((!phone && !stack.thread) || awayWait) && (
@@ -204,21 +206,10 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           draftSignal={host.draftSignals.of(thread.thread_id)}
           filesSignal={host.filesSignals.of(thread.thread_id)}
           onReplyOpened={() => host.setReplyFor(null)}
-          shapeButton={(() => {
-            const board = host.boardsOn && thread ? host.shapes.byThread.get(thread.thread_id) : undefined;
-            if (!board) return null;
-            const open = !!route.shape;
-            // In the Artifacts view's place (one view at a time); opened by this press, its title takes the focus.
-            const show = () => (go({ ...route, shape: board.id, artifacts: false, links: false }), focusBoardTitle(board.id));
-            return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : show())} />;
-          })()}
-          board={boardNode}
           onSide={host.ask.side}
           onSideWords={host.ask.sideWords}
           replyWords={host.askReply?.threadId === thread.thread_id ? host.askReply.words : null}
           onReplyWordsTaken={() => host.setAskReply(null)}
-          replyPart={host.shapeReply?.threadId === thread.thread_id ? host.shapeReply : null}
-          onReplyPartTaken={() => host.setShapeReply(null)}
           onQuestions={host.patchQuestions}
           onPickSaves={(ids, paneClosed) => host.onPickSaves(ids, paneClosed, threadId)}
           onChanged={host.afterWrite}
@@ -231,7 +222,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             void host.refreshList(false);
             return true;
           }}
-          onClose={phone && boardNode ? () => close({ ...routeRef.current, shape: null }) : onClose}
+          onClose={onClose}
           file={route.file ?? null}
           namedFile={route.ref ?? null}
           onOpenNamedFile={(ref) => (ref ? go({ ...routeRef.current, file: null, ref }) : close({ ...routeRef.current, ref: null }))}
@@ -239,9 +230,9 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           fullFromSide={fullFromSide(window.history.state)}
           fullExitFile={fullExitFile(window.history.state)}
           onOpenGuide={(messageId, at) => go({ ...route, guide: messageId, ...(at ? { guideAt: at } : {}) })}
-          artifacts={route.artifacts === true && !boardNode}
-          onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, links: false, msg: null, shape: null }) : close({ ...routeRef.current, artifacts: false, links: false }))}
-          links={route.artifacts === true && route.links === true && !boardNode}
+          artifacts={route.artifacts === true}
+          onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, links: false, msg: null }) : close({ ...routeRef.current, artifacts: false, links: false }))}
+          links={route.artifacts === true && route.links === true}
           // Between the view's two sides: the same screen, so Back still returns to the thread.
           onLinks={(on) => writeRoute({ ...routeRef.current, links: on }, { replace: true })}
           // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
@@ -269,7 +260,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             screen.current = state;
             reportScreen();
           }}
-          backLabel={phone && boardNode ? 'Thread' : fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle}
+          backLabel={backLabel}
           cardChip={fromCard ? <CardChip card={host.cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={host.backToCard} /> : undefined}
           phone={phone}
           stacked={stack.thread || !!fromCard}
@@ -280,9 +271,6 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           fileStacked={stack.file}
           remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
           onToast={(t) => host.showToast(t)}
-          onToastGone={(onUndo) => {
-            if (host.toastNow.current?.onUndo === onUndo) host.dismissToast();
-          }}
           linkOf={(messageId) => threadLink(thread.thread_id, settings, window.location.origin, messageId)}
           onInboxLink={host.inboxLink}
           onBackToList={(fileName) => {
@@ -295,6 +283,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           }}
         />
       )}
+      </RegionBoundary>
     </PaneScopeContext.Provider>
   );
 }

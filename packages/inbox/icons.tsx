@@ -8,8 +8,9 @@
  * otherwise. Only an icon of one agent passes one; a kind of agent (Settings, the tour, "New Claude Code session")
  * keeps its plain mark.
  */
-import type { InboxAuthor } from '@plannotator/core/inbox-types';
-import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/icons';
+import { inboxMarkFaceHost, isInboxMarkFace, type InboxAuthor } from '@plannotator/core/inbox-types';
+import { HostMark as UiHostMark, Icon } from '@plannotator/ui/components/inbox-thread/icons';
+import { isScriptAuthor } from './scriptAuthor';
 import type { CSSProperties, ReactNode } from 'react';
 import { RexMark, useRexMarkOf } from './agents/rexMark';
 import { ProjectFaceMark, useShownAgentFace } from './agents/projectFace';
@@ -25,11 +26,13 @@ export * from '@plannotator/ui/components/inbox-thread/icons';
  * The mark for an agent host; with `agent`, that agent's chosen face when it has one, else, with Settings → Rows' Agent
  * icons "From the project name", its project's tile (agents/projectFace.tsx).
  */
-export function HostMark({ host, big, agent }: { host: string | null | undefined; big?: boolean; agent?: string | null }) {
+export function HostMark({ host, big, agent, script }: { host: string | null | undefined; big?: boolean; agent?: string | null; script?: boolean }) {
   // An agent started in Rex carries its pane's status on the icon's corner (agents/rexMark.tsx); any other: today's icon.
   const rex = useRexMarkOf(agent);
+  const face = useShownAgentFace(agent);
+  if (script) return <ScriptMark big={big} />;
   return (
-    <FaceOfMark host={host} big={big} face={useShownAgentFace(agent)} agent={agent}>
+    <FaceOfMark host={host} big={big} face={face} agent={agent}>
       {rex && agent ? <RexMark mark={rex} seed={agent} size={big ? 30 : 16} /> : null}
     </FaceOfMark>
   );
@@ -37,12 +40,19 @@ export function HostMark({ host, big, agent }: { host: string | null | undefined
 
 /**
  * A given face in a mark's box (HostMark draws the agent's own; a preview draws one not kept yet). `agent`: whose
- * project a `project` face draws. `children`: drawn inside the box after the face (the Rex status mark).
+ * project a `project` face draws. `mark:<host>`: that host's mark (ui's neutral mark for a host it has none for).
+ * `children`: drawn inside the box after the face (the Rex status mark).
  */
 export function FaceOfMark({ host, big, face, agent, children }: { host: string | null | undefined; big?: boolean; face: AgentFace; agent?: string | null; children?: ReactNode }) {
   if (face === 'agent' || face === 'mark')
     return (
       <UiHostMark host={host} big={big}>
+        {children}
+      </UiHostMark>
+    );
+  if (isInboxMarkFace(face))
+    return (
+      <UiHostMark host={inboxMarkFaceHost(face)} big={big}>
         {children}
       </UiHostMark>
     );
@@ -131,10 +141,22 @@ function SetMark({ face, host, big, children }: { face: SetFace; host: string | 
   );
 }
 
-/** An author's mark: an agent's is its session's face when it has one. */
+/**
+ * A script's post (scriptAuthor.ts): a terminal (Heroicons command-line) in the mark's tile, where an agent's icon
+ * would be. No face: no agent chose one, and no project tile stands in for it.
+ */
+export function ScriptMark({ big }: { big?: boolean }) {
+  return (
+    <span className={`ib-mk${big ? ' ib-big' : ''}`} data-script-mark="">
+      <Icon name="terminal" />
+    </span>
+  );
+}
+
+/** An author's mark: an agent's is its session's face when it has one; a script's post's is the terminal. */
 export function AuthorMark({ author, big }: { author: InboxAuthor | null | undefined; big?: boolean }) {
   const agent = author?.kind === 'agent' ? author : null;
-  return <HostMark host={agent?.host ?? null} big={big} agent={agent?.session ?? null} />;
+  return <HostMark host={agent?.host ?? null} big={big} agent={agent?.session ?? null} script={isScriptAuthor(agent)} />;
 }
 
 /**

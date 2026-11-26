@@ -84,11 +84,11 @@ export function inboxPageHeaders(framers: readonly string[] = NO_FRAME_ANCESTORS
   };
 }
 
-async function pageBody(req: Request, readBody: (req: Request) => Promise<Record<string, unknown>>): Promise<Record<string, unknown> | null> {
+async function pageBody(req: Request, readBody: (req: Request) => Promise<Record<string, unknown>>, maxPageBytes: number): Promise<Record<string, unknown> | null> {
   if ((req.headers.get("content-encoding") ?? "").toLowerCase() !== "gzip") return readBody(req);
   let text: string;
   try {
-    text = gunzipSync(Buffer.from(await req.arrayBuffer()), { maxOutputLength: INBOX_PAGE_MAX_BYTES * 2 }).toString("utf8");
+    text = gunzipSync(Buffer.from(await req.arrayBuffer()), { maxOutputLength: maxPageBytes * 2 }).toString("utf8");
   } catch (cause) {
     return (cause as { code?: unknown }).code === "ERR_BUFFER_TOO_LARGE" ? null : {};
   }
@@ -100,10 +100,29 @@ export function createInboxPages(options: {
   json: (body: unknown, status?: number) => Response;
   maxEntries?: number;
   maxBytes?: number;
+  /**
+   * Another kind of kept document, served the same way under its own path,
+   * headers and size (inbox-embeds.ts: a message's annotatable html block,
+   * under the embed's policy). Absent: an attached page, as always.
+   */
+  kind?: {
+    /** The route: `POST <path>` keeps a document, `GET <path>/:id` serves it. */
+    path: string;
+    /** `<path>/:id`, the id its one group. */
+    pattern: RegExp;
+    /** The served document's headers (its own Content-Security-Policy). */
+    headers: (framers: readonly string[]) => Record<string, string>;
+    /** The most one document may weigh. */
+    maxPageBytes: number;
+  };
 }) {
   const { json } = options;
   const maxEntries = options.maxEntries ?? 64;
   const maxBytes = options.maxBytes ?? 64 * 1024 * 1024;
+  const pagesPath = options.kind?.path ?? INBOX_PAGES_PATH;
+  const pageHeaders = options.kind?.headers ?? inboxPageHeaders;
+  const maxPageBytes = options.kind?.maxPageBytes ?? INBOX_PAGE_MAX_BYTES;
+  const pagePath = options.kind?.pattern ?? PAGE_PATH;
   const key = randomBytes(32);
   const idOf = (html: string) => createHmac("sha256", key).update(html).digest("hex").slice(0, 32);
   /** id → document, oldest first (a hit moves to the end). */
@@ -130,22 +149,22 @@ export function createInboxPages(options: {
   };
 
   const route = async (req: Request, url: URL, framers: readonly string[] = NO_FRAME_ANCESTORS): Promise<Response | null> => {
-    if (url.pathname === INBOX_PAGES_PATH) {
+    if (options.kind ? url.pathname === options.kind.path : url.pathname === INBOX_PAGES_PATH) {
       if (req.method !== "POST") return json({ error: "Use POST.", code: "method_not_allowed" }, 405);
-      const body = await pageBody(req, options.readBody);
+      const body = await pageBody(req, options.readBody, maxPageBytes);
       if (body === null) {
-        return json({ error: `html: at most ${INBOX_PAGE_MAX_BYTES} bytes.`, code: "page_too_large" }, 413);
+        return json({ error: `html: at most ${maxPageBytes} bytes.`, code: "page_too_large" }, 413);
       }
       if (typeof body.html !== "string" || body.html.trim() === "") {
         return json({ error: "html: the page, a non-empty string.", code: "validation_error" }, 400);
       }
-      if (Buffer.byteLength(body.html) > INBOX_PAGE_MAX_BYTES) {
-        return json({ error: `html: at most ${INBOX_PAGE_MAX_BYTES} bytes.`, code: "page_too_large" }, 413);
+      if (Buffer.byteLength(body.html) > maxPageBytes) {
+        return json({ error: `html: at most ${maxPageBytes} bytes.`, code: "page_too_large" }, 413);
       }
       const id = keep(body.html);
-      return json({ id, url: `${INBOX_PAGES_PATH}/${id}` });
+      return json({ id, url: `${pagesPath}/${id}` });
     }
-    const match = PAGE_PATH.exec(url.pathname);
+    const match = pagePath.exec(url.pathname);
     if (!match) return null;
     if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET.", code: "method_not_allowed" }, 405);
     const id = match[1]!;
@@ -153,10 +172,10 @@ export function createInboxPages(options: {
     if (page === undefined) {
       return new Response(req.method === "HEAD" ? null : GONE_PAGE, {
         status: 404,
-        headers: { ...inboxPageHeaders(framers), "Content-Security-Policy": withFrameAncestors(GONE_CSP, framers) },
+        headers: { ...pageHeaders(framers), "Content-Security-Policy": withFrameAncestors(GONE_CSP, framers) },
       });
     }
-    return new Response(req.method === "HEAD" ? null : page, { headers: inboxPageHeaders(framers) });
+    return new Response(req.method === "HEAD" ? null : page, { headers: pageHeaders(framers) });
   };
 
   return { route, size: () => pages.size, bytes: () => bytes };

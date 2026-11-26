@@ -108,7 +108,7 @@ export function readPlans(retry = false, poll = false): Promise<void> {
 
 export function setPlansOn(next: boolean): void {
   // Off, its sidebar row is never saved in the layout (sidebarLayout.ts): nothing of an off Plans is written.
-  setSidebarUnsaved(next ? [] : ['plans']);
+  setSidebarUnsaved('plans', !next);
   if (on === next) return;
   on = next;
   if (!on) {
@@ -152,6 +152,24 @@ export function usePlansPage(): PlansSnapshot {
   return usePlans();
 }
 
+// Share this space's own switch (the settings answer's `plans.share`, config.json `inboxSpaceShare`): off, the plan
+// page draws no Share button and reads nothing of a share.
+let shareOn = false;
+const shareListeners = new Set<() => void>();
+export function setPlanShareOn(next: boolean): void {
+  if (shareOn === next) return;
+  shareOn = next;
+  for (const listener of shareListeners) listener();
+}
+const subscribeShare = (listener: () => void) => {
+  shareListeners.add(listener);
+  return () => shareListeners.delete(listener);
+};
+const shareNow = () => shareOn;
+export function usePlanShareOn(): boolean {
+  return useSyncExternalStore(subscribeShare, shareNow, shareNow);
+}
+
 type PlansToast = (toast: Omit<InboxToastModel, 'id'>) => void;
 let toastTo: PlansToast | null = null;
 
@@ -159,6 +177,8 @@ let toastTo: PlansToast | null = null;
 export function usePlansOn(settings: Pick<SettingsModel, 'plans'> | null, toast?: PlansToast): boolean {
   const value = settings?.plans?.on === true;
   useEffect(() => setPlansOn(value), [value]);
+  const share = value && settings?.plans?.share === true;
+  useEffect(() => setPlanShareOn(share), [share]);
   useEffect(() => {
     toastTo = toast ?? null;
   }, [toast]);

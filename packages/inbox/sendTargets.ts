@@ -2,7 +2,7 @@
  * The replies one Send makes (pure, for the tests): the agent messages it
  * answers, and which reply each waiting annotation rides.
  */
-import { inboxActionInDraft, type InboxAnnotationRecord, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
+import { inboxActionInDraft, inboxRemovedFrom, inboxWordsDefault, type InboxAnnotationRecord, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 import { activeHandoff } from './tags';
 import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 
@@ -127,6 +127,8 @@ export function tookOverReply(thread: InboxThread): InboxMessageWire | null {
     const m = thread.messages[index]!;
     if (m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session) && !m.scheduled_change) return null;
     if (!m.took_over || !m.to) continue;
+    // A session the person removed from the thread since holds it no more (core inbox-removed.ts).
+    if (inboxRemovedFrom(thread.messages, m.to.session)) return null;
     // That session's latest since (the server's owner too): a stale tab's reply to another session does not take it.
     const owner = m.to.session;
     return thread.messages.slice(index + 1).filter((later) => later.to?.session === owner).at(-1) ?? m;
@@ -135,7 +137,8 @@ export function tookOverReply(thread: InboxThread): InboxMessageWire | null {
 }
 
 /**
- * The message the person's words answer: the latest agent message, except
+ * The message the person's words answer: the latest agent message (passing
+ * over a script's post, `inboxSessionlessSend`, below), except
  * when a session took over from one that ended (`tookOverReply`: that reply,
  * addressed as it is, until an agent writes), and in a thread handed to
  * another session (approval "inbox-tag-handoff"): then the new owner's latest
@@ -153,8 +156,14 @@ export function wordsMessage(thread: InboxThread): InboxMessageWire {
     return after.at(-1) ?? handoff;
   }
   // A permission prompt's question (launch, `perm:…`) takes only its own answer: the words go to the agent itself.
-  // An agent's routine change line is a note, not its words: the person's words go past it.
-  return thread.messages.filter((m) => m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session) && !m.scheduled_change).at(-1) ?? thread.messages[0]!;
+  // An agent's routine change line is a note, not its words: the person's words go past it. A script's post does
+  // not steal the thread (`inboxWordsDefault`, the same rule as the asking session's).
+  return inboxWordsDefault(thread.messages, answersItself) ?? thread.messages[0]!;
+}
+
+/** A message whose questions or action items the person answered in the draft (a saved pick, a Done). */
+export function answersItself(m: InboxMessageWire): boolean {
+  return (m.questions ?? []).some((q) => q.state === 'picked') || (m.actions ?? []).some((a) => inboxActionInDraft(a));
 }
 
 /** The reply a message's questions ride: its session's, or its own when it has none. */

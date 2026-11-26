@@ -16,7 +16,7 @@
  * .local/proof/review-explorer/ (or $PLANNOTATOR_E2E_PROOF_DIR/review-explorer).
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -360,11 +360,13 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
   const back = process.platform === 'darwin' ? 'Control+Minus' : process.platform === 'win32' ? 'Alt+ArrowLeft' : 'Control+Alt+Minus';
   const forward = process.platform === 'darwin' ? 'Control+Shift+Minus' : process.platform === 'win32' ? 'Alt+ArrowRight' : 'Control+Shift+Minus';
   let child: ChildProcess | undefined;
+  let context: BrowserContext | undefined;
   try {
     child = spawn(binary, ['review', '--diff-type', 'uncommitted'], { env, cwd: repo, stdio: 'ignore' });
     await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
     const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
     const page = await openReview(browser, url);
+    context = page.context();
     const activeTab = page.locator('[data-active-pane-group] [data-pane-tab][aria-selected="true"], .dv-active-tab .dv-review-tab-label').first();
 
     // With no symbol under the pointer F12 is left to the browser (developer tools).
@@ -475,8 +477,9 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await page.keyboard.press('Shift+Alt+F5');
     await expect.poll(scrollTop).toBe(second);
     await expect(activeTab).toHaveText('long.ts');
-    await page.context().close();
   } finally {
+    // A failed run leaves no live page behind in the shared browser.
+    await context?.close();
     await stopReview(child, root);
   }
 });

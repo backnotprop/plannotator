@@ -1,0 +1,66 @@
+/* Nightfox — by EdenEast (James Simpson), MIT: https://github.com/EdenEast/nightfox.nvim */
+.theme-nightfox {
+  --background: #192330;
+  --foreground: #cdcecf;
+  --card: #131a24;
+  --card-foreground: #cdcecf;
+  --popover: #131a24;
+  --popover-foreground: #cdcecf;
+  --primary: #719cd6;
+  --primary-foreground: #131a24;
+  --secondary: #29394f;
+  --secondary-foreground: #aeafb0;
+  --muted: #212e3f;
+  --muted-foreground: #7f8c9d;
+  --accent: #63cdcf;
+  --accent-foreground: #131a24;
+  --destructive: #d16983;
+  --destructive-foreground: #131a24;
+  --border: #39506d;
+  --input: #212e3f;
+  --ring: #719cd6;
+  --success: #81b29a;
+  --success-foreground: #131a24;
+  --warning: #dbc074;
+  --warning-foreground: #131a24;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #131a24;
+  --focus-highlight: #63cdcf;
+}
+
+.theme-nightfox.light {
+  --background: #192330;
+  --foreground: #cdcecf;
+  --card: #131a24;
+  --card-foreground: #cdcecf;
+  --popover: #131a24;
+  --popover-foreground: #cdcecf;
+  --primary: #719cd6;
+  --primary-foreground: #131a24;
+  --secondary: #29394f;
+  --secondary-foreground: #aeafb0;
+  --muted: #212e3f;
+  --muted-foreground: #7f8c9d;
+  --accent: #63cdcf;
+  --accent-foreground: #131a24;
+  --destructive: #d16983;
+  --destructive-foreground: #131a24;
+  --border: #39506d;
+  --input: #212e3f;
+  --ring: #719cd6;
+  --success: #81b29a;
+  --success-foreground: #131a24;
+  --warning: #dbc074;
+  --warning-foreground: #131a24;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #131a24;
+  --focus-highlight: #63cdcf;
+}

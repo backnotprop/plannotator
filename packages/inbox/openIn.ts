@@ -5,7 +5,7 @@
  * (`inboxOpenInPolicy`, @plannotator/core). A plain list: Browser (HTML),
  * the editors this computer has, the default app where the policy allows
  * it, the file manager; then Copy path. The current choice is checked.
- * A referenced file (Shape, a review's diff headers) has the same list, by its
+ * A referenced file (a review's diff headers, a message's code spans) has the same list, by its
  * kind on disk, with no Browser: only an attachment has a page to open.
  * A file of a thread on another linked machine (`onAnotherMachine`) lists
  * only what works from here, a page's or an image's new tab and Copy path:

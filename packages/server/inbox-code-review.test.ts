@@ -321,19 +321,18 @@ describe("the skills catalog", () => {
   const catalog = async (codeReview: boolean, discovered: { name: string; root: string; description: string }[]) =>
     ((await inboxSkillCatalog(codeReview, () => discovered as never).json()) as { skills: { name: string; root: string; humanOnly?: boolean }[] }).skills;
 
-  test("off: no Plannotator skill; on: the offered review skills first, review-guide left out", async () => {
+  test("off: no review skill; on: the offered review skills after /picture-it, review-guide left out", async () => {
     const own = [{ name: "deploy", root: "agents-project", description: "Ship it" }];
-    // Off, the catalog route answers the discovered skills as before (handleReferenceSkills): none of Plannotator's.
     const w = await world();
     const offList = ((await (await fetch(`${w.base}/api/inbox/skills`)).json()) as { skills: { root: string }[] }).skills;
-    expect(offList.some((s) => s.root === "plannotator")).toBe(false);
+    expect((offList as { name: string; root: string }[]).filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it"]);
     await w.setCodeReview(true);
     const onList = ((await (await fetch(`${w.base}/api/inbox/skills`)).json()) as { skills: { name: string; root: string }[] }).skills;
-    expect(onList.filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual([...INBOX_REVIEW_SKILL_NAMES]);
+    expect(onList.filter((s) => s.root === "plannotator").map((s) => s.name)).toEqual(["picture-it", ...INBOX_REVIEW_SKILL_NAMES]);
     expect(onList.some((s) => s.name === "review-guide")).toBe(false);
 
     const on = await catalog(true, own);
-    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:review-curate", "plannotator:review-walkthrough", "plannotator:review-recheck", "agents-project:deploy"]);
+    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:picture-it", "plannotator:review-curate", "plannotator:review-walkthrough", "plannotator:review-recheck", "agents-project:deploy"]);
     expect(on[0]!.humanOnly).toBe(true);
   });
 
@@ -389,14 +388,14 @@ describe("what an agent's tool carries", () => {
     expect(strip(on)).toBe(never);
   });
 
-  // Claude Code cuts a tool description at 2,048 characters: the Board, steps and Code review all on, both builders.
+  // Claude Code cuts a tool description at 2,048 characters: the Board, steps, Routines and Code review all on, both builders.
   test("the description stays under 2,048 characters with every capability on, and Code review leaves it unchanged", async () => {
     const w = await world();
-    await w.post("/api/inbox/settings", { board: { on: true }, steps: { on: true } });
+    await w.post("/api/inbox/settings", { board: { on: true }, steps: { on: true }, ...(process.platform === "win32" ? {} : { scheduled_threads: { on: true } }) });
     const before = parseInboxToolList(await rawList(w.base));
     await w.setCodeReview(true);
     const served = parseInboxToolList(await rawList(w.base));
-    expect(served.some((tool) => tool.name === "card")).toBe(true);
+    expect(served.map((tool) => tool.name)).toEqual(expect.arrayContaining(["card", "steps", ...(process.platform === "win32" ? [] : ["routine"])]));
     for (const build of [inboxAgentTool, modAgentTool]) {
       const tool = build(served)!;
       expect(tool.description.length).toBeLessThan(2_048);

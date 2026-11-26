@@ -112,7 +112,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, saveConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -264,18 +264,12 @@ import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, inboxRemoteOpenHint, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runPlansCommand } from "./plans-command";
 import { runCardCommand } from "./card-command";
-import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT, shapeCommandFolder } from "./shape-command";
-// @ts-expect-error a text import of the optional helper file
-import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
-import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
-import { isReviewDrawCommand } from "./review-draw-command";
-import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
-import { runShapeOpen, runShapeServe } from "./shape-open";
-import { runShapeFrame } from "./shape-frame";
-import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
-import { runInboxCallCommand } from "./inbox-call-command";
+import { inboxHelpTopic } from "./inbox-help-before-after";
+import { inboxPairedRouteFetch, runInboxCallCommand } from "./inbox-call-command";
+import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
+import { runInboxCapabilityCommand } from "./inbox-capability-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -315,10 +309,6 @@ import planHtmlPath from "../dist/index.html" with { type: "file" };
 import reviewHtmlPath from "../dist/review.html" with { type: "file" };
 // @ts-ignore - Bun import attribute for file
 import inboxHtmlPath from "../dist/inbox.html" with { type: "file" };
-// The Shape page is embedded gzipped (about 3 MB instead of 13 MB; scripts/gzip-page.ts at build): the Shapes
-// server sends these bytes as they are to a browser that takes gzip, and unzips them once for one that does not.
-// @ts-ignore - Bun import attribute for file
-import shapeHtmlGzPath from "../dist/shape.html.gz" with { type: "file" };
 
 function embeddedPage(path: unknown): () => string {
   let html: string | undefined;
@@ -327,8 +317,6 @@ function embeddedPage(path: unknown): () => string {
 const planHtmlContent = embeddedPage(planHtmlPath);
 const reviewHtmlContent = embeddedPage(reviewHtmlPath);
 const inboxHtmlContent = embeddedPage(inboxHtmlPath);
-let shapeHtmlGz: Buffer | undefined;
-const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unknown as string));
 
 // Code review's diagram engine: embedded too, read on first need.
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
@@ -375,81 +363,6 @@ const rawArgs = process.argv.slice(2);
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         env: process.env,
         ensureRunning: () => ensureInboxRunning(cardDataDir),
-      }),
-    );
-  }
-}
-// `plannotator review draw …` / `plannotator review drawings <msg_id>`: Show me makes a Shape now, so an older
-// agent that still calls them is told where to go. Before the review parse, which would take `draw` for a ref. Only
-// while the person has Code review on, and only arguments of the old command's own shape: otherwise (off included)
-// the review parse takes them. Read quietly: a broken config.json is Code review off, and the parse warns once.
-// Shape off too (approval "code-review-029-shape-off"): the refusal points at Shape, so it is given only with both on;
-// otherwise the review parse takes the words, as with Code review off.
-if (isReviewDrawCommand(rawArgs, () => {
-  const config = loadConfig({ quiet: true });
-  return config.inboxCodeReview === true && config.inboxShape === true;
-})) {
-  process.stderr.write(`${INBOX_REVIEW_DRAW_GONE}\n`);
-  process.exit(1);
-}
-// `plannotator shape …`: an agent's side of Shape (shape-command.ts; unreleased,
-// HIDDEN_SUBCOMMANDS). It reads and writes the Shape store directly. Before the
-// strict-annotate parse, which takes `--file`-style flags for itself.
-{
-  const args = rawArgs;
-  // Off unless the person turned Shape on (Settings → Capabilities; Code review alone brings none of it, approval
-  // "code-review-029-shape-off"): no command and no help, so an agent learns nothing of it (the same switch hides the
-  // Pebble and the routes).
-  // `shape on|off` is the switch itself, so it runs either way (`on --help` still gets the off line).
-  if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
-    process.exit(runShapeSwitch(args.slice(1)));
-  }
-  if (args[0] === "shape" && !shapeBoardsOn({ quiet: false })) {
-    process.stderr.write(`${SHAPE_OFF_TEXT}\n`);
-    process.exit(1);
-  }
-  if (args[0] === "shape" && args[1] === "kit") {
-    await writeWholeToStdout(SHAPE_KIT);
-    process.exit(0);
-  }
-  // `shape open`: the Shape page without the Inbox (shape-open.ts); `shape serve` is its detached server.
-  // Bare `plannotator shape` is `shape open` with no id (every board), as bare `plannotator inbox` opens the Inbox.
-  if (args[0] === "shape" && (args.length === 1 || (args[1] === "open" && !hasHelpFlag(args.slice(2))))) {
-    process.exit(
-      await runShapeOpen(args.slice(2), {
-        dataDir: getPlannotatorDataDir(),
-        openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
-        // Bare: the page already open, if there is one; `shape open` always opens a tab.
-        reuseOpenPage: args.length === 1,
-      }),
-    );
-  }
-  // `shape --help animate` (or `shape animate [--help]`): the animation guide, read once the agent decides to animate.
-  if (args[0] === "shape" && isShapeAnimateHelp(args.slice(1))) {
-    await writeWholeToStdout(`${SHAPE_ANIMATE_HELP}\n`);
-    process.exit(0);
-  }
-  // `shape frame`: a picture of a board at one moment, through the Chrome on this computer (shape-frame.ts).
-  if (args[0] === "shape" && args[1] === "frame" && !hasHelpFlag(args.slice(2))) {
-    process.exit(
-      await runShapeFrame(args.slice(2), {
-        dataDir: getPlannotatorDataDir(),
-        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
-        env: process.env,
-        pageGzip: shapeHtmlGzip,
-        version: getCliVersion() ?? "dev",
-      }),
-    );
-  }
-  if (args[0] === "shape" && args[1] === "serve" && args.length === 2) {
-    process.exit(await runShapeServe({ dataDir: getPlannotatorDataDir(), pageGzip: shapeHtmlGzip, version: getCliVersion() ?? "dev" }));
-  }
-  if (args[0] === "shape" && !hasHelpFlag(args.slice(1))) {
-    process.exit(
-      await runShapeCommand(args.slice(1), {
-        dataDir: getPlannotatorDataDir(),
-        cwd: shapeCommandFolder(process.env),
-        env: process.env,
       }),
     );
   }
@@ -548,10 +461,32 @@ if (isReviewDrawCommand(rawArgs, () => {
   const args = rawArgs;
   if (args[0] === "inbox" && args[1] === "export-decisions") {
     const exportDataDir = getPlannotatorDataDir();
+    // A paired cloud agent's machine has no Inbox: the person's, through the agent door (inbox-call-command.ts).
+    const pairedRoute = process.env.PLANNOTATOR_PAIRING && !isInboxTurnedOn(exportDataDir) ? inboxPairedRouteFetch({ env: process.env }) : null;
+    if (pairedRoute && "code" in pairedRoute) {
+      process.stderr.write(`${pairedRoute.code}: ${pairedRoute.message}\n`);
+      process.exit(1);
+    }
     process.exit(
       await runInboxExportDecisionsCommand(args.slice(2), {
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         ensureRunning: () => ensureInboxRunning(exportDataDir),
+        ...(pairedRoute ? { fetchRoute: pairedRoute } : {}),
+      }),
+    );
+  }
+}
+// `plannotator inbox capability [<capability> on|off]`: the capability switches, a thin client over the Inbox's `/api/inbox/capability` (inbox-capability-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "capability") {
+    const capabilityDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxCapabilityCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(capabilityDataDir),
       }),
     );
   }
@@ -567,6 +502,25 @@ if (isReviewDrawCommand(rawArgs, () => {
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(stepsDataDir),
+      }),
+    );
+  }
+}
+// `plannotator theme …`: the person's own theme files (theme-command.ts). Reads and writes the data dir
+// only, so it works with nothing running. Before the strict-annotate parse: it takes its own flags and --help.
+{
+  const args = rawArgs;
+  if (args[0] === "theme") {
+    const { runThemeCommand } = await import("./theme-command");
+    process.exit(
+      await runThemeCommand(args.slice(1), {
+        dataDir: getPlannotatorDataDir(),
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        loadTheme: () => {
+          const theme = loadConfig({ quiet: true }).theme;
+          return theme && typeof theme === "object" ? theme : undefined;
+        },
+        saveTheme: (theme) => saveConfig({ theme }),
       }),
     );
   }
@@ -974,6 +928,12 @@ if (isTopLevelHelpInvocation(args)) {
 // otherwise `plannotator review --help` (commonly run by agents probing the
 // CLI) falls through to local review mode and launches the browser UI,
 // spawning a stray tab whose close injects a bogus "no feedback" signal.
+// `inbox --help before-after` (inbox-help-before-after.ts): one topic of the guide, printed alone.
+const inboxTopic = args[0] === "inbox" ? inboxHelpTopic(args.slice(1)) : null;
+if (inboxTopic) {
+  await writeWholeToStdout(`${inboxTopic}\n`);
+  process.exit(0);
+}
 const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
@@ -1509,6 +1469,7 @@ if (args[0] === "sessions") {
       console.error("  GitHub: https://github.com/owner/repo/pull/123");
       console.error("  GitLab: https://gitlab.com/group/project/-/merge_requests/42");
       console.error("  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7");
+      console.error("  Forgejo / Gitea: https://codeberg.org/owner/repo/pulls/5");
       process.exit(1);
     }
 
@@ -1521,7 +1482,7 @@ if (args[0] === "sessions") {
       ghAccountEnv = noteGhAccountForThisRun(await checkPRAuth(prRef));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // REST-only platforms (Bitbucket) have no CLI to be missing; their auth
+      // REST-only platforms (Bitbucket, Forgejo) have no CLI to be missing; their auth
       // error already names the env vars and token scopes to set.
       if (cliName && (msg.includes("not found") || msg.includes("ENOENT"))) {
         console.error(`${getPlatformLabel(prRef)} CLI (${cliName}) is not installed.`);
@@ -1563,7 +1524,7 @@ if (args[0] === "sessions") {
         sessionDir = path.join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
         const prNumber = getPRNumber(prMetadata);
         localPath = path.join(sessionDir, "pool", `pr-${prNumber}`);
-        // GitHub/GitLab: the PR head ref on origin. Bitbucket: the source
+        // GitHub/GitLab: the PR head ref on origin. Forgejo: refs/pull/N/head on origin. Bitbucket: the source
         // branch, from the fork's URL when the PR comes from one.
         const headFetch = getPRHeadFetchSpec(prMetadata);
         const fetchRefStr = headFetch.ref;

@@ -29,6 +29,16 @@ export interface ListReader<M> {
   reset: () => void;
 }
 
+/**
+ * Grid (approval "inbox-agent-grid"): the reads ask for Grid's fields (`grid=1`) only while Grid is on and its page
+ * shows (grid/gridOn.ts). Otherwise the list is the one it was before Grid, byte for byte.
+ */
+let gridAsked = false;
+export const setListGrid = (on: boolean): void => {
+  gridAsked = on;
+};
+export const listGridAsked = (): boolean => gridAsked;
+
 /** Lists kept to put a change together with: the newest few, for reads that were out at once. */
 const KEPT_LISTS = 4;
 

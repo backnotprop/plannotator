@@ -7,6 +7,7 @@ import type {
 } from '@plannotator/shared/semantic-diff-types';
 import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPreview';
 import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
+import { POWER_UP_PROVIDER_NAMES } from '@plannotator/ui/components/settings/SemanticDiffsTab';
 import type { ReviewFileSource, ReviewFileSourceLoader } from '../../hooks/useReviewFileSource';
 
 const CHANGE_ICONS: Record<string, LucideIcon> = {
@@ -141,7 +142,7 @@ function SemanticDiffChangeRow({
   const range = lineSelectionForChange(change);
   const linked = change.origin === 'second-opinion';
   const band = change.band === 'very-likely' ? 'Very likely' : change.band === 'likely' ? 'Likely' : '';
-  const model = change.model?.split(' ')[0]?.replace(/^jev.*/, 'Jev').replace(/^clef.*/, 'Clef') ?? 'the model';
+  const model = change.model?.split(' ')[0]?.replace(/^jev.*/, 'Jev').replace(/^clef.*/, 'Clef').replace(/^gpt-6-luna.*$/, POWER_UP_PROVIDER_NAMES.openai) ?? 'the model';
   const sourcePath = change.changeType === 'deleted' ? change.oldFilePath ?? change.filePath : change.filePath;
   const sourcePreview = useHoverPreview<ReviewFileSource>(
     () => (loadSource && range ? loadSource(sourcePath, range.side === 'deletions' ? 'old' : 'new') : Promise.resolve(null)),

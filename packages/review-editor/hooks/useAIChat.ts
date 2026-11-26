@@ -31,6 +31,7 @@ interface UseAIChatOptions {
   /** The selected provider is "Ask this session": send the diff's identity,
    *  never the on-screen patch, into the agent's own session. */
   sessionBridge?: boolean;
+  storageKey?: string | null;
 }
 
 export function useAIChat({
@@ -43,6 +44,7 @@ export function useAIChat({
   model,
   reasoningEffort,
   sessionBridge = false,
+  storageKey,
 }: UseAIChatOptions) {
   const chat = useSharedAIChat({
     context: {
@@ -52,6 +54,7 @@ export function useAIChat({
     providerId,
     model,
     reasoningEffort,
+    storageKey,
   });
 
   // View state changes mid-session; the session context is baked once. Read the

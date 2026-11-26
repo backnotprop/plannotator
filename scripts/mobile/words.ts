@@ -16,8 +16,13 @@
 import { INBOX_ACTION_LABEL } from '../../packages/core/inbox-actions';
 import { INBOX_STOPPED_REPLY_TEXT, TURN_ENDED_TEXT, autoAfterText, reaskRowLine, sentRowLine } from '../../packages/core/inbox-delivery-line';
 import { INBOX_TURN_FAILED_WORDS } from '../../packages/core/inbox-run-line';
-import { INBOX_ACK_LABEL, INBOX_AGENT_LABELS, INBOX_SECTIONS } from '../../packages/core/inbox-types';
+import { INBOX_SNOOZED_BAND } from '../../packages/core/inbox-snooze';
+import { INBOX_ACK_LABEL, INBOX_AGENT_LABELS, INBOX_HOST_NAMES, INBOX_PRIORITY_GROUP, INBOX_SECTIONS, INBOX_UPLOAD_MAX_BYTES } from '../../packages/core/inbox-types';
+import { ATTACHMENT_FEEDBACK_HEADING, SENT_VERSION_SUFFIX } from '../../packages/inbox/attachments';
+import { MARKUP_ONLY_TEXT } from '../../packages/inbox/markup';
+import { EMOJI } from '../../packages/inbox/components/emojiData';
 import { OUT, cli, jsonText, type Output } from './lib';
+import { readFileSync } from 'node:fs';
 
 /** One word: its text (`{part}` where a part goes), its parts, and where it comes from. */
 export type Word = { text: string; parts: string[]; source: string };
@@ -40,6 +45,8 @@ const DELIVERY = 'packages/core/inbox-delivery-line.ts';
 export function buildWords(): Record<string, Word> {
   const words: Record<string, Word> = {};
   for (const { id, label } of INBOX_SECTIONS) words[`section.${id}`] = fixed(label, `packages/core/inbox-types.ts INBOX_SECTIONS ${id}`);
+  words['group.priority'] = fixed(INBOX_PRIORITY_GROUP.label, 'packages/core/inbox-types.ts INBOX_PRIORITY_GROUP');
+  words['group.snoozed'] = fixed(INBOX_SNOOZED_BAND.label, 'packages/core/inbox-snooze.ts INBOX_SNOOZED_BAND');
   for (const [id, label] of Object.entries(INBOX_AGENT_LABELS)) words[`agent.${id}`] = fixed(label, `packages/core/inbox-types.ts INBOX_AGENT_LABELS ${id}`);
   words['label.ack'] = fixed(INBOX_ACK_LABEL, 'packages/core/inbox-types.ts INBOX_ACK_LABEL');
   words['label.action_item'] = fixed(INBOX_ACTION_LABEL, 'packages/core/inbox-actions.ts INBOX_ACTION_LABEL');
@@ -52,7 +59,47 @@ export function buildWords(): Record<string, Word> {
   words['delivery.reask_queued'] = template(`${DELIVERY} reaskRowLine(name, null, true)`, ['name'], (n) => reaskRowLine(n!, null, true));
   words['delivery.reask_saved'] = template(`${DELIVERY} reaskRowLine(name, null, false)`, ['name'], (n) => reaskRowLine(n!, null, false));
   words['run.turn_failed'] = fixed(INBOX_TURN_FAILED_WORDS, 'packages/core/inbox-run-line.ts INBOX_TURN_FAILED_WORDS');
+  // The text a Send carries for comments on attached files (the phone writes it itself; vectors/feedback.json holds the rest of it).
+  words['feedback.files_title'] = fixed(ATTACHMENT_FEEDBACK_HEADING.title, 'packages/inbox/attachments.ts ATTACHMENT_FEEDBACK_HEADING title');
+  words['feedback.files_intro'] = fixed(ATTACHMENT_FEEDBACK_HEADING.intro, 'packages/inbox/attachments.ts ATTACHMENT_FEEDBACK_HEADING intro');
+  words['feedback.sent_yours'] = fixed(SENT_VERSION_SUFFIX.yours, 'packages/inbox/attachments.ts SENT_VERSION_SUFFIX yours');
+  words['markup.only'] = fixed(MARKUP_ONLY_TEXT, 'packages/inbox/markup.ts MARKUP_ONLY_TEXT');
+  // The Inbox's refusal of a file past its limit (receiveInboxUpload), said by the phone before it reads any of it.
+  words['upload.too_large'] = fixed(`Not attached: a file is at most ${Math.round(INBOX_UPLOAD_MAX_BYTES / (1024 * 1024))} MB.`, 'packages/shared/inbox/uploads.ts receiveInboxUpload, INBOX_UPLOAD_MAX_BYTES');
+  // The Inbox's refusal of a file it could not receive (receiveInboxUpload): the phone says it when it could not read
+  // a file the person picked. Not a constant in the product, so it is read from the source and fails here if it moves.
+  words['upload.not_received'] = fixed(uploadNotReceived(), 'packages/shared/inbox/uploads.ts receiveInboxUpload, upload_refused body');
+  // The names a quoting reply's lead gives another agent's message (store.ts planQuote), by host.
+  for (const [id, name] of Object.entries(INBOX_HOST_NAMES)) words[`host.${id}`] = fixed(name, `packages/core/inbox-types.ts INBOX_HOST_NAMES ${id}`);
   return words;
+}
+
+/** The words of `upload_refused` on the body, as packages/shared/inbox/uploads.ts writes them. */
+function uploadNotReceived(): string {
+  const source = readFileSync(new URL('../../packages/shared/inbox/uploads.ts', import.meta.url), 'utf8');
+  const found = /new InboxError\("upload_refused", "([^"]+)", \{ field: "body" \}\)/.exec(source);
+  if (!found) throw new Error('words.ts: the upload_refused body refusal moved in packages/shared/inbox/uploads.ts');
+  return found[1]!;
+}
+
+/**
+ * Each emoji's name as the window says it (`emojiRow` in packages/inbox/components/EmojiPicker.tsx: the first row of
+ * the reaction tray's list that has the emoji; an emoji the list does not have is "emoji"), one `<emoji>\t<name>`
+ * line each, in the list's order. VoiceOver reads a reaction by it, as the window's screen reader words do
+ * (`reactionSpeech`).
+ */
+export function emojiNameLines(): string[] {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const category of EMOJI) {
+    for (const [emoji, name] of category.emoji) {
+      if (seen.has(emoji)) continue;
+      seen.add(emoji);
+      if (/[\t\n\r\\"]/.test(emoji + name) || !emoji || !name) throw new Error(`words.ts: the emoji row ${JSON.stringify([emoji, name])} cannot be one line of the table`);
+      lines.push(`${emoji}\t${name}`);
+    }
+  }
+  return lines;
 }
 
 /** `section.stopped` → `sectionStopped`, `agent.claude-code` → `agentClaudeCode`. */
@@ -92,6 +139,15 @@ export function swiftWords(words: Record<string, Word>): string {
   };
   table('section.', 'sections', 'A section\'s name by its id (InboxSectionId\'s raw value).');
   table('agent.', 'agents', 'An agent\'s name by its id.');
+  table('host.', 'hosts', 'A host\'s name by its id, as a quoting reply\'s lead names it (INBOX_HOST_NAMES).');
+  lines.push(
+    '',
+    '  /// packages/inbox/components/emojiData.ts EMOJI, as `emojiRow` reads it: one `<emoji>\\t<name>` line per emoji, the',
+    '  /// first row of each. An emoji with no line is named "emoji".',
+    '  public static let emojiNameLines = """',
+    ...emojiNameLines().map((line) => `    ${line.replace('\t', '\\t')}`),
+    '    """',
+  );
   lines.push('}', '');
   return lines.join('\n');
 }

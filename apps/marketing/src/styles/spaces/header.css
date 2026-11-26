@@ -1,0 +1,101 @@
+/* The Spaces header ("header B", src/components/spaces/SpacesTopStrip.astro), on top of page.css.
+   Left to right: the name block, "Open source ★ 20.4k" (a drop-down), Pricing, the light/dark
+   switch and Book a call, the last block, padded to the page edge as the name block is.
+   760 to 899 wide drops the count; under 760 the words and Book a call fold into one menu;
+   under 420 the switch moves into the menu as a row. Rows are set apart by space and fills;
+   focus is the only outline. */
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.lk{display:flex;align-items:center;gap:28px;margin-left:auto;padding-right:12px;font:500 15px/1 var(--sans);letter-spacing:-.005em}
+.lk>a{display:inline-flex;align-items:center;height:50px;color:var(--soft);white-space:nowrap}
+.lk>a:hover{color:var(--ink)}
+.lk>a[aria-current="page"]{font-weight:600;color:var(--ink)}
+.lk>a:focus-visible{outline:2px solid var(--iris);outline-offset:-8px;color:var(--ink)}
+.lk-dd{position:relative;display:flex;align-items:center}
+.lk-t{display:inline-flex;align-items:center;gap:9px;height:50px;margin:0;padding:0;border:0;border-radius:0;background:none;font:inherit;letter-spacing:inherit;color:var(--soft);white-space:nowrap;cursor:pointer;-webkit-appearance:none;appearance:none}
+.lk-t:hover,.lk-t[aria-expanded="true"]{color:var(--ink)}
+.lk-t:focus-visible{outline:2px solid var(--iris);outline-offset:-8px;color:var(--ink)}
+.lk-v{display:block;flex:none;margin-left:-3px;color:var(--soft)}
+.lk-n{display:inline-flex;align-items:center;gap:4px}
+.lk-s{display:block;flex:none}
+.lk-c{font-weight:550;font-variant-numeric:tabular-nums;color:var(--ink)}
+
+/* The drop-down: under the trigger, its right edge on the caret's. */
+.lk-p{
+  --well:var(--q1);--hover:var(--q1);--hover-well:var(--q2);
+  position:absolute;z-index:6;top:100%;right:0;width:min(380px,calc(100vw - 32px));max-height:calc(100dvh - 96px);overflow-y:auto;overscroll-behavior:contain;
+  background:var(--raised);color:var(--ink);font:400 15px/1.3 var(--sans);letter-spacing:0;
+  box-shadow:0 2px 4px rgba(24,30,70,.1),0 32px 64px -20px rgba(24,30,70,.36);
+  transform-origin:100% 0;
+}
+html:not(.light) .lk-p,html:not(.light) .os-ph{--well:var(--q2);--hover:var(--q2);--hover-well:var(--tv)}
+html:not(.light) .lk-p{box-shadow:0 3px 6px rgba(0,0,20,.3),0 40px 80px -20px rgba(0,0,16,.9)}
+.lk-p[data-state="closed"]{visibility:hidden;opacity:0;pointer-events:none;transform:translateY(-4px) scale(.985);transition:opacity 110ms ease-out,transform 110ms ease-out,visibility 0s linear 110ms}
+.lk-p[data-state="open"]{visibility:visible;opacity:1;transform:none;transition:opacity 150ms ease-out,transform 200ms cubic-bezier(.2,.8,.2,1),visibility 0s}
+@media (prefers-reduced-motion:reduce){.lk-p[data-state]{transition:none}}
+
+/* The repositories, in the drop-down and in the phone menu alike. */
+.os-ph{--well:var(--q1);--hover:var(--q1);--hover-well:var(--q2)}
+.os-card,.os-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:12px;margin:0;color:var(--ink)}
+.os-card{padding:16px 20px;background:var(--well)}
+.os-row{align-content:center;min-height:50px;padding:9px 20px}
+.os-name{min-width:0;font:500 14px/1.3 var(--mono);letter-spacing:-.01em;overflow-wrap:anywhere}
+.os-card .os-name{font-size:17px;font-weight:600}
+.os-big,.os-st{display:inline-flex;align-items:center;white-space:nowrap;font-variant-numeric:tabular-nums}
+.os-big{gap:5px;color:var(--ink)}
+.os-big b{font-size:17px;font-weight:600;letter-spacing:0}
+.os-big svg{flex:none;width:15px;height:15px;fill:currentColor}
+.os-st{gap:4px;color:var(--soft);font-size:14px}
+.os-st svg{flex:none;width:13px;height:13px;fill:currentColor}
+/* Two lines at most, cut without an ellipsis. */
+.os-line{grid-column:1/-1;display:block;max-height:2.7em;margin-top:3px;overflow:hidden;color:var(--soft);font-size:13.5px;line-height:1.35;text-wrap:balance}
+.os-all{display:flex;align-items:center;height:50px;padding:0 20px;color:var(--soft);font-size:14px;font-weight:500}
+@media (hover:hover) and (pointer:fine){
+  .os-row:hover,.os-all:hover{background:var(--hover);color:var(--ink)}
+  .os-card:hover{background:var(--hover-well)}
+}
+.os-card:focus-visible,.os-row:focus-visible,.os-all:focus-visible{outline:2px solid var(--iris);outline-offset:-2px}
+
+/* The switch: the site's own, one quiet cell between Pricing and Book a call. */
+.nav .thm{width:50px;height:50px;color:var(--soft)}
+.nav .thm:hover{background:var(--q2);color:var(--ink)}
+.nav .thm:focus-visible{outline-offset:-8px}
+
+.nav .bkb{font-weight:500;background:var(--q1);color:var(--ink);padding-right:calc(var(--m) + var(--inset))}
+.nav .bkb:hover{background:var(--tv);color:var(--ink)}
+.nav .bkb:focus-visible{outline:2px solid var(--iris);outline-offset:-4px}
+
+/* The phone menu. */
+.hm{display:none}
+.hm-b{display:inline-flex;align-items:center;justify-content:center;flex:none;width:50px;height:50px;margin:0;padding:0;border:0;border-radius:0;background:transparent;color:var(--soft);cursor:pointer;-webkit-appearance:none;appearance:none}
+.hm-b svg{display:block}
+.hm-b:hover{background:var(--q2);color:var(--ink)}
+.hm-b[aria-expanded="true"]{background:var(--raised);color:var(--ink)}
+.hm-b:focus-visible{outline:2px solid var(--iris);outline-offset:-8px;color:var(--ink)}
+.hm-b .hm-x,.hm-b[aria-expanded="true"] .hm-i{display:none}
+.hm-b[aria-expanded="true"] .hm-x{display:inline}
+.hm-sheet{position:absolute;z-index:6;top:50px;left:0;right:0;max-height:calc(100dvh - 50px);overflow-y:auto;overscroll-behavior:contain;background:var(--raised);color:var(--ink);font:500 17px/1 var(--sans);letter-spacing:-.005em;box-shadow:0 32px 64px -20px rgba(24,30,70,.36)}
+html:not(.light) .hm-sheet{box-shadow:0 40px 80px -20px rgba(0,0,16,.9)}
+/* Shown while the button says it is open. */
+.hm-sheet,.hm-dim{display:none}
+.hm-b[aria-expanded="true"]~.hm-sheet,.hm-b[aria-expanded="true"]~.hm-dim{display:block}
+.hm-dim{position:absolute;z-index:-1;top:50px;right:0;left:0;height:100lvh;background:rgba(20,22,43,.34)}
+html:not(.light) .hm-dim{background:rgba(2,4,20,.6)}
+.hm-sheet>a,.hm-sheet summary,.hm-theme{display:flex;align-items:center;justify-content:space-between;height:56px;margin:0;padding:0 24px;color:var(--ink);list-style:none;cursor:pointer}
+.hm-sheet summary::-webkit-details-marker{display:none}
+.hm-sheet>a:hover,.hm-sheet summary:hover,.hm-sheet>a[aria-current="page"]{background:var(--q1)}
+.hm-sheet :is(a,summary):focus-visible{outline:2px solid var(--iris);outline-offset:-4px}
+.hm-theme{display:none;padding-right:7px;color:var(--soft);cursor:default}
+.hm-r{display:inline-flex;align-items:center;gap:10px;font-size:15px}
+.os-ph[open] .lk-v{transform:rotate(180deg)}
+.os-body{font:400 15px/1.3 var(--sans);letter-spacing:0}
+.os-body .os-card{padding:16px 24px}
+.os-body .os-row,.os-body .os-all{padding-left:24px;padding-right:24px}
+.hm-sheet>a.hm-book{justify-content:center;height:50px;margin:16px 24px 24px;background:var(--q2);font:600 16px/1 var(--sans)}
+.hm-sheet>a.hm-book:hover{background:var(--tv)}
+
+@media (max-width:1180px){.nav .bkb{padding-right:16px}}
+@media (min-width:760px) and (max-width:899px){.nav .lk-n{display:none}}
+@media (max-width:759px){.hm{display:block}.nav .lk,.nav .bkb{display:none}.nav>.thm{margin-left:auto}}
+@media (max-width:419px){.nav>.thm{display:none}.hm{margin-left:auto}.hm-theme{display:flex}}
+@media (max-width:359px){.nmp{display:none}.nm{white-space:normal}}
