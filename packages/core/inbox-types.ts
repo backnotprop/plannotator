@@ -459,6 +459,8 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   "claude-code": "Claude Code",
   claude: "Claude Code",
   pi: "Pi",
+  // Not a host of its own: a Pi connection inside Oh My Pi (`INBOX_OH_MY_PI_RUNTIME`), and a session the Inbox starts there.
+  "oh-my-pi": "Oh My Pi",
   opencode: "OpenCode",
   codex: "Codex",
   cursor: "Cursor",
@@ -480,6 +482,34 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   "cloud-hermes": "Hermes Agent server",
   "cloud-openclaw": "OpenClaw server",
 };
+
+/**
+ * The app a session runs in when it is not its host's own (`runtime` on a compose session, an agent and a thread's
+ * live session; additive): Oh My Pi, which loads Plannotator's Pi extension, so its sessions poll as host `pi` and say
+ * `plugin.host: "oh-my-pi"`. An older Inbox, or an extension older than that field, sends none: such a session is Pi.
+ */
+export const INBOX_OH_MY_PI_RUNTIME = "oh-my-pi";
+export type InboxAgentRuntime = typeof INBOX_OH_MY_PI_RUNTIME;
+
+/** A session's `runtime` from its host and the `plugin.host` its connection sent; undefined when it runs in its host's own app. */
+export function inboxAgentRuntimeOf(host: string | null | undefined, pluginHost: unknown): InboxAgentRuntime | undefined {
+  return host === "pi" && pluginHost === INBOX_OH_MY_PI_RUNTIME ? INBOX_OH_MY_PI_RUNTIME : undefined;
+}
+
+/**
+ * The one place an agent's host (and the app it runs in, `runtime`) becomes the name the person sees: "Oh My Pi" for
+ * a Pi session that runs in Oh My Pi, else INBOX_HOST_NAMES, else the host as it is. A `runtime` another machine sent
+ * counts only as the one value it can be.
+ */
+export function inboxHostName(host: string, runtime?: unknown): string {
+  const id = inboxAgentRuntimeOf(host, runtime) ?? host;
+  return INBOX_HOST_NAMES[id] ?? host;
+}
+
+/** The name an agent's own connection gave (`agent_name`) when the app it runs in has a name of its own: Oh My Pi's "Pi" becomes "Oh My Pi". */
+export function inboxRuntimeAgentName(host: unknown, name: unknown, runtime: InboxAgentRuntime | undefined): string | null {
+  return runtime && host === "pi" && (name === undefined || name === null || name === INBOX_HOST_NAMES.pi) ? INBOX_HOST_NAMES[runtime]! : null;
+}
 
 /**
  * The agent hosts a person's reply wakes as a new turn by itself: Claude Code,
@@ -3831,6 +3861,8 @@ export interface InboxComposeSession {
   root?: string;
   /** Its title as its host keeps it (a poll's `label`, cleaned): the To picker's name for it, display only. Absent when it has none. Additive. */
   label?: string;
+  /** The app it runs in when not its host's own (`INBOX_OH_MY_PI_RUNTIME`): its name is that app's (`inboxHostName`). Additive. */
+  runtime?: InboxAgentRuntime;
   /** Where it lives, as Rex confirmed it for this answer (`InboxAgentPlace`, never with `show`). Additive. */
   place?: InboxAgentPlace;
 }
@@ -3890,6 +3922,8 @@ export interface InboxAgent {
   launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null; scratch?: string | null; rex?: true };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
   host: string | null;
+  /** The app it runs in when not its host's own (`INBOX_OH_MY_PI_RUNTIME`): its name is that app's (`inboxHostName`). Additive. */
+  runtime?: InboxAgentRuntime;
   /** Its title as its connection last said it (the To picker's name). Absent when none. */
   label?: string;
   /**

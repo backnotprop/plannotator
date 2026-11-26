@@ -255,6 +255,7 @@ import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher 
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
+import { withRuntimeAgentName } from "./inbox-runtime-name";
 import { inboxAgentsEndedSince, inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxFirstSeen } from "./inbox-first-seen";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
@@ -6328,11 +6329,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         void noteMcpPresence(body);
         const refused = refusedToolCall(body);
         if (refused) return refused;
+        // Oh My Pi's sessions write as "Oh My Pi" (inbox-runtime-name.ts); a call carrying steps while they are off goes without them.
         const stripped = withoutOffSteps(body);
-        if (stripped) {
+        const named = withRuntimeAgentName(stripped ?? body, live.runtimeOfSession);
+        if (stripped || named) {
           const headers = new Headers(req.headers);
           headers.delete("content-length");
-          return mcp.fetch(new Request(req.url, { method: "POST", headers, body: JSON.stringify(stripped) }));
+          return mcp.fetch(new Request(req.url, { method: "POST", headers, body: JSON.stringify(named ?? stripped) }));
         }
         const client = inboxMcpInitializeClient(body);
         if (client !== undefined) return mcpForInitialize(client).fetch(req);

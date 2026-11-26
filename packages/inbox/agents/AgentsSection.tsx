@@ -184,7 +184,7 @@ const AgentRow = memo(
     // Show in Rex only where it works now (the list said so for this window): never a dead item.
     const onShowInRex = entry.agent.place?.show === true && !props.phone ? props.onShowInRex : undefined;
     const hasMenu = !!(onRename || onStop || onDelete || onShowInRex);
-    const launchName = agentHostName(entry.agent.host);
+    const launchName = agentHostName(entry.agent.host, entry.agent.runtime);
     const row = (children: ReactNode) => (
       <div
         className="ib-sbagent"
@@ -291,7 +291,7 @@ const AgentRow = memo(
               {entry.name}
             </span>
             <span className="ib-sr">
-              , {agentHostName(entry.agent.host)}
+              , {agentHostName(entry.agent.host, entry.agent.runtime)}
               {entry.agent.place ? `, in ${entry.agent.place.line.replace(' · ', ', ').replace(' / ', ', ')}` : ''}
               {mark ? `, ${rexMarkWords(mark)}` : ''}
             </span>
