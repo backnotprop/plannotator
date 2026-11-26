@@ -8,10 +8,11 @@
 import { inboxAgentName, inboxT3WaitLine, type InboxListRow, type InboxListSection, type InboxRowDelivery } from '@plannotator/core/inbox-types';
 import { deliveryText, INBOX_STOPPED_REPLY_TEXT, type DeliveryLine } from './deliveryLine';
 import { whenTime } from './format';
+import { deliveryAgentName } from './scriptAuthor';
 
 /** Whom it goes to, as the thread names it ("Claude Code", "Claude Code (another session)", an MCP agent's own name). */
 export function rowDeliveryName(d: InboxRowDelivery): string {
-  const name = inboxAgentName({ kind: 'agent', host: d.host, name: d.name });
+  const name = deliveryAgentName(d);
   return d.another_session ? `${name} (another session)` : name;
 }
 
