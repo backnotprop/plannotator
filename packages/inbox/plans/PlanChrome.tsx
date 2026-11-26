@@ -4,12 +4,12 @@
  *
  * - A phone: a short top bar holds the project, Share and one menu (`PlanMenu`, "Page actions"). The approval and the
  *   version sit on the line above the document's own title (`PlanKicker`), so the plan's name shows once; once that
- *   title scrolls away the bar takes the plan's name, its version and its decision (`PlanBarTitle`), a button that
+ *   title scrolls away the bar takes the plan's name and its decision (`PlanBarTitle`), a button that
  *   opens Versions. A document whose first block is not a level-1 heading with the plan's name has the bar's name
  *   from the start. Tools, comments and Send are one bar at the bottom (PlanAnnotate.tsx). The menu holds what the
  *   file-name row and the chips held: Edit, Global comment, Files, Contents, Copy file, Download, Close.
- * - A computer: the reading line stays pinned at the card's top (Edit, the approval, the version), with the menu at
- *   its end: Copy file, Download, Full screen. The tools, Global comment, comments and Send are the bottom bar.
+ * - A computer: the bar stays pinned at the card's top (PlanBar.tsx: the approval, the pencil, the clock), with the
+ *   menu at its end: Copy file, Download, Full screen. The tools, Global comment, comments and Send are the bottom bar.
  *
  * DocLoaded (PlanPage.tsx) knows the document's actions; the top bar (PlanLoaded) draws the phone's menu, so the
  * document hands them up through `PlanChromeContext`.
@@ -20,6 +20,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { Icon, type IconName } from '../icons';
 import type { PaneHostHandle } from '../parts/paneHost';
 import { DecisionMark } from './parts';
+import { PlanVersionsMark } from './PlanBar';
 import type { PlanDecisionTone } from './words';
 
 /** What the document on screen offers the page's menu (null: not offered there). */
@@ -190,28 +191,18 @@ export function PlanMenu({ phone, items }: { phone: boolean; items: () => PlanMe
   );
 }
 
-/** "v4 · newest, version 4, the newest. 4 versions": the frame's ReadingLine's name for the same toggle, kept. */
-export function versionsName(shown: number, count: number): string {
-  return `v${shown} · newest, version ${shown}, the newest. ${count} ${count === 1 ? 'version' : 'versions'}`;
-}
-
-/** The phone's line above the document's title: Approve (when it is offered), the approval, and the version that opens Versions. */
-export function PlanKicker({ start, approved, shown, count, versionsOpen, onVersions }: { start: ReactNode; approved: ReactNode; shown: number; count: number; versionsOpen: boolean; onVersions: (open: boolean) => void }) {
+/**
+ * The phone's line above the document's title: Approve (when it is offered) and the approval, and at its end the
+ * history clock that opens Versions (approval A2: no version text while the newest is read).
+ */
+export function PlanKicker({ start, approved, shown, head, versionsOpen, onVersions }: { start: ReactNode; approved: ReactNode; shown: number; head: number; versionsOpen: boolean; onVersions: (open: boolean) => void }) {
   return (
     <div className="ib-plan-kicker" data-plan-reading="" data-plan-kicker="">
       {start && <span className="ib-plan-kicker-start">{start}</span>}
-      {approved && (
-        <>
-          {approved}
-          <span className="ib-plan-kicker-dot" aria-hidden="true">
-            ·
-          </span>
-        </>
-      )}
-      <button type="button" className="ib-plan-kstate" aria-expanded={versionsOpen} aria-label={versionsName(shown, count)} onClick={() => onVersions(!versionsOpen)} data-reading-versions="">
-        <span data-page-version="">v{shown}</span>
-        <Icon name="chevD" size={11} />
-      </button>
+      {approved}
+      <span className="ib-plan-kicker-end">
+        <PlanVersionsMark shown={shown} head={head} open={versionsOpen} onToggle={onVersions} phone />
+      </span>
     </div>
   );
 }
@@ -242,8 +233,6 @@ export function PlanBarTitle({ rest, name, away, shown, decision, versionsOpen, 
       <button type="button" className="ib-plan-titleblock" inert={away ? undefined : true} aria-expanded={versionsOpen} aria-label={spoken} onClick={() => onVersions(!versionsOpen)} data-plan-titleblock="">
         <span className="ib-plan-title-n">{name}</span>
         <span className="ib-plan-title-s">
-          {shown !== null && <b>v{shown}</b>}
-          {shown !== null && decision && <span aria-hidden="true">·</span>}
           {decision && (
             <span className="ib-plan-title-dec" data-plan-decision={decision.tone}>
               <DecisionMark tone={decision.tone} />

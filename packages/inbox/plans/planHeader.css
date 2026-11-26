@@ -65,6 +65,18 @@
 .ib-plan-menu-end { color: var(--muted-foreground); font-variant-numeric: tabular-nums; padding-right: 4px; }
 /* A copy's row says "Copied!" with the check in the success colour, as the Viewer's own Copy does. */
 [data-plan-menu] [data-copied] svg.ib-ic { color: var(--success, currentColor); }
+/* ── The bar (approval A2, PlanBar.tsx): the approval on the left; the pencil, the clock, the menu at the end ── */
+.ib-plan-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 44px; padding: 6px 8px 6px 16px; font-size: 13px; color: var(--muted-foreground); }
+.ib-plan-bar-start { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; flex: 1 1 auto; min-width: 0; }
+.ib-plan-bar-end { display: flex; align-items: center; gap: 4px; flex: none; margin-left: auto; }
+.ib-plan-bar-older > b { font-weight: 600; color: var(--foreground); }
+.ib-plan-mark { flex: none; }
+.ib-plan-mark:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+/* The clock reads pressed while Versions is open. */
+.ib-plan-mark[aria-pressed="true"] { background: var(--muted); color: var(--foreground); }
+.ib-plan-bar .ib-plan-more { width: 30px; height: 30px; }
+.ib-plan-page[data-phone] .ib-plan-mark { width: 44px; height: 44px; }
+.ib-plan-page[data-phone] .ib-plan-bar { padding-left: 12px; padding-right: 4px; }
 /* A computer: the menu at the reading line's end. */
 .ib-plan-reading:has(> [data-plan-more]) { display: flex; align-items: center; }
 .ib-plan-reading:has(> [data-plan-more]) > [data-reading-line] { flex: 1 1 auto; min-width: 0; }
@@ -103,10 +115,7 @@
 .ib-plan-kicker { align-self: stretch; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; width: 100%; max-width: 640px; min-height: 44px; margin: 8px auto 0; font-size: 14px; color: var(--muted-foreground); }
 .ib-plan-kicker-start { display: flex; align-items: center; gap: 8px; }
 .ib-plan-kicker .ib-plan-approval > svg.ib-ic { width: 15px; height: 15px; }
-.ib-plan-kstate { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 4px; margin-left: -4px; border-radius: 8px; white-space: nowrap; color: var(--muted-foreground); cursor: pointer; }
-.ib-plan-kstate [data-page-version] { font-weight: 600; color: var(--foreground); }
-.ib-plan-kstate > svg.ib-ic { opacity: 0.7; flex: none; }
-.ib-plan-kstate:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+.ib-plan-kicker-end { margin-left: auto; display: flex; align-items: center; }
 .ib-plan-kicker + div article { padding-top: 6px; }
 /* A phone's 44 px targets: the line's small buttons (Approve, Dismiss) take a taller hit area than they draw. */
 .ib-plan-kicker-start > button, .ib-plan-kicker .ib-plan-approval-x { position: relative; }

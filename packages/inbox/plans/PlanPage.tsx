@@ -49,12 +49,13 @@ import { PlanAnnotate } from './PlanAnnotate';
 import { PlanDiffView } from './PlanDiffView';
 import { PlanArtifactView } from './PlanArtifactView';
 import { ArtifactLine, PlanVersions } from './PlanRail';
+import { PlanBar } from './PlanBar';
 import { PLAN_FILES_OPEN_KEY, PLAN_FILES_WIDTH_KEY, PlanBackLink, PlanFiles, PlanRailHead, planFileRoute, type PlanFileRef, type PlanRailDecision } from './PlanFiles';
 
 const plansRoute = { page: 'plans' as const, project: null, thread: null };
 const toList = () => writeRoute(plansRoute);
 
-/** The versions panel closed by the person (its Close), kept on this computer as the rail's open flag is. */
+/** The versions panel closed ('1', and before the person ever opened it) or open ('0'), kept on this computer as the rail's open flag is. */
 export const PLAN_RAIL_HIDDEN_KEY = 'plannotator-inbox-plan-rail-hidden';
 /** The frame's docked versions panel (`VersionsPanel`, md:w-72). */
 const VERSIONS_WIDTH = 288;
@@ -187,7 +188,8 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
   // would open nothing, and the person's choice waits for a row that fits.
   const [row, setRow] = useState<HTMLDivElement | null>(null);
   const rowWidth = useWidth(row);
-  const [versionsHidden, setVersionsHidden] = useStoredFlag(PLAN_RAIL_HIDDEN_KEY);
+  // Closed until the person opens it from the bar's clock (approval A2); once opened it stays open until they close it.
+  const [versionsHidden, setVersionsHidden] = useStoredFlag(PLAN_RAIL_HIDDEN_KEY, true);
   const [versionsSheet, setVersionsSheet] = useState(false);
   const versionsFit = !phone && (rowWidth === 0 || rowWidth - VERSIONS_WIDTH - CARD_GAP >= PLAN_DOC_MIN);
   const versionsDocked = versionsFit && !versionsHidden;
@@ -475,7 +477,8 @@ function DocLoaded({
   }, [chrome, a3, shown]);
   useEffect(() => () => chrome?.setBar(() => ({ a3: false, shown: null, away: null })), [chrome]);
   const onTitleAway = useCallback((away: boolean) => chrome?.setBar((b) => (b.away === away ? b : { ...b, away })), [chrome]);
-  const kicker = a3 ? <PlanKicker start={editing.startNoEdit} approved={editing.approved} shown={shown} count={versions.length} versionsOpen={place.open} onVersions={place.setOpen} /> : null;
+  const kicker = a3 ? <PlanKicker start={editing.startNoEdit} approved={editing.approved} shown={shown} head={head} versionsOpen={place.open} onVersions={place.setOpen} /> : null;
+  const menu = phone ? null : <PlanMenu phone={false} items={() => planMenuItems({ phone: false, acts: pageActs, files: null, close: toList })} />;
   const annotateChrome = { full, onFull: setFull, handle: paneHandle, kicker, onContents, onTitleAway: a3 ? onTitleAway : null };
   return (
     <>
@@ -483,19 +486,14 @@ function DocLoaded({
         top={
           a3 ? null : (
           <div data-plan-reading="" className="ib-plan-reading">
-            <ReadingLine
-              shownNumber={shown}
-              currentNumber={head}
-              versionsOpen={place.open}
-              onToggleVersions={place.setOpen}
-              older={older}
-              comparing={compare ? `Comparing v${compare.from} with v${compare.to}` : null}
-              count={versions.length}
-              start={editing.start}
-              approved={editing.approved}
-            />
+            {compare ? (
+              <ReadingLine shownNumber={shown} currentNumber={head} versionsOpen={place.open} onToggleVersions={place.setOpen} older={null} comparing={`Comparing v${compare.from} with v${compare.to}`} count={versions.length} start={editing.start} approved={editing.approved} />
+            ) : (
+              // The bar (approval A2): the approval on the left; the pencil, the clock and the menu at the end.
+              <PlanBar shown={shown} head={head} start={editing.startNoEdit} approved={editing.approved} edit={editing.edit} older={older} versionsOpen={place.open} onVersions={place.setOpen} menu={phone ? null : menu} phone={phone} />
+            )}
             {/* A computer: the menu at the reading line's end (Copy file, Download, Full screen). */}
-            {!phone && <PlanMenu phone={false} items={() => planMenuItems({ phone: false, acts: pageActs, files: null, close: toList })} />}
+            {compare && menu}
           </div>
           )
         }
