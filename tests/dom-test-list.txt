@@ -951,4 +951,5 @@ packages/inbox/skillFileOpen.dom.test.tsx
 packages/inbox/reviewAnalysis.test.tsx
 packages/inbox/reviewSettings/reviewsSettings.test.tsx
 packages/inbox/guide/usePowerUp.test.tsx
+packages/inbox/guide/useViewedTicks.test.tsx
 packages/inbox/components/reply/replyBoxParity.test.tsx

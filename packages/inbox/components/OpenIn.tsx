@@ -18,7 +18,7 @@ import type { OpenInFileCode, OpenInFileScope } from '../openInWire';
 import { Icon } from '../icons';
 import { newTabMenu, newTabUrl, onAnotherMachine, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
 import { readableVersion } from '../attachments';
-import { onLinkedMachine } from '../linkedReads';
+import { onLinkedMachine, readsServedFor, useLinkedReadsRev } from '../linkedReads';
 import { projectFileOfLink } from '../links';
 import { useInboxFileSource } from '../fileSource';
 import { usePhone, useTouchScreen } from '../phone';
@@ -328,7 +328,9 @@ async function checkOpenInFile(scope: OpenInFileScope, path: string): Promise<{ 
   try {
     const found = await inboxApi.openInFileCheck(scope, path);
     const next = found.found && found.path && found.kind ? { path: found.path, kind: found.kind } : null;
-    knownFiles.set(key, next);
+    // Not asked there yet (that machine has not said it serves these reads): nothing known, so nothing kept.
+    if ('thread' in scope && !readsServedFor(scope.thread)) knownFiles.delete(key);
+    else knownFiles.set(key, next);
     return next;
   } catch {
     knownFiles.delete(key);
@@ -344,6 +346,10 @@ function OpenInFileSplit({ scope, path, line, label, onListOpenChange, note }: {
   const available = answer?.available === true;
   // Asked once the app list answered either way: without apps (over the tailnet) a file that is here still has its path.
   const answered = answer !== null;
+  // A linked machine's file is asked again when that machine's facts change: its marks came, or it is back online.
+  // This computer's own files are not asked again for another machine's comings and goings.
+  const linkedRev = useLinkedReadsRev();
+  const farRev = 'thread' in scope && onLinkedMachine(scope.thread) ? linkedRev : 0;
   useEffect(() => {
     setFile(knownFiles.get(key) ?? null);
     if (!answered) return;
@@ -356,7 +362,7 @@ function OpenInFileSplit({ scope, path, line, label, onListOpenChange, note }: {
     };
     // `key` names the scope and the path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, answered]);
+  }, [key, answered, farRev]);
   const { busy, status, launch, copyPath } = useOpenInActions(file?.path ?? null, (id) => inboxApi.openInFile(scope, path, id, line), remember);
   if (!file) return null;
   // No app to launch here (a window over the tailnet), or the file is on the thread's linked machine (its path there;

@@ -282,3 +282,50 @@ test.skipIf(!hasDom)("a file a linked machine's thread names: asked on that mach
     else delete (navigator as { clipboard?: unknown }).clipboard;
   }
 });
+
+/** A file a linked machine's thread names, answered there once `ready()` says so (a 503 before, as while it is away). */
+function farFileCheck(ready: () => boolean) {
+  const stubbed = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.startsWith(`/api/inbox/m/${OTHER}/open-in/file?`)) {
+      return ready() ? Response.json({ found: true, path: '/Users/ada/shop/src/berth.ts', kind: 'code' }) : Response.json({ error: 'MacBook cannot be reached now.', code: 'machine_offline' }, { status: 503 });
+    }
+    if (url.startsWith('/api/inbox/open-in/file?')) return Response.json({ found: false });
+    return stubbed(input, init);
+  }) as typeof fetch;
+}
+
+const macBook = (marks: string[], state: string) => [
+  { id: SELF, self: true, name: 'Studio' },
+  { id: OTHER, name: 'MacBook', marks, list_cursor: 1, state },
+];
+
+test.skipIf(!hasDom)("a linked machine's file drawn before its list says it serves these reads gets its Copy path once it does", async () => {
+  const { OpenInFile } = await import('./components/OpenIn');
+  const FAR_THREAD = 'msg_01K7FARTHREAD000000000002';
+  setSelfMachine(SELF, macBook([], 'online'));
+  rememberMachine([FAR_THREAD], OTHER);
+  farFileCheck(() => true);
+  await render(<OpenInFile scope={{ thread: FAR_THREAD, message: FAR_THREAD }} path="src/berth.ts" />);
+  for (let i = 0; i < 10; i += 1) await settle();
+  expect(host!.querySelector('[data-open-in-copy-path]')).toBeNull();
+  // The merged list now says MacBook serves these reads: asked there, with no redraw from outside.
+  await act(async () => setSelfMachine(SELF, macBook(['linked-reads'], 'online')));
+  await until(() => host!.querySelector('[data-open-in-copy-path]') !== null, 'the Copy path button');
+});
+
+test.skipIf(!hasDom)("a linked machine's file asked while it is away gets its Copy path when it is back", async () => {
+  const { OpenInFile } = await import('./components/OpenIn');
+  const FAR_THREAD = 'msg_01K7FARTHREAD000000000003';
+  let back = false;
+  setSelfMachine(SELF, macBook(['linked-reads'], 'offline'));
+  rememberMachine([FAR_THREAD], OTHER);
+  farFileCheck(() => back);
+  await render(<OpenInFile scope={{ thread: FAR_THREAD, message: FAR_THREAD }} path="src/berth.ts" />);
+  for (let i = 0; i < 10; i += 1) await settle();
+  expect(host!.querySelector('[data-open-in-copy-path]')).toBeNull();
+  back = true;
+  await act(async () => setSelfMachine(SELF, macBook(['linked-reads'], 'online')));
+  await until(() => host!.querySelector('[data-open-in-copy-path]') !== null, 'the Copy path button');
+});

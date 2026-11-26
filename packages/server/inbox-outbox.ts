@@ -314,7 +314,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST annotations/:id/remove": "set",
   "POST messages/:id/guide/reviewed": "set",
   "POST messages/:id/guide/annotations": "set",
-  // The files ticked Viewed in a review on a linked machine's thread (mark `linked-reads`): the whole list, a state.
+  // A file ticked or unticked Viewed in a review on a linked machine's thread (mark `linked-reads`): `{ path, viewed }`,
+  // laid over the list kept there (an older window's whole list is still taken). One file's state: a copy sets it again.
   "POST messages/:id/guide/viewed": "set",
   "POST messages/:id/annotations": "set",
   "POST threads/:id/message": "append",

@@ -68,9 +68,10 @@ import { useLineInView } from './reviewLineInView';
 import type { ReviewAt } from '../app/reviewAt';
 import type { GuideSelectionActions } from '../guide/types';
 import { reviewSourceLine } from '../guide/sourceLine';
-import { InboxApiError, InboxHeldError, inboxApi } from '../api';
+import { InboxApiError, inboxApi } from '../api';
 import type { MachineView, OutboxView } from '@plannotator/core/inbox-wire-models';
-import { heldViewed, viewedWithHeld } from '../guide/heldViewed';
+import { heldViewed } from '../guide/heldViewed';
+import { useViewedTicks } from '../guide/useViewedTicks';
 import { ownerSwitch, readsServedFor, useLinkedReadsRev } from '../linkedReads';
 import { linkedMachineFacts, machineOf } from '../inboxUrl';
 import { outboxLine } from '../machines';
@@ -256,7 +257,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   const [mode, setMode] = useState<RailMode>('walkthrough');
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
   const [current, setCurrent] = useState<number | null>(null);
-  const [viewed, setViewed] = useState<string[]>(() => message.guide_viewed ?? []);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -298,7 +298,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
       },
     [stateComments, setSelectedId, folded],
   );
-  useEffect(() => setViewed(message.guide_viewed ?? []), [message.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const files = useMemo(() => (snapshot ? parseDiffToFiles(snapshot.review.rawPatch) : []), [snapshot]);
   const commentsForPost = useMemo(() => (pullDiff ? onPullDiff(comments, files, pullDiff.files) : comments), [comments, files, pullDiff]);
@@ -517,25 +516,12 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   );
 
   // What its Inbox keeps, with each tick still held for it (its machine away) laid over: as the person ticked them.
-  const shownViewed = useMemo(() => viewedWithHeld(viewed, outbox, message.id), [viewed, outbox, message.id]);
+  const { shown: shownViewed, toggle: toggleViewed } = useViewedTicks(message.id, message.guide_viewed, outbox, setSaveError);
   const viewedSet = useMemo(() => new Set(shownViewed), [shownViewed]);
   // While a tick waits for its machine: the thread's own held line ("Will send when Laptop is back"), never an error.
   const viewedMachine = linkedMachineFacts(machineOf(message.id) ?? '');
   const heldTick = heldViewed(outbox, message.id).at(-1);
   const heldLine = heldTick ? outboxLine(heldTick, viewedMachine as { name: string; state: MachineView['state'] } | null) : null;
-  const toggleViewed = useCallback(
-    (path: string) => {
-      // One file's change, never the whole list: a tick that waits never undoes another made since.
-      const on = !shownViewed.includes(path);
-      setViewed((kept) => (on ? [...kept.filter((p) => p !== path), path] : kept.filter((p) => p !== path)));
-      inboxApi.saveGuideViewed(message.id, path, on).then(
-        (saved) => setViewed(saved.viewed),
-        // Held for a machine that is away: not a failure. The tick stays (the outbox's entry) and lands once it is back.
-        (cause: unknown) => (cause instanceof InboxHeldError ? undefined : setSaveError(cause instanceof Error ? cause.message : 'The Viewed tick was not saved.')),
-      );
-    },
-    [shownViewed, message.id, setSaveError],
-  );
   // Viewed ticks are Code review's: the server takes them only on a review, and only while Code review is on.
   const viewedProp = useMemo(() => (readOnly || !viewedTicks ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, viewedTicks, viewedSet, toggleViewed]);
   const railViewed = viewedProp ? viewedSet : NO_VIEWED;
