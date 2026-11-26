@@ -11,8 +11,9 @@ import { LAUNCH_ART_ALT, LAUNCH_DIALOG_WORDS, launchArtUrl } from '../utils/laun
  * to a page's first paint.
  *
  * The Inbox announcement's shell (InboxAnnouncementDialog `AnnouncementShell`): the shared dialog (Base UI), modal,
- * focus trapped and restored on close, focus starting on "See the launch", Escape and Mod+Enter taken on the capture
- * phase. 880 wide (LAUNCH_DIALOG_SIZE), the overlay's full width below that (a phone included), narrower on a short
+ * focus trapped and restored on close, Escape and Mod+Enter taken on the capture phase. Focus starts on the panel
+ * itself (no ring anywhere as it opens; the brand gate): the first Tab reaches "Not now", the next "See the launch",
+ * and Enter on opening does nothing. 880 wide (LAUNCH_DIALOG_SIZE), the overlay's full width below that (a phone included), narrower on a short
  * window so it never scrolls. An art band on top (16:9, 880×495) edge to edge under the rounded top corners with a
  * hairline below it, then the title, the line and two buttons side by side, right-aligned (the owner's approved r7
  * mock). "See the launch" has the lit look (GlowStars: a glow and small stars drifting behind it, the Swarm badge's
@@ -41,7 +42,6 @@ export interface LaunchDialogProps {
 }
 
 export function LaunchDialog({ campaign, url, art, onAnswer }: LaunchDialogProps) {
-  const openRef = useRef<HTMLAnchorElement>(null);
   const answered = useRef(false);
   const onAnswerRef = useRef(onAnswer);
   onAnswerRef.current = onAnswer;
@@ -57,7 +57,7 @@ export function LaunchDialog({ campaign, url, art, onAnswer }: LaunchDialogProps
   return (
     <AnnouncementShell
       onClose={() => answer('dismissed')}
-      initialFocus={openRef}
+      initialFocus="panel"
       size={LAUNCH_DIALOG_SIZE}
       media={artSrc ? <img src={artSrc} alt={LAUNCH_ART_ALT} width={1760} height={990} referrerPolicy="no-referrer" className="absolute inset-0 h-full w-full object-cover" /> : undefined}
       data-launch-dialog
@@ -69,7 +69,7 @@ export function LaunchDialog({ campaign, url, art, onAnswer }: LaunchDialogProps
           <DialogDescription className="mt-2 text-pretty text-sm leading-relaxed sm:text-[16px] sm:leading-6">{LAUNCH_DIALOG_WORDS.line}</DialogDescription>
         </div>
 
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-3">
           <button
             type="button"
             data-launch-not-now
@@ -80,7 +80,6 @@ export function LaunchDialog({ campaign, url, art, onAnswer }: LaunchDialogProps
           </button>
           <GlowStars className="flex-1 sm:flex-none">
             <a
-              ref={openRef}
               href={url}
               target="_blank"
               rel="noopener noreferrer"

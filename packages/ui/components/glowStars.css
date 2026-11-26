@@ -12,10 +12,11 @@
  */
 .pn-glow { --pn-glow-radius: 10px; position: relative; display: inline-flex; isolation: isolate; }
 
+/* The glow leans right and is cut 11 px left of the control, so it never reaches a neighbour 12 px to its left. */
 .pn-glow-halo, .pn-glow-halo::after { position: absolute; inset: 0; z-index: 0; border-radius: var(--pn-glow-radius); pointer-events: none; }
-.pn-glow-halo { box-shadow: 0 0 0 5px rgb(165 160 255 / 0.2), 0 0 28px 3px rgb(112 159 255 / 0.5), 0 1px 2px rgb(70 33 172 / 0.2); }
+.pn-glow-halo { clip-path: inset(-60px -60px -60px -11px); box-shadow: 0 0 0 5px rgb(165 160 255 / 0.2), 6px 0 28px 3px rgb(112 159 255 / 0.5), 0 1px 2px rgb(70 33 172 / 0.2); }
 /* The pointer brightens the glow: a second glow, faded in (opacity only). */
-.pn-glow-halo::after { content: ''; box-shadow: 0 0 0 6px rgb(165 160 255 / 0.26), 0 0 36px 6px rgb(112 159 255 / 0.55); opacity: 0;
+.pn-glow-halo::after { content: ''; box-shadow: 0 0 0 6px rgb(165 160 255 / 0.26), 6px 0 36px 6px rgb(112 159 255 / 0.55); opacity: 0;
   transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 @media (hover: hover) and (pointer: fine) {
   .pn-glow:hover .pn-glow-halo::after { opacity: 1; }
@@ -27,9 +28,8 @@
   color: oklch(0.30 0.16 285); box-shadow: 0 0 0 1px rgb(126 114 231 / 0.45); outline: none;
   -webkit-tap-highlight-color: transparent; transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1); }
 .pn-glow-face:active { transform: scale(0.97); }
-/* The focus ring outside the glow's ring: the brand colour pulled toward the page's text colour, so it reads over the
-   glow in either theme (deep indigo on light, pale violet on dark). */
-.pn-glow-face:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 65%, var(--foreground)); outline-offset: 3px; }
+/* Keyboard focus only: one 2 px line in the brand violet, 2 px out; the face's own ring steps aside, so it is one line. */
+.pn-glow-face:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
 
 .pn-glow-stars { position: absolute; inset: -20px -20px -20px 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .pn-glow-star { position: absolute; display: block; }

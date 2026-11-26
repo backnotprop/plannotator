@@ -120,7 +120,11 @@ function Film() {
 interface AnnouncementShellProps {
   /** Escape, the backdrop (and whatever the host wires to its own buttons). */
   readonly onClose: () => void;
-  readonly initialFocus: React.RefObject<HTMLElement | null>;
+  /**
+   * Where focus starts. 'panel': the panel itself (no ring on it; the dialog's name is read, the first Tab reaches its
+   * first control, and a plain Enter while the panel holds focus does nothing), so no control opens with a ring.
+   */
+  readonly initialFocus: React.RefObject<HTMLElement | null> | 'panel';
   /** Default: the Inbox announcement's (ANNOUNCEMENT_FILM_SIZE). */
   readonly size?: AnnouncementSize;
   /** The 16:9 band on top, edge to edge under the rounded corners, a hairline below it. None: no band. */
@@ -139,6 +143,8 @@ interface AnnouncementShellProps {
  */
 export function AnnouncementShell({ onClose, initialFocus, size = ANNOUNCEMENT_FILM_SIZE, media, children, ...data }: AnnouncementShellProps) {
   const onCloseRef = useRef(onClose);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const onPanel = initialFocus === 'panel';
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -159,11 +165,17 @@ export function AnnouncementShell({ onClose, initialFocus, size = ANNOUNCEMENT_F
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         event.stopPropagation();
+        return;
+      }
+      // Focus on the panel itself (opening): a plain Enter there is nobody's, not the page's behind it.
+      if (onPanel && event.key === 'Enter' && event.target === panelRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
       }
     };
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, []);
+  }, [onPanel]);
 
   return (
     <Dialog
@@ -174,10 +186,13 @@ export function AnnouncementShell({ onClose, initialFocus, size = ANNOUNCEMENT_F
     >
       <DialogContent
         hideClose
-        initialFocus={initialFocus}
+        ref={panelRef}
+        initialFocus={onPanel ? panelRef : initialFocus}
+        tabIndex={onPanel ? -1 : undefined}
         {...data}
         backdropClassName="bg-background/90 backdrop-blur-sm"
-        style={{ width: panelWidth(size) }}
+        // The panel holding focus draws no ring (inline: the global :focus-visible outline in theme.css outranks a utility).
+        style={onPanel ? { width: panelWidth(size), outline: 'none' } : { width: panelWidth(size) }}
         className="max-h-full max-w-none rounded-xl bg-card text-card-foreground shadow-2xl motion-reduce:transition-none"
       >
         {media !== undefined && (

@@ -1,8 +1,9 @@
 /**
  * The launch dialog (LaunchDialog.tsx), in the DOM.
  *
- * What regresses: a dialog a screen reader cannot name (role, labelled by its title); focus starting anywhere but
- * "See the launch"; the link not being a plain new-tab link with rel noopener (a popup blocker eats a tab opened after
+ * What regresses: a dialog a screen reader cannot name (role, labelled by its title); focus starting on a control (it
+ * would open with a ring; it starts on the panel), the first Tab not reaching "Not now" then "See the launch", or Enter
+ * on opening following the link or reaching the page behind; the link not being a plain new-tab link with rel noopener (a popup blocker eats a tab opened after
  * an async call); a button that records the wrong answer, or answers twice; Escape not closing it; the layout changing once it is open (the band appearing or going); the art loading from
  * anywhere but the hosted launch folder.
  */
@@ -40,14 +41,45 @@ const open = () => document.querySelector<HTMLAnchorElement>('[data-launch-open]
 const wait = (ms: number) => act(async () => new Promise((r) => setTimeout(r, ms)));
 
 describe.skipIf(!hasDom)('LaunchDialog', () => {
-  test('a named dialog: role dialog, labelled by its title, described by its line, focus on See the launch', async () => {
+  test('a named dialog: role dialog, labelled by its title, described by its line, focus on the panel itself', async () => {
     await mount(() => {});
     const el = dialog()!;
     expect(el.getAttribute('role')).toBe('dialog');
     const title = document.getElementById(el.getAttribute('aria-labelledby') ?? '');
     expect(title?.textContent).toBe(LAUNCH_DIALOG_WORDS.title);
     expect(document.getElementById(el.getAttribute('aria-describedby') ?? '')?.textContent).toBe(LAUNCH_DIALOG_WORDS.line);
-    expect(document.activeElement === open()).toBe(true);
+    // On the panel, not a control: nothing opens with a focus ring.
+    expect(document.activeElement === el).toBe(true);
+    expect(el.tabIndex).toBe(-1);
+    // And the panel itself draws no ring (the global :focus-visible outline would otherwise frame the whole dialog).
+    expect(el.style.outlineStyle).toBe('none');
+  });
+
+  test('the first Tab reaches Not now, the next See the launch (the panel is not in the Tab order)', async () => {
+    await mount(() => {});
+    const tabbable = [...dialog()!.querySelectorAll<HTMLElement>('a[href], button, [tabindex]')].filter((el) => el.tabIndex >= 0);
+    expect(tabbable.map((el) => (el.hasAttribute('data-launch-not-now') ? 'not-now' : el.hasAttribute('data-launch-open') ? 'open' : el.outerHTML))).toEqual(['not-now', 'open']);
+  });
+
+  test('Enter on opening does nothing: no answer, the link is not followed, the page behind never sees it', async () => {
+    const log: string[] = [];
+    await mount((a) => log.push(a));
+    let clicked = 0;
+    let behind = 0;
+    open().addEventListener('click', (e) => {
+      clicked += 1;
+      e.preventDefault();
+    });
+    const onWindow = () => (behind += 1);
+    window.addEventListener('keydown', onWindow);
+    try {
+      await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+      await wait(5);
+    } finally {
+      window.removeEventListener('keydown', onWindow);
+    }
+    expect([log, clicked, behind]).toEqual([[], 0, 0]);
+    expect(dialog()).not.toBeNull();
   });
 
   test('See the launch: a plain new-tab link with rel noopener, answered opened once', async () => {
