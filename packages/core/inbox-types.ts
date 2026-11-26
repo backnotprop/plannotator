@@ -507,6 +507,11 @@ export function inboxHostName(host: string, runtime?: unknown): string {
 }
 
 /** The name an agent's own connection gave (`agent_name`) when the app it runs in has a name of its own: Oh My Pi's "Pi" becomes "Oh My Pi". */
+/** An agent's own name that its host alone would not give ("Oh My Pi" on a `pi` session): the window shows that name. */
+export function inboxRuntimeNamed(host: string | null | undefined, name: string | null | undefined): boolean {
+  return host === "pi" && name === INBOX_HOST_NAMES[INBOX_OH_MY_PI_RUNTIME];
+}
+
 export function inboxRuntimeAgentName(host: unknown, name: unknown, runtime: InboxAgentRuntime | undefined): string | null {
   return runtime && host === "pi" && (name === undefined || name === null || name === INBOX_HOST_NAMES.pi) ? INBOX_HOST_NAMES[runtime]! : null;
 }
@@ -2179,8 +2184,8 @@ export interface InboxListRow extends InboxThreadSummary {
   last_agent_at?: string | null;
   /**
    * Who wrote the latest agent message, when more than one agent is in the thread (`participants`): the window's
-   * held line names the agent that wrote ("Codex replied in …"). Absent with one agent (that is the row's own agent)
-   * and from an older Inbox.
+   * held line names the agent that wrote ("Codex replied in …"). Absent with one agent (that is the row's own agent),
+   * unless its name is not its host's (`inboxRuntimeNamed`: "Oh My Pi" on a `pi` session), and from an older Inbox.
    */
   last_agent?: { host: string | null; name?: string | null };
   /** A message in the thread carries a guided review: the row's "Guided review" mark. */
