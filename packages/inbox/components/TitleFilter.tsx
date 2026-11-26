@@ -10,7 +10,7 @@
  *   goes, and only when nothing at all matches (the folded Snoozed band and the Archived group included) does "No
  *   threads match" read where the list would be. It narrows what the menu's picks left, a linked computer's threads
  *   too, and the Archived group when it shows. A row that stops matching shrinks and fades (titleFilterRows.ts).
- * - A screen reader hears how many threads match once typing pauses, as the menu's "Search filters" says its count
+ * - A screen reader hears how many threads match once typing pauses, as the menu's own find fields say theirs
  *   (saidAfterPause.ts); nothing is added on screen.
  * - The × or Escape (only while the field has focus) empties it, takes it away while the whole list comes back in the
  *   same motion, puts the list's scroll back where it was when the field opened in this list (no other list's), and
@@ -51,10 +51,11 @@ export function useTitleFilterList(sections: readonly InboxListSection[], archiv
     () => (archived && typed ? { ...archived, filter: (rows: readonly InboxListRow[]) => filterRowsByTitle(archived.filter(rows), query) } : archived),
     [archived, typed, query],
   );
-  // Every thread the words leave: every group's, the folded Snoozed band's and the Archived group's.
-  const matches = useMemo(() => shown.reduce((n, section) => n + section.threads.length, 0), [shown]) + archivedMatches;
+  // Every thread the words leave: every group's, the folded Snoozed band's and the Archived group's. Both are read only
+  // while words are typed: a closed or empty field costs the list nothing when its rows change.
+  const matches = useMemo(() => (typed ? shown.reduce((n, section) => n + section.threads.length, 0) : 0), [typed, shown]) + archivedMatches;
   // The picks left rows to narrow: else the list's own empty words stay (Clear filters).
-  const picksLeft = useMemo(() => holdsRows(sections), [sections]);
+  const picksLeft = useMemo(() => typed && holdsRows(sections), [typed, sections]);
   const field: ReactNode = on && open ? <TitleFilterField text={text} place={place} words={typed ? (matches === 0 ? TITLE_FILTER_NONE : matchCount(matches)) : ''} /> : null;
   // Words typed over rows: "No threads match" only when nothing at all matches; matches in the Snoozed band or the
   // Archived group alone draw no words above them.

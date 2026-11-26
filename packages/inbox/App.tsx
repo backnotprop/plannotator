@@ -37,6 +37,7 @@ import { useSettingsSaves } from './data/actions/settings';
 import { useListShown } from './app/useListView';
 import { useListTags } from './app/useListTags';
 import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
+import { decideAwayToast, tuckDecide } from './app/decideTuck';
 import { useSnoozeBack } from './app/useSnoozeBack';
 import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
@@ -67,7 +68,7 @@ import {
   type WhatsNewReleasesModel,
 } from './api';
 import { listReadRefused, readFirstList } from './firstListRead';
-import { adoptRestartedInbox, type RestartHello } from './sessionAdopt';
+import { adoptRestartedInbox, inboxReconnected, type RestartHello } from './sessionAdopt';
 import { newRecordBatch, noteOwnRecord, noteRecord } from './openThreadReads';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { createOwnSaves } from './ownSaves';
@@ -144,6 +145,8 @@ import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
 import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
 import { PlansRoute, usePlansOn } from './plans/PlansPage';
+import { GridRoute, useGridOn } from './grid/GridPage';
+import { pageLinks } from './app/pageLinks';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { ArchivedBlock } from './components/Archived';
@@ -188,7 +191,7 @@ import { snoozeWrites } from './snoozeWrites';
 import { agentWrites, type AgentDeleteAsk } from './agentWrites';
 import { sameSettings, settingsReadAtLoad, takeSettingsAtLoad } from './settingsAtLoad';
 import { restartInbox } from './restartInbox';
-import { errorToast } from './toastError';
+import { ackErrorToast, errorToast } from './toastError';
 import { useBulkWrites } from './components/useCombines';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
@@ -210,7 +213,7 @@ import { threadPanelShows, useThreadPanel } from './threadPanel';
 import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backTo, settleLanding } from './history';
 import { adoptSavedTheme, useInboxThemePick } from './theme';
-import { adoptSavedDiffOptions } from './diffOptions';
+import { adoptSavedReviewSettings } from './reviewAnalysis';
 import { adoptSavedTextSize } from './textSize';
 import { adoptSavedFavicon, chooseFavicon, useInboxFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
@@ -370,7 +373,6 @@ function Inbox() {
   /** What opened decision mode: focus goes back there when the sitting ends. */
   const decideOpener = useRef<HTMLElement | null>(null);
   const [decideLeft, setDecideLeft] = useState(0);
-  const [decidePaused, setDecidePaused] = useState(0);
   const decisionModeOnRef = useRef(false);
   const questionListeners = useRef(new Set<(question: InboxQuestion) => void>());
   /**
@@ -1141,7 +1143,7 @@ function Inbox() {
       adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedSidebar(next.sidebar, next.sidebar_rev, sidebarMark);
       adoptShowArchived(next.show_archived);
-      adoptSavedDiffOptions(next.diff_options, next.diff_style);
+      adoptSavedReviewSettings(next);
       // The name on the person's comments on the PR page and the review, as plan and code review read it; nothing posted
       // carries it. Only with Code review on: off, every comment reads as on main.
       if (next.display_name && next.code_review?.on) configStore.init({ displayName: next.display_name });
@@ -1457,7 +1459,7 @@ function Inbox() {
         eventListTimer = null;
         const listRead = refreshList(false);
         void listRead.then((next) => next && flushNotifications(next));
-        void refreshDecisions();
+        if (decisionsTouched(records)) void refreshDecisions();
         // Each thread on screen reads what these records owe it (panes/shownReads.ts).
         const threadRead = shownReads.afterRecords(records, listRead);
         // pn:record-refresh: the event heard → the list and the open thread read again and drawn.
@@ -1726,8 +1728,8 @@ function Inbox() {
         onConnect: (hello) => {
           // A (re)connect: what happened while the stream was away is not known here; no held thread is drawn from as current.
           staleThreads(queryClient);
-          // The Inbox restarted under this page: when it is provably the same one, writes go on without a reload.
-          if (hello) void adoptAfterRestart(hello);
+          // A restarted Inbox, provably the same one: writes go on without a reload; then unsaved reply drafts save again.
+          void (hello ? adoptAfterRestart(hello) : Promise.resolve()).finally(inboxReconnected);
           // `event: deliveries` carries no record, so the cursor never replays one sent before this connect.
           listAfterEvents(80);
           reportWindow();
@@ -1797,13 +1799,13 @@ function Inbox() {
           setOutbox((current) => new Map(current).set(entry.key, entry));
           // Delivered: the reply is in that machine's thread now; the open thread shows it there.
           if (entry.state === 'delivered') void shownReads.onMachines(new Set([entry.machine]));
-          // Its machine's link went (here, or on that machine): what waited for it was not sent, and its thread is gone
-          // from this list. Said at once; Settings → Machines keeps the words to copy.
-          if (entry.state === 'dropped' && entry.machine_name && entry.notice && !entry.dismissed) {
+          // Its link went (here, or there): what waited was not sent. One toast for all one Unlink dropped; Settings → Machines keeps the words.
+          const lead = `Not sent to ${entry.machine_name}: it is no longer linked.`;
+          if (entry.state === 'dropped' && entry.machine_name && entry.notice && !entry.dismissed && toastNow.current?.lead !== lead) {
             showToast(
               {
                 icon: 'warn',
-                lead: `Not sent to ${entry.machine_name}: it is no longer linked.`,
+                lead,
                 detail: 'Settings → Machines keeps the words.',
                 wrap: true,
               },
@@ -2436,8 +2438,8 @@ function Inbox() {
     const held = pickSaves.current.held;
     pickSaves.current.held = [];
     // Only words typed in answers changed in this run: no list, decisions or drafts read for it. The Drafts page shows
-    // the words, and decision mode's cards are read from the decisions, so both read as before.
-    const quiet = pickSaves.current.textOnly && !paneClosed && routeRef.current.page !== 'drafts' && !decisionModeOnRef.current;
+    // the words, so it reads as before. Decision mode's cards draw from the thread held here, which the saves updated.
+    const quiet = pickSaves.current.textOnly && !paneClosed && routeRef.current.page !== 'drafts';
     pickSaves.current.textOnly = true;
     if (!pickSaves.current.owed) {
       // The records of these saves are still to come: read now what they will owe, so they owe nothing then.
@@ -2899,7 +2901,7 @@ function Inbox() {
     try {
       await inboxApi.ack(messageId, on, reaction);
     } catch (cause) {
-      showError(cause);
+      showToast(ackErrorToast(cause, messageId));
       await afterWrite();
       return;
     }
@@ -3634,10 +3636,11 @@ function Inbox() {
     };
   }, [whatsNewVersion, whatsNewRetry]);
 
-  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
+  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
+  const gridOn = useGridOn(settings, refreshList);
 
   const projects = latest?.projects ?? [];
   /**
@@ -3666,7 +3669,7 @@ function Inbox() {
       },
     },
   });
-  const { decisionModeOn, decideInThread, sittingDecisions, closeDecide } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList });
+  const { decisionModeOn, decideInThread, sittingDecisions, closeDecide, decisionsTouched } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList, route });
   const snoozeBack = useSnoozeBack({ thread, route, listedOpenRow, looking, openThreadCovered, lookRef: paneReads.activeLook, trackLook, refreshList, snoozed: latest?.snoozed, refreshSnoozes, seen: inboxApi.seen });
   // The list's Archived group (approval "inbox-archived-group") and Settings → Archived's Unarchive.
   const archivedFilter = useCallback((rows: readonly InboxListRow[]) => filterShown([{ id: 'archived', label: 'Archived', threads: [...rows] }])[0]?.threads ?? rows, [filterShown]);
@@ -5049,7 +5052,8 @@ function Inbox() {
         context={context}
         error={settingsError}
         onToggleTool={toggleTool}
-        onToggleExperimental={(next) => void toggleExperimental(next)}
+        onToggleExperimental={(next, feature) => void toggleExperimental(next, feature)}
+        onToggleDecisionMode={(next) => void toggleDecisionMode(next)}
         onToggleCookieHost={(next) => void toggleCookieHost(next)}
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
@@ -5325,6 +5329,8 @@ function Inbox() {
     main = <ReviewsOff phone={phone} onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'capabilities' })} />;
   } else if (route.page === 'reviews') {
     main = <div className="ib-listcol" aria-busy="true" />;
+  } else if (route.page === 'grid') {
+    main = <GridRoute on={gridOn} settingsKnown={settings !== null} phone={phone} onOpen={(thread) => go({ page: 'inbox', project: null, thread })} />;
   } else if (route.page === 'plans') {
     main = <PlansRoute route={route} on={plansOn} settingsKnown={settings !== null} phone={phone} projects={projects} />;
   } else if (route.page === 'scheduled') {
@@ -5575,7 +5581,7 @@ function Inbox() {
       {/* The sidebar's Customize panel (approval "inbox-sidebar-customize"): one for the window, beside the sidebar or, on a phone, a bottom sheet. */}
       {!tourOn && (
         <SidebarCustomizer
-          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), plans: plansOn, reviews: Boolean(pullsShown), usage: settings?.cswap === true, phone })}
+          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), plans: plansOn, grid: gridOn, reviews: Boolean(pullsShown), usage: settings?.cswap === true, phone })}
           machines={machines.all.length > 0}
           // Opened from Settings on a desktop, where the sidebar is closed: it opens, so the person sees each change.
           onOpen={() => {
@@ -5699,12 +5705,7 @@ function Inbox() {
             draftsCount={(drafts?.length ?? 0) + replyDrafts.length}
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             onArtifacts={() => leave({ page: 'artifacts', project: null, thread: null })}
-            // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
-            onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
-            onPlans={plansOn ? () => leave({ page: 'plans', project: null, thread: null }) : undefined}
-            onScheduled={scheduledOn ? () => leave({ page: 'scheduled', project: null, thread: null }) : undefined}
-            // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
-            onPulls={pullsShown ? () => leave({ page: 'reviews', project: null, thread: null }) : undefined}
+            {...pageLinks({ board: Boolean(boardEnabled), plans: plansOn, grid: gridOn, scheduled: scheduledOn, reviews: Boolean(pullsShown) }, leave)}
             pullsCount={pullsShown && pulls.reviews ? reviewsOnYou(pulls.reviews) : 0}
             // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
             onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine && !route.agent && !route.tag ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}
@@ -6229,26 +6230,13 @@ function Inbox() {
           refresh={refreshDecisions}
           subscribeQuestions={subscribeQuestions}
           onLeft={setDecideLeft}
-          onPaused={setDecidePaused}
-          onTuck={(threadId, fileId, question) => {
-            setDecide((current) => (current ? { ...current, tucked: true } : current));
-            if (question && !fileId) {
-              // A card's "Open the thread" (approval "inbox-decide-thread-only"): the dialog closes into its pill and
-              // the thread (already behind it) lands on that question, its prompt focused. The same thread replaces
-              // the entry, as a search result's landing does, so Back never stops on the same thread twice.
-              decideLanding.current = { messageId: question.messageId, questionKey: question.key };
-              searchLanding.current = null;
-              const now = routeRef.current;
-              const same = now.page === 'inbox' && now.thread === threadId && !now.file && !now.guide;
-              writeRoute({ page: 'inbox', project: same ? now.project : null, thread: threadId, msg: question.messageId }, same ? { replace: true } : {});
-              return;
-            }
-            writeRoute({ page: 'inbox', project: null, thread: threadId, file: fileId ? { id: fileId, version: 'current', focus: null } : null });
-          }}
+          onTuck={(threadId, fileId, question) => tuckDecide({ setDecide, routeRef, decideLanding, searchLanding }, threadId, fileId, question)}
+          // A Send or a save that fails once the dialog is closed or tucked away: the window's toast says so.
+          onAway={(notice) => showToast(decideAwayToast(notice))}
           onClose={closeDecide}
         />
       )}
-      {decisionModeOn && decide?.tucked && <DecisionPill left={decideLeft} paused={decidePaused} thread={route.page === 'inbox' && route.thread === decide.thread ? null : decide.title} onResume={() => setDecide((current) => (current ? { ...current, tucked: false } : current))} />}
+      {decisionModeOn && decide?.tucked && <DecisionPill left={decideLeft} thread={route.page === 'inbox' && route.thread === decide.thread ? null : decide.title} onResume={() => setDecide((current) => (current ? { ...current, tucked: false } : current))} />}
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>

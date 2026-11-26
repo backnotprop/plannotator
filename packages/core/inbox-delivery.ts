@@ -112,9 +112,7 @@ export interface InboxDeliveryInput {
   /**
    * Delivered after an automatic mark: whether it went into a running turn
    * (`delivery.into_turn`). False: it waited for the turn to end (the
-   * session's own Ask question held it). Absent: not known. True on an item
-   * never marked by the Inbox (`nowBy` not "auto"): the Codex wake steered it
-   * into the running turn and saw it there.
+   * session's own Ask question held it). Absent: not known.
    */
   intoTurn?: boolean | null;
   /** Who set `deliver_now_at`, kept after a failed attempt cleared it (`deliver_now_by`). */
@@ -142,8 +140,6 @@ export interface InboxDeliveryDecision {
   autoAfterMin?: number;
   /** Delivered after an automatic mark, but at the end of the turn (not into it). */
   turnEnded?: boolean;
-  /** Delivered with no mark into the running turn: the wake steered it in (a Codex `turn/steer`). */
-  intoRunningTurn?: boolean;
 }
 
 export function inboxDeliveryState(input: InboxDeliveryInput): InboxDeliveryDecision {
@@ -152,12 +148,7 @@ export function inboxDeliveryState(input: InboxDeliveryInput): InboxDeliveryDeci
   // running turn: one the session's own Ask question held waited for the turn to end, and says that.
   const marked = input.nowBy === "auto" && !!input.nowAt && !!input.waitingSince;
   const auto = marked && input.intoTurn !== false ? { autoAfterMin: wholeMinutes(input.waitingSince!, input.nowAt!) } : {};
-  if (input.delivered) {
-    // Into the running turn and never marked to go by itself (`nowBy` is not "auto", even after a failed attempt
-    // cleared `nowAt`): only the Codex wake's own steer writes that (the store's `intoTurnOf`).
-    const steered = input.nowBy !== "auto" && input.intoTurn === true ? { intoRunningTurn: true } : {};
-    return { state: "delivered", reason: "delivered", ...no, ...auto, ...(marked && input.intoTurn === false ? { turnEnded: true } : {}), ...steered };
-  }
+  if (input.delivered) return { state: "delivered", reason: "delivered", ...no, ...auto, ...(marked && input.intoTurn === false ? { turnEnded: true } : {}) };
   if (input.stuck) return { state: "undelivered", reason: "stuck", ...no };
   if (input.undelivered) return { state: "undelivered", reason: "undelivered", ...no };
   if (input.handed) return { state: "queued", reason: "handed", ...no };
@@ -244,8 +235,21 @@ export function inboxDefaultSkip<M>(_messages: readonly M[], _statesOf: (message
  * stdio shim's `ses_…` included), or an agent's shell the CLI names (`inboxShellAgentOf`), is not one.
  */
 export function inboxSessionlessSend(message: { author: { kind: string; host?: string | null; session?: string | null; name?: string | null }; wakes?: boolean }): boolean {
-  return message.author.kind === "agent" && !message.author.session && !message.author.host && !message.author.name && message.wakes !== true;
+  return inboxScriptAuthor(message.author) && message.wakes !== true;
 }
+
+/**
+ * An agent author with no session, no host and no name: the one the window names "Script" and draws a terminal for,
+ * by the author alone, so a list row (which carries no `wakes`) and the thread name it alike. Routing reads
+ * `inboxSessionlessSend`, which also asks that it was not sent through a waking connection (one always names its
+ * session and host, so the two differ only for a record no connection writes).
+ */
+export function inboxScriptAuthor(author: { kind: string; host?: string | null; session?: string | null; name?: string | null } | null | undefined): boolean {
+  return !!author && author.kind === "agent" && !author.session && !author.host && !author.name;
+}
+
+/** What a person reads for a script's post (`inboxScriptAuthor`): the window, and the phone's push. Agents read "An agent". */
+export const INBOX_SCRIPT_AUTHOR_NAME = "Script";
 
 /** The author fields the words rule reads. */
 type WordsAuthorMessage = { author: { kind: string; host?: string | null; session?: string | null; name?: string | null }; wakes?: boolean; scheduled_change?: unknown };
@@ -318,6 +322,11 @@ export interface InboxRowDelivery {
   name: string | null;
   /** It went to another session of the asker's own host ("Claude Code (another session)"). */
   another_session?: boolean;
+  /**
+   * It answers a script's post (`inboxSessionlessSend`): the window names its recipient "Script", as the thread's
+   * line does. Absent otherwise and from an older Inbox. Additive.
+   */
+  script?: true;
   /**
    * `reason: "ended"`: the agent of the session that asked and has ended
    * (`inboxAskingMessage`), which the line names ("Saved for <it>. The

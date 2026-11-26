@@ -74,6 +74,7 @@ export const ROUTE_FILES = [
   'packages/server/inbox-scheduled-routes.ts',
   'packages/server/inbox-search.ts',
   'packages/server/inbox-sessions.ts',
+  'packages/server/inbox-ship-routes.ts',
   'packages/server/inbox-skills.ts',
   'packages/server/inbox-snooze.ts',
   'packages/server/inbox-steps.ts',

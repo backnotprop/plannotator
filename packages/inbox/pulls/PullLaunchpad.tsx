@@ -116,6 +116,7 @@ export function PullLaunchpad({
   startThread = null,
   untiedThread = null,
   risk = null,
+  ship = null,
   onClose,
   onDiff,
   onThread,
@@ -137,6 +138,8 @@ export function PullLaunchpad({
   startThread?: (() => void) | null;
   untiedThread?: string | null;
   risk?: ReactNode;
+  /** The ship log while the PR ships (useShipping.tsx `PageShipLog`). */
+  ship?: ReactNode;
   onClose: () => void;
   onDiff: () => void;
   onThread: (threadId: string) => void;
@@ -236,6 +239,7 @@ export function PullLaunchpad({
             )}
           </div>
           {risk}
+          {ship}
           {live && read ? (
             <LaunchpadLiveAsks thread={read} stack={stack} pr={pr} link={live} onDiff={onDiff} onAsked={onAsked} onThread={onThread}>
               {draw}

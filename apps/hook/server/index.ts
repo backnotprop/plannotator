@@ -269,6 +269,7 @@ import { inboxPairedRouteFetch, runInboxCallCommand } from "./inbox-call-command
 import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
+import { runInboxCapabilityCommand } from "./inbox-capability-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -328,15 +329,6 @@ import { loadEmbeddedSemDiff } from "./sem-diff";
 // starts at all; this covers a hook registered without it.)
 if (process.argv[2] === "t3-hook" && process.argv.length === 3 && !isAgentSdkEntrypoint(process.env.CLAUDE_CODE_ENTRYPOINT)) {
   process.stdout.write("{}\n");
-  process.exit(0);
-}
-
-// Plannotator's Codex `PostToolUse` hook (`codex-hook`, internal: the installer writes it into the Codex hooks.json,
-// and its shell gate starts this binary only while a reply waits for a Codex turn). Before any startup work, and it
-// never fails a tool call: no output when nothing is taken (apps/hook/server/codex-hook.ts).
-if (process.argv[2] === "codex-hook" && process.argv.length === 3) {
-  const { codexHookMain } = await import("./codex-hook");
-  await codexHookMain().catch(() => undefined);
   process.exit(0);
 }
 
@@ -484,6 +476,21 @@ const rawArgs = process.argv.slice(2);
     );
   }
 }
+// `plannotator inbox capability [<capability> on|off]`: the capability switches, a thin client over the Inbox's `/api/inbox/capability` (inbox-capability-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "capability") {
+    const capabilityDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxCapabilityCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(capabilityDataDir),
+      }),
+    );
+  }
+}
 // `plannotator inbox steps <thread> --json '<list>'`: an agent's thread steps, sugar over `inbox call steps` (inbox-steps-command.ts).
 {
   const args = rawArgs;
@@ -527,16 +534,6 @@ const rawArgs = process.argv.slice(2);
     process.exit(await runFeedbackCommand(args.slice(1), { env: process.env, version: getCliVersion() ?? "dev" }));
   }
 }
-// `codex-hook` with anything after it (the hook itself, bare, ran above): its usage, nothing else.
-{
-  const args = rawArgs;
-  if (args[0] === "codex-hook") {
-    const { SUBCOMMAND_HELP } = await import("./cli");
-    console.log(SUBCOMMAND_HELP["codex-hook"]);
-    process.exit(0);
-  }
-}
-
 // T3 Code (opt-in, unreleased; HIDDEN_SUBCOMMANDS): `t3` is the connection's
 // CLI and worker, `t3-hook` the Claude Bash hook and its settings helper.
 // Loaded only when asked for, so no other subcommand evaluates any of it.

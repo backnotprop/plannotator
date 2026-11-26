@@ -6,6 +6,7 @@ import { formatCount } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { pinnedLabel, pinnedRowName, pinnedState } from '../pins';
 import { rowAgent } from './InboxList';
+import { rowWho } from '../scriptAuthor';
 import { Tip } from './Tip';
 
 /** What a pinned row's menu does. */
@@ -109,7 +110,7 @@ export function PinnedRow(props: PinnedRowProps) {
           data-pinned-row={row.thread_id}
           data-state={state.kind}
         >
-          <AuthorMark author={rowAgent(row)} />
+          <AuthorMark author={rowWho(row, rowAgent(row))} />
           {props.phone ? (
             // A phone's sheet (approval "inbox-phone-sidebar-sheet"): the name in full on up to two lines, then its project and state.
             <span className="ib-pin-t">

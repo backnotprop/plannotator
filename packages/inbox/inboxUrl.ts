@@ -47,14 +47,49 @@ let selfName: string | null = null;
 
 type MachineFactsWire = { id: string; self?: boolean; name: string; marks?: readonly string[]; both_ways?: boolean; list_cursor?: number | null; state?: string };
 
+/** Bumps when the linked machines' facts changed (`onLinkedMachines`): what reads by them reads again. */
+let linkedRev = 0;
+const linkedListeners = new Set<() => void>();
+const factsSignature = () => JSON.stringify([selfName, [...linkedFacts]]);
+
 /** The merged list's machines: each linked one's facts, for what an agent there can read (threadMentions.ts). */
 export function setLinkedMachines(machines: readonly MachineFactsWire[] | null | undefined): void {
   if (!machines) return;
+  const was = factsSignature();
   linkedFacts.clear();
   for (const m of machines) {
     if (m.self) selfName = m.name;
     else if (MACHINE_ID.test(m.id)) linkedFacts.set(m.id, { name: m.name, marks: m.marks ?? [], both_ways: m.both_ways === true, listed: m.list_cursor !== null && m.list_cursor !== undefined, state: m.state ?? '' });
   }
+  if (factsSignature() !== was) linkedChanged();
+  for (const listener of listedListeners) listener();
+}
+
+const listedListeners = new Set<() => void>();
+/** Called each time the merged list names the linked machines, changed or not (`onLinkedMachines` hears a change only). */
+export function onLinkedMachinesListed(listener: () => void): () => void {
+  listedListeners.add(listener);
+  return () => {
+    listedListeners.delete(listener);
+  };
+}
+
+function linkedChanged() {
+  linkedRev += 1;
+  for (const listener of linkedListeners) listener();
+}
+
+/** Called when the linked machines' facts change; the answer stops it. */
+export function onLinkedMachines(listener: () => void): () => void {
+  linkedListeners.add(listener);
+  return () => {
+    linkedListeners.delete(listener);
+  };
+}
+
+/** A count that moves with each change of the linked machines' facts (`useSyncExternalStore`'s snapshot). */
+export function linkedMachinesRev(): number {
+  return linkedRev;
 }
 
 /** This machine's name as the merged list last said it, or null. */
@@ -65,6 +100,16 @@ export function selfMachineName(): string | null {
 /** A linked machine's facts as the merged list last said them, or null (not linked, or not heard of yet). */
 export function linkedMachineFacts(id: string): LinkedMachineFacts | null {
   return linkedFacts.get(id) ?? null;
+}
+
+/** Every linked machine the merged list last named that can be read (not one too old to link, nor revoked), by id. */
+export function linkedMachineIds(): string[] {
+  return [...linkedFacts].filter(([, facts]) => facts.state !== 'needs_update' && facts.state !== 'revoked').map(([id]) => id).sort();
+}
+
+/** The linked machines the merged list last said take `mark`, by id (an older one, or one not listed yet, does not). */
+export function linkedMachinesWith(mark: string): string[] {
+  return [...linkedFacts].filter(([, facts]) => facts.marks.includes(mark) && facts.state !== 'needs_update' && facts.state !== 'revoked').map(([id]) => id).sort();
 }
 
 /** This Inbox's id, as the merged list names it, and (when the list carries them) every linked machine's facts. */
@@ -116,7 +161,7 @@ export function rememberArtifactMachines<T extends { pins?: readonly ArtifactIds
   const list = (value: unknown): readonly ArtifactIds[] => (Array.isArray(value) ? value : []);
   for (const entry of [...list(model?.pins), ...list(model?.artifacts)]) {
     if (!entry || typeof entry.machine !== 'string' || !entry.machine || typeof entry.key !== 'string' || typeof entry.thread_id !== 'string') continue;
-    const file = entry.key.startsWith('guide:') ? '' : entry.key;
+    const file = entry.key.startsWith('guide:') || entry.key.startsWith('html:') ? '' : entry.key;
     rememberMachine([entry.thread_id, entry.message_id ?? '', entry.project?.id ?? '', entry.attachment?.id ?? '', file], entry.machine);
   }
   return model;
@@ -152,6 +197,7 @@ export function resetMachineRoutes(): void {
   selfMachine = null;
   selfName = null;
   linkedFacts.clear();
+  linkedChanged();
   owners.clear();
   local.clear();
   contested.clear();

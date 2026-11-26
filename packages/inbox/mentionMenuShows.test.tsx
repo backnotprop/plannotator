@@ -120,9 +120,11 @@ afterEach(async () => {
   menuRoot = null;
   // A pane that went saves what waited: it lands on the scripted Inbox, never on a real address.
   for (let i = 0; i < 40 && replyDraftUnsaved(); i++) await settle(1);
+  const left = replyDraftUnsaved();
   globalThis.fetch = savedFetch;
   window.location.hash = '';
   window.localStorage.clear();
+  if (left) throw new Error('the test left a reply draft save on its way, or words not saved');
 });
 
 async function settle(turns = 4) {

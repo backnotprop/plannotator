@@ -127,7 +127,7 @@ export function otherAgents(row: InboxListRow, sessions: readonly string[]): Inb
 }
 
 /** Finds a row's agent: the listed ones by launch and session, else one rebuilt from the session. */
-function agentFinder({ groups, machines, labels = {}, chains }: AgentsInputs): (row: InboxListRow) => ViewAgent | null {
+export function agentFinder({ groups, machines, labels = {}, chains }: AgentsInputs): (row: InboxListRow) => ViewAgent | null {
   const self = machines.self;
   const machineOf = (row: InboxListRow) => (machines.all.length === 0 ? null : (row.machine ?? self ?? null));
   const known = new Map<string | null, boolean>();

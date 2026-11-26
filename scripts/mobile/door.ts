@@ -41,6 +41,7 @@ const COLLECTIONS: Record<string, { word: string; param: string }> = {
   cards: { word: 'card', param: 'card' },
   combine: { word: 'combine', param: 'combine' },
   actions: { word: 'action', param: 'action' },
+  scheduled: { word: 'routine', param: 'routine' },
 };
 
 /**
@@ -99,7 +100,7 @@ function writeKind(path: string): string | null {
 }
 
 /** A sample a parameter accepts, from the door's own pattern: asks the door which window route a path reaches. */
-const SAMPLES = ['id_SAMPLE', 'crd_SAMPLE', 'cmb_SAMPLE', 'a-0123abcd', 'path/SAMPLE'];
+const SAMPLES = ['id_SAMPLE', 'crd_SAMPLE', 'cmb_SAMPLE', 'sch_SAMPLE', 'a-0123abcd', 'path/SAMPLE'];
 
 export function doorEntries(): DoorEntry[] {
   const entries = doorRouteTable().map((row): DoorEntry => {

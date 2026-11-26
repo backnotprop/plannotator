@@ -19,14 +19,6 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, parse } from "node:path";
 import { quoteHookWord, t3HookCommand } from "@plannotator/shared/t3-hook-command";
-import { CODEX_HOOK_INSTALLED_FILE, codexHookCommand, isCodexHookCommand } from "@plannotator/shared/codex-hook-command";
-import { isManagedHook, remainingHookReferences } from "./uninstall-hooks";
-
-/**
- * The Codex PostToolUse gate for a path as this computer writes it. The gate's quotes carry no backslash, so a Windows
- * path goes in with forward slashes (scripts/install.sh writes the hook on macOS and Linux only).
- */
-const gateOf = (binary: string, hooksFile: string): string => codexHookCommand(binary.replace(/\\/g, "/"), hooksFile.replace(/\\/g, "/"))!;
 import {
   formatPurgeWarning,
   runPlannotatorUninstall,
@@ -1168,49 +1160,6 @@ describe("default uninstall", () => {
       expect(readJson(settingsPath)).toEqual({ theme: "custom" });
     },
   );
-
-  test("Windows: no gate is made for a backslash path; one naming a Windows binary in forward slashes is ours, on any host", () => {
-    const windowsBinary = "C:\\Users\\Ada Novak\\.local\\bin\\plannotator.exe";
-    const windowsHooks = "C:\\Users\\Ada Novak\\.codex\\hooks.json";
-    expect(codexHookCommand(windowsBinary, windowsHooks)).toBeNull();
-    const gate = gateOf(windowsBinary, windowsHooks);
-    expect(isCodexHookCommand(gate)).toBe(true);
-    const hook = { type: "command", command: gate };
-    expect(isManagedHook(hook, [windowsBinary], "codex-hook", "win32", false)).toBe(true);
-    expect(isManagedHook(hook, ["c:\\users\\ada novak\\.local\\bin\\PLANNOTATOR.EXE"], "codex-hook", "win32", false)).toBe(true);
-    expect(isManagedHook(hook, ["C:\\Other\\plannotator.exe"], "codex-hook", "win32", false)).toBe(false);
-    expect(remainingHookReferences({ hooks: { PreToolUse: [{ hooks: [hook] }] } }, [windowsBinary], "win32", true)).toEqual(["hooks.PreToolUse[0].hooks[0].command"]);
-    // Not ours: another program's gate of the same shape.
-    expect(isCodexHookCommand(gate.replace("plannotator.exe", "other.exe"))).toBe(false);
-  });
-
-  test("removes the Codex PostToolUse hook with the Stop hook, keeps the person's own, and drops the installer's note", async () => {
-    const fixture = createFixture();
-    const binary = join(fixture.homeDir, ".local", "bin", "plannotator");
-    writeText(binary);
-    const hooksPath = join(fixture.homeDir, ".codex", "hooks.json");
-    const theirs = { hooks: [{ type: "command", command: "/usr/local/bin/lint-after", timeout: 5 }] };
-    writeJson(hooksPath, {
-      hooks: {
-        Stop: [{ hooks: [{ type: "command", command: binary, timeout: 345600 }] }],
-        PostToolUse: [theirs, { hooks: [{ type: "command", command: gateOf(binary, hooksPath), timeout: 10 }] }, { hooks: [{ type: "command", command: gateOf(join(fixture.root, "moved", "plannotator"), hooksPath), timeout: 10 }] }],
-      },
-    });
-    const note = join(fixture.dataDir, CODEX_HOOK_INSTALLED_FILE);
-    writeText(note, "");
-
-    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
-    expect(result.ok).toBe(true);
-    expect(readJson(hooksPath)).toEqual({ hooks: { PostToolUse: [theirs] } });
-    expect(existsSync(note)).toBe(false);
-  });
-
-  test("a Codex hook gate the uninstall does not manage is named as a leftover, not missed inside /bin/sh -c", async () => {
-    const binary = join(tmpdir(), "nowhere", "plannotator");
-    const gate = gateOf(binary, join(tmpdir(), "nowhere", ".codex", "hooks.json"));
-    expect(remainingHookReferences({ hooks: { PreToolUse: [{ hooks: [{ type: "command", command: gate }] }] } }, [binary], "linux", true)).toEqual(["hooks.PreToolUse[0].hooks[0].command"]);
-    expect(remainingHookReferences({ hooks: { PostToolUse: [{ hooks: [{ type: "command", command: gate }] }] } }, [binary], "linux", true, [{ event: "PostToolUse", suffix: "codex-hook" }])).toEqual([]);
-  });
 
   test("removes a relocated Codex hook adopted by the installer", async () => {
     const fixture = createFixture();
