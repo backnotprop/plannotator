@@ -949,4 +949,5 @@ packages/inbox/skillFileOpen.dom.test.tsx
 packages/inbox/reviewAnalysis.test.tsx
 packages/ui/components/LaunchDialog.test.tsx
 packages/ui/components/LaunchAnnouncement.test.tsx
+packages/ui/components/GlowStars.test.tsx
 packages/inbox/launchDialog.test.tsx

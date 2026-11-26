@@ -1,9 +1,8 @@
 /**
  * The launch dialog's art (public/launch/<campaign>.webp, served as https://plannotator.ai/launch/<campaign>.webp):
  * the apps load the picture for the campaign that public/launch.json names. What regresses: the switch naming a
- * campaign whose picture is missing, is not a WebP, is not 16:9 at a size the dialog's band is drawn for (1120×630 or
- * 1440×810, for the 720-wide band at 1x and 2x), or is
- * too heavy for a dialog that shows as the page opens. A missing picture still shows the words alone, but not the
+ * campaign whose picture is missing, is not a WebP, is not 16:9 at the size the dialog's band is drawn for (1760×990,
+ * the 880-wide band at 2x), or is too heavy for a dialog that shows as the page opens. A missing picture still shows the words alone, but not the
  * dialog the owner approved.
  */
 import { describe, expect, test } from 'bun:test';
@@ -30,11 +29,11 @@ function webpSize(b: Buffer): { width: number; height: number } | null {
 }
 
 describe('public/launch/<campaign>.webp', () => {
-  test("the picture for launch.json's campaign: a 16:9 WebP, 1120×630 or 1440×810, under 300 KB", () => {
+  test("the picture for launch.json's campaign: a 16:9 WebP, 1760×990, under 300 KB", () => {
     const file = join(import.meta.dir, 'public', 'launch', `${doc.campaign}.webp`);
     expect(existsSync(file), `no art for campaign ${doc.campaign}`).toBe(true);
     const bytes = readFileSync(file);
-    expect([{ width: 1120, height: 630 }, { width: 1440, height: 810 }]).toContainEqual(webpSize(bytes)!);
+    expect(webpSize(bytes)).toEqual({ width: 1760, height: 990 });
     expect(bytes.byteLength).toBeLessThan(300 * 1024);
   });
 });
