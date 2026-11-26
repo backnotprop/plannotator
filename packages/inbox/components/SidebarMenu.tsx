@@ -15,15 +15,17 @@ import { Menu } from '@base-ui/react/menu';
 import {
   INBOX_SIDEBAR_DEFAULT,
   inboxSidebarHideable,
-  inboxSidebarSame,
+  inboxSidebarSameItems,
   inboxSidebarSetShown,
   inboxSidebarShown,
   inboxSidebarSpec,
+  inboxSidebarWithItems,
   type InboxSidebarItem,
   type InboxSidebarLayout,
 } from '@plannotator/core/inbox-sidebar';
 import { Icon } from '../icons';
 import { openSidebarCustomizer, readSidebarLayout, writeSidebarLayout } from '../sidebarLayout';
+import { RailChoiceItems } from '../rail/RailChoice';
 
 /** A touch (or a long press a phone turns into `contextmenu`) never opens the menu. */
 const TOUCH_WINDOW_MS = 1500;
@@ -118,14 +120,17 @@ export function SidebarMenu({ menu, layout, drawn }: { menu: SidebarMenuState; l
               })}
             </Menu.Group>
             <Menu.Separator className="ib-pm-sep" />
+            {/* The project rail (rail/RailChoice.tsx): what the closed sidebar leaves. A phone has no rail column. */}
+            <RailChoiceItems />
+            <Menu.Separator className="ib-pm-sep" />
             <Menu.Item className="ib-pmi" onClick={() => {
                 toPanel.current = true;
                 openSidebarCustomizer(opener);
               }} data-sidebar-customize="">
               <span className="ib-pmi-l">Customize sidebar…</span>
             </Menu.Item>
-            {!inboxSidebarSame(layout, INBOX_SIDEBAR_DEFAULT) && (
-              <Menu.Item className="ib-pmi" onClick={() => void writeSidebarLayout(INBOX_SIDEBAR_DEFAULT)} data-sidebar-reset="">
+            {!inboxSidebarSameItems(layout, INBOX_SIDEBAR_DEFAULT) && (
+              <Menu.Item className="ib-pmi" onClick={() => void writeSidebarLayout(inboxSidebarWithItems(readSidebarLayout(), INBOX_SIDEBAR_DEFAULT))} data-sidebar-reset="">
                 <span className="ib-pmi-l">Reset to default</span>
               </Menu.Item>
             )}

@@ -33,10 +33,21 @@ function snapshot(): boolean {
 	return window.matchMedia(DESKTOP_LG_QUERY).matches;
 }
 
-export function SidebarPeek({ children }: { children: ReactNode }) {
+/**
+ * A press that opens the peek (the project rail's ⋯, rail/PlaceRail.tsx): `n` counts the presses, `opener` is the
+ * button. Opened this way it stays until a pick in it, a press outside it, Escape, the same button again, or the
+ * pointer leaving it once it went in; then focus goes back to the button if it was in the peek.
+ */
+export interface PeekAsk {
+	n: number;
+	opener: HTMLElement | null;
+}
+
+export function SidebarPeek({ children, ask = null }: { children: ReactNode; ask?: PeekAsk | null }) {
 	const { open } = useSidebar();
 	const isLgDesktop = useIsDesktopLg();
 	const [visible, setVisible] = useState(false);
+	const panel = useRef<HTMLDivElement>(null);
 	const showTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const hideTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -89,6 +100,59 @@ export function SidebarPeek({ children }: { children: ReactNode }) {
 		}
 	}, [open, clearShow, clearHide]);
 
+	// A press on the rail's ⋯: open (focus into the peek), or close when it shows.
+	const askedFor = useRef(0);
+	const opener = ask?.opener ?? null;
+	// Opened by the press (not by resting on the edge): the press's rules below apply until it hides.
+	const [held, setHeld] = useState(false);
+	if (!visible && held) setHeld(false);
+	const visibleNow = useRef(visible);
+	visibleNow.current = visible;
+	useEffect(() => {
+		if (!ask || ask.n === askedFor.current) return;
+		askedFor.current = ask.n;
+		clearShow();
+		clearHide();
+		if (visibleNow.current) setVisible(false);
+		else {
+			setVisible(true);
+			setHeld(true);
+		}
+	}, [ask, clearShow, clearHide]);
+	useEffect(() => {
+		if (!held || !opener) return;
+		panel.current?.querySelector<HTMLElement>("[data-inbox-nav]")?.focus({ preventScroll: true });
+		const close = () => {
+			setVisible(false);
+			if (panel.current?.contains(document.activeElement)) opener.focus({ preventScroll: true });
+		};
+		// A menu or a dialog opened from a row in the peek lives outside it: a press there is not outside.
+		const elsewhere = (target: EventTarget | null) =>
+			target instanceof Element && !panel.current?.contains(target) && !opener.contains(target) && !target.closest('[role="menu"], [role="dialog"], [role="listbox"]');
+		const onDown = (event: PointerEvent) => {
+			if (elsewhere(event.target)) close();
+		};
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key !== "Escape" || !panel.current?.contains(event.target as Node)) return;
+			event.stopPropagation();
+			close();
+		};
+		// A pick folds it away: a row or a page, never a section's fold, a sort or a menu's button.
+		const onClick = (event: MouseEvent) => {
+			const hit = event.target instanceof Element ? event.target.closest("button, a") : null;
+			if (hit && !hit.matches("[aria-expanded], [aria-haspopup], [aria-pressed]")) setTimeout(close, 0);
+		};
+		const node = panel.current;
+		document.addEventListener("pointerdown", onDown, true);
+		window.addEventListener("keydown", onKey, true);
+		node?.addEventListener("click", onClick);
+		return () => {
+			document.removeEventListener("pointerdown", onDown, true);
+			window.removeEventListener("keydown", onKey, true);
+			node?.removeEventListener("click", onClick);
+		};
+	}, [held, opener]);
+
 	// Clean up timers on unmount.
 	useEffect(
 		() => () => {
@@ -114,6 +178,7 @@ export function SidebarPeek({ children }: { children: ReactNode }) {
 			    motion, direct final geometry. inert while hidden: the panel is a
 			    full sidebar copy that stays MOUNTED offscreen. */}
 			<div
+				ref={panel}
 				data-sidebar-peek
 				data-visible={visible ? "" : undefined}
 				inert={!visible}

@@ -26,15 +26,27 @@ import { inboxApi } from './api';
 
 export const SIDEBAR_LAYOUT_COOKIE = 'plannotator-inbox-sidebar-layout';
 
-/** The cookie's form: `top;bottom;hidden`, each a comma list of item names. Short, and a cookie's characters only. */
+/**
+ * The cookie's form: `top;bottom;hidden`, each a comma list of item names. Short, and a cookie's characters only. The
+ * rail (rail/, present only when on or pinned): `;1` or `;0`, then `;` and its pins, each URI-encoded, comma-separated.
+ */
 export function sidebarLayoutCookie(layout: InboxSidebarLayout): string {
-  return [layout.top, layout.bottom, layout.hidden].map((list) => list.join(',')).join(';');
+  const items = [layout.top, layout.bottom, layout.hidden].map((list) => list.join(',')).join(';');
+  if (!layout.rail && !layout.pins?.length) return items;
+  return `${items};${layout.rail ? 1 : 0};${(layout.pins ?? []).map(encodeURIComponent).join(',')}`;
 }
 export function parseSidebarLayoutCookie(raw: string | null): InboxSidebarLayout | null {
   if (!raw) return null;
-  const [top = '', bottom = '', hidden = ''] = raw.split(';');
+  const [top = '', bottom = '', hidden = '', rail = '', pins = ''] = raw.split(';');
   const list = (part: string) => part.split(',').filter(Boolean);
-  return inboxSidebarRead({ top: list(top), bottom: list(bottom), hidden: list(hidden) });
+  const decoded = list(pins).flatMap((pin) => {
+    try {
+      return [decodeURIComponent(pin)];
+    } catch {
+      return [];
+    }
+  });
+  return inboxSidebarRead({ top: list(top), bottom: list(bottom), hidden: list(hidden), rail: rail === '1', pins: decoded });
 }
 
 /**
@@ -54,7 +66,7 @@ export function setSidebarUnsaved(id: InboxSidebarItem, off: boolean): void {
 const forSaving = (layout: InboxSidebarLayout): InboxSidebarLayout => {
   if (unsaved.size === 0) return layout;
   const keep = (list: readonly InboxSidebarItem[]) => list.filter((id) => !unsaved.has(id));
-  return { top: keep(layout.top), bottom: keep(layout.bottom), hidden: keep(layout.hidden) };
+  return { ...layout, top: keep(layout.top), bottom: keep(layout.bottom), hidden: keep(layout.hidden) };
 };
 
 let current: InboxSidebarLayout | null = null;

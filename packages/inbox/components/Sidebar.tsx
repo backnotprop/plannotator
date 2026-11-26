@@ -33,6 +33,7 @@ import { useStarredAbove } from '../starredPills';
 import { useInboxTheme } from '../theme';
 import { TaterMark } from './TaterMark';
 import { inboxIsOn, useShownProjects } from '../sidebarPlaces';
+import { RailPinRow } from '../rail/RailPinRow';
 import { ProjectTip } from './ProjectRow';
 import { Tip } from './Tip';
 import { SectionSortToggle } from './SectionSortToggle';
@@ -668,6 +669,8 @@ export function Sidebar(props: SidebarProps) {
       ) : (
         brand
       )}
+      {/* The project rail on a phone (rail/RailPinRow.tsx): with the rail on, its pins head the sheet. */}
+      {phone && <RailPinRow places={props} pick={pick} />}
       {showingOnly && (
         <div className="ib-sheet-now" data-sheet-showing={showingOnly.kind}>
           <div className="ib-sheet-now-t">

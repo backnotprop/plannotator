@@ -77,6 +77,8 @@
 @import "../../packages/inbox/panes/panes.css";
 /* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
 @import "../../packages/inbox/agents/agents.css";
+/* The project rail: the closed sidebar's rail of places (packages/inbox/rail/). */
+@import "../../packages/inbox/rail/rail.css";
 @import "../../packages/inbox/agents/iconDialog.css";
 /* The Rex status marks on agents' icons (packages/inbox/agents/rexMark.tsx). */
 @import "../../packages/inbox/agents/rexMark.css";

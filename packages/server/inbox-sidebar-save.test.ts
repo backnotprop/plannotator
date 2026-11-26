@@ -59,3 +59,16 @@ test("Grid off (its experimental switch): a Customize save never writes `grid` i
   saveInboxSidebar(reordered, { off: inboxSidebarOff([plans], true) });
   expect(stored().top).toEqual(reordered.top);
 });
+
+test("the project rail's choice and pins are stored with the layout, also when an item of a switch that is off is left out", () => {
+  const pins = ["project:prj_harbor", "tag:ini_release"];
+  const layout = { top: INBOX_SIDEBAR_DEFAULT.top.filter((id) => id !== "plans"), bottom: [...INBOX_SIDEBAR_DEFAULT.bottom], hidden: [], rail: true, pins };
+  const answer = saveInboxSidebar(layout, { off: ["plans"] });
+  const saved = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSidebar;
+  expect(saved.rail).toBe(true);
+  expect(saved.pins).toEqual(pins);
+  expect(answer.sidebar.pins).toEqual(pins);
+  // Read back by every window (the phone's included) the same way.
+  expect(inboxSidebarState().sidebar?.rail).toBe(true);
+  expect(inboxSidebarState().sidebar?.pins).toEqual(pins);
+});

@@ -55,7 +55,7 @@ interface Place {
  * The sidebar's places, in its order, each going where its sidebar row goes. Deliberately not the sidebar's Customize
  * choices: a Tags or Projects section hidden there is still listed here (the picker switches without the sidebar).
  */
-function usePlaces(places: SidebarPlaces): { inbox: Place; tags: Place[]; projects: Place[] } {
+export function usePlaces(places: SidebarPlaces): { inbox: Place; tags: Place[]; projects: Place[] } {
   const { shown } = useShownProjects(places);
   const tagSort = useTagSort();
   // `shown`: the window has tags to list at all (useThreadTagsHost.ts), not the Customize sidebar choice.
@@ -83,7 +83,24 @@ function usePlaces(places: SidebarPlaces): { inbox: Place; tags: Place[]; projec
   };
 }
 
-export function ListPlacePicker({ places, phone }: { places: SidebarPlaces; phone: boolean }) {
+/**
+ * The project rail's + (rail/PlaceRail.tsx) opens this same menu from its own button, with a pin on each tag and
+ * project row: the pin puts the place on the rail or takes it off, the name still goes there.
+ */
+export interface PlacePins {
+  /** The pinned places' keys (`tag:<id>`, `project:<id>`). */
+  pinned: ReadonlySet<string>;
+  onPin: (key: string, pinned: boolean) => void;
+}
+interface PickerTrigger {
+  label: string;
+  className: string;
+  icon: ReactNode;
+  /** The rail opens it beside the button; the title's ⌄ under it. */
+  side: 'bottom' | 'right';
+}
+
+export function ListPlacePicker({ places, phone, pins, trigger: given }: { places: SidebarPlaces; phone: boolean; pins?: PlacePins; trigger?: PickerTrigger }) {
   const [open, setOpen] = useState(false);
   const [typing, setTyping] = useState(false);
   if (!open && typing) setTyping(false);
@@ -97,27 +114,27 @@ export function ListPlacePicker({ places, phone }: { places: SidebarPlaces; phon
   const initialFocus = { initialFocus: (type: string) => (menuFocus(type) ? (popup.current ?? true) : (popup.current?.querySelector<HTMLInputElement>('input[data-list-filter-find]') ?? true)) };
   return (
     <Menu.Root open={open} onOpenChange={setOpen} modal={phone} highlightItemOnHover={!typing}>
-      <Tip content={PLACE_PICKER_WORDS}>
-        <Menu.Trigger ref={trigger} className="ib-lhead-switch" aria-label={PLACE_PICKER_WORDS} data-place-picker="">
-          <Icon name="chevD" size={phone ? 20 : 16} />
+      <Tip content={given?.label ?? PLACE_PICKER_WORDS} side={given?.side === 'right' ? 'right' : undefined}>
+        <Menu.Trigger ref={trigger} className={given?.className ?? 'ib-lhead-switch'} aria-label={given?.label ?? PLACE_PICKER_WORDS} data-place-picker={given ? 'rail' : ''}>
+          {given?.icon ?? <Icon name="chevD" size={phone ? 20 : 16} />}
         </Menu.Trigger>
       </Tip>
       <Menu.Portal container={portal ?? undefined}>
         {phone && <Menu.Backdrop className="ib-pm-scrim" />}
         {/* The filter menu's look and its phone sheet, field and all (`ib-lflt-menu`, `data-list-filter-fields`). */}
-        <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={6} data-phone={phone ? '' : undefined} data-list-filter-fields="">
+        <Menu.Positioner className="ib-pm-pos" side={given?.side ?? 'bottom'} align="start" sideOffset={6} data-phone={phone ? '' : undefined} data-list-filter-fields="">
           <Menu.Popup
             ref={popup}
             // `initialFocus` is absent from Base UI 1.9.0's public types, as in ListFilter.tsx (MenuPopup still passes it on).
             {...initialFocus}
             className="ib-pm ib-pc-menu ib-lflt-menu ib-place-menu"
-            aria-label={PLACE_PICKER_WORDS}
+            aria-label={given?.label ?? PLACE_PICKER_WORDS}
             onKeyDown={rowKeyToField}
             data-place-menu=""
             data-list-filter-fields=""
             data-list-filter-typing={typing ? '' : undefined}
           >
-            <PlaceRows places={places} phone={phone} onTyping={setTyping} onPicked={() => setOpen(false)} />
+            <PlaceRows places={places} phone={phone} pins={pins} onTyping={setTyping} onPicked={() => setOpen(false)} />
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
@@ -126,7 +143,7 @@ export function ListPlacePicker({ places, phone }: { places: SidebarPlaces; phon
 }
 
 /** The menu's rows, drawn only while it is open: the words typed start afresh with each open. */
-function PlaceRows({ places, phone, onTyping, onPicked }: { places: SidebarPlaces; phone: boolean; onTyping: (on: boolean) => void; onPicked: () => void }) {
+function PlaceRows({ places, phone, pins, onTyping, onPicked }: { places: SidebarPlaces; phone: boolean; pins?: PlacePins; onTyping: (on: boolean) => void; onPicked: () => void }) {
   const [query, setQuery] = useState('');
   const all = usePlaces(places);
   const searching = query.trim() !== '';
@@ -143,7 +160,21 @@ function PlaceRows({ places, phone, onTyping, onPicked }: { places: SidebarPlace
   // Nothing matching: the filter menu's line for each section there is (Projects alone when there is neither).
   const none = searching && matches === 0 ? [...(all.tags.length > 0 ? [noTagsMatch(query.trim())] : []), ...(all.projects.length > 0 || all.tags.length === 0 ? [noProjectsMatch(query.trim())] : [])] : [];
   const said = useSaidAfterPause(!searching ? '' : matches > 0 ? matchCount(matches) : none.join('. '));
-  const row = ({ place, hit }: { place: Place; hit: readonly [number, number] | null }) => (
+  const row = ({ place, hit }: { place: Place; hit: readonly [number, number] | null }) => {
+    const item = nameRow({ place, hit });
+    if (!pins || place.key === 'inbox') return item;
+    const pinned = pins.pinned.has(place.key);
+    // The rail's +: the row's pin beside its name, a checkbox of its own (the menu stays open on it).
+    return (
+      <div key={place.key} className="ib-place-pinrow" data-pinned={pinned ? '' : undefined}>
+        {item}
+        <Menu.CheckboxItem className="ib-pmi ib-place-pin" checked={pinned} closeOnClick={false} onCheckedChange={(next: boolean) => pins.onPin(place.key, next)} label={`Pin ${place.label}`} aria-label={`Pin ${place.label}`} data-place-pin={place.key}>
+          <Icon name="pin" size={14} />
+        </Menu.CheckboxItem>
+      </div>
+    );
+  };
+  const nameRow = ({ place, hit }: { place: Place; hit: readonly [number, number] | null }) => (
     <Menu.Item key={place.key} className="ib-pmi" label={place.label} onClick={place.go} data-checked={place.on ? '' : undefined} aria-current={place.on ? 'page' : undefined} data-place={place.key}>
       {place.mark}
       <span className="ib-pmi-l" dir="auto" data-hit={hit ? '' : undefined}>

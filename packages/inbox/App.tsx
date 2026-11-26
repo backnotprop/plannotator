@@ -299,8 +299,7 @@ function Inbox() {
     settleTourEntry();
     return readRoute();
   });
-  // Open or closed as the person left it (⌘B or the toggle): a cookie of the Inbox's own, open when absent.
-  const [sidebarOpen, setSidebarOpen] = useState(() => storage.getItem(SIDEBAR_OPEN_COOKIE) !== 'false');
+  const [sidebarOpen, setSidebarOpen] = useState(() => storage.getItem(SIDEBAR_OPEN_COOKIE) !== 'false'); // As the person left it (⌘B, the toggle; a cookie, open when absent); closed, the rail (rail/) may stay.
   const changeSidebar = useCallback((next: boolean) => {
     setSidebarOpen(next);
     storage.setItem(SIDEBAR_OPEN_COOKIE, String(next));
@@ -5620,6 +5619,7 @@ function Inbox() {
       <SidebarShell
         className="ib-shell"
         toggleNotice={sidebarToggleNotice}
+        rail={tourOn || fileOpen || full ? null : { places, machines, rows: windowRows, readable: projectsReadable, onProjectAction: projectAction }}
         open={route.page === 'settings' ? settingsSidebar : sidebarOpen && !fileOpen && !sidebarHeld && !full}
         onOpenChange={(next) => {
           if (routeRef.current.page === 'settings') {

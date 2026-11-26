@@ -1,0 +1,74 @@
+/* The project rail (packages/inbox/rail/, take R1 "The rail is the closed sidebar", 2026-11-26). Off by default: none
+   of this draws unless the person keeps a rail of places. The selected place wears the sidebar's soft fill
+   (--ib-cur-bg), never a mark on its edge. */
+
+.pn-inbox { --ib-place-rail-w: 68px; }
+
+/* The column: in the shell's flow beside the list, the page's ground, the sidebar's text colours. It folds to nothing
+   while the sidebar opens (the docked sidebar slides over it) and comes back when it closes. */
+.pn-inbox .ib-rail { --muted-foreground: var(--ib-side-mfg); --foreground: var(--ib-side-fg); flex: none; display: flex; flex-direction: column; width: var(--ib-place-rail-w); height: 100%; box-sizing: border-box; padding: max(8px, var(--pn-window-controls-height, 0px)) 0 8px; background: var(--ib-ground); color: var(--foreground); overflow: hidden; transition: width 220ms var(--ib-ease-enter, ease-out), opacity 160ms ease-out; }
+.pn-inbox .ib-rail:not([data-shown]) { width: 0; opacity: 0; visibility: hidden; transition: width 220ms var(--ib-ease-enter, ease-out), opacity 120ms ease-out, visibility 0s linear 220ms; }
+@media (prefers-reduced-motion: reduce) { .pn-inbox .ib-rail, .pn-inbox .ib-rail:not([data-shown]) { transition: none; } }
+/* The list beside it no longer starts at the window's edge. */
+.ib-rail[data-shown] ~ .ib-main { --ib-controls-left: 0px; }
+/* The peek (shell/SidebarPeek.tsx) and its hover strip start right of the rail, so the rail stays in sight. */
+.ib-sb-wrapper[data-rail] .ib-peek, .ib-sb-wrapper[data-rail] .ib-peek-strip { left: var(--ib-place-rail-w); }
+
+.ib-rail-scroll { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px 4px 6px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.ib-rail-scroll::-webkit-scrollbar { display: none; }
+.ib-rail-foot { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 6px 0; }
+
+/* A place: its mark, its name under it, another computer's name under that; the count on the mark's corner. */
+.pn-inbox .ib-rail-tile { position: relative; flex: none; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 60px; padding: 6px 1px 5px; border: 0; border-radius: 10px; background: none; color: var(--muted-foreground); font-size: var(--ib-fs-11, 11px); font-weight: 500; line-height: 1.2; cursor: pointer; transition: var(--ib-fade-s, var(--ib-ui-fade)); }
+.pn-inbox .ib-rail-tile:hover:not([data-on]) { background: var(--ib-side-hover-h, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-rail-tile[data-on] { background: var(--ib-cur-bg); color: var(--ib-cur-fg); }
+.pn-inbox .ib-rail-tile:focus-visible, .pn-inbox .ib-rail-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-rail-tile[data-dragging] { opacity: 0.45; }
+.ib-rail-mk { position: relative; display: grid; place-items: center; }
+.ib-rail-l, .ib-rail-m { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.01em; }
+.ib-rail-m { margin-top: -2px; font-size: var(--ib-fs-10, 10px); font-weight: 400; color: var(--muted-foreground); }
+.pn-inbox .ib-rail-n { position: absolute; top: -5px; right: -10px; min-width: 14px; font-size: var(--ib-fs-11, 11px); font-weight: 650; line-height: 1; text-align: left; color: var(--primary); font-variant-numeric: tabular-nums; }
+.ib-rail-ibx { display: grid; place-items: center; width: var(--ib-mark-30, 30px); height: var(--ib-mark-30, 30px); border-radius: var(--ib-mark-30-r, 8px); background: color-mix(in oklab, var(--foreground) 7%, transparent); color: var(--foreground); }
+.ib-rail-tile[data-on] .ib-rail-ibx { color: var(--primary); }
+.ib-rail-mk .ib-lm .ib-ic, .ib-rail-mk .ib-lm svg { width: 15px; height: 15px; }
+.ib-rail-div { flex: none; width: 28px; height: 1px; margin: 4px 0; background: var(--border); }
+.ib-rail-cap { flex: none; margin: 2px 0 0; font-size: var(--ib-fs-10-5, 10.5px); color: var(--muted-foreground); }
+
+/* +, Agents and ⋯: quiet icon buttons; hovered or open, the header buttons' fill. */
+.pn-inbox .ib-rail-btn { position: relative; flex: none; display: grid; place-items: center; width: 40px; height: 34px; margin-top: 2px; padding: 0; border: 0; border-radius: 9px; background: none; color: var(--muted-foreground); cursor: pointer; transition: var(--ib-fade-s, var(--ib-ui-fade)); }
+.pn-inbox .ib-rail-btn:hover, .pn-inbox .ib-rail-btn[data-popup-open] { background: var(--ib-hb-hover-s, var(--muted)); color: var(--foreground); }
+.ib-rail-btn > svg.ib-ic.ib-agents-mk { width: 18px; height: 18px; fill: currentColor; stroke: none; overflow: visible; }
+.ib-rail-btn .ib-rail-n { top: 3px; right: -2px; }
+
+/* The choice's two rows: the name, and its line under it. */
+.pn-inbox .ib-pmi.ib-rail-choice { height: auto; min-height: 30px; align-items: flex-start; padding-block: 6px; white-space: normal; }
+.ib-rail-choice > .ib-pmi-box { margin-top: 2px; }
+.ib-rail-choice-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ib-rail-choice-d { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+
+/* The picker opened from + (components/ListPlacePicker.tsx): each tag and project row with its pin beside it. */
+.ib-place-pinrow { display: flex; align-items: center; gap: 2px; }
+.ib-place-pinrow > .ib-pmi:first-child { flex: 1 1 auto; min-width: 0; }
+.pn-inbox .ib-pmi.ib-place-pin { flex: none; width: 30px; justify-content: center; padding: 0; color: var(--muted-foreground); }
+.ib-place-pin:not([data-checked]) svg { opacity: 0.5; }
+.ib-place-pin[data-checked] { color: var(--foreground); }
+.ib-place-pin[data-checked] svg { fill: currentColor; }
+
+/* Resting on a pin: what waits there (RailPeekCard.tsx). */
+.pn-inbox .ib-rail-card { position: fixed; z-index: 60; width: 280px; box-sizing: border-box; padding: 10px 12px 11px; border-radius: var(--ib-rl-lg-s, 10px); background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 12px 30px -12px oklch(0 0 0 / 0.5)); pointer-events: none; font-size: var(--ib-fs-13, 13px); animation: ib-pm-in 120ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-rail-card-h { display: flex; align-items: center; gap: 8px; }
+.ib-rail-card-h .ib-lm, .ib-rail-card-h .ib-rail-ibx { width: 24px; height: 24px; font-size: var(--ib-fs-11, 11px); }
+.ib-rail-card-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ib-rail-card-m { font-weight: 400; color: var(--muted-foreground); }
+.ib-rail-card-c { margin: 6px 0 2px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
+.ib-rail-card-r { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; min-width: 0; }
+.ib-rail-card-t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-rail-card-p { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
+.ib-rail-card-more { padding-top: 2px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
+@media (prefers-reduced-motion: reduce) { .pn-inbox .ib-rail-card { animation: none; } }
+
+/* A phone's sheet: the pins as one row under the mark, scrolling sideways when they do not fit (RailPinRow.tsx). */
+.pn-inbox .ib-rail-pins { flex: none; display: flex; gap: 4px; margin: 0 -10px 4px; padding: 6px 10px 8px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.ib-rail-pins::-webkit-scrollbar { display: none; }
+.pn-inbox .ib-rail-pins .ib-rail-tile { width: 66px; min-height: 64px; padding: 8px 2px 6px; font-size: var(--ib-fs-13, 13px); border-radius: 12px; }
+.pn-inbox .ib-rail-pins .ib-rail-m { font-size: var(--ib-fs-11, 11px); }
