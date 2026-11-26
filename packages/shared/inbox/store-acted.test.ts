@@ -10,7 +10,6 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxAuthor, InboxMessage, InboxQuestionRecord } from "@plannotator/core/inbox-types";
-import { INBOX_RECENT_ACTIVITY_DAYS } from "@plannotator/core/inbox-types";
 import { INBOX_ACTED_FILE, INBOX_ACTED_MAX, createInboxActed, personActOfMessage, personActOfQuestion, readInboxActed } from "./acted";
 import { InboxStore } from "./store";
 
@@ -38,7 +37,8 @@ function setup() {
 }
 
 const at = (ms: number) => new Date(ms).toISOString();
-const DAY = 86_400_000;
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
 
 describe("the store's record of what the person did in a thread", () => {
   test("an agent's message alone sets nothing; each kind of the person's doing sets the time it happened", () => {
@@ -188,8 +188,8 @@ describe("acted.json: what the log does not hold", () => {
     roots.push(dir);
     return dir;
   };
-  /** The server's clock: a day after START, whatever day the test runs. */
-  const clockAt = () => new Date(START + DAY);
+  /** The server's clock: an hour after START (inside the view's 3 hours), whatever day the test runs. */
+  const clockAt = () => new Date(START + HOUR);
 
   test("notes wait for one write; an older time never replaces a newer one; a restart reads them back", () => {
     const dir = dirOf();
@@ -247,19 +247,20 @@ describe("acted.json: what the log does not hold", () => {
     expect(acted.at(T1)).toBe(at(START));
   });
 
-  test("each write drops what the filter no longer reaches (past 30 days) and the threads this store deleted; a linked machine's thread stays", () => {
+  test("each write drops what the view no longer reaches (past 3 hours) and the threads this store deleted; a linked machine's thread stays", () => {
     const dir = dirOf();
     const OLD = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAX";
     const LINKED = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAY";
     const now = START + 40 * DAY;
     const held = new Set([T1, T2, OLD]);
     const acted = createInboxActed(dir, { flushMs: 60_000, now: () => new Date(now), held: (id) => held.has(id) });
-    acted.note(T1, at(now - 2 * DAY));
-    acted.note(T2, at(now - DAY));
-    acted.note(OLD, at(now - (INBOX_RECENT_ACTIVITY_DAYS + 1) * DAY));
-    acted.note(LINKED, at(now - 3 * DAY));
+    acted.note(T1, at(now - 2 * HOUR));
+    acted.note(T2, at(now - HOUR));
+    // Just past the 3 hours, and just inside them.
+    acted.note(OLD, at(now - 3 * HOUR - 60_000));
+    acted.note(LINKED, at(now - 3 * HOUR + 60_000));
     acted.flush();
-    expect(readInboxActed(dir)).toEqual(new Map([[T2, at(now - DAY)], [T1, at(now - 2 * DAY)], [LINKED, at(now - 3 * DAY)]]));
+    expect(readInboxActed(dir)).toEqual(new Map([[T2, at(now - HOUR)], [T1, at(now - 2 * HOUR)], [LINKED, at(now - 3 * HOUR + 60_000)]]));
     // T2 is deleted here: the deletion's sweep writes the file without it, with no other note.
     held.delete(T2);
     acted.sweep();

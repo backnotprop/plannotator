@@ -137,7 +137,8 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const recent = useRecentActivity(recentView, listSort, route.page === 'inbox' ? (route.thread ?? null) : null, listCovered);
   const recentHeld = (listed: InboxListSection[]) => {
     const kept = filterListSections(listed, listFilterApplied, Date.now(), heldRead, filterTagsOfRow, routineTest);
-    return recent.held ? recentViewSections(listed, kept, recent.held, Date.now()) : kept;
+    // Read at the last whole sort's clock: a row aging past the hours meanwhile stays until the next one.
+    return recent.held ? recentViewSections(listed, kept, recent.held, recent.at) : kept;
   };
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
@@ -145,7 +146,7 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
       // The Tag picks keep a thread tagged itself or in a tagged project (projectTags.ts).
       listHeld ? filterList(sections).map((section) => ({ ...section, threads: [] })) : recentHeld(filterList(sections)),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
-    [filterList, listFilterApplied, listFilterDay, heldRead, filterTagsOfRow, routineTest, listHeld, recent.held],
+    [filterList, listFilterApplied, listFilterDay, heldRead, filterTagsOfRow, routineTest, listHeld, recent.held, recent.at],
   );
   /** The sort InboxList reads: Recent activity's places while it is on, which also draws List's one list whatever the view. */
   const listSortShown = recent.sort;

@@ -4,7 +4,7 @@
  * permanent filter"; design A of the mocks: a slim bar above the list with Done, RecentViewBar.tsx).
  *
  * - Turned on from the filter menu's "Recent activity" row (ListFilter.tsx: no count, no tick; the menu closes).
- * - While on, the list is the threads the person acted in during the last 30 days, newest first by that act
+ * - While on, the list is the threads the person acted in during the last 3 hours, newest first by that act
  *   (listFilterRecent.ts: the rule, the order and how it holds), within whatever the filter's real picks keep. The
  *   folded Snoozed band is not the view's: its rows and count stay the filter's.
  * - Not a filter: not in the filter's badge, its tooltip, its menu counts or the cookie (listFilter.ts has no
@@ -77,7 +77,7 @@ export function useRecentViewLeaves(place: string | null): void {
 /**
  * The list with the view on: of `kept` (what the filter's picks keep of `listed`), only the threads acted in lately,
  * then `held` (listFilterRecent.ts `heldRecentRows`: which rows the list holds until it settles). The Snoozed band keeps
- * the filter's rows, so its count is never the view's.
+ * the filter's rows, so its count is never the view's. `now`: the clock at the last whole sort (`RecentActivity.at`).
  */
 export function recentViewSections(
   listed: readonly InboxListSection[],

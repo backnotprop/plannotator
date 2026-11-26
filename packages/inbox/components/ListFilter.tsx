@@ -524,7 +524,7 @@ export function ListFilterEmpty({ onClear }: { onClear: () => void }) {
 export function RecentViewEmpty() {
   return (
     <div className="ib-empty-list" data-recent-view-empty="">
-      Nothing you acted in during the last month.
+      Nothing you acted in during the last 3 hours.
     </div>
   );
 }
