@@ -3487,7 +3487,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const name = message.delivery ? toName(message, message.delivery) : message.to ? toName(message, message.to) : recipientName(askedBy(message));
     return message.delivery?.at ? `Delivered to ${name}, ${whenTime(message.delivery.at)}` : `Delivered to ${name}`;
   };
-  const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to && !isOtherAgent(askedBy(last), startedTo) ? startedTo : null)) : null;
+  const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to && !isOtherAgent(askedBy(last), startedTo) && !(last.tags ?? []).some((t) => t.joined) ? startedTo : null)) : null; // Swarm's Add an agent: to the agent added alone.
   // The session the person's last reply goes to, when its connection wakes it: a message addressed to a
   // session (`lastTo`), or a reply to an agent message sent through a waking connection (`wakes`).
   const repliedTo = last.author.kind === 'person' && !lastTo ? askedBy(last) : undefined;
